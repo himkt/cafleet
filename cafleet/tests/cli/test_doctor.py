@@ -69,26 +69,13 @@ def test_doctor_outside_tmux__outside_tmux_exits_one(runner, monkeypatch):
     assert "cafleet member commands must be run inside a tmux session" in combined
 
 
-def test_doctor_fleet_id_silently_ignored__fleet_id_flag_silently_ignored(
-    runner, mock_tmux_ok
-):
-    result = runner.invoke(
-        cli,
-        [
-            "--fleet-id",
-            "100",
-            "doctor",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    out = result.output
-    assert "session_name:" in out
-    assert "main" in out
-    assert "window_id:" in out
-    assert "@3" in out
-    assert "pane_id:" in out
-    assert "%0" in out
-    assert "TMUX_PANE:" in out
-    assert _TMUX_PANE_VALUE in out
-    assert "--fleet-id" not in out
-    assert "is required for this subcommand" not in out
+def test_doctor_rejects_fleet_id__rejected_in_both_positions(runner):
+    """``doctor`` does not accept ``--fleet-id`` in either position — Click
+    rejects it with its standard 'no such option' error (exit 2)."""
+    global_pos = runner.invoke(cli, ["--fleet-id", "100", "doctor"])
+    assert global_pos.exit_code == 2, global_pos.output
+    assert "no such option" in (global_pos.output or "").lower()
+
+    per_subcommand = runner.invoke(cli, ["doctor", "--fleet-id", "100"])
+    assert per_subcommand.exit_code == 2, per_subcommand.output
+    assert "no such option" in (per_subcommand.output or "").lower()

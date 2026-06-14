@@ -1,12 +1,14 @@
 """Tests for the ``client_command`` decorator.
 
-``cli/_helpers.py`` provides a shared decorator ``client_command``
-that subsumes the ``--fleet-id`` guard, optional ``--agent-id``-belongs-to-fleet
-validation, broker-error wrapping, and JSON-vs-text output branching.
+``cli/_helpers.py`` provides a shared decorator ``client_command`` that subsumes
+optional ``--agent-id``-belongs-to-fleet validation, broker-error wrapping, and
+JSON-vs-text output branching. The per-subcommand ``fleet_id_option`` decorator
+enforces the ``--fleet-id`` requirement (custom message, ``type=int``) and stashes
+the value into ``ctx.obj["fleet_id"]``.
 
-The tests use a tiny test-only click group (declared at module top) wired
-to the decorator so we exercise it end-to-end via ``CliRunner`` without
-depending on any of the migrated production commands.
+The tests use a tiny test-only click group (declared at module top) wired to the
+decorators so we exercise them end-to-end via ``CliRunner`` without depending on
+any of the migrated production commands.
 """
 
 import json
@@ -16,20 +18,19 @@ import pytest
 from click.testing import CliRunner
 
 from cafleet import broker
-from cafleet.cli._helpers import client_command
+from cafleet.cli._helpers import client_command, fleet_id_option
 
 
 @click.group()
 @click.option("--json", "json_output", is_flag=True, default=False)
-@click.option("--fleet-id", "fleet_id", default=None)
 @click.pass_context
-def _test_cli(ctx, json_output, fleet_id):
+def _test_cli(ctx, json_output):
     ctx.ensure_object(dict)
-    ctx.obj["fleet_id"] = fleet_id
     ctx.obj["json_output"] = json_output
 
 
 @_test_cli.command("simple")
+@fleet_id_option
 @click.pass_context
 @client_command(text_formatter=lambda r: f"TEXT:{r}")
 def _simple(ctx):
@@ -37,6 +38,7 @@ def _simple(ctx):
 
 
 @_test_cli.command("agent-bound")
+@fleet_id_option
 @click.option("--agent-id", required=True)
 @click.pass_context
 @client_command(
@@ -48,6 +50,7 @@ def _agent_bound(ctx, agent_id):
 
 
 @_test_cli.command("raises")
+@fleet_id_option
 @click.pass_context
 @client_command()
 def _raises(ctx):
@@ -76,7 +79,7 @@ def test_requires_agent_fleet__false_does_not_call_verify(runner, monkeypatch):
 
     result = runner.invoke(
         _test_cli,
-        ["--fleet-id", "fleet-1", "simple"],
+        ["simple", "--fleet-id", "1"],
     )
     assert result.exit_code == 0, result.output
     assert verify_calls == []
@@ -96,16 +99,16 @@ def test_requires_agent_fleet__true_calls_verify_and_raises_on_false(
     result = runner.invoke(
         _test_cli,
         [
-            "--fleet-id",
-            "fleet-1",
             "agent-bound",
+            "--fleet-id",
+            "1",
             "--agent-id",
             "agent-1",
         ],
     )
     assert result.exit_code != 0
     assert "not a member of fleet" in result.output
-    assert verify_calls == [("agent-1", "fleet-1")]
+    assert verify_calls == [("agent-1", 1)]
 
 
 def test_requires_agent_fleet__true_proceeds_when_verify_returns_true(
@@ -116,9 +119,9 @@ def test_requires_agent_fleet__true_proceeds_when_verify_returns_true(
     result = runner.invoke(
         _test_cli,
         [
-            "--fleet-id",
-            "fleet-1",
             "agent-bound",
+            "--fleet-id",
+            "1",
             "--agent-id",
             "agent-1",
         ],
@@ -131,7 +134,7 @@ def test_requires_agent_fleet__true_proceeds_when_verify_returns_true(
 def test_broker_error_wrapping__runtime_error_wrapped_as_click_exception(runner):
     result = runner.invoke(
         _test_cli,
-        ["--fleet-id", "fleet-1", "raises"],
+        ["raises", "--fleet-id", "1"],
     )
     assert result.exit_code == 1, result.output
     assert "boom!" in result.output
@@ -140,7 +143,7 @@ def test_broker_error_wrapping__runtime_error_wrapped_as_click_exception(runner)
 def test_output_branching__json_output_branch_uses_format_json(runner):
     result = runner.invoke(
         _test_cli,
-        ["--json", "--fleet-id", "fleet-1", "simple"],
+        ["--json", "simple", "--fleet-id", "1"],
     )
     assert result.exit_code == 0, result.output
     parsed = json.loads(result.output)
@@ -150,7 +153,7 @@ def test_output_branching__json_output_branch_uses_format_json(runner):
 def test_output_branching__text_output_branch_uses_text_formatter(runner):
     result = runner.invoke(
         _test_cli,
-        ["--fleet-id", "fleet-1", "simple"],
+        ["simple", "--fleet-id", "1"],
     )
     assert result.exit_code == 0, result.output
     assert result.output.startswith("TEXT:")

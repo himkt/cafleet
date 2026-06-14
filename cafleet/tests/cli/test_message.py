@@ -57,10 +57,10 @@ def test_message_show_auth_check__rejects_unknown_agent(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "message",
             "show",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
             "--task-id",
@@ -114,11 +114,11 @@ def test_message_show_auth_check__accepts_valid_agent(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "--json",
             "message",
             "show",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
             "--task-id",
@@ -157,10 +157,10 @@ def test_message_poll_auth_check__rejects_unknown_agent(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "message",
             "poll",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
         ],
@@ -197,11 +197,11 @@ def test_message_poll_auth_check__accepts_valid_agent(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "--json",
             "message",
             "poll",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
         ],
@@ -218,10 +218,10 @@ def test_message_poll__removed_flags_rejected(runner, fleet_id, agent_id, remove
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "message",
             "poll",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
             removed_flag,
@@ -256,10 +256,10 @@ def test_message_ack_auth_check__rejects_unknown_agent(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "message",
             "ack",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
             "--task-id",
@@ -311,11 +311,11 @@ def test_message_ack_auth_check__accepts_valid_agent(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "--json",
             "message",
             "ack",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
             "--task-id",
@@ -351,10 +351,10 @@ def test_message_cancel_auth_check__rejects_unknown_agent(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "message",
             "cancel",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
             "--task-id",
@@ -406,11 +406,11 @@ def test_message_cancel_auth_check__accepts_valid_agent(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "--json",
             "message",
             "cancel",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
             "--task-id",

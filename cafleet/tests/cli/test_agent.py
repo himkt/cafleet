@@ -54,10 +54,10 @@ def test_agent_deregister_auth_check__rejects_unknown_agent(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "agent",
             "deregister",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
         ],
@@ -92,10 +92,10 @@ def test_agent_deregister_auth_check__accepts_valid_agent(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "agent",
             "deregister",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
         ],
@@ -144,10 +144,10 @@ def test_agent_list__lists_without_agent_id(runner, fleet_id, monkeypatch):
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "agent",
             "list",
+            "--fleet-id",
+            str(fleet_id),
         ],
     )
     assert result.exit_code == 0, result.output
@@ -165,10 +165,10 @@ def test_agent_list__agent_id_flag_removed(runner, fleet_id, monkeypatch):
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "agent",
             "list",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             "1",
         ],

@@ -123,11 +123,11 @@ def test_cli_agent_show_or_list__slim_and_full_shapes(
 ):
     sid, director_id, runner = bootstrapped_fleet
     args = [
-        "--fleet-id",
-        str(sid),
         "--json",
         "agent",
         verb,
+        "--fleet-id",
+        str(sid),
     ]
     # ``agent show`` retains ``--agent-id``; ``agent list`` no longer accepts it.
     if verb == "show":

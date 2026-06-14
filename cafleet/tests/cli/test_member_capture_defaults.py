@@ -86,10 +86,10 @@ def test_member_capture__default_lines_and_flag_aliases(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            sid,
             "member",
             "capture",
+            "--fleet-id",
+            sid,
             "--member-id",
             member_id,
             *extra_args,
@@ -138,10 +138,10 @@ def test_member_capture__ansi_handling(
     sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
     _record_run(monkeypatch, returns=raw)
     args = [
-        "--fleet-id",
-        sid,
         "member",
         "capture",
+        "--fleet-id",
+        sid,
         "--member-id",
         member_id,
     ]
@@ -193,10 +193,10 @@ def test_member_capture__cr_defragmentation(
     sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
     _record_run(monkeypatch, returns=raw)
     args = [
-        "--fleet-id",
-        sid,
         "member",
         "capture",
+        "--fleet-id",
+        sid,
         "--member-id",
         member_id,
     ]
@@ -219,11 +219,11 @@ def test_member_capture__json_envelope_post_processed_and_lines_default(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            sid,
             "--json",
             "member",
             "capture",
+            "--fleet-id",
+            sid,
             "--member-id",
             member_id,
         ],

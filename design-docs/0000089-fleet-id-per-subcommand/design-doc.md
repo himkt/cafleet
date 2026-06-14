@@ -1,7 +1,7 @@
 # Per-Subcommand `--fleet-id` (Move the Global Flag onto Child Subcommands)
 
 **Status**: Approved
-**Progress**: 14/32 tasks complete
+**Progress**: 19/36 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -197,9 +197,12 @@ The broker/webui/multiplexer tests pass `fleet_id` as a Python argument to broke
 | Test target | Change |
 |---|---|
 | `tests/cli/test_fleet_flag.py` | Rewrite. Keep the missing-fleet-id custom-message test (invoke without `--fleet-id` → exit 1, custom message). Move `--fleet-id` after the subcommand in the flows-into-broker tests. **Replace** the two `…silently_accepted…` tests with removal guards: `db init` / `fleet create` reject `--fleet-id` in **both** the old global position and the per-subcommand position (exit 2, `no such option`). Add `test_old_surface_removed__global_fleet_id_no_longer_parses` (`cafleet --fleet-id 100 agent list` → exit 2, `no such option`), modeled on the existing `test_old_surface_removed__session_flag_and_group_no_longer_parse`. |
-| `tests/cli/test_agent.py`, `test_message.py`, `test_member*.py`, `test_monitor.py`, `test_fleet.py`, `test_doctor.py`, `test_server.py`, `test_compact_echo.py`, `test_message_truncation.py`, `test_fleet_bootstrap.py` | Move `--fleet-id <id>` from before the group to immediately after the leaf subcommand in every `runner.invoke(cli, [...])` arg list. |
+| `tests/cli/test_agent.py`, `test_message.py`, `test_member*.py`, `test_monitor.py`, `test_fleet.py`, `test_compact_echo.py`, `test_message_truncation.py`, `test_fleet_bootstrap.py` | Move `--fleet-id <id>` from before the group to immediately after the leaf subcommand in every `runner.invoke(cli, [...])` arg list. |
+| `tests/cli/test_doctor.py`, `test_server.py` | `doctor`/`server` reject `--fleet-id` (SC#4), so convert their silently-accepted invocations into both-position rejection guards (exit 2, `No such option`) rather than flag-moves. |
 | `tests/cli/test_client_command.py` | If its in-test harness group declares a global `--fleet-id`, switch the harness to the per-subcommand `fleet_id_option` shape; otherwise no change. |
-| `tests/broker/**`, `tests/webui/**`, `tests/multiplexer/**`, `tests/monitor/test_loop.py`, `tests/output/**`, `tests/db/**` | No change — verify none invoke the CLI with a global `--fleet-id`. |
+| `tests/cli/test_member_ping.py`, `tests/multiplexer/test_tmux.py` | Update the `send_poll_trigger` keystroke-payload assertions to the new shape (`cafleet message poll --fleet-id <s> --agent-id <m>`), paired with the `multiplexer/tmux.py` source change. `test_member_prompt_template.py` is shape-agnostic — no change. |
+| `tests/output/test_render_agent.py` | Move the one `--fleet-id` CLI invocation to the new shape (the Tests table's earlier "output no-change" assumption was wrong). |
+| `tests/broker/**`, `tests/webui/**`, `tests/monitor/test_loop.py`, `tests/db/**` | No change — verify none invoke the CLI with a global `--fleet-id`. |
 
 Per `removal.md`, the removal guards above test the **absence** of the old surface (Click's built-in `No such option`), which is allowed; no deprecation shims are added.
 
@@ -237,13 +240,17 @@ Per `removal.md`, the removal guards above test the **absence** of the old surfa
 - [ ] `cli/member.py`: add `@fleet_id_option` to all 7 subcommands; remove the `require_fleet_id` import and the `require_fleet_id(ctx)` body lines (keep `fleet_id = ctx.obj["fleet_id"]`); note the `member create` error-precedence change. <!-- completed: -->
 - [ ] `cli/monitor.py`: add `@fleet_id_option` to `start`, `status`, `config`; remove the `require_fleet_id` import and body lines. <!-- completed: -->
 - [ ] Confirm `cli/fleet.py`, `cli/db.py`, `cli/doctor.py`, `cli/server.py` need no body change (none read `ctx.obj["fleet_id"]`) and now reject `--fleet-id` automatically. <!-- completed: -->
+- [ ] `cli/_prompt.py`: rewrite the `MEMBER_PROMPT_TEMPLATE` poll line to the new shape (`cafleet message poll --fleet-id {fleet_id} --agent-id {agent_id}`) so the default member spawn prompt keystrokes a command the post-change CLI accepts. <!-- completed: -->
+- [ ] `cli/member.py`: rewrite the orphan-rollback warning's suggested command in `_deregister_with_warning` to the new shape (`cafleet agent deregister --fleet-id {fleet_id} --agent-id {new_agent_id}`). <!-- completed: -->
+- [ ] `multiplexer/tmux.py`: rewrite the `send_poll_trigger` payload to the new shape (`cafleet message poll --fleet-id {fleet_id} --agent-id {agent_id}`) — the keystroke `member ping` and the monitor loop inject into agent panes. <!-- completed: -->
 
 ### Step 3: Tests
 
-- [ ] `tests/cli/test_fleet_flag.py`: rewrite per the Tests table — keep custom missing-message test; move flag position in flows-into-broker tests; replace the two `silently_accepted` tests with removal guards (db init / fleet create reject `--fleet-id` in both positions, exit 2); add `test_old_surface_removed__global_fleet_id_no_longer_parses`. <!-- completed: -->
-- [ ] `tests/cli/*.py` (agent, message, member*, monitor, fleet, doctor, server, compact_echo, message_truncation, fleet_bootstrap): move `--fleet-id` after the leaf subcommand in every `runner.invoke` arg list. <!-- completed: -->
-- [ ] `tests/cli/test_client_command.py`: update the in-test harness to the per-subcommand `fleet_id_option` shape if it declares a global `--fleet-id`; else leave unchanged. <!-- completed: -->
-- [ ] Confirm `tests/broker/**`, `tests/webui/**`, `tests/multiplexer/**`, `tests/monitor/test_loop.py`, `tests/output/**`, `tests/db/**` require no change (no CLI global `--fleet-id` invocations). <!-- completed: -->
+- [x] `tests/cli/test_fleet_flag.py`: rewrite per the Tests table — keep custom missing-message test; move flag position in flows-into-broker tests; replace the two `silently_accepted` tests with removal guards (db init / fleet create reject `--fleet-id` in both positions, exit 2); add `test_old_surface_removed__global_fleet_id_no_longer_parses`. <!-- completed: 2026-06-14T10:15 -->
+- [x] `tests/cli/*.py` (agent, message, member*, monitor, fleet, doctor, server, compact_echo, message_truncation, fleet_bootstrap): move `--fleet-id` after the leaf subcommand in every `runner.invoke` arg list. <!-- completed: 2026-06-14T10:15 -->
+- [x] `tests/cli/test_client_command.py`: update the in-test harness to the per-subcommand `fleet_id_option` shape if it declares a global `--fleet-id`; else leave unchanged. <!-- completed: 2026-06-14T10:15 -->
+- [x] Confirm `tests/broker/**`, `tests/webui/**`, `tests/monitor/test_loop.py`, `tests/db/**` require no change (no CLI global `--fleet-id` invocations). <!-- completed: 2026-06-14T10:15 -->
+- [x] Internal-keystroke payload assertions: update `tests/cli/test_member_ping.py::test_ping__keystrokes_escape_first`, `tests/multiplexer/test_tmux.py::test_send_poll_trigger__return_branches_and_argv`, and `tests/multiplexer/test_tmux_send_inline_preview.py::test_send_poll_trigger__keystroke_contract` to assert the new-shape payload (`cafleet message poll --fleet-id <s> --agent-id <m>`). `tests/cli/test_member_prompt_template.py` is shape-agnostic — no change. <!-- completed: 2026-06-14T10:20 -->
 
 ### Step 4: Verification
 
@@ -261,3 +268,4 @@ Per `removal.md`, the removal guards above test the **absence** of the old surfa
 | Date | Changes |
 |------|---------|
 | 2026-06-14 | Initial draft |
+| 2026-06-14 | Director scope amendment during execution (Tester-surfaced): the original Step 2 list enumerated `--fleet-id` option *definitions* but omitted three internal command-string *emission* sites that hardcode the old shape and would break at runtime under the new surface — `cli/_prompt.py` (`MEMBER_PROMPT_TEMPLATE` poll line), `cli/member.py` (`_deregister_with_warning` suggested command), `multiplexer/tmux.py` (`send_poll_trigger` keystroke payload). Added 3 Step-2 tasks + 1 Step-3 task (update the two payload assertions in `test_member_ping.py` and `multiplexer/test_tmux.py`; `test_member_prompt_template.py` is shape-agnostic). Corrected the Tests table: `test_doctor.py`/`test_server.py` get rejection guards (not flag-moves) per SC#4; `tests/multiplexer/test_tmux.py` and `tests/output/test_render_agent.py` moved out of the "no change" row. Confirmed the Tester's three reconciliation decisions. Progress 32 → 36. |

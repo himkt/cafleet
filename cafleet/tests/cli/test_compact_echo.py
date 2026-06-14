@@ -101,7 +101,16 @@ def _setup_command(monkeypatch, command, fleet_id, agent_id):
             "broadcast_message",
             lambda *_a, **_k: _broadcast_summary_result(recipient_count=3),
         )
-        return ["message", "broadcast", "--agent-id", str(agent_id), "--text", "hello"]
+        return [
+            "message",
+            "broadcast",
+            "--fleet-id",
+            str(fleet_id),
+            "--agent-id",
+            str(agent_id),
+            "--text",
+            "hello",
+        ]
     if command == "send":
         monkeypatch.setattr(
             broker,
@@ -114,6 +123,8 @@ def _setup_command(monkeypatch, command, fleet_id, agent_id):
         return [
             "message",
             "send",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
             "--to",
@@ -132,6 +143,8 @@ def _setup_command(monkeypatch, command, fleet_id, agent_id):
         return [
             "message",
             "ack",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
             "--task-id",
@@ -142,6 +155,8 @@ def _setup_command(monkeypatch, command, fleet_id, agent_id):
     return [
         "member",
         "ping",
+        "--fleet-id",
+        str(fleet_id),
         "--member-id",
         str(MEMBER_ID),
     ]
@@ -177,7 +192,7 @@ def test_command_echo__one_line_vs_multi_line_shape(
         args.append("--quiet")
     elif mode == "full":
         args.append("--full")
-    result = runner.invoke(cli, ["--fleet-id", str(fleet_id), *args])
+    result = runner.invoke(cli, args)
     assert result.exit_code == 0, result.output
     out = result.output.strip()
     if expect_oneline:
@@ -200,10 +215,10 @@ def test_broadcast_default__canonical_summary_pattern(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "message",
             "broadcast",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
             "--text",
@@ -228,10 +243,10 @@ def test_broadcast_full__multi_line_per_recipient_envelopes(
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(fleet_id),
             "message",
             "broadcast",
+            "--fleet-id",
+            str(fleet_id),
             "--agent-id",
             str(agent_id),
             "--text",
@@ -247,6 +262,6 @@ def test_broadcast_full__multi_line_per_recipient_envelopes(
 @pytest.mark.parametrize("command", ["send", "ack"])
 def test_quiet__emits_only_task_id(runner, fleet_id, agent_id, monkeypatch, command):
     args = _setup_command(monkeypatch, command, fleet_id, agent_id) + ["--quiet"]
-    result = runner.invoke(cli, ["--fleet-id", str(fleet_id), *args])
+    result = runner.invoke(cli, args)
     assert result.exit_code == 0, result.output
     assert result.output.strip() == "5000"

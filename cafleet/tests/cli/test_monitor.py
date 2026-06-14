@@ -110,7 +110,7 @@ def test_monitor_start__runs_loop_in_process_with_default_tick(fleet, monkeypatc
         "run_monitor_loop",
         lambda fleet_id, tick_seconds: calls.append((fleet_id, tick_seconds)),
     )
-    result = runner.invoke(cli, ["--fleet-id", str(sid), "monitor", "start"])
+    result = runner.invoke(cli, ["monitor", "start", "--fleet-id", str(sid)])
 
     assert result.exit_code == 0, result.output
     assert calls == [(sid, DEFAULT_TICK_SECONDS)]
@@ -126,7 +126,7 @@ def test_monitor_start__passes_tick_through(fleet, monkeypatch):
         lambda fleet_id, tick_seconds: calls.append((fleet_id, tick_seconds)),
     )
     result = runner.invoke(
-        cli, ["--fleet-id", str(sid), "monitor", "start", "--tick", "3"]
+        cli, ["monitor", "start", "--fleet-id", str(sid), "--tick", "3"]
     )
 
     assert result.exit_code == 0, result.output
@@ -141,7 +141,7 @@ def test_monitor_start__already_running_exits_one(fleet, monkeypatch):
         raise click.ClickException(f"monitor already running for fleet {fleet_id}")
 
     monkeypatch.setattr(loop, "run_monitor_loop", boom)
-    result = runner.invoke(cli, ["--fleet-id", str(sid), "monitor", "start"])
+    result = runner.invoke(cli, ["monitor", "start", "--fleet-id", str(sid)])
 
     assert result.exit_code == 1, result.output
     assert "already running" in result.output.lower()
@@ -151,7 +151,7 @@ def test_monitor_start__unknown_fleet_exits_one(fresh_db, monkeypatch):
     db_file, runner = fresh_db
     calls = []
     monkeypatch.setattr(loop, "run_monitor_loop", lambda *a, **k: calls.append(a))
-    result = runner.invoke(cli, ["--fleet-id", "999999", "monitor", "start"])
+    result = runner.invoke(cli, ["monitor", "start", "--fleet-id", "999999"])
 
     assert result.exit_code == 1, result.output
     assert calls == []  # fleet validation fails before the loop runs
@@ -163,7 +163,7 @@ def test_monitor_start__soft_deleted_fleet_exits_one(fleet, monkeypatch):
     _soft_delete_fleet(db_file, sid)
     calls = []
     monkeypatch.setattr(loop, "run_monitor_loop", lambda *a, **k: calls.append(a))
-    result = runner.invoke(cli, ["--fleet-id", str(sid), "monitor", "start"])
+    result = runner.invoke(cli, ["monitor", "start", "--fleet-id", str(sid)])
 
     assert result.exit_code == 1, result.output
     assert calls == []
@@ -177,7 +177,7 @@ def test_monitor_status__running_text_shows_runtime_and_agent_table(fleet):
     sid = data["fleet_id"]
     _seed_runtime(db_file, sid, os.getpid())
 
-    result = runner.invoke(cli, ["--fleet-id", str(sid), "monitor", "status"])
+    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid)])
 
     assert result.exit_code == 0, result.output
     out = result.output.lower()
@@ -192,7 +192,7 @@ def test_monitor_status__json_shape(fleet):
     director_id = data["director"]["agent_id"]
     _seed_runtime(db_file, sid, os.getpid())
 
-    result = runner.invoke(cli, ["--fleet-id", str(sid), "--json", "monitor", "status"])
+    result = runner.invoke(cli, ["--json", "monitor", "status", "--fleet-id", str(sid)])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
@@ -213,7 +213,7 @@ def test_monitor_status__json_shape(fleet):
 def test_monitor_status__not_running_when_no_runtime(fleet):
     db_file, runner, data = fleet
     sid = data["fleet_id"]
-    result = runner.invoke(cli, ["--fleet-id", str(sid), "--json", "monitor", "status"])
+    result = runner.invoke(cli, ["--json", "monitor", "status", "--fleet-id", str(sid)])
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["runtime"]["running"] is False
@@ -242,7 +242,7 @@ def test_monitor_status__labels_monitoring_member_role(fleet):
     )
     _seed_runtime(db_file, sid, os.getpid())
 
-    result = runner.invoke(cli, ["--fleet-id", str(sid), "--json", "monitor", "status"])
+    result = runner.invoke(cli, ["--json", "monitor", "status", "--fleet-id", str(sid)])
     assert result.exit_code == 0, result.output
     roles = {a["agent_id"]: a["role"] for a in json.loads(result.output)["agents"]}
     assert roles[director_id] == "director"
@@ -257,7 +257,7 @@ def test_monitor_status__stale_row_reports_not_running_with_nulls(fleet):
     stale = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     _seed_runtime(db_file, sid, os.getpid(), last_tick_at=stale)
 
-    result = runner.invoke(cli, ["--fleet-id", str(sid), "--json", "monitor", "status"])
+    result = runner.invoke(cli, ["--json", "monitor", "status", "--fleet-id", str(sid)])
 
     assert result.exit_code == 0, result.output
     runtime = json.loads(result.output)["runtime"]
@@ -277,7 +277,7 @@ def test_monitor_config__show(fleet):
     director_id = data["director"]["agent_id"]
     result = runner.invoke(
         cli,
-        ["--fleet-id", str(sid), "monitor", "config", "--agent-id", str(director_id)],
+        ["monitor", "config", "--fleet-id", str(sid), "--agent-id", str(director_id)],
     )
 
     assert result.exit_code == 0, result.output
@@ -291,10 +291,10 @@ def test_monitor_config__set_interval_persists(fleet):
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(sid),
             "monitor",
             "config",
+            "--fleet-id",
+            str(sid),
             "--agent-id",
             str(director_id),
             "--interval",
@@ -314,10 +314,10 @@ def test_monitor_config__disable_then_enable(fleet):
     disabled = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(sid),
             "monitor",
             "config",
+            "--fleet-id",
+            str(sid),
             "--agent-id",
             str(director_id),
             "--disable",
@@ -329,10 +329,10 @@ def test_monitor_config__disable_then_enable(fleet):
     enabled = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(sid),
             "monitor",
             "config",
+            "--fleet-id",
+            str(sid),
             "--agent-id",
             str(director_id),
             "--enable",
@@ -349,10 +349,10 @@ def test_monitor_config__mutual_exclusion_exits_two(fleet):
     result = runner.invoke(
         cli,
         [
-            "--fleet-id",
-            str(sid),
             "monitor",
             "config",
+            "--fleet-id",
+            str(sid),
             "--agent-id",
             str(director_id),
             "--enable",
@@ -370,7 +370,7 @@ def test_monitor_config__not_enrolled_exits_one(fleet):
     sid = data["fleet_id"]
     admin_id = data["administrator_agent_id"]
     result = runner.invoke(
-        cli, ["--fleet-id", str(sid), "monitor", "config", "--agent-id", str(admin_id)]
+        cli, ["monitor", "config", "--fleet-id", str(sid), "--agent-id", str(admin_id)]
     )
 
     assert result.exit_code == 1, result.output

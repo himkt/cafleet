@@ -136,6 +136,6 @@ def test_send_poll_trigger__keystroke_contract(monkeypatch):
     assert len(captured) == 3
     assert captured[0] == ["tmux", "send-keys", "-t", "%5", "Escape"]
     keystroke = captured[1][-1]
-    assert keystroke.startswith("cafleet --fleet-id ")
-    assert "message poll --agent-id" in keystroke
+    assert keystroke.startswith("cafleet message poll --fleet-id ")
+    assert "--agent-id" in keystroke
     assert captured[2] == ["tmux", "send-keys", "-t", "%5", "Enter"]
