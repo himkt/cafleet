@@ -1,7 +1,7 @@
 # Slim Down the CAFleet Skill `.md` Files (Behavior-Preserving)
 
 **Status**: Approved
-**Progress**: 7/10 tasks complete
+**Progress**: 8/10 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -231,8 +231,8 @@ This change edits the very skills (`cafleet-design-doc-create` / `-execute` and 
 
 ### Step 8: Cluster F + G — agent-team + base-dir
 
-- [ ] `monitoring/SKILL.md` + `supervision/SKILL.md`: collapse Shutdown/monitor-stop restatement to the recovery.md cross-ref (D2); remove residual three-beat re-spelling. <!-- completed: -->
-- [ ] `cafleet-base-dir/SKILL.md`: light P5 trim; preserve every resolution branch + `<unset>` contract. <!-- completed: -->
+- [x] `monitoring/SKILL.md` + `supervision/SKILL.md`: collapse Shutdown/monitor-stop restatement to the recovery.md cross-ref (D2); remove residual three-beat re-spelling. <!-- completed: 2026-06-14T03:48 -->
+- [x] `cafleet-base-dir/SKILL.md`: light P5 trim; preserve every resolution branch + `<unset>` contract. <!-- completed: 2026-06-14T03:48 -->
 
 ### Step 9: Verification
 
