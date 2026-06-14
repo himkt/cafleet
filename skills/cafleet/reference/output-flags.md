@@ -1,6 +1,6 @@
 # Output flags — `--full` / `--json` / `--quiet`
 
-`--full`, `--json`, and `--quiet` are cafleet's output-control flags over its compact default output: `--full` and `--json` opt back into untruncated / structured output, while `--quiet` trims output to the bare id. Each flag is documented below.
+`--full`, `--json`, and `--quiet` are cafleet's output-control flags over its compact default output: `--full` and `--json` opt back into untruncated / structured output, while `--quiet` trims output to the bare id.
 
 ## `--full` (cross-subcommand escape hatch)
 
@@ -15,7 +15,7 @@
 
 ## `--json` (global, machine-parseable)
 
-`--json` switches CLI output from text to JSON. JSON encoding is compact (`json.dumps(data, separators=(",",":"), ensure_ascii=False)` — no whitespace, non-ASCII like the `…` suffix emitted as UTF-8), so `--json` is cheap to pipe into `jq` from a Director loop without paying for indentation.
+`--json` switches CLI output from text to JSON. JSON encoding is compact (`json.dumps(data, separators=(",",":"), ensure_ascii=False)` — no whitespace, non-ASCII like the `…` suffix emitted as UTF-8), so `--json` is cheap to pipe into `jq` from a Director loop.
 
 ```bash
 cafleet --json message poll --agent-id <m>

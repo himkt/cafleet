@@ -19,16 +19,6 @@ cafleet --fleet-id <fleet-id> member capture \
 
 The `--activity` flag aggregates per-member `last_sent` / `last_recv` / `last_ack` / `idle` columns so a routine monitor tick can decide which members need a capture WITHOUT capturing every member every wake. See [`reference/director.md`](director.md#member-list-with-activity).
 
-```
-$ cafleet --fleet-id <s> member list --activity
-3 members:
-  agent_id        name      state   last_sent    last_recv    last_ack     idle
-  --------------  --------  ------  -----------  -----------  -----------  -----
-  abc12345        alice     active  12:34:56     12:34:50     12:34:50     6s
-  def67890        bob       active  12:30:11     12:33:02     12:33:02     2m
-  ghi24680        carol     idle    -            12:20:00     12:20:00     14m
-```
-
 Heuristic: capture only members whose `idle > 5m` AND who have an unread inbox (the broker just delivered an inline preview that they have not yet acked). Capture is the expensive operation; use it sparingly.
 
 ## Stalled member shapes

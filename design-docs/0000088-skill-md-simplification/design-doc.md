@@ -1,7 +1,7 @@
 # Slim Down the CAFleet Skill `.md` Files (Behavior-Preserving)
 
 **Status**: Approved
-**Progress**: 0/10 tasks complete (design approved; implementation pending)
+**Progress**: 2/10 tasks complete
 **Last Updated**: 2026-06-14
 
 ## Overview
@@ -190,17 +190,17 @@ This change edits the very skills (`cafleet-design-doc-create` / `-execute` and 
 
 ### Step 1: Frozen-token baseline
 
-- [ ] Extract the V1 frozen-token inventory from all 26 in-scope files into `${BASE}/verification/frozen-inventory-before.md` (commands, flags, error strings, gates, frontmatter descriptions, verb/pointer tokens, spawn-prompt template hashes). <!-- completed: -->
+- [x] Extract the V1 frozen-token inventory from all 26 in-scope files into `${BASE}/verification/frozen-inventory-before.md` (commands, flags, error strings, gates, frontmatter descriptions, verb/pointer tokens, spawn-prompt template hashes). <!-- completed: 2026-06-14T02:35 -->
 
 > **`verification/` is throwaway scratch.** The before/after inventory artifacts live under the committed design-doc directory but are NOT part of the permanent record. Do NOT stage them in the finalize commit — leave `${BASE}/verification/` unstaged / ignored. The durable record is this design doc; the per-file diffs live in git history.
 
 ### Step 2: Cluster A — `cafleet/` reference files
 
-- [ ] `reference/exec-routing.md`: remove the "Why no operator-prompts-for-routing" § (D4). <!-- completed: -->
-- [ ] `reference/broadcast.md`: collapse the 4× `--full` no-op restatement to one + cross-ref `output-flags.md` (D7). <!-- completed: -->
-- [ ] `reference/recovery.md`: drop the duplicated `member list --activity` example block (D3); keep Shutdown Protocol canonical here. <!-- completed: -->
-- [ ] `reference/director.md`: trim the `--model` catalog (D6) and the ARG_MAX spawn-size derivation (D5); keep `--activity` table canonical. <!-- completed: -->
-- [ ] `reference/output-flags.md`: light P5 trim. <!-- completed: -->
+- [x] `reference/exec-routing.md`: remove the "Why no operator-prompts-for-routing" § (D4). <!-- completed: 2026-06-14T02:45 -->
+- [x] `reference/broadcast.md`: collapse the 4× `--full` no-op restatement to one + cross-ref `output-flags.md` (D7). <!-- completed: 2026-06-14T02:45 -->
+- [x] `reference/recovery.md`: drop the duplicated `member list --activity` example block (D3); keep Shutdown Protocol canonical here. <!-- completed: 2026-06-14T02:45 -->
+- [x] `reference/director.md`: trim the `--model` catalog (D6) and the ARG_MAX spawn-size derivation (D5); keep `--activity` table canonical. <!-- completed: 2026-06-14T02:45 -->
+- [x] `reference/output-flags.md`: light P5 trim. <!-- completed: 2026-06-14T02:45 -->
 
 ### Step 3: Cluster A — `cafleet/` core + roles
 

@@ -75,10 +75,6 @@ Process member denial-fallback requests in **poll order, one at a time**. Two `m
 
 `cafleet member exec` reaches any member of the same `--fleet-id` — there is no caller-auth check. The only boundary is fleet isolation: a `--member-id` that does not belong to `--fleet-id` exits 1 with `Error: Agent <member-id> not found`. A denial-fallback request from a member of your own fleet is always dispatchable; a request that names a member outside your fleet cannot be served (the `member exec` will return "not found"), so reply to the sender with a plain `cafleet message send` explaining the mismatch instead.
 
-## Why no operator-prompts-for-routing
-
-When a member offers the operator a list of options ("(1) you run it via `!`, (2) route through Director, (3) skip"), it pushes a routing decision back to the operator that they already implicitly answered by asking the member to run the command. They wanted it run. Routing is implementation. The bash-via-Director protocol exists precisely to handle the harness-denied case without operator interaction.
-
 ## Role-specific reading
 
 The fallback has two perspectives. Read **only the file matching your role**:
