@@ -1,7 +1,7 @@
 # Aggressively Simplify the `skills/` Tree (Tier C)
 
 **Status**: Approved
-**Progress**: 14/17 tasks complete
+**Progress**: 17/17 tasks complete
 **Last Updated**: 2026-06-15
 
 ## Overview
@@ -10,14 +10,14 @@ Every skill directory under `skills/` (45 files, ~7,360 lines) carries restated 
 
 ## Success Criteria
 
-- [ ] Every in-scope file is slimmed per the Tier C principles (§*Slimming principles*), with **zero change to any frozen token** (§*The frozen set*) — proven, not assumed, by the before/after extraction diff (V2).
-- [ ] **Aggregate line reduction is ≥ 30%** (stretch band 30–50%; modeled realistic outcome ~30–37%), **OR** any shortfall below 30% is recorded with a per-cluster justification (V10) — **correctness over percentage**: no load-bearing or frozen content is ever cut to hit a number.
+- [x] Every in-scope file is slimmed per the Tier C principles (§*Slimming principles*), with **zero change to any frozen token** (§*The frozen set*) — proven, not assumed, by the before/after extraction diff (V2).
+- [x] **Aggregate line reduction is ≥ 30%** (stretch band 30–50%; modeled realistic outcome ~30–37%), **OR** any shortfall below 30% is recorded with a per-cluster justification (V10) — **correctness over percentage**: no load-bearing or frozen content is ever cut to hit a number.
 
-- [ ] `cafleet-my-slidev/techniques/` is consolidated **6 → 3** (`formatting.md`, `math-formulas.md`, `two-column-layouts.md`); `animations.md`, `admonition.md`, `highlight.md`, `font-size.md` are removed; **every theme token** (layout/class/slot/component-type/frontmatter-key) survives the merge, and **all four pointer-sources (8 line-instances) are repointed** (SKILL.md techniques table = 4 rows, `admonition.md`→`highlight.md`, `math-formulas.md`→`admonition.md`, and the cross-skill `cafleet-research-presentation/roles/presentation.md`→`highlight.md` = 2 lines).
-- [ ] **No other file is merged, deleted, renamed, or split.** `research-report/template.md`, `roles/scout.md`, `roles/researcher.md`, and `research-presentation/roles/director.md` stay as separate files. No new cross-skill shared template files are created.
-- [ ] Cross-reference integrity holds: every "see X § Y" pointer resolves to an existing heading; every role-file cross-reference points only to a skill the spawned member loads at startup (P7).
-- [ ] No "for history" deprecation breadcrumbs remain (`.claude/rules/removal.md`): each slimmed file reads as if the removed redundancy never existed.
-- [ ] No `README.md` / `docs/concepts/` / `docs/` change is required, because no CLI / API / config / theme-token / file-path surface changes — verified (V6), not assumed.
+- [x] `cafleet-my-slidev/techniques/` is consolidated **6 → 3** (`formatting.md`, `math-formulas.md`, `two-column-layouts.md`); `animations.md`, `admonition.md`, `highlight.md`, `font-size.md` are removed; **every theme token** (layout/class/slot/component-type/frontmatter-key) survives the merge, and **all four pointer-sources (8 line-instances) are repointed** (SKILL.md techniques table = 4 rows, `admonition.md`→`highlight.md`, `math-formulas.md`→`admonition.md`, and the cross-skill `cafleet-research-presentation/roles/presentation.md`→`highlight.md` = 2 lines).
+- [x] **No other file is merged, deleted, renamed, or split.** `research-report/template.md`, `roles/scout.md`, `roles/researcher.md`, and `research-presentation/roles/director.md` stay as separate files. No new cross-skill shared template files are created.
+- [x] Cross-reference integrity holds: every "see X § Y" pointer resolves to an existing heading; every role-file cross-reference points only to a skill the spawned member loads at startup (P7).
+- [x] No "for history" deprecation breadcrumbs remain (`.claude/rules/removal.md`): each slimmed file reads as if the removed redundancy never existed.
+- [x] No `README.md` / `docs/concepts/` / `docs/` change is required, because no CLI / API / config / theme-token / file-path surface changes — verified (V6), not assumed.
 
 ---
 
@@ -194,6 +194,8 @@ The modeled floor lands at **~28%**, just under the 30% target, because two of t
 
 End-state file count: **45 → 42** (the 6→3 techniques consolidation removes 3 files; no other structural change).
 
+**Actual outcome (V10, post-implementation).** Realized aggregate: **7362 → 5839 lines = −1523 (20.7%)** — below the 30% stretch target, recorded not forced per Success Criterion 2. Per-cluster cut: A 11.5%, B 1.8%, C 12.6%, D 12.2%, E 11.0%, F 5.8%, G 2.4%, H 14.7%, I **57.3%** (the techniques 6→3 merge — the largest lever), J 24.7%, K 14.2%. The shortfall concentrates in the reference-dense operational family (A–G, 10.5%) and H/J/K, which are dominated by frozen/load-bearing content (CLI/error tables, gate conditions, the canonical Shutdown Protocol + frozen spawn-templates, output-format contracts, every `bun run agent-browser` command, the 14 verification-tag literals, the Visual Quality Ownership checklist); much residual redundancy lives in single physical lines that in-place tightening cannot remove from the `wc -l` count. V2/V3/V9 confirm zero frozen-token change, and V4 confirms every removed line is redundancy / duplication / non-enforced catalog / example-padding — no load-bearing content was cut to chase a number.
+
 ### Verification strategy (proves the frozen set is preserved)
 
 All V-gates run at **execute time** over the slimmed diffs. The create-time Reviewer reviews *this design doc* for completeness; the skill-file diffs do not exist yet at design time.
@@ -277,15 +279,15 @@ This change edits the orchestrating skills (`cafleet-design-doc-create`/`-execut
 
 ### Step 12: Verification — frozen-set diff
 
-- [ ] Re-extract the frozen-token inventory (`…-after.md`); run V2 (multiset diff identical), V3 (frontmatter byte-identical), V9 (theme-token survival across the merge). Investigate/justify every delta as a pure relocation or revert. <!-- completed: -->
+- [x] Re-extract the frozen-token inventory (`…-after.md`); run V2 (multiset diff identical), V3 (frontmatter byte-identical), V9 (theme-token survival across the merge). Investigate/justify every delta as a pure relocation or revert. <!-- completed: 2026-06-15T15:44 -->
 
 ### Step 13: Verification — integrity + drift + totality
 
-- [ ] Run V5 (cross-reference integrity, incl. the technique-merge grep + P7), V6 (no behavior-doc drift), V7 (removal totality), V8 (content-superset for every collapsed prose block). <!-- completed: -->
+- [x] Run V5 (cross-reference integrity, incl. the technique-merge grep + P7), V6 (no behavior-doc drift), V7 (removal totality), V8 (content-superset for every collapsed prose block). <!-- completed: 2026-06-15T15:49 -->
 
 ### Step 14: Verification — line-count + finalize
 
-- [ ] Run V4 (per-file `git diff` review — only redundancy removed) and V10 (per-file + aggregate line-count delta; aggregate ≥ 30% or recorded justification). Record the global `~/.claude/skills/` re-sync as an operator follow-up. Mark this design doc complete. <!-- completed: -->
+- [x] Run V4 (per-file `git diff` review — only redundancy removed) and V10 (per-file + aggregate line-count delta; aggregate ≥ 30% or recorded justification). Record the global `~/.claude/skills/` re-sync as an operator follow-up. Mark this design doc complete. <!-- completed: 2026-06-15T15:53 -->
 
 ---
 
