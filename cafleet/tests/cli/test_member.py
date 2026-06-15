@@ -19,6 +19,7 @@ from cafleet.cli import cli
 from cafleet.cli._prompt import resolve_prompt
 from cafleet.db.models import Agent
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
+from cafleet.multiplexer import tmux as multiplexer_tmux
 
 
 @pytest.fixture
@@ -1092,3 +1093,43 @@ def test_member_nudge__text_output_happy_and_no_pane_variants(
     assert no_pane.exit_code == 0, no_pane.output
     assert "no pane" in no_pane.output
     assert "queued" in no_pane.output
+
+
+def test_member_nudge__real_preview_keystroke_is_esc_first(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    monkeypatch,
+):
+    """End-to-end (design 0000092 §1/§4): the other C2 tests stub
+    ``send_inline_preview``, so none prove that ``member nudge`` actually emits
+    an Esc-first keystroke through the REAL helper. Drive the CLI with the real
+    helper in play (capture ``_run`` argv, no method-level stub) and assert the
+    target Director's pane receives `Escape` FIRST — so a Director parked on a
+    pending permission-approval prompt has it dismissed before any payload
+    character is typed and the trailing Enter can never confirm it. Mirrors
+    tests/broker/test_inline_preview.py::test_send_message__real_inline_preview_keystroke_is_esc_first."""
+    fleet_id, director_id, runner = bootstrapped_fleet
+    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+    captured: list[list[str]] = []
+    monkeypatch.setattr(
+        multiplexer_tmux,
+        "_run",
+        lambda args, **_kw: captured.append(list(args)) or "",
+    )
+
+    result = _invoke_member_nudge(
+        runner, fleet_id, sender_id, director_id, "cancel it (Esc)", json_output=True
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["notification_sent"] is True
+
+    # The Director's pane (%0) receives Escape FIRST, then the literal payload,
+    # then the trailing Enter submit — the hardened (esc_first) inline preview.
+    pane_calls = [argv for argv in captured if argv[3:4] == ["%0"]]
+    assert pane_calls[0] == ["tmux", "send-keys", "-t", "%0", "Escape"]
+    assert pane_calls[1][:5] == ["tmux", "send-keys", "-t", "%0", "-l"]
+    assert pane_calls[-1] == ["tmux", "send-keys", "-t", "%0", "Enter"]
