@@ -1,7 +1,7 @@
 # Aggressively Simplify the `skills/` Tree (Tier C)
 
 **Status**: Approved
-**Progress**: 7/17 tasks complete
+**Progress**: 8/17 tasks complete
 **Last Updated**: 2026-06-15
 
 ## Overview
@@ -255,7 +255,7 @@ This change edits the orchestrating skills (`cafleet-design-doc-create`/`-execut
 
 ### Step 7: Cluster F + G — agent-team + base-dir
 
-- [ ] Collapse the Shutdown/monitor-stop restatement + residual three-beat re-spelling in `monitoring/SKILL.md` + `supervision/SKILL.md`; light P5 trim of `cafleet-base-dir/SKILL.md` preserving every resolution branch + `<unset>` contract. <!-- completed: -->
+- [x] Collapse the Shutdown/monitor-stop restatement + residual three-beat re-spelling in `monitoring/SKILL.md` + `supervision/SKILL.md`; light P5 trim of `cafleet-base-dir/SKILL.md` preserving every resolution branch + `<unset>` contract. <!-- completed: 2026-06-15T14:52 -->
 
 ### Step 8: Cluster H — `cafleet-create-figure/`
 

@@ -109,15 +109,11 @@ CAFleet members never talk to the user directly — the Director relays. When a 
 
 ## Stall Response
 
-See the `cafleet-agent-team-monitoring` skill § Stall Response.
-
-A quiet ordinary member is no longer woken by the monitor loop — it never pings ordinary members. Instead, the monitoring member's idle assessment **surfaces** the quiet member to the Director, who then re-engages it via `cafleet member ping` (an `Esc`-safeguarded inbox-poll keystroke) or re-sends the instruction with `cafleet message send`. Re-engagement of ordinary members is always Director-mediated.
+See the `cafleet-agent-team-monitoring` skill § Stall Response. (A quiet ordinary member is never woken by the monitor loop — the monitoring member's idle assessment surfaces it to the Director, who re-engages it via `cafleet member ping` or `cafleet message send`; ordinary-member re-engagement is always Director-mediated.)
 
 ## Cleanup Protocol
 
-Cleanup follows the `cafleet` skill § Shutdown Protocol — that is the canonical teardown order (stop the monitor's background task → `cafleet member delete` the monitoring member FIRST → `cafleet member delete` each ordinary member → verify roster empty → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check).
-
-The single rule supervision restates here: **stop the monitor's background task BEFORE the monitoring member's pane is killed** (teardown is first-out — the mirror of the first-in spawn order). There is no `cafleet monitor stop` — message the monitoring member to stop its `monitor start` background task (the task-stop delivers SIGTERM/SIGINT, so the loop clears its runtime row), have it confirm, then `cafleet member delete` it first, before ordinary members. A monitor that keeps ticking after the monitoring member is deleted keystrokes ping commands into tearing-down panes and races with the delete path.
+Cleanup follows the `cafleet` skill § Shutdown Protocol — the canonical teardown order: **stop the monitor's background task BEFORE the monitoring member's pane is killed** (there is no `cafleet monitor stop` — message the monitoring member to stop its `monitor start` task, which SIGTERMs the loop so it clears its runtime row, and confirm) → `cafleet member delete` the monitoring member FIRST → each ordinary member → verify roster empty → `cafleet fleet delete <fleet-id>` → `cafleet fleet list`. Teardown is first-out (mirror of the first-in spawn order); a monitor still ticking after the monitoring member is deleted keystrokes pings into the tearing-down pane and races the delete path.
 
 ## Quick Reference
 
