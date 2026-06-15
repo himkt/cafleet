@@ -1,8 +1,8 @@
 # Aggressively Simplify the `skills/` Tree (Tier C)
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 17/17 tasks complete
-**Last Updated**: 2026-06-15
+**Last Updated**: 2026-06-16
 
 ## Overview
 
@@ -296,3 +296,4 @@ This change edits the orchestrating skills (`cafleet-design-doc-create`/`-execut
 | Date | Changes |
 |------|---------|
 | 2026-06-15 | Initial draft |
+| 2026-06-16 | Implemented — 11 clusters slimmed (7362→5839, −1523, 20.7% aggregate), my-slidev techniques consolidated 6→3; frozen set preserved (V1–V10 PASS, independently corroborated). Copilot review on PR #123 ran 3 rounds: fixed UUID→integer terminology drift, restored `with open(...)` context managers + `import csv, json`, restored full `--fleet-id`/`--agent-id` flags on two ACK examples, corrected `codex.md` doc paths; one pre-existing `--json`-placement doc nuance deferred (not introduced by this change). Sub-30% aggregate recorded with per-cluster justification per Success Criterion 2 (correctness over percentage). |
