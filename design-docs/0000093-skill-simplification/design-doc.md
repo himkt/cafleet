@@ -1,7 +1,7 @@
 # Aggressively Simplify the `skills/` Tree (Tier C)
 
 **Status**: Approved
-**Progress**: 6/17 tasks complete
+**Progress**: 7/17 tasks complete
 **Last Updated**: 2026-06-15
 
 ## Overview
@@ -251,7 +251,7 @@ This change edits the orchestrating skills (`cafleet-design-doc-create`/`-execut
 
 ### Step 6: Cluster E — `cafleet-design-doc-interview/`
 
-- [ ] Slim `SKILL.md` (prose; keep the single `COMMENT(claude)`/`question.md` spec, resume tables, completion gate) and `roles/analyzer.md` (X1). <!-- completed: -->
+- [x] Slim `SKILL.md` (prose; keep the single `COMMENT(claude)`/`question.md` spec, resume tables, completion gate) and `roles/analyzer.md` (X1). <!-- completed: 2026-06-15T14:43 -->
 
 ### Step 7: Cluster F + G — agent-team + base-dir
 

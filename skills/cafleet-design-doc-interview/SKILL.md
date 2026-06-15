@@ -33,17 +33,7 @@ Inline marker placed in the design document.
 COMMENT(claude): <description of discrepancy and what needs to change>
 ```
 
-Placed on its own line, immediately before the content it refers to — e.g.:
-
-```markdown
-## Specification
-
-COMMENT(claude): User confirmed the retry limit should be 5, not 3. Update the retry count and adjust the timeout calculation that depends on it.
-
-### Retry Strategy
-
-Maximum retries: 3 with exponential backoff...
-```
+Placed on its own line, immediately before the content it refers to — e.g. a `COMMENT(claude): User confirmed the retry limit should be 5, not 3. ...` line inserted directly above the `### Retry Strategy` section it refers to.
 
 Roles relevant in this skill:
 
@@ -57,10 +47,6 @@ Rules:
 - Body must be actionable — state what is wrong AND what the correct behavior should be.
 - Markers persist in the document until resolved by the `cafleet-design-doc-create` skill's resume mode, which reads each `COMMENT(claude)` marker, applies the fix, and removes the marker as part of the fix.
 
-### Director-Analyzer Exemption
-
-Director-Analyzer cafleet messages in this skill are explicitly exempt from the verb + pointer schema. The Analyzer's question list is a one-time payload deliverable; the Director's user-facing relay goes through `AskUserQuestion`, not cafleet. Both sides ride as free-form cafleet bodies.
-
 ## Architecture
 
 The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` (no separate `cafleet agent register` call) — and spawns one short-lived Analyzer via `cafleet member create`. The Analyzer is torn down BEFORE the interview rounds begin; the Director then runs the rounds (and writes annotations) on its own. All Analyzer coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
@@ -70,10 +56,6 @@ User
  +-- Director (main Claude -- cafleet fleet create, cafleet member create, drives Q&A, writes annotations)
       +-- Analyzer (member agent -- spawned in tmux pane; returns question list; terminated)
 ```
-
-- **Director ↔ User**: `AskUserQuestion` (4 questions per call, batching the Analyzer's numbered list)
-- **Director ↔ Analyzer**: `cafleet message send` (assignment with doc path + already-reviewed sections; reply with numbered question list)
-- Members receive messages via push notification: the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview`. The recipient processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the recipient calls `cafleet message poll` themselves. `--fleet-id` and `--agent-id` are per-subcommand options (placed **after** the subcommand name).
 
 ## Prerequisites
 
@@ -100,18 +82,6 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 - Appended to on subsequent invocations.
 - Removed when all sections are covered (final invocation). If `question.md` exists but the marker is absent, the interview is considered complete.
 - The Director reads this to determine resume state.
-
-## Primitive Mapping
-
-| Agent Teams primitive | CAFleet equivalent |
-|---|---|
-| `TeamCreate(name="interview-{slug}")` | CAFleet fleet created via `cafleet fleet create` |
-| `Agent(subagent_type="Explore", prompt=...)` (Analyzer) | `cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> --name "Analyzer" --description "..." -- "<prompt>"` |
-| `SendMessage(to="Analyzer")` | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <analyzer-agent-id> --text "..."` |
-| `SendMessage(to="Director")` (from Analyzer) | `cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (heartbeat + facilitation) and the `cafleet-agent-team-supervision` skill (governance) for their Authorization-Scope Guard, idle semantics, Stall Response, and Cleanup policy. The heartbeat is run by the dedicated **monitoring member** (the first `member create`, `--role monitor --model sonnet`, which runs `cafleet monitor start` in its own pane) — the Director never runs the monitor itself. The monitoring member wakes on the loop and, when it finds the Director idle, re-engages it via `cafleet member nudge` (canonical conditional nudge). |
-| `TeamDelete` | `cafleet member delete --fleet-id <fleet-id> --member-id <analyzer-agent-id>`, then `cafleet fleet delete <fleet-id>` |
-| Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
 ## Process
 
@@ -200,11 +170,7 @@ Read the design document, generate a numbered question list per the role definit
 send it to the Director via cafleet message send, then idle pending shutdown.
 ```
 
-Spawn with the two-step (render to file, then `--prompt-file`) pattern:
-
-1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
-2. **Write the rendered text** to `${BASE}/prompts/analyzer-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
-3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
+Render the prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` per the 2c audit-file pattern (leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass), then spawn with `--prompt-file`:
 
    ```bash
    cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
@@ -213,7 +179,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
      --prompt-file ${BASE}/prompts/analyzer-<UTC-compact>.md
    ```
 
-   Parse `agent_id` from the JSON response and substitute it for `<analyzer-agent-id>` in every subsequent command. The pre-spawn file at `${BASE}/prompts/analyzer-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
+   Parse `agent_id` from the JSON response and substitute it for `<analyzer-agent-id>` in every subsequent command.
 
 #### 2e. Wait for the Analyzer's question list
 
@@ -223,13 +189,7 @@ The reply must be a flat numbered list following the format specified in [roles/
 
 #### 2f. Tear down the monitoring member and the Analyzer
 
-The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping either alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received (first-out: stop the monitor, then delete the monitoring member first):
-
-1. Stop the monitoring member's `monitor start` background task (the heartbeat launched in 2b — there is no `monitor stop` command): message the monitoring member to stop its background task (the task-stop delivers SIGTERM/SIGINT, so the loop clears its runtime row), and wait for its confirmation. Do this **before** its pane is killed.
-2. `cafleet member delete --fleet-id <fleet-id> --member-id <monitoring-member-id>` **first**, then `cafleet member delete --fleet-id <fleet-id> --member-id <analyzer-agent-id>`. Each call blocks until the pane is gone (15 s timeout); on exit 2, follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
-3. `cafleet member list --fleet-id <fleet-id>` — the team's roster MUST be empty.
-4. `cafleet fleet delete <fleet-id>` (positional, no `--fleet-id` flag).
-5. `cafleet fleet list` — the fleet MUST not appear.
+The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping either alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then the Analyzer (on exit 2 use `member capture` + `send-input` recovery or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete <fleet-id>`; `cafleet fleet list` to confirm.
 
 #### 2g. Persist the question list to `question.md`
 
