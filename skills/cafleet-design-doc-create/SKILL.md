@@ -40,26 +40,9 @@ User
       +-- Reviewer (member agent -- spawned in tmux pane; critically reviews the draft)
 ```
 
-- **Director ↔ User**: `AskUserQuestion` (clarification relay, draft presentation, feedback collection)
-- **Director ↔ Drafter**: `cafleet message send` (questions relay, user answers, reviewer feedback, drafting instructions)
-- **Director ↔ Reviewer**: `cafleet message send` (draft review requests, review feedback)
-- Members receive messages via a push notification: the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview` whenever a `cafleet message send` is persisted. The recipient processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the recipient calls `cafleet message poll` themselves. `--fleet-id` and `--agent-id` are per-subcommand options (after the subcommand name).
-
 ## Prerequisites
 
 The Director MUST be running inside a tmux session (required by `cafleet member create`). Verify by running `cafleet doctor` before spawning anyone — it reports the tmux session/window/pane identifiers and exits non-zero with a clear message when the environment is not ready. If `cafleet doctor` reports a problem, abort and surface its message to the user. Do NOT invoke `tmux display-message`, `printenv TMUX`, or any other raw tmux/env probe — `cafleet doctor` is the only supported environment check (see `skills/cafleet/SKILL.md` § *use cafleet primitives only*).
-
-## Primitive Mapping
-
-| Agent Teams primitive | CAFleet equivalent |
-|---|---|
-| `TeamCreate(name="create-{slug}")` | CAFleet fleet created via `cafleet fleet create` — it bootstraps the fleet + root Director + placement + Administrator in one transaction (no separate `cafleet agent register` call needed for the Director) |
-| `Agent(team_name=..., subagent_type=...)` | `cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
-| `SendMessage(to="Drafter")` | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."` |
-| `SendMessage(to="Director")` (from member) | `cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (heartbeat + facilitation) and the `cafleet-agent-team-supervision` skill (governance) for their Authorization-Scope Guard, idle semantics, Stall Response, and Cleanup policy. The heartbeat is run by the dedicated **monitoring member** (the first `member create`, `--role monitor --model sonnet`, which runs `cafleet monitor start` in its own pane) — the Director never runs the monitor itself. The monitoring member wakes on the loop and, when it finds the Director idle, re-engages it via `cafleet member nudge` (canonical conditional nudge); that idle-nudge is the Director's supervision turn. |
-| `TeamDelete` | `cafleet member delete --fleet-id <fleet-id> --member-id <member-agent-id>` for each member, then `cafleet fleet delete <fleet-id>` (soft-deletes the fleet, deregisters the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `fleet delete` is the only supported teardown. |
-| Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
 ## Process
 
@@ -98,19 +81,7 @@ Load the `cafleet` skill, the `cafleet-agent-team-monitoring` skill, and the `ca
 
 ```bash
 cafleet fleet create --label "design-doc-create-{slug}" --json
-# → {
-#     "fleet_id": "550e8400-e29b-41d4-a716-446655440000",
-#     "label": "design-doc-create-{slug}",
-#     "created_at": "…",
-#     "administrator_agent_id": "…",
-#     "director": {
-#       "agent_id": "7ba91234-…",
-#       "name": "Director",
-#       "description": "Root Director for this fleet",
-#       "registered_at": "…",
-#       "placement": { "director_agent_id": null, "tmux_session": "…", "tmux_window_id": "…", "tmux_pane_id": "…", "coding_agent": "unknown", "created_at": "…" }
-#     }
-#   }
+# → { "fleet_id": "...", "administrator_agent_id": "...", "director": { "agent_id": "...", "name": "Director", "placement": {...} } }
 ```
 
 Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids.
@@ -142,8 +113,6 @@ The Director references each role definition by **absolute path** in the spawn p
 
 Substitute these absolute paths into the spawn prompts below.
 
-> **Why path-by-reference (and not inline-verbatim)**: cafleet `member create` passes the prompt to `tmux split-window` as a single positional argument. The cumulative caller-shell + cafleet-argv + tmux-argv budget exhausts well below `ARG_MAX` and surfaces as `command too long` once the shell-quoted prompt grows past a few KB. The role file is typically large enough that inlining it exceeds the limit. The member loads the role file via `Read` on its first turn. See the `cafleet` skill's `reference/director.md` reference file § *Spawn prompt size limit* for the canonical write-up.
->
 > **Spawn-prompt audit file (two-step pattern)**: every spawn in this skill follows the same two steps — (1) **render** the prompt (substitute the `[INSERT …]` markers; leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass); (2) **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` (`<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; create `${BASE}/prompts/` on first write; same-second collision → append `_2`, `_3`, … — never overwrite), then invoke `cafleet member create --prompt-file <abs path>` (see Step 1d / 1e for the per-role spawn templates and commands). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet-base-dir` skill § *No-bypass write protocol* and the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 #### 1d. Spawn the Drafter
@@ -210,11 +179,7 @@ Do NOT ask clarifying questions — the COMMENTs contain the needed information.
 Start by reading the design document.
 ```
 
-Spawn with the two-step (render to file, then `--prompt-file`) pattern:
-
-1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
-2. **Write the rendered text** to `${BASE}/prompts/drafter-<UTC-compact>.md` per the two-step audit-file procedure in Step 1c (both normal and resume modes — the resume-mode rendered body indicates the COMMENT-resolution flow).
-3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
+Render the prompt to `${BASE}/prompts/drafter-<UTC-compact>.md` per the Step 1c two-step audit-file pattern (both normal and resume modes — leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass), then spawn with `--prompt-file`:
 
    ```bash
    cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
@@ -251,11 +216,7 @@ COMMUNICATION PROTOCOL:
 Wait for the Director to assign a document for review (cafleet body: `ready (doc)`). When you receive that message, the `doc` pointer refers to the DESIGN DOCUMENT path above — read that file and provide specific, actionable feedback per the role definition.
 ```
 
-Spawn with the two-step (render to file, then `--prompt-file`) pattern:
-
-1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
-2. **Write the rendered text** to `${BASE}/prompts/reviewer-<UTC-compact>.md` per the two-step audit-file procedure in Step 1c.
-3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
+Render the prompt to `${BASE}/prompts/reviewer-<UTC-compact>.md` per the Step 1c two-step audit-file pattern, then spawn with `--prompt-file`:
 
    ```bash
    cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
@@ -355,11 +316,6 @@ No round limit — loop continues until approved or aborted.
    ```
    Wait for the Drafter's `addressed (doc)` confirmation.
 
-2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out: stop the monitor, then delete the monitoring member first):
-   1. Stop the monitoring member's `monitor start` background task (the heartbeat launched in 1b — there is no `monitor stop` command): message the monitoring member to stop its background task (the task-stop delivers SIGTERM/SIGINT, so the loop clears its runtime row), and wait for its confirmation. Do this **before** the monitoring member's pane is killed.
-   2. `cafleet member delete` the monitoring member **first**, then each ordinary member (Drafter, then Reviewer). Each call blocks until the pane is gone (15 s timeout); on exit 2 follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
-   3. `cafleet member list` — the team's roster MUST be empty before continuing.
-   4. `cafleet fleet delete <fleet-id>` (positional, no `--fleet-id` flag).
-   5. `cafleet fleet list` — the fleet MUST not appear (soft-deleted fleets are hidden).
+2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then Drafter and Reviewer (each call blocks 15 s; on exit 2 use `member capture` + `send-input` recovery or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete <fleet-id>` (positional); `cafleet fleet list` to confirm.
 
 The fleet row is soft-deleted and `tasks` are preserved so the message trail remains inspectable in the admin WebUI.

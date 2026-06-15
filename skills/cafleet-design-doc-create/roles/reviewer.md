@@ -33,19 +33,9 @@ You do NOT speak to the user directly. All feedback goes through the Director vi
 cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --to <director-agent-id> --text "complete (doc) — N issues"
 ```
-or, when the draft meets all quality criteria:
-```bash
-cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
-  --to <director-agent-id> --text "approved (doc)"
-```
-Findings are NOT in the cafleet body — each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design document at the affected section (see [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) for the full schema).
-The literal `<fleet-id>`, `<my-agent-id>`, and `<director-agent-id>` ids were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
+or `approved (doc)` when the draft meets all quality criteria (see § *Approval Signal*). Findings are NOT in the cafleet body — each is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design document at the affected section (see [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) for the full schema).
 
-**Receiving review assignments from the Director:** the broker keystrokes a 2-line inline preview of each message into your pane (mechanics in the `cafleet` skill § Send); to fetch the full body (e.g., the path to a draft) run `cafleet message poll` yourself. Read the message, then acknowledge it:
-```bash
-cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
-```
-Then read the document file and send your review back via `cafleet message send`.
+**Receiving review assignments from the Director:** the broker keystrokes an inline preview into your pane (mechanics in the `cafleet` skill § Send); run `cafleet message poll` for the full body, ACK with `cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>`, then read the document and send your review via `cafleet message send`.
 
 ## Review Process
 
