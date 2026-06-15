@@ -25,9 +25,7 @@ cafleet message send --fleet-id [fleet-id] --agent-id [director-agent-id] \
   --text "[tagged feedback or assignment]"
 ```
 
-**Polling and ack-ing inbound messages.** When a member sends you a message, the broker auto-fires `cafleet message poll --fleet-id [fleet-id] --agent-id [director-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that UUID is the cafleet message-task id (called `<task-id>` because cafleet internally models messages as tasks; **distinct from** the harness `taskId` you use with `TaskCreate / TaskUpdate`). After acting on the polled message, ack it via `cafleet message ack --fleet-id [fleet-id] --agent-id [director-agent-id] --task-id <task-id>` — un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent poll cycle.
-
-**Pane silence is normal.** A member going quiet after sending a report is the expected between-turn state per the `cafleet` skill. Do not nudge a member simply because their pane is idle — only nudge when their inactivity blocks your next step (e.g. the next batch cannot spawn because the current VR has not reported).
+Inbound member messages auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [director-agent-id] --task-id <task-id>` after acting (un-acked messages re-surface). The poll `id:` UUID is the cafleet message-task id (`<task-id>` — **distinct from** the harness `taskId` used with `TaskCreate / TaskUpdate`). Pane silence is the expected between-turn state, not a stall — nudge only when a member's inactivity blocks your next step (e.g. the next batch cannot spawn because the current VR has not reported).
 
 ## Presentation Review Tags
 
@@ -107,31 +105,11 @@ The user (or a re-run of the `cafleet-research-report` skill) owns report modifi
 
 ## User Delegation
 
-The Director originates `AskUserQuestion` at exactly two kinds of points, per the User Interaction Contract in SKILL.md:
-
-1. **Step 4's single post-pipeline approval gate** — presenting the completed deliverables (slides, transcript, visual-review results) and collecting approval or revision requests.
-2. **Member-escalated user delegation** — when a member sends a `cafleet message send` with a question that genuinely requires a user decision. Classify the question shape, call `AskUserQuestion` with appropriate options, then relay the user's answer back verbatim via `cafleet message send`. Never decide on the user's behalf.
-
-Do NOT originate `AskUserQuestion` to ask the user whether to run, skip, or shorten any pipeline step (Step 0 through Step 3, including visual review). Steps 0–3 are obligatory and the Director must execute them in order. Escalate to the user only when a step fails for a technical reason you cannot resolve (e.g. server won't start after the fallback chain) — escalation is a response to failure, not a planning shortcut.
+Per the User Interaction Contract in SKILL.md, the Director originates `AskUserQuestion` at exactly two points: (1) Step 4's single post-pipeline approval gate; (2) member-escalated user delegation (classify the question shape, call `AskUserQuestion`, relay the user's answer back verbatim — never decide on the user's behalf). Do NOT use it to ask whether to run/skip/shorten any pipeline step (Steps 0–3 are obligatory, in order); escalate only on an unresolvable technical failure.
 
 ## Server Lifecycle Management
 
-The Director owns the Slidev dev server lifecycle. The Visual Reviewer does not start or stop any server.
-
-| Aspect | Detail |
-|--------|--------|
-| Start command | Project-specific Slidev launcher from your host project's `.claude/rules/`. The underlying invocation is `bun run slidev --open false <slide>` PTY-wrapped via `script -qfc 'bun run slidev --open false <slide>' /dev/null` so Slidev does not exit on detecting a non-TTY. |
-| Execution | Started as a backgrounded process via the coding agent's native primitive (Claude Code: Bash tool with `run_in_background: true`; codex / opencode: see host project `.claude/rules/`). Record the returned task ID for shutdown. |
-| Default URL | `http://localhost:3030` |
-| Readiness check | Visual Reviewer confirms via `bun run agent-browser --session vr-batch-<start> open <server_url>/1` followed by a `bun run agent-browser --session vr-batch-<start> snapshot` retry loop (sleep 3 seconds between retries via `sleep 3`, up to 3 attempts). `agent-browser wait` (`wait --load networkidle`, `wait N`) is discouraged — it is unreliable across renderers and slow CI environments. Use sleep + open-retry instead. Host projects may additionally block the `wait` form via their permissions rules; refer to your host project's `.claude/rules/` for any project-specific constraint. |
-| Shutdown | Stop via the coding agent's native task-stop primitive (Claude Code: `TaskStop` with the recorded task ID; codex / opencode: see host project `.claude/rules/`) after all visual review rounds complete. Do NOT shell out to `pkill` or `kill`. |
-
-**Fallback chain:**
-
-| Step | Action |
-|------|--------|
-| 1 | Retry the start command once |
-| 2 | Report failure to the user and ask them to start the server manually |
+The Director owns the Slidev dev server lifecycle (the Visual Reviewer does not start/stop any server). **Start** it as a backgrounded process via the coding agent's native primitive (Claude Code: Bash `run_in_background: true`; record the returned task ID for shutdown) — the underlying invocation is `bun run slidev --open false <slide>` PTY-wrapped via `script -qfc 'bun run slidev --open false <slide>' /dev/null` (default URL `http://localhost:3030`); see SKILL.md Step 3 *Server Startup*. **Shutdown** via the native task-stop primitive (Claude Code: `TaskStop` with the recorded task ID) after all visual-review rounds — do NOT `pkill`/`kill`. Readiness checking is the VR's job (see `roles/visual-reviewer.md`). On start failure: retry the start command once, then escalate to the user to start it manually.
 
 ## Progress Monitoring
 
@@ -139,19 +117,4 @@ Follow the `cafleet-agent-team-monitoring` skill for the health-check sequence (
 
 ## Shutdown Protocol
 
-Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out: stop the monitor, then delete the monitoring member first):
-
-1. Stop the monitoring member's `monitor start` background task (the heartbeat launched in the bootstrap step — there is no `monitor stop` command): message the monitoring member to stop its background task and wait for its confirmation, **before** its pane is killed.
-2. Delete each member in first-out order — the monitoring member first, then Presentation, Transcript, and any active VR batch. The `--member-id` flag takes the target member's integer `agent_id` (the value `cafleet member create` printed at spawn — the same identifier you use as `--to [member-agent-id]` in `cafleet message send`). For any active VR batch, run the explicit close handshake first per the VR role contract: send a `CLOSE:` message via `cafleet message send`, wait for the VR's `closed` reply, then run `cafleet member delete`. Do not rely on `/exit` to trigger any post-shutdown action — once `/exit` arrives, additional commands are not guaranteed to run.
-   ```bash
-   cafleet member delete --fleet-id [fleet-id] --member-id [monitoring-member-id]
-   cafleet member delete --fleet-id [fleet-id] --member-id [presentation-agent-id]
-   cafleet member delete --fleet-id [fleet-id] --member-id [transcript-agent-id]
-   cafleet member delete --fleet-id [fleet-id] --member-id [vr-batch-agent-id]   # if still alive — only after the close handshake
-   ```
-   Each call sends `/exit` and waits up to 15 s for the pane's `claude` process to exit.
-3. Verify the roster is empty: `cafleet member list --fleet-id [fleet-id]` must return zero members.
-4. Run the agent-browser safety net: `bun run agent-browser close --all`.
-5. Stop the Slidev dev server via the coding agent's native task-stop primitive with the recorded task ID (Claude Code: `TaskStop`; codex / opencode: host project `.claude/rules/`). Do NOT use `pkill`/`kill`.
-6. Delete the fleet: `cafleet fleet delete [fleet-id]` (positional, no `--fleet-id` flag).
-7. Confirm: `cafleet fleet list` — the current fleet must not appear.
+Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then Presentation, Transcript, and any active VR batch — **for an active VR batch, run the close handshake first** (send `CLOSE:` via `cafleet message send`, wait for the VR's `closed` reply, THEN delete). Verify the roster is empty with `cafleet member list`. Then the presentation-specific teardown: `bun run agent-browser close --all` (orphan-session safety net); stop the Slidev dev server via the native task-stop primitive with the recorded task ID (Claude Code: `TaskStop`) — NOT `pkill`/`kill`; `cafleet fleet delete [fleet-id]`; `cafleet fleet list` to confirm.

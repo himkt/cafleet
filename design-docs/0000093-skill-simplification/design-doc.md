@@ -1,7 +1,7 @@
 # Aggressively Simplify the `skills/` Tree (Tier C)
 
 **Status**: Approved
-**Progress**: 13/17 tasks complete
+**Progress**: 14/17 tasks complete
 **Last Updated**: 2026-06-15
 
 ## Overview
@@ -273,7 +273,7 @@ This change edits the orchestrating skills (`cafleet-design-doc-create`/`-execut
 
 ### Step 11: Cluster K — `cafleet-research-presentation/`
 
-- [ ] Slim `SKILL.md` (dedup 3× spawn-procedure X2; ONE canonical Shutdown + cross-ref X3; trim rationale blockquotes) and `roles/{director,presentation,transcript,visual-reviewer}.md` — **all kept separate**; repoint sibling-skill tables (X4) incl `formatting.md`; strip `MULTILINE_BULLET` remediation (keep detection); **keep Visual Quality Ownership + every agent-browser command intact**. <!-- completed: -->
+- [x] Slim `SKILL.md` (dedup 3× spawn-procedure X2; ONE canonical Shutdown + cross-ref X3; trim rationale blockquotes) and `roles/{director,presentation,transcript,visual-reviewer}.md` — **all kept separate**; repoint sibling-skill tables (X4) incl `formatting.md`; strip `MULTILINE_BULLET` remediation (keep detection); **keep Visual Quality Ownership + every agent-browser command intact**. <!-- completed: 2026-06-15T15:37 -->
 
 ### Step 12: Verification — frozen-set diff
 
