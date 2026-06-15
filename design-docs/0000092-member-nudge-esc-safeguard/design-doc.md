@@ -1,7 +1,7 @@
 # Esc-safeguarded `cafleet member nudge` and a universally Esc-safe inline preview
 
-**Status**: Approved
-**Progress**: 19/20 tasks complete
+**Status**: Complete
+**Progress**: 19/20 tasks complete (D2 operator-only manual smoke deferred)
 **Last Updated**: 2026-06-15
 
 ## Overview
@@ -231,3 +231,4 @@ The D1 sweep (Phase D) extends to `docs/`, `README.md`, `.claude/`, and root `CL
 | 2026-06-14 | Scope addition (user): made the dedicated monitoring member mandatory for every CAFleet-native orchestrated team skill (reversing 0000091's request-driven carve-out for create/interview/research-report/research-presentation; execute is the reference). Added §6 (requirement + rationale + routine-variant split + per-skill edits + removal-cleanup checklist), success criteria, tasks A7–A10, and extended the D1 sweep. Kept all §1–§5 nudge-safety content. |
 | 2026-06-15 | Reviewer pass: split the run-on Overview into 3 sentences; fixed line-citation drift for the `esc_first` comment (consistent `tmux.py:67–70` across §1/Q2/B3) and the newline comment (comment `241–244`, payload `\n` at `246` across Background/§3/NOTE 2/B4); stated NOTE 2's expected branch (soft-insert / keep 2-line) with the production-evidence reasoning; separated the §4 error-handling target (`_load_authorized_member`, runs first) vs sender (`send_message` ValueError) layers and scoped B5's translation to the sender error only. |
 | 2026-06-15 | User approved. Status → Approved. |
+| 2026-06-15 | Implemented via CAFleet-orchestrated TDD (Programmer + Tester + monitoring member). Phases A–D complete; B4 confirmed the embedded newline soft-inserts (2-line preview kept). PR #122 opened with Copilot review; 8 review findings addressed across 5 rounds (output no longer hardcodes "Director", cli-options error-table accuracy split, `member nudge` tmux-session guard + test, three precise output variants, newline comment cites the test, `director.md` header de-"Director-only"d, wake-trigger comment rationale corrected). 844 tests pass; lint/format/typecheck green. Copilot converged to "no new comments"; user accepted as green light. Status → Complete. D2 (operator manual smoke: park Director on a deny-listed prompt, nudge, confirm Esc dismisses) deferred — covered by the automated Esc-first contract + e2e tests. |
