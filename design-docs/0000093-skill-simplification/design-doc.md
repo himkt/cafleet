@@ -1,7 +1,7 @@
 # Aggressively Simplify the `skills/` Tree (Tier C)
 
 **Status**: Approved
-**Progress**: 8/17 tasks complete
+**Progress**: 9/17 tasks complete
 **Last Updated**: 2026-06-15
 
 ## Overview
@@ -259,7 +259,7 @@ This change edits the orchestrating skills (`cafleet-design-doc-create`/`-execut
 
 ### Step 8: Cluster H — `cafleet-create-figure/`
 
-- [ ] Slim `SKILL.md` (collapse triplicated placeholder/runner warnings, duplicate base-dir examples, GridSpec example, decision-table↔prohibition overlap); keep palette, save-template, API table, hard rules (P6 #6). <!-- completed: -->
+- [x] Slim `SKILL.md` (collapse triplicated placeholder/runner warnings, duplicate base-dir examples, GridSpec example, decision-table↔prohibition overlap); keep palette, save-template, API table, hard rules (P6 #6). <!-- completed: 2026-06-15T14:58 -->
 
 ### Step 9: Cluster I — `cafleet-my-slidev/` SKILL + techniques consolidation
 
