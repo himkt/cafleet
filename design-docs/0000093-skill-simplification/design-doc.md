@@ -1,7 +1,7 @@
 # Aggressively Simplify the `skills/` Tree (Tier C)
 
 **Status**: Approved
-**Progress**: 2/17 tasks complete
+**Progress**: 3/17 tasks complete
 **Last Updated**: 2026-06-15
 
 ## Overview
@@ -238,7 +238,7 @@ This change edits the orchestrating skills (`cafleet-design-doc-create`/`-execut
 
 ### Step 3: Cluster B — `cafleet-design-doc/` shared
 
-- [ ] Self-trim `coordination.md` (canonical home); leave `guidelines.md`/`template.md`/`SKILL.md` near-as-is. <!-- completed: -->
+- [x] Self-trim `coordination.md` (canonical home); leave `guidelines.md`/`template.md`/`SKILL.md` near-as-is. <!-- completed: 2026-06-15T14:17 -->
 
 ### Step 4: Cluster C — `cafleet-design-doc-create/`
 
