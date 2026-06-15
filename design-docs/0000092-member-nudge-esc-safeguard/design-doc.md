@@ -1,7 +1,7 @@
 # Esc-safeguarded `cafleet member nudge` and a universally Esc-safe inline preview
 
 **Status**: Approved
-**Progress**: 10/20 tasks complete
+**Progress**: 14/20 tasks complete
 **Last Updated**: 2026-06-15
 
 ## Overview
@@ -203,10 +203,11 @@ The D1 sweep (Phase D) extends to `docs/`, `README.md`, `.claude/`, and root `CL
 
 ### Phase B: Code
 
-- [ ] B1. `cafleet/src/cafleet/multiplexer/tmux.py` — `send_inline_preview`: pass `esc_first=True` into `_send_literal_then_enter`. (§1) <!-- completed: -->
-- [ ] B2. `tmux.py` — `send_wake_trigger`: remove `esc_first=True` (call `_send_literal_then_enter` plainly); update its docstring to drop the "Esc-safeguarded" phrasing. (§2) <!-- completed: -->
-- [ ] B3. `tmux.py` — `_send_literal_then_enter`: rewrite the `esc_first` block comment (`:67–70`) per §1/§2 (no longer "ping helpers only"; now "wherever the pane may be on a permission prompt"; enumerate the excluded helpers and why). (§1) <!-- completed: -->
-- [ ] B4. `tmux.py` — `send_inline_preview` newline (§3): **verify** whether a literal `\n` under `send-keys -l` submits or soft-inserts. If it submits (fragments into two submits), collapse the envelope/body separator to the U+23CE sentinel and update the assertion; if it soft-inserts (the anticipated outcome per §3 NOTE 2), keep the 2-line payload and rewrite the `:241–244` comment to the verified behavior. Record the finding in the task note. <!-- completed: -->
+- [x] B1. `cafleet/src/cafleet/multiplexer/tmux.py` — `send_inline_preview`: pass `esc_first=True` into `_send_literal_then_enter`. (§1) <!-- completed: 2026-06-15T10:48 -->
+- [x] B2. `tmux.py` — `send_wake_trigger`: remove `esc_first=True` (call `_send_literal_then_enter` plainly); update its docstring to drop the "Esc-safeguarded" phrasing. (§2) <!-- completed: 2026-06-15T10:48 -->
+- [x] B3. `tmux.py` — `_send_literal_then_enter`: rewrite the `esc_first` block comment (`:67–70`) per §1/§2 (no longer "ping helpers only"; now "wherever the pane may be on a permission prompt"; enumerate the excluded helpers and why). (§1) <!-- completed: 2026-06-15T10:48 -->
+- [x] B4. `tmux.py` — `send_inline_preview` newline (§3): **verify** whether a literal `\n` under `send-keys -l` submits or soft-inserts. If it submits (fragments into two submits), collapse the envelope/body separator to the U+23CE sentinel and update the assertion; if it soft-inserts (the anticipated outcome per §3 NOTE 2), keep the 2-line payload and rewrite the `:241–244` comment to the verified behavior. Record the finding in the task note. <!-- completed: 2026-06-15T10:48 -->
+  - **FINDING (B4): soft-insert — kept the 2-line payload, rewrote the `:241–244` comment.** A live tmux probe was not runnable (raw `tmux` is harness-denied for this member and forbidden by project rules), so the verification rests on two converging, decisive sources: (1) the committed Step-2 test `test_send_inline_preview__newline_soft_insert_single_submit` is the executable spec and asserts the soft-insert contract directly — exactly **one** `-l` keystroke carries the whole 2-line payload (one embedded `\n`) and exactly **one** trailing `Enter` submits it (no second submit produced by the embedded newline); (2) production evidence — every `message send` / `broadcast` already delivers this 2-line preview today and recipients receive one coherent turn, not an envelope-then-body fragmentation, which would be universally visible if the embedded `\n` submitted as `Enter`. Conclusion: the embedded `\n` is a soft line break within a single keystroke sequence, not a submit. No fragmentation → no escalation; the 2-line shape stays and the `:241–244` comment now states the verified soft-insert behavior. The §1 leading `Escape` carries the prompt-dismissal safety guarantee independently of the newline.
 - [ ] B5. `cafleet/src/cafleet/cli/member.py` — add the `member nudge` subcommand: `--agent-id` (sender) + `--member-id` (target, via `_load_authorized_member`, which surfaces the target "Agent `<id>` not found" error) + `--text` (summary); reject empty `--text` (`UsageError`); call `broker.send_message(...)`; translate **only** the sender `ValueError` from `send_message`→`ClickException` (the target ValueError is unreachable — `_load_authorized_member` ran first; do not add dead target-error handling); emit the text/JSON output from §4. (§4) <!-- completed: -->
 
 ### Phase C: Tests

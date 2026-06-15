@@ -66,8 +66,17 @@ def _send_literal_then_enter(
     if esc_first:
         # Permission-prompt safeguard: a leading ``Escape`` dismisses a pending
         # permission-approval prompt so the trailing ``Enter`` below cannot
-        # blindly confirm it. Opt-in (ping helpers only) — an ``Esc`` before
-        # ``/exit``, an inline preview, or ``! <cmd>`` would mis-fire.
+        # blindly confirm it. Applied wherever the target pane MAY be parked on
+        # such a prompt: ``send_poll_trigger`` (``cafleet member ping`` — a
+        # member that might be on a prompt) and ``send_inline_preview`` (every
+        # inbound ``message send`` / ``broadcast`` / ``member nudge`` — any
+        # recipient, the Director included). It is NOT applied where a leading
+        # ``Esc`` would mis-fire — ``send_exit`` (``Esc`` before ``/exit``),
+        # ``send_bash_command`` (``Esc`` before ``! <cmd>``), and the
+        # ``send-input`` helpers (``send_choice_key`` / ``send_freetext_and_submit``
+        # deliberately ANSWER a live AskUserQuestion prompt that an ``Esc`` would
+        # dismiss) — nor where the pane is never on a prompt: ``send_wake_trigger``
+        # (the monitoring member's own read-only pane).
         _run_tolerating_pane_gone(
             ["tmux", "send-keys", "-t", target_pane_id, "Escape"],
             ignore_missing=ignore_missing,
@@ -195,17 +204,20 @@ class TmuxMultiplexer:
     def send_wake_trigger(
         self, *, target_pane_id: str, fleet_id: int, agent_id: int
     ) -> bool:
-        """Best-effort Esc-safeguarded wake nudge for the monitoring member's pane.
+        """Best-effort wake nudge for the monitoring member's pane.
 
         Carries a single-line instruction to run the monitoring member's
         capture-classify-reengage routine — distinct from the poll command
         ``send_poll_trigger`` carries (now used only by ``cafleet member ping``).
         This is the sole keystroke the loop fires — it wakes only the monitoring
-        member. No shell-special characters, so the keystroke is sane whether it
-        lands in the coding agent's input or at a shell prompt. ``fleet_id`` /
-        ``agent_id`` keep the keystroke-helper signature uniform with
-        ``send_poll_trigger``; the routine itself runs in the monitoring member's
-        own pane, so they are not echoed into the nudge.
+        member. No leading ``Escape``: the target is the monitoring member's own
+        pane, which runs a read-only routine under ``dontAsk`` and is never
+        parked on a permission-approval prompt, so an ``Esc`` would merely
+        self-interrupt an in-progress routine. No shell-special characters, so
+        the keystroke is sane whether it lands in the coding agent's input or at
+        a shell prompt. ``fleet_id`` / ``agent_id`` keep the keystroke-helper
+        signature uniform with ``send_poll_trigger``; the routine itself runs in
+        the monitoring member's own pane, so they are not echoed into the nudge.
         """
         if shutil.which("tmux") is None:
             return False
@@ -220,7 +232,6 @@ class TmuxMultiplexer:
                 target_pane_id=target_pane_id,
                 payload=payload,
                 timeout=5,
-                esc_first=True,
             )
         except TmuxError:
             return False
@@ -238,15 +249,25 @@ class TmuxMultiplexer:
         """Best-effort 2-line inline preview keystroke for the recipient's pane."""
         if shutil.which("tmux") is None:
             return False
-        # Sanitize newlines in the user-supplied body — under tmux ``-l`` a raw
-        # newline submits as Enter, corrupting the 2-line shape. The single ``\n``
-        # in the f-string below is the contract between envelope and body and is
-        # intentionally not sanitized.
+        # The single ``\n`` in the f-string below is the envelope/body separator
+        # and is intentionally kept: under tmux ``send-keys -l`` an embedded
+        # newline is delivered as a soft line break inside one keystroke
+        # sequence — it does NOT fragment delivery into a second submit, so the
+        # whole 2-line payload arrives as a single recipient turn submitted by
+        # the one trailing ``Enter`` below. (Confirmed by the live behavior of
+        # every ``message send``: 2-line previews land as one coherent turn, not
+        # an envelope-then-body split.) The leading ``Escape`` (``esc_first``)
+        # carries the permission-prompt safety guarantee independently. The body
+        # sanitization to U+23CE keeps a multi-line user body from visually
+        # breaking the 2-line framing; it is cosmetic, not submit-safety.
         sanitized_text = text.replace("\r\n", "⏎").replace("\n", "⏎").replace("\r", "⏎")
         payload = f"[cafleet msg {task_id} from {sender_id} {ts}]\n{sanitized_text}"
         try:
             _send_literal_then_enter(
-                target_pane_id=target_pane_id, payload=payload, timeout=5
+                target_pane_id=target_pane_id,
+                payload=payload,
+                timeout=5,
+                esc_first=True,
             )
         except TmuxError:
             return False
