@@ -20,9 +20,7 @@ Load these skills at startup:
 
 ## Communication Protocol
 
-You do NOT speak to the Manager directly. All coordination flows through the Director via `cafleet message send`.
-
-**Sending a message to the Director** (completion reports, questions):
+You do NOT speak to the Manager directly. All coordination flows through the Director via `cafleet message send` (completion reports, questions):
 
 ```bash
 cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
@@ -30,11 +28,7 @@ cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
   --text "[your report or question]"
 ```
 
-Substitute the literal `[fleet-id]`, `[my-agent-id]`, and `[director-agent-id]` UUIDs from your spawn prompt. Never use shell variables.
-
-**Receiving messages.** When the Director sends you a message, the broker keystrokes `cafleet message poll --fleet-id [fleet-id] --agent-id [my-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that UUID is the `[task-id]`. After acting on the polled message, ack it via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]`.
-
-**Pane silence is normal.** After writing your file and sending a completion report you sit at the prompt. That is the expected flow — you are waiting for the Director to either relay a targeted Manager follow-up or signal that scouting is done. Do not send status pings.
+Inbound Director messages auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]` (the poll `id:` integer id is the `[task-id]`) after acting. Pane silence after writing your file + completion report is the expected between-turn state — no status pings.
 
 ## Scout vs Researcher
 

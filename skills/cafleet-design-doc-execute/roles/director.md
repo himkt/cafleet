@@ -46,22 +46,7 @@ All Director-to-member messages use the CAFleet message broker. The Director sto
 cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --to <member-agent-id> --text "<instruction>"
 ```
-A push notification automatically keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's tmux pane via `tmux.send_inline_preview`. The member processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the member calls `cafleet message poll` themselves.
-
-**Checking for incoming messages from members:**
-```bash
-cafleet --json message poll --fleet-id <fleet-id> --agent-id <director-agent-id>
-```
-Acknowledge each message after reading:
-```bash
-cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>
-```
-
-**Inspecting a stalled member's terminal (2-stage fallback):**
-```bash
-cafleet member capture --fleet-id <fleet-id> \
-  --member-id <member-agent-id> --lines 200
-```
+A push notification keystrokes the message into the member's pane (see the `cafleet` skill § Send). Poll your inbox with `cafleet --json message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`, ACK each task with `cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>`, and inspect a stalled member with `cafleet member capture --member-id <member-agent-id> --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
 
 ## Escalation Protocol
 

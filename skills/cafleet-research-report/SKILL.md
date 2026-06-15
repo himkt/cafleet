@@ -39,14 +39,9 @@ User
       +-- researcher-NN (claude pane — deep investigation)
 ```
 
-- **Director ↔ User**: `AskUserQuestion` (final report presentation, feedback collection, language disambiguation when escalated by a member)
-- **Director ↔ manager**: `cafleet message send` (spawn requests, review feedback)
-- **Director ↔ scout-* / researcher-***: `cafleet message send` (assignment relays, findings reports, revision requests)
-- **Manager → Director**: spawn requests via `cafleet message send` (Director executes `cafleet member create` on receipt)
-
 Members cannot talk to the user directly — the Director always relays. Members cannot talk to each other directly either — Manager requests are always mediated by the Director (Manager → Director → Scout/Researcher, and Scout/Researcher → Director → Manager).
 
-> **Literal-UUID flag rule** — substitute the UUIDs printed by `cafleet fleet create` and `cafleet member create` directly into every `cafleet ...` call (the harness matches Bash invocations as literal command strings). Never store IDs in shell variables. `--fleet-id` and `--agent-id` are per-subcommand options (placed AFTER the subcommand name). See the `cafleet` skill for the full convention.
+> **Literal-integer-id flag rule** — substitute the integer ids printed by `cafleet fleet create` and `cafleet member create` directly into every `cafleet ...` call (the harness matches Bash invocations as literal command strings). Never store IDs in shell variables. `--fleet-id` and `--agent-id` are per-subcommand options (placed AFTER the subcommand name). See the `cafleet` skill for the full convention.
 
 ## Process
 
@@ -69,7 +64,7 @@ Run `cafleet doctor` to confirm the Director is inside a tmux session with valid
 
 ### Step 0b: Bootstrap CAFleet Fleet (Director — MANDATORY)
 
-`cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current tmux pane, and seeds the built-in Administrator. Capture both UUIDs from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
+`cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current tmux pane, and seeds the built-in Administrator. Capture both integer ids from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
 
 ```bash
 cafleet --json fleet create --label "research-[topic-slug]"
@@ -123,11 +118,7 @@ The Director references each role definition by its **absolute path** in the spa
 
 Substitute these absolute paths into the spawn prompts below.
 
-> **Why path-by-reference (and not inline-verbatim)**: cafleet `member create` passes the prompt to `tmux split-window` as a single positional argument. tmux fails with `command too long` once the shell-quoted prompt grows past a few KB, and cafleet rolls back the agent registration. A role file is typically large enough (5–15 KB) that inlining it exceeds the limit. The member loads the role file via `Read` on its first turn; the file lives in the skill directory and is stable, so this is safe. See the `cafleet` skill's `reference/director.md` reference file § *Spawn prompt size limit* for the canonical write-up.
->
-> **Template safety (str.format placeholders)**: cafleet `member create` runs `str.format()` over the entire spawn prompt (whether it arrived via `--prompt-file` or inline `prompt_argv`) with `fleet_id` / `agent_id` / `director_agent_id` as kwargs. Leave those three single-braced. Double any other literal `{` or `}` in the prompt body (a JSON example, a `${{VAR}}` reference) to `{{` / `}}`. The prompt body rarely needs `{` or `}` at all, since role content is loaded via `Read` rather than embedded in the prompt.
->
-> **Spawn-prompt audit file**: every spawn in this skill writes the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>` (see the per-role flow below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet-base-dir` skill § *No-bypass write protocol* and the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
+> **Spawn mechanics**: path-by-reference is required because cafleet `member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). `str.format()` runs over the prompt with `fleet_id` / `agent_id` / `director_agent_id` as kwargs — leave those single-braced, double any other literal `{` / `}`. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE `cafleet member create --prompt-file <abs path>` (the pre-spawn file IS both the CLI input and the permanent audit artifact); see the `cafleet-base-dir` skill § *No-bypass write protocol* and `reference/director.md` § *Member Create — Scratch and audit files* for the contract incl. the `${BASE} == <unset>` guarded-skip + inline fallback.
 
 #### 2c. Spawn the Manager
 
@@ -139,7 +130,7 @@ You are the Manager in a research report team (CAFleet-native).
 ROLE DEFINITION: Open [INSERT abs path to roles/manager.md] with the Read tool BEFORE any other action. That file is your authoritative role definition — accountability, communication protocol, task discipline, file-aggregation rules, pre-compilation verification, revision loop, and shutdown. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
-- the `cafleet` skill — for the broker primitives, literal-UUID flag convention, and bash-via-Director routing
+- the `cafleet` skill — for the broker primitives, literal-integer-id flag convention, and bash-via-Director routing
 
 FLEET ID: {fleet_id}
 DIRECTOR AGENT ID: {director_agent_id}
@@ -153,7 +144,7 @@ LANGUAGE: [INSERT user's language preference if specified]
 
 COMMUNICATION PROTOCOL:
 - Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
+- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
 - You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.
 - The team shares a harness task list (TaskList / TaskGet / TaskUpdate). Use it to track sub-topic assignments.
 
@@ -162,11 +153,7 @@ To request Scouts or Researchers, send the Director a cafleet message specifying
 Your first compiled report will be reviewed critically by the Director. Aim for highest quality on the first attempt.
 ```
 
-Spawn with the two-step (render to file, then `--prompt-file`) pattern:
-
-1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
-2. **Write the rendered text** to `${BASE}/prompts/manager-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Create `${BASE}/prompts/` on first write (Python: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
-3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
+Render the prompt to `${BASE}/prompts/manager-<UTC-compact>.md` per the 2b two-step audit-file pattern (leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass), then spawn with `--prompt-file`:
 
    ```bash
    cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
@@ -175,7 +162,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern:
      --prompt-file ${BASE}/prompts/manager-<UTC-compact>.md
    ```
 
-   Capture the printed `agent_id` and substitute it for `[manager-agent-id]` in every subsequent `cafleet` call that targets the Manager. The pre-spawn file at `${BASE}/prompts/manager-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
+   Capture the printed `agent_id` and substitute it for `[manager-agent-id]` in every subsequent `cafleet` call that targets the Manager.
 
 ### Step 3: Knowledge Bootstrapping — Scout Phase (Director, on Manager's request)
 
@@ -202,16 +189,12 @@ OUTPUT FILE: [INSERT <resolved-path>/00-scout-<topic>.md]
 
 COMMUNICATION PROTOCOL:
 - Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
+- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
 
 Write findings to the output file, then send the Director a completion summary. The Director will relay your findings to the Manager.
 ```
 
-Spawn with the two-step (render to file, then `--prompt-file`) pattern. Use `scout` if only one Scout will be spawned this run; `scout-1`, `scout-2`, … for multiple — the `<role>` segment in the audit-file path matches the `--name` value (lowercased):
-
-1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
-2. **Write the rendered text** to `${BASE}/prompts/<scout-name>-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; `<scout-name>` matches the lowercased `--name` value, e.g., `scout-1`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
-3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
+Render the prompt to `${BASE}/prompts/<scout-name>-<UTC-compact>.md` per the 2b two-step audit-file pattern (use `scout` for a single Scout, `scout-1`/`scout-2`/… for multiple; `<scout-name>` is the lowercased `--name`), then spawn with `--prompt-file`:
 
    ```bash
    cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
@@ -220,7 +203,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern. Use `sco
      --prompt-file ${BASE}/prompts/scout-<NN>-<UTC-compact>.md
    ```
 
-   Capture the printed `agent_id` for each Scout and substitute it into subsequent `cafleet message send` calls targeting that Scout. The pre-spawn file at `${BASE}/prompts/<scout-name>-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
+   Capture the printed `agent_id` for each Scout and substitute it into subsequent `cafleet message send` calls targeting that Scout.
 
 **Scout-Manager loop (relayed through Director):**
 
@@ -272,18 +255,14 @@ OUTPUT FILE: [INSERT <resolved-path>/NN-research-<subtopic>.md]
 
 COMMUNICATION PROTOCOL:
 - Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
+- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
 - On start, claim your task: TaskUpdate(taskId: YOUR TASK ID, owner: "researcher-NN", status: "in_progress").
 - On completion, mark your task completed: TaskUpdate(taskId: YOUR TASK ID, status: "completed").
 
 Write findings to the output file, then send the Director a completion summary. The Director will relay findings and any follow-up questions between you and the Manager.
 ```
 
-Spawn with the two-step (render to file, then `--prompt-file`) pattern — the `<role>` segment in the audit-file path matches the `--name` value (lowercased), so each Researcher gets its own timestamped file:
-
-1. **Render the prompt locally** with all `[INSERT …]` markers substituted and any literal `{` / `}` doubled. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
-2. **Write the rendered text** to `${BASE}/prompts/researcher-<NN>-<UTC-compact>.md` (`${BASE}` resolved by the `cafleet-base-dir` skill in Step 0; `<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`). Same-second collision: append `_2`, `_3`, … until the name is unique — never overwrite. If `${BASE}` is the sentinel `<unset>`, follow the `<unset>` fallback in the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files*.
-3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
+Render the prompt to `${BASE}/prompts/researcher-<NN>-<UTC-compact>.md` per the 2b two-step audit-file pattern, then spawn with `--prompt-file`:
 
    ```bash
    cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
@@ -292,7 +271,7 @@ Spawn with the two-step (render to file, then `--prompt-file`) pattern — the `
      --prompt-file ${BASE}/prompts/researcher-NN-<UTC-compact>.md
    ```
 
-   The Director repeats this step whenever the Manager requests additional Researchers (for coverage gaps, failed investigations, or revision-driven re-research). Any new Researcher must first have a task created by the Manager; the Director includes the `taskId` in the spawn prompt. The pre-spawn file at `${BASE}/prompts/researcher-NN-<UTC-compact>.md` IS the audit artifact — no second post-spawn re-render is performed.
+   The Director repeats this step whenever the Manager requests additional Researchers (coverage gaps, failed investigations, revision-driven re-research). Any new Researcher must first have a task created by the Manager; the Director includes the `taskId` in the spawn prompt.
 
 ### Step 5: Review & Revision Loop (Director ↔ Manager, via `cafleet message send`)
 
@@ -321,34 +300,7 @@ After user approval, offer to create a presentation via `AskUserQuestion` (adapt
 
 ### Step 8: Finalize & Clean Up (Director)
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet fleet delete` must complete first, otherwise orphan `claude` processes linger (first-out: stop the monitor, then delete the monitoring member first).
-
-1. **Stop the monitoring member's `monitor start` background task** (the heartbeat launched in Step 1 — there is no `monitor stop` command): message the monitoring member to stop its background task (the task-stop delivers SIGTERM/SIGINT, so the loop clears its runtime row), and wait for its confirmation. Do this **before** its pane is killed.
-2. **Delete every member** in first-out dependency order — the monitoring member first, then Researchers, then any active Scout, then the Manager:
-   ```bash
-   cafleet member delete --fleet-id [fleet-id] --member-id [monitoring-member-id]
-   cafleet member delete --fleet-id [fleet-id] --member-id [researcher-agent-id]
-   cafleet member delete --fleet-id [fleet-id] --member-id [scout-agent-id]
-   cafleet member delete --fleet-id [fleet-id] --member-id [manager-agent-id]
-   ```
-   Each call sends `/exit` to the pane and waits up to 15 s for it to close. On exit 2 (timeout), the pane buffer tail is printed on stderr — inspect with `cafleet member capture`, answer any prompt with `cafleet member send-input`, then re-run. As a last resort, rerun with `--force` to skip the wait and kill-pane immediately.
-3. **Verify the roster is empty**:
-   ```bash
-   cafleet member list --fleet-id [fleet-id]
-   ```
-   If anyone remains, repeat step 2 for that member.
-4. **Delete the fleet**:
-   ```bash
-   cafleet fleet delete [fleet-id]
-   ```
-   This soft-deletes the fleet and deregisters the root Director, Administrator, and any surviving members in one transaction.
-5. **Confirm**:
-   ```bash
-   cafleet fleet list
-   ```
-   The current fleet must not appear (soft-deleted fleets are hidden).
-
-Do NOT use raw `tmux kill-pane` or `tmux send-keys` at any point — `cafleet member delete` and `cafleet member capture` / `cafleet member send-input` are the only supported teardown and recovery primitives.
+Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then Researchers, any active Scout, and the Manager (each sends `/exit` and waits 15 s; on exit 2 use `cafleet member capture` + `cafleet member send-input` recovery, or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete [fleet-id]`; `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.
 
 ## Spawnable Agents
 
@@ -373,23 +325,7 @@ This skill ships an embedded agent spec for parallel web research that returns s
 
     ## Input Format
 
-    You will receive research requests in one of these formats:
-
-    ### Single Topic
-    ```
-    Research: <topic>
-    Context: <why this information is needed>
-    ```
-
-    ### Multiple Topics (for parallel research)
-    ```
-    Research the following topics:
-    1. <topic 1>
-    2. <topic 2>
-    3. <topic 3>
-
-    Context: <overall context>
-    ```
+    A single topic (`Research: <topic>` + `Context: <why this is needed>`) or multiple topics (a numbered list + a shared `Context:`) for parallel research.
 
     ---
 
@@ -397,50 +333,11 @@ This skill ships an embedded agent spec for parallel web research that returns s
 
     ### Step 0: Discovery Phase
 
-    **Before formulating any topic-specific queries, execute broad searches to discover recent developments you may not know about.** Your training data has a knowledge cutoff — this phase bridges the gap between your knowledge and the current date.
+    **Before topic-specific queries, run broad date-anchored searches to bridge your knowledge cutoff to the current date** — at least 3, e.g. `"{topic} {current_year}"`, `"{topic} latest news"`, `"{topic} announced {current_year}"`, `"{topic} {current_month} {current_year}"`. If nothing significant surfaces, try ≥2 alternative patterns before concluding. Document results in a **"Discovery Phase Findings"** section at the top of your output file (or state that none were found), and use them to inform query formulation.
 
-    Execute at least 3 searches using date-anchored patterns:
-    - `"{topic} {current_year}"` — events in the current year
-    - `"{topic} latest news"` or `"{topic} latest developments"` — recent coverage
-    - `"{topic} announced {current_year}"` or `"{topic} released {current_year}"` — launches and releases
-    - `"{topic} {current_month} {current_year}"` — very recent events
-    - `"{topic} update"` or `"{topic} new"` — catch remaining updates
+    ### Steps 1–4: Research
 
-    If these initial searches surface no significant new developments, try at least 2 additional searches with alternative query patterns (synonyms, related terms, different date granularity) before concluding.
-
-    Document your discovery results in a **"Discovery Phase Findings"** section at the top of your output file — list what you found, or explicitly state that no recent developments were found after exhausting all search patterns. Use these discoveries to inform your query formulation in Step 1.
-
-    ### Step 1: Query Formulation
-
-    For each topic:
-    - Identify key search terms
-    - Consider alternative phrasings
-    - **Incorporate Discovery Phase findings**: Add search queries specifically targeting events, papers, or releases discovered in Step 0
-
-    ### Step 2: Parallel Search Execution
-
-    **IMPORTANT: When researching multiple topics, execute all WebSearch calls in parallel.**
-
-    For each topic, perform:
-    1. Primary search with main keywords
-    2. Follow-up search if initial results are insufficient
-
-    ### Step 3: Source Evaluation
-
-    Prioritize sources by reliability:
-    1. Official documentation
-    2. Reputable tech blogs and publications
-    3. GitHub repositories and discussions
-    4. Community forums (Stack Overflow, Reddit summaries)
-
-    ### Step 4: Information Synthesis
-
-    For each topic, extract:
-    - Key facts and findings
-    - Technical specifications or requirements
-    - Best practices or recommendations
-    - Potential pitfalls or considerations
-    - Relevant alternatives or comparisons
+    Formulate queries (key terms + alternative phrasings + Discovery findings); execute searches (**all WebSearch calls in parallel for multiple topics**; primary + follow-up per topic); prioritize sources by reliability (official docs → reputable publications → GitHub → community forums); synthesize per topic — key facts, technical specs, best practices, pitfalls, alternatives.
 
     ---
 
@@ -481,22 +378,13 @@ This skill ships an embedded agent spec for parallel web research that returns s
 
     ## Language Selection
 
-    Determine the output language at the start of each research session:
-
-    - **If running as a teammate**: Use the language specified by the Manager/Director. Default to English if not specified.
-    - **If running standalone**: Ask the user via `AskUserQuestion` with options: English (default), Japanese, or Other.
-
-    Write all research output (summaries, findings, recommendations) in the selected language. Technical terms and source URLs remain as-is regardless of language choice.
+    As a teammate, use the language specified by the Manager/Director (default English); standalone, ask the user via `AskUserQuestion` (English default / Japanese / Other). Write all output in the selected language; technical terms and source URLs stay as-is.
 
     ---
 
     ## Research Quality Guidelines
 
-    1. **Accuracy**: Cross-reference information across multiple sources
-    2. **Currency**: Prefer recent information (within the last 1-2 years) for rapidly evolving topics
-    3. **Relevance**: Focus on information directly applicable to the context provided
-    4. **Completeness**: Cover both benefits and drawbacks/limitations
-    5. **Actionability**: Include specific details that can inform decisions
+    Accuracy (cross-reference multiple sources), currency (prefer the last 1–2 years for fast-moving topics), relevance to the given context, completeness (benefits AND drawbacks/limitations), and actionability (specifics that inform decisions).
 
 #### Dispatching this agent (Claude Code recipe)
 
@@ -515,33 +403,8 @@ Context: <why this information is needed>"""
 
 This is the post-promotion equivalent of the named `Agent(subagent_type="web-researcher")` call that worked when `web-researcher` lived as a standalone `.claude/agents/web-researcher.md`. The structured `subagent_type` name is lost (Claude Code's plugin loader does not register skill-embedded agent specs as named subagents), but the behavior is identical because the spec body is the same.
 
-#### Dispatching this agent (codex inline-follow)
+#### Dispatching this agent (codex)
 
-On codex, the simplest dispatch path is **inline-follow**: the codex agent reads the embedded `## Spawnable Agents > web-researcher` block in this SKILL.md (codex reads SKILL.md directly — see `cafleet/docs/reference/coding-agents/codex.md`) and follows the spec's instructions in its own turn, treating the spec body as additional instructions for the current task. No new agent is spawned; the calling agent absorbs the spec's role for one turn.
-
-Use this when:
-- A codex session needs ad-hoc research as part of a larger task.
-- You do not need a separate pane or member for the work.
-
-#### Dispatching this agent (codex member-spawn)
-
-When you want a dedicated codex member running the spec (e.g., for parallel multi-topic research), spawn it via `cafleet member create` with `--coding-agent codex`. The spawn prompt is positional (`[PROMPT_ARGV]...`) — there is no `--spawn-prompt-from-text` flag. Paste the embedded spec body verbatim into the positional argument, then append the per-call inputs:
-
-```bash
-cafleet member create --fleet-id <fleet-id> \
-  --agent-id <director-agent-id> \
-  --name web-researcher-codex \
-  --description "Web research on <topic>" \
-  --coding-agent codex \
-  "<paste the web-researcher spec body verbatim>
-
-Research the following topics:
-1. <topic 1>
-2. <topic 2>
-
-Context: <overall context>"
-```
-
-The new member opens its own tmux pane and works autonomously on the spec. Use this when the research benefits from a separate pane (parallel topic batches, longer-running sweeps, isolation from the director's context).
+On codex (which reads SKILL.md directly — see `docs/reference/coding-agents/codex.md`), either **inline-follow** (the agent reads the embedded `## Spawnable Agents > web-researcher` block and follows the spec in its own turn, no new agent spawned) or **member-spawn** a dedicated codex member via `cafleet member create --coding-agent codex` with the spec body pasted into the positional prompt argument (positional `[PROMPT_ARGV]...`; there is no `--spawn-prompt-from-text` flag).
 
 $ARGUMENTS

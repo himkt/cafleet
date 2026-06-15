@@ -101,7 +101,6 @@ Rules:
 - One marker per logical issue. Do not bundle.
 - Body must be actionable — state the issue and what should change.
 - Reviewer markers carry one of the 5 review tags inside the body: `COMMENT(reviewer): [GAP] Step 4 lacks a Phase D entry.`
-- Markers are split into two classes — *issue* and *status*. Only the *issue* class enters the doc.
 
 ## Issue Markers vs Status Markers (split)
 
@@ -111,8 +110,6 @@ Rules:
 |:--|:--|:--|
 | Issue | `COMMENT(reviewer): [GAP] Specification omits the retry budget.` | Persists in the doc until resolved. The resolver removes the marker as part of the fix. Per `skills/cafleet-design-doc/guidelines.md` § *Completeness Check*, the doc cannot reach `Status: Approved` / `Status: Complete` while any `COMMENT(` marker remains. |
 | Status | (none — never enters the doc) | Lives only in `cafleet message send` text. |
-
-This keeps the design doc clean: at any moment, the markers in the doc reflect *outstanding work*, never historical chatter.
 
 ## Copilot Routing
 
@@ -143,8 +140,6 @@ When the design doc moves to `Status: Approved` (the `cafleet-design-doc-create`
 1. Issue markers (`COMMENT(role)` for `reviewer`, `director`, `drafter`, `programmer`, `tester`, `verifier`, `claude`) MUST already be resolved per `skills/cafleet-design-doc/guidelines.md` § *Completeness Check* — the existing rule "No `COMMENT(` markers remain" stays.
 2. Status markers do not exist in the design doc by construction (split), so there is nothing to strip.
 3. `COMMENT(copilot)` markers in source files are removed by the routed member as part of each fix commit; finalize-time validation only needs to confirm the design doc is marker-free.
-
-The audit trail of every status hop lives in the cafleet message log (admin WebUI timeline) and in git history. The design document itself reads as the current state, not an archaeological dig.
 
 ## Director Per-File Detail Recovery
 

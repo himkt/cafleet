@@ -16,20 +16,6 @@ This file (the core) covers the identity / poll / send / ack / cancel / show lif
 - For crash / disconnect / idle / wedged-pane recovery decision trees AND the Shutdown Protocol, Read [`reference/recovery.md`](reference/recovery.md).
 - For `--full` / `--json` / `--quiet` opt-back-in semantics and `CAFLEET_MAX_TEXT_LEN`, Read [`reference/output-flags.md`](reference/output-flags.md).
 
-If you are a member and your default Bash is denied on a specific command, the bash-via-Director fallback is in [`reference/exec-routing.md`](reference/exec-routing.md). If you are a Director, Read [`reference/director.md`](reference/director.md) before spawning your first member.
-
-## When to Use
-
-- Registering this agent with a fleet
-- Sending a unicast message to another agent
-- Polling for incoming messages
-- Acknowledging received messages
-- Canceling (retracting) a sent message
-- Inspecting a single task by id
-- Deregistering at end of fleet
-
-For broadcast, member spawning, member capture, member ping, and member exec, see the reference files above.
-
 ## Required Flags
 
 Every `cafleet` invocation that touches agents or messages must carry two literal integer ids as flags. There is no env-var fallback.
@@ -66,7 +52,6 @@ In every example below, substitute the literal integer ids printed by `cafleet f
 Only `--json` and `--version` are top-level options (they precede the subcommand name). `--agent-id` and `--fleet-id` are per-subcommand options and must appear **after** the subcommand name:
 
 ```bash
-cafleet --json agent register --fleet-id <fleet-id> --name "My Agent" --description "..."
 cafleet --json agent list --fleet-id <fleet-id>
 cafleet --json message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
 ```
@@ -233,17 +218,7 @@ After soft-delete, the fleet is hidden from `cafleet fleet list` and further `ca
 
 ## Typical Workflow
 
-0. **Verify pane env** (Director / spawn-aware operator):
-   ```bash
-   cafleet doctor
-   # tmux:
-   #   session_name:  <name>
-   #   window_id:     @<n>
-   #   pane_id:       %<n>
-   #   TMUX_PANE:     %<n>
-   ```
-
-   Confirms the calling shell has `TMUX` and `TMUX_PANE` set. Reach for this BEFORE `cafleet fleet create` and BEFORE any `cafleet member create` call — it is the canonical pane-identity probe, replacing raw `tmux display-message` and `TMUX` / `TMUX_PANE` env-var expansion. See § *Doctor* for the subcommand's `--fleet-id` and env-var requirements, plus the `--json` variant.
+0. **Verify pane env** (Director / spawn-aware operator): run `cafleet doctor` to confirm the calling shell has `TMUX` and `TMUX_PANE` set. Reach for this BEFORE `cafleet fleet create` and BEFORE any `cafleet member create` call — it is the canonical pane-identity probe, replacing raw `tmux display-message` and `TMUX` / `TMUX_PANE` env-var expansion (see § *Doctor*).
 
 1. **Create a fleet** (if one does not already exist):
    ```bash
@@ -255,47 +230,13 @@ After soft-delete, the fleet is hidden from `cafleet fleet list` and further `ca
 
    Must be run inside a tmux session — outside tmux the command exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing.
 
-2. **Register** with the broker:
-   ```bash
-   cafleet agent register --fleet-id <fleet-id> \
-     --name "Code Review Agent" --description "Reviews pull requests"
-   # → returns <my-agent-id>
-   ```
-
-3. **Discover** other agents:
-   ```bash
-   cafleet agent list --fleet-id <fleet-id>
-   ```
-
-4. **Send** a message:
-   ```bash
-   cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
-     --to <target-agent-id> --text "Please review PR #42"
-   ```
-
-5. **Poll** for incoming messages:
-   ```bash
-   cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
-   ```
-
-6. **Acknowledge** received messages:
-   ```bash
-   cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
-   ```
-
-7. **Repeat** steps 4–6 as needed. Use `cafleet --json <cmd> --fleet-id <fleet-id>` when parsing output programmatically.
+2. **Register, discover, send, poll, and acknowledge** per the command sections above (§ *Self-registration recipe*, § *List Agents*, § *Send (Unicast)*, § *Poll (Check Inbox)*, § *Acknowledge (ACK)*). Repeat send/poll/ack as needed; use `cafleet --json <cmd> --fleet-id <fleet-id>` when parsing output programmatically.
 
 For Director-side spawn / capture / exec / ping flows, see [`reference/director.md`](reference/director.md). For shutdown ordering, see [`reference/recovery.md`](reference/recovery.md).
 
 ## Message Lifecycle
 
-Messages are modeled as tasks with this lifecycle:
-
-- **input_required** — Message delivered, waiting for recipient to ACK.
-- **completed** — Recipient acknowledged the message.
-- **canceled** — Sender retracted the message before ACK.
-
-For broadcast threading (the `origin_task_id` self-reference shape), see [`reference/broadcast.md`](reference/broadcast.md).
+Messages are tasks with three states: **input_required** (delivered, awaiting ACK) → **completed** (ACKed), or **canceled** (sender retracted before ACK). For broadcast threading (the `origin_task_id` self-reference shape), see [`reference/broadcast.md`](reference/broadcast.md).
 
 ## Error Handling
 

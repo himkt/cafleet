@@ -17,9 +17,7 @@ The skill writes a self-contained Python script that imports matplotlib. The run
 
 ### 0. Resolve directories
 
-**CRITICAL — placeholder convention.** `${FIGURE_BASE}`, `${BASE}`, `${SRC_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` in this document are **template placeholders, NOT shell environment variables**. You must mentally resolve each one to a concrete absolute path and write that literal path into the script file via the Write tool.
-
-**Do NOT** run `export FIGURE_BASE=...`, `FIGURE_BASE=... uv run ...`, or any other shell variable assignment. Bash calls in Claude Code are ephemeral — values set in one call do not persist to the next. The placeholders are resolved entirely in your head, not in the shell.
+**CRITICAL — placeholder convention.** `${FIGURE_BASE}`, `${BASE}`, `${SRC_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` are **template placeholders, NOT shell environment variables** — resolve each to a concrete absolute path in your head and write that literal path into the script via the Write tool. Do NOT use `export FIGURE_BASE=...` or any shell variable assignment (Bash calls in Claude Code are ephemeral, so values do not persist between calls).
 
 **Resolve `${BASE}` in this order:**
 
@@ -31,8 +29,6 @@ The skill writes a self-contained Python script that imports matplotlib. The run
 - `${SRC_DIR} = ${BASE}/figures/src`
 - `${OUTPUT_DIR} = ${BASE}/figures/output`
 - `${DATA_DIR} = ${BASE}/figures/data`
-
-Example resolution: if base-dir resolved `${BASE} = /home/user/proj` (a git-repo root), then `${SRC_DIR}` in your head is `/home/user/proj/figures/src` and figures land under the repo tree — that is the intended behavior. If base-dir resolved `${BASE} = /tmp/claude-code` instead, `${SRC_DIR}` is `/tmp/claude-code/figures/src`. Either way, the literal string you write into the Python script is the concrete resolved path.
 
 If the directories do not exist yet, the Write tool auto-creates parent directories when you write the script file — do NOT call `mkdir`.
 
@@ -77,20 +73,15 @@ print(f"Saved: {output_path}")
 Key points:
 - **All figure text in English** — matplotlib defaults don't support CJK; use English for labels/titles/legends
 - **No `ax.set_title()`** — when embedded in slides, the slide heading is the title
-- `matplotlib.use("Agg")` before `import matplotlib.pyplot`
-- Output filename matches script name (`chart.py` → `chart.png`)
 - Never `plt.show()`, always `plt.savefig()` then `plt.close()`
-- PNG, `dpi=150`, `bbox_inches="tight"`, `facecolor='white'`
 
 ### 2. Execute the script
 
-Run the script with the Python invocation documented in your host project's `.claude/rules/`. This skill is invocation-agnostic — it only requires that the chosen environment provide matplotlib:
+Run the script with the Python invocation documented in your host project's `.claude/rules/` (typical patterns: `uv run`, `python`, or a `mise` task wrapper). This skill is invocation-agnostic — it only requires that the chosen environment provide matplotlib:
 
 ```
 <project-python-runner> ${SRC_DIR}/script_name.py
 ```
-
-The host project's rules document the project-specific runner (typical patterns include `uv run`, `python`, or a `mise` task wrapper). The skill itself does not name a runner.
 
 ### 3. Verify the result
 
@@ -98,24 +89,16 @@ Use the Read tool to load the output PNG from `${OUTPUT_DIR}` and show it to the
 
 ## Data handling
 
-CSV:
+Read input from `${DATA_DIR}` with standard Python, using a `with` block so each file handle closes:
+
 ```python
-import csv
+import csv, json
+
 with open(DATA_DIR / "sales.csv") as f:
     rows = list(csv.DictReader(f))
-```
 
-JSON:
-```python
-import json
 with open(DATA_DIR / "metrics.json") as f:
     data = json.load(f)
-```
-
-Inline data (from web search or user input):
-```python
-categories = ["Q1", "Q2", "Q3", "Q4"]
-values = [120, 185, 240, 310]
 ```
 
 ## Chart Type Selection
@@ -157,15 +140,9 @@ fig, axes = plt.subplot_mosaic(
 )
 axes['left'].barh(categories, values_a, color=C_BAR)
 axes['right'].barh(categories, values_b, color=C_BAR_SEC)
-
-# Complex layouts with GridSpec
-from matplotlib.gridspec import GridSpec
-fig = plt.figure(figsize=(12, 8), constrained_layout=True)
-gs = GridSpec(2, 3, figure=fig)
-ax_wide = fig.add_subplot(gs[0, :])   # top row, full width
-ax_left = fig.add_subplot(gs[1, :2])  # bottom row, 2/3 width
-ax_right = fig.add_subplot(gs[1, 2])  # bottom row, 1/3 width
 ```
+
+For more complex grids, use `matplotlib.gridspec.GridSpec`.
 
 ## Color Rules
 
@@ -249,13 +226,7 @@ When a legend is needed, place it outside the plot area to avoid obscuring data:
 ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', frameon=False)
 ```
 
-For horizontal legends below the chart (useful in multi-series line plots):
-
-```python
-ax.legend(bbox_to_anchor=(0.5, -0.12), loc='upper center', ncol=3, frameon=False)
-```
-
-Use `frameon=False` to keep the look clean. Limit legend entries to ≤ 5; if more, reconsider the chart design.
+For horizontal legends below the chart (multi-series line plots), use `ax.legend(bbox_to_anchor=(0.5, -0.12), loc='upper center', ncol=3, frameon=False)`. Use `frameon=False` to keep the look clean; limit legend entries to ≤ 5, else reconsider the chart design.
 
 ## Out of scope
 

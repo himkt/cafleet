@@ -29,38 +29,17 @@ cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
   --text "[your report or question]"
 ```
 
-Substitute the literal `[fleet-id]`, `[my-agent-id]`, and `[director-agent-id]` UUIDs from your spawn prompt. Never use shell variables.
+Substitute the literal `[fleet-id]`, `[my-agent-id]`, and `[director-agent-id]` integer ids from your spawn prompt. Never use shell variables.
 
-**Receiving messages.** When the Director sends you a message, the broker keystrokes `cafleet message poll --fleet-id [fleet-id] --agent-id [my-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that UUID is the `[task-id]`. After acting on the polled message, ack it via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]`.
+**Receiving messages.** When the Director sends you a message, the broker keystrokes `cafleet message poll --fleet-id [fleet-id] --agent-id [my-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that integer id is the `[task-id]`. After acting on the polled message, ack it via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]`.
 
 ## Layout Selection
 
-Choose the best layout for each slide's content. The `cafleet-my-slidev` skill defines all available layouts. Key decisions:
-
-| Content | Layout |
-|---------|--------|
-| 2-4 key numbers | `stats-grid` |
-| Comparison (X vs Y) | `two-cols` |
-| Table, figure, diagram | `blank` |
-| Chapter break | `section-divider` (with `totalSections`) |
-| General points | `bullets` (max 3 consecutive) |
-| Last slide | `end` |
+Choose layouts per the `cafleet-my-slidev` skill's Layouts table (loaded at startup). Key picks: `stats-grid` for 2-4 key numbers, `two-cols` for comparisons, `blank` for tables/figures/diagrams, `section-divider` for chapter breaks (with `totalSections`), `bullets` for general points (max 3 consecutive), `end` for the last slide.
 
 ## Information Representation
 
-Pick the right format — don't default to bullets or bar charts.
-
-| Information | Format |
-|---|---|
-| Trends over time | Line chart |
-| Category comparisons, rankings | Horizontal bar chart |
-| Distribution of values | Histogram, box plot, violin plot |
-| Correlation between variables | Scatter plot |
-| Part-of-whole composition | Stacked bar chart |
-| Exact reference values, feature matrices | Table |
-| Concepts, qualitative assessments | Bullets |
-| Flows, processes | Mermaid diagram |
-| Key takeaways | Admonition box |
+Pick the chart/format per the `cafleet-create-figure` skill's Chart Type Selection (loaded at startup) — line for trends over time, horizontal bar for rankings, scatter for correlation, histogram/box/violin for distributions, stacked bar for part-of-whole; tables for exact reference values, bullets for concepts, Mermaid for flows, Admonition box for key takeaways. Don't default to bullets or bar charts.
 
 ## Figures
 
@@ -72,49 +51,31 @@ Pick the right format — don't default to bullets or bar charts.
 
 ## Text Emphasis
 
-Follow the **Color Discipline** and **Usage Rules** sections in `techniques/highlight.md`. Key rules:
+Follow the **Color Discipline** and **Usage Rules** subsections under § Highlight in `techniques/formatting.md`. Key rules:
 
-- **Always use the `Highlight` component** for colored numbers and keywords. The actual slide.md syntax is the Vue tag form documented in the my-slidev skill's `techniques/highlight.md` file. Never use `span class="c-..."` markup directly.
+- **Always use the `Highlight` component** for colored numbers and keywords. The actual slide.md syntax is the Vue tag form documented in the my-slidev skill's `techniques/formatting.md` file. Never use `span class="c-..."` markup directly.
 - **Max 3 per slide.** More than 3 → move data to a table or chart.
 - **Semantic color**: positive (green), negative (red), neutral (blue), caution (orange). Ask "is this good or bad for the audience?"
 
-## Single-Line Bullet Rule
+## Bullet & Text Wrapping
 
-**Every top-level bullet must fit on a single visible line.** Wrapped multi-line top-level bullets are a critical defect, flagged by the Visual Reviewer as `[MULTILINE_BULLET]`.
+**Every top-level bullet must fit on a single visible line** — a multi-line top-level bullet is a critical defect (the Visual Reviewer flags `[MULTILINE_BULLET]`). Bad text wrapping (mid-word splits, orphan fragments, citation numbers alone on a line) is likewise critical. After writing each slide, check whether any line would wrap to a second line or end with a short orphan. **Fix structurally first, font last:**
 
-If a bullet's natural text would wrap to a second line, **refactor structurally — do NOT rely on shrinking the font.**
+1. **Refactor a wrapping top-level bullet into a parent + nested sub-bullets.** Split at an em-dash, en-dash, colon, or comma — the lead phrase becomes the parent, each detail clause a sub-bullet:
+   ```markdown
+   <!-- BAD: wraps to 2 lines -->
+   - Reasoning-as-product era opened with o1-preview (Sep 2024) and propagated to every major lab within twelve months [5]
+   <!-- GOOD -->
+   - Reasoning-as-product era
+     - Opened with o1-preview (Sep 2024)
+     - Propagated to every major lab within twelve months [5]
+   ```
+2. **Split into multiple slides** if content is too dense even after restructuring — do not cram.
+3. **Non-breaking characters** — `&nbsp;` between a word and its citation `[N]`, or U+2011 `‑` within compound terms, to keep units together. Citation numbers (`[N]`) must NEVER appear alone on a line (`テキスト&nbsp;[46]`).
+4. **`fontSize` prop** — secondary lever only, once structural fixes are applied (e.g. 80 → 70); stay above the readability floor.
+5. **Minor rephrasing** to shift line breaks — but do NOT shorten to the point of losing information (preserve all citation numbers and key facts).
 
-Refactor pattern:
-
-```markdown
-<!-- BAD: a long single bullet that wraps to 2 visible lines -->
-- Reasoning-as-product era opened with o1-preview (Sep 2024) and propagated to every major lab within twelve months [5]
-
-<!-- GOOD: parent + nested sub-bullets -->
-- Reasoning-as-product era
-  - Opened with o1-preview (Sep 2024)
-  - Propagated to every major lab within twelve months [5]
-```
-
-How to find the split:
-
-- Look for an em-dash, en-dash, colon, or comma that divides the bullet into a "lead phrase" + "detail clause(s)". The lead becomes the parent; each detail clause becomes a sub-bullet.
-- If the bullet has no natural split, shorten by trimming non-essential phrases. Preserve all citation numbers and key facts.
-- A small `fontSize` reduction (e.g. 80 → 70) is acceptable as a *secondary* lever when the result remains comfortably readable, but the primary fix path is restructuring.
-
-Sub-bullets ARE allowed to wrap once if necessary, but prefer single-line sub-bullets too.
-
-## Text Wrapping Prevention
-
-Bad text wrapping (mid-word splits, orphan fragments, citation numbers alone on a line) is a critical defect. After writing each slide, mentally check whether any line would end with a short orphan. Fix with these tools, in order of preference:
-
-1. **Refactor to nested bullets** — if a top-level bullet wraps, break it into a parent + nested sub-bullets per the Single-Line Bullet Rule above. This is the preferred fix for multi-line bullets.
-2. **Split into multiple slides** — if a slide has too much content even after restructuring, split it into two slides. Do not cram.
-3. **Non-breaking characters** — use `&nbsp;` between a word and its citation `[N]`, or U+2011 `‑` within compound terms, to keep units together.
-4. **`fontSize` prop** — only as a secondary lever once the structural fixes above have been applied. Stay above the readability floor — a presentation that requires squinting fails the user.
-5. **Minor text adjustments** — rephrase to shift where the line breaks, but do NOT shorten text to the point of losing information.
-
-Citation numbers (`[N]`) must NEVER appear alone on a line. Use `&nbsp;` between the last word and its citation: `テキスト&nbsp;[46]`.
+Sub-bullets may wrap once if necessary, but prefer single-line.
 
 ## Citations
 

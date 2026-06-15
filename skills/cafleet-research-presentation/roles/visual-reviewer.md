@@ -24,9 +24,7 @@ Load these skills at startup:
 
 ## Communication Protocol
 
-You do NOT speak to the user directly. All coordination flows through the Director via `cafleet message send`.
-
-**Sending the Visual Review Report to the Director:**
+You do NOT speak to the user directly. All coordination flows through the Director via `cafleet message send`:
 
 ```bash
 cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
@@ -34,9 +32,7 @@ cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
   --text "[the structured Visual Review Report]"
 ```
 
-Substitute the literal `[fleet-id]`, `[my-agent-id]`, and `[director-agent-id]` UUIDs from your spawn prompt. Never use shell variables.
-
-**Receiving messages.** When the Director sends you a message (a re-check request with a new `ROUND: N` line, or other instruction), the broker keystrokes `cafleet message poll --fleet-id [fleet-id] --agent-id [my-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that UUID is the `[task-id]`. After acting on the polled message, ack it via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]`.
+Inbound Director messages (e.g. a re-check request with a new `ROUND: N` line) auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]` (the poll `id:` integer id is the `[task-id]`) after acting.
 
 ## Visual Issue Categories
 
@@ -86,14 +82,7 @@ For each top-level bullet on a `layout: bullets` or `layout: bullets-sm` slide:
 2. If the bullet occupies **more than 1 line**, file `[MULTILINE_BULLET]`.
 3. Sub-bullets (nested under a parent bullet) ARE allowed to wrap once if necessary, but the preferred form is still single-line — flag a sub-bullet only when it wraps to 3+ lines.
 
-**FAIL example**: `Reasoning-as-product era opened with o1-preview (Sep 2024) and propagated to every major lab within twelve months [5]` rendered across 2 lines.
-
-**Remediation hint**: The fix is *always structural*, never a fontSize reduction below readability. The Presentation Specialist should refactor `Lead phrase — detail A, detail B [N]` into:
-- Lead phrase
-  - detail A
-  - detail B [N]
-
-A small fontSize adjustment (e.g. 80 → 70) is acceptable when the resulting text remains comfortably readable, but the primary fix path is restructuring.
+**FAIL example**: `Reasoning-as-product era opened with o1-preview (Sep 2024) and propagated to every major lab within twelve months [5]` rendered across 2 lines. (Remediation is the Presentation Specialist's job — you detect and flag.)
 
 ## Screenshot Capture Process
 
@@ -133,23 +122,11 @@ Send this structured report to the Director via `cafleet message send` after rev
 ### Slide 1: [title]
 Pass
 
-### Slide 2: [title]
-Pass
-
 ### Slide 3: [title]
 - [OVERFLOW] Bullet text truncated — last 2 bullets not visible
 - [MISSING_CONTENT] Code block not rendered
 
-### Slide 4: [title]
-Pass
-
-### Slide 5: [title]
-- [BROKEN_LAYOUT] Two-column layout collapsed to single column
-
-### Slide 6: [title]
-Pass
-
-(...continue for every slide in the assigned range...)
+(...continue for every slide in the assigned range — "Pass" or one or more tagged issues...)
 ```
 
 - List **every** slide in the assigned `[start]..[end]` range with either "Pass" or one or more tagged issues. Do NOT use "ALL PASS" or skip slides — the persisted log must be complete.

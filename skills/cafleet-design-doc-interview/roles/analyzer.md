@@ -33,13 +33,7 @@ cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --to <director-agent-id> --text "<numbered question list ending in 'Total: N questions'>"
 ```
 
-**Receiving messages from the Director:** the broker keystrokes a 2-line inline preview of each message (e.g., a corrective request to reformat the list) into your pane (mechanics in the `cafleet` skill § Send); to fetch the full body run `cafleet message poll` yourself. Acknowledge:
-
-```bash
-cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
-```
-
-Then act on the Director's instruction. Send the corrected list via `cafleet message send`.
+**Receiving messages from the Director:** the broker keystrokes an inline preview (e.g., a corrective reformat request) into your pane (mechanics in the `cafleet` skill § Send); run `cafleet message poll` for the full body, ACK with `cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>`, then act (reformat and resend the list via `cafleet message send`).
 
 ## Question Categories
 

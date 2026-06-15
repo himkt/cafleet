@@ -52,16 +52,7 @@ If the Director has already queued your first task, it appears in the poll outpu
 
 ## YOUR cafleet CALLS GO THROUGH THE BASH TOOL TOO
 
-Your harness lets you call cafleet directly:
-
-```bash
-cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
-cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
-  --to <director-agent-id> --text "..."
-cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
-```
-
-These are normal Bash invocations — nothing special. Workspace-scoped auto-approval auto-resolves permission prompts, so they execute without operator interaction.
+Your `cafleet message poll` / `send` / `ack` calls are normal Bash invocations — workspace-scoped auto-approval auto-resolves their permission prompts, so they execute without operator interaction. Command shapes: the On-Spawn block above and [`skills/cafleet/SKILL.md`](../SKILL.md).
 
 ---
 
@@ -72,8 +63,6 @@ These are normal Bash invocations — nothing special. Workspace-scoped auto-app
 - **NEVER "just answer from prior context"** when a fresh command result is needed. Working-tree state changes between turns; only a real execution gives a true answer.
 - **NEVER refuse silently or stall.** Run the command. Report the result.
 - **NEVER assume Bash is denied** without trying. Under workspace-scoped auto-approval, Bash is enabled. If a Bash call appears to fail, surface the actual error message; don't assume it's a permission issue.
-- **NEVER treat a denial as the end of the line.** Before asking the Director or the operator for help, re-examine the command you tried. In most denial cases, the underlying command is the wrong one (typo, wrong flag, wrong path) — fix the command yourself. Only route to the Director when the command is genuinely correct AND genuinely needed AND the harness still denies it.
-- **NEVER offer the operator a list of routing options** ("(1) you run it via `!`, (2) route through Director, (3) skip"). The operator already implicitly answered by asking you to run the command — they wanted it run. Routing is implementation. The bash-via-Director protocol exists precisely to handle the harness-denied case without operator interaction.
 
 ---
 

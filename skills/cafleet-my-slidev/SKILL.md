@@ -5,7 +5,7 @@ description: Create Slidev presentations using the custom theme with cover, bull
 
 # Custom Slidev Theme Presentation Guide
 
-Theme location: `theme/` inside this skill's directory. For Slidev syntax, refer to /slidev or /slidev:slidev. **NEVER READ FILES DIRECTLY**.
+Theme location: `theme/` inside this skill's directory. For Slidev syntax, refer to /slidev or /slidev:slidev — do not read Slidev's upstream source files directly.
 
 ## Headmatter
 
@@ -116,51 +116,14 @@ Auto-rendered: top-level = filled blue circle, nested = hollow. `bullets-sm` has
 - Body ↔ References must be two-way consistent, contiguous, no duplicates
 - Add References slide(s) at end listing only cited sources
 
-## Layout Examples
-
-### Stats-Grid
-
-```md
----
-layout: stats-grid
-stats:
-  - value: "84%"
-    label: "Developer AI tool adoption"
-    source: "[1]"
-  - value: "41%"
-    label: "GitHub code is AI-generated"
-    source: "[2]"
----
-
-::header::
-
-# Market at a Glance
-```
-
-### Section Divider
-
-```md
----
-layout: section-divider
-section: 2
-totalSections: 5
----
-
-# Security & Privacy
-
-Key risks in AI-generated code
-```
-
-### Techniques
+## Techniques
 
 | Technique | Reference |
 |-----------|-----------|
 | Two-column layout | techniques/two-column-layouts.md |
-| Admonition boxes | techniques/admonition.md |
-| Highlight markers | techniques/highlight.md |
-| Code animations | techniques/animations.md |
+| Admonition / Highlight / Font-size formatting | techniques/formatting.md |
 | Math formulas | techniques/math-formulas.md |
-| Font size control | techniques/font-size.md |
+| Code animations | /slidev (stock `v-click` / `v-clicks` / line-range highlighting) |
 
 ## Spawnable Agents
 
@@ -219,17 +182,6 @@ This skill ships an embedded agent spec for generating a complete Slidev present
        - **Pass 2 — Verification**: Re-scan the entire presentation to verify all fixes are correct and no new issues were introduced. Confirm: no overflowing slides, sequential citation numbers starting from `[1]`, body↔references consistency, and no broken formatting (slide separators, layout frontmatter).
        - Only after Pass 2 confirms zero issues, write the file to the current working directory as `slide.md`.
 
-    ## Output Constraints
-
-    - Always start with a `cover` slide
-    - Use `bullets` layout by default for content slides
-    - Add presenter notes with expanded talking points from the source content
-    - Use the literal `theme:` path documented in the embedding skill's headmatter template — `<cafleet-plugin-install-dir>/skills/cafleet-my-slidev/theme`. Substitute the absolute path to the installed cafleet plugin directory on this machine (Claude Code: `~/.claude/plugins/cache/cafleet/cafleet/<version>/`; Codex: as reported by `codex plugin list`). The path is a fixed, documented location; do NOT try to derive it dynamically (the `cafleet-base-dir` skill resolves a CWD-based working directory, not the install location of the calling skill).
-    - All slides must pass content overflow review — no slide may have content that exceeds its viewport
-    - Citations must be numbered sequentially by order of first appearance
-    - Every citation in body must have a reference; every reference must be cited in body
-    - Quality review is mandatory — never skip the two-pass review
-
 #### Dispatching this agent (Claude Code recipe)
 
 On Claude Code, dispatch the embedded `slide-creator` spec via the `Agent` tool with `subagent_type="general-purpose"`. Paste the spec body verbatim into the `prompt` field, then append the per-call inputs (file path or inline content):
@@ -246,27 +198,6 @@ Input: <file path to a markdown report OR inline content>"""
 
 This is the post-promotion equivalent of the named `Agent(subagent_type="slide-creator")` call that worked when `slide-creator` lived as a standalone `.claude/agents/slide-creator.md`. The structured `subagent_type` name is lost (Claude Code's plugin loader does not register skill-embedded agent specs as named subagents), but the behavior is identical because the spec body is the same.
 
-#### Dispatching this agent (codex inline-follow)
+#### Dispatching this agent (codex)
 
-On codex, the simplest dispatch path is **inline-follow**: the codex agent reads the embedded `## Spawnable Agents > slide-creator` block in this SKILL.md (codex reads SKILL.md directly — see `cafleet/docs/reference/coding-agents/codex.md`) and follows the spec's instructions in its own turn, treating the spec body as additional instructions for the current task. No new agent is spawned; the calling agent absorbs the spec's role for one turn.
-
-Use this when:
-- A codex session needs to generate slides ad-hoc as part of a larger task.
-- You do not need a separate pane or member for the work.
-
-#### Dispatching this agent (codex member-spawn)
-
-When you want a dedicated codex member running the spec, spawn it via `cafleet member create` with `--coding-agent codex`. The spawn prompt is positional (`[PROMPT_ARGV]...`) — there is no `--spawn-prompt-from-text` flag. Paste the embedded spec body verbatim into the positional argument, then append the per-call inputs:
-
-```bash
-cafleet member create --fleet-id <fleet-id> \
-  --agent-id <director-agent-id> \
-  --name slide-creator-codex \
-  --description "Generate a Slidev presentation autonomously" \
-  --coding-agent codex \
-  "<paste the slide-creator spec body verbatim>
-
-Input: <file path to a markdown report OR inline content>"
-```
-
-The new member opens its own tmux pane and works autonomously on the spec. Use this when the work benefits from a separate pane (parallel decks, longer-running generations, isolation from the director's context).
+On codex (which reads SKILL.md directly — see `docs/reference/coding-agents/codex.md`), either **inline-follow** (the agent reads the embedded `## Spawnable Agents > slide-creator` block and follows the spec in its own turn, no new agent spawned) or **member-spawn** a dedicated codex member via `cafleet member create --coding-agent codex` with the spec body pasted into the positional prompt argument (positional `[PROMPT_ARGV]...`; there is no `--spawn-prompt-from-text` flag).
