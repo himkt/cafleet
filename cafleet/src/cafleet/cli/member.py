@@ -700,5 +700,12 @@ def member_nudge(ctx, agent_id, member_id, text):
             f"Nudged {target['name']} ({pane_id}) — task {task_id} queued, "
             f"Esc-safeguarded preview dispatched."
         )
-    else:
+    elif pane_id is None:
         click.echo(f"Nudged {target['name']} — no pane; task {task_id} queued.")
+    else:
+        # Pane present but the best-effort preview did not land (tmux binary
+        # missing, self-send, or a send failure) — the task still persisted.
+        click.echo(
+            f"Nudged {target['name']} ({pane_id}) — task {task_id} queued; "
+            f"inline preview not delivered."
+        )

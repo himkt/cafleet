@@ -125,7 +125,7 @@ Why a separate subcommand rather than telling the monitoring member to call `mes
 
 A target with no live pane is tolerated (the task still persists; the keystroke best-effort no-ops) — identical to `message send` semantics. `--text` empty/whitespace-only is rejected with a `UsageError` (exit 2), mirroring `member exec`'s empty-command guard.
 
-**Output.** Text mode: `Nudged <name> (<pane_id>) — task <task_id> queued, Esc-safeguarded preview dispatched.` (or a "no pane; task queued" variant when the target has no placement pane; the target is typically the Director but may be any in-fleet member, so the name is not hard-coded to "Director"). JSON mode (`--json`): `{member_agent_id, pane_id, task_id, notification_sent}`.
+**Output.** Text mode: `Nudged <name> (<pane_id>) — task <task_id> queued, Esc-safeguarded preview dispatched.` when the preview fired; a "no pane; task queued" variant when the target has no placement pane (`pane_id is None`); and a "task queued; inline preview not delivered" variant when the target has a pane but the best-effort keystroke did not fire (tmux binary missing, self-send, or send failure). The target is typically the Director but may be any in-fleet member, so the name is not hard-coded to "Director". JSON mode (`--json`): `{member_agent_id, pane_id, task_id, notification_sent}`.
 
 ### 5. Permissions coverage (`docs/spec/cli-options.md`)
 

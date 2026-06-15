@@ -897,7 +897,7 @@ Text:
 Nudged <name> (<pane_id>) — task <task_id> queued, Esc-safeguarded preview dispatched.
 ```
 
-A target with no placement pane prints the `no pane; task queued` variant. JSON (`cafleet --json ... member nudge ...`):
+A target with no placement pane prints the `no pane; task queued` variant. A target **with** a pane whose best-effort preview did not land (tmux binary missing, self-send, or a send failure) prints `Nudged <name> (<pane_id>) — task <task_id> queued; inline preview not delivered.` — the task still persists in all three cases. JSON (`cafleet --json ... member nudge ...`):
 
 ```json
 {

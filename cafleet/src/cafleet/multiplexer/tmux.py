@@ -254,12 +254,13 @@ class TmuxMultiplexer:
         # newline is delivered as a soft line break inside one keystroke
         # sequence — it does NOT fragment delivery into a second submit, so the
         # whole 2-line payload arrives as a single recipient turn submitted by
-        # the one trailing ``Enter`` below. (Confirmed by the live behavior of
-        # every ``message send``: 2-line previews land as one coherent turn, not
-        # an envelope-then-body split.) The leading ``Escape`` (``esc_first``)
-        # carries the permission-prompt safety guarantee independently. The body
-        # sanitization to U+23CE keeps a multi-line user body from visually
-        # breaking the 2-line framing; it is cosmetic, not submit-safety.
+        # the one trailing ``Enter`` below. (Asserted by
+        # ``test_tmux_send_inline_preview.py::test_send_inline_preview__newline_soft_insert_single_submit``,
+        # which pins the one-``-l``/one-``Enter`` 2-line contract.) The leading
+        # ``Escape`` (``esc_first``) carries the permission-prompt safety
+        # guarantee independently. The body sanitization to U+23CE keeps a
+        # multi-line user body from visually breaking the 2-line framing; it is
+        # cosmetic, not submit-safety.
         sanitized_text = text.replace("\r\n", "⏎").replace("\n", "⏎").replace("\r", "⏎")
         payload = f"[cafleet msg {task_id} from {sender_id} {ts}]\n{sanitized_text}"
         try:
