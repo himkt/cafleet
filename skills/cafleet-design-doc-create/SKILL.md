@@ -57,7 +57,7 @@ The Director MUST be running inside a tmux session (required by `cafleet member 
 | `Agent(team_name=..., subagent_type=...)` | `cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
 | `SendMessage(to="Drafter")` | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <drafter-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from member) | `cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (facilitation policy) and the `cafleet-agent-team-supervision` skill (governance) for their Authorization-Scope Guard, idle semantics, Stall Response, and Cleanup policy. This team is **request-driven**: it does **not** run `cafleet monitor` or spawn a `--role monitor` member. Members wake on the broker's inline-preview keystroke on every `message send`; the Director is woken by members' replies and drives work by active polling (and `cafleet member ping` for manual recovery). |
+| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (heartbeat + facilitation) and the `cafleet-agent-team-supervision` skill (governance) for their Authorization-Scope Guard, idle semantics, Stall Response, and Cleanup policy. The heartbeat is run by the dedicated **monitoring member** (the first `member create`, `--role monitor --model sonnet`, which runs `cafleet monitor start` in its own pane) — the Director never runs the monitor itself. The monitoring member wakes on the loop and, when it finds the Director idle, re-engages it via `cafleet member nudge` (canonical conditional nudge); that idle-nudge is the Director's supervision turn. |
 | `TeamDelete` | `cafleet member delete --fleet-id <fleet-id> --member-id <member-agent-id>` for each member, then `cafleet fleet delete <fleet-id>` (soft-deletes the fleet, deregisters the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `fleet delete` is the only supported teardown. |
 | Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
@@ -117,9 +117,21 @@ Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute th
 
 If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `agent_id` instead of creating a new fleet. Do **not** attempt to register a second Director with `cafleet agent register --name Director` — the root Director from `fleet create` is the team lead; a second registration would just create an unrelated agent with no placement row.
 
-#### 1b. Request-driven supervision (no monitor)
+#### 1b. Spawn the monitoring member (first-in)
 
-This team is **request-driven**: it does **not** run `cafleet monitor` or spawn a `--role monitor` member. Members wake on the broker's inline-preview keystroke on every `message send`; the Director is woken by members' replies (also inline previews) and drives work by active polling (`cafleet member ping` is the manual-recovery re-poke). Load the `cafleet-agent-team-supervision` skill (and its `cafleet-agent-team-monitoring` prerequisite) for the Authorization-Scope Guard, idle semantics, and Stall Response policy — but do **not** re-introduce a heartbeat from them.
+The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model sonnet`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+
+Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the two-step audit-file pattern in Step 1c, then spawn:
+
+```bash
+cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+  --name "monitor" \
+  --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
+  --role monitor --model sonnet \
+  --prompt-file ${BASE}/prompts/monitor-<UTC-compact>.md
+```
+
+See the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical spawn prompt and lifecycle, and the `cafleet-agent-team-supervision` skill for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The heartbeat runs unchanged through the quality loop; its `monitor start` background task is stopped first in Step 6's teardown (first-out).
 
 #### 1c. Locate role definitions (path-by-reference)
 
@@ -135,6 +147,8 @@ Substitute these absolute paths into the spawn prompts below.
 > **Spawn-prompt audit file (two-step pattern)**: every spawn in this skill follows the same two steps — (1) **render** the prompt (substitute the `[INSERT …]` markers; leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass); (2) **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` (`<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; create `${BASE}/prompts/` on first write; same-second collision → append `_2`, `_3`, … — never overwrite), then invoke `cafleet member create --prompt-file <abs path>` (see Step 1d / 1e for the per-role spawn templates and commands). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet-base-dir` skill § *No-bypass write protocol* and the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 #### 1d. Spawn the Drafter
+
+**Gate**: do not spawn the Drafter until the monitoring member's `ready: monitor live` handshake (1b) has arrived.
 
 **Drafter spawn prompt (normal mode):**
 
@@ -341,10 +355,11 @@ No round limit — loop continues until approved or aborted.
    ```
    Wait for the Drafter's `addressed (doc)` confirmation.
 
-2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (no monitor to stop — this team is request-driven):
-   1. `cafleet member delete` for each member (Drafter, then Reviewer). Each call blocks until the pane is gone (15 s timeout); on exit 2 follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
-   2. `cafleet member list` — the team's roster MUST be empty before continuing.
-   3. `cafleet fleet delete <fleet-id>` (positional, no `--fleet-id` flag).
-   4. `cafleet fleet list` — the fleet MUST not appear (soft-deleted fleets are hidden).
+2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out: stop the monitor, then delete the monitoring member first):
+   1. Stop the monitoring member's `monitor start` background task (the heartbeat launched in 1b — there is no `monitor stop` command): message the monitoring member to stop its background task (the task-stop delivers SIGTERM/SIGINT, so the loop clears its runtime row), and wait for its confirmation. Do this **before** the monitoring member's pane is killed.
+   2. `cafleet member delete` the monitoring member **first**, then each ordinary member (Drafter, then Reviewer). Each call blocks until the pane is gone (15 s timeout); on exit 2 follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
+   3. `cafleet member list` — the team's roster MUST be empty before continuing.
+   4. `cafleet fleet delete <fleet-id>` (positional, no `--fleet-id` flag).
+   5. `cafleet fleet list` — the fleet MUST not appear (soft-deleted fleets are hidden).
 
 The fleet row is soft-deleted and `tasks` are preserved so the message trail remains inspectable in the admin WebUI.

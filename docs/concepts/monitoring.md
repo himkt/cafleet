@@ -16,12 +16,20 @@ monitoring member owns its lifetime — there is no detached subprocess and no
 `monitor stop` (stop the background task, or delete the monitoring member, to
 stop it). One monitor per fleet, and one monitoring member per fleet.
 
-Every keystroke the loop sends is **`Esc`-safeguarded**: it presses `Escape`
-first, lets the pane settle for ~0.1 s, then types the literal text and `Enter`.
-The leading `Esc` means a pane sitting on a pending permission-approval prompt
-dismisses that prompt instead of having the trailing `Enter` confirm it — a
-heartbeat keystroke can never blindly approve a coding agent's pending
-permission request.
+The `Esc` safeguard lives wherever a keystroke's target pane **may** be parked
+on a pending permission-approval prompt. Two such paths exist: the
+**message-delivery inline preview** (every inbound `cafleet message send` /
+`broadcast` / `cafleet member nudge`, whose recipient — including a Director — may
+be sitting on a prompt) and `cafleet member ping`. Both press `Escape` first, let
+the pane settle for ~0.1 s, then type the literal text and `Enter`, so the
+trailing `Enter` dismisses a pending prompt instead of blindly confirming it.
+
+The monitor loop's own **wake nudge** is the exception: it keystrokes only into
+the monitoring member's own pane, which runs a read-only routine under `dontAsk`
+and is never parked on a permission prompt, so the wake nudge does **not** lead
+with `Esc` (a leading `Esc` there would only self-interrupt an in-progress
+routine). The safeguard is applied where a prompt may exist and omitted where one
+never does.
 
 ## Heartbeat vs facilitation
 
@@ -35,16 +43,18 @@ those require agent judgment and stay the Director's job, defined by the
 | Heartbeat (the *when*) | which agents are due; the wake keystroke | the `cafleet monitor` loop |
 | Facilitation (the *what*) | poll → ACK → dispatch → health-check → escalate | the Director, per the supervision skill |
 
-The loop wakes only one role, the **monitoring member**, with an
-`Esc`-safeguarded *wake nudge* — a single-line instruction to run its
-capture-classify-reengage routine now. The loop runs inside the monitoring
-member's own pane, so this wake is a deliberate self-ping that drives the routine
-each tick (see [The monitoring member](#the-monitoring-member)).
+The loop wakes only one role, the **monitoring member**, with a *wake nudge* — a
+single-line instruction to run its capture-classify-reengage routine now. The
+loop runs inside the monitoring member's own pane, so this wake is a deliberate
+self-ping that drives the routine each tick (see
+[The monitoring member](#the-monitoring-member)). The wake nudge does not lead
+with `Esc`: the monitoring member's pane is never on a permission prompt.
 
 The Director receives **no** keystroke from the loop. It is re-engaged only on
-demand: by the monitoring member's idle nudge (an `Esc`-safeguarded
-`cafleet message send` when the routine classifies the Director as idle) and by
-the broker's inline-preview keystroke on every inbound `cafleet message send`.
+demand: by the monitoring member's idle nudge — `cafleet member nudge`, which
+persists an ACKable broker task carrying the summary **and** fires the hardened,
+`Esc`-safeguarded inline preview — and by the broker's inline-preview keystroke
+on every inbound `cafleet message send`.
 
 The monitor never reasons about message content — it is the alarm clock; the
 Director is the worker, and the monitoring member is the watcher that re-engages
@@ -56,11 +66,12 @@ Each tick, the monitor evaluates its enrolled, active agents and pings the ones
 whose interval has elapsed. Enrollment is restricted to exactly one agent per
 fleet: the **monitoring member**. The root Director is **not** enrolled, and
 ordinary members are **not** enrolled — neither is ever pinged by the loop. The
-Director is re-engaged on demand (the monitoring member's idle nudge, plus the
-broker's inline-preview keystroke on every `cafleet message send`); re-engaging
-a quiet member is always Director-mediated (the broker's inline-preview keystroke
-on every `cafleet message send` is the primary member-wake path; the Director's
-`Esc`-safeguarded `cafleet member ping` is the manual recovery path).
+Director is re-engaged on demand (the monitoring member's `cafleet member nudge`,
+plus the broker's inline-preview keystroke on every `cafleet message send`);
+re-engaging a quiet member is always Director-mediated (the broker's
+inline-preview keystroke on every `cafleet message send` is the primary
+member-wake path; the Director's `Esc`-safeguarded `cafleet member ping` is the
+manual recovery path).
 
 The monitoring member is pinged **unconditionally once due**, regardless of
 whether it has any pending inbox items: each wake drives its capture-and-assess
@@ -92,8 +103,8 @@ is the **one** process in the fleet that runs `cafleet monitor start`. There is
 at most one monitoring member per fleet; a second `--role monitor` spawn is
 rejected.
 
-On each `Esc`-safeguarded wake the loop keystrokes into its own pane, the
-monitoring member runs its routine:
+On each wake the loop keystrokes into its own pane, and the monitoring member
+runs its routine:
 
 1. **Capture the Director's pane** via `cafleet member capture --member-id
    <director-id>` (read-only; `member capture` accepts any in-fleet agent with a
@@ -102,9 +113,10 @@ monitoring member runs its routine:
    - **ACTIVE** → do nothing.
    - **IDLE** → assess the full picture (the Director's inbox state, its current
      task, and ordinary members' panes via read-only `cafleet member capture`),
-     then **re-engage the Director** with a concise `Esc`-safeguarded nudge via
-     `cafleet message send --to <director-id>` summarizing what needs attention
-     (un-ACKed inbox items, stalled members).
+     then **re-engage the Director** via `cafleet member nudge --member-id
+     <director-id>` summarizing what needs attention (un-ACKed inbox items,
+     stalled members). `member nudge` persists an ACKable broker task and fires
+     the hardened, `Esc`-safeguarded inline preview into the Director's pane.
 
 The monitoring member **never** keystrokes ordinary members with task
 instructions — all member-driving routes back through the Director, who owns the
@@ -114,10 +126,10 @@ monitoring member's idle assessment; the Director then re-pings it (via
 
 Because the monitoring member is itself enrolled, the loop running inside its
 pane keystrokes the wake nudge into that same pane's foreground — a deliberate
-self-ping. The leading `Esc` will interrupt the monitoring member's own
-in-progress turn if a wake lands mid-routine; because the ping interval (default
-60 s) is far longer than a routine's duration, the overlap is rare and the
-self-interrupt is accepted.
+self-ping. The wake nudge does **not** lead with `Esc` (the monitoring member's
+pane is never on a permission prompt), so a wake landing mid-routine no longer
+interrupts the monitoring member's own in-progress turn — the cosmetic
+self-interrupt earlier designs accepted is gone.
 
 ## Cadence and tick precision
 
@@ -164,7 +176,7 @@ flowchart LR
     Tick --> Tick
     Tick --> Stop["stop the task /<br/>delete the monitoring member /<br/>fleet delete"]
     Stop --> Clear["clear runtime row"]
-    Tick -. Esc + wake nudge .-> PaneMon["monitoring member pane"]
+    Tick -. wake nudge .-> PaneMon["monitoring member pane"]
 ```
 
 - **Spawned first.** The monitoring member is the **first** `member create` in
@@ -175,7 +187,7 @@ flowchart LR
   the monitoring member's pane environment (`$TMUX`, `$CAFLEET_DATABASE_URL`) and
   fails fast on startup if it cannot reach a tmux session.
 - **Run**: each tick scans the enrolled monitoring member, wakes it with the
-  `Esc`-safeguarded wake nudge when due, and rewrites the heartbeat.
+  wake nudge when due, and rewrites the heartbeat.
 - **Stop (first-out).** Teardown stops the monitor **before** the monitoring
   member's pane is killed: the Director messages the monitoring member to stop
   its `monitor start` background task (the task-stop delivers SIGTERM/SIGINT, so

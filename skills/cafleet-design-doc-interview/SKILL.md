@@ -109,7 +109,7 @@ Progress is tracked via `question.md` in the design document's directory (e.g., 
 | `Agent(subagent_type="Explore", prompt=...)` (Analyzer) | `cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> --name "Analyzer" --description "..." -- "<prompt>"` |
 | `SendMessage(to="Analyzer")` | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <analyzer-agent-id> --text "..."` |
 | `SendMessage(to="Director")` (from Analyzer) | `cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (facilitation policy) and the `cafleet-agent-team-supervision` skill (governance) for their Authorization-Scope Guard, idle semantics, Stall Response, and Cleanup policy. This team is **request-driven**: it does **not** run `cafleet monitor` or spawn a `--role monitor` member. The Analyzer wakes on the broker's inline-preview keystroke on every `message send`; the Director is woken by the Analyzer's replies and drives work by active polling (and `cafleet member ping` for manual recovery). |
+| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (heartbeat + facilitation) and the `cafleet-agent-team-supervision` skill (governance) for their Authorization-Scope Guard, idle semantics, Stall Response, and Cleanup policy. The heartbeat is run by the dedicated **monitoring member** (the first `member create`, `--role monitor --model sonnet`, which runs `cafleet monitor start` in its own pane) — the Director never runs the monitor itself. The monitoring member wakes on the loop and, when it finds the Director idle, re-engages it via `cafleet member nudge` (canonical conditional nudge). |
 | `TeamDelete` | `cafleet member delete --fleet-id <fleet-id> --member-id <analyzer-agent-id>`, then `cafleet fleet delete <fleet-id>` |
 | Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
@@ -151,9 +151,21 @@ cafleet fleet create --label "design-doc-interview-{slug}" --json
 
 Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids.
 
-#### 2b. Request-driven supervision (no monitor)
+#### 2b. Spawn the monitoring member (first-in)
 
-BEFORE spawning the Analyzer, load both the `cafleet-agent-team-monitoring` skill and the `cafleet-agent-team-supervision` skill (in that order) for their Authorization-Scope Guard, idle semantics, and Stall Response policy. This team is **request-driven**: do **not** run `cafleet monitor` or spawn a `--role monitor` member. The Analyzer wakes on the broker's inline-preview keystroke on every `message send`; the Director is woken by the Analyzer's replies and drives work by active polling (`cafleet member ping` for manual recovery).
+BEFORE spawning the Analyzer, load both the `cafleet-agent-team-monitoring` skill and the `cafleet-agent-team-supervision` skill (in that order) for their heartbeat, Authorization-Scope Guard, idle semantics, and Stall Response policy. Then spawn the dedicated monitoring member as the **first** `cafleet member create` in the fleet, with `--role monitor --model sonnet`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+
+Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the audit-file pattern in 2c, then spawn:
+
+```bash
+cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+  --name "monitor" \
+  --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
+  --role monitor --model sonnet \
+  --prompt-file ${BASE}/prompts/monitor-<UTC-compact>.md
+```
+
+See the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical spawn prompt and lifecycle. The monitoring member is stopped and deleted first in the 2f teardown (first-out).
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
@@ -162,6 +174,8 @@ Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt 
 > **Spawn-prompt audit file**: the spawn below writes the rendered prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>`. The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet-base-dir` skill § *No-bypass write protocol* and the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 #### 2d. Spawn the Analyzer
+
+**Gate**: do not spawn the Analyzer until the monitoring member's `ready: monitor live` handshake (2b) has arrived.
 
 ```
 You are the Analyzer in a design document interview team (CAFleet-native).
@@ -207,14 +221,15 @@ Poll `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id> 
 
 The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and wait again with `cafleet message poll --full`. After 2 corrective rounds, escalate to the user.
 
-#### 2f. Tear down the Analyzer
+#### 2f. Tear down the monitoring member and the Analyzer
 
-The Analyzer is stateless — keeping it alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received (no monitor to stop — this team is request-driven):
+The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping either alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received (first-out: stop the monitor, then delete the monitoring member first):
 
-1. `cafleet member delete --fleet-id <fleet-id> --member-id <analyzer-agent-id>`. The call blocks until the pane is gone (15 s timeout); on exit 2, follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
-2. `cafleet member list --fleet-id <fleet-id>` — the team's roster MUST be empty.
-3. `cafleet fleet delete <fleet-id>` (positional, no `--fleet-id` flag).
-4. `cafleet fleet list` — the fleet MUST not appear.
+1. Stop the monitoring member's `monitor start` background task (the heartbeat launched in 2b — there is no `monitor stop` command): message the monitoring member to stop its background task (the task-stop delivers SIGTERM/SIGINT, so the loop clears its runtime row), and wait for its confirmation. Do this **before** its pane is killed.
+2. `cafleet member delete --fleet-id <fleet-id> --member-id <monitoring-member-id>` **first**, then `cafleet member delete --fleet-id <fleet-id> --member-id <analyzer-agent-id>`. Each call blocks until the pane is gone (15 s timeout); on exit 2, follow the `member capture` + `send-input` recovery in the canonical protocol, or rerun with `--force`.
+3. `cafleet member list --fleet-id <fleet-id>` — the team's roster MUST be empty.
+4. `cafleet fleet delete <fleet-id>` (positional, no `--fleet-id` flag).
+5. `cafleet fleet list` — the fleet MUST not appear.
 
 #### 2g. Persist the question list to `question.md`
 

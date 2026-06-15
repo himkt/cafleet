@@ -21,7 +21,7 @@ Generate comprehensive research reports using a multi-layer CAFleet-orchestrated
 
 ## Prerequisites
 
-The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill and the `cafleet-agent-team-monitoring` skill and embeds them into every member's spawn prompt.
+The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill and the `cafleet-agent-team-monitoring` skill and embeds them into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model sonnet`) that owns the heartbeat and re-engages the idle Director — see Step 1.
 
 ## Output
 
@@ -77,9 +77,21 @@ cafleet --json fleet create --label "research-[topic-slug]"
 
 Capture `fleet_id` and `director.agent_id` from the response. Treat `fleet_id` as `[fleet-id]` and `director.agent_id` as `[director-agent-id]` for the rest of this skill.
 
-### Step 1: Supervision Model (Director — request-driven, no monitor)
+### Step 1: Supervision Model (Director — spawn the monitoring member first)
 
-Load the `cafleet` skill and the `cafleet-agent-team-monitoring` skill for their facilitation and Stall Response policy. This team is **request-driven**: do **not** run `cafleet monitor` or spawn a `--role monitor` member. Members wake on the broker's inline-preview keystroke on every `message send`; the Director is woken by members' replies and drives work by active polling (`cafleet member ping` for manual recovery).
+Load the `cafleet` skill and the `cafleet-agent-team-monitoring` skill for their heartbeat, facilitation, and Stall Response policy. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model sonnet`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+
+Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the audit-file pattern this skill uses for every spawn, then spawn:
+
+```bash
+cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
+  --name "monitor" \
+  --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
+  --role monitor --model sonnet \
+  --prompt-file ${BASE}/prompts/monitor-<UTC-compact>.md
+```
+
+See the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical spawn prompt and lifecycle. The monitoring member is stopped and deleted first in the Step 8 teardown (first-out).
 
 On each active turn, check `${OUTPUT_DIR}` for these expected deliverables:
 
@@ -309,26 +321,28 @@ After user approval, offer to create a presentation via `AskUserQuestion` (adapt
 
 ### Step 8: Finalize & Clean Up (Director)
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet fleet delete` must complete first, otherwise orphan `claude` processes linger. This team is request-driven, so there is no monitor to stop.
+Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet fleet delete` must complete first, otherwise orphan `claude` processes linger (first-out: stop the monitor, then delete the monitoring member first).
 
-1. **Delete every member** in dependency order — Researchers first, then any active Scout, then the Manager:
+1. **Stop the monitoring member's `monitor start` background task** (the heartbeat launched in Step 1 — there is no `monitor stop` command): message the monitoring member to stop its background task (the task-stop delivers SIGTERM/SIGINT, so the loop clears its runtime row), and wait for its confirmation. Do this **before** its pane is killed.
+2. **Delete every member** in first-out dependency order — the monitoring member first, then Researchers, then any active Scout, then the Manager:
    ```bash
+   cafleet member delete --fleet-id [fleet-id] --member-id [monitoring-member-id]
    cafleet member delete --fleet-id [fleet-id] --member-id [researcher-agent-id]
    cafleet member delete --fleet-id [fleet-id] --member-id [scout-agent-id]
    cafleet member delete --fleet-id [fleet-id] --member-id [manager-agent-id]
    ```
    Each call sends `/exit` to the pane and waits up to 15 s for it to close. On exit 2 (timeout), the pane buffer tail is printed on stderr — inspect with `cafleet member capture`, answer any prompt with `cafleet member send-input`, then re-run. As a last resort, rerun with `--force` to skip the wait and kill-pane immediately.
-2. **Verify the roster is empty**:
+3. **Verify the roster is empty**:
    ```bash
    cafleet member list --fleet-id [fleet-id]
    ```
-   If anyone remains, repeat step 1 for that member.
-3. **Delete the fleet**:
+   If anyone remains, repeat step 2 for that member.
+4. **Delete the fleet**:
    ```bash
    cafleet fleet delete [fleet-id]
    ```
    This soft-deletes the fleet and deregisters the root Director, Administrator, and any surviving members in one transaction.
-4. **Confirm**:
+5. **Confirm**:
    ```bash
    cafleet fleet list
    ```

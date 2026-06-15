@@ -88,15 +88,16 @@ Never store these IDs in shell variables (`export FLEET=...`). The Claude Code h
 
 If the user is not inside a tmux session, `cafleet fleet create` exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing. Surface this and stop — do NOT try to start a tmux session yourself.
 
-### 2.3 Choose a supervision model: request-driven or monitoring member
+### 2.3 Spawn the monitoring member first
 
 CAFleet members do not auto-poll. The broker delivers a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview` keystroke; that preview is the trigger that wakes the recipient. If the keystroke is missed (pane buffered, recipient mid-Bash, etc.), the message just sits in `INPUT_REQUIRED` until the recipient runs `cafleet message poll` themselves.
 
-The Director NEVER runs `cafleet monitor start` itself. Pick one of two supervision models for your skill:
+Every CAFleet-orchestrated skill runs a dedicated **monitoring member** — it is a session-level requirement, not a per-skill choice. The Director NEVER runs `cafleet monitor start` itself. Instead, the **first** `cafleet member create` in the fleet is a dedicated monitoring member spawned with `--role monitor --model sonnet`; it runs `cafleet monitor start` as a background task in its own pane and reports `ready: monitor live`, which **gates the first ordinary `member create`** (first-in). The monitor loop wakes **only** the monitoring member; on each wake the monitoring member captures the Director's pane, judges it active vs idle, and re-engages an idle Director on demand with a `cafleet message send` nudge. The Director is never keystroked by the loop. The `cafleet-agent-team-monitoring` skill documents the monitoring member's canonical spawn prompt and the first-in / first-out lifecycle; the heartbeat is identical on any backend (claude, codex, opencode).
 
-- **Request-driven (no monitor).** Most skills. Every member wakes on the broker's inline-preview keystroke fired on each `cafleet message send`, and the Director is woken by members' replies (also inline previews) and drives the work by active polling (with `cafleet member ping` for manual recovery). These skills run no `cafleet monitor` and spawn no monitoring member. Use this when the Director can always make forward progress from member replies alone.
+The monitoring member runs one of two idle-nudge routines (both spawn the monitoring member; the difference is only *when* it nudges the idle Director):
 
-- **Actively-supervised (monitoring member).** For skills whose Director must wake on a cadence that is NOT driven by member replies — e.g. polling an external service (CI, a code-review bot) that never keystrokes the Director's pane. The **first** `cafleet member create` is a dedicated monitoring member spawned with `--role monitor --model sonnet`; it runs `cafleet monitor start` as a background task in its own pane and reports `ready: monitor live`, which gates the first ordinary `member create`. The monitor loop wakes **only** the monitoring member; on each wake the monitoring member captures the Director's pane, judges it active vs idle, and re-engages an idle Director on demand with a `cafleet message send` nudge. The Director is never keystroked by the loop. The `cafleet-agent-team-monitoring` skill documents the monitoring member's canonical spawn prompt and the first-in / first-out lifecycle; the heartbeat is identical on any backend (claude, codex, opencode).
+- **Conditional idle-nudge (canonical).** The monitoring member re-engages the Director only when it can name what needs attention (un-acked inbox items, stalled members). Use this for skills whose Director makes forward progress from member replies — the conditional nudge surfaces real stalls without busy-waking the Director.
+- **Unconditional idle-nudge (extended).** For skills whose Director must wake on a cadence that is NOT driven by member replies — e.g. polling an external service (CI, a code-review bot) that never keystrokes the Director's pane — the monitoring member nudges the idle Director unconditionally, granting it a re-poll turn even when the inbox is empty. The `cafleet-design-doc-execute` skill's Copilot-review loop is the reference.
 
 ### 2.4 Spawn members with `cafleet member create --prompt-file <abs path>`
 
@@ -137,11 +138,11 @@ The spawned member opens its role file with `Read` on its first turn. The role f
 
 When the work is done, the Director MUST tear down in this exact order:
 
-1. **(Actively-supervised skills only) Stop the monitoring member first.** There is no `monitor stop` command — message the monitoring member to stop its `cafleet monitor start` background task (the task-stop delivers SIGTERM/SIGINT, so the loop runs its `finally` and clears its runtime row), wait for its confirmation, then `cafleet member delete` the monitoring member **first**, before any ordinary member. A tick that keystrokes into a tearing-down pane races the delete path. **Request-driven skills have no monitor and skip this step.**
+1. **Stop the monitoring member first.** There is no `monitor stop` command — message the monitoring member to stop its `cafleet monitor start` background task (the task-stop delivers SIGTERM/SIGINT, so the loop runs its `finally` and clears its runtime row), wait for its confirmation, then `cafleet member delete` the monitoring member **first**, before any ordinary member. A tick that keystrokes into a tearing-down pane races the delete path.
 2. **`cafleet member delete --member-id <id>`** for every remaining (ordinary) member. This sends `/exit` to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` per member.
 3. **`cafleet fleet delete <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active agent in the fleet (root Director + Administrator + remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved. `fleet delete` makes any still-running loop self-terminate on its next tick, so step 1 is belt-and-suspenders.
 
-Order matters. For actively-supervised skills, stop the monitoring member's monitor and delete it before the ordinary members so a tick cannot keystroke into a tearing-down pane or race the member-delete path. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
+Order matters. Stop the monitoring member's monitor and delete it before the ordinary members so a tick cannot keystroke into a tearing-down pane or race the member-delete path. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
 
 ---
 
@@ -323,14 +324,14 @@ The `<task-id>` is the full UUID returned by `cafleet --json message poll --agen
 
 ## 6. Worked example — `summarize-pr`
 
-This is a tiny end-to-end CAFleet-orchestrated skill called `summarize-pr` (single Director + single member named Summarizer). The example uses fake `<slug>`, `<fleet-id>`, etc. and is read-only — it is illustrative, not a template you copy. Read it to understand how all five sub-systems fit together; then write your own skill from scratch.
+This is a tiny end-to-end CAFleet-orchestrated skill called `summarize-pr` (single Director + a mandatory monitoring member + one ordinary member named Summarizer). The example uses fake `<slug>`, `<fleet-id>`, etc. and is read-only — it is illustrative, not a template you copy. Read it to understand how all five sub-systems fit together; then write your own skill from scratch.
 
 ### Skill purpose
 
 The user invokes `/summarize-pr <pr-number>`. The Director:
 
 1. Fetches the PR diff via `gh pr diff <pr-number>`.
-2. Spawns a single Summarizer member to digest the diff, identify the top 3 risk areas, and write a 200-word summary to a file.
+2. Spawns the monitoring member first, then a Summarizer member to digest the diff, identify the top 3 risk areas, and write a 200-word summary to a file.
 3. Reviews the summary, asks the user for approval, then tears down.
 
 ### Resolved task-relpath
@@ -356,7 +357,18 @@ Substitute `abc...` and `def...` literally into every subsequent call.
 
 ### Supervision model
 
-`summarize-pr` is **request-driven** (§ 2.3): the Director spawns one member, sends it work (waking it via the broker's inline-preview keystroke), and acts on its reply. There is no `cafleet monitor` and no monitoring member.
+Like every CAFleet-orchestrated skill, `summarize-pr` spawns a dedicated monitoring member **first**, before the Summarizer (§ 2.3). It uses the canonical conditional-idle-nudge routine — the Director makes forward progress from the Summarizer's replies, and the monitoring member is the heartbeat backstop that surfaces a stall. The Director never runs `cafleet monitor start` itself.
+
+```bash
+# First member create: the monitoring member (canonical conditional-nudge routine).
+cafleet --json member create --fleet-id abc... --agent-id def... \
+  --name "monitor" --description "Monitoring member: owns the heartbeat" \
+  --role monitor --model sonnet \
+  --prompt-file /repo/researches/pr-1234/prompts/monitor-20260516T003300Z.md
+# → {"agent_id": "mon...", ...}
+```
+
+Wait for the monitoring member's `ready: monitor live` handshake before spawning the Summarizer (first-in gate).
 
 ### Render the Summarizer spawn prompt
 
@@ -420,16 +432,18 @@ cafleet message send --fleet-id abc... --agent-id def... --to jkl... \
 ### Teardown
 
 ```bash
-# request-driven team: no monitor to stop
+# Stop the monitor's background task and delete the monitoring member FIRST
+# (message the monitoring member to stop its `cafleet monitor start` task; wait for confirmation).
+cafleet member delete --fleet-id abc... --member-id mon...
 cafleet member delete --fleet-id abc... --member-id jkl...
 cafleet fleet delete abc...
 ```
 
-Order matters: delete members, then the fleet. This team is request-driven, so there is no monitor to stop; an actively-supervised team would stop the monitoring member's monitor task and delete the monitoring member first (see § 2.5).
+Order matters: stop the monitoring member's `monitor start` task and delete the monitoring member first (first-out), then delete the ordinary Summarizer, then delete the fleet (see § 2.5).
 
 ### What this example demonstrates
 
-- All five integration sub-systems fire (resolve BASE → bootstrap fleet → choose supervision model [request-driven: no monitor] → spawn member → tear down).
+- All five integration sub-systems fire (resolve BASE → bootstrap fleet → spawn the monitoring member first → spawn the ordinary member → tear down monitor-first).
 - The audit file at `${BASE}/prompts/summarizer-<ts>.md` lives under the task folder, not the repo root.
 - The cafleet body uses the verb + pointer schema (`complete (doc)`, `ready (doc)`, `addressed (doc)`).
 - The substantive revision request rides as a `COMMENT(director)` marker in the document, not in the cafleet body.
@@ -481,13 +495,13 @@ Fix: never fall back to `/tmp` silently. The `<unset>` sentinel is a hard stop, 
 
 Symptom: orphan `claude` processes lingering in tmux panes after the skill completes. The user closes the panes manually. On the next `cafleet fleet create`, the panes are rebound and the orphan members re-emerge.
 
-Fix: tear down in this exact order — (actively-supervised skills only) stop the monitoring member's `cafleet monitor start` task and `cafleet member delete` the monitoring member first, then `cafleet member delete` for every ordinary member, then `cafleet fleet delete`. Request-driven skills have no monitor to stop. See § 2.5.
+Fix: tear down in this exact order — stop the monitoring member's `cafleet monitor start` task and `cafleet member delete` the monitoring member first, then `cafleet member delete` for every ordinary member, then `cafleet fleet delete`. See § 2.5.
 
-### 7.8 Spawning ordinary members before the monitoring member is live (actively-supervised skills)
+### 7.8 Spawning ordinary members before the monitoring member is live
 
-Symptom: in an actively-supervised skill, ordinary members are spawned before the monitoring member's `ready: monitor live` handshake, so the heartbeat backstop is not yet running when they begin work.
+Symptom: ordinary members are spawned before the monitoring member's `ready: monitor live` handshake, so the heartbeat backstop is not yet running when they begin work.
 
-Fix: in actively-supervised skills the **first** `cafleet member create` is the `--role monitor` monitoring member; wait for its `ready: monitor live` message before spawning any ordinary member. The Director never runs `cafleet monitor start` itself. Request-driven skills have no monitor and no monitoring member, so this pitfall does not apply.
+Fix: the **first** `cafleet member create` is the `--role monitor` monitoring member; wait for its `ready: monitor live` message before spawning any ordinary member. The Director never runs `cafleet monitor start` itself.
 
 ---
 

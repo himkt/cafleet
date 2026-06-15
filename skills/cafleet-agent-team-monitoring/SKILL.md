@@ -21,11 +21,11 @@ Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id
 
 CAFleet members do not act autonomously. The Director drives the team — and the Director needs a way to wake itself up periodically to check inboxes, dispatch queued work, and detect stalls. That heartbeat is supplied by **`cafleet monitor`**, a per-fleet `scan → ping → sleep` loop that the fleet's dedicated **monitoring member** runs as a **background task** in its own pane. Because it is just a backgrounded command, the heartbeat is **backend-agnostic** — a root Director on `claude`, `codex`, or `opencode` gets the identical tick. There is no per-backend scheduling asymmetry: the monitor is the one mechanism for every backend.
 
-The loop wakes **only the monitoring member** — never the root Director and never ordinary members. Every ping is **`Esc`-safeguarded**: the loop presses `Escape`, lets the pane settle ~0.1 s, then types the literal text and `Enter`, so a pane sitting on a pending permission-approval prompt dismisses the prompt instead of having the trailing `Enter` confirm it. The monitoring member is pinged **unconditionally** on its interval (default 60 s) once due; `pending_count` is shown in `monitor status` but does not gate the ping. The keystroke is a single-line *wake nudge* instructing the monitoring member to run its capture-classify-reengage routine (see [The monitoring member](#the-monitoring-member)).
+The loop wakes **only the monitoring member** — never the root Director and never ordinary members. The wake nudge does **not** lead with `Esc`: it keystrokes only into the monitoring member's own pane, which runs a read-only routine under `dontAsk` and is never parked on a permission-approval prompt, so a leading `Esc` would merely self-interrupt an in-progress routine. (The `Esc` safeguard instead lives where a target may be on a prompt — the broker's message-delivery inline preview and `cafleet member ping`.) The monitoring member is pinged **unconditionally** on its interval (default 60 s) once due; `pending_count` is shown in `monitor status` but does not gate the ping. The keystroke is a single-line *wake nudge* instructing the monitoring member to run its capture-classify-reengage routine (see [The monitoring member](#the-monitoring-member)).
 
 See the `cafleet` skill and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring/) for the full command surface and policy. **The monitoring member — not the Director — runs `cafleet monitor start`** (see § Monitor Lifecycle).
 
-**The Director is never woken by the loop.** It is re-engaged only on demand: by the monitoring member's idle nudge (an `Esc`-safeguarded `cafleet message send` when the routine classifies the Director as idle), and by the broker's inline-preview keystroke on every inbound `cafleet message send`. When woken by one of those, the Director runs the entire 5-step facilitation loop (poll → ACK → dispatch → health-check → escalate), not just an inbox read. The monitor decides only *when* to wake the monitoring member; this skill defines *what* the Director does once re-engaged.
+**The Director is never woken by the loop.** It is re-engaged only on demand: by the monitoring member's idle nudge (`cafleet member nudge`, which persists an ACKable broker task **and** fires the hardened, `Esc`-safeguarded inline preview, when the routine classifies the Director as idle), and by the broker's inline-preview keystroke on every inbound `cafleet message send`. When woken by one of those, the Director runs the entire 5-step facilitation loop (poll → ACK → dispatch → health-check → escalate), not just an inbox read. The monitor decides only *when* to wake the monitoring member; this skill defines *what* the Director does once re-engaged.
 
 ### How ordinary members are woken
 
@@ -72,8 +72,11 @@ On each wake (a "[monitor] wake: ..." nudge keystroked into this pane by the loo
      any ordinary members that look stalled (read-only
      cafleet member capture --fleet-id {fleet_id} --member-id <member-id>). Then
      re-engage the DIRECTOR with a concise nudge naming what needs attention
-     (un-acked inbox items, stalled members):
-     cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "<summary>"
+     (un-acked inbox items, stalled members). Use cafleet member nudge — it
+     persists an ACKable task AND fires the hardened, Esc-safeguarded inline
+     preview, so a Director sitting on a permission prompt has it dismissed
+     before the preview's Enter lands:
+     cafleet member nudge --fleet-id {fleet_id} --agent-id {agent_id} --member-id {director_agent_id} --text "<summary>"
    Never keystroke task instructions into an ordinary member's pane.
 
 Teardown: when the Director messages you to wrap up, stop your `monitor start`
