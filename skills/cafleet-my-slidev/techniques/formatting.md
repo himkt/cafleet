@@ -1,6 +1,6 @@
 # Formatting Components
 
-`<Admonition>` callout boxes, `<Highlight>` inline emphasis, and per-slide `fontSize` control. For Slidev syntax, refer to /slidev — **NEVER READ FILES DIRECTLY**.
+`<Admonition>` callout boxes, `<Highlight>` inline emphasis, and per-slide `fontSize` control. For Slidev syntax, refer to /slidev — do not read Slidev's upstream source files directly.
 
 ## Admonition
 

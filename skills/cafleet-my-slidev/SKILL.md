@@ -5,7 +5,7 @@ description: Create Slidev presentations using the custom theme with cover, bull
 
 # Custom Slidev Theme Presentation Guide
 
-Theme location: `theme/` inside this skill's directory. For Slidev syntax, refer to /slidev or /slidev:slidev. **NEVER READ FILES DIRECTLY**.
+Theme location: `theme/` inside this skill's directory. For Slidev syntax, refer to /slidev or /slidev:slidev — do not read Slidev's upstream source files directly.
 
 ## Headmatter
 

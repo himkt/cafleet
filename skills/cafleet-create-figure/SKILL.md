@@ -89,7 +89,15 @@ Use the Read tool to load the output PNG from `${OUTPUT_DIR}` and show it to the
 
 ## Data handling
 
-Read input from `${DATA_DIR}` with standard Python — `list(csv.DictReader(open(DATA_DIR / "sales.csv")))` for CSV, `json.load(open(DATA_DIR / "metrics.json"))` for JSON.
+Read input from `${DATA_DIR}` with standard Python, using a `with` block so each file handle closes:
+
+```python
+with open(DATA_DIR / "sales.csv") as f:
+    rows = list(csv.DictReader(f))
+
+with open(DATA_DIR / "metrics.json") as f:
+    data = json.load(f)
+```
 
 ## Chart Type Selection
 
