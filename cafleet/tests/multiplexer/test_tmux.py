@@ -793,7 +793,9 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     literal_call = captured[0]
     assert literal_call[:5] == ["tmux", "send-keys", "-t", "%7", "-l"]
     payload = literal_call[5]
-    # Single line — a raw newline under tmux ``-l`` would submit mid-payload.
+    # Single line by design — the wake nudge is a one-line instruction with no
+    # embedded newline (per design 0000092 §3 an embedded ``\n`` under ``-l``
+    # soft-inserts, so single-line is a shape choice, not a submit-safety guard).
     assert "\n" not in payload
     assert "\r" not in payload
     # A monitoring-member wake nudge (``[monitor]`` provenance tag), not the
