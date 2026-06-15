@@ -72,9 +72,9 @@ Pick the right format — don't default to bullets or bar charts.
 
 ## Text Emphasis
 
-Follow the **Color Discipline** and **Usage Rules** sections in `techniques/highlight.md`. Key rules:
+Follow the **Color Discipline** and **Usage Rules** subsections under § Highlight in `techniques/formatting.md`. Key rules:
 
-- **Always use the `Highlight` component** for colored numbers and keywords. The actual slide.md syntax is the Vue tag form documented in the my-slidev skill's `techniques/highlight.md` file. Never use `span class="c-..."` markup directly.
+- **Always use the `Highlight` component** for colored numbers and keywords. The actual slide.md syntax is the Vue tag form documented in the my-slidev skill's `techniques/formatting.md` file. Never use `span class="c-..."` markup directly.
 - **Max 3 per slide.** More than 3 → move data to a table or chart.
 - **Semantic color**: positive (green), negative (red), neutral (blue), caution (orange). Ask "is this good or bad for the audience?"
 

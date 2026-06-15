@@ -1,7 +1,7 @@
 # Aggressively Simplify the `skills/` Tree (Tier C)
 
 **Status**: Approved
-**Progress**: 9/17 tasks complete
+**Progress**: 12/17 tasks complete
 **Last Updated**: 2026-06-15
 
 ## Overview
@@ -263,9 +263,9 @@ This change edits the orchestrating skills (`cafleet-design-doc-create`/`-execut
 
 ### Step 9: Cluster I — `cafleet-my-slidev/` SKILL + techniques consolidation
 
-- [ ] Slim `SKILL.md` (collapse 3 dispatch recipes → 1, dedup the `theme:` path paragraph, cut Generation-Workflow↔Output-Constraints + Layout-Examples padding). <!-- completed: -->
-- [ ] Create `techniques/formatting.md` (merge admonition + highlight + font-size; dedup color tables; keep all type/props/fontSize tables + bold-redundancy rule); trim `techniques/math-formulas.md` (strip generic KaTeX → `/slidev`; keep formula-wrap rule + table + 1–2 examples) and `techniques/two-column-layouts.md` (1 example; keep all tables); **delete** `admonition.md`, `highlight.md`, `font-size.md`, `animations.md`. <!-- completed: -->
-- [ ] Repoint all four pointer-sources (8 line-instances): SKILL.md techniques table (4 rows), `math-formulas.md`→`formatting.md`, the internal admonition↔highlight ref, and **`research-presentation/roles/presentation.md:75,77`→`techniques/formatting.md`** (V5). <!-- completed: -->
+- [x] Slim `SKILL.md` (collapse 3 dispatch recipes → 1, dedup the `theme:` path paragraph, cut Generation-Workflow↔Output-Constraints + Layout-Examples padding). <!-- completed: 2026-06-15T15:13 -->
+- [x] Create `techniques/formatting.md` (merge admonition + highlight + font-size; dedup color tables; keep all type/props/fontSize tables + bold-redundancy rule); trim `techniques/math-formulas.md` (strip generic KaTeX → `/slidev`; keep formula-wrap rule + table + 1–2 examples) and `techniques/two-column-layouts.md` (1 example; keep all tables); **delete** `admonition.md`, `highlight.md`, `font-size.md`, `animations.md`. <!-- completed: 2026-06-15T15:13 -->
+- [x] Repoint all four pointer-sources (8 line-instances): SKILL.md techniques table (4 rows), `math-formulas.md`→`formatting.md`, the internal admonition↔highlight ref, and **`research-presentation/roles/presentation.md:75,77`→`techniques/formatting.md`** (V5). <!-- completed: 2026-06-15T15:13 -->
 
 ### Step 10: Cluster J — `cafleet-research-report/`
 
