@@ -92,6 +92,8 @@ Use the Read tool to load the output PNG from `${OUTPUT_DIR}` and show it to the
 Read input from `${DATA_DIR}` with standard Python, using a `with` block so each file handle closes:
 
 ```python
+import csv, json
+
 with open(DATA_DIR / "sales.csv") as f:
     rows = list(csv.DictReader(f))
 

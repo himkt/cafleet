@@ -405,6 +405,6 @@ This is the post-promotion equivalent of the named `Agent(subagent_type="web-res
 
 #### Dispatching this agent (codex)
 
-On codex (which reads SKILL.md directly — see `cafleet/docs/reference/coding-agents/codex.md`), either **inline-follow** (the agent reads the embedded `## Spawnable Agents > web-researcher` block and follows the spec in its own turn, no new agent spawned) or **member-spawn** a dedicated codex member via `cafleet member create --coding-agent codex` with the spec body pasted into the positional prompt argument (positional `[PROMPT_ARGV]...`; there is no `--spawn-prompt-from-text` flag).
+On codex (which reads SKILL.md directly — see `docs/reference/coding-agents/codex.md`), either **inline-follow** (the agent reads the embedded `## Spawnable Agents > web-researcher` block and follows the spec in its own turn, no new agent spawned) or **member-spawn** a dedicated codex member via `cafleet member create --coding-agent codex` with the spec body pasted into the positional prompt argument (positional `[PROMPT_ARGV]...`; there is no `--spawn-prompt-from-text` flag).
 
 $ARGUMENTS
