@@ -4,6 +4,7 @@ import pytest
 
 from cafleet import broker
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
+from cafleet.multiplexer import tmux as multiplexer_tmux
 from cafleet.multiplexer.tmux import TmuxMultiplexer
 
 
@@ -175,3 +176,35 @@ def test_send_message__auto_fire_never_calls_send_poll_trigger_on_success(
     sid, sender, recipient = _setup_two_agents()
     broker.send_message(sid, sender, recipient, "hello")
     assert poll_trigger_call_count["n"] == 0
+
+
+def test_send_message__real_inline_preview_keystroke_is_esc_first(monkeypatch):
+    """End-to-end through ``broker.send_message`` (design 0000092 §1): with the
+    REAL ``send_inline_preview`` helper in play (no method-level stub), the
+    keystroke delivered to the recipient's pane leads with `Escape` so a
+    recipient parked on a pending permission-approval prompt dismisses it before
+    any payload character is typed and the trailing Enter can never confirm it.
+
+    Guards that the §1 hardening reaches every ``message send`` recipient over
+    the broker path — not just at the unit-level helper. This is exactly the
+    Background incident's failure path (a nudge confirming the Director's
+    ``git push`` prompt), now closed."""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+    captured: list[list[str]] = []
+    monkeypatch.setattr(
+        multiplexer_tmux,
+        "_run",
+        lambda args, **_kw: captured.append(list(args)) or "",
+    )
+
+    sid, sender, recipient = _setup_two_agents()  # recipient pane is "%2"
+    result = broker.send_message(sid, sender, recipient, "cancel it (Esc)")
+    assert result["notification_sent"] is True
+
+    # Only the recipient's pane (%2) is keystroked; it receives Escape FIRST,
+    # then the literal payload, then the trailing Enter submit.
+    pane_calls = [argv for argv in captured if argv[3:4] == ["%2"]]
+    assert pane_calls[0] == ["tmux", "send-keys", "-t", "%2", "Escape"]
+    assert pane_calls[1][:5] == ["tmux", "send-keys", "-t", "%2", "-l"]
+    assert pane_calls[-1] == ["tmux", "send-keys", "-t", "%2", "Enter"]

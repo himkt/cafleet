@@ -633,7 +633,7 @@ def test_send_bash_command__argv_and_validation(
         assert captured[1] == ["tmux", "send-keys", "-t", "%5", "Enter"]
 
 
-# --- Esc keystroke safeguard (design 0000090 §1, §2) ---------------------------
+# --- Esc keystroke safeguard (design 0000090 §1, §2; inverted by 0000092) ------
 
 
 def test_send_literal_then_enter__esc_first_prepends_escape_and_settle(monkeypatch):
@@ -741,8 +741,11 @@ def test_send_wake_trigger__return_branches_and_argv(
     expected_result,
     expect_run_called,
 ):
-    """`send_wake_trigger` mirrors `send_poll_trigger`'s return branches and is
-    `esc_first=True`: the success keystroke leads with `Escape` (spec §2)."""
+    """`send_wake_trigger` mirrors `send_poll_trigger`'s return branches but,
+    after design 0000092 §2, emits NO leading `Escape`: the monitoring member's
+    own pane (the wake target) is never parked on a permission-approval prompt,
+    so the safeguard would be a pointless self-interrupt. The success keystroke
+    is the plain `-l <payload>` → `Enter` pair."""
     monkeypatch.setattr("shutil.which", lambda _: which_return)
     monkeypatch.setattr("time.sleep", lambda _secs: None)
     captured: list[list[str]] = []
@@ -761,10 +764,10 @@ def test_send_wake_trigger__return_branches_and_argv(
     )
     assert result is expected_result
     if scenario == "success_returns_true":
-        assert len(captured) == 3
-        assert captured[0] == ["tmux", "send-keys", "-t", "%7", "Escape"]
-        assert captured[1][:5] == ["tmux", "send-keys", "-t", "%7", "-l"]
-        assert captured[2] == ["tmux", "send-keys", "-t", "%7", "Enter"]
+        assert len(captured) == 2
+        assert captured[0][:5] == ["tmux", "send-keys", "-t", "%7", "-l"]
+        assert captured[1] == ["tmux", "send-keys", "-t", "%7", "Enter"]
+        assert all("Escape" not in call for call in captured)
     elif not expect_run_called:
         assert captured == []
 
@@ -784,7 +787,10 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     result = _tmux.send_wake_trigger(target_pane_id="%7", fleet_id=59, agent_id=247)
     assert result is True
 
-    literal_call = captured[1]
+    # After 0000092 §2 the wake keystroke leads with the literal payload — no
+    # leading `Escape` — so the literal call is the first captured send-keys.
+    assert all("Escape" not in call for call in captured)
+    literal_call = captured[0]
     assert literal_call[:5] == ["tmux", "send-keys", "-t", "%7", "-l"]
     payload = literal_call[5]
     # Single line — a raw newline under tmux ``-l`` would submit mid-payload.
@@ -801,16 +807,6 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     [
         ("send_exit", lambda t: t.send_exit(target_pane_id="%7")),
         (
-            "send_inline_preview",
-            lambda t: t.send_inline_preview(
-                target_pane_id="%7",
-                task_id=1,
-                sender_id=2,
-                ts="2026-06-14T00:00:00+00:00",
-                text="hello",
-            ),
-        ),
-        (
             "send_bash_command",
             lambda t: t.send_bash_command(target_pane_id="%7", command="git status"),
         ),
@@ -823,11 +819,14 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     ],
 )
 def test_esc_first_false_helpers__never_send_escape(monkeypatch, helper_name, invoke):
-    """The four §1 opt-out helpers — `send_exit`, `send_inline_preview`,
-    `send_bash_command`, and `send_freetext_and_submit` — must NOT send an `Esc`
-    first. An Escape before `/exit`, an inline preview, `! <cmd>`, or the
-    freetext answer to an AskUserQuestion prompt would mis-fire (spec §1: the
-    safeguard is opt-in, ping helpers only)."""
+    """The three opt-out helpers — `send_exit`, `send_bash_command`, and
+    `send_freetext_and_submit` — must NOT send an `Esc` first. An `Escape`
+    before `/exit` or `! <cmd>` would strip a literal the agent must keep, and
+    the freetext helper deliberately ANSWERS a live AskUserQuestion prompt that
+    an `Esc` would dismiss (design 0000092 §1 keystroke-helper inventory).
+
+    `send_inline_preview` is deliberately ABSENT here — after 0000092 §1 it now
+    leads with `Esc` (asserted in test_tmux_send_inline_preview.py)."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
     monkeypatch.setattr("time.sleep", lambda _secs: None)
     captured: list[list[str]] = []

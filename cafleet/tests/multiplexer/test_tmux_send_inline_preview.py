@@ -61,7 +61,9 @@ def test_send_inline_preview__happy_path_envelope_body_and_submit(monkeypatch):
         idx = argv.index("-t")
         assert argv[idx + 1] == "%9"
 
-    # Final call submits with Enter; submit_delay sleep happened.
+    # After design 0000092 §1 the inline preview leads with `Escape` (the
+    # universal permission-prompt safeguard) and submits with the trailing Enter.
+    assert captured[0] == ["tmux", "send-keys", "-t", "%9", "Escape"]
     assert captured[-1] == ["tmux", "send-keys", "-t", "%9", "Enter"]
     assert any(s > 0 for s in sleep_calls)
 
@@ -70,6 +72,73 @@ def test_send_inline_preview__happy_path_envelope_body_and_submit(monkeypatch):
     for argv in captured:
         if argv[:4] == ["tmux", "send-keys", "-t", "%9"] and len(argv) == 5:
             assert argv[4] != "4"
+
+
+def test_send_inline_preview__esc_first_full_sequence(monkeypatch):
+    """Design 0000092 §1: the inline preview now leads with `Escape` so a
+    recipient pane parked on a pending permission-approval prompt dismisses it
+    BEFORE any payload character is typed and the trailing Enter can never
+    confirm it. Full shape: Escape → settle → `-l <payload>` → submit → Enter,
+    identical in shape to `send_poll_trigger`/`member ping`."""
+    captured = _capture_run(monkeypatch)
+    sleeps: list[float] = []
+    monkeypatch.setattr("time.sleep", lambda secs: sleeps.append(secs))
+
+    result = _tmux.send_inline_preview(
+        target_pane_id="%4",
+        task_id=7,
+        sender_id=8,
+        ts="2026-06-15T00:00:00+00:00",
+        text="body",
+    )
+    assert result is True
+
+    # Exactly three send-keys calls: Escape, the literal payload, Enter.
+    assert len(captured) == 3
+    assert captured[0] == ["tmux", "send-keys", "-t", "%4", "Escape"]
+    assert captured[1][:5] == ["tmux", "send-keys", "-t", "%4", "-l"]
+    assert captured[2] == ["tmux", "send-keys", "-t", "%4", "Enter"]
+    # Escape settles first, then the literal/Enter submit delay.
+    assert sleeps == [
+        multiplexer_tmux._ESC_SETTLE_DELAY,
+        multiplexer_tmux._SUBMIT_DELAY,
+    ]
+
+
+def test_send_inline_preview__newline_soft_insert_single_submit(monkeypatch):
+    """Design 0000092 §3 / NOTE 2 (anticipated soft-insert branch): the 2-line
+    payload shape is preserved — the envelope/body separator stays a single
+    embedded ``\\n`` carried by ONE ``-l`` keystroke, and the message is
+    submitted by exactly ONE trailing ``Enter``. The embedded newline does NOT
+    fragment delivery into a second submit; with the §1 leading `Escape`
+    guaranteeing the prompt is dismissed first, the 2-line form is safe."""
+    captured = _capture_run(monkeypatch)
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+
+    _tmux.send_inline_preview(
+        target_pane_id="%4",
+        task_id=11,
+        sender_id=22,
+        ts="2026-06-15T00:00:00+00:00",
+        text="single line body",
+    )
+
+    # Exactly one literal (`-l`) keystroke carries the whole 2-line payload …
+    literal_payloads = _literal_payloads(captured)
+    assert len(literal_payloads) == 1
+    payload = literal_payloads[0]
+    # … with exactly one embedded newline (the envelope/body separator) — the
+    # 2-line shape, not a single-line collapse.
+    assert payload.count("\n") == 1
+    envelope, _, body_line = payload.partition("\n")
+    assert envelope.startswith(ENVELOPE_PREFIX)
+    assert body_line == "single line body"
+
+    # Exactly one submit: a single trailing `Enter` keystroke, no second submit
+    # produced by the embedded newline.
+    enter_calls = [argv for argv in captured if argv[-1:] == ["Enter"]]
+    assert len(enter_calls) == 1
+    assert captured[-1] == ["tmux", "send-keys", "-t", "%4", "Enter"]
 
 
 @pytest.mark.parametrize(
