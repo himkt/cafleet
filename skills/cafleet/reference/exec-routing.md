@@ -11,11 +11,7 @@ The fallback fires only when the coding-agent harness deny-list rejects a Bash i
 | [`cafleet member exec`](director.md#member-exec) | **Shell-dispatch** with operator-controlled `COMMAND` argument. Keystrokes `! <cmd>` + `Enter` into the member's pane via the coding agent's `!` shortcut. | `permissions.ask` — every invocation prompts the operator. |
 | [`cafleet member ping`](director.md#member-ping) | **Inbox-poll-only** nudge. Keystrokes `cafleet message poll --fleet-id <s> --agent-id <m>` + `Enter` into the member's pane. Action is fixed by the subcommand name; no operator-controlled keystroke body. | `permissions.allow` — pre-approved. |
 
-`member exec` is for shell dispatch. `member ping` is for nudging a member that missed an inline-preview keystroke (e.g. its TUI was in a non-input state when the preview arrived). Do not conflate them.
-
 ## Reconsider before routing
-
-Most denials happen because the underlying command is wrong — wrong flag, wrong path, or unnecessary altogether. Before routing, the member MUST reconsider. Only route a command that is **genuinely correct AND genuinely needed AND still rejected** by the harness.
 
 | Step | Member action |
 |---|---|
@@ -74,10 +70,3 @@ Process member denial-fallback requests in **poll order, one at a time**. Two `m
 ### Cross-fleet boundary
 
 `cafleet member exec` reaches any member of the same `--fleet-id` — there is no caller-auth check. The only boundary is fleet isolation: a `--member-id` that does not belong to `--fleet-id` exits 1 with `Error: Agent <member-id> not found`. A denial-fallback request from a member of your own fleet is always dispatchable; a request that names a member outside your fleet cannot be served (the `member exec` will return "not found"), so reply to the sender with a plain `cafleet message send` explaining the mismatch instead.
-
-## Role-specific reading
-
-The fallback has two perspectives. Read **only the file matching your role**:
-
-- **If you are a member** (spawned by `cafleet member create`) → read [`roles/member.md`](../roles/member.md). Covers the default "run it yourself via Bash" path, the reconsider-then-route protocol when Bash is denied, and forbidden behaviors.
-- **If you are a Director** → read [`roles/director.md`](../roles/director.md). Covers how to recognize a member's denial-fallback request, the `cafleet member exec` dispatch, the ping follow-up, and the cross-fleet boundary.

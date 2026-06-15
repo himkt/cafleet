@@ -15,15 +15,7 @@ cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42"
 
 cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
-  --name Claude-B --description "Reviewer for PR #42" \
-  -- "Review PR #42, post feedback via cafleet message send, and deregister on completion."
-
-cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Codex-A --description "Reviewer for PR #42" --coding-agent codex
-
-cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
-  --name Drafter --description "Writes and revises the design document" \
-  --prompt-file /abs/path/to/<BASE>/prompts/drafter-20260514T145000Z.md
 
 cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name monitor --description "Monitoring member: owns the heartbeat" \
@@ -63,10 +55,6 @@ When the operator names a model rather than a backend ("please create a member w
 | Any name containing a `/` (e.g. `anthropic/claude-sonnet-4-6`, `openai/gpt-5.5`, `opencode/big-pickle`) | `opencode` | `--coding-agent opencode --model <provider-id>/<model-id>` |
 | Anything else — no shape match (e.g. `gemini-2.5-pro`, `o3-mini`, any unfamiliar bare name) | none — do NOT infer | Ask the operator which backend to use (or for the explicit `--coding-agent` + `--model` pair) before spawning |
 
-Examples: "please create a member with sonnet" → `--coding-agent claude --model sonnet`; "with gpt-5.4-mini" → `--coding-agent codex --model gpt-5.4-mini`; "with anthropic/claude-sonnet-4-6" → `--coding-agent opencode --model anthropic/claude-sonnet-4-6`.
-
-The model names in this table are examples, not a catalog cafleet enforces — `claude` / `codex` forward any string verbatim, and `opencode` validates only the `<provider-id>/<model-id>` format, not catalog membership.
-
 **Template safety**: because custom prompts go through `str.format()` whether or not they contain placeholders, any literal `{` or `}` in the prompt text must be doubled (`{{` / `}}`).
 
 **Spawn prompt size limit (use `--prompt-file` for templated identity blocks)**: cafleet hands the prompt to `tmux split-window` as a single positional argument, subject to `ARG_MAX`. A large inline positional prompt surfaces as `tmux command failed: command too long` and rolls back the agent registration once the shell-quoted prompt grows past a few KB. `--prompt-file` avoids this: only the path flows through the argv, and cafleet reads the file, runs `str.format()`, and hands the substituted text to `tmux split-window` directly. Use `--prompt-file` for every templated identity block + role-file-by-path prompt. Inline `-- "<prompt>"` remains a first-class input for trivial one-line ad-hoc spawns (e.g. test scripts, doctor flows).
@@ -81,11 +69,7 @@ Whichever input mode is used, keep the prompt body itself focused: role-file pat
 - Same-second collisions: skills MUST NOT overwrite an existing file. If the target path already exists, append `_2`, `_3`, … until the name is unique.
 - The pre-spawn file IS the audit artifact — there is no second post-spawn re-render write. The file path used for `--prompt-file` is the single source of truth for what was spawned, in perpetuity.
 
-**`${BASE} == <unset>` fallback**: when the Director's startup-time `${BASE}` resolution returned the `<unset>` sentinel (the absolute-path argument branch of the `cafleet-base-dir` skill's Step 0), the team skill MUST follow the guarded-skip protocol from the `cafleet-base-dir` skill § *No-bypass write protocol*:
-
-1. Skip the `<BASE>/prompts/<role>-<ts>.md` write entirely (do NOT compute the path).
-2. Fall back to the inline positional `prompt_argv` form — the size limit above still applies, so the skill MUST keep the inline-form prompt under ~2 KB (path-by-reference for role docs, short identity block).
-3. Emit the anchorless status `audit-disabled no BASE in spawn prompt` once per spawn cycle so the operator sees that the audit channel is unavailable. The spawn itself still proceeds.
+**`${BASE} == <unset>` fallback**: when startup-time `${BASE}` resolution returned the `<unset>` sentinel, follow the guarded-skip protocol in the `cafleet-base-dir` skill § *No-bypass write protocol* — skip the `<BASE>/prompts/<role>-<ts>.md` write, fall back to the inline positional form (keep it under ~2 KB, path-by-reference), and emit the anchorless status `audit-disabled no BASE in spawn prompt` once per spawn cycle. The spawn still proceeds.
 
 **Backtick caveat (harness-dependent)**: Some operator environments (including this project) ship a Bash-validator hook that rejects any backtick in a `Bash` invocation — even inside single-quoted positional arguments — because the validator treats backticks as command-substitution syntax. When such a harness is in play, strip backticks from spawn-prompt bodies (use plain text where you would otherwise use markdown code spans). Path-by-reference for role docs sidesteps this entirely: the prompt body becomes short enough that backticks are easy to avoid.
 
@@ -195,16 +179,6 @@ The pane is ALWAYS on the AskUserQuestion 4-option frame when `send-input` is ap
 - Built-in "Other" is always exposed by the tool — do NOT add an explicit "Write my own" / "Custom" option.
 - ≥ 5 candidate bodies → narrow to 2–4 (drop near-duplicates, span decision axes). Do NOT paginate.
 - No preamble text above the question — the capture output already printed plus the question text carry all context.
-
-#### MUST NOT
-
-- Pre-draft a body and tell the user to run the command themselves.
-- Print a fenced `bash` block of the resolved `send-input` invocation.
-- Add a one-line preamble above `AskUserQuestion`.
-- Add explicit "Write my own" / "Custom" option.
-- Silently decide a `--choice` digit.
-- Mix shapes (`--choice` on open-ended pane, `--freetext` on choice-routing pane).
-- Call `send-input` on an "Other shapes" state.
 
 ## Member Exec
 

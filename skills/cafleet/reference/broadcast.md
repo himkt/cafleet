@@ -26,8 +26,6 @@ The default broadcast echo is a one-line summary:
 broadcast id=<id> recipients=<count>
 ```
 
-The default echo collapses the broker response to one operator-readable line. To inspect per-recipient delivery rows, each recipient polls its own inbox via `cafleet message poll`.
-
 ## Threading via `origin_task_id`
 
 Every broadcast generates `recipient_count + 1` rows in `tasks`:
