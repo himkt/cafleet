@@ -663,6 +663,8 @@ def member_nudge(ctx, agent_id, member_id, text):
     """Re-engage a member (typically the Director) with an ACKable task + preview."""
     fleet_id = ctx.obj["fleet_id"]
 
+    ensure_tmux_or_die()
+
     if not text.strip():
         raise click.UsageError("text may not be empty.")
 

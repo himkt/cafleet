@@ -1133,3 +1133,28 @@ def test_member_nudge__real_preview_keystroke_is_esc_first(
     assert pane_calls[0] == ["tmux", "send-keys", "-t", "%0", "Escape"]
     assert pane_calls[1][:5] == ["tmux", "send-keys", "-t", "%0", "-l"]
     assert pane_calls[-1] == ["tmux", "send-keys", "-t", "%0", "Enter"]
+
+
+def test_member_nudge__tmux_unavailable_exits_one(bootstrapped_fleet, monkeypatch):
+    """`member nudge` enforces the same outside-a-tmux-session guard every other
+    `member` subcommand does (Copilot round-2): `ensure_tmux_or_die` raising
+    exits 1 with the member-subgroup tmux error. Mirrors the per-file
+    `test_tmux_unavailable__tmux_not_available_exits_one` in test_member_ping.py
+    / test_member_exec.py."""
+    fleet_id, director_id, runner = bootstrapped_fleet
+
+    def raise_unavailable(self):
+        raise multiplexer_tmux.TmuxError(
+            "cafleet member commands must be run inside a tmux session"
+        )
+
+    monkeypatch.setattr(
+        multiplexer_tmux.TmuxMultiplexer, "ensure_available", raise_unavailable
+    )
+    result = _invoke_member_nudge(
+        runner, fleet_id, director_id, director_id, "re-engage"
+    )
+    assert result.exit_code == 1, result.output
+    assert "cafleet member commands must be run inside a tmux session" in (
+        result.output or ""
+    )
