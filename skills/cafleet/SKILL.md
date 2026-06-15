@@ -128,6 +128,8 @@ After persisting the message, the broker keystrokes a 2-line inline preview into
 <text-truncated-to-CAFLEET_MAX_TEXT_LEN>
 ```
 
+The inline preview **leads with `Esc`**: it presses `Escape`, lets the pane settle ~0.1 s, then types the payload and `Enter`. The leading `Esc` means that if the recipient's pane is parked on a pending permission-approval prompt, that prompt is dismissed **before** any payload character is typed, so the trailing `Enter` can never blindly confirm it. This safeguard applies to every recipient (member or Director) and to every path that routes through `send_inline_preview` — `message send`, `message broadcast`, and `member nudge`.
+
 The recipient's coding agent processes the keystroked text as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path. The recipient acks via `cafleet message ack --task-id <task_id>` once it has consumed the message. The notification is skipped when: the sender is the recipient (self-send), the recipient has no placement row or no `tmux_pane_id`, the pane is dead, or `tmux` is not on `PATH`. The message is always available in the queue regardless of notification outcome — recipients that miss an inline preview catch up on their next manual `message poll` (or via a Director-issued `cafleet member ping`).
 
 ## Poll (Check Inbox)

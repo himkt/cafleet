@@ -17,7 +17,7 @@ Create a Slidev presentation and reading transcript from an existing research re
 
 ## Prerequisites
 
-The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` and `cafleet-agent-team-monitoring` skills and embeds them into every member's spawn prompt.
+The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` and `cafleet-agent-team-monitoring` skills and embeds them into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model sonnet`) that owns the heartbeat and re-engages the idle Director — see Step 1.
 
 For autonomous Slidev generation, see `my-slidev/SKILL.md` § Spawnable Agents → slide-creator.
 
@@ -83,7 +83,7 @@ Step 5 (cleanup) is autonomous — no user prompt.
 
 ### Step 1: Bootstrap CAFleet Fleet & Spawn Presentation + Transcript (Director)
 
-Load the `cafleet` and `cafleet-agent-team-monitoring` skills for their facilitation and Stall Response policy. This team is **request-driven**: it does **not** run `cafleet monitor` or spawn a `--role monitor` member. Members (Presentation + Transcript, and later VR batches) wake on the broker's inline-preview keystroke on every `message send`; the Director is woken by members' replies and drives work by active polling (`cafleet member ping` for manual recovery).
+Load the `cafleet` and `cafleet-agent-team-monitoring` skills for their heartbeat, facilitation, and Stall Response policy. The fleet runs a dedicated monitoring member (the **first** `cafleet member create`, `--role monitor --model sonnet`) that owns the heartbeat and re-engages the idle Director via `cafleet member nudge`; the Director does **not** run `cafleet monitor` itself. Gate the Presentation/Transcript spawns on the monitoring member's `ready: monitor live` handshake (first-in) — see 1b.
 
 #### 1a. Environment precheck and fleet bootstrap
 
@@ -96,9 +96,21 @@ cafleet --json fleet create --label "present-[topic-slug]"
 
 `cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current tmux pane, and seeds the built-in Administrator. Capture `fleet_id` and `director.agent_id` from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
 
-#### 1b. Request-driven supervision (no monitor)
+#### 1b. Spawn the monitoring member (first-in)
 
-This team is **request-driven**: do **not** run `cafleet monitor` or spawn a `--role monitor` member. Members wake on the broker's inline-preview keystroke on every `message send`; the Director is woken by members' replies and drives work by active polling (`cafleet member ping` for manual recovery). Expected deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
+The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model sonnet`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Presentation/Transcript spawns** (1d) — do not spawn an ordinary member until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+
+Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the audit-file pattern in 1c, then spawn:
+
+```bash
+cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
+  --name "monitor" \
+  --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
+  --role monitor --model sonnet \
+  --prompt-file ${BASE}/prompts/monitor-<UTC-compact>.md
+```
+
+See the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical spawn prompt and lifecycle. The monitoring member is stopped and deleted first in the Step 5 teardown (first-out). Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 
@@ -115,6 +127,8 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 > **Spawn-prompt audit file**: every spawn in this skill writes the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE invoking `cafleet member create --prompt-file <abs path>` (see the per-role flow below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet-base-dir` skill § *No-bypass write protocol* and the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 #### 1d. Spawn Presentation + Transcript in parallel
+
+**Gate**: do not spawn Presentation or Transcript until the monitoring member's `ready: monitor live` handshake (1b) has arrived.
 
 Both work from `report.md` independently. After the slide deck is finalized (Step 3), the Director sends the final slide structure to the Transcript member for realignment.
 
@@ -343,25 +357,27 @@ No round limit — loop until approved.
 
 **Only enter after the user approves in Step 4.**
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet fleet delete` must complete first. This team is request-driven, so there is no monitor to stop.
+Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*. Order matters — every step before `cafleet fleet delete` must complete first (first-out: stop the monitor, then delete the monitoring member first).
 
-1. **Delete every member** — Presentation, Transcript, and any active VR batch. For any active VR batch, run the explicit close handshake first (Director sends `CLOSE:` via `cafleet message send`, VR runs `bun run agent-browser --session vr-batch-<start> close` and replies `closed`), THEN run `cafleet member delete`. Once all VR browser sessions are closed:
+1. **Stop the monitoring member's `monitor start` background task** (the heartbeat launched in 1b — there is no `monitor stop` command): message the monitoring member to stop its background task (the task-stop delivers SIGTERM/SIGINT, so the loop clears its runtime row), and wait for its confirmation. Do this **before** its pane is killed.
+2. **Delete every member** in first-out order — the monitoring member first, then Presentation, Transcript, and any active VR batch. For any active VR batch, run the explicit close handshake first (Director sends `CLOSE:` via `cafleet message send`, VR runs `bun run agent-browser --session vr-batch-<start> close` and replies `closed`), THEN run `cafleet member delete`. Once all VR browser sessions are closed:
    ```bash
+   cafleet member delete --fleet-id [fleet-id] --member-id [monitoring-member-id]
    cafleet member delete --fleet-id [fleet-id] --member-id [presentation-agent-id]
    cafleet member delete --fleet-id [fleet-id] --member-id [transcript-agent-id]
    cafleet member delete --fleet-id [fleet-id] --member-id [vr-batch-agent-id]   # if still alive — only after the close handshake
    ```
    Each call sends `/exit` and waits up to 15 s for the pane's `claude` process to exit. Do not rely on `/exit` to trigger any post-shutdown action — additional commands are not guaranteed to run after `/exit` arrives.
-2. **Verify the roster is empty**: `cafleet member list --fleet-id [fleet-id]` must return zero members.
-3. **Run the agent-browser safety net** to close any orphan browser sessions left behind:
+3. **Verify the roster is empty**: `cafleet member list --fleet-id [fleet-id]` must return zero members.
+4. **Run the agent-browser safety net** to close any orphan browser sessions left behind:
    ```bash
    bun run agent-browser close --all
    ```
-4. **Stop the Slidev dev server** if still running. Use the coding agent's **native task-stop primitive** with the task ID you recorded back in Step 3 *Visual Review & Fix* (Server Startup substep 2) — do NOT shell out to `pkill` or `kill`. `pkill -f slidev` matches too broadly (any other Slidev process on the host becomes collateral damage), and the harness-tracked background task keeps leaking stdout to the operator's pane until stopped through the harness, which `pkill` cannot do. Per-backend mechanism:
+5. **Stop the Slidev dev server** if still running. Use the coding agent's **native task-stop primitive** with the task ID you recorded back in Step 3 *Visual Review & Fix* (Server Startup substep 2) — do NOT shell out to `pkill` or `kill`. `pkill -f slidev` matches too broadly (any other Slidev process on the host becomes collateral damage), and the harness-tracked background task keeps leaking stdout to the operator's pane until stopped through the harness, which `pkill` cannot do. Per-backend mechanism:
    - **Claude Code**: call the Claude Code harness's built-in `TaskStop` tool with the task ID recorded in Step 3 *Visual Review & Fix* (Server Startup substep 2).
    - **codex / opencode**: use the backend's task-management primitive (see the host project's `.claude/rules/`).
-5. **Delete the fleet**: `cafleet fleet delete [fleet-id]` (positional, no `--fleet-id` flag). Soft-deletes the fleet and deregisters the root Director and Administrator atomically.
-6. **Confirm**: `cafleet fleet list` — the current fleet must not appear (soft-deleted fleets are hidden).
+6. **Delete the fleet**: `cafleet fleet delete [fleet-id]` (positional, no `--fleet-id` flag). Soft-deletes the fleet and deregisters the root Director and Administrator atomically.
+7. **Confirm**: `cafleet fleet list` — the current fleet must not appear (soft-deleted fleets are hidden).
 
 Do NOT use raw `tmux kill-pane` or `tmux send-keys` at any point — `cafleet member delete` is the only supported teardown primitive.
 

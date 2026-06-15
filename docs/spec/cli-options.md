@@ -36,6 +36,7 @@ One row per subcommand. "Identity flag" is the per-subcommand option naming the 
 | `member send-input` | Forward a restricted keystroke to a member's pane | yes | `--member-id` | [member send-input](#member-send-input) |
 | `member exec` | Dispatch a shell command into a member's pane | yes | `--member-id` | [member exec](#member-exec) |
 | `member ping` | Inject an inbox-poll keystroke into a member's pane | yes | `--member-id` | [member ping](#member-ping) |
+| `member nudge` | Re-engage a member (typically the Director) with an ACKable task + hardened preview | yes | `--agent-id` + `--member-id` | [member nudge](#member-nudge) |
 | `monitor start` | Run the per-fleet scheduler loop in-process (launch as a background task) | yes | none | [monitor start](#monitor-start) |
 | `monitor status` | Show monitor liveness and the per-agent schedule | yes | none | [monitor status](#monitor-status) |
 | `monitor config` | Show or edit an agent's monitor schedule | yes | `--agent-id` | [monitor config](#monitor-config) |
@@ -98,7 +99,7 @@ Unlike `--agent-id` (which uses Click's built-in `required=True`), a missing `--
 
 Because `--fleet-id` is a per-subcommand option, coverage uses **one `permissions.allow` pattern per allow-listed subcommand**, each matching the canonical flag order (`--fleet-id` first after the subcommand name). Apply these to your user-level `~/.claude/settings.json` manually; the repo does **not** ship a committed `.claude/settings.json` permissions block.
 
-Recommended pattern set (19 patterns — the 20 leaf subcommands minus the deliberately excluded `member exec`):
+Recommended pattern set (20 patterns — the 21 leaf subcommands minus the deliberately excluded `member exec`):
 
 ```
 Bash(cafleet agent register --fleet-id *)
@@ -117,6 +118,7 @@ Bash(cafleet member list --fleet-id *)
 Bash(cafleet member capture --fleet-id *)
 Bash(cafleet member send-input --fleet-id *)
 Bash(cafleet member ping --fleet-id *)
+Bash(cafleet member nudge --fleet-id *)
 Bash(cafleet monitor start --fleet-id *)
 Bash(cafleet monitor status --fleet-id *)
 Bash(cafleet monitor config --fleet-id *)
@@ -134,6 +136,7 @@ Bash(cafleet --json message send --fleet-id *)
 Bash(cafleet --json message ack --fleet-id *)
 Bash(cafleet --json member create --fleet-id *)
 Bash(cafleet --json member list --fleet-id *)
+Bash(cafleet --json member nudge --fleet-id *)
 ```
 
 ## Message Body Truncation
@@ -530,7 +533,7 @@ Text output is the compact envelope alone.
 
 ## Member Commands
 
-The `cafleet member` subgroup manages tmux-backed member agents and must be run inside a tmux session. `member create` takes `--agent-id` (the spawning Director's agent ID, validated to equal the fleet root); the other subcommands identify their target by `--member-id`, scoped to the per-subcommand `--fleet-id`.
+The `cafleet member` subgroup manages tmux-backed member agents and must be run inside a tmux session. `member create` takes `--agent-id` (the spawning Director's agent ID, validated to equal the fleet root); `member nudge` takes **both** `--agent-id` (the acting sender, typically the monitoring member) **and** `--member-id` (the target, typically the Director); the remaining subcommands (`delete`, `capture`, `send-input`, `exec`, `ping`) identify their target by `--member-id` alone. All are scoped to the per-subcommand `--fleet-id`.
 
 ### `member create`
 
@@ -813,7 +816,7 @@ See [Member targeting and key delivery](#member-targeting-and-key-delivery) for 
 
 ### `member ping`
 
-Director-only manual inbox-poll nudge. Keystrokes `Esc` → `cafleet message poll --fleet-id <fleet-id> --agent-id <member-id>` → `Enter` into the member's pane so the member drains its inbox via a normal poll. The leading `Esc` is the same safeguard the monitor loop applies (it reuses the `send_poll_trigger` helper): if the member's pane is sitting on a pending permission-approval prompt, the `Esc` dismisses it so the trailing `Enter` cannot blindly confirm it. This is the manual re-poke for a pane that missed the broker's automatic on-delivery notification — which keystrokes a 2-line inline preview (not a poll command) — so the two keystroke paths are distinct. As an operator-driven entry-point, failures surface as exit 1 (the auto-fire path swallows failures silently). The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, which is why this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
+Director-only manual inbox-poll nudge. Keystrokes `Esc` → `cafleet message poll --fleet-id <fleet-id> --agent-id <member-id>` → `Enter` into the member's pane so the member drains its inbox via a normal poll. The leading `Esc` is the permission-prompt safeguard (it reuses the `send_poll_trigger` helper): if the member's pane is sitting on a pending permission-approval prompt, the `Esc` dismisses it so the trailing `Enter` cannot blindly confirm it. This is the manual re-poke for a pane that missed the broker's automatic on-delivery notification — which keystrokes a 2-line inline preview (not a poll command), now also `Esc`-safeguarded for the same reason — so the two keystroke paths are distinct. (The monitor loop's own wake nudge, by contrast, no longer leads with `Esc`: it targets only the monitoring member's own pane, which is never on a permission prompt — see [Monitoring](../concepts/monitoring.md).) As an operator-driven entry-point, failures surface as exit 1 (the auto-fire path swallows failures silently). The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, which is why this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
 
 ```bash
 cafleet member ping --fleet-id <fleet-id> \
@@ -867,9 +870,55 @@ Two keys: `member_agent_id`, `pane_id`. Failures surface via exit 1.
 
 See [Member targeting and key delivery](#member-targeting-and-key-delivery) for the common exit codes. Unique to `member ping`: a missing `--member-id` exits 2, and a `tmux send-keys` failure exits 1 with `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.`.
 
+### `member nudge`
+
+The monitoring member's purpose-built re-engage primitive. It persists an ACKable broker task **and** fires the hardened (`Esc`-safeguarded) inline preview into the target's pane, so a Director sitting on a pending permission-approval prompt has that prompt dismissed before the preview's trailing `Enter` lands — closing the auto-confirm hole a bare on-prompt keystroke would otherwise open. Functionally equivalent to a monitoring-member `cafleet message send --to <director-id>` (both now ride the same hardened send path), `member nudge` is the named interface the monitoring/supervision skills point to for re-engaging an idle Director.
+
+```bash
+cafleet member nudge --fleet-id <fleet-id> --agent-id <monitoring-member-id> \
+  --member-id <director-agent-id> --text "<re-engage summary>"
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The **sender** (typically the monitoring member). Persisted as the task's `from_agent_id` so the Director sees who nudged it. Within the `member` subgroup only `nudge` and `create` take `--agent-id`; `delete`/`capture`/`exec`/`ping` do not. |
+| `--member-id` | yes | The **target** (typically the root Director). Resolved via the same fleet-isolation-only lookup the other `member` subcommands use — any active in-fleet agent with a placement (the root Director included) is a valid target; a cross-fleet / unknown / inactive id resolves to "not found". |
+| `--text` | yes | The re-engage summary (un-ACKed inbox items, stalled members). Persisted as the task body and keystroked as the inline preview. Empty / whitespace-only is rejected (exit 2). |
+
+#### Behavior
+
+Resolves the target (fleet-isolation only — no caller-auth check), then calls the broker send path, which (1) persists a `unicast` / `input_required` task — the ACKable inbox item the Director's facilitation loop consumes — and (2) best-effort fires the now `Esc`-safeguarded inline preview into the target's pane. A target with no live pane is tolerated: the task still persists and the keystroke best-effort no-ops, identical to `message send` semantics.
+
+#### Output format
+
+Text:
+
+```
+Nudged <name> (<pane_id>) — task <task_id> queued, Esc-safeguarded preview dispatched.
+```
+
+A target with no placement pane prints the `no pane; task queued` variant. A target **with** a pane whose best-effort preview did not land (tmux binary missing, self-send, or a send failure) prints `Nudged <name> (<pane_id>) — task <task_id> queued; inline preview not delivered.` — the task still persists in all three cases. JSON (`cafleet --json ... member nudge ...`):
+
+```json
+{
+  "member_agent_id": <id>,
+  "pane_id": "%7",
+  "task_id": <task_id>,
+  "notification_sent": true
+}
+```
+
+#### Exit codes
+
+| Exit | When |
+|---|---|
+| `0` | Task persisted (preview dispatched or best-effort no-op). |
+| `1` | Target not found (cross-fleet / unknown / inactive `--member-id`) → `Error: Agent <member-id> not found`; an in-fleet target with no placement row → ``Error: agent <member-id> has no placement row; it was not spawned via `cafleet member create`.``; or the sender (`--agent-id`) is not active in the fleet. |
+| `2` | Empty / whitespace-only `--text`. |
+
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 
-The `cafleet monitor` subgroup is the per-fleet scheduler that wakes only the monitoring member on a fixed cadence — the heartbeat behind a Director's supervision loop. All three subcommands require the per-subcommand `--fleet-id`. `start` runs the loop in-process (the fleet's dedicated **monitoring member** launches it as a **background task** in its own pane and owns its lifetime); `status` and `config` view and edit the schedule. The conceptual model (heartbeat-vs-facilitation boundary, the monitoring-member wake nudge, the `Esc`-safeguarded keystrokes, the tick-precision floor, single-instance via the DB heartbeat) is canonical on the [Monitoring](../concepts/monitoring.md) concepts page; this page documents the CLI surface.
+The `cafleet monitor` subgroup is the per-fleet scheduler that wakes only the monitoring member on a fixed cadence — the heartbeat behind a Director's supervision loop. All three subcommands require the per-subcommand `--fleet-id`. `start` runs the loop in-process (the fleet's dedicated **monitoring member** launches it as a **background task** in its own pane and owns its lifetime); `status` and `config` view and edit the schedule. The conceptual model (heartbeat-vs-facilitation boundary, the monitoring-member wake nudge — which does not lead with `Esc` — the `Esc` safeguard's placement on the message-delivery and `member ping` keystroke paths, the tick-precision floor, single-instance via the DB heartbeat) is canonical on the [Monitoring](../concepts/monitoring.md) concepts page; this page documents the CLI surface.
 
 There is no `monitor stop` command and no detached process: stop the loop by stopping the monitoring member's background task (or deleting the monitoring member), and the loop also self-terminates when the fleet is torn down. Launching/stopping the loop is **CLI-only** by nature; the schedule-view and schedule-edit surfaces are at WebUI/CLI parity ([WebUI API](./webui-api.md)).
 
@@ -881,7 +930,7 @@ There is no `monitor stop` command and no detached process: stop the loop by sto
 
 Runs the `scan → ping due agents → heartbeat → sleep` loop **in-process** via `run_monitor_loop` — the fleet's monitoring member launches it as a background task in its own pane (the loop blocks the task). On startup it runs the tmux precondition guard (the same `TMUX`-env check the `member` commands use), then atomically claims the single-instance `monitor_runtime` row, installs `SIGTERM`/`SIGINT` handlers (a clean stop clears the row), and loops until signalled or the fleet is torn down (`monitor_tick` returns `STOP` once the fleet is soft-deleted). There is no detached subprocess, no PID file, and no log file — the loop writes to the launching task's own stdout.
 
-The single enrolled agent — the monitoring member — is pinged unconditionally once its interval has elapsed (the ping is **not** gated on the agent having pending inbox items; `pending_count` is informational, shown in `status`). Every ping is **`Esc`-safeguarded**: `Escape` → ~0.1 s settle → literal text → `Enter`, so a pane on a pending permission prompt dismisses it rather than confirming it with the trailing `Enter`. The monitoring member receives a single-line *wake nudge* instructing it to run its capture-classify-reengage routine. The root Director and ordinary members are **not** enrolled and receive nothing from the loop. Each dispatched ping is logged to stdout as `<iso-ts> ping agent <id> (<name>)`, so the launching background task's output shows live heartbeat activity.
+The single enrolled agent — the monitoring member — is pinged unconditionally once its interval has elapsed (the ping is **not** gated on the agent having pending inbox items; `pending_count` is informational, shown in `status`). The ping delivers a single-line *wake nudge* instructing the monitoring member to run its capture-classify-reengage routine. The wake nudge does **not** lead with `Esc` — it targets only the monitoring member's own pane, which runs a read-only routine under `dontAsk` and is never parked on a permission prompt, so the `Esc` would only self-interrupt an in-progress routine (the `Esc` safeguard instead lives on the message-delivery inline preview and `member ping`, whose targets may be on a prompt — see [Monitoring](../concepts/monitoring.md)). The root Director and ordinary members are **not** enrolled and receive nothing from the loop. Each dispatched ping is logged to stdout as `<iso-ts> ping agent <id> (<name>)`, so the launching background task's output shows live heartbeat activity.
 
 If the fleet has **no** enrolled monitoring member when `start` runs, the command prints a warning to stderr (`Warning: fleet <id> has no enrolled monitoring member; the monitor heartbeat will wake no agent. Spawn one first with 'cafleet member create --role monitor'.`) and then runs the loop anyway (warn-but-run). In the canonical flow the warning never fires — the monitoring member is enrolled at `member create`, before it launches `monitor start` in its own pane.
 
@@ -957,6 +1006,10 @@ JSON output: `{"agent_id": 4, "interval_seconds": 60, "last_ping_at": "<iso8601>
 | `member exec` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to exec.` (exit 1) |
 | `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to ping.` (exit 1) |
 | `member ping` when `tmux send-keys` fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
+| `member nudge` with a cross-fleet / unknown / inactive `--member-id` | `Error: Agent <member-id> not found` (exit 1) |
+| `member nudge` on an in-fleet `--member-id` with no placement row | ``Error: agent <member-id> has no placement row; it was not spawned via `cafleet member create`.`` (exit 1) |
+| `member nudge` with empty / whitespace-only `--text` | `Error: text may not be empty.` (exit 2) |
+| `member nudge` whose `--agent-id` (sender) is not active in the fleet | `Error: <sender ValueError from the broker send path>` (exit 1) |
 | `member create` with both `--prompt-file` and a positional prompt argument | `Error: --prompt-file and the positional prompt argument are mutually exclusive.` (exit 2) |
 | `member create --prompt-file` with a relative path | ``Error: --prompt-file requires an absolute path (got '<input>'). Resolve relative paths against your BASE first — see the `cafleet-base-dir` skill.`` (exit 2) |
 | `member create --prompt-file` to a non-existent path or non-regular file (e.g. directory) | `Error: --prompt-file <path>: file does not exist or is not a regular file.` (exit 1) |

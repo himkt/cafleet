@@ -1,6 +1,6 @@
-# Director-only commands (`cafleet member *`)
+# tmux-backed member commands (`cafleet member *`)
 
-Reference page for the `cafleet member` subgroup — `member create`, `member delete`, `member list` (with `--activity`), `member capture`, `member send-input`, `member exec`, `member ping`. All must be run inside a tmux session. `member create` takes `--agent-id` (the spawning Director's ID, validated to equal the fleet root); the other subcommands identify their target by `--member-id`, scoped to the per-subcommand `--fleet-id`.
+Reference page for the `cafleet member` subgroup — `member create`, `member delete`, `member list` (with `--activity`), `member capture`, `member send-input`, `member exec`, `member ping`, `member nudge`. All must be run inside a tmux session. Every subcommand here is Director-initiated **except `member nudge`**, which the monitoring member invokes to re-engage the Director (its `--agent-id` sender is the monitoring member, not the root Director). `member create` takes `--agent-id` (the spawning Director's ID, validated to equal the fleet root); `member nudge` takes **both** `--agent-id` (the acting sender) **and** `--member-id` (the target); the remaining subcommands identify their target by `--member-id` alone. All are scoped to the per-subcommand `--fleet-id`.
 
 Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/exec-routing.md`.
 
@@ -244,6 +244,25 @@ cafleet member ping --fleet-id <fleet-id> \
 | `--member-id` | yes | Target member's agent ID |
 
 The action is wholly determined by the subcommand name — there is no positional argument and no operator-controlled keystroke body, so this subcommand sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
+
+## Member Nudge
+
+The monitoring member's purpose-built re-engage primitive for waking an idle Director. Unlike `member ping` (a pure poll keystroke), `member nudge` carries a summary: it **persists an ACKable broker task** (so the Director's facilitation loop still sees an inbox item naming what needs attention) **and** fires the hardened, `Esc`-safeguarded inline preview into the target's pane.
+
+```bash
+cafleet member nudge --fleet-id <fleet-id> --agent-id <monitoring-member-id> \
+  --member-id <director-agent-id> --text "<re-engage summary>"
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The **sender** (typically the monitoring member). Persisted as the task's `from_agent_id`. |
+| `--member-id` | yes | The **target** (typically the root Director). Resolved with fleet-isolation only — any active in-fleet agent with a placement is a valid target. |
+| `--text` | yes | The re-engage summary (un-ACKed inbox items, stalled members). Empty / whitespace-only is rejected (exit 2). |
+
+The `--agent-id` + `--member-id` pairing is the **asymmetry** that distinguishes `member nudge` from the other member subcommands: only `nudge` and `create` carry a real acting identity (`--agent-id`); `delete` / `capture` / `exec` / `ping` are pure Director-initiated keystrokes that take `--member-id` alone. **Auth is fleet-isolation only** — there is no caller-auth check (consistent with the rest of the `member` subgroup); the only boundary is that a cross-fleet / unknown / inactive `--member-id` resolves to "Agent `<id>` not found" (exit 1).
+
+`member nudge` reuses the broker send path: `send_message` persists the `unicast` / `input_required` task **and** best-effort fires the now `Esc`-safeguarded inline preview. So a Director sitting on a deny-listed permission prompt has that prompt dismissed by the leading `Esc` before the preview's `Enter` lands — `member nudge` and a monitoring-member `cafleet message send --to <director>` now deliver the same persist + hardened-preview effect; `member nudge` is the named interface over that path. A target with no live pane is tolerated (the task still persists; the keystroke best-effort no-ops). Because `--text` is agent-controlled like `message send`, the subcommand sits in `permissions.allow` (`Bash(cafleet member nudge --fleet-id *)`).
 
 ## Cross-references
 

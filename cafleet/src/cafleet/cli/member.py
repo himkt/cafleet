@@ -646,3 +646,66 @@ def member_ping(ctx, member_id, quiet):
         click.echo(
             f"Pinged member {target['name']} ({pane_id}) — poll keystroke dispatched."
         )
+
+
+@member.command("nudge")
+@fleet_id_option
+@click.option(
+    "--agent-id",
+    type=int,
+    required=True,
+    help="Sender's agent ID (the acting member, typically the monitoring member).",
+)
+@director_member_options
+@click.option("--text", required=True, help="Re-engage summary")
+@click.pass_context
+def member_nudge(ctx, agent_id, member_id, text):
+    """Re-engage a member (typically the Director) with an ACKable task + preview."""
+    fleet_id = ctx.obj["fleet_id"]
+
+    ensure_tmux_or_die()
+
+    if not text.strip():
+        raise click.UsageError("text may not be empty.")
+
+    # Resolve the target FIRST (fleet-isolation only): a cross-fleet / unknown /
+    # inactive --member-id raises "Agent <id> not found" here, before the send
+    # path runs. This also makes send_message's own destination ValueError
+    # unreachable in the nudge path — only its sender check can still fire.
+    target, placement = _load_authorized_member(fleet_id, member_id)
+    member_id = target["agent_id"]
+
+    try:
+        result = broker.send_message(fleet_id, agent_id, to=member_id, text=text)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    task_id = result["task"]["task_id"]
+    notification_sent = result["notification_sent"]
+    pane_id = placement["tmux_pane_id"]
+
+    if ctx.obj["json_output"]:
+        click.echo(
+            output.format_json(
+                {
+                    "member_agent_id": member_id,
+                    "pane_id": pane_id,
+                    "task_id": task_id,
+                    "notification_sent": notification_sent,
+                },
+            )
+        )
+    elif notification_sent:
+        click.echo(
+            f"Nudged {target['name']} ({pane_id}) — task {task_id} queued, "
+            f"Esc-safeguarded preview dispatched."
+        )
+    elif pane_id is None:
+        click.echo(f"Nudged {target['name']} — no pane; task {task_id} queued.")
+    else:
+        # Pane present but the best-effort preview did not land (tmux binary
+        # missing, self-send, or a send failure) — the task still persisted.
+        click.echo(
+            f"Nudged {target['name']} ({pane_id}) — task {task_id} queued; "
+            f"inline preview not delivered."
+        )
