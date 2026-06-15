@@ -1,7 +1,7 @@
 # Aggressively Simplify the `skills/` Tree (Tier C)
 
 **Status**: Approved
-**Progress**: 12/17 tasks complete
+**Progress**: 13/17 tasks complete
 **Last Updated**: 2026-06-15
 
 ## Overview
@@ -269,7 +269,7 @@ This change edits the orchestrating skills (`cafleet-design-doc-create`/`-execut
 
 ### Step 10: Cluster J — `cafleet-research-report/`
 
-- [ ] Slim `SKILL.md` (trim web-researcher spec + dispatch recipes X5; dedup 3× spawn-procedure X2; cross-ref monitoring/base-dir/shutdown). Slim `roles/{director,manager,researcher,scout}.md` and `template.md` (X1; merge director Checklist↔Tags) — **all kept as separate files**; keep verification-tag literals, output-path conventions, spawn-template bodies. <!-- completed: -->
+- [x] Slim `SKILL.md` (trim web-researcher spec + dispatch recipes X5; dedup 3× spawn-procedure X2; cross-ref monitoring/base-dir/shutdown). Slim `roles/{director,manager,researcher,scout}.md` and `template.md` (X1; merge director Checklist↔Tags) — **all kept as separate files**; keep verification-tag literals, output-path conventions, spawn-template bodies. <!-- completed: 2026-06-15T15:25 -->
 
 ### Step 11: Cluster K — `cafleet-research-presentation/`
 

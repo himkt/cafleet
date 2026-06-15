@@ -56,20 +56,11 @@ was primarily driven by expansion into the European market and new enterprise co
 
 ### Inline Citations
 
-- Use `[N]` immediately after the claim it supports
-- Multiple sources for one claim: `[1,2,3]` (no spaces around commas)
-- Every factual claim from an external source **MUST** have at least one citation
-- Analysis and opinions by the report author do not need citations
-- Place the citation before the period: `...grew 18% [1].`
+- `[N]` immediately after the claim, before the period (`...grew 18% [1].`); multiple sources `[1,2,3]` (no spaces around commas). Every external-source claim **MUST** be cited; author analysis/opinion need not be.
 
 ### Reference List
 
-- Number sequentially `[1]`, `[2]`, `[3]`, ... in order of **first appearance** in text
-- Format: `[N] "Article Title", URL`
-- Optionally include author/org: `[N] Author, "Article Title", URL`
-- Each URL appears only once — reuse the same `[N]` for repeated citations
-- **Single flat list** — do NOT group by category or section
-- Every reference must be cited at least once in the text
+- Number sequentially `[1]`, `[2]`, … by **first appearance**; format `[N] "Article Title", URL` (optionally `[N] Author, "Article Title", URL`). Each URL appears once (reuse its `[N]`); **single flat list**, no grouping by category/section; every reference cited at least once.
 
 ---
 
@@ -86,10 +77,6 @@ was primarily driven by expansion into the European market and new enterprise co
 
 ## Quality Standards
 
-- Cross-reference claims across multiple sources when possible
-- Prefer recent sources (within 1-2 years of the report date)
-- Source priority: official docs > reputable publications > community sources
-- Include both supporting and opposing viewpoints for balanced coverage
-- Every section should cite at least one reference
-- When a claim relies on a single source with low reliability, flag it explicitly (e.g., "Note: this claim is based on a single unverified source")
-- The executive summary must be a self-contained overview that accurately reflects the full report
+- Cross-reference claims; prefer recent sources (within 1–2 years), priority official docs > reputable publications > community sources; include opposing viewpoints for balance.
+- Every section cites at least one reference; flag low-reliability single-source claims explicitly (e.g., "based on a single unverified source").
+- The executive summary must be a self-contained overview that accurately reflects the full report.

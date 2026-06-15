@@ -26,9 +26,7 @@ cafleet message send --fleet-id [fleet-id] --agent-id [director-agent-id] \
   --text "<instructions, feedback, or relayed content>"
 ```
 
-**Polling and ack-ing inbound messages.** When a member sends you a message, the broker auto-fires `cafleet message poll --fleet-id [fleet-id] --agent-id [director-agent-id]` into your pane via tmux push notification, so the keystroke arrives as your next turn. Every entry in the poll output carries an `id:` line — that UUID is the cafleet message-task id (called `[task-id]` because cafleet internally models messages as tasks; **distinct from** the harness `taskId` you use with `TaskCreate / TaskUpdate`). After acting on the polled message, ack it via `cafleet message ack --fleet-id [fleet-id] --agent-id [director-agent-id] --task-id [task-id]` — un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle.
-
-**Pane silence is not a stall.** A member going quiet after sending a message is the expected between-turn state per the `cafleet` skill. Do not nudge a member simply because their pane is idle — only nudge when their inactivity blocks your next step.
+Inbound member messages auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [director-agent-id] --task-id [task-id]` after acting (un-acked messages re-surface). The poll `id:` UUID is the cafleet message-task id (`[task-id]` — **distinct from** the harness `taskId` used with `TaskCreate / TaskUpdate`). Pane silence is the expected between-turn state, not a stall — nudge only when a member's inactivity blocks your next step.
 
 ## Task List Coordination
 
@@ -48,54 +46,11 @@ When a member (Manager, Scout, or Researcher) sends a `cafleet message send` tha
 
 Never decide on the user's behalf, even when the answer looks obvious.
 
-## Critical Review Checklist
+## Review & Feedback
 
-### Factual Accuracy (non-negotiable)
-- Verify ALL arithmetic: percentage changes, ratios, year-over-year calculations
-- Confirm numbers in the executive summary match the body text
-- Check that dates, timelines, and fiscal year labels are consistent and correct
-- Look for logical impossibilities (e.g., a metric that improved AND worsened in the same period)
+Review the report against these criteria, flagging each issue with the matching tag below. **Factual accuracy is non-negotiable**: verify all arithmetic (%/ratios/YoY), confirm exec-summary numbers match the body, check date/FY-label consistency, and catch logical impossibilities. Also judge: **analytical depth** (genuine insight + cross-section connections, not just listed facts); **coverage** vs the user's original request; **temporal coverage** to the current date (recent papers/releases represented; instruct the Manager to fill gaps); **source quality + citations** (every claim has a `[N]`; authoritative sources; no duplicate references); **data verification** (correct benchmark/entity/scope attribution — cross-check similar benchmark names; recency context on volatile metrics; `(single source)` flags); and **writing quality** (no cross-section redundancy; logical structure; exec-summary is a real summary).
 
-### Analytical Depth
-- Does the report provide genuine insight, or just list facts?
-- Are there explanations of "why" — not just "what happened"?
-- Are comparisons substantive (peer companies, historical benchmarks, industry averages)?
-- Does the report make connections across sections (e.g., linking financial trends to strategic decisions)?
-
-### Coverage Completeness
-- Go back to the user's original request. Is every aspect they asked about covered?
-- Are there important topics that no researcher investigated?
-- Is the competitive analysis substantive or just a bullet list?
-- Are risk factors specific and actionable, or generic?
-
-### Temporal Coverage
-- Check that each major section includes developments up to the current date
-- Are there significant gaps in the timeline (e.g., only covers up to 6+ months ago)?
-- Are the most recent papers, model releases, and announcements from the past 6 months represented?
-- If any section has a temporal gap, instruct the Manager to coordinate additional Researcher searches targeting the gap period
-- Do not approve the report until temporal coverage is adequate across all sections
-
-### Source Quality & Citations
-- Is every factual claim cited with `[N]`?
-- Are there duplicate references (same URL with different numbers)?
-- Are sources authoritative (official filings > news > blogs > forums)?
-- Are there sections that rely on only one source when multiple should exist?
-
-### Data Verification
-- Do volatile metrics (financial, benchmark scores, adoption stats) include recency context? Are any data points stale relative to the report date?
-- Are benchmark scores attributed to the correct benchmark? (Cross-check benchmark names — similar names like "SWE-bench" / "SWE-bench Verified" / "BrowseComp" are common confusion points)
-- Is entity-level data precise? (Product-level data not presented as company-level, and vice versa)
-- Are statistics qualified with their correct scope/population? (No unqualified "X% of all users" when the source says "X% of premium users")
-- Are single-source claims marked with `(single source)` in the report?
-
-### Writing Quality
-- Is there redundancy between sections? (same data point appearing in 3 places)
-- Is the structure logical? Does the flow make sense for the reader?
-- Is the executive summary a genuine summary or just a preview?
-
-## Feedback Tags
-
-When issues are found during review, use tags to make the severity and type of each issue clear:
+Flag each issue with the matching tag:
 
 - `[FACTUAL ERROR]` — Incorrect numbers, wrong calculations, misattributed data. **Must be fixed.**
 - `[GAP]` — Missing topic or insufficient coverage. **Spawn additional Researcher(s).**
@@ -124,17 +79,4 @@ A member is a candidate stall only if their task is `in_progress` AND their expe
 
 ## Shutdown Protocol
 
-Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out: stop the monitor, then delete the monitoring member first):
-
-1. Stop the monitoring member's `monitor start` background task (the heartbeat launched in the bootstrap step — there is no `monitor stop` command): message the monitoring member to stop its background task and wait for its confirmation, **before** its pane is killed.
-2. Delete each member in first-out dependency order — the monitoring member first, then Researchers, then any active Scout, then the Manager. The `--member-id` flag takes the target member's integer `agent_id` (the value `cafleet member create` printed at spawn — the same identifier you use as `--to [member-agent-id]` in `cafleet message send`):
-   ```bash
-   cafleet member delete --fleet-id [fleet-id] --member-id [monitoring-member-id]
-   cafleet member delete --fleet-id [fleet-id] --member-id [researcher-agent-id]
-   cafleet member delete --fleet-id [fleet-id] --member-id [scout-agent-id]
-   cafleet member delete --fleet-id [fleet-id] --member-id [manager-agent-id]
-   ```
-   Each call sends `/exit` and waits 15 s. On exit 2 (timeout), inspect with `cafleet member capture`, answer prompts via `cafleet member send-input`, then re-run — or escalate to `--force` to skip the wait.
-3. Verify the roster is empty: `cafleet member list --fleet-id [fleet-id]` must return zero members.
-4. Run `cafleet fleet delete [fleet-id]` (positional, no `--fleet-id` flag) to soft-delete the fleet and deregister the root Director and Administrator atomically.
-5. Confirm with `cafleet fleet list` — the current fleet must not appear.
+Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then Researchers, any active Scout, and the Manager (`--member-id` takes the integer `agent_id`; each sends `/exit` and waits 15 s; on exit 2 use `cafleet member capture` + `cafleet member send-input` recovery, or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete [fleet-id]` (positional); `cafleet fleet list` to confirm.
