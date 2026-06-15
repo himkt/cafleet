@@ -30,7 +30,7 @@ cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
   --text "[your report or question]"
 ```
 
-Inbound Director messages auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]` (the poll `id:` UUID is the `[task-id]`) after acting.
+Inbound Director messages auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]` (the poll `id:` integer id is the `[task-id]`) after acting.
 
 ## Timing Awareness
 

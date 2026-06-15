@@ -35,7 +35,7 @@ cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
   --text "[your report, spawn request, or question]"
 ```
 
-Inbound Director messages auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]` after acting. The poll `id:` UUID is the cafleet message-task id (`[task-id]` — **distinct from** the harness `taskId` used with `TaskCreate / TaskUpdate` for sub-topic tracking). Pane silence is the expected between-turn state — work resumes when a new message arrives.
+Inbound Director messages auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]` after acting. The poll `id:` integer id is the cafleet message-task id (`[task-id]` — **distinct from** the harness `taskId` used with `TaskCreate / TaskUpdate` for sub-topic tracking). Pane silence is the expected between-turn state — work resumes when a new message arrives.
 
 ## Task-Based Coordination
 

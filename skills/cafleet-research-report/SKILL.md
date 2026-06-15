@@ -41,7 +41,7 @@ User
 
 Members cannot talk to the user directly — the Director always relays. Members cannot talk to each other directly either — Manager requests are always mediated by the Director (Manager → Director → Scout/Researcher, and Scout/Researcher → Director → Manager).
 
-> **Literal-UUID flag rule** — substitute the UUIDs printed by `cafleet fleet create` and `cafleet member create` directly into every `cafleet ...` call (the harness matches Bash invocations as literal command strings). Never store IDs in shell variables. `--fleet-id` and `--agent-id` are per-subcommand options (placed AFTER the subcommand name). See the `cafleet` skill for the full convention.
+> **Literal-integer-id flag rule** — substitute the integer ids printed by `cafleet fleet create` and `cafleet member create` directly into every `cafleet ...` call (the harness matches Bash invocations as literal command strings). Never store IDs in shell variables. `--fleet-id` and `--agent-id` are per-subcommand options (placed AFTER the subcommand name). See the `cafleet` skill for the full convention.
 
 ## Process
 
@@ -64,7 +64,7 @@ Run `cafleet doctor` to confirm the Director is inside a tmux session with valid
 
 ### Step 0b: Bootstrap CAFleet Fleet (Director — MANDATORY)
 
-`cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current tmux pane, and seeds the built-in Administrator. Capture both UUIDs from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
+`cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current tmux pane, and seeds the built-in Administrator. Capture both integer ids from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
 
 ```bash
 cafleet --json fleet create --label "research-[topic-slug]"
@@ -130,7 +130,7 @@ You are the Manager in a research report team (CAFleet-native).
 ROLE DEFINITION: Open [INSERT abs path to roles/manager.md] with the Read tool BEFORE any other action. That file is your authoritative role definition — accountability, communication protocol, task discipline, file-aggregation rules, pre-compilation verification, revision loop, and shutdown. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
-- the `cafleet` skill — for the broker primitives, literal-UUID flag convention, and bash-via-Director routing
+- the `cafleet` skill — for the broker primitives, literal-integer-id flag convention, and bash-via-Director routing
 
 FLEET ID: {fleet_id}
 DIRECTOR AGENT ID: {director_agent_id}
@@ -144,7 +144,7 @@ LANGUAGE: [INSERT user's language preference if specified]
 
 COMMUNICATION PROTOCOL:
 - Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
+- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
 - You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.
 - The team shares a harness task list (TaskList / TaskGet / TaskUpdate). Use it to track sub-topic assignments.
 
@@ -189,7 +189,7 @@ OUTPUT FILE: [INSERT <resolved-path>/00-scout-<topic>.md]
 
 COMMUNICATION PROTOCOL:
 - Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
+- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
 
 Write findings to the output file, then send the Director a completion summary. The Director will relay your findings to the Manager.
 ```
@@ -255,7 +255,7 @@ OUTPUT FILE: [INSERT <resolved-path>/NN-research-<subtopic>.md]
 
 COMMUNICATION PROTOCOL:
 - Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
+- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
 - On start, claim your task: TaskUpdate(taskId: YOUR TASK ID, owner: "researcher-NN", status: "in_progress").
 - On completion, mark your task completed: TaskUpdate(taskId: YOUR TASK ID, status: "completed").
 

@@ -29,9 +29,9 @@ cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
   --text "[your report or question]"
 ```
 
-Substitute the literal `[fleet-id]`, `[my-agent-id]`, and `[director-agent-id]` UUIDs from your spawn prompt. Never use shell variables.
+Substitute the literal `[fleet-id]`, `[my-agent-id]`, and `[director-agent-id]` integer ids from your spawn prompt. Never use shell variables.
 
-**Receiving messages.** When the Director sends you a message, the broker keystrokes `cafleet message poll --fleet-id [fleet-id] --agent-id [my-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that UUID is the `[task-id]`. After acting on the polled message, ack it via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]`.
+**Receiving messages.** When the Director sends you a message, the broker keystrokes `cafleet message poll --fleet-id [fleet-id] --agent-id [my-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that integer id is the `[task-id]`. After acting on the polled message, ack it via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]`.
 
 ## Layout Selection
 

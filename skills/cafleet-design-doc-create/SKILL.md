@@ -81,7 +81,7 @@ Load the `cafleet` skill, the `cafleet-agent-team-monitoring` skill, and the `ca
 
 ```bash
 cafleet fleet create --label "design-doc-create-{slug}" --json
-# → { "fleet_id": "...", "administrator_agent_id": "...", "director": { "agent_id": "...", "name": "Director", "placement": {...} } }
+# → { "fleet_id": <int>, "administrator_agent_id": <int>, "director": { "agent_id": <int>, "name": "Director", "placement": {...} } }
 ```
 
 Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids.

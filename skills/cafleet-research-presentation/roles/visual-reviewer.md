@@ -32,7 +32,7 @@ cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
   --text "[the structured Visual Review Report]"
 ```
 
-Inbound Director messages (e.g. a re-check request with a new `ROUND: N` line) auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]` (the poll `id:` UUID is the `[task-id]`) after acting.
+Inbound Director messages (e.g. a re-check request with a new `ROUND: N` line) auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]` (the poll `id:` integer id is the `[task-id]`) after acting.
 
 ## Visual Issue Categories
 

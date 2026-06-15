@@ -35,7 +35,7 @@ User
 
 Members cannot talk to the user directly — the Director always relays.
 
-> **Literal-UUID flag rule** — every `cafleet ...` invocation carries the literal `fleet_id` / `agent_id` UUIDs as flags (per-subcommand, after the subcommand name), never shell variables; substitute the UUIDs printed by `cafleet fleet create` / `cafleet member create` directly. See the `cafleet` skill for the full convention.
+> **Literal-integer-id flag rule** — every `cafleet ...` invocation carries the literal `fleet_id` / `agent_id` integer ids as flags (per-subcommand, after the subcommand name), never shell variables; substitute the integer ids printed by `cafleet fleet create` / `cafleet member create` directly. See the `cafleet` skill for the full convention.
 
 ## Director Process
 
@@ -147,7 +147,7 @@ OUTPUT:           [INSERT <folder>/slide.md]
 
 COMMUNICATION PROTOCOL:
 - Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
+- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `<task-id>` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
 
 When complete, send the file path to the Director via cafleet message send.
 ```
@@ -185,7 +185,7 @@ OUTPUT:   [INSERT <folder>/transcript.md]
 
 COMMUNICATION PROTOCOL:
 - Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
+- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `<task-id>` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
 
 When complete, send the file path to the Director via cafleet message send.
 ```
@@ -299,7 +299,7 @@ ROUND:           [INSERT <round>]
 
 COMMUNICATION PROTOCOL:
 - Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` UUID from each entry as `<task-id>` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
+- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `<task-id>` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
 
 When complete, persist the report to <folder>/screenshots/vr<start>-r<round>.md and send it to the Director via cafleet message send.
 ```

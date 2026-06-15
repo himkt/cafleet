@@ -30,7 +30,7 @@ cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
   --text "[your report or question]"
 ```
 
-Inbound Director messages auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]` after acting. The poll `id:` UUID is the cafleet message-task id (`[task-id]` — **distinct from** the harness `taskId` used with `TaskUpdate` to claim your sub-topic task). Pane silence after writing your file + completion report is the expected between-turn state — no status pings.
+Inbound Director messages auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]` after acting. The poll `id:` integer id is the cafleet message-task id (`[task-id]` — **distinct from** the harness `taskId` used with `TaskUpdate` to claim your sub-topic task). Pane silence after writing your file + completion report is the expected between-turn state — no status pings.
 
 ## Fact Verification Protocol
 
