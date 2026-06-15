@@ -894,7 +894,7 @@ Resolves the target (fleet-isolation only — no caller-auth check), then calls 
 Text:
 
 ```
-Nudged Director <name> (<pane_id>) — task <task_id> queued, Esc-safeguarded preview dispatched.
+Nudged <name> (<pane_id>) — task <task_id> queued, Esc-safeguarded preview dispatched.
 ```
 
 A target with no placement pane prints the `no pane; task queued` variant. JSON (`cafleet --json ... member nudge ...`):
@@ -913,7 +913,7 @@ A target with no placement pane prints the `no pane; task queued` variant. JSON 
 | Exit | When |
 |---|---|
 | `0` | Task persisted (preview dispatched or best-effort no-op). |
-| `1` | Target not found (cross-fleet / unknown / inactive `--member-id`, or target with no placement row); sender not active in the fleet. |
+| `1` | Target not found (cross-fleet / unknown / inactive `--member-id`) → `Error: Agent <member-id> not found`; an in-fleet target with no placement row → ``Error: agent <member-id> has no placement row; it was not spawned via `cafleet member create`.``; or the sender (`--agent-id`) is not active in the fleet. |
 | `2` | Empty / whitespace-only `--text`. |
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
@@ -1006,7 +1006,8 @@ JSON output: `{"agent_id": 4, "interval_seconds": 60, "last_ping_at": "<iso8601>
 | `member exec` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to exec.` (exit 1) |
 | `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to ping.` (exit 1) |
 | `member ping` when `tmux send-keys` fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
-| `member nudge` with a cross-fleet / unknown / inactive `--member-id` (or a target with no placement row) | `Error: Agent <member-id> not found` (exit 1) |
+| `member nudge` with a cross-fleet / unknown / inactive `--member-id` | `Error: Agent <member-id> not found` (exit 1) |
+| `member nudge` on an in-fleet `--member-id` with no placement row | ``Error: agent <member-id> has no placement row; it was not spawned via `cafleet member create`.`` (exit 1) |
 | `member nudge` with empty / whitespace-only `--text` | `Error: text may not be empty.` (exit 2) |
 | `member nudge` whose `--agent-id` (sender) is not active in the fleet | `Error: <sender ValueError from the broker send path>` (exit 1) |
 | `member create` with both `--prompt-file` and a positional prompt argument | `Error: --prompt-file and the positional prompt argument are mutually exclusive.` (exit 2) |

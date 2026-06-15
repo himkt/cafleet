@@ -695,10 +695,8 @@ def member_nudge(ctx, agent_id, member_id, text):
         )
     elif notification_sent:
         click.echo(
-            f"Nudged Director {target['name']} ({pane_id}) — task {task_id} queued, "
+            f"Nudged {target['name']} ({pane_id}) — task {task_id} queued, "
             f"Esc-safeguarded preview dispatched."
         )
     else:
-        click.echo(
-            f"Nudged Director {target['name']} — no pane; task {task_id} queued."
-        )
+        click.echo(f"Nudged {target['name']} — no pane; task {task_id} queued.")
