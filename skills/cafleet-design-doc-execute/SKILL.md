@@ -42,28 +42,10 @@ User
       +-- Verifier (member agent, optional -- E2E/integration testing)
 ```
 
-- **Director ↔ Programmer**: `cafleet message send` (step assignments, test results, code review feedback, escalation)
-- **Director ↔ Tester**: `cafleet message send` (step assignments, test review feedback, test defect reports)
-- **Director ↔ Verifier**: `cafleet message send` (verification assignments, results, failure routing)
-- **Director**: git operations (commit after each phase — tests and implementation separately)
-- Members receive messages via push notification: the broker keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the member's pane via `tmux.send_inline_preview`. The recipient processes the preview as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path; to fetch the full body, the recipient calls `cafleet message poll` themselves. `--fleet-id` and `--agent-id` are per-subcommand options (placed **after** the subcommand name).
-
 ## Prerequisites
 
 - The Director MUST be running inside a tmux session (required by `cafleet member create`). Verify by running `cafleet doctor` before spawning anyone — it reports the tmux session/window/pane identifiers and exits non-zero with a clear message when the environment is not ready. If `cafleet doctor` reports a problem, abort and surface its message to the user. Do NOT invoke `tmux display-message`, `printenv TMUX`, or any other raw tmux/env probe — `cafleet doctor` is the only supported environment check (see `skills/cafleet/SKILL.md` § *use cafleet primitives only*).
 - `gh` must be authenticated for Steps 6 + 7. Lack of auth is NOT fatal — the Director checks `gh auth status` at Step 6a and falls back to Step 8 local-finalize, skipping the PR and Copilot review loop entirely. All other prerequisites (tmux, approved design doc, feature branch) remain unchanged.
-
-## Primitive Mapping
-
-| Agent Teams primitive | CAFleet equivalent |
-|---|---|
-| `TeamCreate(name="execute-{slug}")` | CAFleet fleet created via `cafleet fleet create` — it bootstraps the fleet + root Director + placement + Administrator in one transaction (no separate `cafleet agent register` call needed for the Director) |
-| `Agent(team_name=..., subagent_type=...)` | `cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> --name "..." --description "..." -- "<prompt>"` |
-| `SendMessage(to="Programmer")` | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <programmer-agent-id> --text "..."` |
-| `SendMessage(to="Director")` (from member) | `cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> --to <director-agent-id> --text "..."` |
-| `cafleet-agent-team-supervision` supervision tick | Load the `cafleet-agent-team-monitoring` skill (heartbeat + facilitation) and the `cafleet-agent-team-supervision` skill (governance). The heartbeat is run by the dedicated **monitoring member** (the first `member create`, `--role monitor --model sonnet`, which runs `cafleet monitor start` in its own pane) — the Director never runs the monitor itself. The monitoring member wakes on the loop and re-engages the idle Director on demand; that idle-nudge is the Director's supervision turn (and the turn source Step 7's Copilot loop rides). |
-| `TeamDelete` | `cafleet member delete --fleet-id <fleet-id> --member-id <member-agent-id>` for each member, then `cafleet fleet delete <fleet-id>` (soft-deletes the fleet and sweeps the root Director + Administrator + any surviving members in one transaction). The root Director cannot be deregistered via `cafleet agent deregister` — `fleet delete` is the only supported teardown. |
-| Auto message delivery | Push notification keystrokes a 2-line inline preview (`[cafleet msg …]` header + truncated body) into member's tmux pane via `tmux.send_inline_preview` |
 
 ## Process
 
@@ -121,17 +103,6 @@ When the base directory tier matches:
 
 Use `AskUserQuestion` with one question. Each option label is the slug name (directory name) of the design doc. The built-in "Other" option is always available for the user to type a direct path or cancel.
 
-Example with 3 approved docs:
-
-```
-Question: "Which design document would you like to implement?"
-Options:
-  1: "feature-auth"
-  2: "refactor-db-layer"
-  3: "add-cli-export"
-  (Other is added automatically)
-```
-
 #### Pagination (5+ Approved Docs)
 
 When there are more than 4 approved docs, `AskUserQuestion`'s option limit (max 4) is exceeded. Use pagination with all options sorted alphabetically by slug:
@@ -140,38 +111,13 @@ When there are more than 4 approved docs, `AskUserQuestion`'s option limit (max 
 - **Last page rule**: If remaining items after the current page would be ≤ 4, show all remaining items directly (no `"More..."` needed). This avoids a last page with only 1 option, which would violate `AskUserQuestion`'s minimum of 2 options per question.
 - Continue until the user selects a document or uses "Other".
 
-Example with 7 approved docs: page 1 shows 3 + "More..." (4 remain), page 2 shows all 4. Example with 5: page 1 shows 3 + "More..." (2 remain), page 2 shows both 2.
-
 #### Error: Zero Approved Docs
 
-When design docs exist but none have `Status: Approved`, display a message listing all found docs with their current statuses so the user understands why none qualified. Format:
-
-```
-No approved design documents found in <base-directory>.
-
-Found documents:
-  - <slug-1>/design-doc.md — Status: Draft
-  - <slug-2>/design-doc.md — Status: In Progress
-  - <slug-3>/design-doc.md — Status: Complete
-
-Only documents with Status: Approved can be executed. Update the status or specify a direct path.
-```
-
-Then abort (do not proceed to team creation or execution).
+When design docs exist but none have `Status: Approved`, display a message listing every found doc with its current status (so the user sees why none qualified), noting that only `Status: Approved` docs can be executed, then abort (do not proceed to team creation or execution).
 
 #### Error: Invalid Path
 
-When `${RESOLVED_ARGS}` does not match any of the three tiers (not a file path ending in `design-doc.md`, not a directory containing `design-doc.md`, and no `**/design-doc.md` found underneath), display:
-
-```
-Invalid argument: `${RESOLVED_ARGS}`
-Expected one of:
-  - Path to a design-doc.md file (e.g., my-feature/design-doc.md)
-  - Slug directory containing design-doc.md (e.g., my-feature/)
-  - No argument (discovers all design docs in ${BASE}/design-docs/)
-```
-
-Then abort.
+When `${RESOLVED_ARGS}` does not match any of the three tiers (not a file path ending in `design-doc.md`, not a directory containing `design-doc.md`, and no `**/design-doc.md` underneath), display an invalid-argument error naming `${RESOLVED_ARGS}` and the three accepted forms (direct `design-doc.md` path, slug directory, or no argument to discover all under `${BASE}/design-docs/`), then abort.
 
 After resolution, the resolved path is used as the design document path for all subsequent steps.
 
@@ -195,19 +141,7 @@ Load the `cafleet` skill, the `cafleet-agent-team-monitoring` skill, and the `ca
 
 ```bash
 cafleet fleet create --label "design-doc-execute-{slug}" --json
-# → {
-#     "fleet_id": "550e8400-e29b-41d4-a716-446655440000",
-#     "label": "design-doc-execute-{slug}",
-#     "created_at": "…",
-#     "administrator_agent_id": "…",
-#     "director": {
-#       "agent_id": "7ba91234-…",
-#       "name": "Director",
-#       "description": "Root Director for this fleet",
-#       "registered_at": "…",
-#       "placement": { "director_agent_id": null, "tmux_session": "…", "tmux_window_id": "…", "tmux_pane_id": "…", "coding_agent": "unknown", "created_at": "…" }
-#     }
-#   }
+# → { "fleet_id": "...", "administrator_agent_id": "...", "director": { "agent_id": "...", "name": "Director", "placement": {...} } }
 ```
 
 Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids. Remember: `--fleet-id` and `--agent-id` are per-subcommand options that go **after** the subcommand name.
@@ -242,8 +176,6 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 
 The spawn prompts below use `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders — cafleet `member create` runs `str.format()` over the entire prompt and substitutes these from the new member's allocated `agent_id`, the fleet ID, and the spawning Director's `agent_id`. The `[INSERT …]` markers (e.g. `[INSERT DESIGN DOC PATH]`, `[INSERT abs path to roles/programmer.md]`) are NOT format placeholders — the Director substitutes them in shell before calling `member create`. See the Template safety note under `Member Create` in `skills/cafleet/reference/director.md`.
 
-> **Path-by-reference for role docs**: Each spawn prompt below references its role file by **absolute path**. The spawned member opens its role doc with `Read` on its first turn. Do NOT inline the role content — cafleet `member create` hits a `tmux command failed: command too long` error once the shell-quoted prompt grows past a few KB, and rolls back the registration. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up. Resolve the absolute path for each of `roles/programmer.md`, `roles/tester.md`, and `roles/verifier.md` (from this skill's `roles/` directory) and substitute into the `[INSERT abs path to …]` markers below.
->
 > **Spawn-prompt audit file (two-step pattern)**: every spawn in this skill follows the same two steps — (1) **render** the prompt (substitute the `[INSERT …]` markers; leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass); (2) **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` (`<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; create `${BASE}/prompts/` on first write; same-second collision → append `_2`, `_3`, … — never overwrite), then invoke `cafleet member create --prompt-file <abs path>` (see the per-role spawn templates and commands below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet-base-dir` skill § *No-bypass write protocol* and the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 **Programmer spawn prompt:**
@@ -274,11 +206,7 @@ IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash proto
 Start by reading the design document. Then wait for the Director to assign your first step.
 ```
 
-Spawn with the two-step (render to file, then `--prompt-file`) pattern:
-
-1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact — the CLI's `str.format()` pass resolves them at member-create time using the newly-allocated `agent_id`.
-2. **Write the rendered text** to `${BASE}/prompts/programmer-<UTC-compact>.md` per the two-step audit-file procedure in 3e.
-3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
+Render the prompt to `${BASE}/prompts/programmer-<UTC-compact>.md` per the 3e two-step audit-file pattern (leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass), then spawn with `--prompt-file`:
 
    ```bash
    cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
@@ -318,11 +246,7 @@ IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash proto
 Start by reading the design document. Then wait for the Director to assign your first step.
 ```
 
-Spawn with the two-step (render to file, then `--prompt-file`) pattern:
-
-1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
-2. **Write the rendered text** to `${BASE}/prompts/tester-<UTC-compact>.md` per the two-step audit-file procedure in 3e.
-3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
+Render the prompt to `${BASE}/prompts/tester-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--prompt-file`:
 
    ```bash
    cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
@@ -364,11 +288,7 @@ Start by reading the design document and discovering available tools.
 Then wait for the Director to assign your first verification task.
 ```
 
-Spawn with the two-step (render to file, then `--prompt-file`) pattern:
-
-1. **Render the prompt locally** with all `[INSERT …]` markers substituted. Leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders intact.
-2. **Write the rendered text** to `${BASE}/prompts/verifier-<UTC-compact>.md` per the two-step audit-file procedure in 3e.
-3. **Spawn with `--prompt-file`** pointing at the rendered file (use the absolute path):
+Render the prompt to `${BASE}/prompts/verifier-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--prompt-file`:
 
    ```bash
    cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
@@ -541,9 +461,7 @@ The Director holds three **PR-review-specific** in-context variables across idle
 
 #### 7a. Add PR-review polling to each idle-nudge-driven turn
 
-On entry to Step 7 there is **no scheduler change** — the monitoring member's `cafleet monitor` started in Step 3b keeps running unchanged, and it keeps nudging the idle Director each interval. The Director simply augments what it does on each granted turn: it runs its normal team-health facilitation AND the PR-review poll below. The "Per idle-nudge turn checklist" subsection is the concrete command list.
-
-On exit from Step 7 (any exit condition), the monitoring member keeps running — Step 8's shutdown stops it. (Stopping the PR-review poll is just the Director no longer running those steps on each turn; nothing scheduler-side changes — the monitoring member stays PR-agnostic and keeps granting idle turns, harmlessly, until teardown.)
+The monitoring member's `cafleet monitor` (started in Step 3b) runs unchanged on entry and exit; the Director simply adds the PR-review poll below to each idle-nudge-driven turn (and drops it after exit — Step 8's shutdown stops the monitor). The "Per idle-nudge turn checklist" subsection is the concrete command list.
 
 #### 7b. Per-turn procedure
 
@@ -609,29 +527,11 @@ The 30-turn threshold is conservative: Copilot's first review after a `--add-rev
 
 #### Per idle-nudge turn checklist (Step 7)
 
-This is the concrete command list the Director runs on each idle-nudge-driven turn while Step 7 is active — team health (unchanged from the `cafleet-agent-team-monitoring` skill) plus the PR-review poll. Substitute the literal ids and the literal PR number — no shell variables.
+The concrete command list the Director runs each idle-nudge-driven turn while Step 7 is active — team health (unchanged from the `cafleet-agent-team-monitoring` skill) plus the PR-review poll. Substitute the literal ids and PR number — no shell variables. Act on the filtered result per the **Step 7b branch table** (the gate conditions and thresholds are canonical there).
 
-```
-On each idle-nudge-driven turn, run team health AND PR review state.
-
-TEAM HEALTH:
-1. Run `cafleet --json member list --fleet-id <fleet-id>`.
-2. Run `cafleet --json message poll --fleet-id <fleet-id> --agent-id <director-agent-id>` (un-acked deliveries). ACK progress reports — ACKing consumes them, so the next tick's poll returns only what has arrived since.
-3. For each member that has not sent a message since last check, run `cafleet member capture --fleet-id <fleet-id> --member-id <member-agent-id> --lines 200`.
-4. Nudge stalled members via `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<original-pointer>)"` — re-send the same `ready (paragraph-Implementation > Step N)` or `ready (<file>:<line>)` body that was used for the original assignment. The recipient interprets a re-sent `ready (...)` contextually as a stall-nudge per [the Coordination Protocol section above](#coordination-protocol) (same target, same expected action).
-
-PR REVIEW:
-5. Run `gh pr view <pr-number> --json reviews` (GraphQL shape: `author.login`, `state`, `submittedAt`, `body`).
-6. Run `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments` (REST shape: `user.login`, `body`, `path`, `line`, `created_at`).
-7. Filter to entries where the appropriate login field (`author.login` for GraphQL reviews, `user.login` for REST inline comments) starts with `copilot` (case-insensitive) and the appropriate timestamp (`submittedAt` / `created_at`) > `last_push_ts` (the in-context state variable defined under "PR Review Loop State").
-8. If the most recent Copilot-authored entry **in the filtered (post-push) set from step 7** has `state == "APPROVED"`: signal Step 7 exit (success). An older approval (i.e., one with `submittedAt <= last_push_ts`) must NOT trigger this exit.
-9. If filter returned 0 entries AND `silence_ticks < 30`: increment `silence_ticks`, continue waiting (do nothing this turn). The loop never auto-exits on Copilot silence.
-10. If filter returned 0 entries AND `silence_ticks >= 30`: silence-escalation per 7e — AskUserQuestion (Keep waiting / Re-request review / Finalize now / Other). Reset `silence_ticks = 0` if the user picks Keep waiting or Re-request review; otherwise honor the user's choice.
-11. If filter returned ≥ 1 entries: reset `silence_ticks = 0`, classify by file path per Step 7c, write `COMMENT(copilot): <body>` at the source `<file>:<line>` for source/test routes (or `COMMENT(director): <body>` at the affected paragraph for design-doc-anchored items), and dispatch via `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<file>:<line>)"`. Design-doc-anchored Copilot items are NOT routed — the Director resolves them directly and skips the `cafleet message send`.
-
-ESCALATION:
-12. If any member has been nudged 2 times with no progress, escalate to the user.
-```
+- **Team health**: `cafleet --json member list --fleet-id <fleet-id>` → `cafleet --json message poll --fleet-id <fleet-id> --agent-id <director-agent-id>` (ACK progress reports to consume them) → `cafleet member capture --fleet-id <fleet-id> --member-id <member-agent-id> --lines 200` for members silent since last check → nudge stalled members with `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<original-pointer>)"` (a re-sent `ready (...)` reads as a contextual stall-nudge).
+- **PR review**: `gh pr view <pr-number> --json reviews` (GraphQL: `author.login`, `state`, `submittedAt`, `body`) and `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments` (REST: `user.login`, `body`, `path`, `line`, `created_at`); filter to `^copilot` logins (case-insensitive) with timestamp > `last_push_ts`; then apply the **Step 7b branch table** — most-recent post-push review `state == "APPROVED"` → exit; 0 new + `silence_ticks < 30` → increment; 0 new + `silence_ticks >= 30` → 7e escalation; ≥ 1 new → reset `silence_ticks = 0`, classify per 7c (write `COMMENT(copilot)` at source `<file>:<line>` or `COMMENT(director)` at the affected paragraph), dispatch `ready (<file>:<line>)` (design-doc-anchored items are not routed).
+- **Escalation**: if any member has been nudged 2× with no progress, escalate to the user.
 
 #### Error Handling (Steps 6–7)
 
@@ -669,10 +569,5 @@ Runs after Step 7 exits, or directly after Step 5 when Step 6 was skipped (gh no
    - Exit code 0 (branch is tracked on origin): `git push`. Covers both the "Step 6 fully succeeded" path and the "Step 6 partial-fail (push OK, PR create failed)" path.
    - Non-zero exit: skip the push. The docs commit stays local.
    - The Director does NOT re-request Copilot review on this final docs commit.
-5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out: stop the monitor, then delete the monitoring member first):
-   1. Stop the monitoring member's `monitor start` background task (the heartbeat launched in Step 3b — there is no `monitor stop` command; it ran unchanged through Step 7): message the monitoring member to stop its background task (the task-stop delivers SIGTERM/SIGINT, so the loop clears its runtime row), and wait for its confirmation. Do this **before** the monitoring member's pane is killed.
-   2. `cafleet member delete` the monitoring member **first**, then each ordinary spawned member (Programmer, Tester if spawned, Verifier if spawned). Each call blocks until the pane is gone; on exit 2 follow the `member capture` + `send-input` recovery, or rerun with `--force`.
-   3. `cafleet member list` — the team's roster MUST be empty before continuing.
-   4. `cafleet fleet delete <fleet-id>`.
-   5. `cafleet fleet list` — the fleet MUST not appear.
+5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task (launched in Step 3b, ran unchanged through Step 7) and wait for confirmation; `cafleet member delete` the monitoring member first, then Programmer, Tester, and Verifier if spawned (on exit 2 use `member capture` + `send-input` recovery or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete <fleet-id>`; `cafleet fleet list` to confirm.
 6. **Report to the user**: include the PR URL (if Step 6 created one), the Copilot loop exit reason (approved / silence-escalated / skipped / aborted), and any skipped-step reasons.

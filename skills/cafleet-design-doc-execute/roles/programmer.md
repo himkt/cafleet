@@ -32,13 +32,7 @@ You do NOT speak to the user directly. All communication goes through the Direct
 cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --to <director-agent-id> --text "<your report or escalation>"
 ```
-The literal `<fleet-id>`, `<my-agent-id>`, and `<director-agent-id>` ids were provided in your spawn prompt (the `coding_agent.py` template bakes them in via `str.format()` substitution when `cafleet member create` launches you). Store them in your notes at startup.
-
-**Receiving tasks from the Director:** the broker keystrokes a 2-line inline preview of each message into your pane (mechanics in the `cafleet` skill § Send); to fetch the full body run `cafleet message poll` yourself. Read the message, then acknowledge it:
-```bash
-cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
-```
-Then act on the Director's instructions. Report completion or follow-up questions via `cafleet message send` to the Director.
+**Receiving tasks from the Director:** the broker keystrokes an inline preview into your pane (mechanics in the `cafleet` skill § Send); run `cafleet message poll` for the full body, ACK with `cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>`, then act on the instructions and report via `cafleet message send`.
 
 **Do NOT:** commit code or run git write operations; modify test files; communicate with the user directly; spawn subagents or run `claude` commands; fix specification issues without Director approval; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
 

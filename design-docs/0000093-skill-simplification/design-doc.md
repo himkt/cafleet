@@ -1,7 +1,7 @@
 # Aggressively Simplify the `skills/` Tree (Tier C)
 
 **Status**: Approved
-**Progress**: 4/17 tasks complete
+**Progress**: 6/17 tasks complete
 **Last Updated**: 2026-06-15
 
 ## Overview
@@ -246,8 +246,8 @@ This change edits the orchestrating skills (`cafleet-design-doc-create`/`-execut
 
 ### Step 5: Cluster D — `cafleet-design-doc-execute/`
 
-- [ ] Slim `SKILL.md`: dedup the 3× spawn-procedure (X2/P10), collapse the per-idle-nudge checklist (X6 — keep 7b's gate conditions frozen), tighten the Copilot rationale (P2), trim Step 1 base-dir narration + discovery examples + Architecture/Primitive-Mapping overlap. Preserve all Steps 1–8 commands, tables, gate conditions, and the three spawn-template bodies. <!-- completed: -->
-- [ ] Slim `roles/{director,programmer,tester,verifier}.md` (X1/X3 → cross-refs); keep all workflow/escalation/commit logic. <!-- completed: -->
+- [x] Slim `SKILL.md`: dedup the 3× spawn-procedure (X2/P10), collapse the per-idle-nudge checklist (X6 — keep 7b's gate conditions frozen), tighten the Copilot rationale (P2), trim Step 1 base-dir narration + discovery examples + Architecture/Primitive-Mapping overlap. Preserve all Steps 1–8 commands, tables, gate conditions, and the three spawn-template bodies. <!-- completed: 2026-06-15T14:37 -->
+- [x] Slim `roles/{director,programmer,tester,verifier}.md` (X1/X3 → cross-refs); keep all workflow/escalation/commit logic. <!-- completed: 2026-06-15T14:37 -->
 
 ### Step 6: Cluster E — `cafleet-design-doc-interview/`
 
