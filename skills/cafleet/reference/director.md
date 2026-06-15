@@ -1,6 +1,6 @@
-# Director-only commands (`cafleet member *`)
+# tmux-backed member commands (`cafleet member *`)
 
-Reference page for the `cafleet member` subgroup — `member create`, `member delete`, `member list` (with `--activity`), `member capture`, `member send-input`, `member exec`, `member ping`, `member nudge`. All must be run inside a tmux session. `member create` takes `--agent-id` (the spawning Director's ID, validated to equal the fleet root); `member nudge` takes **both** `--agent-id` (the acting sender) **and** `--member-id` (the target); the remaining subcommands identify their target by `--member-id` alone. All are scoped to the per-subcommand `--fleet-id`.
+Reference page for the `cafleet member` subgroup — `member create`, `member delete`, `member list` (with `--activity`), `member capture`, `member send-input`, `member exec`, `member ping`, `member nudge`. All must be run inside a tmux session. Every subcommand here is Director-initiated **except `member nudge`**, which the monitoring member invokes to re-engage the Director (its `--agent-id` sender is the monitoring member, not the root Director). `member create` takes `--agent-id` (the spawning Director's ID, validated to equal the fleet root); `member nudge` takes **both** `--agent-id` (the acting sender) **and** `--member-id` (the target); the remaining subcommands identify their target by `--member-id` alone. All are scoped to the per-subcommand `--fleet-id`.
 
 Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/exec-routing.md`.
 
