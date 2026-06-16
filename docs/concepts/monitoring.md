@@ -43,12 +43,14 @@ those require agent judgment and stay the Director's job, defined by the
 | Heartbeat (the *when*) | which agents are due; the wake keystroke | the `cafleet monitor` loop |
 | Facilitation (the *what*) | poll → ACK → dispatch → health-check → escalate | the Director, per the supervision skill |
 
-The loop wakes only one role, the **monitoring member**, with a *wake nudge* — a
-single-line instruction to run its capture-classify-reengage routine now. The
-loop runs inside the monitoring member's own pane, so this wake is a deliberate
-self-ping that drives the routine each tick (see
-[The monitoring member](#the-monitoring-member)). The wake nudge does not lead
-with `Esc`: the monitoring member's pane is never on a permission prompt.
+The loop wakes only one role, the **monitoring member**, with a *wake nudge*
+(the `send_wake_trigger` helper) — a single-line instruction to run its
+capture-classify-reengage routine now. The loop runs inside the monitoring
+member's own pane, so this wake is a deliberate self-ping that drives the
+routine each tick (see [The monitoring member](#the-monitoring-member)). The
+wake nudge does not lead with `Esc` — `send_wake_trigger` does not pass
+`esc_first`, because the monitoring member's pane is never on a permission
+prompt.
 
 The Director receives **no** keystroke from the loop. It is re-engaged only on
 demand: by the monitoring member's idle nudge — `cafleet member nudge`, which

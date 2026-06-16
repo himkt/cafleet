@@ -43,7 +43,8 @@ to indicate "no parent"). Because the recipient pane is resolved by
 `agent_id` alone, Member → Director notifications work automatically once
 the root Director has a placement row. If the recipient has a non-null
 `tmux_pane_id` and is not the sender, the broker keystrokes an inline
-preview of the message itself into the recipient's pane:
+preview of the message itself into the recipient's pane via the
+`tmux.send_inline_preview` helper:
 
 ```text
 [cafleet msg <task_id> from <sender_id> <ts>]
@@ -54,6 +55,14 @@ The recipient's coding agent processes the keystroked text as a fresh
 user-turn input — no `cafleet message poll` invocation is in the auto-fire
 path. The recipient acks via `cafleet message ack --task-id <task_id>` once
 it has consumed the message.
+
+The keystroke **leads with `Esc`** (`tmux.send_inline_preview` is called with
+`esc_first=True`): it presses `Escape`, lets the pane settle ~0.1 s, then types
+the payload and `Enter`, so a recipient parked on a pending permission-approval
+prompt has that prompt dismissed before the trailing `Enter` lands. The same
+`Esc`-safeguarded path serves `message send`, `message broadcast`, and
+`member nudge`; the monitor loop's wake nudge is the lone exception — see
+[Monitoring](monitoring.md).
 
 If the recipient's TUI is in a non-input state, the keystroked preview lands
 wherever the cursor is (the same failure mode any pane keystroke has). The
@@ -84,8 +93,9 @@ successfully triggered. The count is NOT persisted — it lives only in the
 broker return value.
 
 **Manual entry-point**: `cafleet member ping` is the manual poll-nudge path:
-it injects the poll command + Enter into a member's pane and converts a
-failure to exit 1, for an operator or monitoring loop that needs the
+via the `send_poll_trigger` helper (also `esc_first=True`) it injects `Esc` →
+the `cafleet message poll` command → `Enter` into a member's pane and converts
+a failure to exit 1, for an operator or monitoring loop that needs the
 recipient to drain whatever has accumulated after a missed inline preview.
 
 Body truncation in the preview (the `…` suffix at `CAFLEET_MAX_TEXT_LEN`
