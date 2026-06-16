@@ -9,9 +9,7 @@ Foundation layer for CAFleet Directors. This skill documents the `cafleet monito
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal integer ids printed by `cafleet fleet create` (which returns both the fleet id and the root Director's `agent_id` — see the `cafleet` skill § Typical Workflow for the exact output shape) directly into the command. Do **not** introduce shell variables for agent or fleet IDs — `permissions.allow` matches command strings literally, and shell expansion breaks that matching.
-
-**Flag placement**: `--fleet-id` and `--agent-id` are both per-subcommand options (placed **after** the subcommand name). For example: `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`. (`cafleet fleet create` inside a tmux session auto-bootstraps the root Director with its placement row — no separate `cafleet agent register` call is needed to obtain `<director-agent-id>`.)
+Angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<member-agent-id>`) are placeholders, **not** shell variables — substitute the literal integer ids from `cafleet fleet create` (which returns both the fleet id and the root Director's `agent_id`, so no separate `cafleet agent register`). The rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
 
 ## The monitor heartbeat
 
@@ -96,20 +94,8 @@ On every supervision tick — whether fired by the monitoring member's on-demand
 1. **Poll inbox.** `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>` returns only the un-acked (`input_required`) deliveries; ACKing each one (step 2) consumes it, so the next tick's poll surfaces only what has arrived since.
 2. **ACK every message** that requires no further action: `cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>`. Unacknowledged tasks accumulate in the Director's inbox and obscure new arrivals.
 3. **Dispatch queued work.** If a member is idle and inputs are available (review comments to route, the next implementation step in a design doc, reviewer feedback waiting at the Drafter, a teammate reply waiting to be acted on), send the instruction immediately via `cafleet message send`. **Do not wait for a fresh "go" from the user** — the user's original authorization persists across ticks; see the `cafleet-agent-team-supervision` skill § Authorization-Scope Guard.
-4. **Run the health-check sequence** below for any member that has not reported recent progress.
+4. **Run the health-check sequence** for any member that has not reported recent progress — cheapest, least-intrusive check first: (a) `cafleet member list` (enumerate members + pane status); (b) `cafleet message poll` (progress reports / help requests); (c) for a member silent since the last check, `cafleet member capture` to inspect it (an `AskUserQuestion`-style 4-option frame → see Stall Response for the `member send-input` escape hatch); (d) `cafleet message send` a specific instruction to any stalled/idle member; (e) once all members report completion, tell the user "All deliverables are ready for review."
 5. **Escalate** to the user via `AskUserQuestion` after two nudges produce no progress, or whenever a queued action requires a *new* user decision (option choice, risky/remote-visible operation, ambiguous teammate question). Do **not** emit passive-hold messages like `Skipping. Holding for go.` — the tick is a health check, not a permission renewal.
-
-## Health-Check Sequence
-
-Run this sequence once per supervision tick. Order matters — cheapest non-intrusive check first, most invasive last.
-
-| Step | Command | Purpose |
-|---|---|---|
-| 1 | `cafleet member list --fleet-id <fleet-id>` | Enumerate all live members and their pane status |
-| 2 | `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>` | Check inbox for progress reports or help requests from members |
-| 3 | For each member with no recent message: `cafleet member capture --fleet-id <fleet-id> --member-id <member-agent-id>` | Terminal capture fallback — inspect what the member is doing when it has not reported in. If the capture shows an `AskUserQuestion`-style prompt, see Stall Response below for the `member send-input` escape hatch. |
-| 4 | Based on findings, `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <member-agent-id> --text "..."` to any stalled or idle member with a specific instruction | Drive the team forward |
-| 5 | When all members have reported completion (via messages or visible in terminal output), report to the user: "All deliverables are ready for review." | Signal completion to user |
 
 ## Monitor Lifecycle
 
@@ -121,7 +107,7 @@ Run this sequence once per supervision tick. Order matters — cheapest non-intr
 | User review | Keep the monitoring member and its `monitor start` task running during the review cycle — revisions and re-reviews still count as in-progress work. |
 | Teardown (first-out) | Stop the monitor's background task FIRST, then delete the monitoring member before ordinary members. The authoritative full ordering is the `cafleet` skill § *Shutdown Protocol*. |
 
-**Lifecycle rule (non-negotiable):** The monitoring member MUST stay running (with its `monitor start` task live) from the first `member create` through every phase. At teardown, **stop the monitor's background task BEFORE the monitoring member's pane is killed** — there is no `cafleet monitor stop`, so the Director messages the monitoring member to stop its `monitor start` task (the task-stop delivers SIGTERM/SIGINT, so the loop runs `finally` and clears the runtime row), the monitoring member confirms, then the Director `cafleet member delete`s it. A monitor still ticking after the monitoring member is deleted keystrokes pings into the tearing-down pane and races the delete path. Full ordering: the `cafleet` skill § *Shutdown Protocol*.
+**Lifecycle rule (non-negotiable):** The monitoring member MUST stay running (with its `monitor start` task live) from the first `member create` through every phase; at teardown the monitor is stopped FIRST (first-out) — a monitor still ticking after the monitoring member is deleted races the delete path. The full stop mechanism + ordering is canonical in the `cafleet` skill § *Shutdown Protocol*.
 
 ## Stall Response
 
@@ -150,7 +136,7 @@ If `cafleet message poll` shows no recent messages from the member, fall back to
 
 If the terminal buffer shows the member paused on a 4-option choice prompt (a list of "1. …", "2. …", "3. …", "4. Type something" rows — the shape that `cafleet member send-input` is validated for), the correct unblock is `cafleet member send-input` — never raw `tmux send-keys` — and the Director MUST delegate the decision to the user BEFORE invoking the wrapper. The Director never picks the `--choice` digit or drafts the `--freetext` body on its own judgment. The full three-beat workflow and the pane-shapes table live in the cafleet skill's "Answer a member's AskUserQuestion prompt" section — that is canonical; do not duplicate them here.
 
-> **Note that `AskUserQuestion` should be used in Claude Code.** The "delegate to the user" beat in the workflow above assumes the Director itself runs in Claude Code, where `AskUserQuestion` is the dedicated tool for putting a structured choice in front of the operator. Directors running another coding agent must substitute their own equivalent decision-elicitation surface (or fall back to a plain message to the operator). The 4-option-frame shape that `cafleet member send-input` itself targets is a Claude Code idiom — neither codex nor opencode members render the same frame, so on a codex or opencode member the read-then-respond cadence applies but the `--choice` / `--freetext` keystrokes apply only when the captured buffer matches the validated 4-option layout.
+> **`AskUserQuestion` is a Claude Code idiom.** The "delegate to the user" beat assumes the Director runs in Claude Code; Directors on another coding agent substitute their own decision-elicitation surface (or a plain operator message). The 4-option pane frame that `cafleet member send-input` targets is likewise Claude-Code-specific — on a codex/opencode member the read-then-respond cadence applies, but the `--choice` / `--freetext` keystrokes apply only when the captured buffer matches the validated 4-option layout.
 
 ### Escalation
 

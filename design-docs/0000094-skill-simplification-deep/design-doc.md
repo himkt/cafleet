@@ -1,7 +1,7 @@
 # Skill Simplification (Deep): Aggressive De-duplication of `skills/`
 
 **Status**: Approved
-**Progress**: 15/26 tasks complete
+**Progress**: 17/26 tasks complete
 **Last Updated**: 2026-06-16
 
 ## Overview
@@ -224,8 +224,10 @@ COMMENT(director): Step 5 accepted, zero-drift confirmed by diff review — ever
 
 ### Step 6: Simplify the team skills (monitoring/supervision)
 
-- [ ] Simplify `monitoring/SKILL.md`: fold Health-Check into facilitation step 4; one Esc-preview statement; relocate the 60 s / DB-field internals; trim spawn-prompt rationale comments. <!-- completed: -->
-- [ ] Simplify `supervision/SKILL.md`: canonical-home pointers for comms / spawn-gate / teardown; collapse the passive-hold restatements (~4×); trim Quick-Reference notes; relocate env-check error strings. <!-- completed: -->
+- [x] Simplify `monitoring/SKILL.md`: fold Health-Check into facilitation step 4; one Esc-preview statement; relocate the 60 s / DB-field internals; trim spawn-prompt rationale comments. <!-- completed: 2026-06-16T20:30 -->
+- [x] Simplify `supervision/SKILL.md`: canonical-home pointers for comms / spawn-gate / teardown; collapse the passive-hold restatements (~4×); trim Quick-Reference notes; relocate env-check error strings. <!-- completed: 2026-06-16T20:30 -->
+
+COMMENT(programmer): Step 6 done, zero drift. monitoring: placeholder → cafleet § Placeholder pointer; Health-Check Sequence folded into facilitation step 4 (section removed); Lifecycle-rule SIGTERM/finally/runtime-row detail → recovery.md § Shutdown pointer; 60 s + race rationale trimmed to one statement; AskUserQuestion cross-backend note tightened. supervision: Communication-Model 4-step flow → one line + cafleet § Send / tmux-push.md pointer (removed the `tmux.send_inline_preview` dup, ×3); spawn-gate bullet → monitoring § The monitoring member pointer; env-check `Error: binary <name> not found` → cli-options.md#member-create; audit-file + `--model` + ready-signal → director.md/member.md pointers; Cleanup → recovery.md pointer; passive-hold + inline-preview Quick-Ref notes trimmed. Cluster 291→272 (~6.5%) vs 31/33% estimates. Same structural cause you arbitrated for Steps 3/5 + the wc-l-vs-prose effect: the explicit dedups removed the duplicated blocks (Health-Check table, comms flow, spawn-gate bullet) but the single-paragraph protocol trims cut words not physical lines, and the canonical floor is high here — the ~40-line monitoring spawn prompt + wake-nudge, the heartbeat/facilitation/stall-response, and the supervision Authorization-Scope Guard + Spawn/Async-Wait/User-Delegation protocols are all canonical-here content other skills point to. No deeper canonical cut; reconcile at the Step-9 aggregate. — programmer
 
 ### Step 7: Simplify the research skills (1,690 → ~1,154)
 
