@@ -1,7 +1,7 @@
 # Skill Simplification (Deep): Aggressive De-duplication of `skills/`
 
 **Status**: Approved
-**Progress**: 21/26 tasks complete
+**Progress**: 26/26 tasks complete
 **Last Updated**: 2026-06-16
 
 ## Overview
@@ -10,12 +10,12 @@ The `skills/` tree has grown to 53 files / 6,923 lines / 62,340 words, of which 
 
 ## Success Criteria
 
-- [ ] In-scope per-file prose content drops from ~5,849 to ~4,099 lines (**30%**); after the ~80-line web-researcher block relocates into a new in-tree file (slide-creator is cut, not relocated), the **net** `skills/` prose tree is ~4,180 lines (**≈28% net**, within the ~4,200 ceiling). The orchestration-heavy clusters — cafleet core, design-doc-execute, research — are cut **42% / 38% / 32%** respectively (per-file content; research = report 34% / presentation 29%).
-- [ ] Every shared convention (placeholder rule, verb+pointer protocol, BASE/`<unset>`, monitor heartbeat, shutdown ordering, Esc-safeguarded inline preview, spawn-prompt skeleton, member-side boilerplate) appears in **exactly one** canonical file; all other occurrences are one-line cross-references.
-- [ ] Every CLI internal removed from a skill (exit code, verbatim error string, rollback/timeout mechanic, internal DB field name) is preserved in `docs/spec/` or `docs/concepts/` — no information is lost, only relocated.
-- [ ] Zero behavioral drift: no CLI command, flag, required argument, output contract, or workflow step changes. A diff review confirms only prose/dedup/relocation edits.
-- [ ] No dangling cross-references: every pointer resolves to a real file and heading anchor.
-- [ ] Frontmatter `description:` trigger keywords are preserved on every SKILL.md (skill auto-routing unaffected); only wording is tightened.
+- [ ] **NOT MET (line numbers).** Target was ~5,849 → ~4,099 (30% per-file) / ~4,180 net (≈28%) with clusters 42%/38%/32%. **Actual: 4,967 per-file (~15%); 5,048 net (~14%); clusters cafleet 27% / execute 10% / research+slidev 13–20%.** Verified by `wc -l` at Step 9. The estimates assumed more redundancy than exists under the zero-drift contract — every *safe* dedup the design named was applied (verified per step), but reaching the targets would require cutting canonical, cross-referenced content (the spawn-prompt skeleton + delta tables, command indexes, workflow steps, load-bearing matplotlib/Slidev reference), which guardrails 1/2/5 forbid. Correctness was prioritized over the line count. See Changelog 2026-06-16 (Step 9).
+- [x] Every shared convention (placeholder rule, verb+pointer protocol, BASE/`<unset>`, monitor heartbeat, shutdown ordering, Esc-safeguarded inline preview, spawn-prompt skeleton, member-side boilerplate) appears in **exactly one** canonical file; all other occurrences are one-line cross-references.
+- [x] Every CLI internal removed from a skill (exit code, verbatim error string, rollback/timeout mechanic, internal DB field name) is preserved in `docs/spec/` or `docs/concepts/` — no information is lost, only relocated.
+- [x] Zero behavioral drift: no CLI command, flag, required argument, output contract, or workflow step changes. A diff review confirms only prose/dedup/relocation edits (`git diff --stat main...HEAD`: only `skills/`, `docs/concepts/`, and this design doc changed — no source, config, or test files).
+- [x] No dangling cross-references: every pointer resolves to a real file and heading anchor (independent Step-9 audit: 0 dangling / 0 suspect across ~200+ links).
+- [x] Frontmatter `description:` trigger keywords are preserved on every SKILL.md (skill auto-routing unaffected); only wording is tightened — verified byte-identical at base vs HEAD.
 
 ---
 
@@ -245,11 +245,11 @@ COMMENT(programmer): Step 8 done, zero drift, 6 files (+ research-presentation S
 
 ### Step 9: Verify (targets met, no behavior change)
 
-- [ ] Re-measure every in-scope file; confirm aggregate ≥ 28% net (~30% per-file) and the orchestration clusters at their targets (cafleet core 42% / execute 38% / research 32%); record the final before/after table in the Changelog. <!-- completed: -->
-- [ ] Grep all of `skills/` for cross-references; confirm every pointer resolves to a real file + heading anchor; cross-check that no relocated fact was dropped against the Step 1 destinations. <!-- completed: -->
-- [ ] Diff every edited skill; assert only prose/dedup/relocation changed — no CLI command, flag, required argument, output contract, or workflow step altered. Run any repo skill-lint / markdown-lint if present. <!-- completed: -->
-- [ ] **Lossless spawn-prompt reconstruction check:** for each role, assert every IMPORTANT / role-constraint line in the *current* spawn prompt maps to a row in the new skeleton + per-role delta table. A dropped IMPORTANT line reads as a legitimate dedup in a plain diff, so verify field-by-field, per role — not by diff alone. <!-- completed: -->
-- [ ] Update `README.md` / `docs/concepts/` if any relocated content needs surfacing; confirm no README drift (final check; the up-front confirmation is in Step 1). <!-- completed: -->
+- [x] Re-measured every in-scope file via `wc -l`. Aggregate **~15% per-file (5,849→4,967) / ~14% net (→5,048)** — below the 28–30% target (clusters cafleet 27% / execute 10% / research+slidev 13–20%); before/after recorded in the Changelog. Targets not reached without violating zero-drift — see SC#1 note. <!-- completed: 2026-06-16T21:10 -->
+- [x] Cross-references audited independently across all of `skills/` — every pointer resolves to a real file + heading anchor (0 dangling / 0 suspect, ~200+ links, incl. the new `docs/spec` relocation anchors, the canonical-skeleton anchor, `web-researcher.md`, and no surviving `slide-creator` pointer). No relocated fact dropped vs the Step-1 destinations. <!-- completed: 2026-06-16T21:10 -->
+- [x] Diff reviewed per step + holistically (`git diff --stat main...HEAD`): only `skills/`, `docs/concepts/`, and this design doc changed — no source/config/test files; only prose/dedup/relocation. No repo skill-lint / markdown-lint task exists (`.claude/rules/commands.md` lists only Python lint/format/typecheck). <!-- completed: 2026-06-16T21:10 -->
+- [x] **Lossless spawn-prompt reconstruction:** verified per role during each step's review — every IMPORTANT / role-constraint line and start cue maps verbatim to a skeleton + per-role delta row (the lossless rule itself lives in `cafleet/reference/director.md`). No IMPORTANT line dropped. <!-- completed: 2026-06-16T21:10 -->
+- [x] No `README.md` edits required (confirmed up-front at Step 1: README references skills only at install/architecture level, not the tree shape, and cites no relocated internal). `docs/concepts/` updated as relocation destinations; no README drift. <!-- completed: 2026-06-16T21:10 -->
 
 ---
 
@@ -260,3 +260,4 @@ COMMENT(programmer): Step 8 done, zero drift, 6 files (+ research-presentation S
 | 2026-06-16 | Initial draft |
 | 2026-06-16 | Addressed reviewer findings: reconciled the reduction bands/ceiling across Overview / SC#1 / accounting; split CLI-emitted vs skill-instructed contract strings (latter stay inline); cut (not relocate) slide-creator; resolved the interview `COMMENT(claude)` decision; added pointer-dereferencing guardrail 6 + member-side-inline split; promoted the verifier `curl`/`wget` fix to in-scope; added the lossless spawn-prompt reconstruction check and up-front README confirmation |
 | 2026-06-16 | Reviewer + user approved; Status → Approved |
+| 2026-06-16 | **Execution complete (26/26 tasks), zero behavioral drift.** All 8 implementation steps applied every safe dedup/relocation/cut the design named, verified per step + holistically at Step 9. **SC #2–6 met and verified** (single canonical home; no info loss; zero drift — only `skills/` + `docs/concepts/` + this doc changed, no source/config/test; 0 dangling cross-references across ~200+ links; frontmatter `description:` byte-identical). **SC #1 (line numbers) NOT met:** in-scope per-file **5,849 → 4,967 (~15%)** vs 30% target; **net tree → 5,048 (~14%)** vs ~28% / ~4,200 ceiling. Per cluster (before→after, target): cafleet core **851→617 (27%, t42%)**; design-doc-execute **994→891 (10%, t38%)**; research **1690→1413 (16%, t32%)**; design-doc family **1161→1027 (12%, t16%)**; monitoring+supervision **291→272 (6.5%, t32%)**; base-dir/figure/slidev **813→704 (13%, t24%)**. Root cause: the estimates assumed more redundancy than exists under the zero-drift contract — director.md absorbed the new ~51-line canonical spawn-prompt skeleton + lossless rule the 150 estimate never counted; the rest is canonical, cross-referenced content (command indexes, workflow steps, contract strings kept inline per guardrail 2, load-bearing matplotlib/Slidev reference) that guardrails 1/2/5 forbid cutting. Two spec deviations, both correctness-preserving: coordination.md git-recovery condensed in place (no `docs/spec` home → would dangle); base-dir `<unset>` contract strings kept inline (skill-instructed literals, guardrail-2 exception — overrides the Step-8 "relocate the two verbatim strings" wording). New file: `cafleet-research-report/roles/web-researcher.md` (98-line spec extracted verbatim). Cut (not relocated): the my-slidev slide-creator spec. |
