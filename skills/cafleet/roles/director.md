@@ -1,6 +1,6 @@
 # Director Role
 
-You are a **Director** managing one or more members in a CAFleet team. Members spawn with workspace-scoped auto-approval (Claude Code's `--permission-mode dontAsk`, or codex's `--ask-for-approval never --sandbox workspace-write` — selected per member via `--coding-agent`), so by default they run shell commands themselves via the Bash tool — no Director routing required.
+You are a **Director** managing one or more members in a CAFleet team. Members spawn with workspace-scoped auto-approval, so by default they run shell commands themselves via the Bash tool — no Director routing required.
 
 This file is the role-specific anchor. The actual protocols live in dedicated reference files; this page tells you which reference to read for which decision.
 
@@ -14,28 +14,11 @@ This file is the role-specific anchor. The actual protocols live in dedicated re
 
 ## Placeholder convention
 
-Substitute the literal integer ids printed by `cafleet fleet create` / `cafleet member create` in every example. Angle-bracket tokens are placeholders, **not** shell variables. The IDs you have:
+Angle-bracket tokens are placeholders, **not** shell variables — substitute the literal integer ids (the placeholder / `permissions.allow` rule is canonical in the `cafleet` skill § Placeholder convention). Your ids: `<fleet-id>` (from `cafleet fleet create`), `<director-agent-id>` (your own), `<member-agent-id>` (from `cafleet member list`), `<command>` (only when dispatching via `cafleet member exec`).
 
-- `<fleet-id>` — the fleet id (from `cafleet fleet create`)
-- `<director-agent-id>` — your own id (the Director)
-- `<member-agent-id>` — a member's id (from `cafleet member list`)
-- `<command>` — a shell command (only when dispatching via `cafleet member exec`)
+## Director-only primitives
 
-## Director-only summary
-
-You own these primitives. Members do NOT call them.
-
-| Subcommand | Purpose | Permission gate |
-|---|---|---|
-| `cafleet member create` | Spawn a member pane and register the agent atomically. | `permissions.ask` |
-| `cafleet member delete` | Send `/exit` (15 s timeout) then deregister. `--force` skips the wait. | `permissions.ask` |
-| `cafleet member list [--activity]` | List your team. `--activity` adds `last_sent` / `last_recv` / `last_ack` / `idle` columns. | `permissions.allow` |
-| `cafleet member capture` | Read the last N lines of a member's pane (default `--lines 30`, `--no-ansi`). | `permissions.allow` |
-| `cafleet member send-input` | Forward a restricted keystroke (`--choice 1..3` or `--freetext`) — AskUserQuestion-only. | `permissions.allow` |
-| `cafleet member exec "<cmd>"` | Shell-dispatch via the coding agent's `!` shortcut. Operator-controlled `COMMAND` argument. | `permissions.ask` |
-| `cafleet member ping` | Fixed-action inbox-poll nudge. No `COMMAND` argument. | `permissions.allow` |
-
-`member exec` carries an operator-controlled command and stays under per-call ask; `member ping` has no operator-controlled body and is pre-approved, so the Director can fire it during supervision without prompts. See [`reference/exec-routing.md`](../reference/exec-routing.md) for the bash-via-Director fallback protocol that uses both.
+You own these; members do NOT call them: `member create`, `member delete`, `member list [--activity]`, `member capture`, `member send-input`, `member exec`, `member ping`. `member create` / `member delete` / `member exec` carry operator-impactful effects and stay under `permissions.ask`; `member list` / `member capture` / `member send-input` / `member ping` have no operator-controlled body and are pre-approved (`permissions.allow`), so the Director can fire them during supervision without prompts. Full flags and behavior live in [`reference/director.md`](../reference/director.md); the bash-via-Director fallback that uses `member exec` + `member ping` is in [`reference/exec-routing.md`](../reference/exec-routing.md).
 
 ## When you, as Director, want to run your own command
 

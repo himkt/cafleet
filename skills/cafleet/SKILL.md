@@ -8,61 +8,53 @@ Use the `cafleet` CLI to register as an agent, send and receive messages, and di
 
 ## Reference files
 
-This file (the core) covers the identity / poll / send / ack / cancel / show lifecycle every agent uses. Director-only flows, broadcast semantics, the bash-via-Director fallback, recovery decision trees, and the `--full` opt-back-in live in dedicated reference files. Read on demand:
+This file (the core) covers the identity / poll / send / ack / cancel / show lifecycle every agent uses. Director-only flows, broadcast semantics, the bash-via-Director fallback, recovery, and the `--full` opt-back-in live in dedicated reference files. Read on demand:
 
-- For Director-only commands (`member create`, `member delete`, `member list --activity`, `member capture`, `member send-input`, `member exec`, `member ping`, plus the AskUserQuestion three-beat workflow), Read [`reference/director.md`](reference/director.md).
+- For Director-only commands (`member create` / `delete` / `list --activity` / `capture` / `send-input` / `exec` / `ping`, plus the AskUserQuestion three-beat workflow), Read [`reference/director.md`](reference/director.md).
 - For broadcast send/ack and threading via `origin_task_id`, Read [`reference/broadcast.md`](reference/broadcast.md).
-- For the bash-via-Director fallback protocol (member-side reconsider-then-route, Director-side `member exec` dispatch, serialization, cross-fleet boundary), Read [`reference/exec-routing.md`](reference/exec-routing.md).
+- For the bash-via-Director fallback protocol, Read [`reference/exec-routing.md`](reference/exec-routing.md).
 - For crash / disconnect / idle / wedged-pane recovery decision trees AND the Shutdown Protocol, Read [`reference/recovery.md`](reference/recovery.md).
 - For `--full` / `--json` / `--quiet` opt-back-in semantics and `CAFLEET_MAX_TEXT_LEN`, Read [`reference/output-flags.md`](reference/output-flags.md).
 
+Exhaustive per-subcommand flags, exit codes, and error strings live in [`docs/spec/cli-options.md`](../../docs/spec/cli-options.md).
+
 ## Required Flags
 
-Every `cafleet` invocation that touches agents or messages must carry two literal integer ids as flags. There is no env-var fallback.
+Every `cafleet` invocation that touches agents or messages carries two literal integer ids (no env-var fallback):
 
-| Flag | Scope | Required for | Notes |
-|---|---|---|---|
-| `--fleet-id <int>` | per-subcommand (placed **after** the subcommand name) | every client + member subcommand (`register`, `send`, `broadcast`, `poll`, `ack`, `cancel`, `show`, `agent *`, `deregister`, `member *`) | Integer id of the fleet created via `cafleet fleet create`. Typed `int` — a non-integer fails with Click's standard "is not a valid integer" error. Rejected with `No such option` on `db init` / `fleet *` / `server` / `doctor`. |
-| `--agent-id <int>` | per-subcommand (placed **after** the subcommand name) | every subcommand **except** `register` | The acting agent's integer id. `register` returns the new `agent_id` — record it and pass it to every subsequent command. |
+- `--fleet-id <int>` — per-subcommand (placed **after** the subcommand name), required on every client + member subcommand. Rejected with `No such option` on `db init` / `fleet *` / `server` / `doctor`. Missing it exits with `Error: --fleet-id <int> is required for this subcommand. …`.
+- `--agent-id <int>` — per-subcommand, required on every subcommand **except** `register` (which returns the new `agent_id` to record and reuse).
 
-If `--fleet-id` is missing on a subcommand that needs it, the CLI exits with `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`
+Use literal ids, never shell variables: `permissions.allow` matches Bash invocations as fixed strings, so a literal `--fleet-id <int>` (first, after the subcommand name) stays matchable while `$VAR` expansion breaks the match and forces prompts. Coverage is one allow pattern per subcommand; `--json` invocations need companion patterns. See [`cli-options.md`](../../docs/spec/cli-options.md#permissionsallow-coverage).
 
-> **Why literal flags, not env vars?** `permissions.allow` matches Bash invocations as literal command strings — a literal `--fleet-id <int>` keeps the command a fixed string an allow pattern can match, while shell-expansion (`export VAR=...` then `$VAR`) breaks the match and forces per-invocation permission prompts. Substitute the literal ids printed by `cafleet fleet create` and `cafleet agent register`; never store them in shell variables. Because `--fleet-id` is per-subcommand, coverage uses one allow pattern per subcommand (`Bash(cafleet <grp> <cmd> --fleet-id *)`), matched only in the canonical flag order (`--fleet-id` first after the subcommand name); `--json` is a top-level option, so JSON invocations need companion `Bash(cafleet --json <grp> <cmd> --fleet-id *)` patterns. See [cli-options.md](../../docs/spec/cli-options.md#permissionsallow-coverage).
-
-The environment variables the CLI reads (all wired through `cafleet.config.Settings` via explicit `validation_alias` on each field, so the `CAFLEET_` prefix is uniform):
-
-- `CAFLEET_DATABASE_URL` — SQLite database URL (optional; default builds `sqlite:///<path>` from `~/.local/share/cafleet/cafleet.db`). Use an absolute path when overriding — SQLAlchemy does not expand `~` in SQLite URLs.
-- `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` — defaults for `cafleet server` (`127.0.0.1` / `8000`).
-- `CAFLEET_MAX_TEXT_LEN` — body truncation codepoint limit (default `200`); see [`reference/output-flags.md`](reference/output-flags.md).
+CLI env vars (all `CAFLEET_`-prefixed): `CAFLEET_DATABASE_URL` (SQLite URL; default `~/.local/share/cafleet/cafleet.db`, use an absolute path when overriding — `~` is not expanded), `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` (`cafleet server` defaults `127.0.0.1` / `8000`), `CAFLEET_MAX_TEXT_LEN` (body-truncation limit, default `200` — see [`reference/output-flags.md`](reference/output-flags.md)).
 
 ## Placeholder convention
 
-In every example below, substitute the literal integer ids printed by `cafleet fleet create` / `cafleet agent register`. Angle-bracket tokens are placeholders, **not** shell variables:
+In every example, substitute the literal integer ids printed by `cafleet fleet create` / `cafleet agent register`. Angle-bracket tokens are placeholders, **not** shell variables:
 
 - `<fleet-id>` — the fleet id printed by `cafleet fleet create`
-- `<my-agent-id>` — the id returned by your own `cafleet ... agent register` call
+- `<my-agent-id>` — the id returned by your own `cafleet agent register` call
 - `<director-agent-id>` — the Director's id (in your spawn prompt if you are a member)
 - `<target-agent-id>` — the recipient of a unicast message
 - `<task-id>` — the task id printed by `message poll` / `message send`
 
-> **Ids are integers**: every id input (`--fleet-id`, `--agent-id`, `--to`, `--id`, `--member-id`, `--task-id`) is a DB-assigned integer, typically 1–4 digits. Each is typed `int` and is passed in full — there is no prefix resolution. A non-integer fails with Click's standard `Error: Invalid value for '...': '<x>' is not a valid integer.` (exit 2).
+Every id input (`--fleet-id`, `--agent-id`, `--to`, `--id`, `--member-id`, `--task-id`) is a DB-assigned integer (typically 1–4 digits), passed in full — no prefix resolution. A non-integer fails with Click's standard not-a-valid-integer error (exit 2).
 
 ## Global Options
 
-Only `--json` and `--version` are top-level options (they precede the subcommand name). `--agent-id` and `--fleet-id` are per-subcommand options and must appear **after** the subcommand name:
+`--json` and `--version` are top-level options (precede the subcommand name); `--agent-id` and `--fleet-id` are per-subcommand options (after the subcommand name). Putting one in the wrong position fails with `No such option`.
 
 ```bash
 cafleet --json agent list --fleet-id <fleet-id>
 cafleet --json message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
 ```
 
-`cafleet agent list --json` will fail with `No such option: --json` — `--json` is a top-level option and must precede the subcommand name. `--agent-id` and `--fleet-id`, by contrast, are per-subcommand options and must come **after** the subcommand name; a `--fleet-id` preceding the subcommand fails with `No such option: --fleet-id`.
-
 `cafleet --version` prints `cafleet <version>` and exits 0 without `--fleet-id`.
 
 ## Coding-agent backends
 
-Three backends are supported: `claude` (default), `codex`, and `opencode`. The Director picks per member at create time via `--coding-agent {claude,codex,opencode}`. An optional `--model <m>` on `member create` pins the member's LLM (pass-through for `claude` / `codex`; `<provider-id>/<model-id>` format required for `opencode`); the flag detail and the model-name-to-backend inference table for resolving requests like "create a member with sonnet" live in [`reference/director.md`](reference/director.md). A separate `--role {member,monitor}` flag (default `member`) selects whether the new member is an ordinary member or the fleet's single dedicated **monitoring member** (the one that runs `cafleet monitor start`) — see [`reference/director.md`](reference/director.md) § Member Create and the `cafleet-agent-team-monitoring` skill. All three backends honor a leading-`!` shortcut on the input line, so `cafleet member exec` and message-send inline previews work uniformly. Operational details for codex members live in [`docs/reference/coding-agents/codex.md`](../../docs/reference/coding-agents/codex.md); the opencode equivalent (including the `CAFLEET_AGENT` preset materialization at `~/.opencode/agents/cafleet.md` on first spawn and the refresh recipe) lives in [`docs/reference/coding-agents/opencode.md`](../../docs/reference/coding-agents/opencode.md).
+Three backends — `claude` (default), `codex`, `opencode` — chosen per member at create time via `--coding-agent`. `--model <m>` pins the LLM and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; both flags, the model-name-to-backend inference, and the spawn-argv detail live in [`reference/director.md`](reference/director.md) (and the `cafleet-agent-team-monitoring` skill for the monitor). All three honor the leading-`!` input shortcut, so `member exec` and inline previews work uniformly. Backend operational detail: [`codex.md`](../../docs/reference/coding-agents/codex.md) / [`opencode.md`](../../docs/reference/coding-agents/opencode.md).
 
 ## Self-registration recipe
 
@@ -72,138 +64,91 @@ Use `--json` so the output is machine-parseable, and capture `agent_id` for ever
 cafleet --json agent register --fleet-id <fleet-id> \
   --name "<short-label>" \
   --description "<one-sentence purpose>"
+# → {"agent_id":<id>,"name":"<short-label>","registered_at":"<iso8601>"}
 ```
 
-JSON response (field order is not guaranteed):
-
-```json
-{"agent_id":<id>,"name":"<short-label>","registered_at":"<iso8601>"}
-```
-
-Rules:
-
-- **Name**: short, human-identifiable label (`Claude-A`, `reviewer-bot`, …). Not `test`, `foo`, etc.
+- **Name**: short, human-identifiable label (`Claude-A`, `reviewer-bot`, …) — not `test`, `foo`, etc.
 - **Description**: one sentence stating who the agent is and what it is for.
-- **Capture `agent_id` immediately.** It is required for every subsequent call; losing it forces re-registration.
-- Non-`--json` output prints `Agent registered successfully!` followed by `  agent_id:  <id>` and `  name:      <name>`. Parse the `agent_id:` line if `--json` is not an option.
+- **Capture `agent_id` immediately** — it is required for every subsequent call; losing it forces re-registration. Non-`--json` output prints `Agent registered successfully!` then `  agent_id:  <id>` / `  name:      <name>` (parse the `agent_id:` line).
 - Call `cafleet agent deregister --fleet-id <fleet-id> --agent-id <my-agent-id>` at end of fleet so stale registrations do not accumulate.
 
-> **Reserved name — `Administrator`**: every fleet is auto-seeded with exactly one built-in `Administrator` agent at `fleet create` time. Do NOT register a human or member agent under the name `Administrator`. The built-in Administrator is marked internally via `agent_card_json.cafleet.kind == "builtin-administrator"` and is protected against deregister and Director placement (see Deregister below).
+> **Reserved name — `Administrator`**: every fleet is auto-seeded with one built-in `Administrator` (marked `agent_card_json.cafleet.kind == "builtin-administrator"`, protected against deregister and Director placement). Do NOT register an agent under that name.
 
 ## Send (Unicast)
-
-Send a message to a specific agent by ID.
 
 ```bash
 cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --to <target-agent-id> --text "Did the API schema change?"
 ```
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--to <agent-id>` | yes | Recipient agent id (integer). |
-| `--text <body>` | yes | Message body. Truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the echoed response by default. |
-| `--full` | no | Disable body truncation; emit the full typed-column envelope. See [`reference/output-flags.md`](reference/output-flags.md). |
-| `--quiet` | no | Emit only the new task id. Useful in scripted loops. |
-
-After persisting the message, the broker keystrokes a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview`:
+`--to` (recipient id) and `--text` (body, truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` by default) are required; `--full` / `--quiet` per [`reference/output-flags.md`](reference/output-flags.md). After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane:
 
 ```
 [cafleet msg <task_id> from <sender_id> <ts>]
 <text-truncated-to-CAFLEET_MAX_TEXT_LEN>
 ```
 
-The inline preview **leads with `Esc`**: it presses `Escape`, lets the pane settle ~0.1 s, then types the payload and `Enter`. The leading `Esc` means that if the recipient's pane is parked on a pending permission-approval prompt, that prompt is dismissed **before** any payload character is typed, so the trailing `Enter` can never blindly confirm it. This safeguard applies to every recipient (member or Director) and to every path that routes through `send_inline_preview` — `message send`, `message broadcast`, and `member nudge`.
-
-The recipient's coding agent processes the keystroked text as a fresh user-turn input — no `cafleet message poll` invocation is in the auto-fire path. The recipient acks via `cafleet message ack --task-id <task_id>` once it has consumed the message. The notification is skipped when: the sender is the recipient (self-send), the recipient has no placement row or no `tmux_pane_id`, the pane is dead, or `tmux` is not on `PATH`. The message is always available in the queue regardless of notification outcome — recipients that miss an inline preview catch up on their next manual `message poll` (or via a Director-issued `cafleet member ping`).
+The preview **leads with `Esc`** (settles ~0.1 s, then types the payload + `Enter`), so a recipient parked on a pending permission-approval prompt has it dismissed before the trailing `Enter` lands — the same `Esc`-safeguarded path serves `message send` / `message broadcast` / `member nudge`. The recipient processes the keystroke as a fresh user-turn input (no `message poll` in the auto-fire path) and acks once consumed; a missed preview is caught on the next manual `message poll` or a Director `cafleet member ping`. Mechanics: [`tmux-push.md`](../../docs/concepts/tmux-push.md).
 
 ## Poll (Check Inbox)
 
-Poll for incoming messages. Returns only un-acked (`input_required`) deliveries addressed to this agent, newest first — once a task is ACKed it no longer appears in `poll` output.
+Returns only un-acked (`input_required`) deliveries addressed to this agent, newest first; ACKing one drops it from `poll` output. `--full` emits the untruncated typed-column envelope.
 
 ```bash
-cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
-cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id> --full
+cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id> [--full]
 ```
-
-| Flag | Required | Notes |
-|---|---|---|
-| `--full` | no | Disable body truncation; emit the full typed-column envelope for every task. |
 
 ## Acknowledge (ACK)
 
-Acknowledge receipt of a message. Moves the task from `INPUT_REQUIRED` to `COMPLETED`.
+Moves a task from `input_required` to `completed`. `--task-id` required; `--quiet` emits only the acked id.
 
 ```bash
 cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
-cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id> --quiet
 ```
-
-| Flag | Required | Notes |
-|---|---|---|
-| `--task-id <int>` | yes | Task to acknowledge. |
-| `--full` | no | Disable body truncation in the echoed task. |
-| `--quiet` | no | Emit only the acked task id. |
 
 ## Cancel (Retract)
 
-Cancel a sent message that has not been acknowledged yet. Only the sender can cancel.
+Retract a sent message that has not been acknowledged yet (sender-only). `--task-id` required.
 
 ```bash
 cafleet message cancel --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
 ```
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--task-id <int>` | yes | Task to cancel. |
-| `--full` | no | Disable body truncation in the echoed task. |
-
 ## Show (Get Task)
 
-Get details of a specific task by ID.
+Fetch one task by id. `--task-id` required; `--full` for the untruncated envelope.
 
 ```bash
 cafleet message show --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
 ```
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--task-id <int>` | yes | Task to fetch. |
-| `--full` | no | Disable body truncation; emit the full typed-column envelope. |
-
 ## List Agents
 
-`agent list` returns all registered agents in the fleet. To fetch detail for a single agent, use `agent show --id <target-agent-id>`.
+`agent list` returns all registered agents; `agent show --id <target-agent-id>` fetches one.
 
 ```bash
 cafleet agent list --fleet-id <fleet-id>
 cafleet agent show --fleet-id <fleet-id> --agent-id <my-agent-id> --id <target-agent-id>
 ```
 
-Default output is one row per agent (`<id> <name> <status>`); `description` is truncated to 60 codepoints. Pass `--full` for the four-line per-agent block (full `agent_id`, `name`, `description` still truncated to 60, `status`); the agent surfaces do not carry `agent_card_json`, so `--full` does not expose it — see [`reference/output-flags.md`](reference/output-flags.md).
+Default output is one row per agent (`<id> <name> <status>`, `description` truncated to 60 codepoints); `--full` gives the four-line per-agent block (the agent surfaces never carry `agent_card_json`). See [`reference/output-flags.md`](reference/output-flags.md).
 
 ## Doctor
 
-Print the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE`) for operators diagnosing placement issues without reaching for raw tmux commands.
+Print the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE`) for diagnosing placement without raw tmux. Does NOT require `--fleet-id`; requires `TMUX` and `TMUX_PANE` to be set.
 
 ```bash
 cafleet doctor
 cafleet --json doctor
 ```
 
-Does NOT require `--fleet-id`. Requires `TMUX` and `TMUX_PANE` env vars to be set (the standard tmux pane environment).
-
 ## Deregister
-
-Remove this agent's registration from the broker.
 
 ```bash
 cafleet agent deregister --fleet-id <fleet-id> --agent-id <my-agent-id>
 ```
 
-> **Root Director cannot be deregistered**. The agent created by `cafleet fleet create` (the fleet's `fleets.director_agent_id`) is protected — `cafleet agent deregister --agent-id <root-director-id>` exits 1 with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead.` Use `cafleet fleet delete <fleet-id>` for fleet teardown.
-
-> **Administrator cannot be deregistered**. Passing the built-in Administrator's `agent_id` to `cafleet agent deregister` exits 1 with `Error: Administrator cannot be deregistered`. The Administrator row stays `active`; there is no override flag. Every fleet has exactly one Administrator; deregister regular agents only.
+The root Director and the built-in Administrator cannot be deregistered (both exit 1 — see [`cli-options.md`](../../docs/spec/cli-options.md#error-messages)). Use `cafleet fleet delete <fleet-id>` for fleet teardown.
 
 ## Fleet Delete
 
@@ -212,27 +157,20 @@ cafleet fleet delete <fleet-id>
 # → Deleted fleet <fleet-id>. Deregistered N agents.
 ```
 
-Soft-deletes a fleet in a single transaction: stamps `fleets.deleted_at`, deregisters every active agent in the fleet (root Director + Administrator + remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved. Idempotent.
-
-After soft-delete, the fleet is hidden from `cafleet fleet list` and further `cafleet agent register --fleet-id <deleted>` calls fail with `Error: fleet <id> is deleted`. Surviving member coding-agent processes are **not** automatically closed — call `cafleet member delete` per member **before** `cafleet fleet delete` for a clean teardown. See the Shutdown Protocol in [`reference/recovery.md`](reference/recovery.md) for the full ordering.
+Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters every active agent, deletes placement rows; tasks preserved; idempotent). It does **not** close member panes — run `cafleet member delete` per member first, in the [`reference/recovery.md`](reference/recovery.md) Shutdown order. Full behavior: [`cli-options.md`](../../docs/spec/cli-options.md#fleet-delete).
 
 ## Typical Workflow
 
-0. **Verify pane env** (Director / spawn-aware operator): run `cafleet doctor` to confirm the calling shell has `TMUX` and `TMUX_PANE` set. Reach for this BEFORE `cafleet fleet create` and BEFORE any `cafleet member create` call — it is the canonical pane-identity probe, replacing raw `tmux display-message` and `TMUX` / `TMUX_PANE` env-var expansion (see § *Doctor*).
+0. **Verify pane env** (Director): run `cafleet doctor` to confirm `TMUX` / `TMUX_PANE` are set — the canonical pane-identity probe, before `cafleet fleet create` and any `cafleet member create`.
 
-1. **Create a fleet** (if one does not already exist):
+1. **Create a fleet** (if none exists):
    ```bash
    cafleet fleet create --label "my-project"
-   # text output line 1: <fleet-id>; line 2: <root-director-agent-id>
-   cafleet fleet create --label "my-project" --json
-   # JSON: { "fleet_id": "...", "director": {...}, "administrator_agent_id": "..." }
+   # text: line 1 <fleet-id>, line 2 <root-director-agent-id>; --json for the nested shape
    ```
+   Must run inside a tmux session (else exits 1 with `Error: cafleet fleet create must be run inside a tmux session`, writes nothing).
 
-   Must be run inside a tmux session — outside tmux the command exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing.
-
-2. **Register, discover, send, poll, and acknowledge** per the command sections above (§ *Self-registration recipe*, § *List Agents*, § *Send (Unicast)*, § *Poll (Check Inbox)*, § *Acknowledge (ACK)*). Repeat send/poll/ack as needed; use `cafleet --json <cmd> --fleet-id <fleet-id>` when parsing output programmatically.
-
-For Director-side spawn / capture / exec / ping flows, see [`reference/director.md`](reference/director.md). For shutdown ordering, see [`reference/recovery.md`](reference/recovery.md).
+2. **Register, discover, send, poll, ack** per the command sections above; use `cafleet --json …` when parsing output. Director-side spawn/capture/exec/ping: [`reference/director.md`](reference/director.md); shutdown ordering: [`reference/recovery.md`](reference/recovery.md).
 
 ## Message Lifecycle
 
@@ -240,8 +178,4 @@ Messages are tasks with three states: **input_required** (delivered, awaiting AC
 
 ## Error Handling
 
-- Missing `--fleet-id` on a client/member subcommand exits with `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` (exit 1).
-- Missing `--agent-id` on commands that need it exits with `Error: Missing option '--agent-id'.` (Click built-in, exit 2).
-- Errors print to stderr and exit non-zero.
-- Use `cafleet --json <cmd> --fleet-id <fleet-id>` for machine-parseable output (including errors).
-- `member` commands require a tmux session (`TMUX` env var must be set) and exit 1 with `Error: cafleet member commands must be run inside a tmux session` if not.
+Errors print to stderr and exit non-zero; `cafleet --json <cmd>` emits them machine-parseably. The most common: missing `--fleet-id` (exit 1), missing `--agent-id` (`Error: Missing option '--agent-id'.`, exit 2), and `member` commands outside a tmux session (exit 1). Full catalogue: [`cli-options.md`](../../docs/spec/cli-options.md#error-messages).

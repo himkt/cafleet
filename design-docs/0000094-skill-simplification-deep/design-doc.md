@@ -1,7 +1,7 @@
 # Skill Simplification (Deep): Aggressive De-duplication of `skills/`
 
 **Status**: Approved
-**Progress**: 8/26 tasks complete
+**Progress**: 10/26 tasks complete
 **Last Updated**: 2026-06-16
 
 ## Overview
@@ -202,8 +202,10 @@ Both are genuine role-file defects, promoted to in-scope (consistent with this d
 
 ### Step 3: Simplify the cafleet core cluster (851 → ~496)
 
-- [ ] Simplify `cafleet/SKILL.md` + the 5 reference files (`director`, `broadcast`, `exec-routing`, `output-flags`, `recovery`): relocate CLI-internals; dedup the placeholder / inline-preview / forbidden-behaviors blocks; cut rejected-alternative and why-literal-flags rationale. <!-- completed: -->
-- [ ] Simplify `cafleet/roles/{director,member}.md`: point to canonical placeholder / comms / forbidden-behaviors / shutdown homes; keep only role-unique content. <!-- completed: -->
+- [x] Simplify `cafleet/SKILL.md` + the 5 reference files (`director`, `broadcast`, `exec-routing`, `output-flags`, `recovery`): relocate CLI-internals; dedup the placeholder / inline-preview / forbidden-behaviors blocks; cut rejected-alternative and why-literal-flags rationale. <!-- completed: 2026-06-16T19:48 -->
+- [x] Simplify `cafleet/roles/{director,member}.md`: point to canonical placeholder / comms / forbidden-behaviors / shutdown homes; keep only role-unique content. <!-- completed: 2026-06-16T19:48 -->
+
+COMMENT(director): Arbitration — accept the cafleet-core cluster at ~27% (851→619), zero-drift confirmed (SKILL.md reviewed; every relocated internal points to a real docs home). The 42%/496 target is internally inconsistent with this design's own Step-2 decision to host the canonical spawn-prompt skeleton + lossless-rule (~51 lines) in director.md, so director.md's realistic floor is ~200, not 150. Forcing 42% would gut the canonical command index + cross-referenced workflows (model-name→backend inference, AskUserQuestion three-beat, audit-file pattern, recovery.md Shutdown Protocol) and dangle pointers — violating guardrails 1/2/5 and SC #3-5, which outrank the per-cluster line estimate. No deeper canonical cut. Reconcile cluster %s against the firmer net-aggregate (~28%, ~4,200 ceiling) at Step 9; if the aggregate then falls short, look for safe cross-cluster cuts. — director
 
 ### Step 4: Simplify the design-doc family (create/interview/doc + roles)
 
