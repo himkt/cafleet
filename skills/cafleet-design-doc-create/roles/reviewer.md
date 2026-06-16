@@ -20,22 +20,13 @@ Load these skills at startup:
 
 ## Placeholder convention
 
-Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are **placeholders, not shell variables** — substitute the literal ids from your spawn prompt directly into each command (`permissions.allow` matches command strings literally; shell expansion breaks it). Flag placement (`--fleet-id` and `--agent-id` both after the subcommand name) follows the `cafleet` skill.
+Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are placeholders, **not** shell variables — substitute the literal ids from your spawn prompt; the rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
 
 ## Communication Protocol
 
-You do NOT speak to the user directly. All feedback goes through the Director via the CAFleet message broker.
+You do NOT speak to the user directly; all feedback goes through the Director via the broker. Poll your inbox, `cafleet message ack` each assignment, then read the doc and report via `cafleet message send` — command shapes in the `cafleet` skill core and your spawn prompt.
 
-**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema documented in [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md): single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(reviewer)` markers in the design doc. Findings are written into the doc; cafleet bodies do NOT carry the finding text.
-
-**Sending feedback or approval to the Director:**
-```bash
-cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
-  --to <director-agent-id> --text "complete (doc) — N issues"
-```
-or `approved (doc)` when the draft meets all quality criteria (see § *Approval Signal*). Findings are NOT in the cafleet body — each is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design document at the affected section (see [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) for the full schema).
-
-**Receiving review assignments from the Director:** the broker keystrokes an inline preview into your pane (mechanics in the `cafleet` skill § Send); run `cafleet message poll` for the full body, ACK with `cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>`, then read the document and send your review via `cafleet message send`.
+**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema in [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md): single-line `<verb> (<pointer>)` body, findings in inline `COMMENT(reviewer): [TAG] <body>` markers at the affected section (never in the cafleet body). Report `complete (doc) — N issues` after a review pass, or `approved (doc)` when all quality criteria are met (see § *Approval Signal*).
 
 ## Review Process
 

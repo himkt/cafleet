@@ -21,31 +21,9 @@ Validate an existing design document through structured, fine-grained Q&A across
 
 ## Coordination Protocol
 
-This skill writes only `COMMENT(claude)` markers in the design document, and the Director-Analyzer cafleet messages are exempt from the verb + pointer + `COMMENT(role)` schema used by the `cafleet-design-doc-create` and `cafleet-design-doc-execute` skills. The Analyzer's question list is a one-time payload deliverable (a numbered list, not iterative coordination), and the Director's user-facing relay goes through `AskUserQuestion`, not cafleet. Only the inline `COMMENT(claude)` annotation rules below are in scope.
+This skill writes only `COMMENT(claude)` markers in the design document; the Director-Analyzer cafleet messages are exempt from the verb + pointer schema (the Analyzer's question list is a one-time multi-line payload, and the Director's user relay goes through `AskUserQuestion`, not cafleet). The `COMMENT(role)` marker format, the `claude` role (the Director as user-mediator, carrying user-derived clarifications), and the one-per-issue / actionable rules are canonical in [../cafleet-design-doc/coordination.md](../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker*.
 
-> **Maintainer source-of-truth.** The `COMMENT(role)` marker convention is mirrored from `skills/cafleet-design-doc/coordination.md` (the canonical reference; updates to one require updates to the other). The convention is fully inlined below so this skill stands alone when packaged as an independent plugin — no cross-skill markdown link is added, by design.
-
-### COMMENT(claude) Marker
-
-Inline marker placed in the design document.
-
-```
-COMMENT(claude): <description of discrepancy and what needs to change>
-```
-
-Placed on its own line, immediately before the content it refers to — e.g. a `COMMENT(claude): User confirmed the retry limit should be 5, not 3. ...` line inserted directly above the `### Retry Strategy` section it refers to.
-
-Roles relevant in this skill:
-
-| Role | Who writes it | When |
-|:--|:--|:--|
-| `claude` | The Director acting as user-mediator | Carries user-derived clarifications produced by the interview. The marker is placed inline immediately before the relevant content; one marker per discrepancy. |
-
-Rules:
-
-- One marker per logical discrepancy. Do not bundle unrelated issues.
-- Body must be actionable — state what is wrong AND what the correct behavior should be.
-- Markers persist in the document until resolved by the `cafleet-design-doc-create` skill's resume mode, which reads each `COMMENT(claude)` marker, applies the fix, and removes the marker as part of the fix.
+Interview-specific: place each `COMMENT(claude)` marker on its own line immediately before the section it refers to (e.g. above `### Retry Strategy`); markers persist until the `cafleet-design-doc-create` skill's resume mode resolves them (reads each marker, applies the fix, removes it).
 
 ## Architecture
 
@@ -147,28 +125,16 @@ Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt 
 
 **Gate**: do not spawn the Analyzer until the monitoring member's `ready: monitor live` handshake (2b) has arrived.
 
-```
-You are the Analyzer in a design document interview team (CAFleet-native).
+Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (`{fleet_id}` / `{agent_id}` / `{director_agent_id}` filled by `member create`; `[INSERT …]` markers shell-substituted by the Director first):
 
-ROLE DEFINITION: Open [INSERT abs path to roles/analyzer.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the `cafleet` skill — for communication with the Director
-
-FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
-DESIGN DOCUMENT: [INSERT doc_path]
-ALREADY-REVIEWED SECTIONS: [INSERT JSON array from interview-progress, or "none" on fresh start]
-
-COMMUNICATION PROTOCOL:
-- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "your numbered question list"
-- When you see cafleet message poll output with a message from the Director, act on those instructions.
-
-Read the design document, generate a numbered question list per the role definition,
-send it to the Director via cafleet message send, then idle pending shutdown.
-```
+| Slot | Analyzer |
+|---|---|
+| ROLE TITLE / TEAM | `the Analyzer` / `design document interview` |
+| role-file | `roles/analyzer.md` |
+| EXTRA SKILL LOADS | none (the `cafleet` skill only) |
+| CONTEXT LINES | `DESIGN DOCUMENT: [INSERT doc_path]` + `ALREADY-REVIEWED SECTIONS: [INSERT JSON array from interview-progress, or "none" on fresh start]` |
+| report-hint | `your numbered question list` |
+| start cue (verbatim) | `Read the design document, generate a numbered question list per the role definition, send it to the Director via cafleet message send, then idle pending shutdown.` |
 
 Render the prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` per the 2c audit-file pattern (leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass), then spawn with `--prompt-file`:
 

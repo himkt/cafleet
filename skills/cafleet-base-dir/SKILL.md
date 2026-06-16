@@ -75,8 +75,4 @@ Every CAFleet member, every consumer skill, and every Director MUST follow this 
 
 ## The `<unset>` sentinel
 
-The `cafleet-base-dir` skill is the only place that may return `BASE=<unset>`. The sentinel is the literal string `"<unset>"` (case-sensitive). Any consumer skill that has `${BASE}` set to `<unset>` MUST:
-
-1. **Guard audit-file writes.** Audit-file writes that derive their path from `${BASE}` are guarded by an explicit `${BASE} != <unset>` check at the call site. The guard is mandatory; reaching `Path(BASE) / …` without the guard is the failure mode item 3 catches. A guarded skip is the intended path when `${BASE}` is `<unset>` — no silent no-op, no fallback to `/tmp`, just an explicit skip whose condition is visible in the source.
-2. **Omit `BASE:` from spawn prompts.** The Director MUST NOT spawn members with `BASE: <unset>` in the spawn prompt — the line is omitted entirely so the member's existence-check naturally treats audit-file features as disabled. The literal string `BASE: <unset>` is never written into any spawn prompt.
-3. **Loud-error on unguarded BASE-derivation.** If a code path under `${BASE}=<unset>` reaches an unguarded `Path(BASE) / …` computation, abort with the standardized error: `Error: BASE is <unset>; refusing to fall back to /tmp`.
+`cafleet-base-dir` is the only producer of `BASE=<unset>` — the literal string `"<unset>"` (case-sensitive), returned by the absolute-path-arg branch (Step 0). A consumer with `${BASE} == <unset>` follows the **No-bypass write protocol** above: **guard** every audit-file write with an explicit `${BASE} != <unset>` check at the call site (a guarded skip is the intended path — no silent no-op, no `/tmp` fallback); **omit** the `BASE:` line entirely from spawn prompts (never write the literal `BASE: <unset>`), so the member's existence-check treats audit-files as disabled; and **loud-error** on any unguarded `Path(BASE) / …` computation (the abort string in item 2).

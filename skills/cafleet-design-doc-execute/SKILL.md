@@ -174,37 +174,18 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 
 #### 3e. Spawn each member via `cafleet member create`
 
-The spawn prompts below use `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders — cafleet `member create` runs `str.format()` over the entire prompt and substitutes these from the new member's allocated `agent_id`, the fleet ID, and the spawning Director's `agent_id`. The `[INSERT …]` markers (e.g. `[INSERT DESIGN DOC PATH]`, `[INSERT abs path to roles/programmer.md]`) are NOT format placeholders — the Director substitutes them in shell before calling `member create`. See the Template safety note under `Member Create` in `skills/cafleet/reference/director.md`.
+Each member is spawned from the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below. `{fleet_id}` / `{agent_id}` / `{director_agent_id}` are filled by `member create`'s `str.format()`; the `[INSERT …]` markers (`[INSERT DESIGN DOC PATH]`, `[INSERT abs path to roles/<role>.md]`) are shell-substituted by the Director first (double any literal `{`/`}` per the Template-safety note in `cafleet/reference/director.md`). All three roles load `cafleet` + `cafleet-design-doc` and take `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` as their only context line; each delta below gives the role's title, role-file, IMPORTANT lines (verbatim), and start cue.
 
 > **Spawn-prompt audit file (two-step pattern)**: every spawn in this skill follows the same two steps — (1) **render** the prompt (substitute the `[INSERT …]` markers; leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass); (2) **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` (`<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; create `${BASE}/prompts/` on first write; same-second collision → append `_2`, `_3`, … — never overwrite), then invoke `cafleet member create --prompt-file <abs path>` (see the per-role spawn templates and commands below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet-base-dir` skill § *No-bypass write protocol* and the `cafleet` skill's `reference/director.md` reference file § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
-**Programmer spawn prompt:**
+**Programmer spawn prompt** (skeleton + delta):
 
-```
-You are the Programmer in a design document execution team (CAFleet-native).
-
-ROLE DEFINITION: Open [INSERT abs path to roles/programmer.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the `cafleet` skill — for communication with the Director
-- the `cafleet-design-doc` skill — for template and guidelines
-
-FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
-DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
-
-COMMUNICATION PROTOCOL:
-- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "your report"
-- When you see cafleet message poll output with a message from the Director, act on those instructions.
-
-IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.
-IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.
-IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.
-
-Start by reading the design document. Then wait for the Director to assign your first step.
-```
+| Slot | Programmer |
+|---|---|
+| ROLE TITLE | `the Programmer` |
+| role-file | `roles/programmer.md` |
+| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` |
+| start cue | `Start by reading the design document. Then wait for the Director to assign your first step.` |
 
 Render the prompt to `${BASE}/prompts/programmer-<UTC-compact>.md` per the 3e two-step audit-file pattern (leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass), then spawn with `--prompt-file`:
 
@@ -217,34 +198,14 @@ Render the prompt to `${BASE}/prompts/programmer-<UTC-compact>.md` per the 3e tw
 
    Parse `agent_id` from the JSON response and substitute it for `<programmer-agent-id>` in every subsequent command.
 
-**Tester spawn prompt (if needed):**
+**Tester spawn prompt** (skeleton + delta; if needed):
 
-```
-You are the Tester in a design document execution team (CAFleet-native).
-
-ROLE DEFINITION: Open [INSERT abs path to roles/tester.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the `cafleet` skill — for communication with the Director
-- the `cafleet-design-doc` skill — for template and guidelines
-
-FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
-DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
-
-COMMUNICATION PROTOCOL:
-- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "your report"
-- When you see cafleet message poll output with a message from the Director, act on those instructions.
-
-IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.
-IMPORTANT: Do NOT write implementation code — only test code.
-IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.
-IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.
-
-Start by reading the design document. Then wait for the Director to assign your first step.
-```
+| Slot | Tester |
+|---|---|
+| ROLE TITLE | `the Tester` |
+| role-file | `roles/tester.md` |
+| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: Do NOT write implementation code — only test code.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` |
+| start cue | `Start by reading the design document. Then wait for the Director to assign your first step.` |
 
 Render the prompt to `${BASE}/prompts/tester-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--prompt-file`:
 
@@ -261,32 +222,12 @@ Render the prompt to `${BASE}/prompts/tester-<UTC-compact>.md` per the 3e two-st
 
 > **Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the `cafleet-design-doc-interview` skill). Phase 2 verification reports follow the verb + pointer + `COMMENT(verifier)` schema documented in [the Coordination Protocol section above](#coordination-protocol).
 
-```
-You are the Verifier in a design document execution team (CAFleet-native).
-
-ROLE DEFINITION: Open [INSERT abs path to roles/verifier.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the `cafleet` skill — for communication with the Director
-- the `cafleet-design-doc` skill — for template and guidelines
-
-FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
-DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]
-
-COMMUNICATION PROTOCOL:
-- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "your report"
-- When you see cafleet message poll output with a message from the Director, act on those instructions.
-
-IMPORTANT: Do NOT commit code or modify implementation/test files.
-IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.
-IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.
-
-Start by reading the design document and discovering available tools.
-Then wait for the Director to assign your first verification task.
-```
+| Slot | Verifier |
+|---|---|
+| ROLE TITLE | `the Verifier` |
+| role-file | `roles/verifier.md` |
+| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code or modify implementation/test files.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` |
+| start cue | `Start by reading the design document and discovering available tools. Then wait for the Director to assign your first verification task.` |
 
 Render the prompt to `${BASE}/prompts/verifier-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--prompt-file`:
 
@@ -335,7 +276,7 @@ For each step in the design document:
    cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --to <programmer-agent-id> --text "ready (paragraph-Implementation > Step N)"
    ```
-2. **Wait for the Programmer's `complete (paragraph-Implementation > Step N)`** via `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`. On `escalating (paragraph-Implementation > Step N)` (suspected test defect), see [roles/director.md](roles/director.md) for the escalation protocol; the rationale lives in a `COMMENT(programmer)` marker at the pointer, not in the cafleet body.
+2. **Wait for the Programmer's `complete (paragraph-Implementation > Step N)`** via `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`. On `escalating (paragraph-Implementation > Step N)` (suspected test defect), see the **Escalation Protocol (Test Defect)** at the end of Step 4; the rationale lives in a `COMMENT(programmer)` marker at the pointer, not in the cafleet body.
 3. **Programmer updates design doc**: Checkboxes, timestamps, and Progress counter.
 
 #### Phase C: Code Review (Director)
@@ -461,7 +402,7 @@ The Director holds three **PR-review-specific** in-context variables across idle
 
 #### 7a. Add PR-review polling to each idle-nudge-driven turn
 
-The monitoring member's `cafleet monitor` (started in Step 3b) runs unchanged on entry and exit; the Director simply adds the PR-review poll below to each idle-nudge-driven turn (and drops it after exit — Step 8's shutdown stops the monitor). The "Per idle-nudge turn checklist" subsection is the concrete command list.
+The monitoring member's `cafleet monitor` (started in Step 3b) runs unchanged on entry and exit; the Director simply adds the **7b per-turn procedure** (team health + PR-review poll) to each idle-nudge-driven turn, and drops it after exit (Step 8's shutdown stops the monitor).
 
 #### 7b. Per-turn procedure
 
@@ -482,9 +423,9 @@ On each idle-nudge-driven turn (and in any active turn while Step 7 is in progre
 
 The APPROVED check MUST be qualified by the post-push filter (`submittedAt > last_push_ts`). An older approval — say, from a Copilot pass before the most recent fix-push — must NOT be treated as approval of the current HEAD; otherwise a single early approve followed by additional commits would silently finalize the PR.
 
-**Why no auto-exit on silence**: a silent Copilot is NOT proof it is done — it may be slow to re-review after a fix-push, not yet re-triggered, or back-pressured, so auto-exiting on silence risks finalizing while Copilot is still composing comments. The loop never auto-exits on silence; it instead **escalates to the user** via 7e after ~30 consecutive silent idle-nudge-driven turns (~30 minutes), so the user — not the loop — chooses whether to keep waiting, re-request the review, or finalize. Outside that user gate, the loop only exits on an explicit `state == "APPROVED"` signal or on "Stop means stop".
+**No auto-exit on silence**: the loop never auto-exits on silence — a silent Copilot is not proof it is done (it may be slow, not re-triggered, or back-pressured). It escalates to the **user** via 7e once `silence_ticks >= 30` (~30 min); outside that user gate it exits only on a post-push `state == "APPROVED"` or on "Stop means stop".
 
-**Why not `reviewDecision`**: the PR-level `reviewDecision` only reflects required reviewers (typically CODEOWNERS). Copilot is usually not a CODEOWNER, so an approve from Copilot alone leaves `reviewDecision` null/REVIEW_REQUIRED. Reading the Copilot-specific entry in the `reviews` array is the reliable signal.
+**Read `reviews`, not `reviewDecision`**: `reviewDecision` only reflects required reviewers (CODEOWNERS); Copilot usually is not one, so its approve leaves `reviewDecision` null — the Copilot-specific entry in the `reviews` array is the reliable signal.
 
 #### 7c. Classify and route
 
@@ -525,21 +466,12 @@ When `silence_ticks >= 30` (≈ 30 minutes since the last Copilot activity AND n
 
 The 30-turn threshold is conservative: Copilot's first review after a `--add-reviewer` typically lands within 3–5 minutes. 30 minutes is enough that Copilot is highly unlikely to still be composing, while leaving the *decision* to the user instead of the loop. The user retains the option to keep waiting indefinitely — the loop never finalizes on its own based on silence.
 
-#### Per idle-nudge turn checklist (Step 7)
-
-The concrete command list the Director runs each idle-nudge-driven turn while Step 7 is active — team health (unchanged from the `cafleet-agent-team-monitoring` skill) plus the PR-review poll. Substitute the literal ids and PR number — no shell variables. Act on the filtered result per the **Step 7b branch table** (the gate conditions and thresholds are canonical there).
-
-- **Team health**: `cafleet --json member list --fleet-id <fleet-id>` → `cafleet --json message poll --fleet-id <fleet-id> --agent-id <director-agent-id>` (ACK progress reports to consume them) → `cafleet member capture --fleet-id <fleet-id> --member-id <member-agent-id> --lines 200` for members silent since last check → nudge stalled members with `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<original-pointer>)"` (a re-sent `ready (...)` reads as a contextual stall-nudge).
-- **PR review**: `gh pr view <pr-number> --json reviews` (GraphQL: `author.login`, `state`, `submittedAt`, `body`) and `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments` (REST: `user.login`, `body`, `path`, `line`, `created_at`); filter to `^copilot` logins (case-insensitive) with timestamp > `last_push_ts`; then apply the **Step 7b branch table** — most-recent post-push review `state == "APPROVED"` → exit; 0 new + `silence_ticks < 30` → increment; 0 new + `silence_ticks >= 30` → 7e escalation; ≥ 1 new → reset `silence_ticks = 0`, classify per 7c (write `COMMENT(copilot)` at source `<file>:<line>` or `COMMENT(director)` at the affected paragraph), dispatch `ready (<file>:<line>)` (design-doc-anchored items are not routed).
-- **Escalation**: if any member has been nudged 2× with no progress, escalate to the user.
-
 #### Error Handling (Steps 6–7)
+
+The three Step 6a precondition failures (`gh auth status` fails / on default branch / no commits beyond base) all skip Steps 6 + 7 → Step 8 local-finalize (see 6a). The remaining cases:
 
 | Case | Detection | Behavior |
 |:--|:--|:--|
-| `gh auth status` fails | Step 6a precondition check | Skip Steps 6 + 7, go directly to Step 8 local-finalize |
-| On default branch | Step 6a precondition check | Skip Steps 6 + 7, go directly to Step 8 local-finalize |
-| No commits beyond base | Step 6a precondition check | Skip Steps 6 + 7, go directly to Step 8 local-finalize |
 | `git push` rejected | stderr of `git push` | Report exact stderr to user, skip Step 7, go to Step 8 local-finalize. NEVER force-push. |
 | `gh pr create` fails | stderr of `gh pr create` | Report, skip Step 7, go to Step 8 local-finalize |
 | `@copilot` reviewer unavailable | `gh api .../requested_reviewers` shows no Copilot AND no prior Copilot review | Report `Copilot reviewer unavailable for this PR`; skip Step 7; go to Step 8 |

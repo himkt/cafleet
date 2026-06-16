@@ -19,7 +19,7 @@ Create a Slidev presentation and reading transcript from an existing research re
 
 The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` and `cafleet-agent-team-monitoring` skills and embeds them into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model sonnet`) that owns the heartbeat and re-engages the idle Director — see Step 1.
 
-For autonomous Slidev generation, see `my-slidev/SKILL.md` § Spawnable Agents → slide-creator.
+For autonomous Slidev generation, see the `cafleet-my-slidev` skill § Autonomous slide generation.
 
 ## Architecture
 
@@ -123,34 +123,16 @@ Both work from `report.md` independently. After the slide deck is finalized (Ste
 
 **Presentation spawn prompt:**
 
-```
-You are the Presentation Specialist in a research presentation team (CAFleet-native).
+Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Presentation delta below (`{fleet_id}` / `{agent_id}` / `{director_agent_id}` filled by `member create`; `[INSERT …]` markers shell-substituted by the Director first):
 
-ROLE DEFINITION: Open [INSERT abs path to roles/presentation.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the `cafleet` skill — for the broker primitives and bash-via-Director routing
-- the `cafleet-my-slidev` skill — for Slidev authoring layouts and rules
-- the `cafleet-create-figure` skill — if the report includes data that would render better as a chart
-
-FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
-
-TASK: Create a Slidev presentation from the approved research report.
-REPORT:           [INSERT <folder>/report.md]
-RESEARCHER FILES: [INSERT <folder>/[0-9][0-9]-research-*.md]
-LANGUAGE:         [INSERT language detected from report.md]
-FIGURE BASE:      [INSERT <folder>]    (substitute literally for the FIGURE_BASE / BASE placeholders in create-figure)
-OUTPUT:           [INSERT <folder>/slide.md]
-
-COMMUNICATION PROTOCOL:
-- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `<task-id>` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
-
-When complete, send the file path to the Director via cafleet message send.
-```
+| Slot | Presentation Specialist |
+|---|---|
+| ROLE TITLE / TEAM | `the Presentation Specialist` / `research presentation` |
+| role-file | `roles/presentation.md` |
+| cafleet-load purpose + EXTRA SKILLS | `for the broker primitives and bash-via-Director routing`; + `cafleet-my-slidev` (Slidev authoring layouts + rules) + `cafleet-create-figure` (if the report includes data that would render better as a chart) |
+| CONTEXT LINES | `TASK: Create a Slidev presentation from the approved research report.` / `REPORT: [INSERT <folder>/report.md]` / `RESEARCHER FILES: [INSERT <folder>/[0-9][0-9]-research-*.md]` / `LANGUAGE: [INSERT language detected from report.md]` / `FIGURE BASE: [INSERT <folder>]` (substitute literally for the FIGURE_BASE / BASE placeholders in create-figure) / `OUTPUT: [INSERT <folder>/slide.md]` |
+| POLL-HANDLING | **ack-inline** form (capture the `id:` integer as `<task-id>` and `cafleet message ack … --task-id <task-id>`, then act) |
+| start cue (verbatim) | `When complete, send the file path to the Director via cafleet message send.` |
 
 Render the prompt to `${BASE}/prompts/presentation-<UTC-compact>.md` per the 1c two-step audit-file pattern (leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass), then spawn with `--prompt-file`:
 
@@ -165,30 +147,16 @@ Render the prompt to `${BASE}/prompts/presentation-<UTC-compact>.md` per the 1c 
 
 **Transcript spawn prompt:**
 
-```
-You are the Transcript Specialist in a research presentation team (CAFleet-native).
+Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Transcript delta:
 
-ROLE DEFINITION: Open [INSERT abs path to roles/transcript.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the `cafleet` skill — for the broker primitives and bash-via-Director routing
-
-FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
-
-TASK: Create a reading transcript from the approved research report.
-REPORT:   [INSERT <folder>/report.md]
-LANGUAGE: [INSERT language detected from report.md]
-OUTPUT:   [INSERT <folder>/transcript.md]
-
-COMMUNICATION PROTOCOL:
-- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `<task-id>` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
-
-When complete, send the file path to the Director via cafleet message send.
-```
+| Slot | Transcript Specialist |
+|---|---|
+| ROLE TITLE / TEAM | `the Transcript Specialist` / `research presentation` |
+| role-file | `roles/transcript.md` |
+| cafleet-load purpose | `for the broker primitives and bash-via-Director routing` (no extra skills) |
+| CONTEXT LINES | `TASK: Create a reading transcript from the approved research report.` / `REPORT: [INSERT <folder>/report.md]` / `LANGUAGE: [INSERT language detected from report.md]` / `OUTPUT: [INSERT <folder>/transcript.md]` |
+| POLL-HANDLING | **ack-inline** form |
+| start cue (verbatim) | `When complete, send the file path to the Director via cafleet message send.` |
 
 Render the prompt to `${BASE}/prompts/transcript-<UTC-compact>.md` per the 1c two-step audit-file pattern, then spawn with `--prompt-file`:
 
@@ -276,33 +244,16 @@ while start <= total_slides:
 
 **Visual Reviewer spawn prompt** (per batch):
 
-```
-You are the Visual Reviewer in a research presentation team (CAFleet-native).
+Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Visual Reviewer delta:
 
-ROLE DEFINITION: Open [INSERT abs path to roles/visual-reviewer.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the `cafleet` skill — for the broker primitives and bash-via-Director routing
-
-FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
-
-TASK: Visually verify the rendered Slidev presentation.
-SLIDE FILE:      [INSERT <folder>/slide.md]
-RESEARCH FOLDER: [INSERT <folder>]
-SERVER URL:      [INSERT <server_url>]
-SESSION NAME:    [INSERT vr-batch-<start>]
-CHECK SLIDES:    [INSERT <start> to <end>]
-ROUND:           [INSERT <round>]
-
-COMMUNICATION PROTOCOL:
-- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `<task-id>` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id <task-id>, then act on the instructions.
-
-When complete, persist the report to <folder>/screenshots/vr<start>-r<round>.md and send it to the Director via cafleet message send.
-```
+| Slot | Visual Reviewer |
+|---|---|
+| ROLE TITLE / TEAM | `the Visual Reviewer` / `research presentation` |
+| role-file | `roles/visual-reviewer.md` |
+| cafleet-load purpose | `for the broker primitives and bash-via-Director routing` (no extra skills) |
+| CONTEXT LINES | `TASK: Visually verify the rendered Slidev presentation.` / `SLIDE FILE: [INSERT <folder>/slide.md]` / `RESEARCH FOLDER: [INSERT <folder>]` / `SERVER URL: [INSERT <server_url>]` / `SESSION NAME: [INSERT vr-batch-<start>]` / `CHECK SLIDES: [INSERT <start> to <end>]` / `ROUND: [INSERT <round>]` |
+| POLL-HANDLING | **ack-inline** form |
+| start cue (verbatim) | `When complete, persist the report to <folder>/screenshots/vr<start>-r<round>.md and send it to the Director via cafleet message send.` |
 
 Render the prompt to `${BASE}/prompts/vr-batch-<start>-<UTC-compact>.md` per the 1c two-step audit-file pattern (`<start>` matches the batch's first-slide index used in `--name`; each VR batch gets its own timestamped file — no overwriting), then spawn with `--prompt-file`:
 

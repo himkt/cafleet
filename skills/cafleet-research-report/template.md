@@ -54,24 +54,15 @@ was primarily driven by expansion into the European market and new enterprise co
 
 ## Reference Format Rules
 
-### Inline Citations
-
-- `[N]` immediately after the claim, before the period (`...grew 18% [1].`); multiple sources `[1,2,3]` (no spaces around commas). Every external-source claim **MUST** be cited; author analysis/opinion need not be.
-
-### Reference List
-
-- Number sequentially `[1]`, `[2]`, … by **first appearance**; format `[N] "Article Title", URL` (optionally `[N] Author, "Article Title", URL`). Each URL appears once (reuse its `[N]`); **single flat list**, no grouping by category/section; every reference cited at least once.
+- **Inline citations**: `[N]` immediately after the claim, before the period (`...grew 18% [1].`); multiple sources `[1,2,3]` (no spaces around commas). Every external-source claim **MUST** be cited; author analysis/opinion need not be.
+- **Reference list**: number sequentially `[1]`, `[2]`, … by **first appearance**; format `[N] "Article Title", URL` (optionally `[N] Author, "Article Title", URL`). Each URL appears once (reuse its `[N]`); **single flat list**, no grouping by category/section; every reference cited at least once.
 
 ---
 
 ## Formatting Rules
 
-- **Tables** for comparative data and structured metrics
-- **Bullet lists** for enumerated items
-- **Bold** for emphasis (not ALL CAPS)
-- **Horizontal rules** (`---`) between major sections
-- Report language: use the language specified by the user
-- Include a Table of Contents for reports with 3+ sections
+- **Tables** for comparative data; **bullet lists** for enumerated items; **bold** for emphasis (not ALL CAPS); **horizontal rules** (`---`) between major sections.
+- Report language: use the language specified by the user; include a Table of Contents for reports with 3+ sections.
 
 ---
 

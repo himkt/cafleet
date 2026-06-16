@@ -58,39 +58,6 @@ The `columns` prop accepts a colon-separated ratio that maps to CSS grid `fr` un
 | `3:2` | 60% | 40% | Slightly wider left |
 | `2:3` | 40% | 60% | Slightly wider right |
 
-## Examples
-
-### Equal Comparison
-
-```md
----
-layout: two-cols
-columns: "1:1"
----
-
-:: header ::
-
-# REST vs GraphQL
-
-:: left ::
-
-### REST
-
-- Multiple endpoints
-- Over-fetching common
-- Simpler caching
-- Mature ecosystem
-
-:: right ::
-
-### GraphQL
-
-- Single endpoint
-- Fetch exactly what you need
-- Complex caching
-- Flexible queries
-```
-
 ## Tips
 
 - Use `2:1` or `1:2` when one column has significantly more content

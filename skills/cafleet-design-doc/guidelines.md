@@ -39,19 +39,11 @@ Design documents use a directory-based structure:
 - Error cases are enumerated, not left as "handle errors appropriately"
 - Integration points specify exact interfaces
 
-## What "Comprehensive" Does NOT Mean
-
-- No restating obvious things
-- No separate sections for trivial content (fold into Specification or Implementation)
-- No speculative "Future Considerations" unless the current design must accommodate them
-
 ## Anti-patterns to Avoid
 
-- Restating what is already obvious from the code or context
-- Adding sections just because the template has them
-- Writing long prose when a table or list would suffice
-- Separate "Testing Strategy", "Error Handling", "Future Considerations" sections for simple changes — fold into Specification or Implementation if needed
-- Repeating the same information in Overview, Background, and Specification
+- Restating what is already obvious from the code or context, or repeating the same information across Overview, Background, and Specification.
+- Adding sections just because the template has them; writing long prose where a table or list suffices.
+- Separate "Testing Strategy" / "Error Handling" / "Future Considerations" sections for simple changes — fold into Specification or Implementation. Skip speculative "Future Considerations" unless the current design must accommodate them.
 
 ## Completeness Check
 

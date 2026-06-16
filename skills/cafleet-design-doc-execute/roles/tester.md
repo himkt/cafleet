@@ -19,20 +19,13 @@ Load these skills at startup:
 
 ## Placeholder convention
 
-Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are **placeholders, not shell variables** — substitute the literal ids from your spawn prompt directly into each command (`permissions.allow` matches command strings literally; shell expansion breaks it). Flag placement (`--fleet-id` and `--agent-id` both after the subcommand name) follows the `cafleet` skill.
+Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are placeholders, **not** shell variables — substitute the literal ids from your spawn prompt; the rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
 
 ## Communication Protocol
 
-You do NOT speak to the user directly. All communication goes through the Director via the CAFleet message broker.
+You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each task — command shapes in the `cafleet` skill core and your spawn prompt's COMMUNICATION PROTOCOL block.
 
 **Coordination Protocol**: See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules.
-
-**Sending a message to the Director:**
-```bash
-cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
-  --to <director-agent-id> --text "<your report>"
-```
-**Receiving tasks from the Director:** the broker keystrokes an inline preview into your pane (mechanics in the `cafleet` skill § Send); run `cafleet message poll` for the full body, ACK with `cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>`, then act on the instructions and report via `cafleet message send`.
 
 **Do NOT:** commit code or run git write operations; write implementation code; communicate with the user directly; spawn subagents or run `claude` commands; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
 

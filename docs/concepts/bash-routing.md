@@ -20,9 +20,9 @@ operations such as `git push` and `rm -rf` are still rejected at the coding
 agent's harness layer. When a member's Bash invocation is denied, the member
 auto-routes by sending a plain CAFleet message to its Director, and the
 Director dispatches the command into the member's pane via `cafleet member
-exec "<cmd>"`, which keystrokes literal `! <cmd>` + `Enter` and triggers the
-coding agent's `!` CLI shortcut on the receiving side (honored by `claude`,
-`codex`, and `opencode`).
+exec "<cmd>"`, which via the `tmux.send_bash_command` helper keystrokes literal
+`! <cmd>` + `Enter` and triggers the coding agent's `!` CLI shortcut on the
+receiving side (honored by `claude`, `codex`, and `opencode`).
 
 Members must first reconsider whether the rejected command is correct and
 necessary — most denials are caused by a wrong command, not a missing

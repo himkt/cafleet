@@ -4,22 +4,11 @@ Director reference for crash / disconnect / idle / wedged-pane recovery. Member-
 
 ## 2-stage health check
 
-Before assuming a member is stalled, run the cheap check first:
-
-1. **Check the Director's inbox via `cafleet message poll`** — the member may have replied and you missed the inline-preview keystroke. The poll output shows pending messages without touching the member's pane.
-2. **Capture the member's pane via `cafleet member capture`** — see what the member is actually doing. Default `--lines 30`. If the capture is too short to show the prompt frame, re-run with `--lines 120` or `--lines 200`.
-
-```bash
-cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>
-cafleet member capture --fleet-id <fleet-id> \
-  --member-id <member-agent-id>
-```
+Before assuming a member is stalled, run the cheap checks first: poll your own inbox (`cafleet message poll` — the member may have replied via a keystroke you missed) without touching its pane, then capture the member's pane (`cafleet member capture`, default `--lines 30`; bump to `--lines 120`/`200` to show an AskUserQuestion frame). The same poll→capture detection drives the supervision tick — see the `cafleet-agent-team-monitoring` skill § Stall Response.
 
 ## Routine monitoring via `member list --activity`
 
-The `--activity` flag aggregates per-member `last_sent` / `last_recv` / `last_ack` / `idle` columns so a routine supervision tick can decide which members need a capture WITHOUT capturing every member every tick. See [`reference/director.md`](director.md) § *Member List (with `--activity`)*.
-
-Heuristic: capture only members whose `idle > 5m` AND who have an unread inbox (the broker just delivered an inline preview that they have not yet acked). Capture is the expensive operation; use it sparingly.
+Use `member list --activity` (see [`reference/director.md`](director.md) § *Member List*) for routine supervision ticks instead of capturing every member. Heuristic: capture only members whose `idle > 5m` AND have an unread inbox — capture is the expensive operation, use it sparingly.
 
 ## Stalled member shapes
 
@@ -38,13 +27,13 @@ Once you have a capture, classify the shape:
 
 If `cafleet member capture` exits with a tmux subprocess error (the tmux server is unreachable):
 
-1. Run `cafleet doctor` to confirm your own pane's tmux state. If `cafleet doctor` exits 1 with `Error: cafleet member commands must be run inside a tmux session`, your `TMUX` env var is unset — you are no longer attached to a tmux session and recovery is impossible from your current shell. Re-attach (`tmux attach -t <session>`) and re-run.
+1. Run `cafleet doctor` to confirm your own pane's tmux state. If it reports `TMUX` unset, you are no longer attached to a tmux session and recovery is impossible from this shell — re-attach (`tmux attach -t <session>`) and re-run.
 2. If `cafleet doctor` succeeds but `cafleet member capture` still fails, the target pane is gone (the tmux server killed it, or the user closed it manually). Treat as "Pane crashed" above — `cafleet member delete --force` then re-spawn.
-3. Never invoke raw `tmux send-keys`, `tmux kill-pane`, `tmux list-panes`, `tmux capture-pane`, or `tmux display-message` directly. Cafleet's primitives encapsulate the cross-fleet authorization boundary (fleet isolation); raw tmux bypasses it.
+3. Never invoke raw tmux directly — cafleet's primitives encapsulate the fleet-isolation boundary that raw tmux bypasses.
 
 ## Recovering from a wedged `/exit`
 
-The default `cafleet member delete` path sends `/exit`, polls `tmux list-panes` for the target `pane_id` until it disappears (15 s timeout), then deregisters and rebalances. On timeout the command exits 2 with the pane buffer tail printed on stderr. Recovery decision tree:
+The default `cafleet member delete` path sends `/exit`, waits for the pane to close, and on timeout exits 2 with the pane buffer tail on stderr (mechanics in [`cli-options.md`](../../../docs/spec/cli-options.md#member-delete)). Recovery decision tree:
 
 1. **Inspect the tail.** What is the member doing?
 2. **AskUserQuestion-paused** → answer the prompt with `cafleet member send-input --choice N` or `--freetext`, then re-run `cafleet member delete`.
@@ -53,12 +42,10 @@ The default `cafleet member delete` path sends `/exit`, polls `tmux list-panes` 
 
 ## Shutdown Protocol
 
-The teardown MUST run in this exact order. Skipping any step leaves the monitor keystroking its wake nudge into the monitoring member's tearing-down pane, or orphan coding-agent processes lingering in panes.
+The teardown MUST run in this exact order; skipping a step leaves the monitor nudging a tearing-down pane or orphan coding-agent processes lingering. **Use cafleet primitives only** — every tmux interaction (write, inspect, metadata) is encapsulated by a cafleet command (`cafleet doctor` for pane metadata at startup); never invoke raw tmux from the Director.
 
-**Rule: use cafleet primitives only.** All tmux interactions — write, inspect, and metadata — are encapsulated by cafleet commands. For tmux session/window/pane metadata at Director startup, use `cafleet doctor`. Never invoke raw tmux directly from the Director. If a workflow appears to need a raw tmux call, file a gap in `cafleet member *` or `cafleet doctor` — NOT a raw tmux invocation.
-
-1. **Stop the monitor FIRST.** The `cafleet monitor` loop runs as a background task **in the monitoring member's pane** (the Director no longer runs it). The clean stop is: the Director messages the monitoring member to **stop its `monitor start` background task** — the coding agent's task-stop delivers SIGTERM/SIGINT, so the loop runs its `finally` and clears the `monitor_runtime` row — and the monitoring member confirms. Do this **before** the monitoring member's pane is killed (teardown is first-out — the mirror of the first-in spawn order). There is no `cafleet monitor stop` command. A monitor that keeps ticking after teardown begins keystrokes its `Esc`+wake nudge into the monitoring member's tearing-down pane, races with the delete path, and nudges an agent that is mid-`/exit`. There is exactly one monitor loop per fleet — stopping it ends every supervision tick at once (team-health and the Step-7 PR-review poll alike, since PR-review polling is a facilitation step the Director runs on each idle-nudge-driven turn, not a separate scheduler). Because the loop wakes only the monitoring member, this race applies only to the monitoring member itself. **When the monitoring member does not confirm the stop within one turn, force-delete it directly with `cafleet member delete --member-id <monitor-agent-id> --force`.** This kills the monitoring member's pane, which terminates the heartbeat process running in it. It is the same delete as step 2, so a wedged monitor collapses steps 1–2 into that single `--force` call. Recognize this case from the monitoring member's pane: a coding agent cannot stop its own `monitor start` background shell while the heartbeat keeps nudging it, so it loops and asks the operator to kill the heartbeat PID — read that as the cue to run the `--force` delete. The resulting SIGHUP ends the loop without running `finally`, leaving a stale `monitor_runtime` row that `cafleet fleet delete` (step 4) removes outright; that same `fleet delete` self-terminates any still-running loop on its next tick.
+1. **Stop the monitor FIRST (first-out, mirroring the first-in spawn).** The `cafleet monitor` loop runs as a background task in the monitoring member's pane (the Director no longer runs it) and there is no `cafleet monitor stop`. Clean stop: the Director messages the monitoring member to **stop its `monitor start` background task** (the task-stop's SIGTERM/SIGINT runs the loop's `finally`, clearing the `monitor_runtime` row — see [`monitoring.md`](../../../docs/concepts/monitoring.md)), the monitoring member confirms, and only **then** is its pane killed (step 2). Do this before the kill: a monitor still ticking during teardown keystrokes its wake nudge into the tearing-down pane and races the delete path. **If the monitoring member does not confirm the stop within one turn, force-delete it directly: `cafleet member delete --member-id <monitor-agent-id> --force`** — this kills its pane, terminating the heartbeat process, and collapses steps 1–2 into one call. Recognize the case from the monitoring member's pane looping to ask the operator to kill the heartbeat PID (a coding agent cannot stop its own `monitor start` task while the heartbeat keeps nudging it). The force kill ends the loop via SIGHUP without running `finally`, leaving a stale `monitor_runtime` row that `cafleet fleet delete` (step 4) removes.
 2. **Delete the monitoring member first, then every ordinary member** via `cafleet member delete` (first-out: the monitoring member, whose `monitor start` task you stopped in step 1, is deleted before the ordinary members it was watching). This call blocks until the target pane is actually gone (15 s default timeout). On timeout follow the wedged-`/exit` decision tree above. Do this per member, not via `fleet delete` alone — `fleet delete` deregisters agents in the DB but does NOT send `/exit` to panes.
 3. **Verify every member is gone via cafleet.** Run `cafleet member list`. The team's member roster should be empty. Any agent still present means step 2 failed — re-run `cafleet member delete` on that member, capture if needed, and report to the user if it still refuses to leave. Do NOT use raw tmux to "check" or "force" anything.
-4. **Run `cafleet fleet delete <fleet-id>`** (positional, no `--fleet-id` flag). This deregisters the root Director, deregisters the Administrator, sweeps any agent rows that survived step 2, and physically deletes every `agent_placements` row. Plain `cafleet agent deregister --fleet-id <fleet-id> --agent-id <root-director-id>` is rejected with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead.` — always use `fleet delete` for the final teardown step.
+4. **Run `cafleet fleet delete <fleet-id>`** (positional, no `--fleet-id` flag). This deregisters the root Director and Administrator, sweeps any agent rows that survived step 2, and deletes every `agent_placements` row. Plain `cafleet agent deregister` against the root Director is rejected — always use `fleet delete` for the final teardown step.
 5. **Confirm the fleet is closed.** Run `cafleet fleet list`; the current fleet should not appear (soft-deleted fleets are hidden). If it still appears with `active` agents, repeat steps 2–4 for that fleet. Any cross-conversation orphan fleet surfaced by this final check is also cleaned up via `cafleet fleet delete <its-fleet-id>` — never via tmux.

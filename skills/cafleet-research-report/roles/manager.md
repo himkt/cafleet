@@ -27,15 +27,7 @@ Load these skills at startup:
 
 ## Communication Protocol
 
-You do NOT speak to the user directly, nor to Scouts/Researchers — all coordination goes through the Director via `cafleet message send` (spawn requests, contradiction flags, completion reports):
-
-```bash
-cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
-  --to [director-agent-id] \
-  --text "[your report, spawn request, or question]"
-```
-
-Inbound Director messages auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]` after acting. The poll `id:` integer id is the cafleet message-task id (`[task-id]` — **distinct from** the harness `taskId` used with `TaskCreate / TaskUpdate` for sub-topic tracking). Pane silence is the expected between-turn state — work resumes when a new message arrives.
+You do NOT speak to the user directly, nor to Scouts/Researchers — all coordination goes through the Director via `cafleet message send` (spawn requests, contradiction flags, completion reports), and you `cafleet message ack` each inbound Director message after acting (command shapes in the `cafleet` skill core + your spawn prompt). The poll `id:` integer is the cafleet message-task id — **distinct from** the harness `taskId` used with `TaskCreate` / `TaskUpdate` for sub-topic tracking. Pane silence is the expected between-turn state — work resumes when a new message arrives.
 
 ## Task-Based Coordination
 

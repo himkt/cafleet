@@ -53,7 +53,7 @@ Where:
 
 ## Formula Admonition Rules
 
-**All display math must use `<Admonition type="formula">`** — no exceptions. The `formula` type uses a larger content font (`1rem`) than other admonition types for better math readability; full Admonition details in `techniques/formatting.md`.
+The wrapping rule (§ Display (Block) Formulas above) admits exactly these exceptions; the `formula` type uses a larger content font (`1rem`) for math readability (full Admonition details in `techniques/formatting.md`):
 
 | Math Type | Treatment |
 |-----------|-----------|
