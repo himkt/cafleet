@@ -2,7 +2,7 @@
 
 Mechanics for inter-agent coordination. The design document is the substantive communication medium; `cafleet message send --text` carries only a single-line **verb + pointer** poke. Substantive content (feedback, reports, escalation reasons, review items) lives in inline `COMMENT(role)` markers in the design doc — except for source-anchored Copilot inline review, which is annotated in the source file at `<file>:<line>` because that is where the comment lives.
 
-**Scope.** The verb + pointer schema applies to the `cafleet-design-doc-create` and `cafleet-design-doc-execute` skills. The `cafleet-design-doc-interview` skill shares only the inline `COMMENT(role)` marker convention (specifically `COMMENT(claude)`) — its Director-Analyzer cafleet messages are explicitly exempt because the Analyzer's question-list deliverable is a multi-line payload.
+**Scope.** The verb + pointer schema applies to the `cafleet-design-doc-create` and `cafleet-design-doc-execute` skills. Two exchanges are **exempt** and ride as free-form multi-line bodies: the `cafleet-design-doc-create` skill's **Step-2 clarification exchange** (the Drafter's clarifying questions + the Director's user-answers relay, before the design doc exists), and the `cafleet-design-doc-interview` skill's Director-Analyzer messages (which share only the inline `COMMENT(claude)` marker convention — the Analyzer's question-list deliverable is a multi-line payload).
 
 ## Core Principle
 
@@ -143,4 +143,4 @@ When the design doc moves to `Status: Approved` (the `cafleet-design-doc-create`
 
 ## Director Per-File Detail Recovery
 
-Members do not ship file lists in cafleet bodies (the verb + pointer schema carries only a poke); the Director recovers per-file detail directly via git when a commit message needs it: `git status` for unstaged/staged file lists, `git diff --stat <base>..HEAD` for cumulative scope, `git log <base>..HEAD --name-only` for file-touch history, `git diff <base>..HEAD -- <pattern>` for content. This applies in the `cafleet-design-doc-execute` skill's Phase A (test commits), Phase B/C (impl commits), Phase 7d (Copilot fix commits), and Step 8 (finalize commit).
+Members do not ship file lists in cafleet bodies (the verb + pointer poke carries none); the Director recovers per-file detail directly via git when a commit message needs it — `git status`, `git diff --stat <base>..HEAD`, `git log <base>..HEAD --name-only`, `git diff <base>..HEAD -- <pattern>`. This applies to every commit the Director makes in the `cafleet-design-doc-execute` skill (test, impl, Copilot-fix, and finalize commits).

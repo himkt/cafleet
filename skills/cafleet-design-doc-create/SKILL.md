@@ -119,65 +119,15 @@ Substitute these absolute paths into the spawn prompts below.
 
 **Gate**: do not spawn the Drafter until the monitoring member's `ready: monitor live` handshake (1b) has arrived.
 
-**Drafter spawn prompt (normal mode):**
+**Drafter spawn prompt** — render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below. `{fleet_id}` / `{agent_id}` / `{director_agent_id}` are filled by `member create`'s `str.format()`; the `[INSERT …]` markers (`[INSERT DOC PATH]`, `[INSERT USER'S ORIGINAL REQUEST]`, `[INSERT abs path to roles/drafter.md]`) are shell-substituted by the Director first. Per the Template-safety note in `cafleet/reference/director.md`, double any literal `{` / `}`, and keep the prompt under ~2 KB (path-by-reference). Use the normal-mode column by default; the resume-mode column when Step 0 detected resume mode.
 
-The spawn prompt's identity block uses `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders — cafleet `member create` runs `str.format()` over the entire prompt and substitutes these from the new member's allocated `agent_id`, the fleet ID, and the spawning Director's `agent_id`. The `[INSERT …]` markers in the prompt (e.g. `[INSERT DOC PATH]`, `[INSERT USER'S ORIGINAL REQUEST]`, `[INSERT abs path to roles/drafter.md]`) are NOT format placeholders — the Director substitutes them in shell before calling `member create`. See the Template safety note under `Member Create` in `skills/cafleet/reference/director.md` — any literal `{` / `}` you embed in a custom prompt must be doubled (`{{` / `}}`), and prompts MUST stay under ~2 KB (see Step 1c above on path-by-reference).
-
-```
-You are the Drafter in a design document creation team (CAFleet-native).
-
-ROLE DEFINITION: Open [INSERT abs path to roles/drafter.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the `cafleet` skill — for communication with the Director
-- the `cafleet-design-doc` skill — for template and guidelines
-
-FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
-OUTPUT PATH: [INSERT DOC PATH]
-
-The user's request: [INSERT USER'S ORIGINAL REQUEST]
-
-COMMUNICATION PROTOCOL:
-- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "your report"
-- When you see cafleet message poll output with a message from the Director, act on those instructions.
-
-IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.
-Send your questions to the Director who will relay them to the user.
-Start by reading the target codebase for context, then send your clarifying questions.
-Do NOT create any design document file until you have received answers.
-```
-
-**Drafter spawn prompt (resume mode):**
-
-Use this instead when Step 0 detected resume mode:
-
-```
-You are the Drafter in a design document creation team (CAFleet-native, RESUME MODE).
-
-ROLE DEFINITION: Open [INSERT abs path to roles/drafter.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Follow the Resume Mode section in particular. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the `cafleet` skill — for communication with the Director
-- the `cafleet-design-doc` skill — for template and guidelines
-
-FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
-DESIGN DOCUMENT: [INSERT DOC PATH]
-
-COMMUNICATION PROTOCOL:
-- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "your report"
-- When you see cafleet message poll output with a message from the Director, act on those instructions.
-
-This is a RESUME run. The document contains COMMENT markers from a previous
-interview. Follow the Resume Mode instructions in your role definition.
-Do NOT ask clarifying questions — the COMMENTs contain the needed information.
-Start by reading the design document.
-```
+| Slot | Drafter (normal mode) | Drafter (resume mode) |
+|---|---|---|
+| ROLE TITLE / TEAM | `the Drafter` / `design document creation` | `the Drafter` / `design document creation`, with `(CAFleet-native, RESUME MODE)` in the identity line |
+| role-file + ROLE-DEF suffix | `roles/drafter.md` | `roles/drafter.md`; add suffix `Follow the Resume Mode section in particular.` |
+| EXTRA SKILL LOADS | `cafleet-design-doc` (template + guidelines) | same |
+| CONTEXT LINES | `OUTPUT PATH: [INSERT DOC PATH]` + a blank line + `The user's request: [INSERT USER'S ORIGINAL REQUEST]` | `DESIGN DOCUMENT: [INSERT DOC PATH]` |
+| IMPORTANT / start cue (verbatim) | `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.` / `Send your questions to the Director who will relay them to the user.` / `Start by reading the target codebase for context, then send your clarifying questions.` / `Do NOT create any design document file until you have received answers.` | `This is a RESUME run. The document contains COMMENT markers from a previous interview. Follow the Resume Mode instructions in your role definition.` / `Do NOT ask clarifying questions — the COMMENTs contain the needed information.` / `Start by reading the design document.` |
 
 Render the prompt to `${BASE}/prompts/drafter-<UTC-compact>.md` per the Step 1c two-step audit-file pattern (both normal and resume modes — leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass), then spawn with `--prompt-file`:
 
@@ -192,29 +142,15 @@ Render the prompt to `${BASE}/prompts/drafter-<UTC-compact>.md` per the Step 1c 
 
 #### 1e. Spawn the Reviewer
 
-**Reviewer spawn prompt:**
+**Reviewer spawn prompt** — the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with this delta:
 
-```
-You are the Reviewer in a design document creation team (CAFleet-native).
-
-ROLE DEFINITION: Open [INSERT abs path to roles/reviewer.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the `cafleet` skill — for communication with the Director
-- the `cafleet-design-doc` skill — for template and guidelines
-
-FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
-DESIGN DOCUMENT: [INSERT DOC PATH]
-
-COMMUNICATION PROTOCOL:
-- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "your report"
-- When you see cafleet message poll output with a message from the Director, act on those instructions.
-
-Wait for the Director to assign a document for review (cafleet body: `ready (doc)`). When you receive that message, the `doc` pointer refers to the DESIGN DOCUMENT path above — read that file and provide specific, actionable feedback per the role definition.
-```
+| Slot | Reviewer |
+|---|---|
+| ROLE TITLE / TEAM | `the Reviewer` / `design document creation` |
+| role-file | `roles/reviewer.md` |
+| EXTRA SKILL LOADS | `cafleet-design-doc` (template + guidelines) |
+| CONTEXT LINES | `DESIGN DOCUMENT: [INSERT DOC PATH]` |
+| start cue (verbatim) | `Wait for the Director to assign a document for review (cafleet body: ready (doc)). When you receive that message, the doc pointer refers to the DESIGN DOCUMENT path above — read that file and provide specific, actionable feedback per the role definition.` |
 
 Render the prompt to `${BASE}/prompts/reviewer-<UTC-compact>.md` per the Step 1c two-step audit-file pattern, then spawn with `--prompt-file`:
 

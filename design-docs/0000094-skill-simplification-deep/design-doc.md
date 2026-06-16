@@ -1,7 +1,7 @@
 # Skill Simplification (Deep): Aggressive De-duplication of `skills/`
 
 **Status**: Approved
-**Progress**: 10/26 tasks complete
+**Progress**: 13/26 tasks complete
 **Last Updated**: 2026-06-16
 
 ## Overview
@@ -209,9 +209,11 @@ COMMENT(director): Arbitration — accept the cafleet-core cluster at ~27% (851�
 
 ### Step 4: Simplify the design-doc family (create/interview/doc + roles)
 
-- [ ] Simplify `cafleet-design-doc/{SKILL,guidelines,coordination}.md` (leave `template.md` untouched); relocate coordination.md's per-file git-recovery commands to `docs/spec/`. <!-- completed: -->
-- [ ] Simplify `create/SKILL.md` + `roles/{director,drafter,reviewer}.md`: dedup the 3 spawn prompts to the canonical skeleton; collapse the clarification-exemption (3×) and COMMENT-workflow restatements; point role boilerplate to canonical homes. <!-- completed: -->
-- [ ] Simplify `interview/SKILL.md` + `roles/analyzer.md`: convert the inline `COMMENT(claude)` block to a `coordination.md` pointer (firm decision — see Resolved decision above); drop the analyzer's unnecessary `cafleet-base-dir` load. <!-- completed: -->
+- [x] Simplify `cafleet-design-doc/{SKILL,guidelines,coordination}.md` (leave `template.md` untouched); relocate coordination.md's per-file git-recovery commands to `docs/spec/`. <!-- completed: 2026-06-16T20:05 -->
+- [x] Simplify `create/SKILL.md` + `roles/{director,drafter,reviewer}.md`: dedup the 3 spawn prompts to the canonical skeleton; collapse the clarification-exemption (3×) and COMMENT-workflow restatements; point role boilerplate to canonical homes. <!-- completed: 2026-06-16T20:05 -->
+- [x] Simplify `interview/SKILL.md` + `roles/analyzer.md`: convert the inline `COMMENT(claude)` block to a `coordination.md` pointer (firm decision — see Resolved decision above); drop the analyzer's unnecessary `cafleet-base-dir` load. <!-- completed: 2026-06-16T20:05 -->
+
+COMMENT(director): Step 4 accepted, zero-drift confirmed (create spawn-prompt collapse reviewed — every IMPORTANT/start-cue line maps to a delta row). DEVIATION approved: coordination.md's git-recovery commands were condensed IN PLACE rather than relocated to docs/spec/ — the Relocation-map destination does not exist for that content, so a literal relocation would dangle (guardrail 5). Family landed ~11.5% vs the ~16% estimate; same canonical-content-floor / wc-vs-prose effect arbitrated for Step 3. Accept; reconcile against the net-aggregate ceiling at Step 9. — director
 
 ### Step 5: Simplify design-doc-execute (994 → ~612)
 

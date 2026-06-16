@@ -4,9 +4,7 @@ You are the **Director** in a design document creation team orchestrated via the
 
 ## Placeholder convention
 
-Every command below uses angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<drafter-agent-id>`, `<reviewer-agent-id>`, `<member-agent-id>`) as **placeholders, not shell variables**. Substitute the literal integer ids printed by `cafleet fleet create` (which returns the fleet id AND the root Director's `agent_id` — the Director does not need a separate `cafleet agent register` call) and `cafleet member create` directly into each command. Do **not** introduce shell variables — `permissions.allow` matches command strings literally and shell expansion breaks that matching.
-
-**Flag placement**: `--fleet-id` and `--agent-id` are both per-subcommand options (placed **after** the subcommand name). For example: `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`.
+Angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<drafter-agent-id>`, `<reviewer-agent-id>`, `<member-agent-id>`) are placeholders, **not** shell variables — substitute the literal integer ids from `cafleet fleet create` (which returns the fleet id AND the root Director's `agent_id`, so no separate `cafleet agent register`) and `cafleet member create`. The rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
 
 ## Your Accountability
 
@@ -29,7 +27,7 @@ Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks 
 
 All Director-to-member messages use the CAFleet message broker. The Director stores each member's `agent_id` at spawn time (from the `cafleet --json member create` response) and substitutes it literally for `<member-agent-id>` as the `--to` target.
 
-**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema shared with the `cafleet-design-doc-execute` and `cafleet-design-doc-interview` skills — every body is a single-line `<verb> (<pointer>)` poke; substantive content (Reviewer findings, Drafter spec questions, Director arbitration) lives in inline `COMMENT(role)` markers in the design document. Canonical mechanics: [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md). **Step 2 clarification messages are exempt** — the design doc does not yet exist when the Drafter asks clarifying questions, so the Director's "User answers: ..." relay rides as a free-form multi-line body.
+**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema — single-line `<verb> (<pointer>)` poke; substantive content (Reviewer findings, Drafter spec questions, Director arbitration) in inline `COMMENT(role)` markers in the design document. Canonical mechanics + the Step-2 clarification exemption (your "User answers: …" relay rides free-form before the doc exists): [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md).
 
 **Sending a task to a member:**
 ```bash

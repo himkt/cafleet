@@ -12,5 +12,5 @@ This skill provides a standardized format for creating design documents, specifi
 
 - For the document template, see [template.md](template.md)
 - For section guidelines, quality standards, formatting rules, and best practices, see [guidelines.md](guidelines.md)
-- For the inter-agent coordination protocol — verb + pointer schema for the `cafleet-design-doc-create` and `cafleet-design-doc-execute` skills, plus the inline `COMMENT(role)` marker convention shared by the `cafleet-design-doc-interview` skill (whose Director-Analyzer cafleet messages are exempt from the verb + pointer schema) — see [coordination.md](coordination.md)
+- For the inter-agent coordination protocol (the verb + pointer schema + the `COMMENT(role)` marker convention; scope and the create/interview exemptions are in its § Scope), see [coordination.md](coordination.md)
 
