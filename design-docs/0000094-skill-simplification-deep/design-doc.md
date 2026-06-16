@@ -1,7 +1,7 @@
 # Skill Simplification (Deep): Aggressive De-duplication of `skills/`
 
 **Status**: Approved
-**Progress**: 5/26 tasks complete
+**Progress**: 8/26 tasks complete
 **Last Updated**: 2026-06-16
 
 ## Overview
@@ -196,9 +196,9 @@ Both are genuine role-file defects, promoted to in-scope (consistent with this d
 
 ### Step 2: Establish canonical homes for shared conventions
 
-- [ ] Confirm/clean the single canonical statement of each convention per the canonical-home map (placeholder rule, verb+pointer protocol, BASE/`<unset>`, monitor heartbeat + facilitation + stall + spawn-gate, shutdown ordering, Esc-safeguarded inline preview, member-side universal boilerplate). <!-- completed: -->
-- [ ] Add the canonical spawn-prompt skeleton (identity block + COMMUNICATION PROTOCOL + skill-load list) to `cafleet/reference/director.md` § Member Create. The per-role **delta table MUST capture every IMPORTANT / role-constraint line** from each current spawn prompt (e.g. Tester "Do NOT write implementation code", Programmer "Do NOT commit code yourself", "Read `.claude/rules/bash-tool.md`") so no behavioral line is lost in the collapse. <!-- completed: -->
-- [ ] Extract the web-researcher agent spec from `research-report/SKILL.md` into `cafleet-research-report/roles/web-researcher.md`; leave the two dispatch recipes as pointers. <!-- completed: -->
+- [x] Confirm/clean the single canonical statement of each convention per the canonical-home map (placeholder rule, verb+pointer protocol, BASE/`<unset>`, monitor heartbeat + facilitation + stall + spawn-gate, shutdown ordering, Esc-safeguarded inline preview, member-side universal boilerplate). <!-- completed: 2026-06-16T19:24 -->
+- [x] Add the canonical spawn-prompt skeleton (identity block + COMMUNICATION PROTOCOL + skill-load list) to `cafleet/reference/director.md` § Member Create. The per-role **delta table MUST capture every IMPORTANT / role-constraint line** from each current spawn prompt (e.g. Tester "Do NOT write implementation code", Programmer "Do NOT commit code yourself", "Read `.claude/rules/bash-tool.md`") so no behavioral line is lost in the collapse. <!-- completed: 2026-06-16T19:24 -->
+- [x] Extract the web-researcher agent spec from `research-report/SKILL.md` into `cafleet-research-report/roles/web-researcher.md`; leave the two dispatch recipes as pointers. <!-- completed: 2026-06-16T19:24 -->
 
 ### Step 3: Simplify the cafleet core cluster (851 → ~496)
 

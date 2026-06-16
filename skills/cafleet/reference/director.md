@@ -61,6 +61,57 @@ When the operator names a model rather than a backend ("please create a member w
 
 Whichever input mode is used, keep the prompt body itself focused: role-file path, skill-load list, fleet/agent/director IDs, the operational context (output dir, current date, user request), and "start now" cue. The member loads the role file via `Read` on its first turn; the role files live in the skill directory and are stable, so path-by-reference is safe.
 
+### Canonical spawn-prompt skeleton
+
+Every CAFleet-native team skill spawns its ordinary members from this one shared frame; each skill supplies only a compact **per-role delta** (a table in that skill) for the parts that vary. (The dedicated **monitoring member** is the exception — its canonical prompt lives in the `cafleet-agent-team-monitoring` skill § The monitoring member.)
+
+Fixed frame — `{fleet_id}` / `{agent_id}` / `{director_agent_id}` are filled by the CLI's `str.format()` pass; `[INSERT …]` markers are shell-substituted by the Director before `member create`; the `‹…›` slots are filled from the per-role delta:
+
+```text
+You are ‹ROLE TITLE› in a ‹TEAM NAME› team (CAFleet-native).
+
+ROLE DEFINITION: Open [INSERT abs path to roles/‹role›.md] with the Read tool BEFORE any other action. That file is your authoritative role definition.‹ROLE-DEF SUFFIX› Re-read it whenever you are unsure of protocol.
+
+Load these skills at startup:
+- the `cafleet` skill — ‹cafleet-load purpose›
+‹EXTRA SKILL LOADS›
+
+FLEET ID: {fleet_id}
+DIRECTOR AGENT ID: {director_agent_id}
+YOUR AGENT ID: {agent_id}
+BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
+‹CONTEXT LINES›
+
+COMMUNICATION PROTOCOL:
+- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "‹report-hint›"
+- ‹POLL-HANDLING LINE›
+‹EXTRA COMMS LINES›
+
+‹IMPORTANT / ROLE-CONSTRAINT LINES›
+
+‹START CUE›
+```
+
+Per-role delta slots (each consuming skill's spawn section fills these):
+
+| Slot | Filled per role with |
+|---|---|
+| `‹ROLE TITLE›` / `‹TEAM NAME›` | e.g. `the Programmer` / `design document execution`; `a Scout Researcher` / `research`; `the Presentation Specialist` / `research presentation`. |
+| `‹role›` + `‹ROLE-DEF SUFFIX›` | The `roles/<role>.md` filename, plus any addendum after "…role definition." — e.g. resume-mode `Follow the Resume Mode section in particular.`; the research roles' `— accountability, …, and shutdown.` enumeration. Empty for most roles. |
+| `‹cafleet-load purpose›` + `‹EXTRA SKILL LOADS›` | The cafleet purpose phrase (`for communication with the Director`, or `for the broker primitives and bash-via-Director routing`), plus any extra startup skills — `cafleet-design-doc` (design-doc family); `cafleet-my-slidev` + `cafleet-create-figure` (Presentation Specialist). |
+| `‹CONTEXT LINES›` | Role inputs, one per line: `DESIGN DOCUMENT` / `OUTPUT PATH` / `CURRENT DATE` / `USER REQUEST` / `OUTPUT DIRECTORY` / `LANGUAGE` / `YOUR ASSIGNMENT` / `OUTPUT FILE` / `YOUR TASK ID` / `REPORT` / `SLIDE FILE` / `SERVER URL` / `ROUND`, etc. |
+| `‹report-hint›` + `‹POLL-HANDLING LINE›` + `‹EXTRA COMMS LINES›` | The `--text` hint (`your report` / `your numbered question list`). The poll-handling line is either the simple `When you see cafleet message poll output with a message from the Director, act on those instructions.` (create / execute / interview) or the **ack-inline** form `…capture the `id:` integer id from each entry as [task-id] and ack it via cafleet message ack … --task-id [task-id], then act on the instructions.` (research / presentation). Extra comms lines: the Manager's `You do NOT talk to Scouts or Researchers directly…` + shared-task-list lines; the Researcher's `TaskUpdate` claim/complete lines. |
+| `‹IMPORTANT / ROLE-CONSTRAINT LINES›` | Every `IMPORTANT:` line and hard role constraint, verbatim (see lossless rule). |
+| `‹START CUE›` | The role's closing instruction — e.g. `Start by reading the design document. Then wait for the Director to assign your first step.`; `Read the design document, generate a numbered question list …`; `When complete, send the file path to the Director …`. |
+
+**Lossless rule (non-negotiable).** When a skill collapses its inline spawn prompts to "this skeleton + a per-role delta", the per-role delta MUST reproduce **every** `IMPORTANT:` line, hard role-constraint, and start cue from the original prompt **verbatim** — none dropped or paraphrased. These lines are the behavioral contract of the spawn; the reconstruction check asserts each maps to a delta row. Lines that MUST survive every collapse include:
+
+- Programmer: `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.`
+- Tester: `IMPORTANT: Do NOT write implementation code — only test code.` (plus the Programmer no-commit line).
+- Verifier: `IMPORTANT: Do NOT commit code or modify implementation/test files.`
+- All execute roles: `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` and `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`
+- Drafter (normal mode): `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.` and `Do NOT create any design document file until you have received answers.`; (resume mode) `Do NOT ask clarifying questions — the COMMENTs contain the needed information.`
+
 **Member Create — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved by the `cafleet-base-dir` skill) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--prompt-file` write at `<BASE>/prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
 
 - `<role>` is the lowercased value of `--name` (e.g., `drafter`, `reviewer`, `programmer`, `tester`, `verifier`, `manager`, `analyzer`).

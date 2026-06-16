@@ -306,89 +306,11 @@ Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol* (firs
 
 ### web-researcher
 
-This skill ships an embedded agent spec for parallel web research that returns structured summaries with sources. The spec is reproduced verbatim below so it is reachable from both Claude Code (load the `cafleet-research-report` skill then dispatch via `Agent`) and codex (via plugin auto-discovery — see *Dispatching this agent (codex inline-follow)* and *Dispatching this agent (codex member-spawn)* below).
-
-    ---
-    name: web-researcher
-    description: Use this agent to research topics on the web before specification development. Supports parallel research of multiple topics. Returns structured summaries with sources. Best used in combination with the cafleet-design-doc-create skill - run web-researcher first to gather context, then pass results to the cafleet-design-doc-create skill.
-    model: sonnet
-    color: blue
-    ---
-
-    You are a web research specialist focused on gathering accurate, up-to-date information to support specification development and technical decision-making.
-
-    ## Your Core Mission
-
-    Efficiently research topics on the web and provide structured, actionable summaries that can be used as input for specification documents.
-
-    ---
-
-    ## Input Format
-
-    A single topic (`Research: <topic>` + `Context: <why this is needed>`) or multiple topics (a numbered list + a shared `Context:`) for parallel research.
-
-    ---
-
-    ## Research Process
-
-    ### Step 0: Discovery Phase
-
-    **Before topic-specific queries, run broad date-anchored searches to bridge your knowledge cutoff to the current date** — at least 3, e.g. `"{topic} {current_year}"`, `"{topic} latest news"`, `"{topic} announced {current_year}"`, `"{topic} {current_month} {current_year}"`. If nothing significant surfaces, try ≥2 alternative patterns before concluding. Document results in a **"Discovery Phase Findings"** section at the top of your output file (or state that none were found), and use them to inform query formulation.
-
-    ### Steps 1–4: Research
-
-    Formulate queries (key terms + alternative phrasings + Discovery findings); execute searches (**all WebSearch calls in parallel for multiple topics**; primary + follow-up per topic); prioritize sources by reliability (official docs → reputable publications → GitHub → community forums); synthesize per topic — key facts, technical specs, best practices, pitfalls, alternatives.
-
-    ---
-
-    ## Output Format
-
-    Always return results in this structured format:
-
-    ```markdown
-    # Research Results
-
-    ## Topic: <topic name>
-
-    ### Summary
-    <2-3 sentence overview>
-
-    ### Key Findings
-    - <finding 1>
-    - <finding 2>
-    - <finding 3>
-
-    ### Technical Details
-    <relevant specifications, APIs, configurations, etc.>
-
-    ### Recommendations
-    <actionable recommendations based on findings>
-
-    ### Sources
-    - [Source Title](URL)
-    - [Source Title](URL)
-
-    ---
-
-    ## Topic: <next topic>
-    ...
-    ```
-
-    ---
-
-    ## Language Selection
-
-    As a teammate, use the language specified by the Manager/Director (default English); standalone, ask the user via `AskUserQuestion` (English default / Japanese / Other). Write all output in the selected language; technical terms and source URLs stay as-is.
-
-    ---
-
-    ## Research Quality Guidelines
-
-    Accuracy (cross-reference multiple sources), currency (prefer the last 1–2 years for fast-moving topics), relevance to the given context, completeness (benefits AND drawbacks/limitations), and actionability (specifics that inform decisions).
+This skill ships an embedded agent spec for parallel web research that returns structured summaries with sources. The canonical spec lives in [`roles/web-researcher.md`](roles/web-researcher.md), reachable from both Claude Code (load the `cafleet-research-report` skill, then dispatch via `Agent`) and codex (plugin auto-discovery). Read that file and paste its spec body (the prose under the frontmatter) verbatim into the dispatch recipe below.
 
 #### Dispatching this agent (Claude Code recipe)
 
-On Claude Code, dispatch the embedded `web-researcher` spec via the `Agent` tool with `subagent_type="general-purpose"`. Paste the spec body verbatim into the `prompt` field, then append the per-call inputs (the research topic(s) + context):
+On Claude Code, dispatch the `web-researcher` spec via the `Agent` tool with `subagent_type="general-purpose"`. Paste the spec body from [`roles/web-researcher.md`](roles/web-researcher.md) verbatim into the `prompt` field, then append the per-call inputs (the research topic(s) + context):
 
 ```
 Agent(
@@ -405,6 +327,6 @@ This is the post-promotion equivalent of the named `Agent(subagent_type="web-res
 
 #### Dispatching this agent (codex)
 
-On codex (which reads SKILL.md directly — see `docs/reference/coding-agents/codex.md`), either **inline-follow** (the agent reads the embedded `## Spawnable Agents > web-researcher` block and follows the spec in its own turn, no new agent spawned) or **member-spawn** a dedicated codex member via `cafleet member create --coding-agent codex` with the spec body pasted into the positional prompt argument (positional `[PROMPT_ARGV]...`; there is no `--spawn-prompt-from-text` flag).
+On codex (which reads SKILL.md directly — see `docs/reference/coding-agents/codex.md`), either **inline-follow** (the agent reads [`roles/web-researcher.md`](roles/web-researcher.md) and follows the spec in its own turn, no new agent spawned) or **member-spawn** a dedicated codex member via `cafleet member create --coding-agent codex` with the spec body pasted into the positional prompt argument (positional `[PROMPT_ARGV]...`; there is no `--spawn-prompt-from-text` flag).
 
 $ARGUMENTS
