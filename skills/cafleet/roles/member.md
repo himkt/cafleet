@@ -23,7 +23,7 @@ If a task is queued, ACK and process it; if the poll is empty, go idle. The brok
 
 ## The default rule: run shell commands yourself
 
-WHENEVER you need to run a shell command — because the operator asked, OR because you want to (verify a file, check the branch, run tests, look anything up) — call the Bash tool directly. No prefix, no Director routing, no operator prompts. Your own `cafleet poll` / `send` / `ack` calls are normal Bash invocations too; auto-approval resolves them. Inspect the output; if a reply is expected, send it via `cafleet message send`.
+WHENEVER you need to run a shell command — because the operator asked, OR because you want to (verify a file, check the branch, run tests, look anything up) — call the Bash tool directly. No prefix, no Director routing, no operator prompts. Your own `cafleet message poll` / `send` / `ack` calls are normal Bash invocations too; auto-approval resolves them. Inspect the output; if a reply is expected, send it via `cafleet message send`.
 
 ## What you MUST NEVER do
 
