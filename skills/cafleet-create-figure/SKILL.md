@@ -22,7 +22,7 @@ The skill writes a self-contained Python script that imports matplotlib. The run
 **Resolve `${BASE}` in this order:**
 
 1. **Calling-context override**: If a parent skill's spawn prompt told you the figure base directory (e.g., the `cafleet-research-presentation` skill passes its research folder as the figure base), use that path literally as `${BASE}`. Skip base-dir resolution.
-2. **Otherwise**: Load the `cafleet-base-dir` skill and follow its procedure (no path argument; CWD-based inference applies). Use the resolved `${BASE}` verbatim. Figures, scripts, and data land under `${BASE}/figures/{src,output,data}` regardless of whether `${BASE}` is a git-repo root, `/tmp/claude-code`, or any other path. If you want figures kept out of a repo tree, pick `/tmp/claude-code` (or any non-repo path) at base-dir resolution time — the `cafleet-create-figure` skill does NOT second-guess base-dir's answer.
+2. **Otherwise**: Load the `cafleet-base-dir` skill and follow its procedure (no path argument; CWD-based inference applies). Use the resolved `${BASE}` verbatim — figures/scripts/data land under `${BASE}/figures/{src,output,data}` whatever `${BASE}` resolved to (repo root, `/tmp/claude-code`, etc.).
 
 **Derive the subdirectories** (each is a literal path string you will embed in the script):
 

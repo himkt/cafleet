@@ -19,7 +19,7 @@ Create a Slidev presentation and reading transcript from an existing research re
 
 The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` and `cafleet-agent-team-monitoring` skills and embeds them into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model sonnet`) that owns the heartbeat and re-engages the idle Director — see Step 1.
 
-For autonomous Slidev generation, see `my-slidev/SKILL.md` § Spawnable Agents → slide-creator.
+For autonomous Slidev generation, see the `cafleet-my-slidev` skill § Autonomous slide generation.
 
 ## Architecture
 

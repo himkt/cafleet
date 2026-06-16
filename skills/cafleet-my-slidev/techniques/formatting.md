@@ -40,12 +40,7 @@ The `formula` type has a larger content font size (`1rem` vs `0.85rem`) for bett
 
 ### When to use Admonitions vs alternatives
 
-| Technique | Best For |
-|-----------|----------|
-| `<Admonition>` | Multi-line callouts with a title and distinct visual emphasis |
-| `<Admonition type="formula">` | Mathematical formulas and definitions that need visual prominence |
-| `<Highlight type="positive">` / `<Highlight type="negative">` | Inline semantic emphasis within a sentence (see § Highlight) |
-| `.bg-primary-light` | Light background highlight for a paragraph without a title |
+`<Admonition>` for multi-line titled callouts (`type="formula"` for math/definitions needing prominence); `<Highlight type="...">` for inline semantic emphasis within a sentence (see § Highlight); `.bg-primary-light` for a light paragraph highlight without a title.
 
 ## Highlight
 

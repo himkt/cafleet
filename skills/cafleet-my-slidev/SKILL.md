@@ -82,9 +82,7 @@ After generating all slides, check every slide:
 
 ### Discipline
 
-- **1-2 colored elements per slide max**
-- **Color for data, not decoration** — only color the specific number or keyword
-- **Consistent semantics** — green = positive, red = negative throughout
+- **1-2 colored elements per slide max**; **color for data, not decoration** — only color the specific number or keyword. The full semantic-color palette (green = positive, red = negative, blue = neutral, orange = caution, purple = critical) + decision flow is canonical in [`techniques/formatting.md`](techniques/formatting.md) § Color Discipline.
 
 ## Figures
 
@@ -125,79 +123,13 @@ Auto-rendered: top-level = filled blue circle, nested = hollow. `bullets-sm` has
 | Math formulas | techniques/math-formulas.md |
 | Code animations | /slidev (stock `v-click` / `v-clicks` / line-range highlighting) |
 
-## Spawnable Agents
+## Autonomous slide generation
 
-### slide-creator
+To generate a complete deck autonomously from input content (a research report, outline, or notes), follow this skill's own sections directly — there is no separate agent spec to dispatch:
 
-This skill ships an embedded agent spec for generating a complete Slidev presentation autonomously from input content (research reports, outlines, notes). The spec is reproduced verbatim below so it is reachable from both Claude Code (load the `cafleet-my-slidev` skill then dispatch via `Agent`) and codex (via plugin auto-discovery — see *Dispatching this agent (codex inline-follow)* and *Dispatching this agent (codex member-spawn)* below).
+1. Read the input; extract the title + author (infer a suitable title if absent, default author "Author").
+2. Break the content into one-idea-per-slide topics; pick a layout for each per the [Layouts](#layouts) table (`cover` first, `bullets` for most content, `blank` for diagrams/figures/code, `end` last).
+3. Apply the [Content Rules](#content-rules), [Color](#color) discipline, and [Citations](#citations) (renumber by first appearance; keep body↔references consistent).
+4. Run the [Self-Review Checklist](#self-review-checklist-mandatory) plus a two-pass overflow + citation-ordering review, then write `slide.md` to the working directory.
 
-    ---
-    name: slide-creator
-    description: Generate a complete Slidev presentation from input content (research reports, outlines, notes). Fully autonomous — produces slide.md without asking clarifying questions. Takes a file path or inline content as input.
-    color: green
-    ---
-
-    You generate Slidev presentations from input content. You work autonomously — do not ask the user clarifying questions.
-
-    ## Required Skills
-
-    Before generating any presentation, load these two skills:
-
-    1. **`cafleet-my-slidev`** — Custom theme with cover, bullets, and blank layouts. Provides layout selection guide, content structuring rules, formatting conventions, and headmatter template.
-    2. **`slidev`** — Slidev syntax reference for markdown features, components, animations, and other capabilities.
-
-    ## Input
-
-    You receive input content in one of two ways:
-
-    - **File path**: A path to a markdown file (e.g., a research report). Read the file and transform its content into a presentation.
-    - **Inline content**: Content provided directly in the prompt. Parse and structure it into slides.
-
-    ## Generation Workflow
-
-    1. **Read the input content** — Load the file or parse the inline content. Understand the structure, key topics, and overall narrative.
-    2. **Identify title and author** — Extract the presentation title and author from content metadata (e.g., document title, author field). If not available, infer a suitable title from the content and use "Author" as the default author name.
-    3. **Break content into logical topics** — Each topic becomes one slide. One idea per slide — do not overload slides with multiple concepts.
-    4. **Choose the appropriate layout for each slide**:
-       - `cover` for the first slide (title + author)
-       - `bullets` for most content slides (topic heading + supporting points)
-       - `blank` for slides with diagrams, images, code blocks, or free-form content that doesn't fit the bullets pattern
-    5. **Apply content structuring rules** from the `my-slidev` skill:
-       - Max 5 bullets per slide; split into multiple slides if needed
-       - Bullet text max ~15 words; keep concise
-       - Use sub-bullets sparingly
-       - Use `**bold**` for key terms, max 1-2 per bullet
-    6. **Generate the initial slide content**:
-       - Start with the headmatter template from the `my-slidev` skill
-       - Use the literal `theme:` path documented in the embedding skill's headmatter template — `<cafleet-plugin-install-dir>/skills/cafleet-my-slidev/theme`. Substitute the absolute path to the installed cafleet plugin directory on this machine (Claude Code: `~/.claude/plugins/cache/cafleet/cafleet/<version>/`; Codex: as reported by `codex plugin list`). The path is a fixed, documented location; do NOT try to derive it dynamically (the `cafleet-base-dir` skill resolves a CWD-based working directory, not the install location of the calling skill).
-       - First slide is always `cover` layout
-       - Content slides follow with appropriate layouts
-       - Add presenter notes (`<!-- notes -->`) with expanded talking points from the source content
-       - Assemble the full presentation in memory — do NOT write the file yet
-    7. **Quality Review** (two-pass, mandatory before writing the file):
-       - **Pass 1 — Review and Fix**:
-         1. Content overflow check: Walk through every slide and assess whether its content fits on a single slide. Fix any overflow using remediation strategies from the `my-slidev` skill (split, condense, change layout, simplify).
-         2. Citation ordering check: Scan all slides from first to last, recording the order of first appearance of each citation. If citations are not in sequential order, renumber them throughout the entire presentation (both body text and References section).
-         3. Citation correctness check: Verify body→references and references→body consistency. Fix any mismatches (remove orphan references, add missing references, remove uncited `[N]` markers).
-       - **Pass 2 — Verification**: Re-scan the entire presentation to verify all fixes are correct and no new issues were introduced. Confirm: no overflowing slides, sequential citation numbers starting from `[1]`, body↔references consistency, and no broken formatting (slide separators, layout frontmatter).
-       - Only after Pass 2 confirms zero issues, write the file to the current working directory as `slide.md`.
-
-#### Dispatching this agent (Claude Code recipe)
-
-On Claude Code, dispatch the embedded `slide-creator` spec via the `Agent` tool with `subagent_type="general-purpose"`. Paste the spec body verbatim into the `prompt` field, then append the per-call inputs (file path or inline content):
-
-```
-Agent(
-  subagent_type="general-purpose",
-  description="Generate Slidev presentation",
-  prompt="""<paste the slide-creator spec body verbatim>
-
-Input: <file path to a markdown report OR inline content>"""
-)
-```
-
-This is the post-promotion equivalent of the named `Agent(subagent_type="slide-creator")` call that worked when `slide-creator` lived as a standalone `.claude/agents/slide-creator.md`. The structured `subagent_type` name is lost (Claude Code's plugin loader does not register skill-embedded agent specs as named subagents), but the behavior is identical because the spec body is the same.
-
-#### Dispatching this agent (codex)
-
-On codex (which reads SKILL.md directly — see `docs/reference/coding-agents/codex.md`), either **inline-follow** (the agent reads the embedded `## Spawnable Agents > slide-creator` block and follows the spec in its own turn, no new agent spawned) or **member-spawn** a dedicated codex member via `cafleet member create --coding-agent codex` with the spec body pasted into the positional prompt argument (positional `[PROMPT_ARGV]...`; there is no `--spawn-prompt-from-text` flag).
+Start from the [Headmatter](#headmatter) template (substitute the literal `theme:` install path), and add presenter notes (`<!-- notes -->`) with expanded talking points.

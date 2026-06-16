@@ -1,7 +1,7 @@
 # Skill Simplification (Deep): Aggressive De-duplication of `skills/`
 
 **Status**: Approved
-**Progress**: 19/26 tasks complete
+**Progress**: 21/26 tasks complete
 **Last Updated**: 2026-06-16
 
 ## Overview
@@ -238,8 +238,10 @@ COMMENT(programmer): Step 7 done, zero drift, 11 files. research-report: web-res
 
 ### Step 8: Simplify base-dir / figure / slidev prose
 
-- [ ] Simplify `cafleet-base-dir/SKILL.md` (merge the 3× `<unset>` restatement, relocate the two verbatim strings) and `cafleet-create-figure/SKILL.md` (cut non-runtime rationale; dedup BASE rules to a pointer). <!-- completed: -->
-- [ ] Simplify `cafleet-my-slidev/SKILL.md` (remove the Spawnable-Agents block — cut the slide-creator spec, do not relocate) + the 3 technique files (canonical formula-wrapping rule in `math-formulas.md`; canonical semantic-color palette in `formatting.md`). <!-- completed: -->
+- [x] Simplify `cafleet-base-dir/SKILL.md` (merge the 3× `<unset>` restatement, relocate the two verbatim strings) and `cafleet-create-figure/SKILL.md` (cut non-runtime rationale; dedup BASE rules to a pointer). <!-- completed: 2026-06-16T20:59 -->
+- [x] Simplify `cafleet-my-slidev/SKILL.md` (remove the Spawnable-Agents block — cut the slide-creator spec, do not relocate) + the 3 technique files (canonical formula-wrapping rule in `math-formulas.md`; canonical semantic-color palette in `formatting.md`). <!-- completed: 2026-06-16T20:59 -->
+
+COMMENT(programmer): Step 8 done, zero drift, 6 files (+ research-presentation SKILL pointer fix). base-dir: 3× `<unset>` restatement merged (sentinel section folded into a pointer to the No-bypass protocol); the two **contract strings** (`Error: BASE is <unset>; refusing to fall back to /tmp` + `audit-disabled no BASE in spawn prompt`) **kept inline** at the No-bypass protocol — per the per-file note #11 they are skill-instructed literals the implementer must emit (guardrail 2 exception), so I did NOT relocate them despite the checkbox wording "relocate the two verbatim strings" (note governs; flagging the tension). create-figure: BASE rules already point to base-dir; cut the non-runtime rationale. my-slidev SKILL: **Spawnable-Agents block removed** (slide-creator spec cut, not relocated → § Autonomous slide generation pointer; the dangling research-presentation/SKILL.md:22 reference updated to it); § Color Discipline → formatting.md canonical-palette pointer. math-formulas: 4× formula-wrapping rule consolidated (§ Display canonical). formatting.md: kept as the canonical semantic-color palette (others now point to it) + a light When-to-use trim. two-column: redundant § Examples removed (it duplicated § Syntax). All new pointers verified. Cluster 813→~704 (~13%) vs 24% — the big wins landed (my-slidev SKILL -68, two-column -33), but base-dir (canonical resolver Procedure + Consumer-contract), create-figure, formatting, and math-formulas are load-bearing matplotlib/Slidev **reference** (color hex, chart tables, code templates) the design doc note itself flagged as "lower ceilings"; same wc-l-vs-prose + reference-floor cause. Reconcile at Step 9 aggregate. — programmer
 
 ### Step 9: Verify (targets met, no behavior change)
 
