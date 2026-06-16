@@ -19,20 +19,13 @@ Load these skills at startup:
 
 ## Placeholder convention
 
-Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are **placeholders, not shell variables** — substitute the literal ids from your spawn prompt directly into each command (`permissions.allow` matches command strings literally; shell expansion breaks it). Flag placement (`--fleet-id` and `--agent-id` both after the subcommand name) follows the `cafleet` skill.
+Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are placeholders, **not** shell variables — substitute the literal ids from your spawn prompt; the rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
 
 ## Communication Protocol
 
-You do NOT speak to the user directly. All communication goes through the Director via the CAFleet message broker.
+You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each task — command shapes in the `cafleet` skill core and your spawn prompt's COMMUNICATION PROTOCOL block. The Director may relay verification requests from the Programmer or Tester at any time during development, not just at the end.
 
 **Coordination Protocol**: See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules. **Phase 1 tool-discovery is exempt** from the schema — the inventory is a one-time discovery payload, not iterative coordination, so it rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the `cafleet-design-doc-interview` skill). Phase 2 verification reports follow the schema.
-
-**Sending a message to the Director:**
-```bash
-cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
-  --to <director-agent-id> --text "<your verification report>"
-```
-**Receiving tasks from the Director:** the broker keystrokes an inline preview into your pane (mechanics in the `cafleet` skill § Send); run `cafleet message poll` for the full body, ACK with `cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>`. The Director may relay verification requests from the Programmer or Tester at any time during development — not just at the end. After verification, report results via `cafleet message send`.
 
 **Do NOT:** commit code or run git write operations; modify implementation or test files; communicate with the user directly; spawn subagents or run `claude` commands; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
 
@@ -56,9 +49,9 @@ For each verification task assigned by the Director (you receive `ready (doc)` o
 
 | Project Type | Primary Approach | Fallback |
 |:--|:--|:--|
-| Web application | Playwright MCP (browser automation) | `curl`/`wget` for HTTP checks |
+| Web application | Playwright MCP (browser automation) | WebFetch (public URL) or delegate to an agent-browser teammate (local dev server) — never `curl`/`wget` |
 | CLI tool | Run the tool via Bash, verify output | -- |
-| API service | HTTP requests via `curl` or MCP tools | -- |
+| API service | HTTP requests via an MCP HTTP tool or WebFetch (public URLs; delegate for a local-only server) | -- |
 | Library/package | Import and call from a test script | -- |
 | Configuration change | Validate config syntax, dry-run | -- |
 
@@ -73,7 +66,7 @@ For each verification task assigned by the Director (you receive `ready (doc)` o
 
 If the best tool for a verification task is unavailable:
 
-1. **Fall back** to the next best alternative (e.g., `curl` instead of Playwright for HTTP checks)
+1. **Fall back** to the next best alternative (e.g., WebFetch or an HTTP MCP tool instead of Playwright for HTTP checks — never `curl`/`wget`, which the project Bash ban blocks)
 2. **If no suitable tool exists**, skip that verification item and write a `COMMENT(verifier): test gap — <what was skipped and why>; suggested tooling: <MCP server or tool>` marker. Place the marker at the paragraph that matches the cafleet pointer used to report the gap (per the pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md`).
 3. Never fail silently — always record what could and could not be verified in `COMMENT(verifier)` markers.
 

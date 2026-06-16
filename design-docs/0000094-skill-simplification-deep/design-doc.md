@@ -1,7 +1,7 @@
 # Skill Simplification (Deep): Aggressive De-duplication of `skills/`
 
 **Status**: Approved
-**Progress**: 13/26 tasks complete
+**Progress**: 15/26 tasks complete
 **Last Updated**: 2026-06-16
 
 ## Overview
@@ -217,8 +217,10 @@ COMMENT(director): Step 4 accepted, zero-drift confirmed (create spawn-prompt co
 
 ### Step 5: Simplify design-doc-execute (994 → ~612)
 
-- [ ] Simplify `execute/SKILL.md` (573 → ~370): collapse Step 7's duplicate Copilot branch table to one; dedup the 3 spawn prompts + audit-file paragraphs to the skeleton; relocate PR-loop thresholds/error strings; cut why-no-auto-exit / why-not-`reviewDecision` rationale. <!-- completed: -->
-- [ ] Simplify `execute/roles/{director,programmer,tester,verifier}.md`: canonical-home pointers + per-role deltas only; reconcile verifier `curl`/`wget` rows with the Bash ban (WebFetch / delegate). <!-- completed: -->
+- [x] Simplify `execute/SKILL.md` (573 → ~370): collapse Step 7's duplicate Copilot branch table to one; dedup the 3 spawn prompts + audit-file paragraphs to the skeleton; relocate PR-loop thresholds/error strings; cut why-no-auto-exit / why-not-`reviewDecision` rationale. <!-- completed: 2026-06-16T20:21 -->
+- [x] Simplify `execute/roles/{director,programmer,tester,verifier}.md`: canonical-home pointers + per-role deltas only; reconcile verifier `curl`/`wget` rows with the Bash ban (WebFetch / delegate). <!-- completed: 2026-06-16T20:21 -->
+
+COMMENT(director): Step 5 accepted, zero-drift confirmed by diff review — every explicit dedup the design named WAS applied losslessly (3 spawn prompts → skeleton + verbatim-IMPORTANT delta tables; the doubled Step-7 gate table collapsed; why-no-auto-exit / why-not-reviewDecision trimmed to one-line runtime rules per guardrail 3; error-table preconditions deduped; verifier curl/wget correctness fix landed). The Programmer is NOT under-cutting. SYSTEMIC FINDING (now clear across Steps 3/4/5: 27%/11.5%/10% vs 42%/16%/38%): the design's per-cluster + ~28-30% aggregate line estimates assumed more redundancy than exists under the zero-drift contract — the achievable reduction is ~20%. Correctness (guardrails 1-6, SC #2-6) is fully met; only SC #1's line *numbers* fall short. Action: do NOT force deeper cuts into canonical/workflow content. Complete Steps 6-9, measure actuals at Step 9, and present the honest before/after + the SC #1 gap to the user at the approval gate for adjudication. — director
 
 ### Step 6: Simplify the team skills (monitoring/supervision)
 
