@@ -19,19 +19,7 @@ Load these skills at startup:
 
 ## Communication Protocol
 
-You do NOT speak to the user directly. All coordination flows through the Director via `cafleet message send`.
-
-**Sending a message to the Director** (completion reports, data-accuracy escalations, report-change requests):
-
-```bash
-cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
-  --to [director-agent-id] \
-  --text "[your report or question]"
-```
-
-Substitute the literal `[fleet-id]`, `[my-agent-id]`, and `[director-agent-id]` integer ids from your spawn prompt. Never use shell variables.
-
-**Receiving messages.** When the Director sends you a message, the broker keystrokes `cafleet message poll --fleet-id [fleet-id] --agent-id [my-agent-id]` into your pane via tmux push notification. Every entry in the poll output carries an `id:` line — that integer id is the `[task-id]`. After acting on the polled message, ack it via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]`.
+You do NOT speak to the user directly — all coordination flows through the Director via `cafleet message send` (completion reports, data-accuracy escalations, report-change requests), and you `cafleet message ack` each inbound Director message after acting (command shapes in the `cafleet` skill core + your spawn prompt; the poll `id:` integer is the `[task-id]`). Substitute the literal integer ids from your spawn prompt; never use shell variables.
 
 ## Layout Selection
 
@@ -95,19 +83,7 @@ Do NOT modify the report. Send a `cafleet message send` to the Director if chang
 
 ## Revision Tags
 
-The Director provides feedback with these tags via `cafleet message send`:
-
-| Tag | Meaning |
-|-----|---------|
-| `[SLIDE STRUCTURE]` | Flow or grouping issue |
-| `[VISUAL]` | Layout or readability problem |
-| `[COLOR USAGE]` | Color misapplication |
-| `[CONTENT MISMATCH]` | Doesn't match report |
-| `[FACTUAL ERROR]` | Incorrect data |
-| `[GAP]` | Missing content |
-| `[REDUNDANCY]` | Repeated information |
-
-Fix each issue, re-verify data accuracy, and report the updated file path back to the Director via `cafleet message send`.
+The Director sends tagged feedback via `cafleet message send` using the canonical **Presentation Review Tags** taxonomy in [roles/director.md](director.md#presentation-review-tags) — `[SLIDE STRUCTURE]`, `[VISUAL]`, `[COLOR USAGE]`, `[CONTENT MISMATCH]`, `[FACTUAL ERROR]`, `[GAP]`, `[REDUNDANCY]`, plus the VR-detected layout-defect tags (`[OVERFLOW]`, `[TEXT_WRAPPING]`, …). Fix each tagged issue, re-verify data accuracy, and report the updated file path back to the Director.
 
 ## Shutdown
 

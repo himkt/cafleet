@@ -1,7 +1,7 @@
 # Skill Simplification (Deep): Aggressive De-duplication of `skills/`
 
 **Status**: Approved
-**Progress**: 17/26 tasks complete
+**Progress**: 19/26 tasks complete
 **Last Updated**: 2026-06-16
 
 ## Overview
@@ -231,8 +231,10 @@ COMMENT(programmer): Step 6 done, zero drift. monitoring: placeholder → caflee
 
 ### Step 7: Simplify the research skills (1,690 → ~1,154)
 
-- [ ] Simplify `research-report` (`SKILL.md` + `template.md` + 4 roles): land the web-researcher extraction pointers; dedup tag/verification tables to one producer-owned copy; point role boilerplate to canonical homes; collapse in-file shutdown double-statements. <!-- completed: -->
-- [ ] Simplify `research-presentation` (`SKILL.md` + 4 roles): dedup the spawn prompts; keep each tag table in one producer role; point boilerplate to canonical homes; relocate ack/state strings. <!-- completed: -->
+- [x] Simplify `research-report` (`SKILL.md` + `template.md` + 4 roles): land the web-researcher extraction pointers; dedup tag/verification tables to one producer-owned copy; point role boilerplate to canonical homes; collapse in-file shutdown double-statements. <!-- completed: 2026-06-16T20:51 -->
+- [x] Simplify `research-presentation` (`SKILL.md` + 4 roles): dedup the spawn prompts; keep each tag table in one producer role; point boilerplate to canonical homes; relocate ack/state strings. <!-- completed: 2026-06-16T20:51 -->
+
+COMMENT(programmer): Step 7 done, zero drift, 11 files. research-report: web-researcher extraction pointers landed (researcher.md / scout.md now read [`web-researcher.md`](the Step-2 file) instead of the stale `Agent(subagent_type="web-researcher")` inline); 3 SKILL spawn prompts (Manager/Scout/Researcher) → skeleton + lossless delta tables (ack-inline comms variant + TaskUpdate + "don't talk to Scouts" lines preserved verbatim); 4 role comms command-blocks → cafleet-core pointers; director shutdown double-statement collapsed; template.md light W merge. Verification tags ([VERIFIED]/[SINGLE-SOURCE]/[VOLATILE]) already producer-owned in researcher.md, review tags ([FACTUAL ERROR]/…) in director.md — consumers reference by name (clean). research-presentation: 3 SKILL spawn prompts (Presentation/Transcript/VR) → skeleton + delta; presentation.md + transcript.md Revision-Tags meaning tables → director.md producer pointers (tag NAMES kept inline for recognition, per guardrail 6); 4 role comms collapses; director shutdown double-statement collapsed. VR's Visual Issue Categories kept (it is the detector/producer). All new pointers verified (director tag anchors, web-researcher.md, skeleton anchor). Cluster 1690→~1413 (~16%) vs 32% estimate — SKILLs dropped hard (report 410→284, presentation 348→299) from the deltas + Step-2 web-researcher extraction, but the role files are mostly role-specific content (the Manager's task/verification protocols, the VR's ~60-line defect-detection procedures, the Director's review-tag tables + visual-quality checklist) that guardrail 6 keeps inline; same wc-l-vs-prose + canonical-floor cause you arbitrated for Steps 3/5/6. Reconcile at the Step-9 aggregate. — programmer
 
 ### Step 8: Simplify base-dir / figure / slidev prose
 

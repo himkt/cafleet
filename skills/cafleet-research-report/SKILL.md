@@ -124,34 +124,16 @@ Substitute these absolute paths into the spawn prompts below.
 
 **Manager spawn prompt:**
 
-```
-You are the Manager in a research report team (CAFleet-native).
+Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Manager delta below (`{fleet_id}` / `{agent_id}` / `{director_agent_id}` filled by `member create`; `[INSERT …]` markers shell-substituted by the Director first):
 
-ROLE DEFINITION: Open [INSERT abs path to roles/manager.md] with the Read tool BEFORE any other action. That file is your authoritative role definition — accountability, communication protocol, task discipline, file-aggregation rules, pre-compilation verification, revision loop, and shutdown. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the `cafleet` skill — for the broker primitives, literal-integer-id flag convention, and bash-via-Director routing
-
-FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
-
-CURRENT DATE: [INSERT today's date]
-USER REQUEST: [INSERT user's original request in full]
-OUTPUT DIRECTORY: [INSERT OUTPUT DIRECTORY]
-LANGUAGE: [INSERT user's language preference if specified]
-
-COMMUNICATION PROTOCOL:
-- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
-- You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.
-- The team shares a harness task list (TaskList / TaskGet / TaskUpdate). Use it to track sub-topic assignments.
-
-To request Scouts or Researchers, send the Director a cafleet message specifying: role (Scout or Researcher), scope, search angles, and output file path. The Director will spawn them via `cafleet member create` and relay their completion reports back to you.
-
-Your first compiled report will be reviewed critically by the Director. Aim for highest quality on the first attempt.
-```
+| Slot | Manager |
+|---|---|
+| ROLE TITLE / TEAM | `the Manager` / `research report` |
+| role-file + ROLE-DEF suffix | `roles/manager.md`; suffix `— accountability, communication protocol, task discipline, file-aggregation rules, pre-compilation verification, revision loop, and shutdown.` |
+| cafleet-load purpose | `for the broker primitives, literal-integer-id flag convention, and bash-via-Director routing` (no extra skills) |
+| CONTEXT LINES | `CURRENT DATE: [INSERT today's date]` / `USER REQUEST: [INSERT user's original request in full]` / `OUTPUT DIRECTORY: [INSERT OUTPUT DIRECTORY]` / `LANGUAGE: [INSERT user's language preference if specified]` |
+| POLL-HANDLING + extra comms | **ack-inline** form (capture the `id:` integer as `[task-id]` and `cafleet message ack … --task-id [task-id]`, then act); plus `You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.` and `The team shares a harness task list (TaskList / TaskGet / TaskUpdate). Use it to track sub-topic assignments.` |
+| start cue (verbatim) | `To request Scouts or Researchers, send the Director a cafleet message specifying: role (Scout or Researcher), scope, search angles, and output file path. The Director will spawn them via cafleet member create and relay their completion reports back to you.` + `Your first compiled report will be reviewed critically by the Director. Aim for highest quality on the first attempt.` |
 
 Render the prompt to `${BASE}/prompts/manager-<UTC-compact>.md` per the 2b two-step audit-file pattern (leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass), then spawn with `--prompt-file`:
 
@@ -170,29 +152,16 @@ After assessing the topic, the Manager may send the Director one or more Scout s
 
 **Scout spawn prompt:**
 
-```
-You are a Scout Researcher in a research team (CAFleet-native).
+Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Scout delta:
 
-ROLE DEFINITION: Open [INSERT abs path to roles/scout.md] with the Read tool BEFORE any other action. That file is your authoritative role definition — landscape-mapping focus, communication protocol, output format, and shutdown. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the `cafleet` skill — for the broker primitives and bash-via-Director routing
-
-FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
-
-CURRENT DATE: [INSERT today's date]
-YOUR ASSIGNMENT: [landscape scope and what areas to map]
-OUTPUT FILE: [INSERT <resolved-path>/00-scout-<topic>.md]
-
-COMMUNICATION PROTOCOL:
-- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
-
-Write findings to the output file, then send the Director a completion summary. The Director will relay your findings to the Manager.
-```
+| Slot | Scout |
+|---|---|
+| ROLE TITLE / TEAM | `a Scout Researcher` / `research` |
+| role-file + ROLE-DEF suffix | `roles/scout.md`; suffix `— landscape-mapping focus, communication protocol, output format, and shutdown.` |
+| cafleet-load purpose | `for the broker primitives and bash-via-Director routing` (no extra skills) |
+| CONTEXT LINES | `CURRENT DATE: [INSERT today's date]` / `YOUR ASSIGNMENT: [landscape scope and what areas to map]` / `OUTPUT FILE: [INSERT <resolved-path>/00-scout-<topic>.md]` |
+| POLL-HANDLING | **ack-inline** form (capture the `id:` integer as `[task-id]` and `cafleet message ack … --task-id [task-id]`, then act) |
+| start cue (verbatim) | `Write findings to the output file, then send the Director a completion summary. The Director will relay your findings to the Manager.` |
 
 Render the prompt to `${BASE}/prompts/<scout-name>-<UTC-compact>.md` per the 2b two-step audit-file pattern (use `scout` for a single Scout, `scout-1`/`scout-2`/… for multiple; `<scout-name>` is the lowercased `--name`), then spawn with `--prompt-file`:
 
@@ -234,33 +203,16 @@ The Manager's `TaskCreate` calls also serve as the authoritative list of sub-top
 
 **Researcher spawn prompt:**
 
-```
-You are a Research Specialist in a research team (CAFleet-native).
+Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Researcher delta:
 
-ROLE DEFINITION: Open [INSERT abs path to roles/researcher.md] with the Read tool BEFORE any other action. That file is your authoritative role definition — accountability, Discovery Phase, fact verification protocol, output format, and shutdown. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the `cafleet` skill — for the broker primitives and bash-via-Director routing
-
-FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
-
-CURRENT DATE: [INSERT today's date]
-YOUR NAME: researcher-NN
-YOUR ASSIGNMENT: [specific sub-topic and what to investigate]
-YOUR TASK ID: [INSERT the taskId the Manager created for this sub-topic]
-OUTPUT FILE: [INSERT <resolved-path>/NN-research-<subtopic>.md]
-
-COMMUNICATION PROTOCOL:
-- Report to Director: cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "..."
-- When you see cafleet message poll output with a message from the Director, capture the `id:` integer id from each entry as `[task-id]` and ack it via cafleet message ack --fleet-id {fleet_id} --agent-id {agent_id} --task-id [task-id], then act on the instructions.
-- On start, claim your task: TaskUpdate(taskId: YOUR TASK ID, owner: "researcher-NN", status: "in_progress").
-- On completion, mark your task completed: TaskUpdate(taskId: YOUR TASK ID, status: "completed").
-
-Write findings to the output file, then send the Director a completion summary. The Director will relay findings and any follow-up questions between you and the Manager.
-```
+| Slot | Researcher |
+|---|---|
+| ROLE TITLE / TEAM | `a Research Specialist` / `research` |
+| role-file + ROLE-DEF suffix | `roles/researcher.md`; suffix `— accountability, Discovery Phase, fact verification protocol, output format, and shutdown.` |
+| cafleet-load purpose | `for the broker primitives and bash-via-Director routing` (no extra skills) |
+| CONTEXT LINES | `CURRENT DATE: [INSERT today's date]` / `YOUR NAME: researcher-NN` / `YOUR ASSIGNMENT: [specific sub-topic and what to investigate]` / `YOUR TASK ID: [INSERT the taskId the Manager created for this sub-topic]` / `OUTPUT FILE: [INSERT <resolved-path>/NN-research-<subtopic>.md]` |
+| POLL-HANDLING + extra comms | **ack-inline** form; plus `On start, claim your task: TaskUpdate(taskId: YOUR TASK ID, owner: "researcher-NN", status: "in_progress").` and `On completion, mark your task completed: TaskUpdate(taskId: YOUR TASK ID, status: "completed").` |
+| start cue (verbatim) | `Write findings to the output file, then send the Director a completion summary. The Director will relay findings and any follow-up questions between you and the Manager.` |
 
 Render the prompt to `${BASE}/prompts/researcher-<NN>-<UTC-compact>.md` per the 2b two-step audit-file pattern, then spawn with `--prompt-file`:
 

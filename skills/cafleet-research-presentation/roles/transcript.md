@@ -22,15 +22,7 @@ Load these skills at startup:
 
 ## Communication Protocol
 
-You do NOT speak to the user directly. All coordination flows through the Director via `cafleet message send` (completion reports, questions):
-
-```bash
-cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
-  --to [director-agent-id] \
-  --text "[your report or question]"
-```
-
-Inbound Director messages auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]` (the poll `id:` integer id is the `[task-id]`) after acting.
+You do NOT speak to the user directly — all coordination flows through the Director via `cafleet message send` (completion reports, questions), and you `cafleet message ack` each inbound Director message after acting (command shapes in the `cafleet` skill core + your spawn prompt; the poll `id:` integer is the `[task-id]`).
 
 ## Timing Awareness
 
@@ -74,19 +66,7 @@ Your work proceeds in two phases:
 
 ## The Iterative Improvement Loop
 
-**Expect multiple revision rounds — this is the process working as designed.** The Director reviews your transcript and provides feedback via `cafleet message send` using these tags:
-
-| Tag | Meaning |
-|-----|---------|
-| `[FLOW]` | Narration doesn't flow naturally for oral delivery |
-| `[TIMING]` | Section too long or too short for the corresponding slide |
-| `[CONTENT MISMATCH]` | Transcript doesn't match the slide or report content |
-| `[READABILITY]` | Phrasing awkward for reading aloud |
-| `[FACTUAL ERROR]` | Incorrect data in the narration |
-| `[GAP]` | Slide not covered or important point omitted |
-| `[REDUNDANCY]` | Same point repeated unnecessarily across narration blocks |
-
-When the Director sends feedback:
+**Expect multiple revision rounds — this is the process working as designed.** The Director reviews your transcript and sends tagged feedback via `cafleet message send` using the canonical **Transcript Review Tags** taxonomy in [roles/director.md](director.md#transcript-review-tags) — `[FLOW]`, `[TIMING]`, `[CONTENT MISMATCH]`, `[READABILITY]`, `[FACTUAL ERROR]`, `[GAP]`, `[REDUNDANCY]`. When the Director sends feedback:
 
 - Fix each tagged issue directly and thoroughly.
 - Re-check 1:1 slide correspondence after revisions.

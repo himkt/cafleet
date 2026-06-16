@@ -24,15 +24,7 @@ Load these skills at startup:
 
 ## Communication Protocol
 
-You do NOT speak to the user directly. All coordination flows through the Director via `cafleet message send`:
-
-```bash
-cafleet message send --fleet-id [fleet-id] --agent-id [my-agent-id] \
-  --to [director-agent-id] \
-  --text "[the structured Visual Review Report]"
-```
-
-Inbound Director messages (e.g. a re-check request with a new `ROUND: N` line) auto-fire `cafleet message poll` into your pane; ack each via `cafleet message ack --fleet-id [fleet-id] --agent-id [my-agent-id] --task-id [task-id]` (the poll `id:` integer id is the `[task-id]`) after acting.
+You do NOT speak to the user directly — all coordination flows through the Director via `cafleet message send` (the structured Visual Review Report), and you `cafleet message ack` each inbound Director message (e.g. a re-check request with a new `ROUND: N` line) after acting (command shapes in the `cafleet` skill core + your spawn prompt; the poll `id:` integer is the `[task-id]`).
 
 ## Visual Issue Categories
 
