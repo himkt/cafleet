@@ -25,7 +25,7 @@ each other; agents in different fleets are invisible to one another.
 | inline preview | the 2-line message preview the broker keystrokes into the recipient's pane | [tmux push](tmux-push.md) |
 | poll / ack | how a recipient fetches and then confirms consumption of a message | [CLI options](../spec/cli-options.md) |
 | coding-agent backend | the binary in a member pane: `claude`, `codex`, or `opencode` | [Coding agents](coding-agents.md) |
-| monitor | a fleet-scoped loop a coding agent runs as a background task, waking due agents on a fixed cadence by keystroking `message poll` into their panes | [Monitoring](monitoring.md) |
+| monitor | a fleet-scoped loop the monitoring member runs as a background task, waking the monitoring member by keystroke whenever a watched agent (Director or member) is due on its own interval | [Monitoring](monitoring.md) |
 
 ## Architecture diagram
 
@@ -75,12 +75,14 @@ and ACK chip metadata — lives at [WebUI API](../spec/webui-api.md).
 
 A Director supervises its team on a periodic tick. That tick is supplied by
 `cafleet monitor` — a per-fleet loop the fleet's dedicated monitoring member runs
-as a background task, waking **only** the monitoring member by keystroking a wake
-nudge into its pane. It is a plain loop, not agent reasoning, so the heartbeat
-works the same on any backend. The monitor owns only the *when* (the monitoring
-member is due); the monitoring member re-engages the idle Director on demand, and
-the Director owns the *what* (poll, ACK, dispatch, health-check, escalate). See
-[Monitoring](monitoring.md).
+as a background task. Each tick it scans the **watched set** (the root Director at
+180 s and every ordinary member at 720 s, each on its own interval) and, when ≥ 1
+watched agent is due, wakes the monitoring member by keystroking a wake nudge into
+its pane. It is a plain loop, not agent reasoning, so the heartbeat works the same
+on any backend. The monitor owns only the *when* (which watched agents are due);
+the monitoring member then inspects each freshly-due agent and re-engages the idle
+Director on demand, and the Director owns the *what* (poll, ACK, dispatch,
+health-check, escalate). See [Monitoring](monitoring.md).
 
 ## Design document orchestration skills
 

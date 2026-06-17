@@ -34,9 +34,11 @@ The supervision tick is supplied by `cafleet monitor` — a per-fleet loop the
 fleet's dedicated monitoring member runs as a background task in its own pane —
 and works the same on **any** backend (`claude`, `codex`, or `opencode`). The
 monitoring member (the first `cafleet member create`, `--role monitor`) is the
-one process that runs `cafleet monitor start`; the loop wakes only the monitoring
-member, which re-engages the idle Director on demand. The Director never runs the
-monitor itself ([Monitoring](../concepts/monitoring.md)).
+one process that runs `cafleet monitor start`; each tick the loop scans the
+watched set (the Director at 180 s and every ordinary member at 720 s) and wakes
+the monitoring member whenever a watched agent is due, which inspects it and
+re-engages the idle Director on demand. The Director never runs the monitor
+itself ([Monitoring](../concepts/monitoring.md)).
 
 ## What to expect
 

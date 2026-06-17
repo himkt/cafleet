@@ -53,7 +53,7 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
       "status": "active",
       "registered_at": "2026-04-15T09:59:00+00:00",
       "kind": "user",
-      "monitor": null
+      "monitor": {"interval_seconds": 180, "last_ping_at": null, "enabled": true}
     },
     {
       "agent_id": 3,
@@ -71,7 +71,16 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
       "status": "active",
       "registered_at": "2026-04-15T10:05:00+00:00",
       "kind": "user",
-      "monitor": {"interval_seconds": 60, "last_ping_at": null, "enabled": true}
+      "monitor": null
+    },
+    {
+      "agent_id": 5,
+      "name": "alice",
+      "description": "Ordinary member",
+      "status": "active",
+      "registered_at": "2026-04-15T10:06:00+00:00",
+      "kind": "user",
+      "monitor": {"interval_seconds": 720, "last_ping_at": null, "enabled": true}
     }
   ]
 }
@@ -79,10 +88,11 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
 
 **`monitor` field**: each agent carries its folded monitoring schedule —
 `{"interval_seconds": int, "last_ping_at": str|null, "enabled": bool}` — or
-`null` when the agent is not enrolled. Only the fleet's dedicated monitoring
-member is enrolled; the root Director, ordinary members, the Administrator,
-deregistered agents, and card-only registrations are **never** enrolled and so
-carry `monitor: null`. Folding the schedule into the list lets the SPA render
+`null` when the agent is not enrolled. The fleet's **watched set** is enrolled:
+the root Director (180 s) and every ordinary member (720 s) carry a non-null
+`monitor`. The dedicated **monitoring member** is the unenrolled watcher and
+carries `monitor: null`, as do the Administrator, deregistered agents, and
+card-only registrations. Folding the schedule into the list lets the SPA render
 every agent's schedule without an extra request per agent. See
 [Monitoring](../concepts/monitoring.md).
 
@@ -135,17 +145,18 @@ Returns one agent's monitoring schedule.
 
 ```json
 {
-  "interval_seconds": 60,
+  "interval_seconds": 180,
   "last_ping_at": null,
   "enabled": true
 }
 ```
 
 **Errors**: 404 (`detail: "Agent not enrolled"`) when the agent is not in the
-fleet or not enrolled (Administrator, deregistered, card-only). 400 for a
-missing or non-integer `X-Fleet-Id`; 404 (`detail: "Fleet not found"`) for an
-unknown fleet. The SPA reads the folded `monitor` field on `GET /api/agents`
-instead of calling this endpoint per agent — it exists for CLI/API parity.
+fleet or not enrolled (the monitoring member, Administrator, deregistered,
+card-only). 400 for a missing or non-integer `X-Fleet-Id`; 404
+(`detail: "Fleet not found"`) for an unknown fleet. The SPA reads the folded
+`monitor` field on `GET /api/agents` instead of calling this endpoint per agent —
+it exists for CLI/API parity.
 
 ### PATCH /api/agents/{agent_id}/monitor — Edit Agent Monitor Config
 

@@ -1,13 +1,17 @@
 """Broker DB-layer tests for the monitor schedule + runtime functions.
 
-Covers selective enrollment-on-registration (the dedicated monitoring member is
-the ONLY enrolled role, per design 0000091 — the root Director is no longer
-enrolled), the ``monitoring-member`` kind marker, cleanup-on-teardown, per-agent
-config edits, the per-tick scan (``list_monitor_targets``, surfacing
-``is_monitoring_member``), ping recording, the single-instance runtime
+Covers per-member enrollment-on-registration (the root Director @180 at
+``create_fleet``, every ordinary member @720 at ``register_agent``; the
+monitoring member and the Administrator stay unenrolled), the
+``monitoring-member`` kind marker, the ``find_monitoring_member`` watcher lookup,
+cleanup-on-teardown, per-agent config edits, the per-tick scan
+(``list_monitor_targets`` over the watched Director + members, with no
+``is_monitoring_member`` field), ping recording, the single-instance runtime
 claim/heartbeat/clear with the ownership-checked split-brain guard, and the
 Alembic data migrations that prune ``monitor_config`` rows (``0003`` prunes
-non-Director rows; ``0004`` then prunes the root-Director rows).
+non-Director rows; ``0004`` then prunes the root-Director rows; ``0005`` — the
+current head, which inverts to per-member intervals — is covered by
+``test_alembic_smoke.py``).
 """
 
 import importlib.resources
@@ -46,7 +50,7 @@ def _placement(fleet: dict, pane_id: str = "%5") -> dict:
 def _register_ordinary_member(
     fleet: dict, name: str = "member", pane_id: str = "%5"
 ) -> dict:
-    """A pane-bound ordinary member — NOT enrolled in monitoring (design 0000090)."""
+    """A pane-bound ordinary member — enrolled in monitoring @720 (this design)."""
     return _register_agent(
         fleet["fleet_id"], name=name, placement=_placement(fleet, pane_id)
     )
@@ -55,7 +59,7 @@ def _register_ordinary_member(
 def _register_monitoring_member(
     fleet: dict, name: str = "watcher", pane_id: str = "%5"
 ) -> dict:
-    """The dedicated monitoring member — the only enrolled non-Director role."""
+    """The dedicated monitoring member — the unenrolled watcher, located by kind."""
     return broker.register_agent(
         fleet_id=fleet["fleet_id"],
         name=name,
@@ -72,33 +76,40 @@ def _iso_now() -> str:
 # --- enrollment on registration -------------------------------------------
 
 
-def test_enroll_on_create__director_not_enrolled_administrator_not():
-    # design 0000091: create_fleet no longer enrolls the root Director; the only
-    # enrolled role is the dedicated monitoring member (registered separately).
+def test_enroll_on_create__director_enrolled_180_administrator_not():
+    # this design: create_fleet enrolls the root Director @180; the Administrator
+    # has no placement and stays unenrolled.
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
 
-    assert broker.get_monitor_config(sid, fleet["director"]["agent_id"]) is None
+    director_cfg = broker.get_monitor_config(sid, fleet["director"]["agent_id"])
+    assert director_cfg is not None
+    assert director_cfg["interval_seconds"] == 180
+    assert director_cfg["enabled"] is True
+    assert director_cfg["last_ping_at"] is None
+
     assert broker.get_monitor_config(sid, fleet["administrator_agent_id"]) is None
 
 
-def test_enroll_on_register__ordinary_member_not_enrolled():
-    # design 0000090: a pane-bound ordinary member is NO LONGER auto-enrolled
+def test_enroll_on_register__ordinary_member_enrolled_720():
+    # this design: a pane-bound ordinary member is enrolled @720 at registration.
     fleet = _create_fleet()
     member = _register_ordinary_member(fleet, name="alice")
 
-    assert broker.get_monitor_config(fleet["fleet_id"], member["agent_id"]) is None
+    cfg = broker.get_monitor_config(fleet["fleet_id"], member["agent_id"])
+    assert cfg is not None
+    assert cfg["interval_seconds"] == 720
+    assert cfg["enabled"] is True
+    assert cfg["last_ping_at"] is None
 
 
-def test_enroll_on_register__monitoring_member_enrolled():
+def test_enroll_on_register__monitoring_member_not_enrolled():
+    # this design: the monitoring member is the unenrolled watcher (located by
+    # kind), so register_agent does NOT write a monitor_config row for it.
     fleet = _create_fleet()
     watcher = _register_monitoring_member(fleet, name="watcher")
 
-    cfg = broker.get_monitor_config(fleet["fleet_id"], watcher["agent_id"])
-    assert cfg is not None
-    assert cfg["interval_seconds"] == 60
-    assert cfg["enabled"] is True
-    assert cfg["last_ping_at"] is None
+    assert broker.get_monitor_config(fleet["fleet_id"], watcher["agent_id"]) is None
 
 
 def test_enroll_on_register__card_only_agent_not_enrolled():
@@ -160,33 +171,96 @@ def test_register_paneless_monitoring_member__rejected():
         )
 
 
+# --- find_monitoring_member (watcher lookup, §3) ---------------------------
+
+
+def test_find_monitoring_member__returns_pane_when_present():
+    fleet = _create_fleet()
+    watcher = _register_monitoring_member(fleet, name="watcher", pane_id="%7")
+
+    found = broker.find_monitoring_member(fleet["fleet_id"])
+    assert found is not None
+    assert found["agent_id"] == watcher["agent_id"]
+    assert found["name"] == "watcher"
+    assert found["pane_id"] == "%7"
+
+
+def test_find_monitoring_member__none_when_no_monitoring_member():
+    fleet = _create_fleet()
+    _register_ordinary_member(fleet, name="ordinary")  # not a monitoring member
+
+    assert broker.find_monitoring_member(fleet["fleet_id"]) is None
+
+
+def test_find_monitoring_member__none_after_deregister():
+    fleet = _create_fleet()
+    watcher = _register_monitoring_member(fleet, name="watcher")
+    broker.deregister_agent(watcher["agent_id"])
+
+    assert broker.find_monitoring_member(fleet["fleet_id"]) is None
+
+
+def test_find_monitoring_member__none_when_pane_pending():
+    # a monitoring member whose placement is still pending (tmux_pane_id=None) has
+    # no wakeable pane, so find_monitoring_member treats it as absent.
+    fleet = _create_fleet()
+    broker.register_agent(
+        fleet_id=fleet["fleet_id"],
+        name="pending-watcher",
+        description="monitoring member with a pending pane",
+        placement={
+            "director_agent_id": fleet["director"]["agent_id"],
+            "tmux_session": "main",
+            "tmux_window_id": "@3",
+            "tmux_pane_id": None,
+            "coding_agent": "claude",
+        },
+        kind="monitoring-member",
+    )
+
+    assert broker.find_monitoring_member(fleet["fleet_id"]) is None
+
+
+def test_find_monitoring_member__scoped_to_fleet():
+    fleet_a = _create_fleet()
+    fleet_b = _create_fleet()
+    _register_monitoring_member(fleet_b, name="watcher-b", pane_id="%7")
+
+    # fleet_a has no monitoring member of its own; fleet_b's is not leaked to it
+    assert broker.find_monitoring_member(fleet_a["fleet_id"]) is None
+    assert broker.find_monitoring_member(fleet_b["fleet_id"])["name"] == "watcher-b"
+
+
 # --- cleanup on teardown ---------------------------------------------------
 
 
 def test_cleanup_on_deregister__config_removed():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    watcher = _register_monitoring_member(fleet, name="bob")
+    member = _register_ordinary_member(fleet, name="bob")
 
-    assert broker.get_monitor_config(sid, watcher["agent_id"]) is not None
-    broker.deregister_agent(watcher["agent_id"])
-    assert broker.get_monitor_config(sid, watcher["agent_id"]) is None
+    assert broker.get_monitor_config(sid, member["agent_id"]) is not None
+    broker.deregister_agent(member["agent_id"])
+    assert broker.get_monitor_config(sid, member["agent_id"]) is None
 
 
 def test_cleanup_on_fleet_delete__config_and_runtime_removed(broker_session):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["agent_id"]
-    watcher = _register_monitoring_member(fleet, name="carol")
-    watcher_id = watcher["agent_id"]
+    member_id = _register_ordinary_member(fleet, name="carol")["agent_id"]
     broker.claim_monitor_runtime(sid, os.getpid(), 5, _iso_now())
+
+    # both the Director (@180) and the member (@720) hold monitor_config rows
+    assert broker.get_monitor_config(sid, director_id) is not None
+    assert broker.get_monitor_config(sid, member_id) is not None
 
     broker.delete_fleet(sid)
 
     with broker_session() as s:
         configs = (
             s.query(MonitorConfig)
-            .filter(MonitorConfig.agent_id.in_([director_id, watcher_id]))
+            .filter(MonitorConfig.agent_id.in_([director_id, member_id]))
             .all()
         )
         runtime = s.get(MonitorRuntime, sid)
@@ -198,11 +272,11 @@ def test_cleanup_on_fleet_delete__config_and_runtime_removed(broker_session):
 
 
 def test_update_monitor_config__interval_and_enabled_persist():
-    # the monitoring member is the only enrolled role (design 0000091), so it is
-    # what exercises the config-edit mechanics
+    # an ordinary member is enrolled @720 (this design), so it exercises the
+    # config-edit mechanics
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    aid = _register_monitoring_member(fleet, name="watcher")["agent_id"]
+    aid = _register_ordinary_member(fleet, name="member")["agent_id"]
 
     updated = broker.update_monitor_config(sid, aid, interval_seconds=30)
     assert updated["interval_seconds"] == 30
@@ -248,10 +322,10 @@ def test_update_monitor_config__cross_fleet_raises():
 
 
 def test_record_ping__sets_last_ping_at():
-    # the monitoring member is the only enrolled role (design 0000091)
+    # an ordinary member is enrolled @720 (this design)
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    aid = _register_monitoring_member(fleet, name="pinger")["agent_id"]
+    aid = _register_ordinary_member(fleet, name="pinger")["agent_id"]
 
     assert broker.get_monitor_config(sid, aid)["last_ping_at"] is None
     when = _iso_now()
@@ -265,13 +339,15 @@ def test_record_ping__sets_last_ping_at():
 def test_list_monitor_configs__enrolled_only_and_bool_enabled():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    watcher = _register_monitoring_member(fleet, name="gina")
-    _register_ordinary_member(fleet, name="ordinary", pane_id="%8")  # not enrolled
+    director_id = fleet["director"]["agent_id"]
+    member = _register_ordinary_member(fleet, name="ordinary", pane_id="%8")
+    _register_monitoring_member(fleet, name="gina", pane_id="%5")  # NOT enrolled
 
     configs = broker.list_monitor_configs(sid)
     enrolled_ids = {c["agent_id"] for c in configs}
-    # only the monitoring member is enrolled (design 0000091); the Director is not
-    assert enrolled_ids == {watcher["agent_id"]}
+    # this design: the Director (@180) + ordinary members (@720) are enrolled;
+    # the monitoring member is the unenrolled watcher.
+    assert enrolled_ids == {director_id, member["agent_id"]}
     for c in configs:
         assert isinstance(c["enabled"], bool)
 
@@ -279,25 +355,34 @@ def test_list_monitor_configs__enrolled_only_and_bool_enabled():
 # --- list_monitor_targets (per-tick scan) ----------------------------------
 
 
-def test_list_monitor_targets__monitoring_member_only_shape():
+def test_list_monitor_targets__director_and_members_shape():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["agent_id"]
-    watcher = _register_monitoring_member(fleet, name="hank", pane_id="%7")
-    watcher_id = watcher["agent_id"]
-    _register_ordinary_member(fleet, name="ordinary", pane_id="%8")  # excluded
+    member = _register_ordinary_member(fleet, name="hank", pane_id="%8")
+    member_id = member["agent_id"]
+    watcher = _register_monitoring_member(fleet, name="watcher", pane_id="%7")
 
     targets = {t["agent_id"]: t for t in broker.list_monitor_targets(sid)}
-    # design 0000091: only the monitoring member is enrolled; the Director is not
-    assert set(targets) == {watcher_id}
-    assert director_id not in targets
+    # this design: the watched set is the Director + ordinary members; the
+    # monitoring member is the unenrolled watcher and is NOT a target.
+    assert set(targets) == {director_id, member_id}
+    assert watcher["agent_id"] not in targets
 
-    m = targets[watcher_id]
+    # the dead is_monitoring_member field is removed from every row
+    for t in targets.values():
+        assert "is_monitoring_member" not in t
+
+    d = targets[director_id]
+    assert d["is_director"] is True
+    assert d["interval_seconds"] == 180
+    assert d["enabled"] is True
+
+    m = targets[member_id]
     assert m["is_director"] is False
-    assert m["is_monitoring_member"] is True
     assert m["name"] == "hank"
-    assert m["pane_id"] == "%7"
-    assert m["interval_seconds"] == 60
+    assert m["pane_id"] == "%8"
+    assert m["interval_seconds"] == 720
     assert m["last_ping_at"] is None
     assert isinstance(m["enabled"], bool)
     assert m["enabled"] is True
@@ -308,39 +393,35 @@ def test_list_monitor_targets__pending_count_input_required_only():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["agent_id"]
-    watcher_id = _register_monitoring_member(fleet, name="ivy", pane_id="%9")[
-        "agent_id"
-    ]
+    member_id = _register_ordinary_member(fleet, name="ivy", pane_id="%9")["agent_id"]
 
-    first = broker.send_message(sid, director_id, watcher_id, "msg1")
-    broker.send_message(sid, director_id, watcher_id, "msg2")
-    broker.send_message(sid, director_id, watcher_id, "msg3")
+    first = broker.send_message(sid, director_id, member_id, "msg1")
+    broker.send_message(sid, director_id, member_id, "msg2")
+    broker.send_message(sid, director_id, member_id, "msg3")
 
     targets = {t["agent_id"]: t for t in broker.list_monitor_targets(sid)}
-    assert targets[watcher_id]["pending_count"] == 3
-    # the Director is no longer enrolled, so it is not a scan target at all
-    assert director_id not in targets
+    assert targets[member_id]["pending_count"] == 3
+    # the Director is a watched target too, but has no pending input here
+    assert targets[director_id]["pending_count"] == 0
 
-    broker.ack_task(watcher_id, first["task"]["task_id"])
+    broker.ack_task(member_id, first["task"]["task_id"])
     targets = {t["agent_id"]: t for t in broker.list_monitor_targets(sid)}
-    assert targets[watcher_id]["pending_count"] == 2
+    assert targets[member_id]["pending_count"] == 2
 
 
 def test_list_monitor_targets__pending_count_excludes_broadcast_summary(broker_session):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["agent_id"]
-    watcher_id = _register_monitoring_member(fleet, name="jack", pane_id="%11")[
-        "agent_id"
-    ]
+    member_id = _register_ordinary_member(fleet, name="jack", pane_id="%11")["agent_id"]
 
-    broker.send_message(sid, director_id, watcher_id, "real pending")
+    broker.send_message(sid, director_id, member_id, "real pending")
 
     now = _iso_now()
     with broker_session() as s:
         s.add(
             Task(
-                context_id=watcher_id,
+                context_id=member_id,
                 from_agent_id=director_id,
                 to_agent_id=0,
                 type="broadcast_summary",
@@ -354,17 +435,20 @@ def test_list_monitor_targets__pending_count_excludes_broadcast_summary(broker_s
         s.commit()
 
     targets = {t["agent_id"]: t for t in broker.list_monitor_targets(sid)}
-    assert targets[watcher_id]["pending_count"] == 1
+    assert targets[member_id]["pending_count"] == 1
 
 
-def test_list_monitor_targets__excludes_deregistered_monitoring_member():
+def test_list_monitor_targets__excludes_deregistered_member():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    watcher = _register_monitoring_member(fleet, name="kim")
-    broker.deregister_agent(watcher["agent_id"])
+    member = _register_ordinary_member(fleet, name="kim")
 
     target_ids = {t["agent_id"] for t in broker.list_monitor_targets(sid)}
-    assert watcher["agent_id"] not in target_ids
+    assert member["agent_id"] in target_ids
+
+    broker.deregister_agent(member["agent_id"])
+    target_ids = {t["agent_id"] for t in broker.list_monitor_targets(sid)}
+    assert member["agent_id"] not in target_ids
 
 
 # --- runtime claim / heartbeat / clear / read ------------------------------
@@ -557,7 +641,7 @@ def test_prune_migration__deletes_non_director_rows_downgrade_noop(tmp_path):
 
         # 0003 prunes the non-Director row (20) and keeps the root-Director row
         # (10). Pin to 0003 (not head) so this exercises 0003 in isolation —
-        # 0004 (the new head) deletes row 10, which the 0004 test covers.
+        # 0004 (which deletes row 10) is covered by the 0004 test.
         command.upgrade(cfg, "0003")
         assert _monitor_config_agent_ids(url) == {10}
 
@@ -633,9 +717,11 @@ def test_prune_director_migration__deletes_director_row_keeps_monitoring_member(
         _seed_director_and_monitoring_member(url)
         assert _monitor_config_agent_ids(url) == {10, 30}
 
-        # upgrading to head runs 0004: the root-Director row (10) is pruned, the
-        # monitoring member's row (30) is kept.
-        command.upgrade(cfg, "head")
+        # 0004 prunes the root-Director row (10) and keeps the monitoring
+        # member's row (30). Pin to 0004 (not head) so this exercises 0004 in
+        # isolation — 0005 (the new head) prunes the monitoring member and
+        # backfills the Director, which the 0005 test covers.
+        command.upgrade(cfg, "0004")
         assert _monitor_config_agent_ids(url) == {30}
 
         # the downgrade is a no-op — it does NOT resurrect the Director row.

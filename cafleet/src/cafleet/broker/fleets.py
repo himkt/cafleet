@@ -78,6 +78,12 @@ def create_fleet(
         director_agent_id = director.agent_id
         session.add(AgentPlacement(agent_id=director_agent_id, **director_placement))
         session.flush()
+        # Enroll the root Director in the heartbeat @180, atomically with fleet
+        # creation. The Director is a watched agent — the loop wakes the
+        # monitoring member when the Director comes due on this interval.
+        monitor.enroll_agent(
+            session, director_agent_id, interval=monitor.DIRECTOR_PING_INTERVAL_SECONDS
+        )
         session.execute(
             update(Fleet)
             .where(Fleet.fleet_id == fleet_id)

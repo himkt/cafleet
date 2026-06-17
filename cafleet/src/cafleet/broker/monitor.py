@@ -28,10 +28,14 @@ from cafleet.db.models import (
     Task,
 )
 
-# Enrollment default and liveness window. The ``cafleet.monitor`` package
-# imports these so the value has a single home in the layer that computes
-# liveness; ``STALE_AFTER = max(FACTOR * tick_seconds, FLOOR_SECONDS)``.
-DEFAULT_PING_INTERVAL_SECONDS = 60
+# Role-based enrollment intervals and the liveness window. The ``cafleet.monitor``
+# package imports these so each value has a single home in the layer that computes
+# liveness; ``STALE_AFTER = max(FACTOR * tick_seconds, FLOOR_SECONDS)``. The root
+# Director is enrolled at ``DIRECTOR_PING_INTERVAL_SECONDS`` and every ordinary
+# member at ``MEMBER_PING_INTERVAL_SECONDS``; ``enroll_agent`` takes the interval
+# explicitly, so no single implicit default is shared across the two roles.
+DIRECTOR_PING_INTERVAL_SECONDS = 180
+MEMBER_PING_INTERVAL_SECONDS = 720
 MONITOR_STALE_FACTOR = 3
 MONITOR_STALE_FLOOR_SECONDS = 15
 
@@ -45,18 +49,52 @@ def _config_dict(row) -> dict:
     }
 
 
-def enroll_agent(
-    session, agent_id: int, interval: int = DEFAULT_PING_INTERVAL_SECONDS
-) -> None:
-    """Insert a ``monitor_config`` row for an enrolled agent.
+def enroll_agent(session, agent_id: int, interval: int) -> None:
+    """Insert a ``monitor_config`` row for a watched agent at ``interval``.
 
     Called inside the same write transaction as the agent/placement insert, so
-    enrollment is atomic with registration. Enrollment is restricted to exactly
-    one role per fleet: the dedicated monitoring member (enrolled by
-    ``register_agent`` when ``kind == MONITORING_MEMBER_KIND``). The root Director
-    is no longer enrolled, and ordinary members are not enrolled.
+    enrollment is atomic with registration. Enrollment covers the watched set:
+    the root Director (``create_fleet``, ``DIRECTOR_PING_INTERVAL_SECONDS``) and
+    every pane-bound ordinary member (``register_agent``,
+    ``MEMBER_PING_INTERVAL_SECONDS``). The dedicated monitoring member is the
+    unenrolled watcher (located by kind) and is not enrolled here; ``interval``
+    is required so each role's cadence is passed explicitly.
     """
     session.add(MonitorConfig(agent_id=agent_id, interval_seconds=interval, enabled=1))
+
+
+def find_monitoring_member(fleet_id: int) -> dict | None:
+    """Return the fleet's active monitoring member as ``{agent_id, name, pane_id}``.
+
+    The monitoring member is the unenrolled *watcher*, identified by
+    ``agent_card_json.cafleet.kind == MONITORING_MEMBER_KIND`` and inner-joined to
+    ``agent_placements`` for its pane. There is at most one active per fleet (the
+    ``register_agent`` guard), so the loop locates it by kind rather than by a
+    ``monitor_config`` row. The pane must be bound (non-NULL ``tmux_pane_id``): a
+    monitoring member whose placement is still pending has no wakeable pane, so it
+    is treated as absent. Returns ``None`` when the fleet has no active,
+    pane-bound monitoring member.
+    """
+    stmt = (
+        select(Agent.agent_id, Agent.name, AgentPlacement.tmux_pane_id)
+        .join(AgentPlacement, AgentPlacement.agent_id == Agent.agent_id)
+        .where(
+            Agent.fleet_id == fleet_id,
+            Agent.status == "active",
+            AgentPlacement.tmux_pane_id.is_not(None),
+            func.json_extract(Agent.agent_card_json, "$.cafleet.kind")
+            == _shared.MONITORING_MEMBER_KIND,
+        )
+    )
+    with _shared.read_session() as session:
+        row = session.execute(stmt).first()
+    if row is None:
+        return None
+    return {
+        "agent_id": row.agent_id,
+        "name": row.name,
+        "pane_id": row.tmux_pane_id,
+    }
 
 
 def get_monitor_config(fleet_id: int, agent_id: int) -> dict | None:
@@ -166,19 +204,17 @@ def record_ping(agent_id: int, when: str) -> None:
 
 
 def list_monitor_targets(fleet_id: int) -> list[dict]:
-    """Per-tick scan: one row per active, enrolled agent in the fleet.
+    """Per-tick scan: one row per active, enrolled agent — the watched set.
 
-    Enrollment is restricted to exactly one role — the dedicated monitoring
-    member — so in normal operation this returns just that one row (a Director
-    row is not expected). Each dict carries ``agent_id``, ``name``,
-    ``is_director`` (derived from ``fleets.director_agent_id``, retained only for
-    the loop's defensive skip and ``monitor status`` labeling),
-    ``is_monitoring_member`` (derived from ``agent_card_json.cafleet.kind``, the
-    row the loop wakes and the one ``monitor status`` labels), ``pane_id``,
-    ``interval_seconds``, ``last_ping_at``, ``enabled`` (bool), and
-    ``pending_count`` — the count of the agent's ``input_required`` deliveries
-    excluding ``broadcast_summary`` rows, a correlated subquery mirroring
-    ``members.py``.
+    Enrollment covers the root Director (180 s) and every ordinary member
+    (720 s), so this returns those rows; the dedicated monitoring member is the
+    unenrolled watcher and never appears here (it is located separately by
+    ``find_monitoring_member``). Each dict carries ``agent_id``, ``name``,
+    ``is_director`` (derived from ``fleets.director_agent_id``, used for the
+    ``monitor status`` role label), ``pane_id``, ``interval_seconds``,
+    ``last_ping_at``, ``enabled`` (bool), and ``pending_count`` — the count of
+    the agent's ``input_required`` deliveries excluding ``broadcast_summary``
+    rows, a correlated subquery mirroring ``members.py``.
     """
     pending_sq = (
         select(func.count(Task.task_id))
@@ -190,9 +226,6 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
         .correlate(Agent)
         .scalar_subquery()
     )
-    kind_expr = func.coalesce(
-        func.json_extract(Agent.agent_card_json, "$.cafleet.kind"), ""
-    )
     stmt = (
         select(
             Agent.agent_id,
@@ -202,7 +235,6 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
             MonitorConfig.interval_seconds,
             MonitorConfig.last_ping_at,
             MonitorConfig.enabled,
-            kind_expr.label("kind_raw"),
             pending_sq.label("pending_count"),
         )
         .join(MonitorConfig, MonitorConfig.agent_id == Agent.agent_id)
@@ -217,7 +249,6 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
             "agent_id": row.agent_id,
             "name": row.name,
             "is_director": row.agent_id == row.director_agent_id,
-            "is_monitoring_member": row.kind_raw == _shared.MONITORING_MEMBER_KIND,
             "pane_id": row.tmux_pane_id,
             "interval_seconds": row.interval_seconds,
             "last_ping_at": row.last_ping_at,

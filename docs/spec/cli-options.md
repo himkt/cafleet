@@ -544,7 +544,7 @@ The `cafleet member` subgroup manages tmux-backed member agents and must be run 
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`; exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH` — see [Opencode members](../reference/coding-agents/opencode.md) for the preset note. |
 | `--model` | no | Model forwarded to the backend binary's `--model` flag; omitted by default — see [Model selection](../concepts/coding-agents.md#model-selection). |
-| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** — it sets `agent_card_json.cafleet.kind == "monitoring-member"` and enrolls the agent in `monitor_config` (ordinary `member` does neither). `--role` controls only the kind marker and enrollment; the LLM is still chosen by `--model` (the Director passes `--model sonnet`). A second `--role monitor` spawn in the same fleet is rejected — see [Error Messages](#error-messages). See [Monitoring](../concepts/monitoring.md#the-monitoring-member). |
+| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** — it sets `agent_card_json.cafleet.kind == "monitoring-member"` but does **not** enroll the agent in `monitor_config` (the monitoring member is the unenrolled watcher, located by that kind marker). An ordinary `member` with a pane **is** enrolled (720 s). `--role` controls the kind marker and whether enrollment is skipped; the LLM is still chosen by `--model` (the Director passes `--model sonnet`). A second `--role monitor` spawn in the same fleet is rejected — see [Error Messages](#error-messages). See [Monitoring](../concepts/monitoring.md#the-monitoring-member). |
 | `--prompt-file` | no | Absolute path to a UTF-8 file used as the spawn prompt; mutually exclusive with the positional prompt. |
 | *(positional, after `--`)* | no | Prompt text for the spawned coding-agent process. All three backends receive the same prompt; the prompt template is backend-neutral. Mutually exclusive with `--prompt-file`. |
 
@@ -918,7 +918,7 @@ A target with no placement pane prints the `no pane; task queued` variant. A tar
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 
-The `cafleet monitor` subgroup is the per-fleet scheduler that wakes only the monitoring member on a fixed cadence — the heartbeat behind a Director's supervision loop. All three subcommands require the per-subcommand `--fleet-id`. `start` runs the loop in-process (the fleet's dedicated **monitoring member** launches it as a **background task** in its own pane and owns its lifetime); `status` and `config` view and edit the schedule. The conceptual model (heartbeat-vs-facilitation boundary, the monitoring-member wake nudge — which does not lead with `Esc` — the `Esc` safeguard's placement on the message-delivery and `member ping` keystroke paths, the tick-precision floor, single-instance via the DB heartbeat) is canonical on the [Monitoring](../concepts/monitoring.md) concepts page; this page documents the CLI surface.
+The `cafleet monitor` subgroup is the per-fleet scheduler that wakes the monitoring member whenever a **watched agent** (the root Director or an ordinary member) is due by its own interval — the heartbeat behind a Director's supervision loop. All three subcommands require the per-subcommand `--fleet-id`. `start` runs the loop in-process (the fleet's dedicated **monitoring member** launches it as a **background task** in its own pane and owns its lifetime); `status` and `config` view and edit the schedule. The conceptual model (heartbeat-vs-facilitation boundary, the watched-set-vs-watcher split, the monitoring-member wake nudge — which does not lead with `Esc` — the `Esc` safeguard's placement on the message-delivery and `member ping` keystroke paths, the tick-precision floor, single-instance via the DB heartbeat) is canonical on the [Monitoring](../concepts/monitoring.md) concepts page; this page documents the CLI surface.
 
 There is no `monitor stop` command and no detached process: stop the loop by stopping the monitoring member's background task (or deleting the monitoring member), and the loop also self-terminates when the fleet is torn down. Launching/stopping the loop is **CLI-only** by nature; the schedule-view and schedule-edit surfaces are at WebUI/CLI parity ([WebUI API](./webui-api.md)).
 
@@ -928,28 +928,29 @@ There is no `monitor stop` command and no detached process: stop the loop by sto
 |---|---|---|
 | `--tick` | no | Scan-tick cadence in seconds (`click.IntRange(min=1)`, default **5**). Stored in `monitor_runtime.tick_seconds` so `status` can report it. The tick is the floor on per-agent interval precision — see [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision). |
 
-Runs the `scan → ping due agents → heartbeat → sleep` loop **in-process** via `run_monitor_loop` — the fleet's monitoring member launches it as a background task in its own pane (the loop blocks the task). On startup it runs the tmux precondition guard (the same `TMUX`-env check the `member` commands use), then atomically claims the single-instance `monitor_runtime` row, installs `SIGTERM`/`SIGINT` handlers (a clean stop clears the row), and loops until signalled or the fleet is torn down (`monitor_tick` returns `STOP` once the fleet is soft-deleted). There is no detached subprocess, no PID file, and no log file — the loop writes to the launching task's own stdout.
+Runs the `scan → wake monitor when any watched agent is due → heartbeat → sleep` loop **in-process** via `run_monitor_loop` — the fleet's monitoring member launches it as a background task in its own pane (the loop blocks the task). On startup it runs the tmux precondition guard (the same `TMUX`-env check the `member` commands use), then atomically claims the single-instance `monitor_runtime` row, installs `SIGTERM`/`SIGINT` handlers (a clean stop clears the row), and loops until signalled or the fleet is torn down (`monitor_tick` returns `STOP` once the fleet is soft-deleted). There is no detached subprocess, no PID file, and no log file — the loop writes to the launching task's own stdout.
 
-The single enrolled agent — the monitoring member — is pinged unconditionally once its interval has elapsed (the ping is **not** gated on the agent having pending inbox items; `pending_count` is informational, shown in `status`). The ping delivers a single-line *wake nudge* instructing the monitoring member to run its capture-classify-reengage routine. The wake nudge does **not** lead with `Esc` — it targets only the monitoring member's own pane, which runs a read-only routine under `dontAsk` and is never parked on a permission prompt, so the `Esc` would only self-interrupt an in-progress routine (the `Esc` safeguard instead lives on the message-delivery inline preview and `member ping`, whose targets may be on a prompt — see [Monitoring](../concepts/monitoring.md)). The root Director and ordinary members are **not** enrolled and receive nothing from the loop. Each dispatched ping is logged to stdout as `<iso-ts> ping agent <id> (<name>)`, so the launching background task's output shows live heartbeat activity.
+Each tick the loop scans the **watched set** — the root Director (180 s) and every ordinary member (720 s), each on its own interval — and, when ≥ 1 is due, wakes the monitoring member **once** with a single-line *wake nudge* instructing it to run its capture-classify-reengage routine. The loop also stamps `last_ping_at = now` on each due agent at the moment of wake-dispatch, advancing its cadence so a just-flagged agent is not due on the next tick (no wake-storm). The wake nudge does **not** lead with `Esc` — it targets only the monitoring member's own pane, which runs a read-only routine under `dontAsk` and is never parked on a permission prompt, so the `Esc` would only self-interrupt an in-progress routine (the `Esc` safeguard instead lives on the message-delivery inline preview and `member ping`, whose targets may be on a prompt — see [Monitoring](../concepts/monitoring.md)). The loop **never** keystrokes a watched pane. Each due agent is logged to stdout as `<iso-ts> due agent <id> (<name>) -> wake monitor`, so the launching background task's output shows live heartbeat activity.
 
-If the fleet has **no** enrolled monitoring member when `start` runs, the command prints a warning to stderr (`Warning: fleet <id> has no enrolled monitoring member; the monitor heartbeat will wake no agent. Spawn one first with 'cafleet member create --role monitor'.`) and then runs the loop anyway (warn-but-run). In the canonical flow the warning never fires — the monitoring member is enrolled at `member create`, before it launches `monitor start` in its own pane.
+If the fleet has **no** monitoring member when `start` runs (`broker.find_monitoring_member(fleet_id) is None`), the command prints a warning to stderr (`Warning: fleet <id> has no monitoring member; the monitor heartbeat will wake no agent. Spawn one first with 'cafleet member create --role monitor'.`) and then runs the loop anyway (warn-but-run). In the canonical flow the warning never fires — the monitoring member is spawned at `member create`, before it launches `monitor start` in its own pane.
 
 Exit codes: `0` clean exit (signalled, or the fleet was torn down); `1` already running (`monitor already running for fleet N`), unknown or soft-deleted fleet, or tmux unreachable; `2` click usage errors (e.g. `--tick 0`).
 
 ### `monitor status`
 
-No flags beyond the per-subcommand `--fleet-id`. Reports runtime liveness derived from the DB heartbeat (true even when the process died silently) plus the per-agent schedule table.
+No flags beyond the per-subcommand `--fleet-id`. Reports runtime liveness derived from the DB heartbeat (true even when the process died silently) plus the watched-agent schedule table.
 
 Text output:
 
 ```
 monitor: running (pid 4821, last tick 2s ago, tick 5s, started 2026-06-13T04:50:00+00:00)
-  agent_id  name         role      interval  last_ping             enabled  pending
-  --------  -----------  --------  --------  -------------------  -------  -------
-  7         monitor      monitor   60s       2026-06-13T04:50:30   yes      0
+  agent_id  name         role      interval  last_ping  enabled  pending
+  --------  -----------  --------  --------  ---------  -------  -------
+  2         Director      director  180s      8s ago     yes      1
+  5         alice         member    720s      —          yes      0
 ```
 
-Only the enrolled monitoring member appears (`role: monitor`, derived from its `cafleet.kind`). The root Director and ordinary members are not enrolled, so they never show in this table. The `director` role label is still derived defensively, so a stray/legacy enrolled Director row would render as `role: director` — but none is expected in normal operation. When no monitor is running the first line reads `monitor: stopped`; the schedule table still renders. JSON output:
+The **watched** agents appear — the root Director (`role: director`, derived from `fleets.director_agent_id`) and every ordinary member (`role: member`). The monitoring member is **not** enrolled, so it never shows in this table (it is the watcher, located by kind). `last_ping` renders as a human age (`8s ago`, or `—` when never pinged) so the monitoring member's LLM can spot the agents the loop just flagged (smallest age = freshly due). When no monitor is running the first line reads `monitor: stopped`; the schedule table still renders. JSON output keeps `last_ping_at` (ISO or null) and adds a derived `last_ping_age_seconds` (int or null) per agent:
 
 ```json
 {
@@ -957,8 +958,11 @@ Only the enrolled monitoring member appears (`role: monitor`, derived from its `
               "last_tick_at": "2026-06-13T04:51:02+00:00", "last_tick_age_seconds": 2,
               "started_at": "2026-06-13T04:50:00+00:00"},
   "agents": [
-    {"agent_id": 7, "name": "monitor", "role": "monitor", "interval_seconds": 60,
-     "last_ping_at": "2026-06-13T04:50:30+00:00", "enabled": true, "pending_count": 0}
+    {"agent_id": 2, "name": "Director", "role": "director", "interval_seconds": 180,
+     "last_ping_at": "2026-06-13T04:50:54+00:00", "last_ping_age_seconds": 8,
+     "enabled": true, "pending_count": 1},
+    {"agent_id": 5, "name": "alice", "role": "member", "interval_seconds": 720,
+     "last_ping_at": null, "last_ping_age_seconds": null, "enabled": true, "pending_count": 0}
   ]
 }
 ```
@@ -973,15 +977,15 @@ Exit `0` (`2` for click usage errors). On an unknown or soft-deleted fleet, exit
 | `--interval` | no | New ping interval in seconds (`click.IntRange(min=1)` — the same `>= 1` lower bound the WebUI `PATCH` enforces). |
 | `--enable` / `--disable` | no | Enable or disable monitoring for the agent. Mutually exclusive. |
 
-With no edit flag, prints the agent's current config. With `--interval` / `--enable` / `--disable`, applies the update and prints the new config. Exits 1 if the agent is not in the fleet or not enrolled (the Administrator and card-only agents are never enrolled). `--enable` and `--disable` together exit 2.
+With no edit flag, prints the agent's current config. With `--interval` / `--enable` / `--disable`, applies the update and prints the new config. The command is generic — it edits any enrolled agent, the root Director or an ordinary member. Exits 1 if the agent is not in the fleet or not enrolled (the monitoring member, the Administrator, and card-only agents are never enrolled, so `--agent-id <monitoring-member-id>` reports not-enrolled). `--enable` and `--disable` together exit 2.
 
 Text output:
 
 ```
-agent 4: interval 60s, enabled, last_ping 2026-06-13T04:51:00
+agent 5: interval 720s, enabled, last_ping 2026-06-13T04:51:00
 ```
 
-JSON output: `{"agent_id": 4, "interval_seconds": 60, "last_ping_at": "<iso8601>|null", "enabled": true}`.
+JSON output: `{"agent_id": 5, "interval_seconds": 720, "last_ping_at": "<iso8601>|null", "enabled": true}`.
 
 ## Error Messages
 

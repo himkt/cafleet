@@ -423,7 +423,7 @@ On each idle-nudge-driven turn (and in any active turn while Step 7 is in progre
 
 The APPROVED check MUST be qualified by the post-push filter (`submittedAt > last_push_ts`). An older approval — say, from a Copilot pass before the most recent fix-push — must NOT be treated as approval of the current HEAD; otherwise a single early approve followed by additional commits would silently finalize the PR.
 
-**No auto-exit on silence**: the loop never auto-exits on silence — a silent Copilot is not proof it is done (it may be slow, not re-triggered, or back-pressured). It escalates to the **user** via 7e once `silence_ticks >= 30` (~30 min); outside that user gate it exits only on a post-push `state == "APPROVED"` or on "Stop means stop".
+**No auto-exit on silence**: the loop never auto-exits on silence — a silent Copilot is not proof it is done (it may be slow, not re-triggered, or back-pressured). It escalates to the **user** via 7e once `silence_ticks >= 30` (~90 min, since each idle-nudge-driven turn now arrives on the Director's 180 s due-ness); outside that user gate it exits only on a post-push `state == "APPROVED"` or on "Stop means stop".
 
 **Read `reviews`, not `reviewDecision`**: `reviewDecision` only reflects required reviewers (CODEOWNERS); Copilot usually is not one, so its approve leaves `reviewDecision` null — the Copilot-specific entry in the `reviews` array is the reliable signal.
 
@@ -455,7 +455,7 @@ For review-level comments (body text not attached to a specific line), route by 
 
 #### 7e. Silence escalation
 
-When `silence_ticks >= 30` (≈ 30 minutes since the last Copilot activity AND no new items this turn), escalate to the user via `AskUserQuestion`:
+When `silence_ticks >= 30` (≈ 90 minutes since the last Copilot activity AND no new items this turn — each idle-nudge-driven turn now arrives on the Director's 180 s due-ness), escalate to the user via `AskUserQuestion`:
 
 | Option | Behavior |
 |:--|:--|
@@ -464,7 +464,7 @@ When `silence_ticks >= 30` (≈ 30 minutes since the last Copilot activity AND n
 | 3. Finalize now | Exit loop → Step 8 (accept the current state of Copilot review as-is) |
 | 4. *(Other)* | Intent judgment; abort-intent → Abort Flow |
 
-The 30-turn threshold is conservative: Copilot's first review after a `--add-reviewer` typically lands within 3–5 minutes. 30 minutes is enough that Copilot is highly unlikely to still be composing, while leaving the *decision* to the user instead of the loop. The user retains the option to keep waiting indefinitely — the loop never finalizes on its own based on silence.
+The 30-turn threshold is conservative: Copilot's first review after a `--add-reviewer` typically lands within 3–5 minutes. 90 minutes is enough that Copilot is highly unlikely to still be composing, while leaving the *decision* to the user instead of the loop. The user retains the option to keep waiting indefinitely — the loop never finalizes on its own based on silence.
 
 #### Error Handling (Steps 6–7)
 
