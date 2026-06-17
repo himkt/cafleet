@@ -28,10 +28,14 @@ from cafleet.db.models import (
     Task,
 )
 
-# Enrollment default and liveness window. The ``cafleet.monitor`` package
-# imports these so the value has a single home in the layer that computes
-# liveness; ``STALE_AFTER = max(FACTOR * tick_seconds, FLOOR_SECONDS)``.
-DEFAULT_PING_INTERVAL_SECONDS = 60
+# Role-based enrollment intervals and the liveness window. The ``cafleet.monitor``
+# package imports these so each value has a single home in the layer that computes
+# liveness; ``STALE_AFTER = max(FACTOR * tick_seconds, FLOOR_SECONDS)``. The root
+# Director is enrolled at ``DIRECTOR_PING_INTERVAL_SECONDS`` and every ordinary
+# member at ``MEMBER_PING_INTERVAL_SECONDS``; ``enroll_agent`` takes the interval
+# explicitly, so no single implicit default is shared across the two roles.
+DIRECTOR_PING_INTERVAL_SECONDS = 180
+MEMBER_PING_INTERVAL_SECONDS = 720
 MONITOR_STALE_FACTOR = 3
 MONITOR_STALE_FLOOR_SECONDS = 15
 
@@ -45,9 +49,7 @@ def _config_dict(row) -> dict:
     }
 
 
-def enroll_agent(
-    session, agent_id: int, interval: int = DEFAULT_PING_INTERVAL_SECONDS
-) -> None:
+def enroll_agent(session, agent_id: int, interval: int) -> None:
     """Insert a ``monitor_config`` row for an enrolled agent.
 
     Called inside the same write transaction as the agent/placement insert, so

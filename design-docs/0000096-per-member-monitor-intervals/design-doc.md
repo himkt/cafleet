@@ -1,7 +1,7 @@
 # Per-member monitor intervals
 
 **Status**: Approved
-**Progress**: 13/36 tasks complete
+**Progress**: 18/36 tasks complete
 **Last Updated**: 2026-06-17
 
 ## Overview
@@ -258,11 +258,11 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 
 ### Step 2: Schema, constants & migration
 
-- [ ] `cafleet/broker/monitor.py`: replace `DEFAULT_PING_INTERVAL_SECONDS = 60` with `DIRECTOR_PING_INTERVAL_SECONDS = 180` and `MEMBER_PING_INTERVAL_SECONDS = 720`; make `enroll_agent`'s `interval` a **required** argument (drop its default). Update `cafleet/monitor/__init__.py`'s `from cafleet.broker.monitor import (...)` block, `__all__`, and module docstring to re-export both new names (the model `server_default` stays `"60"` and is not touched — §2). <!-- completed: -->
-- [ ] Add `cafleet/db/alembic/versions/0005_per_member_monitor_intervals.py` (`down_revision="0004"`) per §9: delete monitoring-member rows; backfill active Directors @180 + ordinary members @720; downgrade no-op. <!-- completed: -->
-- [ ] Update `cafleet/tests/db/test_alembic_smoke.py`: rename `test_alembic_version_table_records_head_0004` → `test_alembic_version_table_records_head_0005` (assert `[("0005",)]`); rename `test_four_migration_revisions_exist` → `test_five_migration_revisions_exist` (assert `len == 5`, the `{0001..0005}` set, `by_revision["0005"].down_revision == "0004"`, `script.get_current_head() == "0005"`, and update its docstring). `test_monitor_config_table_created_by_migration`'s `interval_seconds == 60` assert reads the migrated schema (frozen `0002` default) and stays correct. <!-- completed: -->
-- [ ] Add a `0005` data-migration test: after `upgrade head`, a pre-existing monitoring-member `monitor_config` row is gone, a pre-existing active Director row is present @180, a pre-existing active ordinary member is present @720, and the Administrator stays unenrolled. <!-- completed: -->
-- [ ] Update `cafleet/tests/monitor/test_constants.py`: retarget `test_monitor_package_exposes_all_constants` to assert `DIRECTOR_PING_INTERVAL_SECONDS == 180` and `MEMBER_PING_INTERVAL_SECONDS == 720`, keep the `DEFAULT_TICK_SECONDS` / `MONITOR_STALE_FACTOR` / `MONITOR_STALE_FLOOR_SECONDS` asserts, drop the `DEFAULT_PING_INTERVAL_SECONDS` assert, and fix the module docstring tunable count. <!-- completed: -->
+- [x] `cafleet/broker/monitor.py`: replace `DEFAULT_PING_INTERVAL_SECONDS = 60` with `DIRECTOR_PING_INTERVAL_SECONDS = 180` and `MEMBER_PING_INTERVAL_SECONDS = 720`; make `enroll_agent`'s `interval` a **required** argument (drop its default). Update `cafleet/monitor/__init__.py`'s `from cafleet.broker.monitor import (...)` block, `__all__`, and module docstring to re-export both new names (the model `server_default` stays `"60"` and is not touched — §2). <!-- completed: 2026-06-17T08:43 -->
+- [x] Add `cafleet/db/alembic/versions/0005_per_member_monitor_intervals.py` (`down_revision="0004"`) per §9: delete monitoring-member rows; backfill active Directors @180 + ordinary members @720; downgrade no-op. <!-- completed: 2026-06-17T08:43 -->
+- [x] Update `cafleet/tests/db/test_alembic_smoke.py`: rename `test_alembic_version_table_records_head_0004` → `test_alembic_version_table_records_head_0005` (assert `[("0005",)]`); rename `test_four_migration_revisions_exist` → `test_five_migration_revisions_exist` (assert `len == 5`, the `{0001..0005}` set, `by_revision["0005"].down_revision == "0004"`, `script.get_current_head() == "0005"`, and update its docstring). `test_monitor_config_table_created_by_migration`'s `interval_seconds == 60` assert reads the migrated schema (frozen `0002` default) and stays correct. <!-- completed: 2026-06-17T08:43 -->
+- [x] Add a `0005` data-migration test: after `upgrade head`, a pre-existing monitoring-member `monitor_config` row is gone, a pre-existing active Director row is present @180, a pre-existing active ordinary member is present @720, and the Administrator stays unenrolled. <!-- completed: 2026-06-17T08:43 -->
+- [x] Update `cafleet/tests/monitor/test_constants.py`: retarget `test_monitor_package_exposes_all_constants` to assert `DIRECTOR_PING_INTERVAL_SECONDS == 180` and `MEMBER_PING_INTERVAL_SECONDS == 720`, keep the `DEFAULT_TICK_SECONDS` / `MONITOR_STALE_FACTOR` / `MONITOR_STALE_FLOOR_SECONDS` asserts, drop the `DEFAULT_PING_INTERVAL_SECONDS` assert, and fix the module docstring tunable count. <!-- completed: 2026-06-17T08:43 -->
 
 ### Step 3: Broker — enrollment, cleanup & watcher lookup
 
