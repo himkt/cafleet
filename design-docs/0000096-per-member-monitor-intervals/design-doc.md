@@ -10,13 +10,13 @@ Invert where the monitoring interval lives. Today the dedicated monitoring membe
 
 ## Success Criteria
 
-- [ ] The root Director is enrolled in `monitor_config` at `create_fleet` with a **180 s** interval; every ordinary member is enrolled at `register_agent` with a **720 s** interval; the Administrator and card-only agents stay unenrolled.
-- [ ] The dedicated monitoring member is **no longer enrolled** in `monitor_config` and carries no interval anywhere (DB, CLI, WebUI) — full removal, zero deprecation residue per `~/.claude/rules/removal.md`.
-- [ ] `cafleet monitor start` (run by the monitoring member) wakes the monitoring member when ≥ 1 watched agent is due by its own interval, and never blind-keystrokes a Director or member pane.
-- [ ] On each wake the monitoring member re-queries `cafleet monitor status`, inspects each freshly-due agent with read-only `cafleet member capture`, and re-engages the Director via `cafleet member nudge`; it never drives ordinary members directly.
-- [ ] The admin agent-detail page (`/fleets/:id/agents/:id`) shows an editable interval for every enrolled member (Director + ordinary members) and shows no interval control for the monitoring member.
-- [ ] Alembic `0005` deletes the monitoring member's `monitor_config` rows and backfills existing active root Directors (180 s) + ordinary members (720 s); downgrade is a no-op.
-- [ ] `mise //cafleet:lint`, `:format`, `:typecheck`, `:test`, and `mise //admin:build` all pass; docs, `README.md`, and every affected `SKILL.md` read as if the monitoring member never had an interval.
+- [x] The root Director is enrolled in `monitor_config` at `create_fleet` with a **180 s** interval; every ordinary member is enrolled at `register_agent` with a **720 s** interval; the Administrator and card-only agents stay unenrolled.
+- [x] The dedicated monitoring member is **no longer enrolled** in `monitor_config` and carries no interval anywhere (DB, CLI, WebUI) — full removal, zero deprecation residue per `~/.claude/rules/removal.md`.
+- [x] `cafleet monitor start` (run by the monitoring member) wakes the monitoring member when ≥ 1 watched agent is due by its own interval, and never blind-keystrokes a Director or member pane.
+- [x] On each wake the monitoring member re-queries `cafleet monitor status`, inspects each freshly-due agent with read-only `cafleet member capture`, and re-engages the Director via `cafleet member nudge`; it never drives ordinary members directly.
+- [x] The admin agent-detail page (`/fleets/:id/agents/:id`) shows an editable interval for every enrolled member (Director + ordinary members) and shows no interval control for the monitoring member.
+- [x] Alembic `0005` deletes the monitoring member's `monitor_config` rows and backfills existing active root Directors (180 s) + ordinary members (720 s); downgrade is a no-op.
+- [x] `mise //cafleet:lint`, `:format`, `:typecheck`, `:test`, and `mise //admin:build` all pass; docs, `README.md`, and every affected `SKILL.md` read as if the monitoring member never had an interval.
 
 ---
 
