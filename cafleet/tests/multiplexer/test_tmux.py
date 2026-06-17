@@ -759,8 +759,8 @@ def test_send_wake_trigger__return_branches_and_argv(
     monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     result = _tmux.send_wake_trigger(
         target_pane_id="%7",
-        fleet_id=59,
-        agent_id=247,
+        due_agents=[{"agent_id": 332, "name": "Director", "is_director": True}],
+        director_agent_id=332,
     )
     assert result is expected_result
     if scenario == "success_returns_true":
@@ -773,8 +773,12 @@ def test_send_wake_trigger__return_branches_and_argv(
 
 
 def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
-    """The wake nudge is a single-line monitoring instruction, NOT the poll
-    command keystroke (spec §2 — distinct payload for the monitoring member)."""
+    """The wake nudge is a single-line monitoring instruction that NAMES the
+    freshly-due agents and the Director id (spec §2) — distinct from the
+    ``cafleet ... message poll`` command the Director receives. A crafted name
+    carrying CR/LF/tab is sanitized so the single-line guarantee holds, and the
+    payload carries no backtick / ``$(`` command-substitution sequence (the
+    narrowed shell-safety guarantee, §2)."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
     monkeypatch.setattr("time.sleep", lambda _secs: None)
     captured: list[list[str]] = []
@@ -784,7 +788,16 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
         lambda args, **_kw: captured.append(list(args)) or "",
     )
 
-    result = _tmux.send_wake_trigger(target_pane_id="%7", fleet_id=59, agent_id=247)
+    # Worked example A (§2): the Director (332) and a member (336) are both due;
+    # the member's name carries a CR/LF and a tab to exercise the sanitizer.
+    result = _tmux.send_wake_trigger(
+        target_pane_id="%7",
+        due_agents=[
+            {"agent_id": 332, "name": "Director", "is_director": True},
+            {"agent_id": 336, "name": "evil\r\nname\there", "is_director": False},
+        ],
+        director_agent_id=332,
+    )
     assert result is True
 
     # After 0000092 §2 the wake keystroke leads with the literal payload — no
@@ -793,15 +806,68 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     literal_call = captured[0]
     assert literal_call[:5] == ["tmux", "send-keys", "-t", "%7", "-l"]
     payload = literal_call[5]
-    # Single line by design — the wake nudge is a one-line instruction with no
-    # embedded newline (per design 0000092 §3 an embedded ``\n`` under ``-l``
-    # soft-inserts, so single-line is a shape choice, not a submit-safety guard).
+
+    # Single line — no raw CR/LF survives, including the crafted name's controls
+    # (per 0000092 §3 an embedded ``\n`` under ``-l`` soft-inserts, so single-line
+    # is a shape choice; here the sanitizer also strips the crafted control chars).
     assert "\n" not in payload
     assert "\r" not in payload
-    # A monitoring-member wake nudge (``[monitor]`` provenance tag), not the
-    # ``cafleet ... message poll`` command the Director receives.
-    assert payload.startswith("[monitor]")
+    # The tab is sanitized too (§2 extends the CR/LF cosmetic strip with the tab).
+    assert "\t" not in payload
+
+    # Provenance tag + count/noun prefix (§2 template: "{N} {agent|agents} due"),
+    # NOT the ``cafleet ... message poll`` command the Director receives.
+    assert payload.startswith("[monitor] wake: 2 agents due")
     assert not payload.startswith("cafleet")
+
+    # Each freshly-due agent is named ``<role> <id> (<name>)`` (§2): the Director
+    # (is_director=True) renders with role ``director``, the member with ``member``.
+    assert "director 332 (Director)" in payload
+    assert "member 336 (evil" in payload
+    # The crafted control chars collapsed to U+23CE rather than vanishing.
+    assert "⏎" in payload
+
+    # The Director id is named as the standing inspect-and-re-engage target via
+    # the "the Director pane ({director_id})" clause — distinct from the due-list
+    # rendering (where the id is not parenthesized).
+    assert "(332)" in payload
+
+    # Narrowed shell-safety guarantee (§2): no backtick, no ``$(`` command sub.
+    assert "`" not in payload
+    assert "$(" not in payload
+
+
+def test_send_wake_trigger__singular_noun_and_director_named_when_not_due(monkeypatch):
+    """Worked example B (§2): a single due member yields the singular noun
+    ("1 agent due"), and the Director id is still named as the standing
+    inspect-and-re-engage target even though the Director is not itself due —
+    the property this design restores (the Director is always inspected)."""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+    captured: list[list[str]] = []
+    monkeypatch.setattr(
+        multiplexer_tmux,
+        "_run",
+        lambda args, **_kw: captured.append(list(args)) or "",
+    )
+
+    result = _tmux.send_wake_trigger(
+        target_pane_id="%7",
+        due_agents=[{"agent_id": 336, "name": "alice", "is_director": False}],
+        director_agent_id=332,
+    )
+    assert result is True
+
+    payload = captured[0][5]
+    # Singular noun for a single due agent (§2 template: "{N} {agent|agents} due").
+    assert payload.startswith("[monitor] wake: 1 agent due")
+    # The lone due member is named ``member <id> (<name>)``.
+    assert "member 336 (alice)" in payload
+    # The Director (332) is not in the due set, yet it is named via the standing
+    # clause; it is never rendered as a due agent (no ``member 332`` / ``director 332``).
+    assert "(332)" in payload
+    assert "member 332" not in payload
+    assert "director 332" not in payload
 
 
 @pytest.mark.parametrize(

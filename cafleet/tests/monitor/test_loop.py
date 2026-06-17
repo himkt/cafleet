@@ -63,7 +63,9 @@ def _stub_tmux(monkeypatch, live_panes, *, wake_ok=True):
     watcher's pane); ``polls`` is captured to assert the loop never keystrokes a
     watched (Director / member) pane (§4). ``wake_ok`` is the boolean
     ``send_wake_trigger`` returns — pass ``False`` to model a best-effort
-    keystroke that was attempted but failed to land."""
+    keystroke that was attempted but failed to land. Each ``wakes`` entry is
+    ``(target_pane_id, [conveyed due-agent ids], director_agent_id)`` — the due
+    set and the Director id the wake nudge names (§2/§4)."""
     monkeypatch.setattr(
         "cafleet.multiplexer.tmux.TmuxMultiplexer.list_pane_ids",
         lambda self: set(live_panes),
@@ -76,8 +78,10 @@ def _stub_tmux(monkeypatch, live_panes, *, wake_ok=True):
         polls.append((target_pane_id, fleet_id, agent_id))
         return True
 
-    def fake_wake(self, *, target_pane_id, fleet_id, agent_id):
-        wakes.append((target_pane_id, fleet_id, agent_id))
+    def fake_wake(self, *, target_pane_id, due_agents, director_agent_id):
+        wakes.append(
+            (target_pane_id, [t["agent_id"] for t in due_agents], director_agent_id)
+        )
         return wake_ok
 
     monkeypatch.setattr(
@@ -95,7 +99,7 @@ def test_monitor_tick__due_director_wakes_watcher(capsys, monkeypatch):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["agent_id"]
-    watcher = _register_monitoring_member(fleet, "watcher", "%7")
+    _register_monitoring_member(fleet, "watcher", "%7")
 
     # the Director is enrolled @180 with last_ping_at=None → due immediately
     broker.claim_monitor_runtime(
@@ -106,10 +110,11 @@ def test_monitor_tick__due_director_wakes_watcher(capsys, monkeypatch):
     result = monitor_tick(sid, _NOW)
 
     assert result is CONTINUE
-    # exactly one wake, into the WATCHER's pane — never the Director's pane
-    assert wakes == [("%7", sid, watcher)]
+    # exactly one wake into the WATCHER's pane ("%7"), conveying the due Director
+    # as the sole due agent plus the Director id; the loop never keystrokes a
+    # watched pane (asserted by ``polls == []``).
+    assert wakes == [("%7", [director_id], director_id)]
     assert polls == []
-    assert ("%0", sid, director_id) not in wakes
     # record_pings advanced the due Director's cadence
     assert (
         broker.get_monitor_config(sid, director_id)["last_ping_at"] == _NOW.isoformat()
@@ -126,7 +131,7 @@ def test_monitor_tick__due_member_wakes_watcher(capsys, monkeypatch):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["agent_id"]
-    watcher = _register_monitoring_member(fleet, "watcher", "%7")
+    _register_monitoring_member(fleet, "watcher", "%7")
     member = _register_member(fleet, "alice", "%9")
 
     # make the Director not-due so the member is the only due watched agent
@@ -139,9 +144,10 @@ def test_monitor_tick__due_member_wakes_watcher(capsys, monkeypatch):
     result = monitor_tick(sid, _NOW)
 
     assert result is CONTINUE
-    # one wake into the watcher's pane; no keystroke into the member's pane
-    assert wakes == [("%7", sid, watcher)]
-    assert ("%9", sid, member) not in wakes
+    # one wake into the watcher's pane conveying the due MEMBER (not the
+    # Director) plus the correct director_agent_id; no keystroke into a watched
+    # pane (``polls == []``).
+    assert wakes == [("%7", [member], director_id)]
     assert polls == []
     # only the due member's cadence advanced
     assert broker.get_monitor_config(sid, member)["last_ping_at"] == _NOW.isoformat()
@@ -155,7 +161,7 @@ def test_monitor_tick__multiple_due_agents_single_wake(capsys, monkeypatch):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["agent_id"]
-    watcher = _register_monitoring_member(fleet, "watcher", "%7")
+    _register_monitoring_member(fleet, "watcher", "%7")
     member = _register_member(fleet, "alice", "%9")
 
     # both the Director (@180) and the member (@720) are never-pinged → both due
@@ -167,8 +173,13 @@ def test_monitor_tick__multiple_due_agents_single_wake(capsys, monkeypatch):
     result = monitor_tick(sid, _NOW)
 
     assert result is CONTINUE
-    # exactly ONE wake into the watcher's pane, even though two agents are due
-    assert wakes == [("%7", sid, watcher)]
+    # exactly ONE wake into the watcher's pane, even though two agents are due —
+    # the single wake conveys BOTH due ids (order-independent) plus the Director.
+    assert len(wakes) == 1
+    pane_id, conveyed_ids, conveyed_director = wakes[0]
+    assert pane_id == "%7"
+    assert set(conveyed_ids) == {director_id, member}
+    assert conveyed_director == director_id
     assert polls == []
     # both due agents' cadences advanced in the single record_pings write
     assert (
@@ -248,7 +259,7 @@ def test_monitor_tick__failed_wake_does_not_advance_or_log(capsys, monkeypatch):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["agent_id"]
-    watcher = _register_monitoring_member(fleet, "watcher", "%7")
+    _register_monitoring_member(fleet, "watcher", "%7")
 
     # the Director is due (never pinged) and the watcher's pane is live, so a wake
     # is ATTEMPTED — but the best-effort keystroke fails (send_wake_trigger → False)
@@ -260,8 +271,9 @@ def test_monitor_tick__failed_wake_does_not_advance_or_log(capsys, monkeypatch):
     result = monitor_tick(sid, _NOW)
 
     assert result is CONTINUE
-    # the wake was attempted into the watcher's pane (the call returned False)
-    assert wakes == [("%7", sid, watcher)]
+    # the wake was attempted into the watcher's pane (the call returned False),
+    # conveying the due Director and the Director id
+    assert wakes == [("%7", [director_id], director_id)]
     assert polls == []
     # a failed wake leaves the due Director flagged: last_ping_at is NOT advanced,
     # so the next tick retries instead of skipping a check for a full interval
