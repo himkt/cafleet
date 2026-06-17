@@ -1,8 +1,8 @@
 # Monitoring-Member Scope & Execute-Loop Persistence
 
-**Status**: Approved
-**Progress**: 0/12 tasks complete
-**Last Updated**: 2026-06-16
+**Status**: Complete
+**Progress**: 12/12 tasks complete
+**Last Updated**: 2026-06-17
 
 ## Overview
 
@@ -10,11 +10,11 @@ Tighten three CAFleet skill behaviors using concise, affirmative wording only: (
 
 ## Success Criteria
 
-- [ ] The `cafleet-agent-team-monitoring` skill states the monitoring member's on-wake routine acts through exactly two commands — `cafleet member capture` (read-only inspection) and `cafleet member nudge` (re-engage the idle Director) — in both the spawn prompt and the wake-routine description, affirmatively.
-- [ ] The `cafleet-design-doc-execute` `SKILL.md` and `roles/director.md` state that once execute is invoked the fleet runs autonomously and collaboratively through every design-doc task to completion, while preserving the designed gates (Step 5 user approval, "stop means stop", new-decision escalations), affirmatively.
-- [ ] The `cafleet-design-doc-execute` Step 7 (`SKILL.md`) and `roles/director.md` state that authority to end the Copilot loop rests solely with the Administrator (the user), that the loop ends on exactly two conditions (user instructs termination, OR Copilot reports no remaining concerns), and that every other state keeps the loop turning — waiting while a review is pending and autonomously re-requesting a review that failed to land, affirmatively.
-- [ ] All new and edited text for the three improvements is concise and uses affirmative phrasing only (no newly introduced `NEVER` / `DO NOT` style wording).
-- [ ] The edits are internally consistent: no dangling references remain (e.g. the stale `7f` references in `director.md`), and the Step 7 branch logic, loop-state table, and `director.md` milestones row all agree.
+- [x] The `cafleet-agent-team-monitoring` skill states the monitoring member's on-wake routine acts through exactly two commands — `cafleet member capture` (read-only inspection) and `cafleet member nudge` (re-engage the idle Director) — in both the spawn prompt and the wake-routine description, affirmatively.
+- [x] The `cafleet-design-doc-execute` `SKILL.md` and `roles/director.md` state that once execute is invoked the fleet runs autonomously and collaboratively through every design-doc task to completion, while preserving the designed gates (Step 5 user approval, "stop means stop", new-decision escalations), affirmatively.
+- [x] The `cafleet-design-doc-execute` Step 7 (`SKILL.md`) and `roles/director.md` state that authority to end the Copilot loop rests solely with the Administrator (the user), that the loop ends on exactly two conditions (user instructs termination, OR Copilot reports no remaining concerns), and that every other state keeps the loop turning — waiting while a review is pending and autonomously re-requesting a review that failed to land, affirmatively.
+- [x] All new and edited text for the three improvements is concise and uses affirmative phrasing only (no newly introduced `NEVER` / `DO NOT` style wording).
+- [x] The edits are internally consistent: no dangling references remain (e.g. the stale `7f` references in `director.md`), and the Step 7 branch logic, loop-state table, and `director.md` milestones row all agree.
 
 ---
 
@@ -118,7 +118,7 @@ The no-concerns exit MUST be qualified by the post-push filter (`submittedAt > l
 ```markdown
 #### 7e. Silence handling — autonomous re-request
 
-When `silence_ticks >= 30` (≈ 30 min since the last Copilot activity AND no new items this turn), the Director re-requests the review on its own — no user prompt. Authority to end the loop stays with the Administrator (§ Termination authority); silence is a pending review, so the Director keeps it turning:
+When `silence_ticks >= 30` (≈ 90 min since the last Copilot activity AND no new items this turn), the Director re-requests the review on its own — no user prompt. Authority to end the loop stays with the Administrator (§ Termination authority); silence is a pending review, so the Director keeps it turning:
 
 1. **Detect pending vs. failed-to-land** via `gh api repos/<owner>/<repo>/pulls/<pr-number>/requested_reviewers`:
    - **Copilot present** → the request landed and the review is pending; reset `silence_ticks = 0` and keep waiting.
@@ -157,24 +157,24 @@ This is a documentation-only change (skill markdown). No tests apply; verificati
 
 ### Step 1: Monitoring-member scope (Improvement 1)
 
-- [ ] 1a. Add the spawn-prompt scope sentence after the `member-driving routes back through the Director.` paragraph in `skills/cafleet-agent-team-monitoring/SKILL.md` (Spec 1a). <!-- completed: -->
-- [ ] 1b. Add the two-command lead-in to the `On each wake (...)` routine header in the same file (Spec 1b). <!-- completed: -->
+- [x] 1a. Add the spawn-prompt scope sentence after the `member-driving routes back through the Director.` paragraph in `skills/cafleet-agent-team-monitoring/SKILL.md` (Spec 1a). <!-- completed: 2026-06-17T11:50 -->
+- [x] 1b. Add the two-command lead-in to the `On each wake (...)` routine header in the same file (Spec 1b). <!-- completed: 2026-06-17T11:50 -->
 
 ### Step 2: Execute runs to completion (Improvement 2)
 
-- [ ] 2a. Insert the `**Run to completion.**` paragraph after the `## Process` heading in `skills/cafleet-design-doc-execute/SKILL.md` (Spec 2a). <!-- completed: -->
-- [ ] 2b. Insert the `**Drive every task to completion.**` accountability bullet after the TDD-cycle bullet in `skills/cafleet-design-doc-execute/roles/director.md` (Spec 2b). <!-- completed: -->
+- [x] 2a. Insert the `**Run to completion.**` paragraph after the `## Process` heading in `skills/cafleet-design-doc-execute/SKILL.md` (Spec 2a). <!-- completed: 2026-06-17T11:53 -->
+- [x] 2b. Insert the `**Drive every task to completion.**` accountability bullet after the TDD-cycle bullet in `skills/cafleet-design-doc-execute/roles/director.md` (Spec 2b). <!-- completed: 2026-06-17T11:53 -->
 
 ### Step 3: Copilot review loop persists (Improvement 3)
 
-- [ ] 3a. Insert the `#### Termination authority` subsection at the start of Step 7 in `SKILL.md` (Spec 3a). <!-- completed: -->
-- [ ] 3b. Replace the Step 7b branch table (with the top-down first-match lead-in) in `SKILL.md` (Spec 3b). <!-- completed: -->
-- [ ] 3c. Replace the two post-table notes in Step 7b with the qualify-no-concerns note and the `**Silence keeps the loop turning.**` note in `SKILL.md` (Spec 3c). <!-- completed: -->
-- [ ] 3d. Update the `silence_ticks` reset rule in the PR Review Loop State table in `SKILL.md` (Spec 3d). <!-- completed: -->
-- [ ] 3e. Replace `#### 7e. Silence escalation` with `#### 7e. Silence handling — autonomous re-request` in `SKILL.md` (Spec 3e). <!-- completed: -->
-- [ ] 3f. Update the execute intro-paragraph termination clause in `SKILL.md` (Spec 3f). <!-- completed: -->
-- [ ] 3g. Replace the `**The loop never auto-exits ...**` sentence in the Director accountability bullet in `roles/director.md` (Spec 3g). <!-- completed: -->
-- [ ] 3h. Replace the `PR Review (Step 7)` milestones-row Director action cell in `roles/director.md` (Spec 3h). <!-- completed: -->
+- [x] 3a. Insert the `#### Termination authority` subsection at the start of Step 7 in `SKILL.md` (Spec 3a). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3b. Replace the Step 7b branch table (with the top-down first-match lead-in) in `SKILL.md` (Spec 3b). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3c. Replace the two post-table notes in Step 7b with the qualify-no-concerns note and the `**Silence keeps the loop turning.**` note in `SKILL.md` (Spec 3c). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3d. Update the `silence_ticks` reset rule in the PR Review Loop State table in `SKILL.md` (Spec 3d). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3e. Replace `#### 7e. Silence escalation` with `#### 7e. Silence handling — autonomous re-request` in `SKILL.md` (Spec 3e). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3f. Update the execute intro-paragraph termination clause in `SKILL.md` (Spec 3f). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3g. Replace the `**The loop never auto-exits ...**` sentence in the Director accountability bullet in `roles/director.md` (Spec 3g). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3h. Replace the `PR Review (Step 7)` milestones-row Director action cell in `roles/director.md` (Spec 3h). <!-- completed: 2026-06-17T11:56 -->
 
 ---
 
@@ -183,3 +183,4 @@ This is a documentation-only change (skill markdown). No tests apply; verificati
 | Date | Changes |
 |------|---------|
 | 2026-06-16 | Initial draft |
+| 2026-06-17 | Implemented all 12 tasks (skill-doc edits); addressed 3 rounds of Copilot review (monitoring two-command scope clarified, 7e re-request timing corrected to ~90 min and collapsed to a two-way request-state check, loop-state variable count and exit-reason label fixed); marked Complete |

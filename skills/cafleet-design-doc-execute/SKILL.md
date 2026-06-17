@@ -6,7 +6,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch
 
 # Design Doc Execute (CAFleet Edition)
 
-Implement features based on a design document using up to four roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), and Verifier (E2E/integration testing). Every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline. The Director judges which members to spawn based on the nature of the implementation tasks. For each step, the Tester writes unit tests first, the Director reviews and approves them, then the Programmer implements code to pass the tests. The Director also reviews the Programmer's implementation for code quality and design doc compliance before committing. After all TDD steps, the Verifier performs E2E/integration verification (Phase D) if spawned. After user approval, the Director runs the full publication flow: Step 6 pushes the feature branch and opens a PR with `@copilot` requested, Step 7 runs a Copilot review loop — driven by the monitoring member's idle-nudges on the `cafleet monitor` heartbeat — that routes inline comments to the still-live Programmer / Tester and exits when Copilot approves or the user resolves a silence escalation, and Step 8 finalizes, commits the completion marker, pushes it (when the branch is tracked on origin), and tears the team down.
+Implement features based on a design document using up to four roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), and Verifier (E2E/integration testing). Every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline. The Director judges which members to spawn based on the nature of the implementation tasks. For each step, the Tester writes unit tests first, the Director reviews and approves them, then the Programmer implements code to pass the tests. The Director also reviews the Programmer's implementation for code quality and design doc compliance before committing. After all TDD steps, the Verifier performs E2E/integration verification (Phase D) if spawned. After user approval, the Director runs the full publication flow: Step 6 pushes the feature branch and opens a PR with `@copilot` requested, Step 7 runs a Copilot review loop — driven by the monitoring member's idle-nudges on the `cafleet monitor` heartbeat — that routes inline comments to the still-live Programmer / Tester and ends only when the user instructs termination or Copilot reports no remaining concerns, and Step 8 finalizes, commits the completion marker, pushes it (when the branch is tracked on origin), and tears the team down.
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
@@ -48,6 +48,8 @@ User
 - `gh` must be authenticated for Steps 6 + 7. Lack of auth is NOT fatal — the Director checks `gh auth status` at Step 6a and falls back to Step 8 local-finalize, skipping the PR and Copilot review loop entirely. All other prerequisites (tmux, approved design doc, feature branch) remain unchanged.
 
 ## Process
+
+**Run to completion.** Once `/cafleet-design-doc-execute` is invoked, the fleet operates autonomously and collaboratively through every task in the design document. The Director keeps driving the team — dispatching the next step to each idle member the moment it is ready — until all Implementation tasks and Success Criteria are complete. The designed checkpoints stay in force: the Step 5 user-approval gate, the user's "stop means stop" halt during Step 7, and escalations that require a genuinely new user decision.
 
 ### Step 1: Resolve Design Document Path (Director)
 
@@ -391,14 +393,18 @@ After Step 5 Approve, the Director pushes the feature branch, opens a PR, and re
 
 Once the PR exists and Copilot has been invited, the Director runs a Copilot review loop. The monitoring member runs **unchanged** — there is no scheduler swap. While Step 7 is active, the Director simply **adds the PR-review poll to what it does on each idle-nudge-driven turn**, on top of its normal team-health facilitation. The "loop" here is the logical poll → route → fix → push → re-poll cycle the Director drives; the turn that drives each pass is the monitoring member's periodic idle-nudge (the monitoring member finds the Director idle-while-awaiting-Copilot and nudges it, granting a re-poll turn). Copilot is an *external* reviewer that never fires a broker inline-preview into the Director's pane, so this idle-nudge is the loop's turn source.
 
+#### Termination authority
+
+Once the loop is active (the PR exists and Copilot has been invited), authority to end it rests solely with the Administrator (the user). The loop ends on exactly two conditions: (1) the user instructs termination (§ User Interjection During Step 7), or (2) a post-push Copilot no-concerns signal arrives — a `reviews` entry with `state == "APPROVED"`, or a Copilot review/comment whose body indicates no remaining concerns even when `state == "COMMENTED"`. In every other state the Director keeps the loop turning: it waits while a Copilot review is pending, and it autonomously re-requests the review (7e) when a prior request failed to land. The Step 6a preconditions and the initial push / PR-create failures are pre-loop fallbacks that skip Step 7 entirely — they are distinct from ending an active loop.
+
 #### PR Review Loop State
 
-The Director holds three **PR-review-specific** in-context variables across idle-nudge-driven turns (separate from the team-health inbox poll the `cafleet-agent-team-monitoring` skill runs via `cafleet message poll`, which returns only un-acked deliveries and tracks no timestamp). They are NOT persisted to disk — the Director carries them in its own working memory.
+The Director holds two **PR-review-specific** in-context variables across idle-nudge-driven turns (separate from the team-health inbox poll the `cafleet-agent-team-monitoring` skill runs via `cafleet message poll`, which returns only un-acked deliveries and tracks no timestamp). They are NOT persisted to disk — the Director carries them in its own working memory.
 
 | Variable | Meaning | Update rule |
 |:--|:--|:--|
 | `last_push_ts` | ISO 8601 timestamp of the most recent push to the PR branch | Reset on every `git push` from 6b-step 2 or 7d-step 3 |
-| `silence_ticks` | Consecutive Director turns (driven by the monitoring member's idle nudge) with 0 new Copilot items since the last activity | Increment each turn with 0 new items; reset to 0 when new Copilot items arrive OR after a fix-push from 7d |
+| `silence_ticks` | Consecutive Director turns (driven by the monitoring member's idle nudge) with 0 new Copilot items since the last activity | Increment each turn with 0 new items; reset to 0 when new Copilot items arrive, after a fix-push from 7d, OR after the 7e autonomous re-request |
 
 #### 7a. Add PR-review polling to each idle-nudge-driven turn
 
@@ -414,16 +420,18 @@ On each idle-nudge-driven turn (and in any active turn while Step 7 is in progre
 4. **New-since-push filter**: keep items whose timestamp (`submittedAt` for reviews, `created_at` for inline comments) is strictly later than `last_push_ts`.
 5. **Branch on the filter result**:
 
+Evaluate top-down; the first matching row wins (a post-push no-concerns signal matches row 1 before the general new-items row):
+
 | Result | Action |
 |:--|:--|
-| The most recent **post-push** Copilot-authored entry in `reviews` (i.e., one with `submittedAt > last_push_ts`) has `state == "APPROVED"` | Exit loop (success) → Step 8 |
-| 0 new Copilot items AND `silence_ticks < 30` | Increment `silence_ticks`, continue waiting |
-| 0 new Copilot items AND `silence_ticks >= 30` | Silence-escalation: see 7e |
+| A **post-push** Copilot no-concerns signal — a `reviews` entry with `state == "APPROVED"`, OR a Copilot review/comment whose body indicates no remaining concerns (even when `state == "COMMENTED"`) | Exit loop (success) → Step 8 |
 | ≥ 1 new Copilot items | Reset `silence_ticks = 0`, go to 7c |
+| 0 new Copilot items AND `silence_ticks < 30` | Increment `silence_ticks`, keep waiting |
+| 0 new Copilot items AND `silence_ticks >= 30` | Run the 7e autonomous re-request check, reset `silence_ticks = 0`, keep waiting |
 
-The APPROVED check MUST be qualified by the post-push filter (`submittedAt > last_push_ts`). An older approval — say, from a Copilot pass before the most recent fix-push — must NOT be treated as approval of the current HEAD; otherwise a single early approve followed by additional commits would silently finalize the PR.
+The no-concerns exit MUST be qualified by the post-push filter (`submittedAt > last_push_ts` for reviews, `created_at > last_push_ts` for comments): only a Copilot signal newer than the most recent fix-push clears the current HEAD. An older approval or no-concerns note reflects a previous revision and leaves the loop running.
 
-**No auto-exit on silence**: the loop never auto-exits on silence — a silent Copilot is not proof it is done (it may be slow, not re-triggered, or back-pressured). It escalates to the **user** via 7e once `silence_ticks >= 30` (~90 min, since each idle-nudge-driven turn now arrives on the Director's 180 s due-ness); outside that user gate it exits only on a post-push `state == "APPROVED"` or on "Stop means stop".
+**Silence keeps the loop turning.** A silent Copilot is a pending review, not completion. On prolonged silence the Director autonomously re-requests the review (7e) and continues; the loop ends only on the two termination conditions above — the user instructs termination, or a post-push Copilot no-concerns signal arrives.
 
 **Read `reviews`, not `reviewDecision`**: `reviewDecision` only reflects required reviewers (CODEOWNERS); Copilot usually is not one, so its approve leaves `reviewDecision` null — the Copilot-specific entry in the `reviews` array is the reliable signal.
 
@@ -453,18 +461,16 @@ For review-level comments (body text not attached to a specific line), route by 
 5. Re-request Copilot review: `gh pr edit <pr-number> --add-reviewer @copilot`. Re-adding the same reviewer triggers a fresh Copilot pass.
 6. Continue the loop.
 
-#### 7e. Silence escalation
+#### 7e. Silence handling — autonomous re-request
 
-When `silence_ticks >= 30` (≈ 90 minutes since the last Copilot activity AND no new items this turn — each idle-nudge-driven turn now arrives on the Director's 180 s due-ness), escalate to the user via `AskUserQuestion`:
+When `silence_ticks >= 30` (≈ 90 min since the last Copilot activity AND no new items this turn), the Director re-requests the review on its own — no user prompt. Authority to end the loop stays with the Administrator (§ Termination authority); silence is a pending review, so the Director keeps it turning:
 
-| Option | Behavior |
-|:--|:--|
-| 1. Keep waiting | Reset `silence_ticks = 0`, continue Step 7 |
-| 2. Re-request review | Run `gh pr edit <pr-number> --add-reviewer @copilot` to re-trigger Copilot, reset `silence_ticks = 0`, continue Step 7 |
-| 3. Finalize now | Exit loop → Step 8 (accept the current state of Copilot review as-is) |
-| 4. *(Other)* | Intent judgment; abort-intent → Abort Flow |
+1. **Detect the request state** via `gh api repos/<owner>/<repo>/pulls/<pr-number>/requested_reviewers`. Reaching 7e means 0 new post-push Copilot items this turn, so Copilot's absence here means the request failed to land:
+   - **Copilot present** → the request landed and the review is pending; reset `silence_ticks = 0` and keep waiting.
+   - **Copilot absent** → the request failed to land; re-request with `gh pr edit <pr-number> --add-reviewer @copilot`, confirm Copilot now appears in `requested_reviewers`, reset `silence_ticks = 0`, and keep waiting.
+2. The user may terminate at any time via the "stop means stop" halt (§ User Interjection During Step 7) — that is the one path that ends the loop short of a Copilot no-concerns signal.
 
-The 30-turn threshold is conservative: Copilot's first review after a `--add-reviewer` typically lands within 3–5 minutes. 90 minutes is enough that Copilot is highly unlikely to still be composing, while leaving the *decision* to the user instead of the loop. The user retains the option to keep waiting indefinitely — the loop never finalizes on its own based on silence.
+The 30-tick patience window keeps the Director from re-requesting every tick; Copilot's first review after a `--add-reviewer` typically lands within 3–5 minutes.
 
 #### Error Handling (Steps 6–7)
 
@@ -502,4 +508,4 @@ Runs after Step 7 exits, or directly after Step 5 when Step 6 was skipped (gh no
    - Non-zero exit: skip the push. The docs commit stays local.
    - The Director does NOT re-request Copilot review on this final docs commit.
 5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task (launched in Step 3b, ran unchanged through Step 7) and wait for confirmation; `cafleet member delete` the monitoring member first, then Programmer, Tester, and Verifier if spawned (on exit 2 use `member capture` + `send-input` recovery or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete <fleet-id>`; `cafleet fleet list` to confirm.
-6. **Report to the user**: include the PR URL (if Step 6 created one), the Copilot loop exit reason (approved / silence-escalated / skipped / aborted), and any skipped-step reasons.
+6. **Report to the user**: include the PR URL (if Step 6 created one), the Copilot loop exit reason (no-concerns / user-terminated / skipped / aborted), and any skipped-step reasons.
