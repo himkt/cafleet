@@ -1,7 +1,7 @@
 # Monitoring-Member Scope & Execute-Loop Persistence
 
 **Status**: Approved
-**Progress**: 0/12 tasks complete
+**Progress**: 2/12 tasks complete
 **Last Updated**: 2026-06-16
 
 ## Overview
@@ -157,8 +157,8 @@ This is a documentation-only change (skill markdown). No tests apply; verificati
 
 ### Step 1: Monitoring-member scope (Improvement 1)
 
-- [ ] 1a. Add the spawn-prompt scope sentence after the `member-driving routes back through the Director.` paragraph in `skills/cafleet-agent-team-monitoring/SKILL.md` (Spec 1a). <!-- completed: -->
-- [ ] 1b. Add the two-command lead-in to the `On each wake (...)` routine header in the same file (Spec 1b). <!-- completed: -->
+- [x] 1a. Add the spawn-prompt scope sentence after the `member-driving routes back through the Director.` paragraph in `skills/cafleet-agent-team-monitoring/SKILL.md` (Spec 1a). <!-- completed: 2026-06-17T11:50 -->
+- [x] 1b. Add the two-command lead-in to the `On each wake (...)` routine header in the same file (Spec 1b). <!-- completed: 2026-06-17T11:50 -->
 
 ### Step 2: Execute runs to completion (Improvement 2)
 
