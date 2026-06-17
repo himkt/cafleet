@@ -1,7 +1,7 @@
 # Monitoring-Member Scope & Execute-Loop Persistence
 
 **Status**: Approved
-**Progress**: 2/12 tasks complete
+**Progress**: 4/12 tasks complete
 **Last Updated**: 2026-06-16
 
 ## Overview
@@ -162,8 +162,8 @@ This is a documentation-only change (skill markdown). No tests apply; verificati
 
 ### Step 2: Execute runs to completion (Improvement 2)
 
-- [ ] 2a. Insert the `**Run to completion.**` paragraph after the `## Process` heading in `skills/cafleet-design-doc-execute/SKILL.md` (Spec 2a). <!-- completed: -->
-- [ ] 2b. Insert the `**Drive every task to completion.**` accountability bullet after the TDD-cycle bullet in `skills/cafleet-design-doc-execute/roles/director.md` (Spec 2b). <!-- completed: -->
+- [x] 2a. Insert the `**Run to completion.**` paragraph after the `## Process` heading in `skills/cafleet-design-doc-execute/SKILL.md` (Spec 2a). <!-- completed: 2026-06-17T11:53 -->
+- [x] 2b. Insert the `**Drive every task to completion.**` accountability bullet after the TDD-cycle bullet in `skills/cafleet-design-doc-execute/roles/director.md` (Spec 2b). <!-- completed: 2026-06-17T11:53 -->
 
 ### Step 3: Copilot review loop persists (Improvement 3)
 

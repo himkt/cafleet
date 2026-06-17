@@ -49,6 +49,8 @@ User
 
 ## Process
 
+**Run to completion.** Once `/cafleet-design-doc-execute` is invoked, the fleet operates autonomously and collaboratively through every task in the design document. The Director keeps driving the team — dispatching the next step to each idle member the moment it is ready — until all Implementation tasks and Success Criteria are complete. The designed checkpoints stay in force: the Step 5 user-approval gate, the user's "stop means stop" halt during Step 7, and escalations that require a genuinely new user decision.
+
 ### Step 1: Resolve Design Document Path (Director)
 
 Before validation, resolve `$ARGUMENTS` into a concrete `design-doc.md` path.
