@@ -1,7 +1,7 @@
 # Per-member monitor intervals
 
 **Status**: Approved
-**Progress**: 33/36 tasks complete
+**Progress**: 35/36 tasks complete
 **Last Updated**: 2026-06-17
 
 ## Overview
@@ -293,8 +293,8 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 
 ### Step 7: Verification
 
-- [ ] `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test`, `mise //admin:build` all pass. <!-- completed: -->
-- [ ] Final removal sweep across the whole tree confirms no `60 s` monitor-interval / "only the monitoring member is enrolled" residue survives outside `design-docs/`. <!-- completed: -->
+- [x] `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test`, `mise //admin:build` all pass. <!-- completed: 2026-06-17T09:58 -->
+- [x] Final removal sweep across the whole tree confirms no `60 s` monitor-interval / "only the monitoring member is enrolled" residue survives outside `design-docs/`. <!-- completed: 2026-06-17T09:58 -->
 - [ ] Manual smoke (operator, optional): spawn a fleet + monitoring member; confirm `monitor status` shows the Director @180 and members @720, the monitoring member as runtime owner (no interval row); confirm the loop wakes the monitoring member when an agent is due and never keystrokes a watched pane; confirm the admin detail page edits a member's interval and shows no interval control for the monitoring member. <!-- completed: -->
 
 ---

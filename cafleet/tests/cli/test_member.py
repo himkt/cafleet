@@ -729,7 +729,7 @@ def _read_agent_card(new_agent_id: int) -> dict:
         return json.loads(s.get(Agent, new_agent_id).agent_card_json)
 
 
-def test_member_create__role_monitor_sets_kind_and_enrolls(
+def test_member_create__role_monitor_sets_kind_not_enrolled(
     bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
@@ -749,11 +749,11 @@ def test_member_create__role_monitor_sets_kind_and_enrolls(
 
     # the kind marker is written into the agent card …
     assert _read_agent_card(new_id)["cafleet"]["kind"] == "monitoring-member"
-    # … and the monitoring member is enrolled in monitor_config
-    assert broker.get_monitor_config(fleet_id, new_id) is not None
+    # … but the monitoring member is the unenrolled watcher (no monitor_config row)
+    assert broker.get_monitor_config(fleet_id, new_id) is None
 
 
-def test_member_create__role_member_does_not_enroll(
+def test_member_create__role_member_enrolls_720(
     bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
@@ -771,17 +771,19 @@ def test_member_create__role_member_does_not_enroll(
     assert result.exit_code == 0, result.output
     new_id = json.loads(result.output)["agent_id"]
 
-    # an ordinary member carries no kind marker and is NOT enrolled
+    # an ordinary member carries no kind marker and is enrolled @720
     assert "cafleet" not in _read_agent_card(new_id)
-    assert broker.get_monitor_config(fleet_id, new_id) is None
+    cfg = broker.get_monitor_config(fleet_id, new_id)
+    assert cfg is not None
+    assert cfg["interval_seconds"] == 720
 
 
-def test_member_create__default_role_is_member_not_enrolled(
+def test_member_create__default_role_is_member_enrolled_720(
     bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
-    # omitting --role defaults to 'member': no kind marker, no enrollment
+    # omitting --role defaults to 'member': no kind marker, enrolled @720
     fleet_id, director_id, runner = bootstrapped_fleet
     result = _invoke_member_create(
         runner,
@@ -794,7 +796,9 @@ def test_member_create__default_role_is_member_not_enrolled(
     assert result.exit_code == 0, result.output
     new_id = json.loads(result.output)["agent_id"]
     assert "cafleet" not in _read_agent_card(new_id)
-    assert broker.get_monitor_config(fleet_id, new_id) is None
+    cfg = broker.get_monitor_config(fleet_id, new_id)
+    assert cfg is not None
+    assert cfg["interval_seconds"] == 720
 
 
 def test_member_create__second_role_monitor_rejected(

@@ -316,7 +316,11 @@ def _seed_pre_0005_fleet(engine):
     agents = [
         (_DIRECTOR_ID, "director", '{"cafleet": {"kind": "director"}}'),
         (_MEMBER_ID, "member", '{"cafleet": {"kind": "member"}}'),
-        (_MONITORING_MEMBER_ID, "monitor", '{"cafleet": {"kind": "monitoring-member"}}'),
+        (
+            _MONITORING_MEMBER_ID,
+            "monitor",
+            '{"cafleet": {"kind": "monitoring-member"}}',
+        ),
         (
             _ADMINISTRATOR_ID,
             "Administrator",
@@ -338,7 +342,13 @@ def _seed_pre_0005_fleet(engine):
                     "status, registered_at, agent_card_json) "
                     "VALUES (:aid, :fid, :name, 'seed', 'active', :ts, :card)"
                 ),
-                {"aid": agent_id, "fid": _FLEET_ID, "name": name, "ts": ts, "card": card},
+                {
+                    "aid": agent_id,
+                    "fid": _FLEET_ID,
+                    "name": name,
+                    "ts": ts,
+                    "card": card,
+                },
             )
             conn.execute(
                 text(

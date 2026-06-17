@@ -226,12 +226,10 @@ def format_monitor_status(payload: dict) -> str:
     agents = payload["agents"]
     if agents:
         lines.append(
-            "  agent_id  name         role      interval  "
-            "last_ping  enabled  pending"
+            "  agent_id  name         role      interval  last_ping  enabled  pending"
         )
         lines.append(
-            "  --------  -----------  --------  --------  "
-            "---------  -------  -------"
+            "  --------  -----------  --------  --------  ---------  -------  -------"
         )
         for a in agents:
             interval_s = f"{a['interval_seconds']}s"
