@@ -1,7 +1,7 @@
 # Per-member monitor intervals
 
 **Status**: Approved
-**Progress**: 31/36 tasks complete
+**Progress**: 33/36 tasks complete
 **Last Updated**: 2026-06-17
 
 ## Overview
@@ -288,8 +288,8 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 
 ### Step 6: WebUI — verification & test retargeting
 
-- [ ] `cafleet/tests/webui/test_monitor_api.py`: retarget the enrolled-agent assertions to the Director + members — `GET /api/agents` folds a non-null `monitor` for the Director (180) and members (720) and `null` for the monitoring member; `GET /api/agents/{monitoring-member}/monitor` 404s; `PATCH /api/agents/{member}/monitor` updates a member's interval. <!-- completed: -->
-- [ ] Confirm `admin/src/` needs no code change for the edit surface (the `MonitoringSection` renders for any `agent.monitor !== null`); run `mise //admin:build`. <!-- completed: -->
+- [x] `cafleet/tests/webui/test_monitor_api.py`: retarget the enrolled-agent assertions to the Director + members — `GET /api/agents` folds a non-null `monitor` for the Director (180) and members (720) and `null` for the monitoring member; `GET /api/agents/{monitoring-member}/monitor` 404s; `PATCH /api/agents/{member}/monitor` updates a member's interval. <!-- completed: 2026-06-17T09:26 -->
+- [x] Confirm `admin/src/` needs no code change for the edit surface (the `MonitoringSection` renders for any `agent.monitor !== null`); run `mise //admin:build`. <!-- completed: 2026-06-17T09:26 -->
 
 ### Step 7: Verification
 
