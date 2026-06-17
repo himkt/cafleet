@@ -58,8 +58,8 @@ Startup (in order, as your first actions):
 On each wake (a "[monitor] wake: ..." nudge keystroked into this pane by the loop):
 1. Re-query the watched schedule to find which agents the monitor just flagged:
    cafleet monitor status --fleet-id {fleet_id}
-   The freshly-due agents are the ones with the smallest last_ping age (they read
-   as "just now"); they are who you inspect this wake.
+   The freshly-due agents are the ones with the smallest last_ping age (e.g.
+   "0s ago"); they are who you inspect this wake.
 2. Capture the Director's pane (always — the Director is your only actuation
    target):
    cafleet member capture --fleet-id {fleet_id} --member-id {director_agent_id} --lines 120

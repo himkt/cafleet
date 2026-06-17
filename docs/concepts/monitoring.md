@@ -118,8 +118,8 @@ runs its routine — staying within two read/act commands, read-only
 `cafleet member capture` and `cafleet member nudge`:
 
 1. **Re-query `cafleet monitor status`** to read the watched schedule and
-   identify the agents the monitor just flagged (smallest `last_ping` age — they
-   read as "just now").
+   identify the agents the monitor just flagged (the smallest `last_ping` age,
+   e.g. `0s ago`).
 2. **Capture the Director's pane** via `cafleet member capture --member-id
    <director-id>` (read-only; `member capture` accepts any in-fleet agent with a
    placement, the root Director included) and classify it ACTIVE vs IDLE.
