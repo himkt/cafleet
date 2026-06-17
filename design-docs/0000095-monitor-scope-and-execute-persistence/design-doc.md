@@ -10,11 +10,11 @@ Tighten three CAFleet skill behaviors using concise, affirmative wording only: (
 
 ## Success Criteria
 
-- [ ] The `cafleet-agent-team-monitoring` skill states the monitoring member's on-wake routine acts through exactly two commands — `cafleet member capture` (read-only inspection) and `cafleet member nudge` (re-engage the idle Director) — in both the spawn prompt and the wake-routine description, affirmatively.
-- [ ] The `cafleet-design-doc-execute` `SKILL.md` and `roles/director.md` state that once execute is invoked the fleet runs autonomously and collaboratively through every design-doc task to completion, while preserving the designed gates (Step 5 user approval, "stop means stop", new-decision escalations), affirmatively.
-- [ ] The `cafleet-design-doc-execute` Step 7 (`SKILL.md`) and `roles/director.md` state that authority to end the Copilot loop rests solely with the Administrator (the user), that the loop ends on exactly two conditions (user instructs termination, OR Copilot reports no remaining concerns), and that every other state keeps the loop turning — waiting while a review is pending and autonomously re-requesting a review that failed to land, affirmatively.
-- [ ] All new and edited text for the three improvements is concise and uses affirmative phrasing only (no newly introduced `NEVER` / `DO NOT` style wording).
-- [ ] The edits are internally consistent: no dangling references remain (e.g. the stale `7f` references in `director.md`), and the Step 7 branch logic, loop-state table, and `director.md` milestones row all agree.
+- [x] The `cafleet-agent-team-monitoring` skill states the monitoring member's on-wake routine acts through exactly two commands — `cafleet member capture` (read-only inspection) and `cafleet member nudge` (re-engage the idle Director) — in both the spawn prompt and the wake-routine description, affirmatively.
+- [x] The `cafleet-design-doc-execute` `SKILL.md` and `roles/director.md` state that once execute is invoked the fleet runs autonomously and collaboratively through every design-doc task to completion, while preserving the designed gates (Step 5 user approval, "stop means stop", new-decision escalations), affirmatively.
+- [x] The `cafleet-design-doc-execute` Step 7 (`SKILL.md`) and `roles/director.md` state that authority to end the Copilot loop rests solely with the Administrator (the user), that the loop ends on exactly two conditions (user instructs termination, OR Copilot reports no remaining concerns), and that every other state keeps the loop turning — waiting while a review is pending and autonomously re-requesting a review that failed to land, affirmatively.
+- [x] All new and edited text for the three improvements is concise and uses affirmative phrasing only (no newly introduced `NEVER` / `DO NOT` style wording).
+- [x] The edits are internally consistent: no dangling references remain (e.g. the stale `7f` references in `director.md`), and the Step 7 branch logic, loop-state table, and `director.md` milestones row all agree.
 
 ---
 
