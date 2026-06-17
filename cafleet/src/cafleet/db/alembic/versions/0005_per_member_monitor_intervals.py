@@ -39,13 +39,16 @@ def upgrade() -> None:
         WHERE f.director_agent_id IS NOT NULL AND f.deleted_at IS NULL
         """
     )
-    # 3. Backfill existing active, pane-bound ordinary members @720 (skip the
-    #    Director, the monitoring member, and the Administrator).
+    # 3. Backfill existing active, pane-bound ordinary members in non-deleted
+    #    fleets @720 (skip the Director, the monitoring member, and the
+    #    Administrator). The fleets join mirrors step 2's deleted_at gate so an
+    #    orphaned active/placed member in a soft-deleted fleet is not re-enrolled.
     op.execute(
         """
         INSERT OR IGNORE INTO monitor_config (agent_id, interval_seconds, enabled)
         SELECT a.agent_id, 720, 1 FROM agents a
         JOIN agent_placements p ON p.agent_id = a.agent_id
+        JOIN fleets f ON f.fleet_id = a.fleet_id AND f.deleted_at IS NULL
         WHERE a.status = 'active'
           AND a.agent_id NOT IN
               (SELECT director_agent_id FROM fleets WHERE director_agent_id IS NOT NULL)

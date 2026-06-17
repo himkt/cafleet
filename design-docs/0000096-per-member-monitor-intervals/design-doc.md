@@ -195,6 +195,7 @@ def upgrade() -> None:
         INSERT OR IGNORE INTO monitor_config (agent_id, interval_seconds, enabled)
         SELECT a.agent_id, 720, 1 FROM agents a
         JOIN agent_placements p ON p.agent_id = a.agent_id
+        JOIN fleets f ON f.fleet_id = a.fleet_id AND f.deleted_at IS NULL
         WHERE a.status = 'active'
           AND a.agent_id NOT IN
               (SELECT director_agent_id FROM fleets WHERE director_agent_id IS NOT NULL)
