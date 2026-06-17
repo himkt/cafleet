@@ -41,9 +41,12 @@ def register_agent(
             created alongside the agent.
         kind: Optional ``agent_card_json.cafleet.kind`` marker. When set to
             ``_shared.MONITORING_MEMBER_KIND`` the new agent is the fleet's
-            dedicated monitoring member: it is enrolled in ``monitor_config``
-            and a second active one per fleet is rejected. Ordinary members
-            pass ``None`` and are not enrolled.
+            dedicated monitoring member — the unenrolled *watcher*: it is NOT
+            enrolled in ``monitor_config`` (located by its kind marker instead),
+            must be pane-bound, and a second active one per fleet is rejected.
+            Every other pane-bound member (``kind`` left ``None``) is enrolled
+            in ``monitor_config`` @720; the root Director is enrolled at
+            ``create_fleet`` @180.
 
     Returns:
         Dict with ``agent_id``, ``name``, and ``registered_at``.
@@ -73,10 +76,10 @@ def register_agent(
 
     with _shared.write_session() as session:
         if kind == _shared.MONITORING_MEMBER_KIND:
-            # A monitoring member must be pane-bound: it owns the heartbeat and
-            # is the only enrolled role. Without a placement it would consume the
-            # one-per-fleet slot yet never enroll (enrollment is gated on the
-            # placement insert below) and have no pane to ping.
+            # A monitoring member must be pane-bound: it runs the heartbeat loop
+            # and receives the loop's wake nudges in its own pane. Without a
+            # placement it would consume the one-per-fleet slot yet have no pane
+            # to run the loop in or receive wakes.
             if placement is None:
                 raise click.ClickException(
                     "a monitoring member must be pane-bound; register it via "
@@ -145,12 +148,14 @@ def register_agent(
                     created_at=registered_at,
                 )
             )
-            # Enroll ONLY the dedicated monitoring member in the heartbeat,
-            # atomically with its placement insert. It is the single enrolled
-            # role — the root Director is no longer enrolled and ordinary
-            # members never are, so the loop wakes only the monitoring member.
-            if kind == _shared.MONITORING_MEMBER_KIND:
-                monitor.enroll_agent(session, agent_id)
+            # Enroll every pane-bound ordinary member in the heartbeat @720,
+            # atomically with its placement insert. The dedicated monitoring
+            # member is the unenrolled watcher (located by kind), so it is NOT
+            # enrolled; the root Director is enrolled separately at create_fleet.
+            if kind != _shared.MONITORING_MEMBER_KIND:
+                monitor.enroll_agent(
+                    session, agent_id, interval=monitor.MEMBER_PING_INTERVAL_SECONDS
+                )
 
     return {
         "agent_id": agent_id,

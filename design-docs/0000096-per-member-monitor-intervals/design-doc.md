@@ -1,7 +1,7 @@
 # Per-member monitor intervals
 
 **Status**: Approved
-**Progress**: 18/36 tasks complete
+**Progress**: 24/36 tasks complete
 **Last Updated**: 2026-06-17
 
 ## Overview
@@ -266,12 +266,12 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 
 ### Step 3: Broker — enrollment, cleanup & watcher lookup
 
-- [ ] `cafleet/broker/fleets.py::create_fleet`: enroll the root Director via `monitor.enroll_agent(session, director_agent_id, interval=DIRECTOR_PING_INTERVAL_SECONDS)` after its `AgentPlacement` is added (re-adds the Director enrollment `0000091` removed). <!-- completed: -->
-- [ ] `cafleet/broker/agents.py::register_agent`: when `placement is not None` AND `kind != MONITORING_MEMBER_KIND`, call `monitor.enroll_agent(session, agent_id, interval=MEMBER_PING_INTERVAL_SECONDS)`; when `kind == MONITORING_MEMBER_KIND`, do **not** enroll. Keep the one-per-fleet + pane-bound monitoring-member guards. <!-- completed: -->
-- [ ] `cafleet/broker/monitor.py`: add `find_monitoring_member(fleet_id) -> dict | None` (§3, kind-filtered join to `agent_placements`); update `enroll_agent` + `list_monitor_targets` docstrings to the watched-set model; **remove** the `is_monitoring_member` field and its `json_extract` kind expression from `list_monitor_targets` rows (keep `is_director`). <!-- completed: -->
-- [ ] Export `find_monitoring_member` and the two interval constants from `cafleet/broker/__init__.py` as needed. <!-- completed: -->
-- [ ] `cafleet/broker/agents.py::register_agent`: rewrite the docstring `kind` paragraph and the inline enrollment comment to the watched-set model — an ordinary member (with placement) is enrolled @720; the monitoring member is **not** enrolled. The 1c sweep does not scan `cafleet/src`, so this source residue is fixed here. <!-- completed: -->
-- [ ] Tests (`tests/broker/test_monitor.py`): `create_fleet` enrolls the Director @180; an ordinary `member create` enrolls @720; a `--role monitor` member is **not** enrolled; `list_monitor_targets` returns the Director + members (no monitoring member, no `is_monitoring_member` key); `find_monitoring_member` returns the monitoring member's pane (and `None` when absent); `deregister_agent` / `delete_fleet` still drop the relevant `monitor_config` rows. <!-- completed: -->
+- [x] `cafleet/broker/fleets.py::create_fleet`: enroll the root Director via `monitor.enroll_agent(session, director_agent_id, interval=DIRECTOR_PING_INTERVAL_SECONDS)` after its `AgentPlacement` is added (re-adds the Director enrollment `0000091` removed). <!-- completed: 2026-06-17T08:59 -->
+- [x] `cafleet/broker/agents.py::register_agent`: when `placement is not None` AND `kind != MONITORING_MEMBER_KIND`, call `monitor.enroll_agent(session, agent_id, interval=MEMBER_PING_INTERVAL_SECONDS)`; when `kind == MONITORING_MEMBER_KIND`, do **not** enroll. Keep the one-per-fleet + pane-bound monitoring-member guards. <!-- completed: 2026-06-17T08:59 -->
+- [x] `cafleet/broker/monitor.py`: add `find_monitoring_member(fleet_id) -> dict | None` (§3, kind-filtered join to `agent_placements`); update `enroll_agent` + `list_monitor_targets` docstrings to the watched-set model; **remove** the `is_monitoring_member` field and its `json_extract` kind expression from `list_monitor_targets` rows (keep `is_director`). <!-- completed: 2026-06-17T08:59 -->
+- [x] Export `find_monitoring_member` and the two interval constants from `cafleet/broker/__init__.py` as needed. <!-- completed: 2026-06-17T08:59 -->
+- [x] `cafleet/broker/agents.py::register_agent`: rewrite the docstring `kind` paragraph and the inline enrollment comment to the watched-set model — an ordinary member (with placement) is enrolled @720; the monitoring member is **not** enrolled. The 1c sweep does not scan `cafleet/src`, so this source residue is fixed here. <!-- completed: 2026-06-17T08:59 -->
+- [x] Tests (`tests/broker/test_monitor.py`): `create_fleet` enrolls the Director @180; an ordinary `member create` enrolls @720; a `--role monitor` member is **not** enrolled; `list_monitor_targets` returns the Director + members (no monitoring member, no `is_monitoring_member` key); `find_monitoring_member` returns the monitoring member's pane (and `None` when absent); `deregister_agent` / `delete_fleet` still drop the relevant `monitor_config` rows. <!-- completed: 2026-06-17T08:59 -->
 
 ### Step 4: Loop rewrite
 
