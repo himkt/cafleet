@@ -399,7 +399,7 @@ Once the loop is active (the PR exists and Copilot has been invited), authority 
 
 #### PR Review Loop State
 
-The Director holds three **PR-review-specific** in-context variables across idle-nudge-driven turns (separate from the team-health inbox poll the `cafleet-agent-team-monitoring` skill runs via `cafleet message poll`, which returns only un-acked deliveries and tracks no timestamp). They are NOT persisted to disk — the Director carries them in its own working memory.
+The Director holds two **PR-review-specific** in-context variables across idle-nudge-driven turns (separate from the team-health inbox poll the `cafleet-agent-team-monitoring` skill runs via `cafleet message poll`, which returns only un-acked deliveries and tracks no timestamp). They are NOT persisted to disk — the Director carries them in its own working memory.
 
 | Variable | Meaning | Update rule |
 |:--|:--|:--|
@@ -508,4 +508,4 @@ Runs after Step 7 exits, or directly after Step 5 when Step 6 was skipped (gh no
    - Non-zero exit: skip the push. The docs commit stays local.
    - The Director does NOT re-request Copilot review on this final docs commit.
 5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task (launched in Step 3b, ran unchanged through Step 7) and wait for confirmation; `cafleet member delete` the monitoring member first, then Programmer, Tester, and Verifier if spawned (on exit 2 use `member capture` + `send-input` recovery or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete <fleet-id>`; `cafleet fleet list` to confirm.
-6. **Report to the user**: include the PR URL (if Step 6 created one), the Copilot loop exit reason (approved / user-terminated / skipped / aborted), and any skipped-step reasons.
+6. **Report to the user**: include the PR URL (if Step 6 created one), the Copilot loop exit reason (no-concerns / user-terminated / skipped / aborted), and any skipped-step reasons.
