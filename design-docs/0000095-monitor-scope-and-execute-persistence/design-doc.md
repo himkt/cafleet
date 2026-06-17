@@ -1,7 +1,7 @@
 # Monitoring-Member Scope & Execute-Loop Persistence
 
 **Status**: Approved
-**Progress**: 4/12 tasks complete
+**Progress**: 12/12 tasks complete
 **Last Updated**: 2026-06-16
 
 ## Overview
@@ -167,14 +167,14 @@ This is a documentation-only change (skill markdown). No tests apply; verificati
 
 ### Step 3: Copilot review loop persists (Improvement 3)
 
-- [ ] 3a. Insert the `#### Termination authority` subsection at the start of Step 7 in `SKILL.md` (Spec 3a). <!-- completed: -->
-- [ ] 3b. Replace the Step 7b branch table (with the top-down first-match lead-in) in `SKILL.md` (Spec 3b). <!-- completed: -->
-- [ ] 3c. Replace the two post-table notes in Step 7b with the qualify-no-concerns note and the `**Silence keeps the loop turning.**` note in `SKILL.md` (Spec 3c). <!-- completed: -->
-- [ ] 3d. Update the `silence_ticks` reset rule in the PR Review Loop State table in `SKILL.md` (Spec 3d). <!-- completed: -->
-- [ ] 3e. Replace `#### 7e. Silence escalation` with `#### 7e. Silence handling — autonomous re-request` in `SKILL.md` (Spec 3e). <!-- completed: -->
-- [ ] 3f. Update the execute intro-paragraph termination clause in `SKILL.md` (Spec 3f). <!-- completed: -->
-- [ ] 3g. Replace the `**The loop never auto-exits ...**` sentence in the Director accountability bullet in `roles/director.md` (Spec 3g). <!-- completed: -->
-- [ ] 3h. Replace the `PR Review (Step 7)` milestones-row Director action cell in `roles/director.md` (Spec 3h). <!-- completed: -->
+- [x] 3a. Insert the `#### Termination authority` subsection at the start of Step 7 in `SKILL.md` (Spec 3a). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3b. Replace the Step 7b branch table (with the top-down first-match lead-in) in `SKILL.md` (Spec 3b). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3c. Replace the two post-table notes in Step 7b with the qualify-no-concerns note and the `**Silence keeps the loop turning.**` note in `SKILL.md` (Spec 3c). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3d. Update the `silence_ticks` reset rule in the PR Review Loop State table in `SKILL.md` (Spec 3d). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3e. Replace `#### 7e. Silence escalation` with `#### 7e. Silence handling — autonomous re-request` in `SKILL.md` (Spec 3e). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3f. Update the execute intro-paragraph termination clause in `SKILL.md` (Spec 3f). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3g. Replace the `**The loop never auto-exits ...**` sentence in the Director accountability bullet in `roles/director.md` (Spec 3g). <!-- completed: 2026-06-17T11:56 -->
+- [x] 3h. Replace the `PR Review (Step 7)` milestones-row Director action cell in `roles/director.md` (Spec 3h). <!-- completed: 2026-06-17T11:56 -->
 
 ---
 
