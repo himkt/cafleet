@@ -57,11 +57,13 @@ def _register_monitoring_member(fleet: dict, name: str, pane_id: str) -> int:
     )["agent_id"]
 
 
-def _stub_tmux(monkeypatch, live_panes):
+def _stub_tmux(monkeypatch, live_panes, *, wake_ok=True):
     """Stub pane liveness; capture poll-trigger and wake-trigger keystrokes into
     separate lists. The loop only ever fires ``send_wake_trigger`` (into the
     watcher's pane); ``polls`` is captured to assert the loop never keystrokes a
-    watched (Director / member) pane (§4)."""
+    watched (Director / member) pane (§4). ``wake_ok`` is the boolean
+    ``send_wake_trigger`` returns — pass ``False`` to model a best-effort
+    keystroke that was attempted but failed to land."""
     monkeypatch.setattr(
         "cafleet.multiplexer.tmux.TmuxMultiplexer.list_pane_ids",
         lambda self: set(live_panes),
@@ -76,7 +78,7 @@ def _stub_tmux(monkeypatch, live_panes):
 
     def fake_wake(self, *, target_pane_id, fleet_id, agent_id):
         wakes.append((target_pane_id, fleet_id, agent_id))
-        return True
+        return wake_ok
 
     monkeypatch.setattr(
         "cafleet.multiplexer.tmux.TmuxMultiplexer.send_poll_trigger", fake_poll
@@ -240,6 +242,34 @@ def test_monitor_tick__watcher_pane_dead_no_wake(monkeypatch):
     assert polls == []
     # nothing recorded since the watcher could not be woken
     assert broker.get_monitor_config(sid, director_id)["last_ping_at"] is None
+
+
+def test_monitor_tick__failed_wake_does_not_advance_or_log(capsys, monkeypatch):
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["agent_id"]
+    watcher = _register_monitoring_member(fleet, "watcher", "%7")
+
+    # the Director is due (never pinged) and the watcher's pane is live, so a wake
+    # is ATTEMPTED — but the best-effort keystroke fails (send_wake_trigger → False)
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+    polls, wakes = _stub_tmux(monkeypatch, {"%0", "%7"}, wake_ok=False)
+
+    result = monitor_tick(sid, _NOW)
+
+    assert result is CONTINUE
+    # the wake was attempted into the watcher's pane (the call returned False)
+    assert wakes == [("%7", sid, watcher)]
+    assert polls == []
+    # a failed wake leaves the due Director flagged: last_ping_at is NOT advanced,
+    # so the next tick retries instead of skipping a check for a full interval
+    assert broker.get_monitor_config(sid, director_id)["last_ping_at"] is None
+    # and no due-log line is emitted when the wake did not land
+    out = capsys.readouterr().out
+    assert "due agent" not in out
+    assert "-> wake monitor" not in out
 
 
 def test_monitor_tick__stop_on_soft_deleted_fleet(broker_session, monkeypatch):

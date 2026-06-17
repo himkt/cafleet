@@ -115,11 +115,11 @@ def monitor_tick(fleet_id, now):                       # now: tz-aware datetime
             due.append(t)
 
     if due and watcher is not None and watcher["pane_id"] in live_panes:
-        mux.send_wake_trigger(                          # wake the WATCHER once
-            target_pane_id=watcher["pane_id"], fleet_id=fleet_id, agent_id=watcher["agent_id"])
-        broker.record_pings([t["agent_id"] for t in due], now.isoformat())
-        for t in due:
-            click.echo(f"{now.isoformat()} due agent {t['agent_id']} ({t['name']}) -> wake monitor")
+        if mux.send_wake_trigger(                       # wake the WATCHER once (best-effort)
+                target_pane_id=watcher["pane_id"], fleet_id=fleet_id, agent_id=watcher["agent_id"]):
+            broker.record_pings([t["agent_id"] for t in due], now.isoformat())  # stamp only on a successful wake
+            for t in due:
+                click.echo(f"{now.isoformat()} due agent {t['agent_id']} ({t['name']}) -> wake monitor")
     return CONTINUE
 ```
 
@@ -127,7 +127,7 @@ Key points:
 
 - **`should_ping` is unchanged** (pure: `enabled` AND `pane_alive` AND interval elapsed since `last_ping_at`), but it is now evaluated over the **watched** agents (Director + members), not over the monitoring member.
 - The loop **never keystrokes a watched pane.** Its only keystroke is `send_wake_trigger` into the watcher's own pane (the same helper used today). No blind member ping is reintroduced — the safety property `0000090` established is preserved.
-- **`record_pings` stamps `last_ping_at = now` for the due agents at the moment of wake-dispatch.** This advances each watched agent's cadence and prevents a wake-storm: a just-flagged agent is not due on the next 5 s tick, so the loop will not re-wake the watcher every tick while the watcher is still working. `last_ping_at`'s meaning is "the last time the monitor dispatched a check for this agent."
+- **`record_pings` stamps `last_ping_at = now` for the due agents only when `send_wake_trigger` succeeds.** A successful wake advances each watched agent's cadence and prevents a wake-storm: a just-flagged agent is not due on the next 5 s tick, so the loop will not re-wake the watcher every tick while the watcher is still working. If the best-effort keystroke fails (tmux error → `send_wake_trigger` returns `False`), nothing is stamped, so the due agents are retried on the next tick rather than skipped for a full interval. `last_ping_at`'s meaning is "the last time the monitor successfully dispatched a check for this agent."
 - **The watcher learns *which* agents to inspect by re-querying `cafleet monitor status`**: the agents the loop just flagged are the ones with the smallest last-ping age (`monitor status` renders `last_ping` as an age; freshly-flagged agents read as "just now"). Because the Director (180 s) and a member (720 s) rarely come due on the same tick, most wakes flag exactly one agent, so the freshly-pinged set is unambiguous.
 - If there is **no** watcher (or its pane is dead), the loop records nothing and simply continues — there is no one to wake.
 

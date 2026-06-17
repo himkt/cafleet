@@ -87,23 +87,28 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
             due.append(target)
 
     if due and watcher is not None and watcher["pane_id"] in live_panes:
-        # The loop's only keystroke: a single wake nudge into the watcher's own
-        # pane, driving its capture-classify-reengage routine over the freshly-due
-        # agents. A watched pane (Director / member) is never keystroked.
-        mux.send_wake_trigger(
+        # The loop's only keystroke: a single best-effort wake nudge into the
+        # watcher's own pane, driving its capture-classify-reengage routine over
+        # the freshly-due agents. A watched pane (Director / member) is never
+        # keystroked.
+        woke = mux.send_wake_trigger(
             target_pane_id=watcher["pane_id"],
             fleet_id=fleet_id,
             agent_id=watcher["agent_id"],
         )
-        # Stamp each due agent's cadence at wake-dispatch so a just-flagged agent
-        # is not due again next tick (no wake-storm while the watcher works).
-        broker.record_pings([t["agent_id"] for t in due], now.isoformat())
-        # Visible heartbeat: one line per due agent on the launching task's stdout.
-        for target in due:
-            click.echo(
-                f"{now.isoformat()} due agent {target['agent_id']} "
-                f"({target['name']}) -> wake monitor"
-            )
+        if woke:
+            # Stamp each due agent's cadence ONLY on a successful wake, so a
+            # just-flagged agent is not due again next tick (no wake-storm while
+            # the watcher works). A failed best-effort keystroke leaves the due
+            # agents flagged, so the next tick retries instead of silently
+            # skipping a check for a full interval.
+            broker.record_pings([t["agent_id"] for t in due], now.isoformat())
+            # Visible heartbeat: one line per due agent on the launching task's stdout.
+            for target in due:
+                click.echo(
+                    f"{now.isoformat()} due agent {target['agent_id']} "
+                    f"({target['name']}) -> wake monitor"
+                )
     return CONTINUE
 
 

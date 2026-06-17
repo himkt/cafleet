@@ -150,9 +150,13 @@ def register_agent(
             )
             # Enroll every pane-bound ordinary member in the heartbeat @720,
             # atomically with its placement insert. The dedicated monitoring
-            # member is the unenrolled watcher (located by kind), so it is NOT
-            # enrolled; the root Director is enrolled separately at create_fleet.
-            if kind != _shared.MONITORING_MEMBER_KIND:
+            # member (the unenrolled watcher, located by kind) and a placed
+            # Administrator are both excluded — mirroring §2 and the 0005 backfill
+            # guard; the root Director is enrolled separately at create_fleet.
+            if kind not in (
+                _shared.MONITORING_MEMBER_KIND,
+                _shared.ADMINISTRATOR_KIND,
+            ):
                 monitor.enroll_agent(
                     session, agent_id, interval=monitor.MEMBER_PING_INTERVAL_SECONDS
                 )
