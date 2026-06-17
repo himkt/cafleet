@@ -1,7 +1,7 @@
 # Per-member monitor intervals
 
 **Status**: Approved
-**Progress**: 24/36 tasks complete
+**Progress**: 27/36 tasks complete
 **Last Updated**: 2026-06-17
 
 ## Overview
@@ -275,9 +275,9 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 
 ### Step 4: Loop rewrite
 
-- [ ] `cafleet/monitor/loop.py::monitor_tick`: rewrite per §4 — locate the watcher via `broker.find_monitoring_member`; compute the due set over the watched agents (`should_ping` unchanged); when the due set is non-empty and the watcher pane is live, `send_wake_trigger` into the watcher's pane once, `record_pings` the due agent ids, and log each due agent. Update `should_ping`'s docstring (it now ranges over the watched Director + members; the monitoring member is the unenrolled watcher). <!-- completed: -->
-- [ ] Tests (`tests/monitor/test_loop.py`): a due Director wakes the watcher (one `send_wake_trigger`, Director's `last_ping_at` advanced, no keystroke into the Director's pane); a due member wakes the watcher and advances that member's `last_ping_at`; nothing due → no wake, no `record_pings`; no monitoring member present → no wake; `STOP` on soft-deleted/missing fleet. <!-- completed: -->
-- [ ] Tests (`tests/monitor/test_should_ping.py`): keep the pure-policy cases; ensure fixtures reflect watched Director/member targets (interval/enabled/pane-liveness), not a monitoring-member target. <!-- completed: -->
+- [x] `cafleet/monitor/loop.py::monitor_tick`: rewrite per §4 — locate the watcher via `broker.find_monitoring_member`; compute the due set over the watched agents (`should_ping` unchanged); when the due set is non-empty and the watcher pane is live, `send_wake_trigger` into the watcher's pane once, `record_pings` the due agent ids, and log each due agent. Update `should_ping`'s docstring (it now ranges over the watched Director + members; the monitoring member is the unenrolled watcher). <!-- completed: 2026-06-17T09:09 -->
+- [x] Tests (`tests/monitor/test_loop.py`): a due Director wakes the watcher (one `send_wake_trigger`, Director's `last_ping_at` advanced, no keystroke into the Director's pane); a due member wakes the watcher and advances that member's `last_ping_at`; nothing due → no wake, no `record_pings`; no monitoring member present → no wake; `STOP` on soft-deleted/missing fleet. <!-- completed: 2026-06-17T09:09 -->
+- [x] Tests (`tests/monitor/test_should_ping.py`): keep the pure-policy cases; ensure fixtures reflect watched Director/member targets (interval/enabled/pane-liveness), not a monitoring-member target. <!-- completed: 2026-06-17T09:09 -->
 
 ### Step 5: CLI
 

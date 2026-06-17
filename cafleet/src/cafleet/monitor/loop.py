@@ -36,15 +36,15 @@ STOP = _Sentinel("STOP")
 
 
 def should_ping(target: dict, now: datetime) -> bool:
-    """Decide whether an enrolled agent is due for a ping this tick.
+    """Decide whether a watched agent is due for a check this tick.
 
-    The dedicated monitoring member (the Director is no longer enrolled;
-    ``is_director`` is still derived for the loop's defensive skip and
-    ``monitor status`` labeling) is pinged once the interval has elapsed,
-    regardless of ``pending_count`` (R2). The policy is role-agnostic
-    (``is_director`` / ``is_monitoring_member`` are consulted by the loop for the
-    keystroke selection / defensive skip, not here). Disabled agents and
-    dead/missing panes are always skipped, and a not-yet-due agent waits.
+    ``target`` is a ``list_monitor_targets`` row — a watched agent: the root
+    Director (180 s) or an ordinary member (720 s). The dedicated monitoring
+    member is the unenrolled watcher and never appears here. A watched agent is
+    due once its interval has elapsed, regardless of ``pending_count`` (R2). The
+    policy is role-agnostic (``is_director`` is retained for ``monitor status``
+    labeling, not consulted here). Disabled agents and dead/missing panes are
+    always skipped, and a not-yet-due agent waits.
     """
     if not target["enabled"]:
         return False
@@ -58,13 +58,17 @@ def should_ping(target: dict, now: datetime) -> bool:
 
 
 def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
-    """Run one scan pass: heartbeat, then ping every due agent.
+    """Run one scan pass: heartbeat, then wake the watcher if any agent is due.
 
     Returns ``STOP`` (self-terminate) when this process no longer owns the slot
     (ownership-checked heartbeat matched zero rows) or the fleet vanished /
     soft-deleted; otherwise ``CONTINUE``. The pane-liveness set is fetched once
-    per tick (one tmux call), and ``last_ping_at`` advances whenever a ping is
-    attempted, regardless of the best-effort keystroke's success.
+    per tick (one tmux call). The due set is computed over the WATCHED agents
+    (the root Director + ordinary members); when ≥ 1 is due and the monitoring
+    member's pane is live, the loop keystrokes a single wake nudge into the
+    watcher's own pane — never into a watched pane — and advances each due
+    agent's cadence in one write. With no live watcher to wake, nothing is
+    recorded.
     """
     if not broker.heartbeat_monitor_runtime(fleet_id, os.getpid(), now.isoformat()):
         return STOP
@@ -72,36 +76,34 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
     if fleet is None or fleet["deleted_at"] is not None:
         return STOP
 
+    watcher = broker.find_monitoring_member(fleet_id)
     mux = TmuxMultiplexer()
     live_panes = mux.list_pane_ids()
-    pinged: list[int] = []
+
+    due: list[dict] = []
     for target in broker.list_monitor_targets(fleet_id):
         target["pane_alive"] = target["pane_id"] in live_panes
-        if not should_ping(target, now):
-            continue
-        # The loop wakes ONLY the monitoring member, with a wake nudge that
-        # drives its capture-and-assess routine. Any other enrolled row — a
-        # stray/legacy Director row that survived the prune, the Administrator,
-        # an ordinary member — is defensively skipped, never woken. The Director
-        # is no longer enrolled and is re-engaged on demand (the monitoring
-        # member's idle nudge + the broker's inline-preview keystroke).
-        if target["is_monitoring_member"]:
-            keystroke = mux.send_wake_trigger
-        else:
-            continue
-        keystroke(
-            target_pane_id=target["pane_id"],
+        if should_ping(target, now):
+            due.append(target)
+
+    if due and watcher is not None and watcher["pane_id"] in live_panes:
+        # The loop's only keystroke: a single wake nudge into the watcher's own
+        # pane, driving its capture-classify-reengage routine over the freshly-due
+        # agents. A watched pane (Director / member) is never keystroked.
+        mux.send_wake_trigger(
+            target_pane_id=watcher["pane_id"],
             fleet_id=fleet_id,
-            agent_id=target["agent_id"],
+            agent_id=watcher["agent_id"],
         )
-        pinged.append(target["agent_id"])
-        # Visible heartbeat: the launching agent's background task shows a
-        # line per dispatched ping on its stdout.
-        click.echo(
-            f"{now.isoformat()} ping agent {target['agent_id']} ({target['name']})"
-        )
-    # Record every dispatched ping in one write transaction (no-op if none).
-    broker.record_pings(pinged, now.isoformat())
+        # Stamp each due agent's cadence at wake-dispatch so a just-flagged agent
+        # is not due again next tick (no wake-storm while the watcher works).
+        broker.record_pings([t["agent_id"] for t in due], now.isoformat())
+        # Visible heartbeat: one line per due agent on the launching task's stdout.
+        for target in due:
+            click.echo(
+                f"{now.isoformat()} due agent {target['agent_id']} "
+                f"({target['name']}) -> wake monitor"
+            )
     return CONTINUE
 
 
