@@ -465,8 +465,9 @@ For review-level comments (body text not attached to a specific line), route by 
 
 When `silence_ticks >= 30` (≈ 30 min since the last Copilot activity AND no new items this turn), the Director re-requests the review on its own — no user prompt. Authority to end the loop stays with the Administrator (§ Termination authority); silence is a pending review, so the Director keeps it turning:
 
-1. **Detect pending vs. failed-to-land** via `gh api repos/<owner>/<repo>/pulls/<pr-number>/requested_reviewers`:
+1. **Detect the request state** via `gh api repos/<owner>/<repo>/pulls/<pr-number>/requested_reviewers`:
    - **Copilot present** → the request landed and the review is pending; reset `silence_ticks = 0` and keep waiting.
+   - **Copilot absent AND a post-push Copilot review exists** → the review already landed and was handled by the 7b branch table (GitHub drops a reviewer from `requested_reviewers` once it submits); no re-request needed; reset `silence_ticks = 0` and keep waiting.
    - **Copilot absent AND no post-push Copilot review exists** → the request failed to land; re-request with `gh pr edit <pr-number> --add-reviewer @copilot`, confirm Copilot now appears in `requested_reviewers`, reset `silence_ticks = 0`, and keep waiting.
 2. The user may terminate at any time via the "stop means stop" halt (§ User Interjection During Step 7) — that is the one path that ends the loop short of a Copilot no-concerns signal.
 
