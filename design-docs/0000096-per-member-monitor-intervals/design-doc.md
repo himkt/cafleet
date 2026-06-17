@@ -1,6 +1,6 @@
 # Per-member monitor intervals
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 35/36 tasks complete
 **Last Updated**: 2026-06-17
 
@@ -306,3 +306,4 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 |------|---------|
 | 2026-06-17 | Initial draft |
 | 2026-06-17 | Reviewer pass: corrected the constant location (defined in `broker/monitor.py`, re-exported by `monitor/__init__.py`); dropped the model `server_default` change (frozen `0002` default left untouched); made `enroll_agent`'s `interval` required; added the `test_constants.py` + `register_agent`-prose tasks and spelled out the alembic-smoke renames. Approved by user. |
+| 2026-06-17 | Implemented all 7 steps via TDD; 4 Copilot review rounds (migration fleet-scoping; admin enrollment-gate exclusion; stamp `last_ping_at` only on a successful wake; `find_monitoring_member` non-NULL-pane filter; last-ping age doc wording), each with tests. 862 tests green; lint/format/typecheck + `admin:build` pass; removal sweep clean. Marked Complete (35/36 — the optional operator smoke is deferred). |
