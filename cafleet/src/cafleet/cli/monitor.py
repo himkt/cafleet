@@ -48,8 +48,7 @@ def monitor_start(ctx: click.Context, tick: int) -> None:
     fleet_id = ctx.obj["fleet_id"]
     _require_live_fleet(fleet_id)
     ensure_tmux_or_die()
-    targets = broker.list_monitor_targets(fleet_id)
-    if not any(t["is_monitoring_member"] for t in targets):
+    if broker.find_monitoring_member(fleet_id) is None:
         click.echo(
             f"Warning: fleet {fleet_id} has no enrolled monitoring member; the "
             f"monitor heartbeat will wake no agent. Spawn one first with "
@@ -96,24 +95,26 @@ def monitor_status(ctx: click.Context) -> None:
             "started_at": row["started_at"],
         }
 
-    agents = [
-        {
-            "agent_id": t["agent_id"],
-            "name": t["name"],
-            "role": (
-                "director"
-                if t["is_director"]
-                else "monitor"
-                if t["is_monitoring_member"]
-                else "member"
-            ),
-            "interval_seconds": t["interval_seconds"],
-            "last_ping_at": t["last_ping_at"],
-            "enabled": t["enabled"],
-            "pending_count": t["pending_count"],
-        }
-        for t in broker.list_monitor_targets(fleet_id)
-    ]
+    agents = []
+    for t in broker.list_monitor_targets(fleet_id):
+        last_ping_at = t["last_ping_at"]
+        age = (
+            int((now - datetime.fromisoformat(last_ping_at)).total_seconds())
+            if last_ping_at is not None
+            else None
+        )
+        agents.append(
+            {
+                "agent_id": t["agent_id"],
+                "name": t["name"],
+                "role": "director" if t["is_director"] else "member",
+                "interval_seconds": t["interval_seconds"],
+                "last_ping_at": last_ping_at,
+                "last_ping_age_seconds": age,
+                "enabled": t["enabled"],
+                "pending_count": t["pending_count"],
+            }
+        )
     payload = {"runtime": runtime, "agents": agents}
 
     if ctx.obj["json_output"]:

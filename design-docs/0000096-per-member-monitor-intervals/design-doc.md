@@ -1,7 +1,7 @@
 # Per-member monitor intervals
 
 **Status**: Approved
-**Progress**: 27/36 tasks complete
+**Progress**: 31/36 tasks complete
 **Last Updated**: 2026-06-17
 
 ## Overview
@@ -281,10 +281,10 @@ Per `.claude/rules/design-doc-numbering.md`, documentation — including every a
 
 ### Step 5: CLI
 
-- [ ] `cafleet/cli/monitor.py::monitor_start`: replace the `any(t["is_monitoring_member"] …)` warning check with `broker.find_monitoring_member(fleet_id) is None`; warn-but-run unchanged. <!-- completed: -->
-- [ ] `cafleet/cli/monitor.py::monitor_status`: remove the `is_monitoring_member` → `"monitor"` role branch (role labels become `director` / `member`); add the `last_ping_age_seconds` derived field and render `last_ping` as a human age in the text formatter. <!-- completed: -->
-- [ ] `cafleet/output.py`: update `format_monitor_status` for the last-ping-age column (and drop any `monitor` role rendering). <!-- completed: -->
-- [ ] Tests (`tests/cli/test_monitor.py`): `monitor status` lists the Director + members with their intervals (180 / 720) and last-ping age, and shows no `monitor`-role row; `monitor start` warns when no monitoring member exists (now via `find_monitoring_member`) and is silent when one exists; `monitor config --agent-id <director>` and `--agent-id <member>` both edit; `--agent-id <monitoring-member>` reports not-enrolled. <!-- completed: -->
+- [x] `cafleet/cli/monitor.py::monitor_start`: replace the `any(t["is_monitoring_member"] …)` warning check with `broker.find_monitoring_member(fleet_id) is None`; warn-but-run unchanged. <!-- completed: 2026-06-17T09:20 -->
+- [x] `cafleet/cli/monitor.py::monitor_status`: remove the `is_monitoring_member` → `"monitor"` role branch (role labels become `director` / `member`); add the `last_ping_age_seconds` derived field and render `last_ping` as a human age in the text formatter. <!-- completed: 2026-06-17T09:20 -->
+- [x] `cafleet/output.py`: update `format_monitor_status` for the last-ping-age column (and drop any `monitor` role rendering). <!-- completed: 2026-06-17T09:20 -->
+- [x] Tests (`tests/cli/test_monitor.py`): `monitor status` lists the Director + members with their intervals (180 / 720) and last-ping age, and shows no `monitor`-role row; `monitor start` warns when no monitoring member exists (now via `find_monitoring_member`) and is silent when one exists; `monitor config --agent-id <director>` and `--agent-id <member>` both edit; `--agent-id <monitoring-member>` reports not-enrolled. <!-- completed: 2026-06-17T09:20 -->
 
 ### Step 6: WebUI — verification & test retargeting
 

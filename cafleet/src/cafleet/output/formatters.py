@@ -197,12 +197,21 @@ def _format_idle(seconds: int | None) -> str:
     return f"{seconds // 3600}h"
 
 
+def _format_ping_age(age_seconds: int | None) -> str:
+    """Render a watched agent's last-ping age for the status table."""
+    if age_seconds is None:
+        return "—"
+    return f"{age_seconds}s ago"
+
+
 def format_monitor_status(payload: dict) -> str:
-    """Render ``monitor status`` as text: a runtime line + per-agent schedule table.
+    """Render ``monitor status`` as text: a runtime line + watched-agent table.
 
     ``payload`` is ``{"runtime": {...}, "agents": [...]}`` (the same shape the
     ``--json`` path emits). The runtime line reads ``running``/``stopped`` from
-    the DB heartbeat; the table lists every enrolled agent's schedule.
+    the DB heartbeat; the table lists the watched set (the root Director + every
+    ordinary member) with role / interval / last-ping age / enabled / pending.
+    The monitoring member is the unenrolled watcher and never appears here.
     """
     rt = payload["runtime"]
     if rt["running"]:
@@ -218,19 +227,19 @@ def format_monitor_status(payload: dict) -> str:
     if agents:
         lines.append(
             "  agent_id  name         role      interval  "
-            "last_ping             enabled  pending"
+            "last_ping  enabled  pending"
         )
         lines.append(
             "  --------  -----------  --------  --------  "
-            "-------------------  -------  -------"
+            "---------  -------  -------"
         )
         for a in agents:
             interval_s = f"{a['interval_seconds']}s"
-            last_ping = a["last_ping_at"] or "-"
+            last_ping = _format_ping_age(a["last_ping_age_seconds"])
             enabled_s = "yes" if a["enabled"] else "no"
             lines.append(
                 f"  {str(a['agent_id']):<8}  {a['name']:<11}  {a['role']:<8}  "
-                f"{interval_s:<8}  {last_ping:<19}  {enabled_s:<7}  "
+                f"{interval_s:<8}  {last_ping:<9}  {enabled_s:<7}  "
                 f"{a['pending_count']}"
             )
     return "\n".join(lines)
