@@ -9,7 +9,9 @@ cleanup-on-teardown, per-agent config edits, the per-tick scan
 ``is_monitoring_member`` field), ping recording, the single-instance runtime
 claim/heartbeat/clear with the ownership-checked split-brain guard, and the
 Alembic data migrations that prune ``monitor_config`` rows (``0003`` prunes
-non-Director rows; ``0004`` then prunes the root-Director rows).
+non-Director rows; ``0004`` then prunes the root-Director rows; ``0005`` — the
+current head, which inverts to per-member intervals — is covered by
+``test_alembic_smoke.py``).
 """
 
 import importlib.resources
@@ -194,6 +196,27 @@ def test_find_monitoring_member__none_after_deregister():
     fleet = _create_fleet()
     watcher = _register_monitoring_member(fleet, name="watcher")
     broker.deregister_agent(watcher["agent_id"])
+
+    assert broker.find_monitoring_member(fleet["fleet_id"]) is None
+
+
+def test_find_monitoring_member__none_when_pane_pending():
+    # a monitoring member whose placement is still pending (tmux_pane_id=None) has
+    # no wakeable pane, so find_monitoring_member treats it as absent.
+    fleet = _create_fleet()
+    broker.register_agent(
+        fleet_id=fleet["fleet_id"],
+        name="pending-watcher",
+        description="monitoring member with a pending pane",
+        placement={
+            "director_agent_id": fleet["director"]["agent_id"],
+            "tmux_session": "main",
+            "tmux_window_id": "@3",
+            "tmux_pane_id": None,
+            "coding_agent": "claude",
+        },
+        kind="monitoring-member",
+    )
 
     assert broker.find_monitoring_member(fleet["fleet_id"]) is None
 

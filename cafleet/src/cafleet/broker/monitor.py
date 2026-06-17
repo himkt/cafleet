@@ -70,8 +70,10 @@ def find_monitoring_member(fleet_id: int) -> dict | None:
     ``agent_card_json.cafleet.kind == MONITORING_MEMBER_KIND`` and inner-joined to
     ``agent_placements`` for its pane. There is at most one active per fleet (the
     ``register_agent`` guard), so the loop locates it by kind rather than by a
-    ``monitor_config`` row. Returns ``None`` when the fleet has no active
-    monitoring member.
+    ``monitor_config`` row. The pane must be bound (non-NULL ``tmux_pane_id``): a
+    monitoring member whose placement is still pending has no wakeable pane, so it
+    is treated as absent. Returns ``None`` when the fleet has no active,
+    pane-bound monitoring member.
     """
     stmt = (
         select(Agent.agent_id, Agent.name, AgentPlacement.tmux_pane_id)
@@ -79,6 +81,7 @@ def find_monitoring_member(fleet_id: int) -> dict | None:
         .where(
             Agent.fleet_id == fleet_id,
             Agent.status == "active",
+            AgentPlacement.tmux_pane_id.is_not(None),
             func.json_extract(Agent.agent_card_json, "$.cafleet.kind")
             == _shared.MONITORING_MEMBER_KIND,
         )

@@ -60,7 +60,7 @@ The load-bearing reframe is the split between the **watched set** and the **watc
 | Agent kind | Enrolled in `monitor_config`? | Default interval | Insertion site |
 |---|---|---|---|
 | Root Director | **yes** | **180 s** | `broker.create_fleet` (after its `AgentPlacement` is added) |
-| Ordinary member | **yes** | **720 s** | `broker.register_agent` when `placement is not None` AND `kind != MONITORING_MEMBER_KIND` |
+| Ordinary member | **yes** | **720 s** | `broker.register_agent` when `placement is not None` AND `kind not in (MONITORING_MEMBER_KIND, ADMINISTRATOR_KIND)` |
 | Monitoring member | **no** | — | (not enrolled; located by kind marker, §3) |
 | Administrator | no | — | (no placement) |
 | Card-only `agent register` | no | — | (no placement) |
@@ -90,7 +90,7 @@ def find_monitoring_member(fleet_id: int) -> dict | None:
     """
 ```
 
-It selects the single active agent in the fleet whose `json_extract(agent_card_json, '$.cafleet.kind') == MONITORING_MEMBER_KIND`, inner-joined to `agent_placements` for `tmux_pane_id`. Returns `None` when no monitoring member exists (the warn-but-run case, §7).
+It selects the single active agent in the fleet whose `json_extract(agent_card_json, '$.cafleet.kind') == MONITORING_MEMBER_KIND`, inner-joined to `agent_placements` for `tmux_pane_id` (which must be non-NULL — a pending / un-patched placement has no wakeable pane and is treated as absent). Returns `None` when no active, pane-bound monitoring member exists (the warn-but-run case, §7).
 
 ### 4. The loop (`monitor/loop.py::monitor_tick`)
 
