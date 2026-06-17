@@ -1,7 +1,7 @@
 # Monitor wake nudge names the due agents
 
 **Status**: Approved
-**Progress**: 0/14 tasks complete
+**Progress**: 6/14 tasks complete
 **Last Updated**: 2026-06-17
 
 ## Overview
@@ -199,12 +199,12 @@ The new payload fully replaces the old fixed Director-centric string. After this
 
 ### Step 1: Documentation & skills first (no code)
 
-- [ ] `docs/concepts/monitoring.md`: rewrite the wake-nudge description and "The monitoring member" routine per §5/§6 — the nudge names the freshly-due agents (role + id + name) + the Director; the routine inspects the named due agents plus the Director; remove the "re-query `monitor status` … smallest `last_ping` age" re-derivation (keep `monitor status` as optional context). <!-- completed: -->
-- [ ] `docs/spec/cli-options.md`: update the `cafleet monitor` wake-nudge sentence (≈ line 933) — the nudge names the freshly-due agents + the Director — AND reframe the `monitor status` last-ping rationale (≈ line 953) so `last_ping` ages are optional context, not the monitoring member's source of the due set. <!-- completed: -->
-- [ ] `README.md`: light-touch the monitoring summary (line 85) — the nudge names the freshly-due agents; the monitoring member inspects each named agent plus the Director and re-engages the Director on a stall. <!-- completed: -->
-- [ ] `skills/cafleet-agent-team-monitoring/SKILL.md`: rewrite, per §5, the line-18 wake-nudge paragraph (body prose, not the YAML `description:` field), the spawn-prompt routine-summary paragraph (≈ lines 48-51) and "On each wake" preamble (≈ lines 63-66) that open the routine with a `monitor status` schedule query, the numbered "On each wake" steps (drop the step-1 `Re-query the watched schedule` re-derivation; add the Director-dedupe note), and the quoted wake-nudge block (≈ lines 95-101, a representative rendering of the new payload with a note that the count, named agents, and Director id are filled per wake) — preserve the two-command (`cafleet member capture` + `cafleet member nudge`) on-wake scope. <!-- completed: -->
-- [ ] Verify `skills/cafleet-agent-team-supervision/SKILL.md` and `skills/cafleet/*` need no edit (the new payload content is not quoted there). <!-- completed: -->
-- [ ] Removal sweep: `git grep -nI -e "capture the Director pane, judge it" -e "smallest .*last.ping.* age" -e "run your monitoring routine now" -e "monitor status schedule query" -e "Re-query the watched schedule"` over the tree; every hit outside `design-docs/` is a removal-rule blocker. <!-- completed: -->
+- [x] `docs/concepts/monitoring.md`: rewrite the wake-nudge description and "The monitoring member" routine per §5/§6 — the nudge names the freshly-due agents (role + id + name) + the Director; the routine inspects the named due agents plus the Director; remove the "re-query `monitor status` … smallest `last_ping` age" re-derivation (keep `monitor status` as optional context). <!-- completed: 2026-06-17T23:25 -->
+- [x] `docs/spec/cli-options.md`: update the `cafleet monitor` wake-nudge sentence (≈ line 933) — the nudge names the freshly-due agents + the Director — AND reframe the `monitor status` last-ping rationale (≈ line 953) so `last_ping` ages are optional context, not the monitoring member's source of the due set. <!-- completed: 2026-06-17T23:25 -->
+- [x] `README.md`: light-touch the monitoring summary (line 85) — the nudge names the freshly-due agents; the monitoring member inspects each named agent plus the Director and re-engages the Director on a stall. <!-- completed: 2026-06-17T23:25 -->
+- [x] `skills/cafleet-agent-team-monitoring/SKILL.md`: rewrite, per §5, the line-18 wake-nudge paragraph (body prose, not the YAML `description:` field), the spawn-prompt routine-summary paragraph (≈ lines 48-51) and "On each wake" preamble (≈ lines 63-66) that open the routine with a `monitor status` schedule query, the numbered "On each wake" steps (drop the step-1 `Re-query the watched schedule` re-derivation; add the Director-dedupe note), and the quoted wake-nudge block (≈ lines 95-101, a representative rendering of the new payload with a note that the count, named agents, and Director id are filled per wake) — preserve the two-command (`cafleet member capture` + `cafleet member nudge`) on-wake scope. <!-- completed: 2026-06-17T23:25 -->
+- [x] Verify `skills/cafleet-agent-team-supervision/SKILL.md` and `skills/cafleet/*` need no edit (the new payload content is not quoted there). <!-- completed: 2026-06-17T23:25 -->
+- [x] Removal sweep: `git grep -nI -e "capture the Director pane, judge it" -e "smallest .*last.ping.* age" -e "run your monitoring routine now" -e "monitor status schedule query" -e "Re-query the watched schedule"` over the tree; every hit outside `design-docs/` is a removal-rule blocker. <!-- completed: 2026-06-17T23:25 -->
 
 ### Step 2: Protocol & keystroke payload
 

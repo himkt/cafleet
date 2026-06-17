@@ -47,11 +47,14 @@ job, defined by the `cafleet-agent-team-supervision` skill (the *what*).
 The loop's only keystroke is a *wake nudge* (the `send_wake_trigger` helper) into
 the monitoring member's own pane — a single-line instruction to run its
 capture-classify-reengage routine now. The loop fires that wake when **≥ 1
-watched agent** (the Director or an ordinary member) has come due. The loop runs
-inside the monitoring member's own pane, so this wake lands in that same pane's
-foreground (see [The monitoring member](#the-monitoring-member)). The wake nudge
-does not lead with `Esc` — `send_wake_trigger` does not pass `esc_first`, because
-the monitoring member's pane is never on a permission prompt.
+watched agent** (the Director or an ordinary member) has come due, and the nudge
+**names** each freshly-due agent as `<role> <id> (<name>)` (role `director` or
+`member`) plus the Director id as the standing inspect-and-re-engage target, so
+the monitoring member inspects exactly those named panes plus the Director this
+wake. The loop runs inside the monitoring member's own pane, so this wake lands
+in that same pane's foreground (see [The monitoring member](#the-monitoring-member)).
+The wake nudge does not lead with `Esc` — `send_wake_trigger` does not pass
+`esc_first`, because the monitoring member's pane is never on a permission prompt.
 
 The Director receives **no** keystroke from the loop. It is re-engaged only on
 demand: by the monitoring member's idle nudge — `cafleet member nudge`, which
@@ -113,21 +116,26 @@ never enrolled. It is the **one** process in the fleet that runs
 `cafleet monitor start`. There is at most one monitoring member per fleet; a
 second `--role monitor` spawn is rejected.
 
-On each wake the loop keystrokes into its own pane, and the monitoring member
-runs its routine — staying within two read/act commands, read-only
-`cafleet member capture` and `cafleet member nudge`:
+On each wake the loop keystrokes a nudge **naming the freshly-due agents** into
+its own pane, and the monitoring member runs its routine — staying within two
+read/act commands, read-only `cafleet member capture` and `cafleet member nudge`:
 
-1. **Re-query `cafleet monitor status`** to read the watched schedule and
-   identify the agents the monitor just flagged (the smallest `last_ping` age,
-   e.g. `0s ago`).
-2. **Capture the Director's pane** via `cafleet member capture --member-id
-   <director-id>` (read-only; `member capture` accepts any in-fleet agent with a
-   placement, the root Director included) and classify it ACTIVE vs IDLE.
-3. **For each freshly-due member**, capture its pane (read-only) and judge whether
-   it is progressing or stalled.
+1. **Read the freshly-due agents named in the wake nudge** — each rendered as
+   `<role> <id> (<name>)`. Those agents, plus the Director, are who you inspect
+   this wake. (`cafleet monitor status` is available as optional context — e.g. to
+   read intervals or pending counts — but it is **not** the source of the due set;
+   the nudge's named list is authoritative.)
+2. **Capture each named due agent's pane** via `cafleet member capture --member-id
+   <id>` (read-only; `member capture` accepts any in-fleet agent with a placement,
+   the root Director included) and judge it active/idle and progressing/stalled.
+3. **Always also capture the Director's pane** via `cafleet member capture
+   --member-id <director-id>` and classify it ACTIVE vs IDLE — the Director is the
+   only actuation target. (If the Director is itself among the named due agents,
+   step 2 already captured it; step 3 only adds the Director when it is not in the
+   named list.)
 4. **Re-engage the Director** via `cafleet member nudge --member-id <director-id>`
    when the Director is idle with un-ACKed inbox / stalled members, **or** when
-   any inspected member looks stalled — naming what needs attention (idle
+   any named due agent looks stalled — naming what needs attention (idle
    Director, stalled member `<id>`). `member nudge` persists an ACKable broker
    task and fires the hardened, `Esc`-safeguarded inline preview into the
    Director's pane. The Director then drives the stalled member.

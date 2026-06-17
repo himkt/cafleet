@@ -15,7 +15,7 @@ Angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<member-agent-id>`) 
 
 CAFleet members do not act autonomously. The Director drives the team — and the Director needs a way to wake itself up periodically to check inboxes, dispatch queued work, and detect stalls. That heartbeat is supplied by **`cafleet monitor`**, a per-fleet `scan → wake → sleep` loop that the fleet's dedicated **monitoring member** runs as a **background task** in its own pane. Because it is just a backgrounded command, the heartbeat is **backend-agnostic** — a root Director on `claude`, `codex`, or `opencode` gets the identical tick. There is no per-backend scheduling asymmetry: the monitor is the one mechanism for every backend.
 
-Each tick the loop scans the **watched set** — the root Director (default **180 s**) and every ordinary member (default **720 s**), each on its own per-agent interval — and, when **≥ 1 watched agent is due**, wakes the monitoring member **once**. The loop's only keystroke is into the monitoring member's own pane; it **never** keystrokes a watched pane (the Director or an ordinary member). The wake nudge does **not** lead with `Esc`: the monitoring member's pane runs a read-only routine under `dontAsk` and is never parked on a permission-approval prompt, so a leading `Esc` would merely self-interrupt an in-progress routine. (The `Esc` safeguard instead lives where a target may be on a prompt — the broker's message-delivery inline preview and `cafleet member ping`.) The dedicated monitoring member is the **watcher**, not a watched agent — it carries no interval and is located by its `agent_card_json.cafleet.kind == "monitoring-member"` marker, not by a `monitor_config` row. The keystroke is a single-line *wake nudge* instructing the monitoring member to run its capture-classify-reengage routine over the freshly-due agents (see [The monitoring member](#the-monitoring-member)).
+Each tick the loop scans the **watched set** — the root Director (default **180 s**) and every ordinary member (default **720 s**), each on its own per-agent interval — and, when **≥ 1 watched agent is due**, wakes the monitoring member **once**. The loop's only keystroke is into the monitoring member's own pane; it **never** keystrokes a watched pane (the Director or an ordinary member). The wake nudge does **not** lead with `Esc`: the monitoring member's pane runs a read-only routine under `dontAsk` and is never parked on a permission-approval prompt, so a leading `Esc` would merely self-interrupt an in-progress routine. (The `Esc` safeguard instead lives where a target may be on a prompt — the broker's message-delivery inline preview and `cafleet member ping`.) The dedicated monitoring member is the **watcher**, not a watched agent — it carries no interval and is located by its `agent_card_json.cafleet.kind == "monitoring-member"` marker, not by a `monitor_config` row. The keystroke is a single-line *wake nudge* that **names** each freshly-due agent as `<role> <id> (<name>)` (role `director` or `member`) plus the Director id as the standing inspect-and-re-engage target, instructing the monitoring member to run its capture-classify-reengage routine over exactly those named agents plus the Director (see [The monitoring member](#the-monitoring-member)).
 
 See the `cafleet` skill and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring/) for the full command surface and policy. **The monitoring member — not the Director — runs `cafleet monitor start`** (see § Monitor Lifecycle).
 
@@ -47,8 +47,9 @@ member-driving routes back through the Director.
 
 Your on-wake routine acts through exactly two cafleet member commands: cafleet
 member capture for read-only inspection, and cafleet member nudge to re-engage the
-idle Director. It opens with a read-only cafleet monitor status schedule query,
-then keeps every wake within those two member actions.
+idle Director. It opens by reading the freshly-due agents the wake nudge names
+(each rendered <role> <id> (<name>)), then keeps every wake within those two
+member actions.
 
 Startup (in order, as your first actions):
 1. Send the ready signal to the Director:
@@ -60,31 +61,36 @@ Startup (in order, as your first actions):
    cafleet message send --fleet-id {fleet_id} --agent-id {agent_id} --to {director_agent_id} --text "ready: monitor live"
    This message gates the Director's first ordinary member create.
 
-On each wake (a "[monitor] wake: ..." nudge keystroked into this pane by the loop),
-your routine opens with a read-only cafleet monitor status schedule query, then
-acts through exactly two cafleet member commands — cafleet member capture (read-only
-inspection) and cafleet member nudge (re-engage the idle Director):
-1. Re-query the watched schedule to find which agents the monitor just flagged:
-   cafleet monitor status --fleet-id {fleet_id}
-   The freshly-due agents are the ones with the smallest last_ping age (e.g.
-   "0s ago"); they are who you inspect this wake.
-2. Capture the Director's pane (always — the Director is your only actuation
+On each wake (a "[monitor] wake: N agent(s) due — ..." nudge keystroked into this
+pane by the loop), your routine opens by reading the freshly-due agents the nudge
+names, then acts through exactly two cafleet member commands — cafleet member
+capture (read-only inspection) and cafleet member nudge (re-engage the idle
+Director):
+1. Read the freshly-due agents named in the wake nudge — each rendered
+   <role> <id> (<name>) (role director or member). Those agents, plus the
+   Director, are who you inspect this wake. (cafleet monitor status --fleet-id
+   {fleet_id} is available as optional context — e.g. to read intervals or pending
+   counts — but it is NOT the source of the due set; the nudge's named list is
+   authoritative.)
+2. Capture each named due agent's pane (read-only) and judge whether it is active
+   or idle and progressing or stalled:
+   cafleet member capture --fleet-id {fleet_id} --member-id <id> --lines 120
+3. Always also capture the Director's pane (the Director is your only actuation
    target):
    cafleet member capture --fleet-id {fleet_id} --member-id {director_agent_id} --lines 120
    Classify the Director ACTIVE vs IDLE with your own judgment (mid-turn, running
    a tool, or typing = ACTIVE; sitting at an empty prompt with un-acked inbox or
-   visibly stalled members = IDLE).
-3. For each freshly-due ORDINARY member, capture its pane (read-only) and judge
-   whether it is progressing or stalled:
-   cafleet member capture --fleet-id {fleet_id} --member-id <member-id> --lines 120
+   visibly stalled members = IDLE). If the Director is itself among the named due
+   agents, step 2 already captured it; this step only adds the Director when it is
+   not in the named list.
 4. Re-engage the DIRECTOR via cafleet member nudge when the Director is IDLE with
-   un-acked inbox / stalled members, OR when any inspected member looks stalled —
+   un-acked inbox / stalled members, OR when any named due agent looks stalled —
    naming what needs attention (idle Director, stalled member <id>). member nudge
    persists an ACKable task AND fires the hardened, Esc-safeguarded inline preview,
    so a Director sitting on a permission prompt has it dismissed before the
    preview's Enter lands:
    cafleet member nudge --fleet-id {fleet_id} --agent-id {agent_id} --member-id {director_agent_id} --text "<summary>"
-   If the Director is ACTIVE and no inspected member looks stalled, do nothing; end
+   If the Director is ACTIVE and no named due agent looks stalled, do nothing; end
    your turn. Never keystroke task instructions into an ordinary member's pane —
    all member-driving routes back through the Director.
 
@@ -94,13 +100,16 @@ row), confirm to the Director, and return to the prompt. The Director then runs
 member delete on you.
 ```
 
-The loop's wake nudge that drives the "On each wake" routine is the single line:
+The loop's wake nudge that drives the "On each wake" routine is a single line that
+**names** the freshly-due agents and the Director id — for example, when the
+Director (332) and member 336 "alice" are both due:
 
 ```text
-[monitor] wake: run your monitoring routine now — capture the Director pane,
-judge it active vs idle, and if idle assess the inbox and members and re-engage
-the Director with an Esc-safeguarded nudge.
+[monitor] wake: 2 agents due — director 332 (Director), member 336 (alice). Capture each named pane read-only, with the Director pane (332) always inspected; judge each active/idle and progressing/stalled; re-engage the Director via cafleet member nudge when it is idle with un-acked work or any due agent looks stalled.
 ```
+
+The count (`N agent(s) due`), the named agents (`<role> <id> (<name>)`, one per
+freshly-due agent), and the Director id are filled in per wake.
 
 ## Team-facilitation instructions
 
