@@ -65,10 +65,10 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
     soft-deleted; otherwise ``CONTINUE``. The pane-liveness set is fetched once
     per tick (one tmux call). The due set is computed over the WATCHED agents
     (the root Director + ordinary members); when ≥ 1 is due and the monitoring
-    member's pane is live, the loop keystrokes a single wake nudge into the
-    watcher's own pane — never into a watched pane — and advances each due
-    agent's cadence in one write. With no live watcher to wake, nothing is
-    recorded.
+    member's pane is live, the loop keystrokes a single wake nudge — naming the
+    freshly-due agents and the Director id — into the watcher's own pane (never
+    into a watched pane) and advances each due agent's cadence in one write. With
+    no live watcher to wake, nothing is recorded.
     """
     if not broker.heartbeat_monitor_runtime(fleet_id, os.getpid(), now.isoformat()):
         return STOP
@@ -88,13 +88,14 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
 
     if due and watcher is not None and watcher["pane_id"] in live_panes:
         # The loop's only keystroke: a single best-effort wake nudge into the
-        # watcher's own pane, driving its capture-classify-reengage routine over
-        # the freshly-due agents. A watched pane (Director / member) is never
-        # keystroked.
+        # watcher's own pane. The nudge NAMES the freshly-due agents and the
+        # Director id, driving the watcher's capture-classify-reengage routine
+        # over exactly those panes plus the Director. A watched pane (Director /
+        # member) is never keystroked.
         woke = mux.send_wake_trigger(
             target_pane_id=watcher["pane_id"],
-            fleet_id=fleet_id,
-            agent_id=watcher["agent_id"],
+            due_agents=due,
+            director_agent_id=fleet["director_agent_id"],
         )
         if woke:
             # Stamp each due agent's cadence ONLY on a successful wake, so a

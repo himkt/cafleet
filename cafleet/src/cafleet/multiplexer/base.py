@@ -151,21 +151,29 @@ class Multiplexer(Protocol):
         ...
 
     def send_wake_trigger(
-        self, *, target_pane_id: str, fleet_id: int, agent_id: int
+        self, *, target_pane_id: str, due_agents: list[dict], director_agent_id: int
     ) -> bool:
         """Keystroke a single-line *wake nudge* into the monitoring member's pane.
 
         Unlike :meth:`send_poll_trigger` (a bare ``cafleet … message poll`` the
         Director receives), this carries an instruction to run the monitoring
-        member's capture-classify-reengage routine. Both ping helpers lead with
-        an ``Esc`` safeguard. ``fleet_id`` / ``agent_id`` keep the signature
-        uniform with :meth:`send_poll_trigger`; the routine runs in the
-        monitoring member's own pane, so they are not echoed into the nudge.
+        member's capture-classify-reengage routine. The nudge **names** each
+        freshly-due agent (``<role> <id> (<name>)``) and the Director id as the
+        standing inspect-and-re-engage target, so the monitoring member inspects
+        exactly those panes plus the Director. The wake nudge does **not** lead
+        with an ``Esc`` safeguard — only :meth:`send_poll_trigger` (via
+        ``cafleet member ping``) and :meth:`send_inline_preview` do, because their
+        targets may be parked on a permission-approval prompt; the monitoring
+        member's own pane never is. The payload carries no backtick and no
+        ``$(…)`` command substitution, so it is safe in the monitoring member's
+        coding-agent input box.
 
         Args:
             target_pane_id: Pane id of the monitoring member to nudge.
-            fleet_id: Fleet id (signature parity with ``send_poll_trigger``).
-            agent_id: Monitoring member's agent id (signature parity).
+            due_agents: The freshly-due watched agents to name, each a target
+                dict carrying ``agent_id``, ``name``, and ``is_director``.
+            director_agent_id: The Director's agent id, named in every payload as
+                the standing inspect-and-re-engage target.
 
         Returns:
             ``True`` if the keystroke landed; ``False`` if the pane is dead or

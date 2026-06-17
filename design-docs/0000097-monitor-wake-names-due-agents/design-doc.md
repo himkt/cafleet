@@ -1,7 +1,7 @@
 # Monitor wake nudge names the due agents
 
 **Status**: Approved
-**Progress**: 6/14 tasks complete
+**Progress**: 14/14 tasks complete
 **Last Updated**: 2026-06-17
 
 ## Overview
@@ -208,23 +208,23 @@ The new payload fully replaces the old fixed Director-centric string. After this
 
 ### Step 2: Protocol & keystroke payload
 
-- [ ] `cafleet/src/cafleet/multiplexer/base.py`: update `Multiplexer.send_wake_trigger` to `(*, target_pane_id, due_agents, director_agent_id)`; rewrite the docstring (the nudge names the freshly-due agents + the Director id) and **correct** the stale "Both ping helpers lead with an `Esc` safeguard" claim (the wake nudge does not lead with `Esc`); update the `Args:` block (add `due_agents` / `director_agent_id`, drop `fleet_id` / `agent_id`). <!-- completed: -->
-- [ ] `cafleet/src/cafleet/multiplexer/tmux.py`: update `TmuxMultiplexer.send_wake_trigger` to the new signature; build the §2 single-line payload from `due_agents` + `director_agent_id` (with the CR/LF/tab → U+23CE name sanitizer); rewrite the docstring and remove the "`fleet_id` / `agent_id` keep the signature uniform" sentence. Leave `_send_literal_then_enter` and `send_inline_preview` unchanged. <!-- completed: -->
+- [x] `cafleet/src/cafleet/multiplexer/base.py`: update `Multiplexer.send_wake_trigger` to `(*, target_pane_id, due_agents, director_agent_id)`; rewrite the docstring (the nudge names the freshly-due agents + the Director id) and **correct** the stale "Both ping helpers lead with an `Esc` safeguard" claim (the wake nudge does not lead with `Esc`); update the `Args:` block (add `due_agents` / `director_agent_id`, drop `fleet_id` / `agent_id`). <!-- completed: 2026-06-17T23:45 -->
+- [x] `cafleet/src/cafleet/multiplexer/tmux.py`: update `TmuxMultiplexer.send_wake_trigger` to the new signature; build the §2 single-line payload from `due_agents` + `director_agent_id` (with the CR/LF/tab → U+23CE name sanitizer); rewrite the docstring and remove the "`fleet_id` / `agent_id` keep the signature uniform" sentence. Leave `_send_literal_then_enter` and `send_inline_preview` unchanged. <!-- completed: 2026-06-17T23:45 -->
 
 ### Step 3: Loop
 
-- [ ] `cafleet/src/cafleet/monitor/loop.py::monitor_tick`: call `send_wake_trigger(target_pane_id=watcher["pane_id"], due_agents=due, director_agent_id=fleet["director_agent_id"])`; update the inline comment and the `monitor_tick` docstring to say the nudge names the freshly-due agents + the Director. `record_pings`, the stdout echo, the retry-on-failure path, and the no-watcher path stay unchanged. <!-- completed: -->
+- [x] `cafleet/src/cafleet/monitor/loop.py::monitor_tick`: call `send_wake_trigger(target_pane_id=watcher["pane_id"], due_agents=due, director_agent_id=fleet["director_agent_id"])`; update the inline comment and the `monitor_tick` docstring to say the nudge names the freshly-due agents + the Director. `record_pings`, the stdout echo, the retry-on-failure path, and the no-watcher path stay unchanged. <!-- completed: 2026-06-17T23:45 -->
 
 ### Step 4: Tests
 
-- [ ] `cafleet/tests/monitor/test_loop.py`: update the `fake_wake` stub to `(self, *, target_pane_id, due_agents, director_agent_id)` and capture the conveyed due-agent ids + director id; assert the due-Director, due-member, and multi-due tests each convey the correct due set and `director_agent_id`; update the no-wake / failed-wake / `STOP` tests for the new signature; keep the `polls == []` (never-keystroke-a-watched-pane) assertions. <!-- completed: -->
-- [ ] `cafleet/tests/multiplexer/test_tmux.py`: update `test_send_wake_trigger__return_branches_and_argv` and `test_send_wake_trigger__payload_is_single_line_monitor_nudge` to pass `due_agents` + `director_agent_id`; assert the payload names each due agent (role + id + name) and the Director id, stays single-line / `[monitor]`-prefixed / non-`cafleet` / no-`Esc`, sanitizes a crafted CR/LF/tab name, and contains no backtick and no `$(` command-substitution sequence. <!-- completed: -->
-- [ ] `cafleet/tests/multiplexer/test_protocol.py`: confirm `test_protocol_declares_send_wake_trigger` and `test_impl_satisfies_protocol` stay green (no edit expected). <!-- completed: -->
+- [x] `cafleet/tests/monitor/test_loop.py`: update the `fake_wake` stub to `(self, *, target_pane_id, due_agents, director_agent_id)` and capture the conveyed due-agent ids + director id; assert the due-Director, due-member, and multi-due tests each convey the correct due set and `director_agent_id`; update the no-wake / failed-wake / `STOP` tests for the new signature; keep the `polls == []` (never-keystroke-a-watched-pane) assertions. <!-- completed: 2026-06-17T23:45 -->
+- [x] `cafleet/tests/multiplexer/test_tmux.py`: update `test_send_wake_trigger__return_branches_and_argv` and `test_send_wake_trigger__payload_is_single_line_monitor_nudge` to pass `due_agents` + `director_agent_id`; assert the payload names each due agent (role + id + name) and the Director id, stays single-line / `[monitor]`-prefixed / non-`cafleet` / no-`Esc`, sanitizes a crafted CR/LF/tab name, and contains no backtick and no `$(` command-substitution sequence. <!-- completed: 2026-06-17T23:45 -->
+- [x] `cafleet/tests/multiplexer/test_protocol.py`: confirm `test_protocol_declares_send_wake_trigger` and `test_impl_satisfies_protocol` stay green (no edit expected). <!-- completed: 2026-06-17T23:45 -->
 
 ### Step 5: Verification
 
-- [ ] `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test`, and `mise //admin:build` all pass. <!-- completed: -->
-- [ ] Final removal sweep confirms no copy of the old fixed Director-centric nudge string and no re-derivation framing ("re-derive from smallest `last_ping` age", "monitor status schedule query", or "Re-query the watched schedule") survives outside `design-docs/`. <!-- completed: -->
+- [x] `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test`, and `mise //admin:build` all pass. <!-- completed: 2026-06-17T23:45 -->
+- [x] Final removal sweep confirms no copy of the old fixed Director-centric nudge string and no re-derivation framing ("re-derive from smallest `last_ping` age", "monitor status schedule query", or "Re-query the watched schedule") survives outside `design-docs/`. <!-- completed: 2026-06-17T23:45 -->
 
 ---
 
