@@ -118,7 +118,7 @@ The no-concerns exit MUST be qualified by the post-push filter (`submittedAt > l
 ```markdown
 #### 7e. Silence handling — autonomous re-request
 
-When `silence_ticks >= 30` (≈ 30 min since the last Copilot activity AND no new items this turn), the Director re-requests the review on its own — no user prompt. Authority to end the loop stays with the Administrator (§ Termination authority); silence is a pending review, so the Director keeps it turning:
+When `silence_ticks >= 30` (≈ 90 min since the last Copilot activity AND no new items this turn), the Director re-requests the review on its own — no user prompt. Authority to end the loop stays with the Administrator (§ Termination authority); silence is a pending review, so the Director keeps it turning:
 
 1. **Detect pending vs. failed-to-land** via `gh api repos/<owner>/<repo>/pulls/<pr-number>/requested_reviewers`:
    - **Copilot present** → the request landed and the review is pending; reset `silence_ticks = 0` and keep waiting.
