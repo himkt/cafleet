@@ -95,7 +95,7 @@ When the user selects "Other" and provides free text, use LLM reasoning to deter
 
 ## Progress Monitoring
 
-Track team progress on each turn the monitoring member's idle-nudge grants you (default 60 s interval) using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next. Supervision obligations (Authorization-Scope Guard, idle semantics) come from the paired `cafleet-agent-team-supervision` skill.
+Track team progress on each turn the monitoring member's idle-nudge grants you (driven by the Director's 180 s due-ness in the watched set) using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next. Supervision obligations (Authorization-Scope Guard, idle semantics) come from the paired `cafleet-agent-team-supervision` skill.
 
 ### User delegation for member send-input
 

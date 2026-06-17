@@ -14,11 +14,12 @@ against its tokens. Moving the supervision scheduler out of the coding agents
 into the monitoring member's `cafleet monitor` process
 ([Monitoring](monitoring.md)) is itself a per-tick reduction: no agent carries a
 scheduling prompt template in context — the monitor wakes only the monitoring
-member with a single wake-nudge keystroke, and the Director is re-engaged on
-demand (the monitoring member's idle nudge plus the broker's inline-preview
-keystroke), not by a per-tick poll keystroke. The architectural-shape choices
-that keep per-message, per-spawn, per-tick, and per-context-load cost down are
-summarized below.
+member with a single wake-nudge keystroke (fired when a watched agent comes due on
+its own interval — the Director at 180 s, members at 720 s), and the Director is
+re-engaged on demand (the monitoring member's idle nudge plus the broker's
+inline-preview keystroke), not by a per-tick poll keystroke. The
+architectural-shape choices that keep per-message, per-spawn, per-tick, and
+per-context-load cost down are summarized below.
 
 | Technique | Architectural touch-points |
 |---|---|

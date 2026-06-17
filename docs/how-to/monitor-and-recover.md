@@ -12,11 +12,14 @@ reacting. This guide checks on a running team and recovers a quiet member.
 
 The recovery ladder below is driven by a periodic supervision tick. That tick
 comes from `cafleet monitor` — a per-fleet loop the fleet's dedicated
-**monitoring member** runs as a background task in its own pane, waking **only**
-the monitoring member on its interval with an
-**`Esc`-safeguarded** keystroke (an `Escape` precedes every ping so a pane on a
-pending permission prompt can't have it confirmed by the trailing `Enter`). The
-monitoring member is spawned **first**; it starts the loop and reports
+**monitoring member** runs as a background task in its own pane. Each tick it
+scans the **watched set** (the root Director at 180 s and every ordinary member at
+720 s, each on its own interval) and, when ≥ 1 watched agent is due, wakes the
+monitoring member by keystroking a wake nudge into its pane. That wake nudge does
+**not** lead with `Esc` — it targets the monitoring member's own pane, which is
+never parked on a permission prompt; the `Esc` safeguard instead lives on the
+broker's inline preview and `cafleet member ping`, whose targets may be on a
+prompt. The monitoring member is spawned **first**; it starts the loop and reports
 `ready: monitor live` (its canonical spawn prompt lives in the
 `cafleet-agent-team-monitoring` skill):
 
@@ -28,16 +31,18 @@ cafleet member create --fleet-id 1 --agent-id 2 \
 cafleet monitor status --fleet-id 1              # confirm it is running + see the schedule
 ```
 
-The loop pings only the monitoring member — **never** the root Director and
-**never** ordinary members ([Monitoring](../concepts/monitoring.md)). The
-Director is re-engaged on demand by the monitoring member's idle assessment
-(and by the broker's inline-preview keystroke on every inbound `message send`);
-a quiet ordinary member is surfaced the same way — the monitoring member's idle
-assessment of the Director re-engages the Director to run the inspect-and-recover
-ladder below. The monitor supplies only the heartbeat; the inspect-and-recover
-steps are the Director's job. Stop it at teardown by stopping the monitoring
-member's background task (there is no `monitor stop`); `fleet delete` also makes
-the loop self-terminate.
+The loop's only keystroke is into the monitoring member's pane — it **never**
+keystrokes a watched pane, neither the root Director nor an ordinary member
+([Monitoring](../concepts/monitoring.md)). On each wake the monitoring member
+inspects each freshly-due watched agent (read-only `cafleet member capture`) and
+re-engages the idle Director on demand via `cafleet member nudge` (the broker's
+inline-preview keystroke on every inbound `message send` also wakes the Director).
+A quiet ordinary member is surfaced the same way — the monitoring member's
+assessment names it to the Director, who runs the inspect-and-recover ladder
+below. The monitor supplies only the heartbeat; the inspect-and-recover steps are
+the Director's job. Stop it at teardown by stopping the monitoring member's
+background task (there is no `monitor stop`); `fleet delete` also makes the loop
+self-terminate.
 
 ## Prompt
 
