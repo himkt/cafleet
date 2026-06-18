@@ -97,16 +97,27 @@ def _send_literal_then_enter(
 
 
 def _sanitize_wake_name(name: str) -> str:
-    """Collapse CR/LF/tab in a user-controlled agent name to U+23CE so a crafted
-    name cannot break the wake nudge's single-line guarantee. Distinct from the
-    CR/LF-only cosmetic strip ``send_inline_preview`` applies — this one also
-    neutralizes the tab.
+    """Neutralize the sequences in a user-controlled agent name that would break
+    the wake nudge's guarantees, before the name is interpolated into the payload:
+
+    * CR/LF/tab → U+23CE (⏎), preserving the single-line guarantee.
+    * a backtick → U+02CB (ˋ) and a ``$(`` command-substitution opener →
+      ``$`` + U+FE59 (﹙), so the no-backtick / no-``$(`` payload guarantee holds
+      for *any* name, not just the static template — defense-in-depth for the
+      agent-crash / mis-launch edge where the monitoring pane could momentarily
+      sit at a shell prompt.
+
+    Distinct from the CR/LF-only cosmetic strip ``send_inline_preview`` applies;
+    the ``$(`` replacement is non-empty so it cannot reintroduce ``$(`` by joining
+    leftover characters.
     """
     return (
         name.replace("\r\n", "⏎")
         .replace("\n", "⏎")
         .replace("\r", "⏎")
         .replace("\t", "⏎")
+        .replace("`", "ˋ")
+        .replace("$(", "$﹙")
     )
 
 
