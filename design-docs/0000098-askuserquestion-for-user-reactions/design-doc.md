@@ -1,7 +1,7 @@
 # AskUserQuestion as the Canonical User-Reaction Surface
 
 **Status**: Approved
-**Progress**: 1/17 tasks complete
+**Progress**: 2/17 tasks complete
 **Last Updated**: 2026-06-18
 
 ## Overview
@@ -158,7 +158,7 @@ The present-gate already uses `AskUserQuestion`; make the feedback path explicit
 
 ### Step 2: Centralize the backend caveat
 
-- [ ] Reduce the `cafleet-agent-team-monitoring/SKILL.md` backend caveat (line 163) to the pointer form (§2). <!-- completed: -->
+- [x] Reduce the `cafleet-agent-team-monitoring/SKILL.md` backend caveat (line 163) to the pointer form (§2). <!-- completed: 2026-06-18T13:24 -->
 
 ### Step 3: Reference the canonical taxonomy (de-duplicate)
 

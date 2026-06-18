@@ -160,7 +160,7 @@ If `cafleet message poll` shows no recent messages from the member, fall back to
 
 If the terminal buffer shows the member paused on a 4-option choice prompt (a list of "1. …", "2. …", "3. …", "4. Type something" rows — the shape that `cafleet member send-input` is validated for), the correct unblock is `cafleet member send-input` — never raw `tmux send-keys` — and the Director MUST delegate the decision to the user BEFORE invoking the wrapper. The Director never picks the `--choice` digit or drafts the `--freetext` body on its own judgment. The full three-beat workflow and the pane-shapes table live in the cafleet skill's "Answer a member's AskUserQuestion prompt" section — that is canonical; do not duplicate them here.
 
-> **`AskUserQuestion` is a Claude Code idiom.** The "delegate to the user" beat assumes the Director runs in Claude Code; Directors on another coding agent substitute their own decision-elicitation surface (or a plain operator message). The 4-option pane frame that `cafleet member send-input` targets is likewise Claude-Code-specific — on a codex/opencode member the read-then-respond cadence applies, but the `--choice` / `--freetext` keystrokes apply only when the captured buffer matches the validated 4-option layout.
+> **`AskUserQuestion` is a Claude Code idiom.** See the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)* for the canonical caveat — it governs both the "delegate to the user" beat and the Claude-Code-specific `cafleet member send-input` 4-option pane frame.
 
 ### Escalation
 
