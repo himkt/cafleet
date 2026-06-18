@@ -96,6 +96,31 @@ def _send_literal_then_enter(
     )
 
 
+def _sanitize_wake_name(name: str) -> str:
+    """Neutralize the sequences in a user-controlled agent name that would break
+    the wake nudge's guarantees, before the name is interpolated into the payload:
+
+    * CR/LF/tab → U+23CE (⏎), preserving the single-line guarantee.
+    * a backtick → U+02CB (ˋ) and a ``$(`` command-substitution opener →
+      ``$`` + U+FE59 (﹙), so the no-backtick / no-``$(`` payload guarantee holds
+      for *any* name, not just the static template — defense-in-depth for the
+      agent-crash / mis-launch edge where the monitoring pane could momentarily
+      sit at a shell prompt.
+
+    Distinct from the CR/LF-only cosmetic strip ``send_inline_preview`` applies;
+    the ``$(`` replacement is non-empty so it cannot reintroduce ``$(`` by joining
+    leftover characters.
+    """
+    return (
+        name.replace("\r\n", "⏎")
+        .replace("\n", "⏎")
+        .replace("\r", "⏎")
+        .replace("\t", "⏎")
+        .replace("`", "ˋ")
+        .replace("$(", "$﹙")
+    )
+
+
 class TmuxMultiplexer:
     name = "tmux"
 
@@ -202,30 +227,38 @@ class TmuxMultiplexer:
         return True
 
     def send_wake_trigger(
-        self, *, target_pane_id: str, fleet_id: int, agent_id: int
+        self, *, target_pane_id: str, due_agents: list[dict], director_agent_id: int
     ) -> bool:
         """Best-effort wake nudge for the monitoring member's pane.
 
-        Carries a single-line instruction to run the monitoring member's
-        capture-classify-reengage routine — distinct from the poll command
+        Carries a single-line instruction that **names** each freshly-due agent
+        (``<role> <id> (<name>)``) and the Director id, directing the monitoring
+        member to run its capture-classify-reengage routine over those named
+        panes plus the Director — distinct from the poll command
         ``send_poll_trigger`` carries (now used only by ``cafleet member ping``).
         This is the sole keystroke the loop fires — it wakes only the monitoring
         member. No leading ``Escape``: the target is the monitoring member's own
         pane, which runs a read-only routine under ``dontAsk`` and is never
         parked on a permission-approval prompt, so an ``Esc`` would merely
-        self-interrupt an in-progress routine. No shell-special characters, so
-        the keystroke is sane whether it lands in the coding agent's input or at
-        a shell prompt. ``fleet_id`` / ``agent_id`` keep the keystroke-helper
-        signature uniform with ``send_poll_trigger``; the routine itself runs in
-        the monitoring member's own pane, so they are not echoed into the nudge.
+        self-interrupt an in-progress routine. User-controlled agent names are
+        sanitized (CR/LF/tab → U+23CE) to preserve the single-line shape, and the
+        payload carries no backtick and no ``$(…)`` command substitution, so it
+        is safe in the monitoring member's coding-agent input box.
         """
         if shutil.which("tmux") is None:
             return False
+        noun = "agent" if len(due_agents) == 1 else "agents"
+        due_list = ", ".join(
+            f"{'director' if t['is_director'] else 'member'} {t['agent_id']} "
+            f"({_sanitize_wake_name(t['name'])})"
+            for t in due_agents
+        )
         payload = (
-            "[monitor] wake: run your monitoring routine now — capture the "
-            "Director pane, judge it active vs idle, and if idle assess the "
-            "inbox and members and re-engage the Director with an "
-            "Esc-safeguarded nudge."
+            f"[monitor] wake: {len(due_agents)} {noun} due — {due_list}. "
+            f"Capture each named pane read-only, with the Director pane "
+            f"({director_agent_id}) always inspected; judge each active/idle and "
+            "progressing/stalled; re-engage the Director via cafleet member nudge "
+            "when it is idle with un-acked work or any due agent looks stalled."
         )
         try:
             _send_literal_then_enter(
