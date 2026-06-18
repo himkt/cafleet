@@ -244,7 +244,7 @@ If the Manager asks the Director a question that is really a user decision (e.g.
 
 ### Step 6: Present to User (Director)
 
-Present the approved report to the user via `AskUserQuestion` with: a summary of findings (2–3 sentences), file paths (report, scout files, researcher files), known limitations, and a request for feedback. If the user provides feedback, route it to the Manager via `cafleet message send`, re-review, and re-present. Repeat until the user approves.
+Present the approved report to the user via `AskUserQuestion` (options: **Approve** / **Request changes**; the built-in "Other" captures free-text feedback) with a summary of findings (2–3 sentences), file paths (report, scout files, researcher files), and known limitations. If the user selects **Request changes** or types feedback via "Other", route it to the Manager via `cafleet message send`, re-review, and re-present. Repeat until the user approves.
 
 ### Step 7: Offer Presentation Chaining (Director)
 

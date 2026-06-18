@@ -32,7 +32,7 @@ Angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<programmer-agent-id
 Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet member capture` fallback → `AskUserQuestion` three-beat for a paused 4-option frame) follow the `cafleet-agent-team-supervision` skill § Idle Semantics and the `cafleet-agent-team-monitoring` skill § Stall Response — both loaded at startup. Two skill-specific rungs are NOT in those skills and stay here:
 
 - **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet member capture --member-id <member-agent-id> --lines 200`, then escalate — in that order.
-- **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via `AskUserQuestion` with concrete options (re-spawn / redistribute / drop scope / Other). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
+- **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via `AskUserQuestion` with concrete options (re-spawn / redistribute / drop scope). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
 
 ## Communication Protocol
 

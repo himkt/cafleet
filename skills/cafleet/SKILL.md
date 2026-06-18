@@ -56,6 +56,30 @@ cafleet --json message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
 
 Three backends — `claude` (default), `codex`, `opencode` — chosen per member at create time via `--coding-agent`. `--model <m>` pins the LLM and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; both flags, the model-name-to-backend inference, and the spawn-argv detail live in [`reference/director.md`](reference/director.md) (and the `cafleet-agent-team-monitoring` skill for the monitor). All three honor the leading-`!` input shortcut, so `member exec` and inline previews work uniformly. Backend operational detail: [`codex.md`](../../docs/reference/coding-agents/codex.md) / [`opencode.md`](../../docs/reference/coding-agents/opencode.md).
 
+## Soliciting user reactions (AskUserQuestion)
+
+When a CAFleet agent running on Claude Code needs a reaction from the user to proceed — **approve**, **choose among options**, **confirm**, or **continue-or-abort** — it solicits that reaction through the `AskUserQuestion` tool. This is the single canonical surface for every user reaction across CAFleet skills, roles, and rules. Never request a reaction in free-form prose ("let me know if this looks good", "shall I proceed?", "reply with your choice") — that surface produces no recorded answer and routinely stalls.
+
+**Standalone vs. fleet.** A standalone Claude Code agent (running a skill directly, no fleet) calls `AskUserQuestion` itself. A fleet **member** never talks to the user; it sends its question to the Director via `cafleet message send`, and the **Director** relays it through `AskUserQuestion` (see the `cafleet-agent-team-supervision` skill § *User Delegation Protocol*).
+
+**Question-shape taxonomy** — pick the shape that fits; ≤ 4 options each. The tool's built-in "Other" always exposes a free-text field, so do NOT add an explicit "Write my own" / "Custom" option. No preamble sentence above the question — the conversation context plus the question text carry it.
+
+| Reaction shape | AskUserQuestion form |
+|---|---|
+| Choice among labeled options | Up to 4 options mirroring the labels |
+| Approve / yes-no | Two options (e.g. Approve / Revise) |
+| Continue-or-abort | Two options (Continue / Abort) |
+| Open-ended "what next" / draft selection | 2–4 complete candidate bodies to compare side-by-side |
+
+**Every escalation is a decision point — give it a surface.** "Escalate to the user", "surface to the user", and "defer to the user" name no surface on their own. Whenever an agent escalates — including a pure action handoff (e.g. "the user must start the server manually") — front it with an `AskUserQuestion` continue/abort gate so no escalation is ever left surface-less.
+
+**Exemptions** (no reaction is being solicited, so `AskUserQuestion` is not required):
+
+- A final informational status report that asks for no decision ("Done — here is what changed"). Reporting an outcome is not soliciting a reaction.
+- A member's question to its Director: the member uses `cafleet message send`; the Director then relays via `AskUserQuestion`.
+
+> **`AskUserQuestion` is a Claude Code idiom.** The rule above assumes the agent runs in Claude Code. A Director or standalone agent on another coding agent (`codex`, `opencode`) substitutes its own decision-elicitation surface (or a plain operator message). The `cafleet member send-input` 4-option pane frame is likewise Claude-Code-specific — on a codex/opencode member the read-then-respond cadence applies, but the `--choice` / `--freetext` keystrokes apply only when the captured buffer matches the validated 4-option layout.
+
 ## Self-registration recipe
 
 Use `--json` so the output is machine-parseable, and capture `agent_id` for every subsequent call:
