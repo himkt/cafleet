@@ -66,7 +66,7 @@ When a CAFleet agent running on Claude Code needs a reaction from the user to pr
 
 | Reaction shape | AskUserQuestion form |
 |---|---|
-| Choice among labelled options | Up to 4 options mirroring the labels |
+| Choice among labeled options | Up to 4 options mirroring the labels |
 | Approve / yes-no | Two options (e.g. Approve / Revise) |
 | Continue-or-abort | Two options (Continue / Abort) |
 | Open-ended "what next" / draft selection | 2–4 complete candidate bodies to compare side-by-side |

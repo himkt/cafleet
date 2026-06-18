@@ -51,7 +51,7 @@ When a CAFleet agent running on Claude Code needs a reaction from the user to pr
 
 | Reaction shape | AskUserQuestion form |
 |---|---|
-| Choice among labelled options | Up to 4 options mirroring the labels |
+| Choice among labeled options | Up to 4 options mirroring the labels |
 | Approve / yes-no | Two options (e.g. Approve / Revise) |
 | Continue-or-abort | Two options (Continue / Abort) |
 | Open-ended "what next" / draft selection | 2–4 complete candidate bodies to compare side-by-side |
@@ -79,7 +79,7 @@ Each rewrite names `AskUserQuestion` and supplies concrete options (per the esca
 
 | # | File : line | Old (verbatim fragment) | New |
 |---|---|---|---|
-| a | `cafleet-agent-team-monitoring/SKILL.md:167` | `…shows no forward progress in the terminal buffer, escalate to the user.` | `…escalate to the user via `AskUserQuestion` (per the `cafleet` skill § *Soliciting user reactions*) with concrete options (e.g. re-nudge once more / re-spawn the member / drop its task / Other).` |
+| a | `cafleet-agent-team-monitoring/SKILL.md:167` | `…shows no forward progress in the terminal buffer, escalate to the user.` | `…escalate to the user via `AskUserQuestion` (per the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*) with concrete options (e.g. re-nudge once more / re-spawn the member / drop its task / Other).` |
 | b | `cafleet-agent-team-monitoring/SKILL.md:169` | `… → `cafleet member delete --force` (last resort, never raw `tmux kill-pane`) → escalate to the user — are documented…` | `… → `cafleet member delete --force` (last resort, never raw `tmux kill-pane`) → escalate to the user via `AskUserQuestion` — are documented…` |
 | c | `cafleet-research-presentation/roles/director.md:12` | `**Do not modify the report.** The report is a finalized input. If changes are needed, escalate to the user.` | `**Do not modify the report.** The report is a finalized input. If changes are needed, escalate to the user via `AskUserQuestion` (per the Report Modification Policy below).` |
 | d | `cafleet-research-presentation/roles/director.md:82` | `If issues persist after 3 rounds, make a judgment call: accept with known limitations or escalate specific issues to the user.` | `If issues persist after 3 rounds, escalate to the user via `AskUserQuestion` (options: Accept with known limitations / Escalate the issues / Other).` |
@@ -119,11 +119,11 @@ To realize "single authoritative rule", the existing taxonomy copies defer to th
 
 **`skills/cafleet-agent-team-supervision/SKILL.md` — User Delegation Protocol (lines 87–94).** Replace the three inline taxonomy sub-bullets under step 1 with a reference to the canonical taxonomy; keep the relay steps.
 
-- **New step 1**: `**Classify the question shape** per the canonical taxonomy in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)* (choice among labelled options, approve / yes-no, continue-or-abort, or open-ended / draft selection), and mirror it into `AskUserQuestion` options. The built-in "Other" handles custom text — do NOT add an explicit "Write my own" option.`
+- **New step 1**: `**Classify the question shape** per the canonical taxonomy in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)* (choice among labeled options, approve / yes-no, continue-or-abort, or open-ended / draft selection), and mirror it into `AskUserQuestion` options. The built-in "Other" handles custom text — do NOT add an explicit "Write my own" option.`
 - Add one lead sentence after the protocol's opening line: `This is the relay-specific application of the canonical rule in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*.`
 - Steps 2 and 3 (Ask / Relay) are unchanged.
 
-**`skills/cafleet-agent-team-supervision/SKILL.md:55`** ("When you genuinely need user input"). Append a pointer so the canonical source is discoverable: after `use `AskUserQuestion``, add `(the canonical surface — `cafleet` skill § *Soliciting user reactions*)`.
+**`skills/cafleet-agent-team-supervision/SKILL.md:55`** ("When you genuinely need user input"). Append a pointer so the canonical source is discoverable: after `use `AskUserQuestion``, add `(the canonical surface — `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*)`.
 
 ### 5. Add canonical pointers at the two cross-reference hubs
 
