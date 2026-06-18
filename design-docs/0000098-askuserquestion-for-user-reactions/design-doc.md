@@ -1,7 +1,7 @@
 # AskUserQuestion as the Canonical User-Reaction Surface
 
 **Status**: Approved
-**Progress**: 14/17 tasks complete
+**Progress**: 16/17 tasks complete
 **Last Updated**: 2026-06-18
 
 ## Overview
@@ -183,6 +183,6 @@ The present-gate already uses `AskUserQuestion`; make the feedback path explicit
 
 ### Step 6: Propagate and verify
 
-- [ ] Run `mise //cafleet:lint`. <!-- completed: -->
-- [ ] Verify no surface-less escalation remains: `grep -rn 'escalate to the user\|surface to the user' skills/ | grep -v 'AskUserQuestion'` MUST return zero matches. Use this line-level `AskUserQuestion` exclusion rather than a `(?! via)` lookahead: some correct sites name the tool later in the sentence (e.g. `cafleet-design-doc-create/SKILL.md:212` reads "escalate to the user: … use `AskUserQuestion` …"), so excluding by the word "via" alone would misfire and flag them. The case-sensitive `escalate`/`surface` also skips the capitalised quoted meta-references inside the §1 canonical section, whose line names `AskUserQuestion` regardless. <!-- completed: -->
+- [x] Run `mise //cafleet:lint`. <!-- completed: 2026-06-18T13:36 -->
+- [x] Verify no surface-less escalation remains: `grep -rn 'escalate to the user\|surface to the user' skills/ | grep -v 'AskUserQuestion'` MUST return zero matches. Use this line-level `AskUserQuestion` exclusion rather than a `(?! via)` lookahead: some correct sites name the tool later in the sentence (e.g. `cafleet-design-doc-create/SKILL.md:212` reads "escalate to the user: … use `AskUserQuestion` …"), so excluding by the word "via" alone would misfire and flag them. The case-sensitive `escalate`/`surface` also skips the capitalised quoted meta-references inside the §1 canonical section, whose line names `AskUserQuestion` regardless. <!-- completed: 2026-06-18T13:36 -->
 - [ ] Regenerate the installed copies with `mise //:skill-install`. <!-- completed: -->
