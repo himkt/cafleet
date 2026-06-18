@@ -21,7 +21,7 @@ Angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<drafter-agent-id>`,
 Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet member capture` fallback → `AskUserQuestion` three-beat for a paused 4-option frame) follow the `cafleet-agent-team-supervision` skill § Idle Semantics and the `cafleet-agent-team-monitoring` skill § Stall Response — both loaded at startup. Two skill-specific rungs are NOT in those skills and stay here:
 
 - **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet member capture --member-id <member-agent-id> --lines 200`, then escalate — in that order.
-- **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via `AskUserQuestion` with concrete options (re-spawn / redistribute / drop scope / Other). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
+- **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via `AskUserQuestion` with concrete options (re-spawn / redistribute / drop scope). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
 
 ## Communication Protocol
 
@@ -44,7 +44,7 @@ See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordina
 
 1. **Immediately** scan for `COMMENT(` markers in the design document using Grep — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
 2. **If markers are found**: Route the Drafter to address them in-doc with `ready (doc)`. After the Drafter replies `addressed (doc)`, verify with Grep that no `COMMENT(` markers remain.
-3. **If no markers are found**: Explain the marker convention to the user (`# COMMENT(username): feedback` placed directly in the design document) and show the file path so the user can edit it. Then re-prompt with the same three-option pattern (Approve / Scan for COMMENT markers / Other).
+3. **If no markers are found**: Explain the marker convention to the user (`# COMMENT(username): feedback` placed directly in the design document) and show the file path so the user can edit it. Then re-prompt with the same two-option pattern (Approve / Scan for COMMENT markers).
 
 ### LLM Intent Judgment
 

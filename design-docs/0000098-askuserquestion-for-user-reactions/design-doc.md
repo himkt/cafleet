@@ -70,27 +70,27 @@ When a CAFleet agent running on Claude Code needs a reaction from the user to pr
 
 The full caveat now lives in the canonical section. Reduce the monitoring instance (current line 163) to a pointer with no duplicated normative text.
 
-- **Old**: `> **`AskUserQuestion` is a Claude Code idiom.** The "delegate to the user" beat assumes the Director runs in Claude Code; Directors on another coding agent substitute their own decision-elicitation surface (or a plain operator message). The 4-option pane frame that `cafleet member send-input` targets is likewise Claude-Code-specific — on a codex/opencode member the read-then-respond cadence applies, but the `--choice` / `--freetext` keystrokes apply only when the captured buffer matches the validated 4-option layout.`
-- **New**: `> **`AskUserQuestion` is a Claude Code idiom.** See the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)* for the canonical caveat — it governs both the "delegate to the user" beat and the Claude-Code-specific `cafleet member send-input` 4-option pane frame.`
+- **Old**: ``> **`AskUserQuestion` is a Claude Code idiom.** The "delegate to the user" beat assumes the Director runs in Claude Code; Directors on another coding agent substitute their own decision-elicitation surface (or a plain operator message). The 4-option pane frame that `cafleet member send-input` targets is likewise Claude-Code-specific — on a codex/opencode member the read-then-respond cadence applies, but the `--choice` / `--freetext` keystrokes apply only when the captured buffer matches the validated 4-option layout.``
+- **New**: ``> **`AskUserQuestion` is a Claude Code idiom.** See the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)* for the canonical caveat — it governs both the "delegate to the user" beat and the Claude-Code-specific `cafleet member send-input` 4-option pane frame.``
 
 ### 3. Tighten the surface-less escalations
 
-Each rewrite names `AskUserQuestion` and supplies concrete options (per the escalation-gate rule). Five sites are already correct and left unchanged: four name `AskUserQuestion` directly (`cafleet-research-presentation/SKILL.md:57`, `cafleet-design-doc-create/SKILL.md:212`, `cafleet-design-doc-create/roles/director.md:24`, `cafleet-design-doc-execute/roles/director.md:35`), and `cafleet-research-presentation/SKILL.md:228` is a pseudocode comment ("remaining issues escalate to user in Step 4") that defers to the Step 4 approval gate — itself the `AskUserQuestion`-backed gate. (Line 228 reads "escalate to user" without "the", so the Step 6 grep does not surface it regardless.)
+Each rewrite names `AskUserQuestion` and supplies concrete options (per the escalation-gate rule). Five sites already name `AskUserQuestion` and need no surface-less-escalation rewrite (`cafleet-research-presentation/SKILL.md:57`, `cafleet-design-doc-create/SKILL.md:212`, `cafleet-design-doc-create/roles/director.md:24`, `cafleet-design-doc-execute/roles/director.md:35`), and `cafleet-research-presentation/SKILL.md:228` is a pseudocode comment ("remaining issues escalate to user in Step 4") that defers to the Step 4 approval gate — itself the `AskUserQuestion`-backed gate. (Line 228 reads "escalate to user" without "the", so the Step 6 grep does not surface it regardless.) Two of these — `cafleet-design-doc-create/roles/director.md:24` and `cafleet-design-doc-execute/roles/director.md:35` — additionally had a redundant explicit "Other" option removed in the explicit-Other conformance pass (see Scope boundaries).
 
 | # | File : line | Old (verbatim fragment) | New |
 |---|---|---|---|
-| a | `cafleet-agent-team-monitoring/SKILL.md:167` | `…shows no forward progress in the terminal buffer, escalate to the user.` | `…escalate to the user via `AskUserQuestion` (per the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*) with concrete options (e.g. re-nudge once more / re-spawn the member / drop its task).` |
-| b | `cafleet-agent-team-monitoring/SKILL.md:169` | `… → `cafleet member delete --force` (last resort, never raw `tmux kill-pane`) → escalate to the user — are documented…` | `… → `cafleet member delete --force` (last resort, never raw `tmux kill-pane`) → escalate to the user via `AskUserQuestion` — are documented…` |
-| c | `cafleet-research-presentation/roles/director.md:12` | `**Do not modify the report.** The report is a finalized input. If changes are needed, escalate to the user.` | `**Do not modify the report.** The report is a finalized input. If changes are needed, escalate to the user via `AskUserQuestion` (per the Report Modification Policy below).` |
-| d | `cafleet-research-presentation/roles/director.md:82` | `If issues persist after 3 rounds, make a judgment call: accept with known limitations or escalate specific issues to the user.` | `If issues persist after 3 rounds, escalate to the user via `AskUserQuestion` (options: Accept with known limitations / Escalate the issues).` |
+| a | `cafleet-agent-team-monitoring/SKILL.md:167` | `…shows no forward progress in the terminal buffer, escalate to the user.` | ``…escalate to the user via `AskUserQuestion` (per the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*) with concrete options (e.g. re-nudge once more / re-spawn the member / drop its task).`` |
+| b | `cafleet-agent-team-monitoring/SKILL.md:169` | ``… → `cafleet member delete --force` (last resort, never raw `tmux kill-pane`) → escalate to the user — are documented…`` | ``… → `cafleet member delete --force` (last resort, never raw `tmux kill-pane`) → escalate to the user via `AskUserQuestion` — are documented…`` |
+| c | `cafleet-research-presentation/roles/director.md:12` | `**Do not modify the report.** The report is a finalized input. If changes are needed, escalate to the user.` | ``**Do not modify the report.** The report is a finalized input. If changes are needed, escalate to the user via `AskUserQuestion` (per the Report Modification Policy below).`` |
+| d | `cafleet-research-presentation/roles/director.md:82` | `If issues persist after 3 rounds, make a judgment call: accept with known limitations or escalate specific issues to the user.` | ``If issues persist after 3 rounds, escalate to the user via `AskUserQuestion` (options: Accept with known limitations / Keep iterating).`` |
 | e | `cafleet-research-presentation/roles/director.md:86` | The Report Modification Policy block (prose `Director → User:` template) | Replace the prose template with an `AskUserQuestion` gate (see §3.1 below). |
-| f | `cafleet-research-presentation/roles/director.md:102` | `On start failure: retry the start command once, then escalate to the user to start it manually.` | `On start failure: retry the start command once, then escalate to the user via `AskUserQuestion` (options: Retry again / I started it manually — continue / Abort).` |
-| g | `cafleet-design-doc-interview/SKILL.md:154` | `After 2 corrective rounds, escalate to the user.` | `After 2 corrective rounds, escalate to the user via `AskUserQuestion` (options: retry the Analyzer once more / abort the interview / proceed with the partial list).` |
+| f | `cafleet-research-presentation/roles/director.md:102` | `On start failure: retry the start command once, then escalate to the user to start it manually.` | ``On start failure: retry the start command once, then escalate to the user via `AskUserQuestion` (options: Retry again / I started it manually — continue / Abort).`` |
+| g | `cafleet-design-doc-interview/SKILL.md:154` | `After 2 corrective rounds, escalate to the user.` | ``After 2 corrective rounds, escalate to the user via `AskUserQuestion` (options: retry the Analyzer once more / abort the interview / proceed with the partial list).`` |
 
 #### 3.1 Report Modification Policy block (`cafleet-research-presentation/roles/director.md:86`)
 
 - **Old**:
-  ```
+  ````
   This skill operates on a finalized report. The Director does **not** modify the report itself. If the Presentation member requests report changes, escalate to the user:
 
   ```
@@ -100,7 +100,7 @@ Each rewrite names `AskUserQuestion` and supplies concrete options (per the esca
   ```
 
   The user (or a re-run of the `cafleet-research-report` skill) owns report modifications.
-  ```
+  ````
 - **New**:
   ```
   This skill operates on a finalized report. The Director does **not** modify the report itself. If the Presentation member requests report changes, escalate to the user via `AskUserQuestion` (the User Interaction Contract's member-escalated delegation point), passing the member's reason as context:
@@ -119,29 +119,30 @@ To realize "single authoritative rule", the existing taxonomy copies defer to th
 
 **`skills/cafleet-agent-team-supervision/SKILL.md` — User Delegation Protocol (lines 87–94).** Replace the three inline taxonomy sub-bullets under step 1 with a reference to the canonical taxonomy; keep the relay steps.
 
-- **New step 1**: `**Classify the question shape** per the canonical taxonomy in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)* (choice among labeled options, approve / yes-no, continue-or-abort, or open-ended / draft selection), and mirror it into `AskUserQuestion` options. The built-in "Other" handles custom text — do NOT add an explicit "Write my own" option.`
-- Add one lead sentence after the protocol's opening line: `This is the relay-specific application of the canonical rule in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*.`
+- **New step 1**: ``**Classify the question shape** per the canonical taxonomy in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)* (choice among labeled options, approve / yes-no, continue-or-abort, or open-ended / draft selection), and mirror it into `AskUserQuestion` options. The built-in "Other" handles custom text — do NOT add an explicit "Write my own" option.``
+- Add one lead sentence after the protocol's opening line: ``This is the relay-specific application of the canonical rule in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*.``
 - Steps 2 and 3 (Ask / Relay) are unchanged.
 
-**`skills/cafleet-agent-team-supervision/SKILL.md:55`** ("When you genuinely need user input"). Append a pointer so the canonical source is discoverable: after `use `AskUserQuestion``, add `(the canonical surface — `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*)`.
+**`skills/cafleet-agent-team-supervision/SKILL.md:55`** ("When you genuinely need user input"). Append a pointer so the canonical source is discoverable: after ``use `AskUserQuestion` ``, add ``(the canonical surface — `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*)``.
 
 ### 5. Add canonical pointers at the two cross-reference hubs
 
-- **`skills/cafleet/reference/director.md`** — at the top of the `### Answer a member's AskUserQuestion prompt` section, insert one line directly under the heading: `This is the pane-relay application of the canonical rule in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*.`
+- **`skills/cafleet/reference/director.md`** — at the top of the `### Answer a member's AskUserQuestion prompt` section, insert one line directly under the heading: ``This is the pane-relay application of the canonical rule in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*.``
 - **`skills/cafleet-research-presentation/roles/director.md:98`** (User Delegation) — append the canonical pointer to the **first** sentence (the one ending "…never decide on the user's behalf)."), leaving the last sentence (which is about *not* using `AskUserQuestion`) untouched:
-  - **Old**: `Per the User Interaction Contract in SKILL.md, the Director originates `AskUserQuestion` at exactly two points: (1) Step 4's single post-pipeline approval gate; (2) member-escalated user delegation (classify the question shape, call `AskUserQuestion`, relay the user's answer back verbatim — never decide on the user's behalf).`
-  - **New**: `Per the User Interaction Contract in SKILL.md, the Director originates `AskUserQuestion` at exactly two points: (1) Step 4's single post-pipeline approval gate; (2) member-escalated user delegation (classify the question shape, call `AskUserQuestion`, relay the user's answer back verbatim — never decide on the user's behalf). This is the application of the canonical rule in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*.`
+  - **Old**: ``Per the User Interaction Contract in SKILL.md, the Director originates `AskUserQuestion` at exactly two points: (1) Step 4's single post-pipeline approval gate; (2) member-escalated user delegation (classify the question shape, call `AskUserQuestion`, relay the user's answer back verbatim — never decide on the user's behalf).``
+  - **New**: ``Per the User Interaction Contract in SKILL.md, the Director originates `AskUserQuestion` at exactly two points: (1) Step 4's single post-pipeline approval gate; (2) member-escalated user delegation (classify the question shape, call `AskUserQuestion`, relay the user's answer back verbatim — never decide on the user's behalf). This is the application of the canonical rule in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*.``
 
 ### 6. Tighten the research-report feedback surface (`skills/cafleet-research-report/SKILL.md:247`)
 
 The present-gate already uses `AskUserQuestion`; make the feedback path explicit rather than the loose "If the user provides feedback".
 
-- **Old**: `Present the approved report to the user via `AskUserQuestion` with: a summary of findings (2–3 sentences), file paths (report, scout files, researcher files), known limitations, and a request for feedback. If the user provides feedback, route it to the Manager via `cafleet message send`, re-review, and re-present. Repeat until the user approves.`
-- **New**: `Present the approved report to the user via `AskUserQuestion` (options: **Approve** / **Request changes**; the built-in "Other" captures free-text feedback) with a summary of findings (2–3 sentences), file paths (report, scout files, researcher files), and known limitations. If the user selects **Request changes** or types feedback via "Other", route it to the Manager via `cafleet message send`, re-review, and re-present. Repeat until the user approves.`
+- **Old**: ``Present the approved report to the user via `AskUserQuestion` with: a summary of findings (2–3 sentences), file paths (report, scout files, researcher files), known limitations, and a request for feedback. If the user provides feedback, route it to the Manager via `cafleet message send`, re-review, and re-present. Repeat until the user approves.``
+- **New**: ``Present the approved report to the user via `AskUserQuestion` (options: **Approve** / **Request changes**; the built-in "Other" captures free-text feedback) with a summary of findings (2–3 sentences), file paths (report, scout files, researcher files), and known limitations. If the user selects **Request changes** or types feedback via "Other", route it to the Manager via `cafleet message send`, re-review, and re-present. Repeat until the user approves.``
 
 ### Scope boundaries
 
 - **No code, no CLI/API/schema change.** This is a documentation-norm change confined to `skills/`, `skills/*/roles/*`, and `skills/cafleet/reference/*`. `README.md` and `docs/concepts/` are unaffected (verified). The `docs/spec/cli-options.md` and `docs/how-to/monitor-and-recover.md` AskUserQuestion mentions describe `member send-input` CLI mechanics and already reference the three-beat workflow correctly — out of scope.
+- **Explicit-Other conformance pass.** Because §1 bans an explicit "Other" / "Custom" option (the tool's built-in "Other" always provides a free-text path), every `AskUserQuestion` option list in `skills/` was conformed to drop the redundant token: the three §3 escalation rewrites that had carried it (rows a / d / g) plus five pre-existing sites — `cafleet-design-doc-create/roles/director.md:24` & `:47`, `cafleet-design-doc-create/SKILL.md:238`, `cafleet-design-doc-execute/roles/director.md:35`, and `cafleet-research-report/roles/web-researcher.md:75`.
 - **Historical design docs are untouched.** `design-docs/0000024-cleanup-and-refactor/design-doc.md` ("surface to the user") and any other prior design doc remain as the historical record (git + design docs are canonical history).
 - **Global skill copies are installer-managed.** `~/.claude/skills/**` is never hand-edited; it is regenerated by `mise //:skill-install` after the repo edits land.
 
