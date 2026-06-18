@@ -1,7 +1,7 @@
 # AskUserQuestion as the Canonical User-Reaction Surface
 
 **Status**: Approved
-**Progress**: 11/17 tasks complete
+**Progress**: 14/17 tasks complete
 **Last Updated**: 2026-06-18
 
 ## Overview
@@ -177,9 +177,9 @@ The present-gate already uses `AskUserQuestion`; make the feedback path explicit
 
 ### Step 5: Cross-reference hubs + feedback surface
 
-- [ ] Insert the canonical pointer at the top of `cafleet/reference/director.md` § *Answer a member's AskUserQuestion prompt* (§5). <!-- completed: -->
-- [ ] Append the canonical pointer to `cafleet-research-presentation/roles/director.md:98` (§5). <!-- completed: -->
-- [ ] Tighten the `cafleet-research-report/SKILL.md:247` feedback surface (§6). <!-- completed: -->
+- [x] Insert the canonical pointer at the top of `cafleet/reference/director.md` § *Answer a member's AskUserQuestion prompt* (§5). <!-- completed: 2026-06-18T13:34 -->
+- [x] Append the canonical pointer to `cafleet-research-presentation/roles/director.md:98` (§5). <!-- completed: 2026-06-18T13:34 -->
+- [x] Tighten the `cafleet-research-report/SKILL.md:247` feedback surface (§6). <!-- completed: 2026-06-18T13:34 -->
 
 ### Step 6: Propagate and verify
 

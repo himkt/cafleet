@@ -94,7 +94,7 @@ The user (or a re-run of the `cafleet-research-report` skill) owns report modifi
 
 ## User Delegation
 
-Per the User Interaction Contract in SKILL.md, the Director originates `AskUserQuestion` at exactly two points: (1) Step 4's single post-pipeline approval gate; (2) member-escalated user delegation (classify the question shape, call `AskUserQuestion`, relay the user's answer back verbatim — never decide on the user's behalf). Do NOT use it to ask whether to run/skip/shorten any pipeline step (Steps 0–3 are obligatory, in order); escalate only on an unresolvable technical failure.
+Per the User Interaction Contract in SKILL.md, the Director originates `AskUserQuestion` at exactly two points: (1) Step 4's single post-pipeline approval gate; (2) member-escalated user delegation (classify the question shape, call `AskUserQuestion`, relay the user's answer back verbatim — never decide on the user's behalf). This is the application of the canonical rule in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*. Do NOT use it to ask whether to run/skip/shorten any pipeline step (Steps 0–3 are obligatory, in order); escalate only on an unresolvable technical failure.
 
 ## Server Lifecycle Management
 

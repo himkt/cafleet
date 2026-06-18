@@ -148,6 +148,8 @@ Forward a restricted keystroke to a member's tmux pane — AskUserQuestion-only,
 
 ### Answer a member's AskUserQuestion prompt
 
+This is the pane-relay application of the canonical rule in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*.
+
 When `cafleet member capture` reveals a member paused on an AskUserQuestion-shaped 4-option frame (`1. …`, `2. …`, `3. …`, `4. Type something`), the Director MUST delegate the decision to the user via the three-beat shape:
 
 1. **Capture** with `--lines 120` (recommended default; bump to `--lines 200` only if the AskUserQuestion frame is truncated).
