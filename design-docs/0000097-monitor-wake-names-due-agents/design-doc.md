@@ -1,6 +1,6 @@
 # Monitor wake nudge names the due agents
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 14/14 tasks complete
 **Last Updated**: 2026-06-17
 
@@ -235,3 +235,4 @@ The new payload fully replaces the old fixed Director-centric string. After this
 | 2026-06-17 | Initial draft |
 | 2026-06-17 | Reviewer pass: narrowed the payload shell-safety guarantee to no-backtick / no-`$(…)` (keeping the readable `role id (name)` rendering) with a backing test assertion; enumerated the two stale spawn-prompt `monitor status` framings + named the line-18 wake-nudge paragraph; added the Director-dedupe note to the routine; added cli-options.md ≈ line 953 to the change surface; strengthened the removal-sweep patterns; corrected the failed-wake test description; fixed the Progress count. |
 | 2026-06-17 | User approved. Status → Approved. |
+| 2026-06-18 | Implemented via TDD (docs → tests → impl): wake nudge now names the freshly-due agents + Director id; `_sanitize_wake_name` neutralizes CR/LF/tab + backtick + `$(`; routine reads the named list. Copilot review round 1 (backtick/`$(` injection via user-controlled names) addressed by strengthening the sanitizer + test + §2 spec; round 2 clean. Status → Complete. |
