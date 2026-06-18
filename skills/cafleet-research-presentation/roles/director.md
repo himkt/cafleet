@@ -79,7 +79,7 @@ Read every screenshot in `<folder>/screenshots/vr<start>-r<round>-p<N>.png` (or 
 ## Revision Approach
 
 - Aim for 2-3 revision rounds maximum (balance quality against token cost).
-- If issues persist after 3 rounds, escalate to the user via `AskUserQuestion` (options: Accept with known limitations / Escalate the issues / Other).
+- If issues persist after 3 rounds, escalate to the user via `AskUserQuestion` (options: Accept with known limitations / Escalate the issues).
 
 ## Report Modification Policy
 
