@@ -1,7 +1,7 @@
 # AskUserQuestion as the Canonical User-Reaction Surface
 
 **Status**: Approved
-**Progress**: 4/17 tasks complete
+**Progress**: 11/17 tasks complete
 **Last Updated**: 2026-06-18
 
 ## Overview
@@ -80,7 +80,7 @@ Each rewrite names `AskUserQuestion` and supplies concrete options (per the esca
 | # | File : line | Old (verbatim fragment) | New |
 |---|---|---|---|
 | a | `cafleet-agent-team-monitoring/SKILL.md:167` | `…shows no forward progress in the terminal buffer, escalate to the user.` | `…escalate to the user via `AskUserQuestion` (per the `cafleet` skill § *Soliciting user reactions*) with concrete options (e.g. re-nudge once more / re-spawn the member / drop its task / Other).` |
-| b | `cafleet-agent-team-monitoring/SKILL.md:169` | `… → `cafleet member delete --force` (last resort, never raw `tmux kill-pane`) → escalate to the user — are documented…` | `… → escalate to the user via `AskUserQuestion` — are documented…` |
+| b | `cafleet-agent-team-monitoring/SKILL.md:169` | `… → `cafleet member delete --force` (last resort, never raw `tmux kill-pane`) → escalate to the user — are documented…` | `… → `cafleet member delete --force` (last resort, never raw `tmux kill-pane`) → escalate to the user via `AskUserQuestion` — are documented…` |
 | c | `cafleet-research-presentation/roles/director.md:12` | `**Do not modify the report.** The report is a finalized input. If changes are needed, escalate to the user.` | `**Do not modify the report.** The report is a finalized input. If changes are needed, escalate to the user via `AskUserQuestion` (per the Report Modification Policy below).` |
 | d | `cafleet-research-presentation/roles/director.md:82` | `If issues persist after 3 rounds, make a judgment call: accept with known limitations or escalate specific issues to the user.` | `If issues persist after 3 rounds, escalate to the user via `AskUserQuestion` (options: Accept with known limitations / Escalate the issues / Other).` |
 | e | `cafleet-research-presentation/roles/director.md:86` | The Report Modification Policy block (prose `Director → User:` template) | Replace the prose template with an `AskUserQuestion` gate (see §3.1 below). |
@@ -167,13 +167,13 @@ The present-gate already uses `AskUserQuestion`; make the feedback path explicit
 
 ### Step 4: Tighten surface-less escalations
 
-- [ ] `cafleet-agent-team-monitoring/SKILL.md:167` — name `AskUserQuestion` + options (§3a). <!-- completed: -->
-- [ ] `cafleet-agent-team-monitoring/SKILL.md:169` — name `AskUserQuestion` in the primitive chain (§3b). <!-- completed: -->
-- [ ] `cafleet-research-presentation/roles/director.md:12` — name `AskUserQuestion` (§3c). <!-- completed: -->
-- [ ] `cafleet-research-presentation/roles/director.md:82` — name `AskUserQuestion` + options (§3d). <!-- completed: -->
-- [ ] `cafleet-research-presentation/roles/director.md:86` — replace the prose template with the `AskUserQuestion` gate table (§3.1). <!-- completed: -->
-- [ ] `cafleet-research-presentation/roles/director.md:102` — name `AskUserQuestion` + options (§3f). <!-- completed: -->
-- [ ] `cafleet-design-doc-interview/SKILL.md:154` — name `AskUserQuestion` + options (§3g). <!-- completed: -->
+- [x] `cafleet-agent-team-monitoring/SKILL.md:167` — name `AskUserQuestion` + options (§3a). <!-- completed: 2026-06-18T13:28 -->
+- [x] `cafleet-agent-team-monitoring/SKILL.md:169` — name `AskUserQuestion` in the primitive chain (§3b). <!-- completed: 2026-06-18T13:31 -->
+- [x] `cafleet-research-presentation/roles/director.md:12` — name `AskUserQuestion` (§3c). <!-- completed: 2026-06-18T13:28 -->
+- [x] `cafleet-research-presentation/roles/director.md:82` — name `AskUserQuestion` + options (§3d). <!-- completed: 2026-06-18T13:28 -->
+- [x] `cafleet-research-presentation/roles/director.md:86` — replace the prose template with the `AskUserQuestion` gate table (§3.1). <!-- completed: 2026-06-18T13:28 -->
+- [x] `cafleet-research-presentation/roles/director.md:102` — name `AskUserQuestion` + options (§3f). <!-- completed: 2026-06-18T13:28 -->
+- [x] `cafleet-design-doc-interview/SKILL.md:154` — name `AskUserQuestion` + options (§3g). <!-- completed: 2026-06-18T13:28 -->
 
 ### Step 5: Cross-reference hubs + feedback surface
 
