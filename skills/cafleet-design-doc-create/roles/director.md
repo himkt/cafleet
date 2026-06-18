@@ -44,7 +44,7 @@ See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordina
 
 1. **Immediately** scan for `COMMENT(` markers in the design document using Grep — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
 2. **If markers are found**: Route the Drafter to address them in-doc with `ready (doc)`. After the Drafter replies `addressed (doc)`, verify with Grep that no `COMMENT(` markers remain.
-3. **If no markers are found**: Explain the marker convention to the user (`# COMMENT(username): feedback` placed directly in the design document) and show the file path so the user can edit it. Then re-prompt with the same two-option pattern (Approve / Scan for COMMENT markers).
+3. **If no markers are found**: Explain the marker convention to the user (`# COMMENT(username): feedback` placed directly in the design document) and show the file path so the user can edit it. Then re-prompt with the same three-option pattern (Approve / Scan for COMMENT markers / built-in Other).
 
 ### LLM Intent Judgment
 
