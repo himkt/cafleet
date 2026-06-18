@@ -775,10 +775,11 @@ def test_send_wake_trigger__return_branches_and_argv(
 def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     """The wake nudge is a single-line monitoring instruction that NAMES the
     freshly-due agents and the Director id (spec §2) — distinct from the
-    ``cafleet ... message poll`` command the Director receives. A crafted name
-    carrying CR/LF/tab is sanitized so the single-line guarantee holds, and the
-    payload carries no backtick / ``$(`` command-substitution sequence (the
-    narrowed shell-safety guarantee, §2)."""
+    ``cafleet ... message poll`` command the Director receives. A crafted
+    user-controlled name carrying CR/LF/tab, a backtick, and a ``$(…)``
+    command-substitution sequence is sanitized so the single-line guarantee
+    holds and the payload carries no backtick / ``$(`` (the narrowed
+    shell-safety guarantee, §2)."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
     monkeypatch.setattr("time.sleep", lambda _secs: None)
     captured: list[list[str]] = []
@@ -788,13 +789,20 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
         lambda args, **_kw: captured.append(list(args)) or "",
     )
 
-    # Worked example A (§2): the Director (332) and a member (336) are both due;
-    # the member's name carries a CR/LF and a tab to exercise the sanitizer.
+    # Worked example A (§2): the Director (332) and a member (336) are both due.
+    # The member's user-controlled name carries a CR/LF, a tab, a backtick, and a
+    # ``$(…)`` command-substitution sequence — every metacharacter the sanitizer
+    # must neutralize so the no-raw-control / no-backtick / no-``$(`` assertions
+    # below verify the contract for user-controlled names (§2).
     result = _tmux.send_wake_trigger(
         target_pane_id="%7",
         due_agents=[
             {"agent_id": 332, "name": "Director", "is_director": True},
-            {"agent_id": 336, "name": "evil\r\nname\there", "is_director": False},
+            {
+                "agent_id": 336,
+                "name": "evil\r\nname\there`$(id)",
+                "is_director": False,
+            },
         ],
         director_agent_id=332,
     )
