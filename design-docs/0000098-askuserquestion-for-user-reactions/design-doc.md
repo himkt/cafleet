@@ -1,7 +1,7 @@
 # AskUserQuestion as the Canonical User-Reaction Surface
 
 **Status**: Approved
-**Progress**: 2/17 tasks complete
+**Progress**: 4/17 tasks complete
 **Last Updated**: 2026-06-18
 
 ## Overview
@@ -162,8 +162,8 @@ The present-gate already uses `AskUserQuestion`; make the feedback path explicit
 
 ### Step 3: Reference the canonical taxonomy (de-duplicate)
 
-- [ ] Rewrite the `cafleet-agent-team-supervision/SKILL.md` User Delegation Protocol step 1 to reference the canonical taxonomy and add the lead sentence (§4). <!-- completed: -->
-- [ ] Append the canonical-source pointer to `cafleet-agent-team-supervision/SKILL.md:55` (§4). <!-- completed: -->
+- [x] Rewrite the `cafleet-agent-team-supervision/SKILL.md` User Delegation Protocol step 1 to reference the canonical taxonomy and add the lead sentence (§4). <!-- completed: 2026-06-18T13:26 -->
+- [x] Append the canonical-source pointer to `cafleet-agent-team-supervision/SKILL.md:55` (§4). <!-- completed: 2026-06-18T13:26 -->
 
 ### Step 4: Tighten surface-less escalations
 

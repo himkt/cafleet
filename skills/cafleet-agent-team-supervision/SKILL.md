@@ -52,7 +52,7 @@ The monitoring member's idle nudges, teammate idle notifications, broker auto-fi
 
 ### When you genuinely need user input
 
-If a queued action requires a *new* decision the user has not yet made (choosing between options, approving a risky / remote-visible operation, disambiguating a teammate's question), use `AskUserQuestion` — do **not** emit a passive hold and wait. The hold message produces nothing; the question unblocks you within seconds and produces a recorded answer.
+If a queued action requires a *new* decision the user has not yet made (choosing between options, approving a risky / remote-visible operation, disambiguating a teammate's question), use `AskUserQuestion` (the canonical surface — `cafleet` skill § *Soliciting user reactions*) — do **not** emit a passive hold and wait. The hold message produces nothing; the question unblocks you within seconds and produces a recorded answer.
 
 ## Spawn Protocol
 
@@ -84,12 +84,9 @@ The active turn consumes inputs that have already arrived and dispatches what is
 
 ## User Delegation Protocol
 
-CAFleet members never talk to the user directly — the Director relays. When a member sends a `cafleet message send` asking for user input:
+CAFleet members never talk to the user directly — the Director relays. This is the relay-specific application of the canonical rule in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*. When a member sends a `cafleet message send` asking for user input:
 
-1. **Classify the question shape:**
-   - Choice among labelled options → `AskUserQuestion` with up to 4 options mirroring the member's labels; built-in "Other" handles custom text. Do NOT add an explicit "Write my own" option.
-   - Open-ended / draft selection → `AskUserQuestion` with 2–4 complete candidate bodies so the user can compare wording side-by-side.
-   - Yes/no → two-option `AskUserQuestion`.
+1. **Classify the question shape** per the canonical taxonomy in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)* (choice among labelled options, approve / yes-no, continue-or-abort, or open-ended / draft selection), and mirror it into `AskUserQuestion` options. The built-in "Other" handles custom text — do NOT add an explicit "Write my own" option.
 2. **Ask the user.** No preamble sentence above the question — the conversation context plus the question text carry it.
 3. **Relay the answer back** via `cafleet message send` to the originating member. Pass through the user's selection verbatim; do not substitute your own judgment. If the user chose "Other" and typed custom text, send the typed text.
 
