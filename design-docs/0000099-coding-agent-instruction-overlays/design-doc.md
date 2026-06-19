@@ -1,7 +1,7 @@
 # Coding-agent instruction overlays
 
 **Status**: Approved
-**Progress**: 5/31 tasks complete
+**Progress**: 7/31 tasks complete
 **Last Updated**: 2026-06-19
 
 ## Overview
@@ -160,8 +160,8 @@ When content moves from base to overlay, DELETE it from the base cleanly. The ba
 
 ### Step 2: Add the convention artifacts
 
-- [ ] Create `.claude/rules/coding-agent-overlay.md` per §8, written affirmatively. <!-- completed: -->
-- [ ] Add the base/overlay-pattern section to `.claude/skills/skill-author/SKILL.md` per §9. <!-- completed: -->
+- [x] Create `.claude/rules/coding-agent-overlay.md` per §8, written affirmatively. <!-- completed: 2026-06-19T11:22 -->
+- [x] Add the base/overlay-pattern section to `.claude/skills/skill-author/SKILL.md` per §9. <!-- completed: 2026-06-19T11:22 -->
 
 ### Step 3: Spawn-prompt skeleton + overlay pointer
 

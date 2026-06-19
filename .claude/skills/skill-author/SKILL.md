@@ -505,4 +505,23 @@ Fix: the **first** `cafleet member create` is the `--role monitor` monitoring me
 
 ---
 
+## 8. Keep the base neutral; put backend deltas in the overlay
+
+CAFleet runs members on three coding-agent backends — `claude`, `codex`, `opencode`. When a skill hardcodes one backend's idioms — a specific monitor `--model`, the permission-mode flags, the `AskUserQuestion` decision surface, the harness `Task*` tools, the "load via the Skill tool" recipe — it drifts the moment a member runs on another backend, and forces every non-`claude` reader to mentally subtract the `claude`-only parts. Keep your skill backend-neutral and push the backend specifics into the overlay.
+
+The split:
+
+- **Base — your `SKILL.md` and `roles/*.md`.** Write these so they read the same on any backend. State *what* to do in backend-agnostic terms; wherever behavior varies by backend, state the neutral behavior and point the agent at its overlay.
+- **Overlay — `skills/cafleet/reference/coding-agent/<name>.md`.** This is the single canonical home for every backend delta. Six deltas vary by backend: the decision surface (the `AskUserQuestion` analog or the plain-message fallback), the monitor model, the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, and the skill-loading recipe. Put each backend's concrete realization in its overlay; a new overlay starts from `reference/coding-agent/_template.md`.
+
+Wire it up:
+
+1. **Point at the overlay.** `skills/cafleet/SKILL.md` carries the canonical "apply your coding-agent overlay" instruction; every sibling family `SKILL.md` carries a one-line pointer to `../cafleet/reference/coding-agent/<name>.md`. A new family skill adds the same pointer near its top.
+2. **Stamp the backend into the spawn prompt.** Add a `CODING AGENT: <name>` line to the spawn prompt's identity block (next to `FLEET ID` / `BASE`). The Director fills it as a rendered literal — the same render-time substitution it already does for `BASE` — so a spawned member knows which overlay to read with no CLI change. A standalone agent uses its own identity instead.
+3. **Keep the homes independent.** The agent-facing overlay home and the human-facing `docs/reference/coding-agents/` operator docs never cross-link in either direction. Restating an operational fact in both is fine; linking between them is not.
+
+See `.claude/rules/coding-agent-overlay.md` for the convention in brief.
+
+---
+
 You now have everything you need to write a CAFleet-orchestrated skill. Re-read § 2 (the integration checklist) and § 5 (the coordination protocol) once more before you start writing the SKILL.md, and keep the worked example in § 6 open as a reference shape — but write the skill yourself, do not paste the example.
