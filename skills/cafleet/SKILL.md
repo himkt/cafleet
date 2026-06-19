@@ -10,7 +10,7 @@ Use the `cafleet` CLI to register as an agent, send and receive messages, and di
 
 This file (the core) covers the identity / poll / send / ack / cancel / show lifecycle every agent uses. Director-only flows, broadcast semantics, the bash-via-Director fallback, recovery, and the `--full` opt-back-in live in dedicated reference files. Read on demand:
 
-- For Director-only commands (`member create` / `delete` / `list --activity` / `capture` / `send-input` / `exec` / `ping`, plus the AskUserQuestion three-beat workflow), Read [`reference/director.md`](reference/director.md).
+- For Director-only commands (`member create` / `delete` / `list --activity` / `capture` / `exec` / `ping`), Read [`reference/director.md`](reference/director.md).
 - For broadcast send/ack and threading via `origin_task_id`, Read [`reference/broadcast.md`](reference/broadcast.md).
 - For the bash-via-Director fallback protocol, Read [`reference/exec-routing.md`](reference/exec-routing.md).
 - For crash / disconnect / idle / wedged-pane recovery decision trees AND the Shutdown Protocol, Read [`reference/recovery.md`](reference/recovery.md).
@@ -58,31 +58,11 @@ cafleet --json message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
 
 ## Coding-agent backends
 
-Three backends — `claude` (default), `codex`, `opencode` — chosen per member at create time via `--coding-agent`. `--model <m>` pins the LLM and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; both flags, the model-name-to-backend inference, and the spawn-argv detail live in [`reference/director.md`](reference/director.md) (and the `cafleet-agent-team-monitoring` skill for the monitor). All three honor the leading-`!` input shortcut, so `member exec` and inline previews work uniformly. Backend operational detail: [`codex.md`](../../docs/reference/coding-agents/codex.md) / [`opencode.md`](../../docs/reference/coding-agents/opencode.md).
+Three backends — `claude` (default), `codex`, `opencode` — chosen per member at create time via `--coding-agent`. `--model <m>` pins the LLM and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; both flags, the model-name-to-backend inference, and the spawn-argv detail live in [`reference/director.md`](reference/director.md) (and the `cafleet-agent-team-monitoring` skill for the monitor). All three honor the leading-`!` input shortcut, so `member exec` and inline previews work uniformly. Per-backend deltas: [`codex`](reference/coding-agent/codex.md) / [`opencode`](reference/coding-agent/opencode.md).
 
-## Soliciting user reactions (AskUserQuestion)
+## Soliciting user reactions
 
-When a CAFleet agent running on Claude Code needs a reaction from the user to proceed — **approve**, **choose among options**, **confirm**, or **continue-or-abort** — it solicits that reaction through the `AskUserQuestion` tool. This is the single canonical surface for every user reaction across CAFleet skills, roles, and rules. Never request a reaction in free-form prose ("let me know if this looks good", "shall I proceed?", "reply with your choice") — that surface produces no recorded answer and routinely stalls.
-
-**Standalone vs. fleet.** A standalone Claude Code agent (running a skill directly, no fleet) calls `AskUserQuestion` itself. A fleet **member** never talks to the user; it sends its question to the Director via `cafleet message send`, and the **Director** relays it through `AskUserQuestion` (see the `cafleet-agent-team-supervision` skill § *User Delegation Protocol*).
-
-**Question-shape taxonomy** — pick the shape that fits; ≤ 4 options each. The tool's built-in "Other" always exposes a free-text field, so do NOT add an explicit "Write my own" / "Custom" option. No preamble sentence above the question — the conversation context plus the question text carry it.
-
-| Reaction shape | AskUserQuestion form |
-|---|---|
-| Choice among labeled options | Up to 4 options mirroring the labels |
-| Approve / yes-no | Two options (e.g. Approve / Revise) |
-| Continue-or-abort | Two options (Continue / Abort) |
-| Open-ended "what next" / draft selection | 2–4 complete candidate bodies to compare side-by-side |
-
-**Every escalation is a decision point — give it a surface.** "Escalate to the user", "surface to the user", and "defer to the user" name no surface on their own. Whenever an agent escalates — including a pure action handoff (e.g. "the user must start the server manually") — front it with an `AskUserQuestion` continue/abort gate so no escalation is ever left surface-less.
-
-**Exemptions** (no reaction is being solicited, so `AskUserQuestion` is not required):
-
-- A final informational status report that asks for no decision ("Done — here is what changed"). Reporting an outcome is not soliciting a reaction.
-- A member's question to its Director: the member uses `cafleet message send`; the Director then relays via `AskUserQuestion`.
-
-> **`AskUserQuestion` is a Claude Code idiom.** The rule above assumes the agent runs in Claude Code. A Director or standalone agent on another coding agent (`codex`, `opencode`) substitutes its own decision-elicitation surface (or a plain operator message). The `cafleet member send-input` 4-option pane frame is likewise Claude-Code-specific — on a codex/opencode member the read-then-respond cadence applies, but the `--choice` / `--freetext` keystrokes apply only when the captured buffer matches the validated 4-option layout.
+When you need a recorded user reaction — **approve**, **choose among options**, **confirm**, or **continue-or-abort** — solicit it through your decision surface, never in free-form prose ("let me know if this looks good", "shall I proceed?", "reply with your choice") which records no answer and routinely stalls. A fleet **member** never talks to the user: it sends its question to the Director via `cafleet message send`, and the Director relays it. See your overlay (`reference/coding-agent/<name>.md`) for the concrete decision surface and the question-shape taxonomy.
 
 ## Self-registration recipe
 

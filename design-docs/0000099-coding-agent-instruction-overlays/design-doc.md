@@ -1,7 +1,7 @@
 # Coding-agent instruction overlays
 
 **Status**: Approved
-**Progress**: 11/31 tasks complete
+**Progress**: 15/31 tasks complete
 **Last Updated**: 2026-06-19
 
 ## Overview
@@ -172,10 +172,10 @@ When content moves from base to overlay, DELETE it from the base cleanly. The ba
 
 ### Step 4: Neutralize the base — `skills/cafleet/` core
 
-- [ ] `skills/cafleet/SKILL.md`: replace § *Soliciting user reactions (AskUserQuestion)* with the neutral delta-1 form pointing at the overlay; remove the "AskUserQuestion is a Claude Code idiom" callout; replace the § *Coding-agent backends* docs link with the overlay link (§6). <!-- completed: -->
-- [ ] `skills/cafleet/reference/director.md`: neutralize `--model sonnet` (§ *Member Create*, monitor row) to delta-2 form; neutralize the pane-title asymmetry note to delta-5 form; move the § *Member Send-Input* three-beat `AskUserQuestion` workflow, pane-shape table, and constraints into `claude.md`, leaving a neutral delta-1 pointer; replace the docs links with overlay links; KEEP the model-name-to-backend inference table verbatim. <!-- completed: -->
-- [ ] `skills/cafleet/roles/member.md`: neutralize the three-backend permission-mode enumeration (opening paragraph) to the delta-3 form pointing at the overlay. <!-- completed: -->
-- [ ] `skills/cafleet/reference/recovery.md`: neutralize every `AskUserQuestion` / `send-input` reference to the delta-1 form pointing at the overlay. The three locations are § *2-stage health check* (the "bump to `--lines 120`/`200` to show an AskUserQuestion frame" mention), the § *Stalled member shapes* table (the `AskUserQuestion`-paused row, plus the "no AskUserQuestion frame" qualifiers in the REPL-idle and truly-wedged rows), and § *Recovering from a wedged `/exit`* (the AskUserQuestion-paused → `send-input` branch). <!-- completed: -->
+- [x] `skills/cafleet/SKILL.md`: replace § *Soliciting user reactions (AskUserQuestion)* with the neutral delta-1 form pointing at the overlay; remove the "AskUserQuestion is a Claude Code idiom" callout; replace the § *Coding-agent backends* docs link with the overlay link (§6). <!-- completed: 2026-06-19T11:40 -->
+- [x] `skills/cafleet/reference/director.md`: neutralize `--model sonnet` (§ *Member Create*, monitor row) to delta-2 form; neutralize the pane-title asymmetry note to delta-5 form; move the § *Member Send-Input* three-beat `AskUserQuestion` workflow, pane-shape table, and constraints into `claude.md`, leaving a neutral delta-1 pointer; replace the docs links with overlay links; KEEP the model-name-to-backend inference table verbatim. <!-- completed: 2026-06-19T11:40 -->
+- [x] `skills/cafleet/roles/member.md`: neutralize the three-backend permission-mode enumeration (opening paragraph) to the delta-3 form pointing at the overlay. <!-- completed: 2026-06-19T11:40 -->
+- [x] `skills/cafleet/reference/recovery.md`: neutralize every `AskUserQuestion` / `send-input` reference to the delta-1 form pointing at the overlay. The three locations are § *2-stage health check* (the "bump to `--lines 120`/`200` to show an AskUserQuestion frame" mention), the § *Stalled member shapes* table (the `AskUserQuestion`-paused row, plus the "no AskUserQuestion frame" qualifiers in the REPL-idle and truly-wedged rows), and § *Recovering from a wedged `/exit`* (the AskUserQuestion-paused → `send-input` branch). <!-- completed: 2026-06-19T11:40 -->
 
 ### Step 5: Neutralize the base — monitoring & supervision skills
 
