@@ -1,7 +1,7 @@
 # Coding-agent instruction overlays
 
 **Status**: Approved
-**Progress**: 26/31 tasks complete
+**Progress**: 31/31 tasks complete
 **Last Updated**: 2026-06-19
 
 ## Overview
@@ -43,7 +43,7 @@ Deliberate restatement of the same fact in both homes is acceptable where each a
 
 ### 1. Architecture: base + overlay
 
-- **Base** = every cafleet-family `SKILL.md`, every `roles/*.md`, and every `skills/cafleet/reference/*.md` EXCEPT everything under `skills/cafleet/reference/coding-agent/` (the three overlays and the `_template.md` skeleton). The base is fully backend-neutral: it states *what* to do in backend-agnostic terms and, wherever behavior varies, points at the overlay. Among the `reference/*.md` files, `director.md` and `recovery.md` carry backend idioms (the `AskUserQuestion` / `send-input` surface) and ARE neutralized; `broadcast.md`, `exec-routing.md`, and `output-flags.md` contain no backend deltas (verified) and are left as-is.
+- **Base** = every cafleet-family `SKILL.md`, every `roles/*.md`, and every `skills/cafleet/reference/*.md` EXCEPT everything under `skills/cafleet/reference/coding-agent/` (the three overlays and the `_template.md` skeleton). The base is fully backend-neutral: it states *what* to do in backend-agnostic terms and, wherever behavior varies, points at the overlay. Among the `reference/*.md` files, `director.md` and `recovery.md` carry backend idioms (the `AskUserQuestion` / `send-input` surface) and ARE neutralized; `broadcast.md`, `exec-routing.md`, and `output-flags.md` contain no backend deltas (verified) and are left as-is. **Scope of "cafleet-family":** the family is the enumerated set in the Background section — `skills/cafleet/`, `cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision`, the `cafleet-design-doc-*` skills, and the `cafleet-research-*` skills. Utility skills loaded by the family but not part of it — `cafleet-base-dir`, `cafleet-create-figure`, `cafleet-my-slidev` — are OUT of scope here and are not neutralized by this design; `cafleet-base-dir`'s `AskUserQuestion` usage is a candidate for a follow-up that extends the base/overlay pattern to utility skills.
 - **Overlay** = `skills/cafleet/reference/coding-agent/<name>.md` for `<name>` in `{claude, codex, opencode}`. The overlay states *how* its backend realizes each neutral instruction. It is the single canonical home for every backend delta; sibling skills link to it via `../cafleet/reference/coding-agent/<name>.md`.
 - An agent reads the base, identifies its coding agent, reads its overlay, and applies the overlay's deltas on top of every base instruction.
 
@@ -202,11 +202,11 @@ When content moves from base to overlay, DELETE it from the base cleanly. The ba
 
 ### Step 9: Verification
 
-- [ ] Grep the base (every family `SKILL.md`, every `roles/*.md`, and every `skills/cafleet/reference/*.md` excluding `reference/coding-agent/*`; also excluding the new rule and the skill-author extension) for the delta tokens listed in Success Criteria; confirm zero hits, exempting the `allowed-tools:` front matter (§4b). Verify delta-6 by reviewing the skill-loading prose, not the literal grep alone. The model-name-to-backend inference table contains none of the tokens. <!-- completed: -->
-- [ ] Confirm no skill→`docs/reference/coding-agents/` link remains and no link exists in either direction between the two homes. <!-- completed: -->
-- [ ] Confirm every family `SKILL.md` carries the overlay pointer and `reference/director.md` + the monitor prompt carry the `CODING AGENT:` line. <!-- completed: -->
-- [ ] removal.md sweep: confirm no deprecation residue (no "see claude.md", no historical callouts, no relocated-flag rows) in the base. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test`; confirm green. <!-- completed: -->
+- [x] Grep the base (every family `SKILL.md`, every `roles/*.md`, and every `skills/cafleet/reference/*.md` excluding `reference/coding-agent/*`; also excluding the new rule and the skill-author extension) for the delta tokens listed in Success Criteria; confirm zero hits, exempting the `allowed-tools:` front matter (§4b). Verify delta-6 by reviewing the skill-loading prose, not the literal grep alone. The model-name-to-backend inference table contains none of the tokens. <!-- completed: 2026-06-19T12:33 -->
+- [x] Confirm no skill→`docs/reference/coding-agents/` link remains and no link exists in either direction between the two homes. <!-- completed: 2026-06-19T12:33 -->
+- [x] Confirm every family `SKILL.md` carries the overlay pointer and `reference/director.md` + the monitor prompt carry the `CODING AGENT:` line. <!-- completed: 2026-06-19T12:33 -->
+- [x] removal.md sweep: confirm no deprecation residue (no "see claude.md", no historical callouts, no relocated-flag rows) in the base. <!-- completed: 2026-06-19T12:33 -->
+- [x] Run `mise //cafleet:lint`, `mise //cafleet:format`, `mise //cafleet:typecheck`, `mise //cafleet:test`; confirm green. <!-- completed: 2026-06-19T12:33 -->
 
 ---
 
@@ -216,4 +216,5 @@ When content moves from base to overlay, DELETE it from the base cleanly. The ba
 |------|---------|
 | 2026-06-19 | Initial draft |
 | 2026-06-19 | Add standalone overlay template `_template.md` (§5a, new Success Criterion, Step 1 task) per user request; broaden no-cross-link check to cover the template; Progress denominator 30 → 31. |
+| 2026-06-19 | Step 9 ruling (per Administrator): `cafleet-base-dir` is out of scope; added a "Scope of cafleet-family" clarification to §1 (the family is the Background enumeration; utility skills are excluded). All 5 Step-9 verification checks pass. |
 | 2026-06-19 | Step 6 arbitration: generalize §4b + Success-Criteria exemption (a) so the `allowed-tools:` front-matter exemption covers any functional tool grant (research `Task*`/`TaskStop` AND interview `AskUserQuestion`); clarify that a skill's `description:` field is neutralized like body prose, not exempt. |
