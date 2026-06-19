@@ -1,6 +1,6 @@
 # Coding-agent instruction overlays
 
-**Status**: Complete
+**Status**: Approved
 **Progress**: 31/31 tasks complete
 **Last Updated**: 2026-06-19
 
@@ -10,11 +10,11 @@ Split the cafleet skill family into a backend-neutral **base** instruction set a
 
 ## Success Criteria
 
-- [x] Three overlay files exist at `skills/cafleet/reference/coding-agent/{claude,codex,opencode}.md`, each covering all six backend deltas for its backend.
-- [x] An overlay template exists at `skills/cafleet/reference/coding-agent/_template.md`, carrying all six delta-section headings (in §4 order) with fill-in guidance and no backend-specific values (§5a). The three overlays follow its section structure.
+- [x] Three overlay files exist at `skills/cafleet/reference/coding-agent/{claude,codex,opencode}.md`, each a compact `| Placeholder | Value |` table defining the 9 canonical placeholders (§2) for its backend.
+- [x] An overlay template exists at `skills/cafleet/reference/coding-agent/_template.md`, carrying the 9-placeholder value-table skeleton with angle-bracket fill-in guidance and no backend-specific values (§5a). The three overlays follow its table structure.
 - [x] No base instruction file names a backend-specific value. The base is every cafleet-family `SKILL.md`, every `roles/*.md`, and every `skills/cafleet/reference/*.md` EXCEPT everything under `skills/cafleet/reference/coding-agent/` (the three overlays and the `_template.md`). A grep across the base for `--model sonnet`, `--permission-mode`, `--ask-for-approval`, `--sandbox workspace-write`, `--agent cafleet`, `AskUserQuestion`, `send-input`, `run_in_background`, `TaskStop`, `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`, and the skill-loader variants (`Skill tool`, the backticked `` `Skill` tool ``, `via the Skill tool`) returns nothing — with two exemptions: (a) the `allowed-tools:` YAML front matter of any family skill (a functional Claude tool grant that cannot live in an overlay — the research skills' `Task*`/`TaskStop` and `cafleet-design-doc-interview`'s `AskUserQuestion`; see §4b), and (b) delta-6, which is additionally verified by reviewing the skill-loading prose, not the literal grep alone. A skill's `description:` field is not exempt — it is neutralized like body prose.
 - [x] The model-name-to-backend inference table remains in `skills/cafleet/reference/director.md` unchanged (it is a backend-agnostic selector, not a delta).
-- [x] `skills/cafleet/SKILL.md` carries a prominent early "apply your overlay" instruction; every other family `SKILL.md` carries a one-line overlay pointer linking `../cafleet/reference/coding-agent/<name>.md`.
+- [x] `skills/cafleet/SKILL.md` carries a prominent early "apply your overlay" instruction explaining the `{placeholder}` → value-table substitution convention; every other family `SKILL.md` carries a one-line overlay pointer linking `../cafleet/reference/coding-agent/<name>.md`. The base uses the 9 canonical `{placeholder}` tokens (§2) for every backend-varying value, each substituting cleanly from the overlay's value table.
 - [x] The canonical spawn-prompt skeleton in `reference/director.md` and the monitoring-member spawn prompt in `cafleet-agent-team-monitoring/SKILL.md` both include a `CODING AGENT: <name>` identity line.
 - [x] No skill→`docs/reference/coding-agents/` link remains; no link exists in EITHER direction between `skills/cafleet/reference/coding-agent/` and `docs/reference/coding-agents/`.
 - [x] `.claude/rules/coding-agent-overlay.md` exists and is written affirmatively (positive spec, not a pile of prohibitions).
@@ -47,15 +47,17 @@ Deliberate restatement of the same fact in both homes is acceptable where each a
 - **Overlay** = `skills/cafleet/reference/coding-agent/<name>.md` for `<name>` in `{claude, codex, opencode}`. The overlay states *how* its backend realizes each neutral instruction. It is the single canonical home for every backend delta; sibling skills link to it via `../cafleet/reference/coding-agent/<name>.md`.
 - An agent reads the base, identifies its coding agent, reads its overlay, and applies the overlay's deltas on top of every base instruction.
 
-### 2. The overlay pointer (prominent, early)
+### 2. The placeholder model (base tokens + overlay value table)
 
-The base must make every agent aware that it has to consult its overlay. Two placements:
+The base is written backend-neutral with `{placeholder}` tokens for every value that varies by coding agent; each overlay (`reference/coding-agent/<name>.md`) is a compact **value table** that defines those tokens for its backend. An agent reads the base, identifies its coding agent, reads its overlay's value table, and substitutes the overlay's value for each `{placeholder}` as it reads. Two placements make every agent aware of this:
 
-1. **Canonical statement** — a new early section in `skills/cafleet/SKILL.md` (placed right after the intro / "Reference files" list), worded affirmatively, e.g.:
+1. **Canonical statement** — a new early section in `skills/cafleet/SKILL.md` (right after the "Reference files" list), worded affirmatively:
 
-   > **Apply your coding-agent overlay.** CAFleet instructions are split into a backend-neutral base (this skill family) and a per-coding-agent overlay at `reference/coding-agent/<name>.md`. Identify your coding agent — your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity — then read `reference/coding-agent/<name>.md` and apply its deltas on top of every base instruction.
+   > **Apply your coding-agent overlay.** CAFleet instructions are backend-neutral, written with `{placeholder}` tokens for everything that varies by coding agent. Your overlay — `reference/coding-agent/<name>.md` — is a value table defining each token. Identify your coding agent (your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity), then substitute your overlay's value for each `{placeholder}` you encounter.
 
-2. **Sibling pointer** — every other family `SKILL.md` (`cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision`, `cafleet-design-doc-*`, `cafleet-research-*`) gets a one-line pointer near its top linking `../cafleet/reference/coding-agent/<name>.md` and instructing the agent to read and apply it.
+2. **Sibling pointer** — every other family `SKILL.md` (`cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision`, `cafleet-design-doc-*`, `cafleet-research-*`) gets a one-line pointer near its top linking `../cafleet/reference/coding-agent/<name>.md`.
+
+**Canonical placeholder set** (9): `{decision_surface}`, `{monitor_model}`, `{member_model}`, `{permission_flags}`, `{bg_run}`, `{bg_stop}`, `{task_coord}`, `{pane_title}`, `{skill_loader}`. Where a Claude-specific structure (an option-count cap, a harness task list) does not generalize, the base conditionalizes it — "if your surface caps how many options it shows, paginate"; "on a harness task list, set owner …" — so substitution reads correctly on every backend. Concepts richer than a single value — the `send-input` relay/recovery primitive, the decision-prompt frame shape, the sub-agent dispatch recipe — stay as overlay pointers rather than tokens.
 
 ### 3. Backend self-identification (spawn-prompt change)
 
@@ -70,9 +72,9 @@ A spawned member must know which overlay to read. The Director already knows the
 
 ### 4. The six deltas — base-neutral form and per-overlay content
 
-Every row below moves OUT of the base and into the overlays. The base keeps only the neutral form (which carries the overlay pointer); the three overlay columns are the new canonical content.
+Every value below moves OUT of the base and into the overlays. The base carries only a `{placeholder}` token — delta 1 → `{decision_surface}`; 2 → `{monitor_model}` (+ `{member_model}` for an ordinary member); 3 → `{permission_flags}`; 4 → `{bg_run}` / `{bg_stop}` / `{task_coord}`; 5 → `{pane_title}`; 6 → `{skill_loader}`. The three overlay columns give each backend's value for that token (the overlay's value table). The "base intent" column states what the neutral instruction conveys — the prose the `{placeholder}` stands in for.
 
-| # | Concept | Base-neutral form (stays in base) | `claude.md` | `codex.md` | `opencode.md` |
+| # | Concept | Base intent (the `{placeholder}` stands in for this) | `claude.md` | `codex.md` | `opencode.md` |
 |---|---|---|---|---|---|
 | 1 | **User-reaction surface** | "When you need a recorded user reaction (approve / choose / confirm / continue-or-abort), solicit it through your decision surface — never in free-form prose, which records no answer. A fleet member never talks to the user; it sends its question to the Director, which relays it. See your overlay for the concrete surface and the question-shape taxonomy." | Names `AskUserQuestion` as the surface; the full question-shape taxonomy table; the no-explicit-"Other" rule; the every-escalation-is-a-decision-point gate; standalone-vs-fleet (standalone calls `AskUserQuestion` itself, a member routes to the Director); the `cafleet member send-input` 4-option pane frame — the three-beat capture → `AskUserQuestion` → `send-input` workflow, the pane-shape table, the `--choice`/`--freetext` keystrokes, and the constraints. | No interactive in-pane decision prompt: the member sends its question to the Director via `cafleet message send`, and the Director answers as a plain operator message (read-then-respond cadence). The overlay states this affirmatively and does NOT reference the claude `AskUserQuestion` idiom. | No interactive in-pane decision prompt; opencode normally shows no permission popup (the safety floor resolves every check), so the Director answers as a plain operator message, same read-then-respond cadence. The overlay does NOT reference `AskUserQuestion`. |
 | 2 | **Monitor model** | "Spawn the monitor with the cheapest capable model for the monitor's own backend (claude by default — see §4a)." | `--model haiku` | `--model gpt-5.4-mini` (cheaper than `gpt-5.5`) | `--model anthropic/claude-haiku-4-5` |
@@ -89,23 +91,17 @@ Every row below moves OUT of the base and into the overlays. The base keeps only
 
 ### 5. Overlay file outline
 
-Each overlay opens with a one-line statement of which backend it covers and "apply these deltas on top of the cafleet base", then one section per applicable delta from the table above (§4). Section order is the §4 numbering. The overlays are self-contained; they may reference the shared CLI spec (`docs/spec/cli-options.md`) and `docs/concepts/` pages, but **must not** link to `docs/reference/coding-agents/`.
+Each overlay is a compact **value table**: it opens with `# Overlay: <backend>` and the one-liner "Substitute these into the base `{…}` placeholders.", then a `| Placeholder | Value |` markdown table with one row per canonical placeholder (§2), each filled with this backend's value. Values are short noun phrases that read correctly when substituted into the base sentences. The claude overlay additionally ends with a one-line `send-input` relay note pointing at `docs/spec/cli-options.md` (the deep keystroke detail is NOT reproduced in the overlay). Overlays are self-contained; they may reference the shared CLI spec (`docs/spec/cli-options.md`) but **must not** link to `docs/reference/coding-agents/`.
 
 #### §5a — The overlay template (`_template.md`)
 
-Because all three overlays share the same six-section structure, the canonical skeleton lives in one place: `skills/cafleet/reference/coding-agent/_template.md`. An author starts a new overlay by copying the template and filling each section with the backend's concrete delta. The template:
+Because all overlays share the same value-table structure, the canonical skeleton lives in one place: `skills/cafleet/reference/coding-agent/_template.md`. An author starts a new overlay by copying the template and filling each row. The template:
 
-- Opens with `# Overlay: <backend name>` and the one-liner "Apply these deltas on top of the cafleet base."
-- Carries all six delta-section headings in §4 order, each with a short angle-bracket placeholder describing what the backend states there:
-  1. `## 1. Decision surface` — how this backend solicits a recorded user reaction (its interactive decision-prompt tool if it has one, or the plain-operator-message-via-Director fallback). A non-claude overlay states its surface affirmatively and does NOT reference the claude `AskUserQuestion` idiom.
-  2. `## 2. Monitor model` — `--model <cheapest capable model for this backend>`.
-  3. `## 3. Auto-approval / permission mode` — the exact spawn flags.
-  4. `## 4. Background-task + task-list primitives` — the background-run + stop primitive and the task-list (or cafleet-message) coordination substrate.
-  5. `## 5. Pane discovery / pane title` — `cafleet member list` is ground truth; note any `--name`-style pane-title analog.
-  6. `## 6. Skill-loading recipe` — the loader, or the read-by-absolute-path fallback.
-- Carries **no backend-specific value** — only the structure and placeholders. It lives under `coding-agent/`, so it is excluded from the base delta grep (§1, Step 9) and, like the overlays, **must not** link to `docs/reference/coding-agents/`.
+- Opens with `# Overlay: <backend name>` and "Substitute these into the base `{…}` placeholders. Fill every row with this backend's concrete value; keep values short."
+- Carries the `| Placeholder | Value |` table with all 9 canonical placeholder rows (§2), each value an angle-bracket guidance description of what the backend states there (no backend-specific values).
+- Carries **no backend-specific value**. It lives under `coding-agent/`, so it is excluded from the base delta grep (§1, Step 9) and **must not** link to `docs/reference/coding-agents/`.
 
-Each overlay's section structure must match the template (all six sections, §4 order); a backend with "no analog" for a section states that *as* the section's content rather than omitting the section.
+Every overlay's table must define all 9 canonical placeholders; a backend with "no analog" for a value states that *as* the value (e.g. `{task_coord}` = "none — coordinate via cafleet messages") rather than omitting the row.
 
 The codex / opencode operational facts the overlays state are sourced from the human docs (`docs/reference/coding-agents/{codex,opencode}.md`) and RESTATED in the overlay (deliberate restatement, no link). The resolved facts both overlays must carry:
 
@@ -223,4 +219,5 @@ When content moves from base to overlay, DELETE it from the base cleanly. The ba
 | 2026-06-19 | Opus review round 3: neutralized the matching per-backend dispatch pointer in `cafleet-research-report/roles/web-researcher.md` (base roles file) to the backend-neutral form. |
 | 2026-06-19 | Opus review round 4: **approved** — base reads backend-neutral, overlays self-contained, no cross-links, removal-clean. Review fixes pushed to PR #130. Status → Complete. Non-blocking follow-up (out of scope): `web-researcher.md` frontmatter `model: sonnet` is vestigial Claude agent-spec metadata (§4b-class, ignored on codex). |
 | 2026-06-19 | Post-completion fix (per Administrator audit): bare backend-specific **model names** had leaked past the Success-Criteria grep (which only tokenized `--model sonnet`, not bare names). Relocated the `director.md` `--model` per-backend examples + opencode `<provider-id>/<model-id>` note into each overlay's delta-2 (with a neutral pointer left in `director.md`); dropped the vestigial `web-researcher.md` `model: sonnet`. The model-name-to-backend inference table stays (backend-agnostic selector, used before the backend is known — cannot live in a per-backend overlay). |
+| 2026-06-19 | **Variable-substitution redesign (per Administrator).** The overlays were too wordy and the "see your overlay" prose-pointer model was indirect. Reworked to a template-variable model: the base is written with 9 canonical `{placeholder}` tokens (`{decision_surface}` `{monitor_model}` `{member_model}` `{permission_flags}` `{bg_run}` `{bg_stop}` `{task_coord}` `{pane_title}` `{skill_loader}`), and each overlay is a compact `\| Placeholder \| Value \|` table defining them (claude.md ~74→18 lines). Rewrote §2/§4/§5/§5a + SC accordingly. Claude-specific structures (option-count cap, harness task list) are conditionalized in the base so substitution reads correctly on every backend; concepts richer than a value (`send-input` relay/recovery, decision-prompt frame, sub-agent dispatch) stay as overlay pointers. |
 | 2026-06-19 | Step 6 arbitration: generalize §4b + Success-Criteria exemption (a) so the `allowed-tools:` front-matter exemption covers any functional tool grant (research `Task*`/`TaskStop` AND interview `AskUserQuestion`); clarify that a skill's `description:` field is neutralized like body prose, not exempt. |
