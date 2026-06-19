@@ -1,7 +1,7 @@
 # Coding-agent instruction overlays
 
 **Status**: Approved
-**Progress**: 21/31 tasks complete
+**Progress**: 23/31 tasks complete
 **Last Updated**: 2026-06-19
 
 ## Overview
@@ -191,8 +191,8 @@ When content moves from base to overlay, DELETE it from the base cleanly. The ba
 
 ### Step 7: Neutralize the base — research family
 
-- [ ] `cafleet-research-report/SKILL.md` + `roles/{director,manager,researcher}.md`: neutralize the PROSE for `--model sonnet` (delta-2), the `Task*` work-coordination substrate (delta-4), the "load skills via the Skill tool" recipe (delta-6), and the `AskUserQuestion` reference (delta-1). KEEP the `allowed-tools:` front matter intact (§4b). <!-- completed: -->
-- [ ] `cafleet-research-presentation/SKILL.md` + `roles/*.md`: neutralize the PROSE for `--model sonnet` (delta-2), `run_in_background`/`TaskStop` (delta-4), and the `AskUserQuestion` reference (delta-1). KEEP the `allowed-tools:` front matter intact (§4b). <!-- completed: -->
+- [x] `cafleet-research-report/SKILL.md` + `roles/{director,manager,researcher}.md`: neutralize the PROSE for `--model sonnet` (delta-2), the `Task*` work-coordination substrate (delta-4), the "load skills via the Skill tool" recipe (delta-6), and the `AskUserQuestion` reference (delta-1). KEEP the `allowed-tools:` front matter intact (§4b). <!-- completed: 2026-06-19T12:13 -->
+- [x] `cafleet-research-presentation/SKILL.md` + `roles/*.md`: neutralize the PROSE for `--model sonnet` (delta-2), `run_in_background`/`TaskStop` (delta-4), and the `AskUserQuestion` reference (delta-1). KEEP the `allowed-tools:` front matter intact (§4b). <!-- completed: 2026-06-19T12:13 -->
 
 ### Step 8: Narrow docs-staleness fixes
 

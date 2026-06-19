@@ -72,7 +72,7 @@ Always return results in this structured format:
 
 ## Language Selection
 
-As a teammate, use the language specified by the Manager/Director (default English); standalone, ask the user via `AskUserQuestion` (English default / Japanese). Write all output in the selected language; technical terms and source URLs stay as-is.
+As a teammate, use the language specified by the Manager/Director (default English); standalone, ask the user via your decision surface (English default / Japanese). Write all output in the selected language; technical terms and source URLs stay as-is.
 
 ---
 
