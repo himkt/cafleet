@@ -88,7 +88,7 @@ The active turn consumes inputs that have already arrived and dispatches what is
 
 CAFleet members never talk to the user directly — the Director relays. This is the relay-specific application of the canonical rule in the `cafleet` skill § *Soliciting user reactions* (the question-shape taxonomy is in your overlay). When a member sends a `cafleet message send` asking for user input:
 
-1. **Classify the question shape** per the question-shape taxonomy in your overlay (choice among labeled options, approve / yes-no, continue-or-abort, or open-ended / draft selection), and present it through {decision_surface} (mirror the shape into options where {decision_surface} supports them). Follow your overlay for how the surface handles free-form text.
+1. **Classify the question shape** per the question-shape taxonomy in your overlay (choice among labeled options, approve / yes-no, continue-or-abort, or open-ended / draft selection), and present it through {decision_surface}, mirroring the shape into options where the surface supports them. Follow your overlay for how the surface handles free-form text.
 2. **Ask the user.** No preamble sentence above the question — the conversation context plus the question text carry it.
 3. **Relay the answer back** via `cafleet message send` to the originating member. Pass through the user's selection verbatim; do not substitute your own judgment. If the user provided free-form text instead of a listed option, send that text.
 

@@ -194,8 +194,8 @@ After decomposing the topic, the Manager sends the Director one or more Research
 
 With multiple Researchers running in parallel, coordination goes through {task_coord} — not just through spawn prompts. The Manager MUST create one task per sub-topic BEFORE asking the Director to spawn the Researcher for it.
 
-- The Manager registers each sub-topic with {task_coord} before its Researcher is spawned (on a harness task list, that is one task per sub-topic). The registration records the sub-topic, scope, and expected output file path (e.g., `<resolved-path>/01-research-<subtopic>.md`).
-- Each Researcher claims its assignment via {task_coord} on spawn (on a harness task list, set owner `researcher-NN`, status `in_progress`).
+- The Manager registers each sub-topic with {task_coord} before its Researcher is spawned. The registration records the sub-topic, scope, and expected output file path (e.g., `<resolved-path>/01-research-<subtopic>.md`).
+- Each Researcher claims its assignment via {task_coord} on spawn.
 - Researchers mark their task `completed` when their output file is written and the completion report has been sent.
 - The Manager blocks on all research tasks being `completed` before starting compilation. Check the task list for progress.
 
@@ -213,7 +213,7 @@ Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#ca
 | role-file + ROLE-DEF suffix | `roles/researcher.md`; suffix `— accountability, Discovery Phase, fact verification protocol, output format, and shutdown.` |
 | cafleet-load purpose | `for the broker primitives and bash-via-Director routing` (no extra skills) |
 | CONTEXT LINES | `CURRENT DATE: [INSERT today's date]` / `YOUR NAME: researcher-NN` / `YOUR ASSIGNMENT: [specific sub-topic and what to investigate]` / `YOUR TASK ID: [INSERT the task id the Manager created for this sub-topic]` / `OUTPUT FILE: [INSERT <resolved-path>/NN-research-<subtopic>.md]` |
-| POLL-HANDLING + extra comms | **ack-inline** form; plus `On start, claim your assignment via {task_coord} (on a harness task list, owner researcher-NN, status in_progress).` and `Report completion via {task_coord} when done.` |
+| POLL-HANDLING + extra comms | **ack-inline** form; plus `On start, claim your assignment via {task_coord}.` and `Report completion via {task_coord} when done.` |
 | start cue (verbatim) | `Write findings to the output file, then send the Director a completion summary. The Director will relay findings and any follow-up questions between you and the Manager.` |
 
 Render the prompt to `${BASE}/prompts/researcher-<NN>-<UTC-compact>.md` per the 2b two-step audit-file pattern, then spawn with `--prompt-file`:
