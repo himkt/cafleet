@@ -70,6 +70,7 @@ FLEET ID: {fleet_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
 BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
+CODING AGENT: [INSERT the backend name the Director chose at member create — claude / codex / opencode]
 ‹CONTEXT LINES›
 
 COMMUNICATION PROTOCOL:
@@ -81,6 +82,8 @@ COMMUNICATION PROTOCOL:
 
 ‹START CUE›
 ```
+
+The `CODING AGENT:` line names the member's coding-agent backend (`claude` / `codex` / `opencode`). The Director fills it as a rendered literal the same way it fills `BASE` — from the `--coding-agent` value it chose at `member create` — so no CLI code change is required. The member reads its overlay `reference/coding-agent/<name>.md` deterministically from this line and applies the overlay's deltas on top of the base.
 
 Per-role delta slots (each consuming skill's spawn section fills these):
 

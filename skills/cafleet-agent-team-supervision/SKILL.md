@@ -7,6 +7,8 @@ description: "Governance layer for CAFleet Directors. Loads agent-team-monitorin
 
 This skill builds on the `cafleet-agent-team-monitoring` skill. Load monitoring first — it documents the `cafleet monitor` heartbeat that supervision is performed through. Supervision adds the always-applicable obligations and the Authorization-Scope Guard.
 
+**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
+
 ## Core Principle
 
 **You are the instruction giver. If you stop giving instructions, the entire team stops.**

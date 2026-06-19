@@ -18,6 +18,10 @@ This file (the core) covers the identity / poll / send / ack / cancel / show lif
 
 Exhaustive per-subcommand flags, exit codes, and error strings live in [`docs/spec/cli-options.md`](../../docs/spec/cli-options.md).
 
+## Apply your coding-agent overlay
+
+CAFleet instructions are split into a backend-neutral base (this skill family) and a per-coding-agent overlay at `reference/coding-agent/<name>.md`. Identify your coding agent — your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity — then read `reference/coding-agent/<name>.md` and apply its deltas on top of every base instruction.
+
 ## Required Flags
 
 Every `cafleet` invocation that touches agents or messages carries two literal integer ids (no env-var fallback):

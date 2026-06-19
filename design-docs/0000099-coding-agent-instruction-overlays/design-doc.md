@@ -1,7 +1,7 @@
 # Coding-agent instruction overlays
 
 **Status**: Approved
-**Progress**: 7/31 tasks complete
+**Progress**: 11/31 tasks complete
 **Last Updated**: 2026-06-19
 
 ## Overview
@@ -165,10 +165,10 @@ When content moves from base to overlay, DELETE it from the base cleanly. The ba
 
 ### Step 3: Spawn-prompt skeleton + overlay pointer
 
-- [ ] Add the `CODING AGENT: <name>` identity line to the canonical spawn-prompt skeleton in `skills/cafleet/reference/director.md` § *Canonical spawn-prompt skeleton* (identity block + the per-role delta notes), and document that the Director fills it like `BASE`. <!-- completed: -->
-- [ ] Add the `CODING AGENT: <name>` line to the monitoring-member spawn prompt in `cafleet-agent-team-monitoring/SKILL.md` § *The monitoring member*. <!-- completed: -->
-- [ ] Add the prominent "Apply your coding-agent overlay" section to `skills/cafleet/SKILL.md` per §2(1). <!-- completed: -->
-- [ ] Add the one-line overlay pointer (`../cafleet/reference/coding-agent/<name>.md`) near the top of each sibling `SKILL.md`: `cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision`, `cafleet-design-doc`, `cafleet-design-doc-create`, `cafleet-design-doc-execute`, `cafleet-design-doc-interview`, `cafleet-research-report`, `cafleet-research-presentation`. <!-- completed: -->
+- [x] Add the `CODING AGENT: <name>` identity line to the canonical spawn-prompt skeleton in `skills/cafleet/reference/director.md` § *Canonical spawn-prompt skeleton* (identity block + the per-role delta notes), and document that the Director fills it like `BASE`. <!-- completed: 2026-06-19T11:27 -->
+- [x] Add the `CODING AGENT: <name>` line to the monitoring-member spawn prompt in `cafleet-agent-team-monitoring/SKILL.md` § *The monitoring member*. <!-- completed: 2026-06-19T11:27 -->
+- [x] Add the prominent "Apply your coding-agent overlay" section to `skills/cafleet/SKILL.md` per §2(1). <!-- completed: 2026-06-19T11:27 -->
+- [x] Add the one-line overlay pointer (`../cafleet/reference/coding-agent/<name>.md`) near the top of each sibling `SKILL.md`: `cafleet-agent-team-monitoring`, `cafleet-agent-team-supervision`, `cafleet-design-doc`, `cafleet-design-doc-create`, `cafleet-design-doc-execute`, `cafleet-design-doc-interview`, `cafleet-research-report`, `cafleet-research-presentation`. <!-- completed: 2026-06-19T11:27 -->
 
 ### Step 4: Neutralize the base — `skills/cafleet/` core
 

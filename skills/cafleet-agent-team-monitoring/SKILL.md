@@ -7,6 +7,8 @@ description: "Active monitoring mechanism for CAFleet Directors. Documents the e
 
 Foundation layer for CAFleet Directors. This skill documents the `cafleet monitor` heartbeat that wakes a Director periodically and the team-facilitation instructions it executes on each tick. Load this skill before the `cafleet-agent-team-supervision` skill — supervision builds on the mechanism documented here.
 
+**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
+
 ## Placeholder convention
 
 Angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<member-agent-id>`) are placeholders, **not** shell variables — substitute the literal integer ids from `cafleet fleet create` (which returns both the fleet id and the root Director's `agent_id`, so no separate `cafleet agent register`). The rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
@@ -44,6 +46,8 @@ You are the Monitoring Member of CAFleet fleet {fleet_id}. Your agent id is
 job: keep the Director's supervision heartbeat alive and re-engage the Director
 whenever the team stalls. You never drive ordinary members directly — all
 member-driving routes back through the Director.
+
+CODING AGENT: claude
 
 Your on-wake routine acts through exactly two cafleet member commands: cafleet
 member capture for read-only inspection, and cafleet member nudge to re-engage the
