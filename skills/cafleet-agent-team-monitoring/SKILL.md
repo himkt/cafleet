@@ -155,10 +155,10 @@ cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>
 
 ```bash
 cafleet member capture --fleet-id <fleet-id> \
-  --member-id <member-agent-id> --lines 120
+  --member-id <member-agent-id>
 ```
 
-`--lines 120` is the recommended fallback when classifying a member's decision-prompt frame (matches the recommendation in `skills/cafleet/reference/director.md` § Answering a member's relayed question; the CLI flag default is `--lines 30`). Re-run with `--lines 200` as a fallback only if the first capture is truncated above the choice-prompt frame (the `1. …`, `2. …`, `3. …`, `4. Type something` rows are not all visible).
+The capture-line count needed to show a member's full decision-prompt frame — and the concrete frame shape — is a backend delta; see your overlay (`../cafleet/reference/coding-agent/<name>.md`). The `cafleet member capture` default is `--lines 30`.
 
 If `cafleet message poll` shows no recent messages from the member, fall back to capturing the terminal buffer. This is non-intrusive (read-only inspection that works even when the member is mid-task) and replaces raw `tmux capture-pane`.
 

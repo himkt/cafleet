@@ -4,7 +4,7 @@ Apply these deltas on top of the cafleet base. The base states each instruction 
 
 ## 1. Decision surface
 
-codex has no `AskUserQuestion` analog and no validated 4-option `send-input` frame. When a recorded user reaction is needed, a fleet **member** sends its question to the Director via `cafleet message send`; the **Director** answers as a plain operator message (the read-then-respond cadence). The base's no-free-form-prose rule still holds for the member→Director hop: the question must be a concrete, answerable ask, not "let me know what you think".
+codex has no interactive in-pane prompt for soliciting a user decision, so the relay through the Director IS the decision surface. When a recorded user reaction is needed (approve / choose / confirm / continue-or-abort), a fleet **member** sends its question to the Director via `cafleet message send`, and the **Director** answers as a plain operator message (read-then-respond cadence). The base's no-free-form-prose rule still holds for the member→Director hop: the question must be a concrete, answerable ask — a specific choice or yes/no — not "let me know what you think".
 
 ## 2. Monitor model
 

@@ -4,7 +4,7 @@ Apply these deltas on top of the cafleet base. The base states each instruction 
 
 ## 1. Decision surface
 
-<How this backend solicits a recorded user reaction — approve / choose / confirm / continue-or-abort. Name the concrete surface (the `AskUserQuestion` analog), or state the plain-operator-message fallback. A fleet member never talks to the user: it sends its question to the Director, which relays it through this surface. Include the question-shape taxonomy and any pane-relay keystroke frame this backend supports.>
+<How this backend solicits a recorded user reaction — approve / choose / confirm / continue-or-abort. Name this backend's interactive decision-prompt tool if it has one, or state the plain-operator-message-via-Director fallback. A fleet member never talks to the user: it sends its question to the Director, which relays it through this surface. Include the question-shape taxonomy and any pane-relay keystroke frame this backend supports.>
 
 ## 2. Monitor model
 

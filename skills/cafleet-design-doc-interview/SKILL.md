@@ -191,14 +191,14 @@ After persisting the question list (Step 2g) — or directly when `SKIP_ANALYZER
 
 > The Director MUST complete all rounds in the current invocation. Stopping before all questions are asked is FORBIDDEN. The only exception is the user explicitly using the decision surface's free-text option to request early termination — in that case proceed directly to Step 4 with the answers collected so far.
 
-**There is no "End interview" option.** The user's escape hatch is the built-in "Other" free-text on any question.
+**There is no "End interview" option.** The user's escape hatch is the free-text option on any question.
 
 **Session termination:**
 
 | Condition | Next action |
 |:--|:--|
 | All rounds completed (`round = total_rounds`) | Proceed to Step 4 |
-| User requests early exit via "Other" | Proceed to Step 4 with answers collected so far |
+| User requests early exit via the free-text option | Proceed to Step 4 with answers collected so far |
 
 ### Step 4: Annotate & Update Progress (Director)
 

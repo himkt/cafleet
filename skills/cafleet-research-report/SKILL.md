@@ -246,7 +246,7 @@ If the Manager asks the Director a question that is really a user decision (e.g.
 
 ### Step 6: Present to User (Director)
 
-Present the approved report to the user via your decision surface (options: **Approve** / **Request changes**; a free-text fallback captures other feedback — see your overlay) with a summary of findings (2–3 sentences), file paths (report, scout files, researcher files), and known limitations. If the user selects **Request changes** or types feedback via "Other", route it to the Manager via `cafleet message send`, re-review, and re-present. Repeat until the user approves.
+Present the approved report to the user via your decision surface (options: **Approve** / **Request changes**; a free-text fallback captures other feedback — see your overlay) with a summary of findings (2–3 sentences), file paths (report, scout files, researcher files), and known limitations. If the user selects **Request changes** or provides free-form feedback, route it to the Manager via `cafleet message send`, re-review, and re-present. Repeat until the user approves.
 
 ### Step 7: Offer Presentation Chaining (Director)
 
@@ -260,27 +260,19 @@ Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol* (firs
 
 ### web-researcher
 
-This skill ships an embedded agent spec for parallel web research that returns structured summaries with sources. The canonical spec lives in [`roles/web-researcher.md`](roles/web-researcher.md), reachable from both Claude Code (load the `cafleet-research-report` skill, then dispatch via `Agent`) and codex (plugin auto-discovery). Read that file and paste its spec body (the prose under the frontmatter) verbatim into the dispatch recipe below.
+This skill ships an embedded agent spec for parallel web research that returns structured summaries with sources. The canonical spec lives in [`roles/web-researcher.md`](roles/web-researcher.md). Read that file and paste its spec body (the prose under the frontmatter) verbatim into the dispatch recipe below.
 
-#### Dispatching this agent (Claude Code recipe)
+#### Dispatching this agent
 
-On Claude Code, dispatch the `web-researcher` spec via the `Agent` tool with `subagent_type="general-purpose"`. Paste the spec body from [`roles/web-researcher.md`](roles/web-researcher.md) verbatim into the `prompt` field, then append the per-call inputs (the research topic(s) + context):
+Read the spec body (the prose under the frontmatter) from [`roles/web-researcher.md`](roles/web-researcher.md) and use it verbatim as the dispatched agent's prompt, then append the per-call inputs — the research topic(s) and the context for why the information is needed:
 
 ```
-Agent(
-  subagent_type="general-purpose",
-  description="Web research on <topic>",
-  prompt="""<paste the web-researcher spec body verbatim>
+<paste the web-researcher spec body verbatim>
 
 Research: <topic>
-Context: <why this information is needed>"""
-)
+Context: <why this information is needed>
 ```
 
-This is the post-promotion equivalent of the named `Agent(subagent_type="web-researcher")` call that worked when `web-researcher` lived as a standalone `.claude/agents/web-researcher.md`. The structured `subagent_type` name is lost (Claude Code's plugin loader does not register skill-embedded agent specs as named subagents), but the behavior is identical because the spec body is the same.
-
-#### Dispatching this agent (codex)
-
-On codex (which reads SKILL.md directly — see `docs/reference/coding-agents/codex.md`), either **inline-follow** (the agent reads [`roles/web-researcher.md`](roles/web-researcher.md) and follows the spec in its own turn, no new agent spawned) or **member-spawn** a dedicated codex member via `cafleet member create --coding-agent codex` with the spec body pasted into the positional prompt argument (positional `[PROMPT_ARGV]...`; there is no `--spawn-prompt-from-text` flag).
+Dispatch this prompt via your backend's sub-agent primitive if it has one (see your overlay). If your backend has no sub-agent primitive, either **inline-follow** the spec (read [`roles/web-researcher.md`](roles/web-researcher.md) and follow it in your own turn — no new agent spawned) or **member-spawn** a dedicated member via `cafleet member create` with the spec body pasted into its spawn prompt.
 
 $ARGUMENTS

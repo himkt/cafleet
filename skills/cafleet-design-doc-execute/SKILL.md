@@ -359,7 +359,7 @@ When the user selects "Scan for COMMENT markers": scan changed files for `COMMEN
 
 After all `COMMENT(...)` markers are resolved and verified, re-present to user.
 
-When the user selects "Other": interpret intent per [roles/director.md](roles/director.md) rules.
+When the user provides free-form text: interpret intent per [roles/director.md](roles/director.md) rules.
 
 No round limit — the loop continues until the user approves or aborts.
 
@@ -484,8 +484,8 @@ The three Step 6a precondition failures (`gh auth status` fails / on default bra
 | `gh pr create` fails | stderr of `gh pr create` | Report, skip Step 7, go to Step 8 local-finalize |
 | `@copilot` reviewer unavailable | `gh api .../requested_reviewers` shows no Copilot AND no prior Copilot review | Report `Copilot reviewer unavailable for this PR`; skip Step 7; go to Step 8 |
 | Fix-push fails mid-loop (any subsequent push after the initial one) | stderr of `git push` | Escalate to user (decision surface: retry / finalize now / abort) |
-| User selects "Other" in Step 5 with abort-intent text | Existing LLM intent judgment | Abort Flow (unchanged — no push) |
-| User selects "Other" in Step 5 with approve-local intent | Existing LLM intent judgment, extended | Skip Steps 6 + 7; go to Step 8 local-finalize |
+| User provides free-form text in Step 5 with abort-intent | Existing LLM intent judgment | Abort Flow (unchanged — no push) |
+| User provides free-form text in Step 5 with approve-local intent | Existing LLM intent judgment, extended | Skip Steps 6 + 7; go to Step 8 local-finalize |
 
 #### User Interjection During Step 7
 

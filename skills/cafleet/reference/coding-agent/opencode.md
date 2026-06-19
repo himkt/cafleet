@@ -4,7 +4,7 @@ Apply these deltas on top of the cafleet base. The base states each instruction 
 
 ## 1. Decision surface
 
-opencode has no `AskUserQuestion` analog. In normal operation the TUI shows no permission popup — the `--agent cafleet` safety floor resolves every check to `allow` or `deny`, so there is no runtime decision point to relay. When a recorded user reaction is needed, a fleet **member** sends its question to the Director via `cafleet message send`; the **Director** answers as a plain operator message (the read-then-respond cadence). If a permission popup ever appears it is a regression escape from the safety floor, not a decision point: escalate to the user and capture pane state for diagnosis rather than answering it.
+opencode has no interactive in-pane prompt for soliciting a user decision, so the relay through the Director IS the decision surface. When a recorded user reaction is needed (approve / choose / confirm / continue-or-abort), a fleet **member** sends its question to the Director via `cafleet message send`, and the **Director** answers as a plain operator message (read-then-respond cadence). In normal operation the TUI also shows no permission popup — the `--agent cafleet` safety floor resolves every check to `allow` or `deny`, so there is no in-pane decision point to relay. If a permission popup ever appears it is a regression escape from the safety floor, not a decision point: escalate to the user and capture pane state for diagnosis rather than answering it. The question to the Director must be a concrete, answerable ask, never free-form prose.
 
 ## 2. Monitor model
 

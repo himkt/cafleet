@@ -48,7 +48,7 @@ See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordina
 
 ### LLM Intent Judgment
 
-When the user selects "Other" and provides free text, use LLM reasoning to determine intent — not keyword matching. Interpret the user's text to distinguish between:
+When the user provides free-form text instead of a listed option, use LLM reasoning to determine intent — not keyword matching. Interpret the user's text to distinguish between:
 
 - **Abort intent** (user wants to stop or cancel the process)
 - **Non-abort intent** (user is providing verbal feedback or asking a question)
