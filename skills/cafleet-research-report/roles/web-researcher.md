@@ -5,7 +5,6 @@ Canonical spec for the embedded web-research agent that returns structured summa
 ---
 name: web-researcher
 description: Use this agent to research topics on the web before specification development. Supports parallel research of multiple topics. Returns structured summaries with sources. Best used in combination with the cafleet-design-doc-create skill - run web-researcher first to gather context, then pass results to the cafleet-design-doc-create skill.
-model: sonnet
 color: blue
 ---
 

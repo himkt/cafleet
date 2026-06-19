@@ -8,7 +8,7 @@ codex has no interactive in-pane prompt for soliciting a user decision, so the r
 
 ## 2. Monitor model
 
-`--model gpt-5.4-mini` — the cheapest capable model for the codex backend (cheaper than `gpt-5.5`). The Director substitutes this into the `cafleet member create … --role monitor` spawn command only when it spawns the monitor with `--coding-agent codex`.
+`--model gpt-5.4-mini` — the cheapest capable model for the codex backend (cheaper than `gpt-5.5`). The Director substitutes this into the `cafleet member create … --role monitor` spawn command only when it spawns the monitor with `--coding-agent codex`. For an ordinary member, a general `--model` example value on this backend is `gpt-5.5` (a bare model name, pass-through; distinct from the monitor model above).
 
 ## 3. Auto-approval / permission mode
 

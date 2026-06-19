@@ -55,7 +55,7 @@ Validation and key sequences: [`cli-options.md`](../../../../docs/spec/cli-optio
 
 ## 2. Monitor model
 
-`--model haiku` — the cheapest capable model for the claude backend. The Director substitutes this into the `cafleet member create … --role monitor` spawn command.
+`--model haiku` — the cheapest capable model for the claude backend. The Director substitutes this into the `cafleet member create … --role monitor` spawn command. For an ordinary member, a general `--model` example value on this backend is `sonnet` (a bare model name, pass-through; distinct from the monitor model above).
 
 ## 3. Auto-approval / permission mode
 

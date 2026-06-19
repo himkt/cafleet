@@ -8,7 +8,7 @@ opencode has no interactive in-pane prompt for soliciting a user decision, so th
 
 ## 2. Monitor model
 
-`--model anthropic/claude-haiku-4-5` — the cheapest capable model for the opencode backend, in opencode's required `<provider-id>/<model-id>` form. The Director substitutes this into the `cafleet member create … --role monitor` spawn command only when it spawns the monitor with `--coding-agent opencode`.
+`--model anthropic/claude-haiku-4-5` — the cheapest capable model for the opencode backend, in opencode's required `<provider-id>/<model-id>` form. The Director substitutes this into the `cafleet member create … --role monitor` spawn command only when it spawns the monitor with `--coding-agent opencode`. For an ordinary member, a general `--model` example value on this backend is `anthropic/claude-sonnet-4-6`, in the same required `<provider-id>/<model-id>` form (distinct from the monitor model above); opencode rejects a value missing the `/` separator at exit 2.
 
 ## 3. Auto-approval / permission mode
 

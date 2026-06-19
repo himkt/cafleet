@@ -8,7 +8,7 @@ Apply these deltas on top of the cafleet base. The base states each instruction 
 
 ## 2. Monitor model
 
-`--model <cheapest capable model for this backend>` — the value the Director substitutes into the `cafleet member create … --role monitor` spawn command.
+`--model <cheapest capable model for this backend>` — the value the Director substitutes into the `cafleet member create … --role monitor` spawn command. Also state this backend's accepted `--model` form and a general `--model` example value for an ordinary member (distinct from the monitor model above).
 
 ## 3. Auto-approval / permission mode
 
