@@ -53,7 +53,7 @@ If the `codex` binary is not on `PATH`, `cafleet member create --coding-agent co
 
 ## cafleet usage from inside a codex pane
 
-Codex members cannot load Claude Code skills, so their spawn prompt points them at this page instead. The same cafleet CLI surface works from a codex pane unchanged:
+Codex members cannot load Claude Code skills, so their spawn prompt has them read the cafleet skill files by absolute path instead. The same cafleet CLI surface works from a codex pane unchanged:
 
 ```bash
 cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>

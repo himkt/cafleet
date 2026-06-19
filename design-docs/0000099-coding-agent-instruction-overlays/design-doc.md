@@ -1,7 +1,7 @@
 # Coding-agent instruction overlays
 
 **Status**: Approved
-**Progress**: 23/31 tasks complete
+**Progress**: 26/31 tasks complete
 **Last Updated**: 2026-06-19
 
 ## Overview
@@ -196,9 +196,9 @@ When content moves from base to overlay, DELETE it from the base cleanly. The ba
 
 ### Step 8: Narrow docs-staleness fixes
 
-- [ ] `docs/reference/coding-agents/codex.md`: update the stale "spawn prompt points them at this page" sentence per §7 (no link to the overlay). <!-- completed: -->
-- [ ] `docs/reference/coding-agents/opencode.md`: apply the equivalent fix if it carries the same claim. <!-- completed: -->
-- [ ] `README.md`: grep for coding-agent-specific values / skill-structure references; update only what this change makes stale, otherwise leave untouched. <!-- completed: -->
+- [x] `docs/reference/coding-agents/codex.md`: update the stale "spawn prompt points them at this page" sentence per §7 (no link to the overlay). <!-- completed: 2026-06-19T12:16 -->
+- [x] `docs/reference/coding-agents/opencode.md`: apply the equivalent fix if it carries the same claim. <!-- completed: 2026-06-19T12:16 -->
+- [x] `README.md`: grep for coding-agent-specific values / skill-structure references; update only what this change makes stale, otherwise leave untouched. <!-- completed: 2026-06-19T12:16 -->
 
 ### Step 9: Verification
 
