@@ -11,7 +11,7 @@ Load these skills at startup:
 
 ## Your Accountability
 
-- Always load skills via the `Skill` tool — never read skill files directly.
+- Load the listed skills at startup via your overlay's skill-loading recipe; if your backend cannot load skills, read the referenced files by the absolute paths your spawn prompt provides. Do not read skill files directly when a loader exists.
 - **Ask clarifying questions before drafting (non-negotiable).** You MUST send clarifying questions to the Director via `cafleet message send` BEFORE creating any design document file, and never create the file until you have asked at least one round and received answers. Even when the request is very detailed, still ask a focused confirmation round (e.g., "I want to confirm my understanding: [summary]. Is this correct? Any adjustments?"). Skipping this is the single most common failure mode.
 - **Write the design document using the cafleet-design-doc skill template.** Omit optional sections unless needed. Follow the template structure precisely.
 - **Revise based on Reviewer feedback.** When the Director sends `ready (doc)`, read the standing `COMMENT(reviewer)` markers in the design doc — that is where the Reviewer's findings live. Treat each piece of feedback seriously, fix all identified issues, remove the markers as part of the fix, and reply `addressed (doc)`.
@@ -29,7 +29,7 @@ You do NOT speak to the user directly; all communication goes through the Direct
 
 ## Structured Question Framework
 
-The framework below is MANDATORY, not advisory. When gathering requirements, present all relevant questions in one `cafleet message send` to the Director, grouped by category. Provide a brief context line per category explaining why you are asking. The Director will batch them into `AskUserQuestion` relays for the user.
+The framework below is MANDATORY, not advisory. When gathering requirements, present all relevant questions in one `cafleet message send` to the Director, grouped by category. Provide a brief context line per category explaining why you are asking. The Director will batch them into decision-surface relays for the user.
 
 You MUST present questions from at least 3 categories from the framework below. Skip a category ONLY if the user's request makes it entirely irrelevant (e.g., skip UI/UX for a backend-only feature).
 

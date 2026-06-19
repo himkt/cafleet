@@ -1,7 +1,7 @@
 # Coding-agent instruction overlays
 
 **Status**: Approved
-**Progress**: 17/31 tasks complete
+**Progress**: 21/31 tasks complete
 **Last Updated**: 2026-06-19
 
 ## Overview
@@ -12,7 +12,7 @@ Split the cafleet skill family into a backend-neutral **base** instruction set a
 
 - [ ] Three overlay files exist at `skills/cafleet/reference/coding-agent/{claude,codex,opencode}.md`, each covering all six backend deltas for its backend.
 - [ ] An overlay template exists at `skills/cafleet/reference/coding-agent/_template.md`, carrying all six delta-section headings (in §4 order) with fill-in guidance and no backend-specific values (§5a). The three overlays follow its section structure.
-- [ ] No base instruction file names a backend-specific value. The base is every cafleet-family `SKILL.md`, every `roles/*.md`, and every `skills/cafleet/reference/*.md` EXCEPT everything under `skills/cafleet/reference/coding-agent/` (the three overlays and the `_template.md`). A grep across the base for `--model sonnet`, `--permission-mode`, `--ask-for-approval`, `--sandbox workspace-write`, `--agent cafleet`, `AskUserQuestion`, `send-input`, `run_in_background`, `TaskStop`, `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`, and the skill-loader variants (`Skill tool`, the backticked `` `Skill` tool ``, `via the Skill tool`) returns nothing — with two exemptions: (a) the `allowed-tools:` YAML front matter of the research skills (a functional Claude tool grant that cannot live in an overlay — see §4b), and (b) delta-6, which is additionally verified by reviewing the skill-loading prose, not the literal grep alone.
+- [ ] No base instruction file names a backend-specific value. The base is every cafleet-family `SKILL.md`, every `roles/*.md`, and every `skills/cafleet/reference/*.md` EXCEPT everything under `skills/cafleet/reference/coding-agent/` (the three overlays and the `_template.md`). A grep across the base for `--model sonnet`, `--permission-mode`, `--ask-for-approval`, `--sandbox workspace-write`, `--agent cafleet`, `AskUserQuestion`, `send-input`, `run_in_background`, `TaskStop`, `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`, and the skill-loader variants (`Skill tool`, the backticked `` `Skill` tool ``, `via the Skill tool`) returns nothing — with two exemptions: (a) the `allowed-tools:` YAML front matter of any family skill (a functional Claude tool grant that cannot live in an overlay — the research skills' `Task*`/`TaskStop` and `cafleet-design-doc-interview`'s `AskUserQuestion`; see §4b), and (b) delta-6, which is additionally verified by reviewing the skill-loading prose, not the literal grep alone. A skill's `description:` field is not exempt — it is neutralized like body prose.
 - [ ] The model-name-to-backend inference table remains in `skills/cafleet/reference/director.md` unchanged (it is a backend-agnostic selector, not a delta).
 - [ ] `skills/cafleet/SKILL.md` carries a prominent early "apply your overlay" instruction; every other family `SKILL.md` carries a one-line overlay pointer linking `../cafleet/reference/coding-agent/<name>.md`.
 - [ ] The canonical spawn-prompt skeleton in `reference/director.md` and the monitoring-member spawn prompt in `cafleet-agent-team-monitoring/SKILL.md` both include a `CODING AGENT: <name>` identity line.
@@ -85,7 +85,7 @@ Every row below moves OUT of the base and into the overlays. The base keeps only
 
 **§4a — Monitor model is a runnable value (delta-2).** The monitor model is set inside a runnable spawn command (`cafleet member create … --role monitor --model <value>`), so the base cannot replace it with a pure "see overlay" pointer — the Director needs a concrete `--model <value>` at spawn time. The base monitor-spawn template therefore carries `--model <cheapest capable model for the monitor's backend>` and the Director substitutes the concrete value from the overlay when it runs the command (the same render-time substitution it already performs for `BASE`). The monitoring member is spawned WITHOUT `--coding-agent`, so it runs on claude by default: the resolved value is `--model haiku` and the monitor's `CODING AGENT:` line is the literal `claude`. The three delta-2 overlay values document the cheapest-capable pick per backend so the principle holds for whichever backend the monitor runs on — the codex / opencode values apply only if a Director ever spawns the monitor with `--coding-agent codex` / `opencode`; this design does NOT change the monitor's default backend. The claude value `haiku` replaces the current `sonnet` — the one intentional behavioral change, per the user's cheapest-capable decision.
 
-**§4b — `allowed-tools` front matter stays (delta-4).** The research skills (`cafleet-research-report`, `cafleet-research-presentation`) declare `Task*` / `TaskStop` in their `allowed-tools:` YAML front matter. That front matter is a functional Claude-harness tool grant, not instructional prose, and it is not read from an overlay file — so it MUST stay in the skill's own `SKILL.md` and is exempt from the delta-token grep (Success Criteria, Step 9). Only the PROSE that describes how to use the primitives moves to the overlay (delta-4); on codex / opencode the front matter is simply ignored and the overlay's cafleet-message fallback applies.
+**§4b — `allowed-tools` front matter stays (functional tool grant).** A skill's `allowed-tools:` YAML front matter is a functional Claude-harness tool grant, not instructional prose, and it is not read from an overlay file — so it MUST stay in the skill's own `SKILL.md` and is exempt from the delta-token grep (Success Criteria, Step 9). This covers the research skills (`cafleet-research-report`, `cafleet-research-presentation`), which declare `Task*` / `TaskStop` (delta-4), AND `cafleet-design-doc-interview`, which declares `AskUserQuestion` (delta-1) because its Director needs the grant to call `AskUserQuestion` on Claude. Only the PROSE that describes how to use these primitives moves to the overlay; on codex / opencode the front matter is simply ignored and the overlay's fallback applies. A skill's `description:` field is NOT exempt — it is loader-facing metadata and is neutralized like body prose (drop the delta token, keep the meaning).
 
 ### 5. Overlay file outline
 
@@ -184,10 +184,10 @@ When content moves from base to overlay, DELETE it from the base cleanly. The ba
 
 ### Step 6: Neutralize the base — design-doc family
 
-- [ ] `cafleet-design-doc-create/SKILL.md` + `roles/director.md`, `roles/drafter.md`, `roles/reviewer.md`: neutralize `--model sonnet`, `--permission-mode dontAsk`, and `AskUserQuestion` references to deltas 2/3/1. <!-- completed: -->
-- [ ] `cafleet-design-doc-execute/SKILL.md` + `roles/director.md` (and other roles): neutralize `--model sonnet`, `--permission-mode dontAsk`, and `AskUserQuestion` references to deltas 2/3/1. <!-- completed: -->
-- [ ] `cafleet-design-doc-interview/SKILL.md` + `roles/*.md`: neutralize `--model sonnet` to delta-2 and the `AskUserQuestion`-rounds mechanism to delta-1 (the Director's decision surface, per overlay). <!-- completed: -->
-- [ ] `cafleet-design-doc/SKILL.md`: confirm the skill-loader phrasing is the neutral delta-6 form (it already says "via their backend's skill-loader"); add the overlay pointer if missing. <!-- completed: -->
+- [x] `cafleet-design-doc-create/SKILL.md` + `roles/director.md`, `roles/drafter.md`, `roles/reviewer.md`: neutralize `--model sonnet`, `--permission-mode dontAsk`, and `AskUserQuestion` references to deltas 2/3/1. <!-- completed: 2026-06-19T12:03 -->
+- [x] `cafleet-design-doc-execute/SKILL.md` + `roles/director.md` (and other roles): neutralize `--model sonnet`, `--permission-mode dontAsk`, and `AskUserQuestion` references to deltas 2/3/1. <!-- completed: 2026-06-19T12:03 -->
+- [x] `cafleet-design-doc-interview/SKILL.md` + `roles/*.md`: neutralize `--model sonnet` to delta-2 and the `AskUserQuestion`-rounds mechanism to delta-1 (the Director's decision surface, per overlay). <!-- completed: 2026-06-19T12:03 -->
+- [x] `cafleet-design-doc/SKILL.md`: confirm the skill-loader phrasing is the neutral delta-6 form (it already says "via their backend's skill-loader"); add the overlay pointer if missing. <!-- completed: 2026-06-19T12:03 -->
 
 ### Step 7: Neutralize the base — research family
 
@@ -216,3 +216,4 @@ When content moves from base to overlay, DELETE it from the base cleanly. The ba
 |------|---------|
 | 2026-06-19 | Initial draft |
 | 2026-06-19 | Add standalone overlay template `_template.md` (§5a, new Success Criterion, Step 1 task) per user request; broaden no-cross-link check to cover the template; Progress denominator 30 → 31. |
+| 2026-06-19 | Step 6 arbitration: generalize §4b + Success-Criteria exemption (a) so the `allowed-tools:` front-matter exemption covers any functional tool grant (research `Task*`/`TaskStop` AND interview `AskUserQuestion`); clarify that a skill's `description:` field is neutralized like body prose, not exempt. |
