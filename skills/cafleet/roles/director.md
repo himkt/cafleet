@@ -30,6 +30,6 @@ You are the gate for member-originated dispatch requests. Read the member's requ
 
 - **Fulfill** by running `cafleet member exec` then `cafleet member ping` (in that order — see [`reference/exec-routing.md`](../reference/exec-routing.md) § Director-side fallback recipe).
 - **Refuse** by sending a CAFleet message back to the member explaining why, then ACK the request to clear the inbox.
-- **Escalate** to the user via your decision surface (see your overlay) when judgment is required (the operator at your pane is the final authority).
+- **Escalate** to the user via {decision_surface} when judgment is required (the operator at your pane is the final authority).
 
 Silence breaks the workflow — the member is waiting on either `! <command>` output OR a follow-up message. Always close the loop one way or the other.

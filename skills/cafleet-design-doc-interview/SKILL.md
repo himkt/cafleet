@@ -12,7 +12,7 @@ Validate an existing design document through structured, fine-grained Q&A across
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
-| **Director (Interviewer)** | Main Claude | Resolve doc path, parse `question.md` progress, spawn Analyzer, drive decision-surface Q&A rounds, write answers + COMMENT annotations + progress marker | Read the document for question generation (delegated to Analyzer); conduct the Q&A rounds off your decision surface | (inline in this SKILL.md) |
+| **Director (Interviewer)** | Main Claude | Resolve doc path, parse `question.md` progress, spawn Analyzer, drive decision-surface Q&A rounds, write answers + COMMENT annotations + progress marker | Read the document for question generation (delegated to Analyzer); conduct the Q&A rounds off {decision_surface} | (inline in this SKILL.md) |
 | **Analyzer** | CAFleet member spawned via `cafleet member create` | Read the design doc, return a flat numbered question list covering uncovered sections, then idle pending shutdown | Talk to the user; edit any file; persist state across spawns | [roles/analyzer.md](roles/analyzer.md) |
 
 ## Additional resources
@@ -23,7 +23,7 @@ Validate an existing design document through structured, fine-grained Q&A across
 
 ## Coordination Protocol
 
-This skill writes only `COMMENT(claude)` markers in the design document; the Director-Analyzer cafleet messages are exempt from the verb + pointer schema (the Analyzer's question list is a one-time multi-line payload, and the Director's user relay goes through its decision surface, not cafleet). The `COMMENT(role)` marker format, the `claude` role (the Director as user-mediator, carrying user-derived clarifications), and the one-per-issue / actionable rules are canonical in [../cafleet-design-doc/coordination.md](../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker*.
+This skill writes only `COMMENT(claude)` markers in the design document; the Director-Analyzer cafleet messages are exempt from the verb + pointer schema (the Analyzer's question list is a one-time multi-line payload, and the Director's user relay goes through {decision_surface}, not cafleet). The `COMMENT(role)` marker format, the `claude` role (the Director as user-mediator, carrying user-derived clarifications), and the one-per-issue / actionable rules are canonical in [../cafleet-design-doc/coordination.md](../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker*.
 
 Interview-specific: place each `COMMENT(claude)` marker on its own line immediately before the section it refers to (e.g. above `### Retry Strategy`); markers persist until the `cafleet-design-doc-create` skill's resume mode resolves them (reads each marker, applies the fix, removes it).
 
@@ -103,7 +103,7 @@ Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute th
 
 #### 2b. Spawn the monitoring member (first-in)
 
-BEFORE spawning the Analyzer, load both the `cafleet-agent-team-monitoring` skill and the `cafleet-agent-team-supervision` skill (in that order) for their heartbeat, Authorization-Scope Guard, idle semantics, and Stall Response policy. Then spawn the dedicated monitoring member as the **first** `cafleet member create` in the fleet, with `--role monitor --model <cheapest capable model for the monitor's backend>`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+BEFORE spawning the Analyzer, load both the `cafleet-agent-team-monitoring` skill and the `cafleet-agent-team-supervision` skill (in that order) for their heartbeat, Authorization-Scope Guard, idle semantics, and Stall Response policy. Then spawn the dedicated monitoring member as the **first** `cafleet member create` in the fleet, with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
 Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the audit-file pattern in 2c, then spawn:
 
@@ -111,7 +111,7 @@ Render the canonical monitoring-member spawn prompt (the **conditional** idle-nu
 cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name "monitor" \
   --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
-  --role monitor --model <cheapest capable model for the monitor's backend> \
+  --role monitor --model {monitor_model} \
   --prompt-file ${BASE}/prompts/monitor-<UTC-compact>.md
 ```
 
@@ -153,7 +153,7 @@ Render the prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` per the 2c audi
 
 Poll `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id> --full` until the Analyzer's reply arrives. **The `--full` flag is required**: `cafleet message poll` truncates each message body to 200 codepoints + `…` by default, which would silently mangle the Analyzer's numbered question list. Acknowledge with `cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>`.
 
-The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and wait again with `cafleet message poll --full`. After 2 corrective rounds, escalate to the user via your decision surface (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
+The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and wait again with `cafleet message poll --full`. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
 
 #### 2f. Tear down the monitoring member and the Analyzer
 
@@ -180,7 +180,7 @@ After persisting the question list (Step 2g) — or directly when `SKIP_ANALYZER
 **Loop: for `round = 1` to `total_rounds`:**
 
 1. Take the next batch of up to 4 questions.
-2. Present the batch via your decision surface, grouped by related topic when possible. Each question carries 2–4 options as supplied by the Analyzer. A free-text fallback is always available (see your overlay).
+2. Present the batch via {decision_surface}, grouped by related topic when possible. Each question carries 2–4 options as supplied by the Analyzer. A free-text fallback is always available.
 3. After the user responds:
    - Append the round's answers to `question.md`'s Answers section under a `### Round X (Questions Y-Z)` heading.
    - Record any discrepancies (target section, current text, what needs to change) for Step 4.
@@ -189,7 +189,7 @@ After persisting the question list (Step 2g) — or directly when `SKIP_ANALYZER
 
 **Mandatory completion rule (NON-NEGOTIABLE):**
 
-> The Director MUST complete all rounds in the current invocation. Stopping before all questions are asked is FORBIDDEN. The only exception is the user explicitly using the decision surface's free-text option to request early termination — in that case proceed directly to Step 4 with the answers collected so far.
+> The Director MUST complete all rounds in the current invocation. Stopping before all questions are asked is FORBIDDEN. The only exception is the user explicitly providing free-form text via {decision_surface} to request early termination — in that case proceed directly to Step 4 with the answers collected so far.
 
 **There is no "End interview" option.** The user's escape hatch is the free-text option on any question.
 

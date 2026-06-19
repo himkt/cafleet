@@ -17,7 +17,7 @@ cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
 
 cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name monitor --description "Monitoring member: owns the heartbeat" \
-  --role monitor --model <cheapest capable model for the monitor's backend> \
+  --role monitor --model {monitor_model} \
   --prompt-file /abs/path/to/<BASE>/prompts/monitor-20260514T145000Z.md
 ```
 
@@ -27,8 +27,8 @@ cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`; also recorded as `placement.coding_agent`. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent. The `opencode` backend materializes its agent preset on first spawn. |
-| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The accepted `--model` form and an example value per backend are a delta — see your overlay; the model-name-to-backend inference table below maps a bare model name to its backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
-| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `agent_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop instead watches the Director at 180 s + members at 720 s and wakes the monitoring member when one is due). An ordinary `--role member` with a pane IS enrolled (720 s). The LLM is still set by `--model` (the Director passes the cheapest capable model for the monitor's backend, per the overlay). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical prompt and first-in/first-out lifecycle. |
+| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). An example member `--model` value is `{member_model}`. The model-name-to-backend inference table below maps a bare model name to its backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
+| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `agent_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop instead watches the Director at 180 s + members at 720 s and wakes the monitoring member when one is due). An ordinary `--role member` with a pane IS enrolled (720 s). The LLM is still set by `--model` (the Director passes the monitor model `{monitor_model}`). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical prompt and first-in/first-out lifecycle. |
 | `--prompt-file` | no | Absolute path to a UTF-8 file used as the spawn prompt (mutually exclusive with the positional prompt; read verbatim, same `str.format()` pass). Path/file errors are catalogued in [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 | *(positional, after `--`)* | no | Prompt for the spawned process (mutually exclusive with `--prompt-file`; the default template is used if both are omitted). Goes through `str.format()` with `fleet_id` / `agent_id` / `director_agent_id` as kwargs. |
 
@@ -114,7 +114,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 
 **Backtick caveat (harness-dependent)**: some environments (including this project) run a Bash-validator hook that rejects any backtick in a `Bash` invocation. When in play, strip backticks from spawn-prompt bodies (plain text instead of code spans); path-by-reference keeps the body short enough that this is easy.
 
-**Pane discovery**: discover a member's pane via `cafleet member list` (the `pane_id` column is ground truth for all backends); some backends additionally set the pane title from the member name — see your overlay. The spawn is atomic — a `split-window` or placement-patch failure rolls back the registration (and `/exit`s the pane on a patch failure) — and uses `-d` so the Director keeps focus. See [`member-lifecycle.md`](../../../docs/concepts/member-lifecycle.md).
+**Pane discovery**: discover a member's pane via `cafleet member list` (the `pane_id` column is ground truth for all backends). Pane title: {pane_title}. The spawn is atomic — a `split-window` or placement-patch failure rolls back the registration (and `/exit`s the pane on a patch failure) — and uses `-d` so the Director keeps focus. See [`member-lifecycle.md`](../../../docs/concepts/member-lifecycle.md).
 
 ## Member Delete
 
@@ -147,7 +147,7 @@ cafleet member capture --fleet-id <fleet-id> --member-id <member-agent-id> --lin
 
 ## Answering a member's relayed question
 
-A fleet member never talks to the user. When it needs a recorded user reaction (approve / choose / confirm / continue-or-abort), it relays the question to the Director via `cafleet message send`, and the Director answers it through the Director's own decision surface. The concrete decision surface, the question-shape taxonomy, and any pane-keystroke primitive for forwarding the answer are backend deltas — see your overlay (`coding-agent/<name>.md`). The canonical user-reaction rule is the `cafleet` skill § *Soliciting user reactions*.
+A fleet member never talks to the user. When it needs a recorded user reaction (approve / choose / confirm / continue-or-abort), it relays the question to the Director via `cafleet message send`, and the Director answers it through {decision_surface}. The question-shape taxonomy and any pane-keystroke relay for forwarding the answer are backend deltas — see your overlay (`coding-agent/<name>.md`). The canonical user-reaction rule is the `cafleet` skill § *Soliciting user reactions*.
 
 ## Member Exec
 

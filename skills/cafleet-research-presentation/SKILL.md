@@ -19,7 +19,7 @@ Create a Slidev presentation and reading transcript from an existing research re
 
 ## Prerequisites
 
-The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` and `cafleet-agent-team-monitoring` skills and embeds them into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model <cheapest capable model for the monitor's backend>`) that owns the heartbeat and re-engages the idle Director — see Step 1.
+The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` and `cafleet-agent-team-monitoring` skills and embeds them into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director — see Step 1.
 
 For autonomous Slidev generation, see the `cafleet-my-slidev` skill § Autonomous slide generation.
 
@@ -48,15 +48,15 @@ The Director's pipeline runs autonomously from Step 0 through Step 3, converges 
 The Director originates a decision-surface prompt at exactly two kinds of points:
 
 1. **Step 4 — single post-pipeline approval gate.** After all pipeline deliverables exist — slides, transcript, AND visual review — the Director presents them to the user and collects approval or revision requests.
-2. **Member-escalated user delegation.** When a member sends a `cafleet message send` that genuinely requires a user decision, the Director relays it via its decision surface and passes the answer back verbatim.
+2. **Member-escalated user delegation.** When a member sends a `cafleet message send` that genuinely requires a user decision, the Director relays it via {decision_surface} and passes the answer back verbatim.
 
-The Director does NOT use its decision surface to:
+The Director does NOT use {decision_surface} to:
 
 - Ask whether to run, skip, or shorten any pipeline step. Steps 0–3 are obligatory and non-negotiable. Visual review in Step 3 is not an optional polish — it is a quality gate.
 - Offer "faster," "lighter," or "partial" variants of the pipeline.
 - Confirm the Director's own design choices (spawn counts, batch boundaries, tag usage, layout decisions).
 
-If a pipeline step fails for a technical reason the Director cannot resolve (e.g. the Slidev dev server refuses to start after the fallback chain), *then* escalate to the user via your decision surface with concrete options — but escalation is a response to failure, not a planning shortcut.
+If a pipeline step fails for a technical reason the Director cannot resolve (e.g. the Slidev dev server refuses to start after the fallback chain), *then* escalate to the user via {decision_surface} with concrete options — but escalation is a response to failure, not a planning shortcut.
 
 Step 5 (cleanup) is autonomous — no user prompt.
 
@@ -78,7 +78,7 @@ Step 5 (cleanup) is autonomous — no user prompt.
 
 ### Step 1: Bootstrap CAFleet Fleet & Spawn Presentation + Transcript (Director)
 
-Load the `cafleet` and `cafleet-agent-team-monitoring` skills for their heartbeat, facilitation, and Stall Response policy. The fleet runs a dedicated monitoring member (the **first** `cafleet member create`, `--role monitor --model <cheapest capable model for the monitor's backend>`) that owns the heartbeat and re-engages the idle Director via `cafleet member nudge`; the Director does **not** run `cafleet monitor` itself. Gate the Presentation/Transcript spawns on the monitoring member's `ready: monitor live` handshake (first-in) — see 1b.
+Load the `cafleet` and `cafleet-agent-team-monitoring` skills for their heartbeat, facilitation, and Stall Response policy. The fleet runs a dedicated monitoring member (the **first** `cafleet member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director via `cafleet member nudge`; the Director does **not** run `cafleet monitor` itself. Gate the Presentation/Transcript spawns on the monitoring member's `ready: monitor live` handshake (first-in) — see 1b.
 
 #### 1a. Environment precheck and fleet bootstrap
 
@@ -93,7 +93,7 @@ cafleet --json fleet create --label "present-[topic-slug]"
 
 #### 1b. Spawn the monitoring member (first-in)
 
-The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model <cheapest capable model for the monitor's backend>`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Presentation/Transcript spawns** (1d) — do not spawn an ordinary member until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Presentation/Transcript spawns** (1d) — do not spawn an ordinary member until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
 Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the audit-file pattern in 1c, then spawn:
 
@@ -101,7 +101,7 @@ Render the canonical monitoring-member spawn prompt (the **conditional** idle-nu
 cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
   --name "monitor" \
   --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
-  --role monitor --model <cheapest capable model for the monitor's backend> \
+  --role monitor --model {monitor_model} \
   --prompt-file ${BASE}/prompts/monitor-<UTC-compact>.md
 ```
 
@@ -191,14 +191,14 @@ Once the slide deck is finalized, send the finalized slide structure to the Tran
 
 ### Step 3: Visual Review & Fix (Director)
 
-Once Step 2 converges on an approved slide deck and transcript, the Director runs the batched visual-review loop defined below. Per the User Interaction Contract, this step is a pipeline stage, not a decision — the Director does not call its decision surface to decide whether to run it, skip it, or shorten it.
+Once Step 2 converges on an approved slide deck and transcript, the Director runs the batched visual-review loop defined below. Per the User Interaction Contract, this step is a pipeline stage, not a decision — the Director does not call {decision_surface} to decide whether to run it, skip it, or shorten it.
 
 **Server Startup (once):**
 
 **Calling-pane working directory: a directory that contains the Slidev `package.json` (typically the host project root).** Bun resolves `node_modules/` and `package.json` from the calling directory directly — no `--cwd` plumbing or sidecar directory. Project-specific task wrappers (e.g., `mise` tasks) that capture invariants like `--frozen-lockfile` belong in the host project's `.claude/rules/`, not in this skill body.
 
 1. Install bun dependencies — refer to your host project's `.claude/rules/` for the canonical command (it typically wraps `bun install --frozen-lockfile`).
-2. Start the Slidev dev server **as a backgrounded process** — refer to your host project's `.claude/rules/` for the canonical launcher. The underlying invocation is `bun run slidev --open false <folder>/slide.md` (the `--open false` flag is required for headless review) and the launcher MUST PTY-wrap stdout (e.g., via `script -qfc`) so Slidev does not exit on detecting a non-TTY. **Record the task id** your coding agent returns when it backgrounds the process — the overall Step 5 of this skill (*Finalize & Clean Up*, further down the page) needs it to stop the server cleanly without falling back on `pkill`. Run the backgrounded process via your backend's background-run primitive; the returned task id feeds your backend's matching stop primitive at teardown — see your overlay for the concrete primitives.
+2. Start the Slidev dev server **as a backgrounded process** — refer to your host project's `.claude/rules/` for the canonical launcher. The underlying invocation is `bun run slidev --open false <folder>/slide.md` (the `--open false` flag is required for headless review) and the launcher MUST PTY-wrap stdout (e.g., via `script -qfc`) so Slidev does not exit on detecting a non-TTY. **Record the task id** your coding agent returns when it backgrounds the process — the overall Step 5 of this skill (*Finalize & Clean Up*, further down the page) needs it to stop the server cleanly without falling back on `pkill`. Run the backgrounded process via {bg_run}; stop it at teardown via {bg_stop}.
 3. Set `<server_url>` to the Slidev dev server URL (default: `http://localhost:3030`). Use this value when spawning Visual Reviewers.
 4. Create the persistent screenshots directory: write `<folder>/screenshots/.keep` (empty file) using the Write tool. This is a one-time operation per `cafleet-research-presentation` skill invocation; do NOT delete or wipe it on subsequent batches. agent-browser does not auto-create parent directories when given an explicit `screenshot <path>`, so this step is required for VR's per-slide capture to succeed.
 5. The Director MUST NOT run `bun run agent-browser --session vr-batch-* open|snapshot|screenshot|wait|close` (or the equivalent `bun run agent-browser ...`) directly — agent-browser's browser-operation commands are exclusively for Visual Reviewers (the only exception is the `close --all` safety net in Step 5 *Finalize & Clean Up*). The Director MAY run `console` and `errors` for diagnostics if needed (e.g., investigating a stuck VR), but should prefer letting the VR do it.
@@ -270,7 +270,7 @@ Render the prompt to `${BASE}/prompts/vr-batch-<start>-<UTC-compact>.md` per the
 
 This is the single post-pipeline approval gate defined in the User Interaction Contract. Only enter Step 4 after Step 3's visual-review loop has completed (all batches reviewed, fixes applied, re-check rounds exhausted or passing).
 
-Present deliverables (slides, transcript, preview URL) and request approval via your decision surface. Report any known residual visual issues surfaced by Step 3 so the user can weigh them.
+Present deliverables (slides, transcript, preview URL) and request approval via {decision_surface}. Report any known residual visual issues surfaced by Step 3 so the user can weigh them.
 
 If the user requests revisions:
 
@@ -293,7 +293,7 @@ Then the presentation-specific teardown:
    ```bash
    bun run agent-browser close --all
    ```
-2. **Stop the Slidev dev server** via your backend's stop primitive (see your overlay) with the task id recorded in Step 3 (Server Startup substep 2) — do NOT `pkill`/`kill` (`pkill -f slidev` matches too broadly, and a harness-tracked task keeps leaking stdout until stopped through the harness).
+2. **Stop the Slidev dev server** via {bg_stop} with the task id recorded in Step 3 (Server Startup substep 2) — do NOT `pkill`/`kill` (`pkill -f slidev` matches too broadly, and a harness-tracked task keeps leaking stdout until stopped through the harness).
 3. `cafleet fleet delete [fleet-id]` (positional); `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.
 
 $ARGUMENTS

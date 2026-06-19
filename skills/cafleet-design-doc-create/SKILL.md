@@ -69,7 +69,7 @@ Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt. The audit-
    - Use Grep to search for `COMMENT(claude)` in the file. The grep is tightened to the `claude` role because user-derived clarifications are the only marker class that warrants resume-mode. Stale `COMMENT(reviewer)` / `COMMENT(director)` / `COMMENT(programmer)` markers from other workflows MUST NOT be misclassified as interview-resume. Note: the `cafleet-design-doc-execute` skill also writes transient `COMMENT(claude): <choice>` markers for user arbitration (e.g., test-framework selection in `Phase 1`), but those are short-lived and removed by the routed member as part of the fix; under normal flow no `COMMENT(claude)` survives an in-progress execute run. If the user invokes the `cafleet-design-doc-create` skill against a half-finished execute doc that happens to carry a transient `COMMENT(claude)`, treating it as resume-mode is acceptable — the Drafter will read and resolve the marker the same way it handles interview clarifications.
 
    - **`COMMENT(claude)` markers found** → This is **resume mode**. Proceed to Step 1 with the resume-specific Drafter spawn prompt. Set an internal flag `SKIP_CLARIFICATION=true` so Step 2 (clarification) is skipped.
-   - **No `COMMENT(claude)` markers found** → Inform the user: "No `COMMENT(claude)` markers found in the existing document." Use your decision surface with two options:
+   - **No `COMMENT(claude)` markers found** → Inform the user: "No `COMMENT(claude)` markers found in the existing document." Present two options through {decision_surface}:
      - **"Run quality review"**: Set internal flags `SKIP_CLARIFICATION=true` and `QUALITY_REVIEW_ONLY=true`. Skip Step 2 entirely and enter Step 3 by immediately routing the existing `${DOC_PATH}` to the Reviewer via `cafleet message send` (no new draft is produced; the Drafter is only involved later if the Reviewer requests revisions).
      - **"Start fresh"**: Treat as new creation, ignoring the existing file. Ensure `SKIP_CLARIFICATION` and `QUALITY_REVIEW_ONLY` are unset, then proceed to Step 1 as normal.
 
@@ -92,7 +92,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 1b. Spawn the monitoring member (first-in)
 
-The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model <cheapest capable model for the monitor's backend>`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
 Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the two-step audit-file pattern in Step 1c, then spawn:
 
@@ -100,7 +100,7 @@ Render the canonical monitoring-member spawn prompt (the **conditional** idle-nu
 cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name "monitor" \
   --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
-  --role monitor --model <cheapest capable model for the monitor's backend> \
+  --role monitor --model {monitor_model} \
   --prompt-file ${BASE}/prompts/monitor-<UTC-compact>.md
 ```
 
@@ -181,7 +181,7 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 
 1. Wait for the Drafter's clarifying questions. The broker's inline-preview keystroke on the Drafter's `message send`, and your own periodic `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`, will surface the Drafter's message once it arrives.
 2. `cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>` each received message after reading it.
-3. Relay the questions to the user via your decision surface. If the number of questions exceeds your decision surface's per-call option limit (see your overlay), split them into multiple sequential calls to relay all questions without omission.
+3. Relay the questions to the user via {decision_surface}. If {decision_surface} caps how many questions it shows at once (your overlay states the cap) and the number exceeds it, split them into multiple sequential calls to relay all questions without omission.
 4. Relay the user's answers back to the Drafter (free-form, per the Clarification Exemption above):
    ```bash
    cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
@@ -211,11 +211,11 @@ Enter this step after the Drafter reports `complete (doc)`, **or immediately** w
    ```
 4. Wait for the Drafter's `addressed (doc)` reply (revisions resolve the `COMMENT(reviewer)` markers), then loop back to step 1 (re-route to Reviewer with `ready (doc)`).
 5. Repeat until the Reviewer explicitly signals `approved (doc)`.
-6. **Iteration limit**: Aim for 2–3 rounds. If not converging, escalate to the user: summarize the remaining issues at a high level (read directly from the surviving `COMMENT(reviewer)` markers in the doc) and use your decision surface to ask whether to continue iterating or abort. Do not proceed to Step 4 until the Reviewer has approved.
+6. **Iteration limit**: Aim for 2–3 rounds. If not converging, escalate to the user: summarize the remaining issues at a high level (read directly from the surviving `COMMENT(reviewer)` markers in the doc) and use {decision_surface} to ask whether to continue iterating or abort. Do not proceed to Step 4 until the Reviewer has approved.
 
 ### Step 4: Present to User (Director)
 
-Only after the Reviewer explicitly approves, present a summary (including file path) and use your decision surface:
+Only after the Reviewer explicitly approves, present a summary (including file path) and use {decision_surface}:
 
 | Option | Label | Description | Behavior |
 |:--|:--|:--|:--|

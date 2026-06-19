@@ -23,7 +23,7 @@ Generate comprehensive research reports using a multi-layer CAFleet-orchestrated
 
 ## Prerequisites
 
-The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill and the `cafleet-agent-team-monitoring` skill and embeds them into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model <cheapest capable model for the monitor's backend>`) that owns the heartbeat and re-engages the idle Director — see Step 1.
+The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill and the `cafleet-agent-team-monitoring` skill and embeds them into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director — see Step 1.
 
 ## Output
 
@@ -76,7 +76,7 @@ Capture `fleet_id` and `director.agent_id` from the response. Treat `fleet_id` a
 
 ### Step 1: Supervision Model (Director — spawn the monitoring member first)
 
-Load the `cafleet` skill and the `cafleet-agent-team-monitoring` skill for their heartbeat, facilitation, and Stall Response policy. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model <cheapest capable model for the monitor's backend>`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+Load the `cafleet` skill and the `cafleet-agent-team-monitoring` skill for their heartbeat, facilitation, and Stall Response policy. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
 Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the audit-file pattern this skill uses for every spawn, then spawn:
 
@@ -84,7 +84,7 @@ Render the canonical monitoring-member spawn prompt (the **conditional** idle-nu
 cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
   --name "monitor" \
   --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
-  --role monitor --model <cheapest capable model for the monitor's backend> \
+  --role monitor --model {monitor_model} \
   --prompt-file ${BASE}/prompts/monitor-<UTC-compact>.md
 ```
 
@@ -108,7 +108,7 @@ Load the `cafleet` skill and follow its spawn protocol.
 
 #### 2a. Shared task list
 
-Your backend's task-list primitive is the work-coordination substrate (see your overlay; if your backend has none, coordinate via cafleet messages). The on-disk task store is created on the first task creation (typically by the Manager when decomposing the topic). No explicit team-bootstrap step is required.
+Work-coordination substrate: {task_coord}. The on-disk task store is created on the first task creation (typically by the Manager when decomposing the topic). No explicit team-bootstrap step is required.
 
 #### 2b. Locate role definitions (path-by-reference)
 
@@ -134,7 +134,7 @@ Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#ca
 | role-file + ROLE-DEF suffix | `roles/manager.md`; suffix `— accountability, communication protocol, task discipline, file-aggregation rules, pre-compilation verification, revision loop, and shutdown.` |
 | cafleet-load purpose | `for the broker primitives, literal-integer-id flag convention, and bash-via-Director routing` (no extra skills) |
 | CONTEXT LINES | `CURRENT DATE: [INSERT today's date]` / `USER REQUEST: [INSERT user's original request in full]` / `OUTPUT DIRECTORY: [INSERT OUTPUT DIRECTORY]` / `LANGUAGE: [INSERT user's language preference if specified]` |
-| POLL-HANDLING + extra comms | **ack-inline** form (capture the `id:` integer as `[task-id]` and `cafleet message ack … --task-id [task-id]`, then act); plus `You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.` and `The team shares a task list via your backend's task-list primitive (see your overlay). Use it to track sub-topic assignments.` |
+| POLL-HANDLING + extra comms | **ack-inline** form (capture the `id:` integer as `[task-id]` and `cafleet message ack … --task-id [task-id]`, then act); plus `You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.` and `The team coordinates sub-topic assignments via {task_coord}.` |
 | start cue (verbatim) | `To request Scouts or Researchers, send the Director a cafleet message specifying: role (Scout or Researcher), scope, search angles, and output file path. The Director will spawn them via cafleet member create and relay their completion reports back to you.` + `Your first compiled report will be reviewed critically by the Director. Aim for highest quality on the first attempt.` |
 
 Render the prompt to `${BASE}/prompts/manager-<UTC-compact>.md` per the 2b two-step audit-file pattern (leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass), then spawn with `--prompt-file`:
@@ -192,10 +192,10 @@ After decomposing the topic, the Manager sends the Director one or more Research
 
 #### 4a. Create tasks for each sub-topic (Manager, before spawn requests)
 
-With multiple Researchers running in parallel, coordination goes through the **shared task list** (your backend's task-list primitive — see your overlay) — not just through spawn prompts. The Manager MUST create one task per sub-topic BEFORE asking the Director to spawn the Researcher for it.
+With multiple Researchers running in parallel, coordination goes through {task_coord} — not just through spawn prompts. The Manager MUST create one task per sub-topic BEFORE asking the Director to spawn the Researcher for it.
 
-- The Manager creates a task for each sub-topic via the task-list primitive. Task content describes the sub-topic, scope, and the expected output file path (e.g., `<resolved-path>/01-research-<subtopic>.md`).
-- Tasks start unowned. When a Researcher is spawned and given their assignment, they claim their assigned task (set owner `researcher-NN`, status `in_progress`) via the task-list primitive.
+- The Manager registers each sub-topic with {task_coord} before its Researcher is spawned (on a harness task list, that is one task per sub-topic). The registration records the sub-topic, scope, and expected output file path (e.g., `<resolved-path>/01-research-<subtopic>.md`).
+- Each Researcher claims its assignment via {task_coord} on spawn (on a harness task list, set owner `researcher-NN`, status `in_progress`).
 - Researchers mark their task `completed` when their output file is written and the completion report has been sent.
 - The Manager blocks on all research tasks being `completed` before starting compilation. Check the task list for progress.
 
@@ -213,7 +213,7 @@ Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#ca
 | role-file + ROLE-DEF suffix | `roles/researcher.md`; suffix `— accountability, Discovery Phase, fact verification protocol, output format, and shutdown.` |
 | cafleet-load purpose | `for the broker primitives and bash-via-Director routing` (no extra skills) |
 | CONTEXT LINES | `CURRENT DATE: [INSERT today's date]` / `YOUR NAME: researcher-NN` / `YOUR ASSIGNMENT: [specific sub-topic and what to investigate]` / `YOUR TASK ID: [INSERT the task id the Manager created for this sub-topic]` / `OUTPUT FILE: [INSERT <resolved-path>/NN-research-<subtopic>.md]` |
-| POLL-HANDLING + extra comms | **ack-inline** form; plus `On start, claim your task via your backend's task-list primitive (owner researcher-NN, status in_progress).` and `On completion, mark your task completed via your backend's task-list primitive.` |
+| POLL-HANDLING + extra comms | **ack-inline** form; plus `On start, claim your assignment via {task_coord} (on a harness task list, owner researcher-NN, status in_progress).` and `Report completion via {task_coord} when done.` |
 | start cue (verbatim) | `Write findings to the output file, then send the Director a completion summary. The Director will relay findings and any follow-up questions between you and the Manager.` |
 
 Render the prompt to `${BASE}/prompts/researcher-<NN>-<UTC-compact>.md` per the 2b two-step audit-file pattern, then spawn with `--prompt-file`:
@@ -242,15 +242,15 @@ When the Manager delivers the compiled `report.md`:
 4. Each polled inbound message MUST be `ack`ed via `cafleet message ack --fleet-id [fleet-id] --agent-id [director-agent-id] --task-id [task-id]` after acting on it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle.
 5. Repeat until the Director judges quality is sufficient. Aim for 2–3 rounds maximum.
 
-If the Manager asks the Director a question that is really a user decision (e.g. language choice, scope trade-off), the Director MUST relay via its decision surface and pass the user's verbatim answer back via `cafleet message send`. Never decide on the user's behalf.
+If the Manager asks the Director a question that is really a user decision (e.g. language choice, scope trade-off), the Director MUST relay via {decision_surface} and pass the user's verbatim answer back via `cafleet message send`. Never decide on the user's behalf.
 
 ### Step 6: Present to User (Director)
 
-Present the approved report to the user via your decision surface (options: **Approve** / **Request changes**; a free-text fallback captures other feedback — see your overlay) with a summary of findings (2–3 sentences), file paths (report, scout files, researcher files), and known limitations. If the user selects **Request changes** or provides free-form feedback, route it to the Manager via `cafleet message send`, re-review, and re-present. Repeat until the user approves.
+Present the approved report to the user via {decision_surface} (options: **Approve** / **Request changes**; a free-text fallback captures other feedback) with a summary of findings (2–3 sentences), file paths (report, scout files, researcher files), and known limitations. If the user selects **Request changes** or provides free-form feedback, route it to the Manager via `cafleet message send`, re-review, and re-present. Repeat until the user approves.
 
 ### Step 7: Offer Presentation Chaining (Director)
 
-After user approval, offer to create a presentation via your decision surface (adapt to user's language). If yes, proceed to Step 8, then invoke the `cafleet-research-presentation` skill with `${OUTPUT_DIR}`. If no, proceed directly to Step 8.
+After user approval, offer to create a presentation via {decision_surface} (adapt to user's language). If yes, proceed to Step 8, then invoke the `cafleet-research-presentation` skill with `${OUTPUT_DIR}`. If no, proceed directly to Step 8.
 
 ### Step 8: Finalize & Clean Up (Director)
 

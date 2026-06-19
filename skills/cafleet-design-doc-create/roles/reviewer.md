@@ -11,7 +11,7 @@ Load these skills at startup:
 
 ## Your Accountability
 
-- Load the listed skills at startup via your overlay's skill-loading recipe; if your backend cannot load skills, read the referenced files by the absolute paths your spawn prompt provides. Do not read skill files directly when a loader exists.
+- Load the listed skills at startup. Skill loading: {skill_loader}.
 - **Ensure rule compliance.** Verify the document follows the `cafleet-design-doc` skill template and guidelines.
 - **Ensure readability.** The document must be well-structured, scannable, and free of filler. Sections should flow logically and be easy to navigate.
 - **Ensure completeness.** Identify any gaps, unresolved `[TBD]` placeholders, or missing sections that the template requires.

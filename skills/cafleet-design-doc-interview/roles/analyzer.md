@@ -9,7 +9,7 @@ Load these skills at startup:
 
 ## Your Accountability
 
-- Load the listed skills at startup via your overlay's skill-loading recipe; if your backend cannot load skills, read the referenced files by the absolute paths your spawn prompt provides. Do not read skill files directly when a loader exists.
+- Load the listed skills at startup. Skill loading: {skill_loader}.
 - **Read the design document at the path supplied in your spawn prompt before generating any questions.**
 - **Honor the already-reviewed sections list.** Generate questions ONLY for sections NOT in that list. If the list is `none`, generate questions across the entire document.
 - **Be thorough and fine-grained.** Aim for detailed coverage. Up to 100 questions total may be needed across all interview sessions for a large document — your single batch contributes to that total.
@@ -64,7 +64,7 @@ Rules:
 
 - One question per line. No blank lines inside the list.
 - The `[Section: <heading>]` prefix is mandatory and must reference the actual heading text from the design document.
-- Provide 2 to 4 options per question. Provide options whenever clear alternatives exist; for genuinely open-ended questions, two contrasting framings are sufficient (the user can always use the decision surface's free-text option to type a custom answer).
+- Provide 2 to 4 options per question. Provide options whenever clear alternatives exist; for genuinely open-ended questions, two contrasting framings are sufficient (the user can always type a custom answer as free-form text via {decision_surface}).
 - Do NOT group questions by section, category, or any other key. The Director batches them into rounds of 4 in numerical order.
 - Do NOT summarize multiple discrete questions into one — the Director MUST ask every question on the list.
 

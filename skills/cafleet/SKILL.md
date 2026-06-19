@@ -20,7 +20,7 @@ Exhaustive per-subcommand flags, exit codes, and error strings live in [`docs/sp
 
 ## Apply your coding-agent overlay
 
-CAFleet instructions are split into a backend-neutral base (this skill family) and a per-coding-agent overlay at `reference/coding-agent/<name>.md`. Identify your coding agent — your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity — then read `reference/coding-agent/<name>.md` and apply its deltas on top of every base instruction.
+CAFleet instructions are backend-neutral, written with `{placeholder}` tokens for everything that varies by coding agent (`{monitor_model}`, `{permission_flags}`, `{decision_surface}`, and the rest). Your overlay — `reference/coding-agent/<name>.md` — is a value table that defines each token for your backend. Identify your coding agent — your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity — then read your overlay and, as you read the base, substitute your overlay's value for each `{placeholder}` you encounter.
 
 ## Required Flags
 
@@ -62,7 +62,7 @@ Three backends — `claude` (default), `codex`, `opencode` — chosen per member
 
 ## Soliciting user reactions
 
-When you need a recorded user reaction — **approve**, **choose among options**, **confirm**, or **continue-or-abort** — solicit it through your decision surface, never in free-form prose ("let me know if this looks good", "shall I proceed?", "reply with your choice") which records no answer and routinely stalls. A fleet **member** never talks to the user: it sends its question to the Director via `cafleet message send`, and the Director relays it. See your overlay (`reference/coding-agent/<name>.md`) for the concrete decision surface and the question-shape taxonomy.
+When you need a recorded user reaction — **approve**, **choose among options**, **confirm**, or **continue-or-abort** — solicit it through {decision_surface}, never in free-form prose ("let me know if this looks good", "shall I proceed?", "reply with your choice") which records no answer and routinely stalls. A fleet **member** never talks to the user: it sends its question to the Director via `cafleet message send`, and the Director relays it. See your overlay for the question shapes and any surface constraints.
 
 ## Self-registration recipe
 
