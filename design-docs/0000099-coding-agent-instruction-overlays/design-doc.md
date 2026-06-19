@@ -1,6 +1,6 @@
 # Coding-agent instruction overlays
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 31/31 tasks complete
 **Last Updated**: 2026-06-19
 
@@ -220,4 +220,6 @@ When content moves from base to overlay, DELETE it from the base cleanly. The ba
 | 2026-06-19 | Opus review round 1 (3 findings): fixed incomplete delta-1 neutralization + stale cross-ref in `cafleet-agent-team-monitoring/SKILL.md` (claude 4-option frame / `--lines` sizing → overlay), and neutralized residual AskUserQuestion `"Other"` option-label phrasing → "free-text" across interview / research-report / create / execute. Initially deferred the `cafleet-research-report` § *Spawnable Agents* dispatch recipe (reversed in round 2 — see below). |
 | 2026-06-19 | User-flagged fix: the `codex.md` / `opencode.md` / `_template.md` overlays defined their decision surface by reference to claude's `AskUserQuestion` ("no AskUserQuestion analog") — a claude-centric leak. Rewrote them to state the plain-message-via-Director surface affirmatively, with no `AskUserQuestion` reference; only `claude.md` names it (its actual surface). Updated §4 delta-1 codex/opencode cells, §5/§5a, accordingly. |
 | 2026-06-19 | Opus review round 2: reversed the round-1 out-of-scope ruling on the `cafleet-research-report` § *Spawnable Agents* recipe — the "Claude Code recipe" names the `Agent` tool (delta-6), so it is an inline-per-backend leak (§1/§10), in scope by the same non-exhaustive-bullets principle applied in Steps 4–6. Neutralized the per-backend dispatch split to a backend-neutral instruction pointing at the overlay. |
+| 2026-06-19 | Opus review round 3: neutralized the matching per-backend dispatch pointer in `cafleet-research-report/roles/web-researcher.md` (base roles file) to the backend-neutral form. |
+| 2026-06-19 | Opus review round 4: **approved** — base reads backend-neutral, overlays self-contained, no cross-links, removal-clean. Review fixes pushed to PR #130. Status → Complete. Non-blocking follow-up (out of scope): `web-researcher.md` frontmatter `model: sonnet` is vestigial Claude agent-spec metadata (§4b-class, ignored on codex). |
 | 2026-06-19 | Step 6 arbitration: generalize §4b + Success-Criteria exemption (a) so the `allowed-tools:` front-matter exemption covers any functional tool grant (research `Task*`/`TaskStop` AND interview `AskUserQuestion`); clarify that a skill's `description:` field is neutralized like body prose, not exempt. |
