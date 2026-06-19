@@ -1,6 +1,6 @@
 # web-researcher agent spec
 
-Canonical spec for the embedded web-research agent that returns structured summaries with sources. It is dispatched identically by the Researcher and Scout roles (and is usable standalone). The dispatch recipes — Claude Code (`Agent` tool) and codex (inline-follow / member-spawn) — live in [`../SKILL.md`](../SKILL.md) § Spawnable Agents. To dispatch, paste the spec body (everything below the frontmatter) verbatim into the Agent prompt, or follow it inline.
+Canonical spec for the embedded web-research agent that returns structured summaries with sources. It is dispatched identically by the Researcher and Scout roles (and is usable standalone). The dispatch recipe lives in [`../SKILL.md`](../SKILL.md) § Spawnable Agents. To dispatch, paste the spec body (everything below the frontmatter) verbatim into the dispatched agent's prompt, or follow it inline.
 
 ---
 name: web-researcher
