@@ -1,7 +1,7 @@
 # Coding-agent instruction overlays
 
 **Status**: Approved
-**Progress**: 15/31 tasks complete
+**Progress**: 17/31 tasks complete
 **Last Updated**: 2026-06-19
 
 ## Overview
@@ -179,8 +179,8 @@ When content moves from base to overlay, DELETE it from the base cleanly. The ba
 
 ### Step 5: Neutralize the base — monitoring & supervision skills
 
-- [ ] `cafleet-agent-team-monitoring/SKILL.md`: neutralize every `--model sonnet` to delta-2; neutralize the `AskUserQuestion`-idiom callout to delta-1. <!-- completed: -->
-- [ ] `cafleet-agent-team-supervision/SKILL.md`: neutralize every `--model sonnet` to delta-2; neutralize the § *User Delegation Protocol* `AskUserQuestion` references to delta-1 (decision surface + overlay). <!-- completed: -->
+- [x] `cafleet-agent-team-monitoring/SKILL.md`: neutralize every `--model sonnet` to delta-2; neutralize the `AskUserQuestion`-idiom callout to delta-1. <!-- completed: 2026-06-19T11:47 -->
+- [x] `cafleet-agent-team-supervision/SKILL.md`: neutralize every `--model sonnet` to delta-2; neutralize the § *User Delegation Protocol* `AskUserQuestion` references to delta-1 (decision surface + overlay). <!-- completed: 2026-06-19T11:47 -->
 
 ### Step 6: Neutralize the base — design-doc family
 
