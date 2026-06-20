@@ -4,7 +4,7 @@ icon: lucide/bot
 
 # Codex members
 
-Operational doc for cafleet member panes that run the OpenAI Codex CLI (`codex`) instead of Claude Code (`claude`). cafleet supports both binaries side-by-side; this file covers the codex-specific surface.
+Operational doc for cafleet member panes that run the OpenAI Codex CLI (`codex`) instead of Claude Code (`claude`) — this file covers the codex-specific surface.
 
 For the multi-backend overview and selection rules, see the [Coding agents](../../concepts/coding-agents.md) Concepts page.
 

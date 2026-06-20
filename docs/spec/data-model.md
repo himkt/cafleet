@@ -6,7 +6,7 @@ icon: lucide/table
 
 The `Task` payload is fully relational: every routing field plus the message body lives in its own typed column. The only JSON `TEXT` blob is `agents.agent_card_json`, which stores an `AgentCard`-shaped document.
 
-Schema management is handled by Alembic; the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver. The schema is managed by a chain of Alembic revisions, applied once via `cafleet db init` before starting the server.
+Schema management is handled by Alembic; the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver. The schema is managed by a chain of Alembic revisions; run `cafleet db init` to apply them before starting the server — it is idempotent and safe to re-run after upgrades.
 
 ## SQL Schema
 

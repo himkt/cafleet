@@ -4,7 +4,7 @@ icon: lucide/bot
 
 # Opencode members
 
-Operational doc for cafleet member panes that run the [opencode](https://opencode.ai) TUI (`opencode`) instead of Claude Code (`claude`) or the OpenAI Codex CLI (`codex`). cafleet supports all three binaries side-by-side; this file covers the opencode-specific surface.
+Operational doc for cafleet member panes that run the [opencode](https://opencode.ai) TUI (`opencode`) instead of Claude Code (`claude`) or the OpenAI Codex CLI (`codex`) — this file covers the opencode-specific surface.
 
 For the multi-backend overview and selection rules, see the [Coding agents](../../concepts/coding-agents.md) Concepts page.
 

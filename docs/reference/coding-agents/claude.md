@@ -4,7 +4,7 @@ icon: lucide/bot
 
 # Claude members
 
-Operational doc for cafleet member panes that run Claude Code (`claude`), the default backend. cafleet supports `claude`, `codex`, and `opencode` side-by-side; this file covers the claude-specific surface.
+Operational doc for cafleet member panes that run Claude Code (`claude`), the default backend — this file covers the claude-specific surface.
 
 For the multi-backend overview and selection rules, see the [Coding agents](../../concepts/coding-agents.md) Concepts page.
 
@@ -16,8 +16,6 @@ A claude member is a cafleet member whose `agent_placements.coding_agent` value 
 cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Claude-A --description "<one-sentence purpose>"
 ```
-
-A single Director may spawn `claude`, `codex`, and `opencode` members in the same fleet — the broker, message lifecycle, and tmux primitives behave identically for all three.
 
 ## Spawn flags
 
