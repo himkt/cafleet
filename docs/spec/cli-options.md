@@ -564,7 +564,7 @@ In all three modes the member's Bash tool is enabled and routine permission prom
 
 | Inputs | Resulting spawn prompt |
 |---|---|
-| Neither `--prompt-file` nor positional prompt | The built-in default prompt template, with `{fleet_id}` / `{agent_id}` / `{director_agent_id}` / `{coding_agent}` substituted. |
+| Neither `--prompt-file` nor positional prompt | The built-in default prompt template, after the same `str.format()` substitution (supported placeholders: `{fleet_id}` / `{agent_id}` / `{director_agent_id}` / `{coding_agent}`). |
 | Positional prompt only | The positional argument(s) joined by spaces, after the same `str.format()` substitution. |
 | `--prompt-file PATH` only | The file contents, byte-for-byte, after the same `str.format()` substitution. Surrounding whitespace and trailing newlines are preserved verbatim. |
 | Both a positional prompt and `--prompt-file` | Error (exit 2) — see [Error Messages](#error-messages). |
