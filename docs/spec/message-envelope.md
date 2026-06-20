@@ -6,28 +6,9 @@ icon: lucide/mail
 
 The shape of a `Task` envelope as it is persisted in SQLite, returned by the broker layer, and rendered by the CLI.
 
-This document covers the canonical envelope shape: the broker constructs it, the CLI renders it, and the WebUI consumes it.
+## Persisted shape
 
-## Persisted shape (typed columns)
-
-Every message lives in `tasks` as a flat row of typed columns. There is no JSON blob — `tasks.text` carries the message body and the remaining typed columns carry the routing and lifecycle fields.
-
-| Column | Type | Meaning |
-|---|---|---|
-| `task_id` | `INTEGER` | Primary key (DB-assigned, never reused). Identifies a single delivery (unicast row, broadcast delivery row, or broadcast summary row). |
-| `context_id` | `INTEGER` (`agents.agent_id` FK) | The recipient agent for unicast/broadcast deliveries; the broadcaster for `broadcast_summary`; the preserved original `context_id` for ACK/cancel. The inbox-listing index `idx_tasks_context_status_ts` keys on `(context_id, status_timestamp DESC)`. |
-| `from_agent_id` | `INTEGER` (agent_id) | Sender. Not a foreign key — historical tasks may outlive their sender. |
-| `to_agent_id` | `INTEGER` (agent_id) | Recipient. `0` for `broadcast_summary` rows (real ids are `>= 1`, so `0` never collides). |
-| `type` | `TEXT` | `"unicast"` or `"broadcast_summary"`. Drives render-time decisions (e.g. summary tasks always emit in full; unicast tasks honor `CAFLEET_MAX_TEXT_LEN` truncation). |
-| `created_at` | `TEXT` (ISO-8601, microsecond precision) | Set at insert time, never updated. |
-| `status_state` | `TEXT` | `input_required` (queued), `completed` (acked), `canceled` (retracted). |
-| `status_timestamp` | `TEXT` (ISO-8601, microsecond precision) | Updated on every state change. Used for `ORDER BY DESC` and for `member list --activity` aggregation. |
-| `origin_task_id` | `INTEGER` (nullable) | Broadcast grouping link. `NULL` on unicast deliveries; on broadcast delivery rows holds the summary task's `task_id`; on the broadcast summary row itself self-references its own `task_id`. |
-| `text` | `TEXT` | Message body. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` (computed at insert time). |
-
-The persisted shape is the canonical source of truth. Every render the broker produces is a projection of these columns.
-
-See [data-model.md](data-model.md) for the full SQL schema (including indexes and foreign-key declarations).
+Every message is a flat row of typed columns in `tasks` — there is no JSON blob; `tasks.text` carries the body and the remaining columns carry the routing and lifecycle fields. See [data-model.md](data-model.md#tasks) for the full column schema. The persisted shape is the canonical source of truth; every render the broker produces is a projection of these columns.
 
 ## Rendered shape
 

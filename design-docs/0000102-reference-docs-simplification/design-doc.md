@@ -1,7 +1,7 @@
 # Reference Documentation Simplification
 
 **Status**: Approved
-**Progress**: 5/39 tasks complete
+**Progress**: 20/39 tasks complete
 **Last Updated**: 2026-06-20
 
 ## Overview
@@ -99,30 +99,30 @@ The authoritative, per-file CUT/MERGE/REWRITE/KEEP list is encoded as the [Imple
 
 **`cli-options.md`** (condense in place; do NOT split):
 
-- [ ] CUT the duplicated `--fleet-id`-literal rationale: keep the canonical statement in the "Fleet ID" section; reduce the blockquote (L55–57) and the `permissions.allow` coverage restatements (L98/L128) to one-line pointers to "Fleet ID". <!-- completed: -->
-- [ ] CUT the ~15 inline per-subcommand error restatements (`member exec`, `member send-input`, `member ping`, `member nudge`, `member create --prompt-file`, root-Director/Administrator deregister guards); the Error Messages table (L990–1031) is the single home, each subcommand keeps a one-line "see Error Messages" pointer. <!-- completed: -->
-- [ ] REWRITE the `permissions.allow` coverage section (L98–140): replace the ~40 literal pattern lines (20 base + 8 `--json` companions) with the generation rule (one pattern per allow-listed subcommand, canonical `--fleet-id`-first order, `member exec` excluded, `--json` needs a companion because it precedes the subcommand) + 3 representative example lines + a note that the full set is mechanical. <!-- completed: -->
-- [ ] CUT concept narration to a `monitoring.md` pointer in: the `monitor` group intro (L921–923), `monitor start` (L931–937), `member ping` description (L819), `member nudge` Behavior/description (L873–875, L888–890). Keep only the CLI surface (action, flags, exit codes, the no-monitoring-member warning). <!-- completed: -->
-- [ ] REWRITE the `member create` `--coding-agent` (L545) and `--role` (L547) Notes cells to the flag's own behavior + a pointer to `coding-agents.md`/`monitoring.md`. Demote the "Spawn command per backend" table (L553–557) to a pointer to `coding-agents.md`. <!-- completed: -->
-- [ ] REWRITE the six `message {send,ack,cancel,show,poll,broadcast}` bodies (L469–532): collapse the shared output contract ("Text output is `<verb>` + compact envelope; `--quiet` prints only the task id") into one sentence above the six tables; keep each subcommand's unique flags. <!-- completed: -->
-- [ ] Env-var defaults point to `api/config.md`, EXCEPT the `server` section, which keeps `127.0.0.1`/`8000` inline where it states the flag-beats-env-beats-default precedence. KEEP: Subcommand summary table (L13–42), `--full` semantics table (L77–86), Error Messages catalogue, per-flag Required/Notes tables. <!-- completed: -->
+- [x] CUT the duplicated `--fleet-id`-literal rationale: keep the canonical statement in the "Fleet ID" section; reduce the blockquote (L55–57) and the `permissions.allow` coverage restatements (L98/L128) to one-line pointers to "Fleet ID". <!-- completed: 2026-06-20T11:36 -->
+- [x] CUT the ~15 inline per-subcommand error restatements (`member exec`, `member send-input`, `member ping`, `member nudge`, `member create --prompt-file`, root-Director/Administrator deregister guards); the Error Messages table (L990–1031) is the single home, each subcommand keeps a one-line "see Error Messages" pointer. <!-- completed: 2026-06-20T11:36 -->
+- [x] REWRITE the `permissions.allow` coverage section (L98–140): replace the ~40 literal pattern lines (20 base + 8 `--json` companions) with the generation rule (one pattern per allow-listed subcommand, canonical `--fleet-id`-first order, `member exec` excluded, `--json` needs a companion because it precedes the subcommand) + 3 representative example lines + a note that the full set is mechanical. <!-- completed: 2026-06-20T11:36 -->
+- [x] CUT concept narration to a `monitoring.md` pointer in: the `monitor` group intro (L921–923), `monitor start` (L931–937), `member ping` description (L819), `member nudge` Behavior/description (L873–875, L888–890). Keep only the CLI surface (action, flags, exit codes, the no-monitoring-member warning). <!-- completed: 2026-06-20T11:36 -->
+- [x] REWRITE the `member create` `--coding-agent` (L545) and `--role` (L547) Notes cells to the flag's own behavior + a pointer to `coding-agents.md`/`monitoring.md`. Demote the "Spawn command per backend" table (L553–557) to a pointer to `coding-agents.md`. <!-- completed: 2026-06-20T11:36 -->
+- [x] REWRITE the six `message {send,ack,cancel,show,poll,broadcast}` bodies (L469–532): collapse the shared output contract ("Text output is `<verb>` + compact envelope; `--quiet` prints only the task id") into one sentence above the six tables; keep each subcommand's unique flags. <!-- completed: 2026-06-20T11:36 -->
+- [x] Env-var defaults point to `api/config.md`, EXCEPT the `server` section, which keeps `127.0.0.1`/`8000` inline where it states the flag-beats-env-beats-default precedence. KEEP: Subcommand summary table (L13–42), `--full` semantics table (L77–86), Error Messages catalogue, per-flag Required/Notes tables. <!-- completed: 2026-06-20T11:36 -->
 
 **`data-model.md`**:
 
-- [ ] CUT the duplicate opening: "The model is predominantly relational…" (L9) duplicates L7 — keep L7, fold any index/blob detail in. <!-- completed: -->
-- [ ] CUT ENTIRELY the migration archaeology: the "Enrollment-inversion data migration" section (L151–162) including the raw `DELETE FROM monitor_config …` SQL, and the revision `0002`/`0005` narration in the `interval_seconds` Note (L126). State only current behavior: every enrollment writes an explicit interval; the schema default is inert. <!-- completed: -->
-- [ ] FIX the false single-migration claim while removing the archaeology: the repo ships five Alembic revisions (`0001`–`0005`, verified in `cafleet/src/cafleet/db/alembic/versions/`), so L11 ("the schema is created by a single initial migration") and L69 ("the single initial migration is schema-only") are wrong. Rewrite both to the accurate current state — the schema is managed by a chain of Alembic revisions, applied once via `cafleet db init` — without naming individual revision numbers. <!-- completed: -->
-- [ ] REWRITE the watched-set restatements (L121, L126, L130, kind-marker section L134–149): state the watched set once at the `monitor_config` intro as a pointer to `monitoring.md` with NO interval numbers; Notes cells reference it. <!-- completed: -->
-- [ ] MERGE the "Deregistered Agents" section (L215–217) into the `agents` table notes (fold the one new fact: WebUI still surfaces them); drop the standalone section. KEEP all schema tables, the AUTOINCREMENT/id-never-reused explanation, Task Visibility Rules, Broadcast Grouping. Reduce the `context_id` mention to the column's existence (rationale lives in `storage.md`). <!-- completed: -->
+- [x] CUT the duplicate opening: "The model is predominantly relational…" (L9) duplicates L7 — keep L7, fold any index/blob detail in. <!-- completed: 2026-06-20T11:36 -->
+- [x] CUT ENTIRELY the migration archaeology: the "Enrollment-inversion data migration" section (L151–162) including the raw `DELETE FROM monitor_config …` SQL, and the revision `0002`/`0005` narration in the `interval_seconds` Note (L126). State only current behavior: every enrollment writes an explicit interval; the schema default is inert. <!-- completed: 2026-06-20T11:36 -->
+- [x] FIX the false single-migration claim while removing the archaeology: the repo ships five Alembic revisions (`0001`–`0005`, verified in `cafleet/src/cafleet/db/alembic/versions/`), so L11 ("the schema is created by a single initial migration") and L69 ("the single initial migration is schema-only") are wrong. Rewrite both to the accurate current state — the schema is managed by a chain of Alembic revisions, applied once via `cafleet db init` — without naming individual revision numbers. <!-- completed: 2026-06-20T11:36 -->
+- [x] REWRITE the watched-set restatements (L121, L126, L130, kind-marker section L134–149): state the watched set once at the `monitor_config` intro as a pointer to `monitoring.md` with NO interval numbers; Notes cells reference it. <!-- completed: 2026-06-20T11:36 -->
+- [x] MERGE the "Deregistered Agents" section (L215–217) into the `agents` table notes (fold the one new fact: WebUI still surfaces them); drop the standalone section. KEEP all schema tables, the AUTOINCREMENT/id-never-reused explanation, Task Visibility Rules, Broadcast Grouping. Reduce the `context_id` mention to the column's existence (rationale lives in `storage.md`). <!-- completed: 2026-06-20T11:36 -->
 
 **`message-envelope.md`**:
 
-- [ ] CUT the L9 redundant restatement ("This document covers the canonical envelope shape…") — it repeats the L5–7 intro. <!-- completed: -->
-- [ ] MERGE/POINTER: replace the "Persisted shape (typed columns)" table (L15–26) with a one-line pointer to `data-model.md#tasks`; keep only the rendered projection here. KEEP the Compact rendered envelope table (L40–51), Text-mode rules (L96–106), and the default/`--full` JSON examples (L64–93). <!-- completed: -->
+- [x] CUT the L9 redundant restatement ("This document covers the canonical envelope shape…") — it repeats the L5–7 intro. <!-- completed: 2026-06-20T11:36 -->
+- [x] MERGE/POINTER: replace the "Persisted shape (typed columns)" table (L15–26) with a one-line pointer to `data-model.md#tasks`; keep only the rendered projection here. KEEP the Compact rendered envelope table (L40–51), Text-mode rules (L96–106), and the default/`--full` JSON examples (L64–93). <!-- completed: 2026-06-20T11:36 -->
 
 **`webui-api.md`**:
 
-- [ ] CUT the `409 (reserved for future deregister endpoint)` paragraph (L314) — speculative future-state narration. REWRITE the `monitor`-field watched-set explanation (L89–97) to field shape + a pointer to `monitoring.md` (no interval numbers). KEEP every endpoint spec and the shared-row-formatter note (L212). <!-- completed: -->
+- [x] CUT the `409 (reserved for future deregister endpoint)` paragraph (L314) — speculative future-state narration. REWRITE the `monitor`-field watched-set explanation (L89–97) to field shape + a pointer to `monitoring.md` (no interval numbers). KEEP every endpoint spec and the shared-row-formatter note (L212). <!-- completed: 2026-06-20T11:36 -->
 
 ### Step 3: Coding-agent reference pages + neutrality
 

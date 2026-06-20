@@ -88,13 +88,11 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
 
 **`monitor` field**: each agent carries its folded monitoring schedule —
 `{"interval_seconds": int, "last_ping_at": str|null, "enabled": bool}` — or
-`null` when the agent is not enrolled. The fleet's **watched set** is enrolled:
-the root Director (180 s) and every ordinary member (720 s) carry a non-null
-`monitor`. The dedicated **monitoring member** is the unenrolled watcher and
-carries `monitor: null`, as do the Administrator, deregistered agents, and
-card-only registrations. Folding the schedule into the list lets the SPA render
-every agent's schedule without an extra request per agent. See
-[Monitoring](../concepts/monitoring.md).
+`null` when the agent is not enrolled (the unenrolled watcher, the
+Administrator, deregistered agents, and card-only registrations all carry
+`monitor: null`). Folding the schedule into the list lets the SPA render every
+agent's schedule without an extra request per agent. Which agents are enrolled
+— the watched set — is defined in [Monitoring](../concepts/monitoring.md).
 
 **`kind` values**:
 
@@ -311,7 +309,6 @@ X-Fleet-Id: <fleet_id>
 - 422: Missing or invalid request-body fields (`from_agent_id`, `to_agent_id`, or `text`) — FastAPI/Pydantic validation on the request model.
 - 400: `from_agent_id` is not an active agent in the caller's fleet (`from_agent not in fleet`). A missing or non-integer `X-Fleet-Id` header is also 400 — see [Request Headers](#request-headers).
 - 404 — two cases, each with its own `detail` string: the destination `to_agent_id` does not resolve to an active agent in the fleet (unknown, cross-fleet, or deregistered) → `Agent not found`; an unknown `X-Fleet-Id` fleet → `Fleet not found`.
-- 409 (reserved for future deregister endpoint): for any future endpoint that attempts to deregister or otherwise modify the built-in Administrator, the broker's protection error (`Administrator cannot be deregistered`) must be translated to a 409 response. This 409 is not currently reachable through `POST /api/messages/send`; this entry documents the required mapping for the future endpoint.
 
 ## Error Format
 
