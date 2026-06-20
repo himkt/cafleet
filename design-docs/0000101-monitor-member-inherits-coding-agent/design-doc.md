@@ -1,6 +1,6 @@
 # Monitor member inherits the administrator's coding agent
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 17/17 tasks complete
 **Last Updated**: 2026-06-20
 
@@ -177,3 +177,4 @@ The monitor prompt template then uses `CODING AGENT: {coding_agent}` (instead of
 |------|---------|
 | 2026-06-20 | Initial draft |
 | 2026-06-20 | Reviewer revisions applied; user-approved |
+| 2026-06-20 | Implemented via TDD (docs, tests, CLI); opus reviewer confirmed minimal & sufficient; lint/typecheck/871 tests green; PR #133 opened with one Copilot doc-accuracy fix; marked Complete |
