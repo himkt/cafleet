@@ -27,7 +27,7 @@ cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`; also recorded as `placement.coding_agent`. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent. The `opencode` backend materializes its agent preset on first spawn. |
-| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend and lists a per-backend example. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
+| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend and lists a per-backend example; the available-models-per-backend tables that follow it list what each backend accepts. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
 | `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `agent_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop instead watches the Director at 180 s + members at 720 s and wakes the monitoring member when one is due). An ordinary `--role member` with a pane IS enrolled (720 s). The LLM is still set by `--model` (the Director passes the monitor model `{monitor_model}`). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical prompt and first-in/first-out lifecycle. |
 | `--prompt-file` | no | Absolute path to a UTF-8 file used as the spawn prompt (mutually exclusive with the positional prompt; read verbatim, same `str.format()` pass). Path/file errors are catalogued in [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 | *(positional, after `--`)* | no | Prompt for the spawned process (mutually exclusive with `--prompt-file`; the default template is used if both are omitted). Goes through `str.format()` with `fleet_id` / `agent_id` / `director_agent_id` as kwargs. |
@@ -38,12 +38,62 @@ The per-backend spawn argv is in [`cli-options.md`](../../../docs/spec/cli-optio
 
 When the operator names a model rather than a backend ("please create a member with sonnet"), resolve the backend from the model-name shape:
 
-| User says (model name shape) | Inferred backend | Flags to pass |
+| Model name shape | Backend | Flags to pass |
 |---|---|---|
-| `fable`, `opus`, `sonnet`, or a `claude-*` full name | `claude` | `--coding-agent claude --model <name>` (`--coding-agent claude` may be omitted — it is the default) |
-| `gpt-*` (e.g. `gpt-5.5`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`) | `codex` | `--coding-agent codex --model <name>` |
-| Any name containing a `/` (e.g. `anthropic/claude-sonnet-4-6`, `openai/gpt-5.5`, `opencode/big-pickle`) | `opencode` | `--coding-agent opencode --model <provider-id>/<model-id>` |
-| Anything else — no shape match (e.g. `gemini-2.5-pro`, `o3-mini`, any unfamiliar bare name) | none — do NOT infer | Ask the operator which backend to use (or for the explicit `--coding-agent` + `--model` pair) before spawning |
+| Contains a `/` — provider-prefixed (e.g. `opencode/gpt-5.5`, `anthropic/claude-sonnet-4-6`) | `opencode` | `--coding-agent opencode --model <provider-id>/<model-id>` |
+| `gpt-*` (e.g. `gpt-5.5`, `gpt-5.4-mini`) | `codex` | `--coding-agent codex --model <name>` |
+| Claude alias or `claude-*` full name — `fable`, `opus`, `sonnet`, `haiku`, `best`, `default`, `opusplan`, `sonnet[1m]`, `opus[1m]`, `claude-opus-4-8`, … | `claude` (default) | `--model <name>` (`--coding-agent claude` is the default and may be omitted) |
+| Any other bare name — no shape match (e.g. `gemini-2.5-pro`, `o3-mini`) | none — do NOT infer | Ask the operator for the explicit `--coding-agent` + `--model` pair |
+
+Followed by the routing rule as ordered precedence:
+
+> Resolve the backend in this order — the first match wins:
+> 1. **Name contains a `/`** → `opencode`. The provider-prefixed form is the explicit "use opencode" signal; opencode is never inferred from a bare name.
+> 2. **Name matches `gpt-*`** → `codex`.
+> 3. **Name is a Claude alias (`fable` / `opus` / `sonnet` / `haiku` / `best` / `default` / `opusplan` / `sonnet[1m]` / `opus[1m]`) or a `claude-*` full name** → `claude`, the default backend (`--coding-agent` may be omitted).
+> 4. **Anything else** → do not infer; ask the operator for the explicit `--coding-agent` + `--model` pair.
+
+Precedence matters for the slash case: `anthropic/claude-sonnet-4-6` contains both `claude` and a `/`, and rule 1 (slash → opencode) wins over rule 3.
+
+### Available models per backend
+
+**Claude Code (`--coding-agent claude`)** — simple list:
+
+| Model | For |
+|---|---|
+| `fable` | hardest, longest-running tasks |
+| `opus` | complex reasoning |
+| `sonnet` | everyday coding |
+| `haiku` | fast, simple tasks |
+| `best` | Fable 5 if the org has access, else the latest Opus |
+| `default` | clears the override; returns to the account-tier model |
+| `opusplan` | `opus` in Plan Mode, `sonnet` during execution |
+| `sonnet[1m]` | `sonnet` with a 1M-token context window |
+| `opus[1m]` | `opus` with a 1M-token context window |
+
+Full names: `claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5`.
+
+**Codex (`--coding-agent codex`)**:
+
+| Model | Notes |
+|---|---|
+| `gpt-5.5` | newest frontier; default / recommended |
+| `gpt-5.4` | flagship frontier — professional coding & reasoning |
+| `gpt-5.4-mini` | fast, efficient mini — responsive tasks and subagents |
+| `gpt-5.3-codex-spark` | text-only research preview (ChatGPT Pro) — near-instant iteration |
+
+**OpenCode Zen (`--coding-agent opencode`)** — the OpenCode Zen catalog ([opencode.ai/docs/zen](https://opencode.ai/docs/zen/)). Every Zen model is passed with the `opencode/` gateway prefix, i.e. `opencode/<model-id>` (e.g. `opencode/gpt-5.5`, `opencode/claude-sonnet-4-6`, `opencode/gemini-3.5-flash`). The Models column lists the bare `<model-id>`; prepend `opencode/`:
+
+| Provider | Models (pass as `opencode/<model-id>`) |
+|---|---|
+| OpenAI | `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.3-codex` |
+| Anthropic | `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5` |
+| Google | `gemini-3.5-flash` |
+
+Other providers: Qwen, DeepSeek, Kimi, GLM, MiniMax, Grok.
+Free (limited beta): Big Pickle, DeepSeek V4 Flash Free, MiMo-V2.5 Free, North Mini Code Free, Nemotron 3 Ultra Free.
+
+The S1 routing rule accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`; the Zen catalog above is normalized to the `opencode/` gateway prefix, and the direct-provider examples elsewhere in `director.md` / `README.md` / `coding-agents.md` stay valid.
 
 **Template safety**: because custom prompts go through `str.format()` whether or not they contain placeholders, any literal `{` or `}` in the prompt text must be doubled (`{{` / `}}`).
 
