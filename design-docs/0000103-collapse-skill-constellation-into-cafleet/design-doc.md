@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 18/32 tasks complete
+**Progress**: 19/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -410,7 +410,7 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 10: Rewrite the 11 member base-dir startup bullets (#5-15)
 
-- [ ] Fold each "the `cafleet-base-dir` skill — …" bullet into the existing `cafleet` startup bullet → "Read `skills/cafleet/reference/base-dir.md`" across the 11 role files <!-- completed: -->
+- [x] Fold each "the `cafleet-base-dir` skill — …" bullet into the existing `cafleet` startup bullet → "Read `skills/cafleet/reference/base-dir.md`" across the 11 role files <!-- completed: 2026-06-21T08:48 -->
 
 ### Step 11: Rewrite base-dir SKILL bodies (#28-46)
 
