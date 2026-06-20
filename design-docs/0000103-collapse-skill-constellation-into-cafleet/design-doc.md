@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 2/32 tasks complete
+**Progress**: 4/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -370,8 +370,8 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 2: Create `reference/cli.md`
 
-- [ ] Migrate the body movers (env vars, Global Options, Coding-agent backends, Self-registration recipe, Cancel, Show, List Agents, Doctor, Deregister, Fleet Delete, Typical Workflow, Message Lifecycle, Error Handling) with depth-3 path rewrites <!-- completed: -->
-- [ ] Fix the dangling monitor pointer in Coding-agent backends → `../roles/monitor.md` + `../reference/supervision.md` <!-- completed: -->
+- [x] Migrate the body movers (env vars, Global Options, Coding-agent backends, Self-registration recipe, Cancel, Show, List Agents, Doctor, Deregister, Fleet Delete, Typical Workflow, Message Lifecycle, Error Handling) with depth-3 path rewrites <!-- completed: 2026-06-21T07:45 -->
+- [x] Fix the dangling monitor pointer in Coding-agent backends → `../roles/monitor.md` + `../reference/supervision.md` <!-- completed: 2026-06-21T07:45 -->
 
 ### Step 3: Create `roles/monitor.md`
 
