@@ -1,7 +1,7 @@
 # Monitor member inherits the administrator's coding agent
 
 **Status**: Approved
-**Progress**: 12/17 tasks complete
+**Progress**: 17/17 tasks complete
 **Last Updated**: 2026-06-20
 
 ## Overview
@@ -154,10 +154,10 @@ The monitor prompt template then uses `CODING AGENT: {coding_agent}` (instead of
 
 ### Step 2: CLI implementation
 
-- [ ] `cafleet/src/cafleet/cli/_prompt.py` — add a `coding_agent` parameter to `resolve_prompt`, substitute it in the `template.format(...)` call, and update the docstring + the unknown-placeholder `UsageError` message to list `{coding_agent}`. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/cli/member.py` — change `--coding-agent` to `default=None` with a `show_default` string describing the per-role default. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/cli/member.py` — add the `_resolve_coding_agent` helper (explicit wins; `--role monitor` inherits the Director's `placement.coding_agent`; ordinary member → `claude`; fail loud on unresolvable Director). <!-- completed: -->
-- [ ] `cafleet/src/cafleet/cli/member.py` — call `_resolve_coding_agent(...)` right after `fleet_id` is read (before `CODING_AGENTS[coding_agent]`), and pass `coding_agent=coding_agent` into the `resolve_prompt(...)` call. <!-- completed: -->
+- [x] `cafleet/src/cafleet/cli/_prompt.py` — add a `coding_agent` parameter to `resolve_prompt`, substitute it in the `template.format(...)` call, and update the docstring + the unknown-placeholder `UsageError` message to list `{coding_agent}`. <!-- completed: 2026-06-20T09:14 -->
+- [x] `cafleet/src/cafleet/cli/member.py` — change `--coding-agent` to `default=None` with a `show_default` string describing the per-role default. <!-- completed: 2026-06-20T09:14 -->
+- [x] `cafleet/src/cafleet/cli/member.py` — add the `_resolve_coding_agent` helper (explicit wins; `--role monitor` inherits the Director's `placement.coding_agent`; ordinary member → `claude`; fail loud on unresolvable Director). <!-- completed: 2026-06-20T09:14 -->
+- [x] `cafleet/src/cafleet/cli/member.py` — call `_resolve_coding_agent(...)` right after `fleet_id` is read (before `CODING_AGENTS[coding_agent]`), and pass `coding_agent=coding_agent` into the `resolve_prompt(...)` call. <!-- completed: 2026-06-20T09:14 -->
 
 ### Step 3: Tests
 
@@ -167,7 +167,7 @@ The monitor prompt template then uses `CODING AGENT: {coding_agent}` (instead of
 - [x] `cafleet/tests/cli/test_member.py` — scope guard: on a non-claude Director, an ordinary member (`--role member`) with `--coding-agent` omitted still spawns `claude`. <!-- completed: 2026-06-20T09:06 -->
 - [x] `cafleet/tests/cli/test_member.py` — fail-loud (missing placement): `--role monitor` with `--coding-agent` omitted against a Director that has no placement row exits 1 with the "has no placement row" message and records no spawn. <!-- completed: 2026-06-20T09:06 -->
 - [x] `cafleet/tests/cli/test_member.py` — fail-loud (Director not found): `--role monitor` with `--coding-agent` omitted and `--agent-id` pointing at a nonexistent/inactive agent exits 1 with the "not found in fleet" message and records no spawn, exercising the `director is None` branch. <!-- completed: 2026-06-20T09:06 -->
-- [ ] Run `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` — all green; existing monitor tests (`test_member_create__role_monitor_*`) still pass because a claude Director inherits `claude`. <!-- completed: -->
+- [x] Run `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` — all green; existing monitor tests (`test_member_create__role_monitor_*`) still pass because a claude Director inherits `claude`. <!-- completed: 2026-06-20T09:15 -->
 
 ---
 
