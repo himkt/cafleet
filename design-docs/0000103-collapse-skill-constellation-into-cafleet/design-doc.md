@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 23/32 tasks complete
+**Progress**: 24/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -430,7 +430,7 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 15: Decide `cli-options.md:986` (#78, R5)
 
-- [ ] Leave the source-string mirror verbatim this cycle; append a row to this design doc's Changelog table flagging the `_prompt.py:35` ↔ `cli-options.md:986` desync for a future source-scoped change; do NOT edit source <!-- completed: -->
+- [x] Leave the source-string mirror verbatim this cycle; append a row to this design doc's Changelog table flagging the `_prompt.py:35` ↔ `cli-options.md:986` desync for a future source-scoped change; do NOT edit source <!-- completed: 2026-06-21T09:26 -->
 
 ### Step 16: Delete the three skill directories and prune the plugin manifest
 
