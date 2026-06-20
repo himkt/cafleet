@@ -1,7 +1,7 @@
 # Readable model / coding-agent routing guidance with available-model tables
 
 **Status**: Approved
-**Progress**: 7/13 tasks complete
+**Progress**: 9/13 tasks complete
 **Last Updated**: 2026-06-20
 
 ## Overview
@@ -139,8 +139,8 @@ Every surface that mentions model/backend routing, the `--model` flag, or specif
 
 ### Step 3: Agent-facing skill consistency
 
-- [ ] `skills/cafleet/SKILL.md` line 61: verify the `director.md` cross-ref is accurate; optionally note the available-model tables. <!-- completed: -->
-- [ ] `skills/cafleet/reference/coding-agent/{claude,codex,opencode}.md`: confirm the `monitor_model` values are untouched (no change expected). <!-- completed: -->
+- [x] `skills/cafleet/SKILL.md` line 61: verify the `director.md` cross-ref is accurate; optionally note the available-model tables. <!-- completed: 2026-06-20T12:04 -->
+- [x] `skills/cafleet/reference/coding-agent/{claude,codex,opencode}.md`: confirm the `monitor_model` values are untouched (no change expected). <!-- completed: 2026-06-20T12:04 -->
 
 ### Step 4: Verification
 
