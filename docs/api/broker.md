@@ -5,11 +5,8 @@ icon: lucide/code
 # broker
 
 The data-access layer every CLI command and the WebUI share: all agent,
-fleet, and message operations against SQLite live here. Read this page to
-embed the broker from Python or to change any persisted behavior. Like
-every API page, it is for contributors changing cafleet and embedders
-driving it from Python; CLI users find the command surface in
-[CLI options](../spec/cli-options.md).
+fleet, and message operations against SQLite live here, and any change to
+persisted behavior lands here.
 
 ## Package layout
 
@@ -26,11 +23,10 @@ driving it from Python; CLI users find the command surface in
 
 ## Re-export contract
 
-`broker/__init__.py` re-exports the full public API with `__all__`, so
-consumers import the package and use attribute access — `from cafleet
-import broker` then `broker.send_message(...)` — never a submodule
-directly. The package attribute is also the supported patch seam for
-tests; the single DB seam is
+`broker/__init__.py` re-exports the full public API with `__all__`: import
+the package and use attribute access (`from cafleet import broker` then
+`broker.send_message(...)`), never a submodule directly. The package
+attribute is the supported test patch seam; the single DB seam is
 `cafleet.broker._shared.get_sync_sessionmaker`.
 
 ::: cafleet.broker
