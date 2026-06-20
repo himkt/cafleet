@@ -1,7 +1,7 @@
 # Readable model / coding-agent routing guidance with available-model tables
 
 **Status**: Approved
-**Progress**: 9/13 tasks complete
+**Progress**: 13/13 tasks complete
 **Last Updated**: 2026-06-20
 
 ## Overview
@@ -15,7 +15,7 @@ Replace the prose-heavy "Model-name-to-backend inference" table in the cafleet s
 - [ ] The routing rule documents precedence: slash-form → `opencode` (explicit-only); else `gpt-*` → `codex`; else Claude alias / `claude-*` full name → `claude` (default); else unknown bare name → ask the operator.
 - [ ] `best`/`default`/`opusplan`/`sonnet[1m]`/`opus[1m]` route to `claude`, not the ask-operator branch.
 - [ ] No full available-model list exists outside `director.md`; `cli-options.md`, `coding-agents.md`, `README.md`, `quickstart.md`, `mixed-backend-team.md` retain only brief examples.
-- [ ] The old `| fable, opus, sonnet, or a claude-* full name | claude | … |` row and its three sibling rows no longer appear in any skill/doc surface — a backtick-tolerant repo grep for that wording returns only this design doc and the pre-spawn prompt render under `prompts/`.
+- [ ] The old `| fable, opus, sonnet, or a claude-* full name | claude | … |` row and its three sibling rows no longer appear in any live skill/doc surface — a backtick-tolerant repo grep for that wording returns only design docs (this doc plus the historical `0000082-coding-agent-model-option`, which introduced the table and is preserved per `removal.md`) and the pre-spawn prompt renders under `prompts/`.
 - [ ] Every surface in the Surface Inventory (S3) is updated or explicitly verified as needing no change.
 
 ---
@@ -144,10 +144,10 @@ Every surface that mentions model/backend routing, the `--model` flag, or specif
 
 ### Step 4: Verification
 
-- [ ] A backtick-tolerant repo-wide grep (the live row backticks each token, e.g. `` `fable` ``/`` `opus` ``/`` `claude-*` ``, so the pattern must tolerate backticks) confirms the four old inference-table rows no longer appear in any skill/doc surface — the only remaining hits are this design doc and the pre-spawn prompt render under `prompts/`. <!-- completed: -->
-- [ ] Repo-wide grep confirms no per-backend full available-model list exists outside `director.md`. <!-- completed: -->
-- [ ] All internal cross-references introduced in Steps 1-3 resolve to real anchors / files. <!-- completed: -->
-- [ ] `mise //cafleet:lint` passes — a docs-only change touches no Python, so this is a guard against accidental source edits. <!-- completed: -->
+- [x] A backtick-tolerant repo-wide grep (the live row backticks each token, e.g. `` `fable` ``/`` `opus` ``/`` `claude-*` ``, so the pattern must tolerate backticks) confirms the four old inference-table rows no longer appear in any live skill/doc surface — the only remaining hits are design docs (this doc plus the historical `0000082-coding-agent-model-option`, preserved per `removal.md`) and the pre-spawn prompt renders under `prompts/`. <!-- completed: 2026-06-20T12:12 -->
+- [x] Repo-wide grep confirms no per-backend full available-model list exists outside `director.md`. <!-- completed: 2026-06-20T12:09 -->
+- [x] All internal cross-references introduced in Steps 1-3 resolve to real anchors / files. <!-- completed: 2026-06-20T12:09 -->
+- [x] `mise //cafleet:lint` passes — a docs-only change touches no Python, so this is a guard against accidental source edits. <!-- completed: 2026-06-20T12:09 -->
 
 ---
 
