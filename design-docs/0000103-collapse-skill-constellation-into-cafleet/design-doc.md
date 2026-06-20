@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 9/32 tasks complete
+**Progress**: 12/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -386,9 +386,9 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 5: Edit `SKILL.md`
 
-- [ ] Broaden the description (R2 default wording) <!-- completed: -->
-- [ ] Extend the Reference files index with the 4 new files; remove the migrated sections; keep the keepers <!-- completed: -->
-- [ ] Add the "Team supervision" section (inline monitor-first gating rule + pointers to `reference/supervision.md` and `roles/monitor.md`) immediately after Required Flags; trim the Send preview-mechanics prose to a one-liner <!-- completed: -->
+- [x] Broaden the description (R2 default wording) <!-- completed: 2026-06-21T08:14 -->
+- [x] Extend the Reference files index with the 4 new files; remove the migrated sections; keep the keepers <!-- completed: 2026-06-21T08:14 -->
+- [x] Add the "Team supervision" section (inline monitor-first gating rule + pointers to `reference/supervision.md` and `roles/monitor.md`) immediately after Required Flags; trim the Send preview-mechanics prose to a one-liner <!-- completed: 2026-06-21T08:14 -->
 
 ### Step 6: Edit `reference/director.md`
 
