@@ -1,7 +1,7 @@
 # Monitor member inherits the administrator's coding agent
 
 **Status**: Approved
-**Progress**: 6/17 tasks complete
+**Progress**: 12/17 tasks complete
 **Last Updated**: 2026-06-20
 
 ## Overview
@@ -161,12 +161,12 @@ The monitor prompt template then uses `CODING AGENT: {coding_agent}` (instead of
 
 ### Step 3: Tests
 
-- [ ] `cafleet/tests/cli/test_member.py` — `resolve_prompt` unit tests: a `{coding_agent}` template substitutes the passed backend; an unknown placeholder still raises `UsageError` and the message now lists `{coding_agent}`. <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_member.py` — monitor inheritance: with a non-claude Director (fleet created with `--coding-agent codex` / `opencode`, or its placement patched) and `--coding-agent` omitted, assert the spawned binary (`split_window_recorder[0]["command"][0]`), the monitor's `placement.coding_agent`, and the rendered prompt's `CODING AGENT:` line all equal the Director's backend. <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_member.py` — explicit override: on a non-claude Director, `--role monitor --coding-agent claude` spawns `claude` (explicit wins). <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_member.py` — scope guard: on a non-claude Director, an ordinary member (`--role member`) with `--coding-agent` omitted still spawns `claude`. <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_member.py` — fail-loud (missing placement): `--role monitor` with `--coding-agent` omitted against a Director that has no placement row exits 1 with the "has no placement row" message and records no spawn. <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_member.py` — fail-loud (Director not found): `--role monitor` with `--coding-agent` omitted and `--agent-id` pointing at a nonexistent/inactive agent exits 1 with the "not found in fleet" message and records no spawn, exercising the `director is None` branch. <!-- completed: -->
+- [x] `cafleet/tests/cli/test_member.py` — `resolve_prompt` unit tests: a `{coding_agent}` template substitutes the passed backend; an unknown placeholder still raises `UsageError` and the message now lists `{coding_agent}`. <!-- completed: 2026-06-20T09:06 -->
+- [x] `cafleet/tests/cli/test_member.py` — monitor inheritance: with a non-claude Director (fleet created with `--coding-agent codex` / `opencode`, or its placement patched) and `--coding-agent` omitted, assert the spawned binary (`split_window_recorder[0]["command"][0]`), the monitor's `placement.coding_agent`, and the rendered prompt's `CODING AGENT:` line all equal the Director's backend. <!-- completed: 2026-06-20T09:06 -->
+- [x] `cafleet/tests/cli/test_member.py` — explicit override: on a non-claude Director, `--role monitor --coding-agent claude` spawns `claude` (explicit wins). <!-- completed: 2026-06-20T09:06 -->
+- [x] `cafleet/tests/cli/test_member.py` — scope guard: on a non-claude Director, an ordinary member (`--role member`) with `--coding-agent` omitted still spawns `claude`. <!-- completed: 2026-06-20T09:06 -->
+- [x] `cafleet/tests/cli/test_member.py` — fail-loud (missing placement): `--role monitor` with `--coding-agent` omitted against a Director that has no placement row exits 1 with the "has no placement row" message and records no spawn. <!-- completed: 2026-06-20T09:06 -->
+- [x] `cafleet/tests/cli/test_member.py` — fail-loud (Director not found): `--role monitor` with `--coding-agent` omitted and `--agent-id` pointing at a nonexistent/inactive agent exits 1 with the "not found in fleet" message and records no spawn, exercising the `director is None` branch. <!-- completed: 2026-06-20T09:06 -->
 - [ ] Run `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` — all green; existing monitor tests (`test_member_create__role_monitor_*`) still pass because a claude Director inherits `claude`. <!-- completed: -->
 
 ---
