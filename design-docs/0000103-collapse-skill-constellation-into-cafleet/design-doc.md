@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 6/32 tasks complete
+**Progress**: 9/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -380,9 +380,9 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 4: Create `reference/supervision.md` (merge both deleted team skills)
 
-- [ ] Merge governance + heartbeat mechanism per the content outline; collapse the supervision Stall Response stub into the full version; dedup the overlay note to one copy; drop ALL load-ordering language <!-- completed: -->
-- [ ] Merge the wake mechanism (not concatenate); point Monitor Lifecycle/Cleanup to `./recovery.md` for the canonical Shutdown (R10); convert every "do not duplicate" to an affirmative pointer <!-- completed: -->
-- [ ] Apply all depth-3 path rewrites and repoint anchors (`../roles/monitor.md`, `../roles/member.md`, `./director.md`, `../SKILL.md`, `../../../docs/…`) <!-- completed: -->
+- [x] Merge governance + heartbeat mechanism per the content outline; collapse the supervision Stall Response stub into the full version; dedup the overlay note to one copy; drop ALL load-ordering language <!-- completed: 2026-06-21T08:05 -->
+- [x] Merge the wake mechanism (not concatenate); point Monitor Lifecycle/Cleanup to `./recovery.md` for the canonical Shutdown (R10); convert every "do not duplicate" to an affirmative pointer <!-- completed: 2026-06-21T08:05 -->
+- [x] Apply all depth-3 path rewrites and repoint anchors (`../roles/monitor.md`, `../roles/member.md`, `./director.md`, `../SKILL.md`, `../../../docs/…`) <!-- completed: 2026-06-21T08:05 -->
 
 ### Step 5: Edit `SKILL.md`
 
