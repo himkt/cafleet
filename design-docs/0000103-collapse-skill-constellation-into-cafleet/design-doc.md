@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 0/32 tasks complete
+**Progress**: 2/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -365,8 +365,8 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 1: Create `reference/base-dir.md` (no inbound dependencies)
 
-- [ ] Move every section from `cafleet-base-dir/SKILL.md` substance-preserving; drop frontmatter + the "Do NOT invoke directly" line; rewrite the lead to "Read this file …" <!-- completed: -->
-- [ ] Preserve the `Consumer contract` labeled paragraph (a bold inline label, not a heading) and the two real `##` headings `No-bypass write protocol` / `The <unset> sentinel` — do NOT add a `## Consumer contract` heading; preserve the literal `<unset>` byte-for-byte; rewrite the `coordination.md § Anchorless Status` relative path for the new depth <!-- completed: -->
+- [x] Move every section from `cafleet-base-dir/SKILL.md` substance-preserving; drop frontmatter + the "Do NOT invoke directly" line; rewrite the lead to "Read this file …" <!-- completed: 2026-06-21T07:36 -->
+- [x] Preserve the `Consumer contract` labeled paragraph (a bold inline label, not a heading) and the two real `##` headings `No-bypass write protocol` / `The <unset> sentinel` — do NOT add a `## Consumer contract` heading; preserve the literal `<unset>` byte-for-byte; rewrite the `coordination.md § Anchorless Status` relative path for the new depth <!-- completed: 2026-06-21T07:36 -->
 
 ### Step 2: Create `reference/cli.md`
 
