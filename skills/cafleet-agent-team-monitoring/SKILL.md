@@ -38,7 +38,7 @@ The monitoring member is a single, dedicated coding-agent member — spawned **f
 
 ### Canonical monitoring-member spawn prompt
 
-Render this template to a `--prompt-file` (the `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders are substituted by `cafleet member create`) and spawn with `--role monitor --model {monitor_model}`:
+Render this template to a `--prompt-file` (the `{fleet_id}` / `{agent_id}` / `{director_agent_id}` / `{coding_agent}` placeholders are substituted by `cafleet member create`) and spawn with `--role monitor --model {monitor_model}`. Omit `--coding-agent`: the monitoring member then inherits the spawning Director's backend, and `{coding_agent}` in the template is filled with that resolved backend so the `CODING AGENT:` line matches the binary it runs on:
 
 ```text
 You are the Monitoring Member of CAFleet fleet {fleet_id}. Your agent id is
@@ -47,7 +47,7 @@ job: keep the Director's supervision heartbeat alive and re-engage the Director
 whenever the team stalls. You never drive ordinary members directly — all
 member-driving routes back through the Director.
 
-CODING AGENT: claude
+CODING AGENT: {coding_agent}
 
 Your on-wake routine acts through exactly two cafleet member commands: cafleet
 member capture for read-only inspection, and cafleet member nudge to re-engage the

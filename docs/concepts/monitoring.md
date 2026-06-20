@@ -106,8 +106,12 @@ simply continues — there is no one to wake.
 ## The monitoring member
 
 The monitoring member is a single, dedicated coding-agent member — spawned with
-`cafleet member create --role monitor` (the Director passes `--model sonnet`) —
-that owns the heartbeat and applies LLM judgment to the watched agents' state. It
+`cafleet member create --role monitor` (the Director passes `--model haiku`) —
+that owns the heartbeat and applies LLM judgment to the watched agents' state.
+Because `--coding-agent` is omitted on this spawn, the monitoring member
+inherits the spawning Director's backend (from the Director's placement row)
+rather than defaulting to `claude`, so it runs on — and reads the overlay of —
+the same backend it watches; an explicit `--coding-agent` still wins. It
 is identified by `agent_card_json.cafleet.kind == "monitoring-member"` (the same
 `kind`-marker pattern the built-in Administrator uses; no new SQL column) and is
 located by the broker's `find_monitoring_member` lookup (the kind marker joined to

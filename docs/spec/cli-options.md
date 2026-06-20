@@ -542,9 +542,9 @@ The `cafleet member` subgroup manages tmux-backed member agents and must be run 
 | `--agent-id` | yes | Director's agent ID |
 | `--name` | yes | Display name of the new member — see [Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals) for pane-title behavior. |
 | `--description` | yes | One-sentence purpose |
-| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`; exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH` — see [Opencode members](../reference/coding-agents/opencode.md) for the preset note. |
+| `--coding-agent` | no | One of `claude`, `codex`, or `opencode`. When omitted, an ordinary member defaults to `claude`; a `--role monitor` member **inherits the spawning Director's backend** (read from the Director's `placement.coding_agent`) so the monitoring member runs on the same backend it watches. An explicit value always wins for both roles. Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH` — see [Opencode members](../reference/coding-agents/opencode.md) for the preset note. |
 | `--model` | no | Model forwarded to the backend binary's `--model` flag; omitted by default — see [Model selection](../concepts/coding-agents.md#model-selection). |
-| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** — it sets `agent_card_json.cafleet.kind == "monitoring-member"` but does **not** enroll the agent in `monitor_config` (the monitoring member is the unenrolled watcher, located by that kind marker). An ordinary `member` with a pane **is** enrolled (720 s). `--role` controls the kind marker and whether enrollment is skipped; the LLM is still chosen by `--model` (the Director passes `--model sonnet`). A second `--role monitor` spawn in the same fleet is rejected — see [Error Messages](#error-messages). See [Monitoring](../concepts/monitoring.md#the-monitoring-member). |
+| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** — it sets `agent_card_json.cafleet.kind == "monitoring-member"` but does **not** enroll the agent in `monitor_config` (the monitoring member is the unenrolled watcher, located by that kind marker). An ordinary `member` with a pane **is** enrolled (720 s). `--role` controls the kind marker and whether enrollment is skipped; the LLM is still chosen by `--model` (the Director passes `--model haiku`). When `--coding-agent` is omitted, a `--role monitor` member inherits the spawning Director's backend instead of defaulting to `claude` (see the `--coding-agent` row). A second `--role monitor` spawn in the same fleet is rejected — see [Error Messages](#error-messages). See [Monitoring](../concepts/monitoring.md#the-monitoring-member). |
 | `--prompt-file` | no | Absolute path to a UTF-8 file used as the spawn prompt; mutually exclusive with the positional prompt. |
 | *(positional, after `--`)* | no | Prompt text for the spawned coding-agent process. All three backends receive the same prompt; the prompt template is backend-neutral. Mutually exclusive with `--prompt-file`. |
 
@@ -564,12 +564,12 @@ In all three modes the member's Bash tool is enabled and routine permission prom
 
 | Inputs | Resulting spawn prompt |
 |---|---|
-| Neither `--prompt-file` nor positional prompt | The built-in default prompt template, with `{fleet_id}` / `{agent_id}` / `{director_agent_id}` substituted. |
+| Neither `--prompt-file` nor positional prompt | The built-in default prompt template, with `{fleet_id}` / `{agent_id}` / `{director_agent_id}` / `{coding_agent}` substituted. |
 | Positional prompt only | The positional argument(s) joined by spaces, after the same `str.format()` substitution. |
 | `--prompt-file PATH` only | The file contents, byte-for-byte, after the same `str.format()` substitution. Surrounding whitespace and trailing newlines are preserved verbatim. |
 | Both a positional prompt and `--prompt-file` | Error (exit 2) — see [Error Messages](#error-messages). |
 
-The substituted placeholders are `fleet_id` / `agent_id` / `director_agent_id`. For `--prompt-file`, relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all produce non-zero-exit errors — see the [Error Messages](#error-messages) table for the full surface. Inline prompts beyond a few KB exceed tmux's argv ceiling (`tmux command failed: command too long` rolls back the registration) — use `--prompt-file` for long prompts.
+The substituted placeholders are `fleet_id` / `agent_id` / `director_agent_id` / `coding_agent` (the resolved backend — useful for a monitor prompt's `CODING AGENT:` line). For `--prompt-file`, relative paths, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all produce non-zero-exit errors — see the [Error Messages](#error-messages) table for the full surface. Inline prompts beyond a few KB exceed tmux's argv ceiling (`tmux command failed: command too long` rolls back the registration) — use `--prompt-file` for long prompts.
 
 #### Focus behavior
 
@@ -1022,6 +1022,8 @@ JSON output: `{"agent_id": 5, "interval_seconds": 720, "last_ping_at": "<iso8601
 | `member create --prompt-file` to a zero-byte or whitespace-only file | `Error: --prompt-file <path>: file is empty.` (exit 1) |
 | `member create --coding-agent opencode --model` with a value violating the `<provider-id>/<model-id>` format | `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` (exit 2; fires before any agent registration or tmux side effect) |
 | `member create --role monitor` when the fleet already has an active monitoring member | `Error: fleet <id> already has an active monitoring member (agent <existing-id>); only one is allowed.` (exit 1; enforced in `register_agent`) |
+| `member create --role monitor` with `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the monitor's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
+| `member create --role monitor` with `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the monitor's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
 | `monitor start` for a fleet that already has a live monitor | `Error: monitor already running for fleet <id>` (exit 1) |
 | `monitor start` / `monitor status` against an unknown or soft-deleted fleet | `Error: fleet <id> not found` (exit 1) |
 | `monitor config` with both `--enable` and `--disable` | `Error: --enable and --disable are mutually exclusive.` (exit 2) |

@@ -1,7 +1,7 @@
 # Monitor member inherits the administrator's coding agent
 
 **Status**: Approved
-**Progress**: 0/17 tasks complete
+**Progress**: 6/17 tasks complete
 **Last Updated**: 2026-06-20
 
 ## Overview
@@ -145,12 +145,12 @@ The monitor prompt template then uses `CODING AGENT: {coding_agent}` (instead of
 
 ### Step 1: Documentation & skills
 
-- [ ] `docs/concepts/coding-agents.md` — in the `cafleet member create` paragraph (lines 30-34), state that for `--role monitor`, omitting `--coding-agent` inherits the spawning Director's backend (explicit flag still wins). <!-- completed: -->
-- [ ] `docs/spec/cli-options.md` — update the `--coding-agent` row (line 545) and the `--role` row (line 547) of `member create` to document monitor inheritance, replacing the `--model sonnet` example with the canonical `--model haiku`; add `coding_agent` to the substituted-placeholders list (lines 567-572); add the two fail-loud error strings to the Error Messages section. <!-- completed: -->
-- [ ] `docs/concepts/monitoring.md` — at "The monitoring member" spawn line (lines 108-109), which already omits `--coding-agent`, change the `--model sonnet` example to `--model haiku` and add a sentence that omitting `--coding-agent` now inherits the spawning Director's backend. <!-- completed: -->
-- [ ] `README.md` — at the §4 monitor spawn example (line 85), which already omits `--coding-agent` and uses `--model haiku`, add a clause that omitting `--coding-agent` inherits the spawning Director's backend (keep the `haiku` example). <!-- completed: -->
-- [ ] `skills/cafleet-agent-team-monitoring/SKILL.md` — change `CODING AGENT: claude` → `CODING AGENT: {coding_agent}` in the canonical monitor prompt (line 50); update the placeholder note (line 41) to include `{coding_agent}` and state that `--coding-agent` is omitted so the monitor inherits the Director's backend; keep the Monitor Lifecycle spawn command (line 132) free of `--coding-agent`. <!-- completed: -->
-- [ ] `skills/cafleet/reference/director.md` — update the `--coding-agent` row (line 29) and the `--role` row (line 31) for monitor inheritance; add `coding_agent` to the positional-prompt `str.format()` kwargs note (line 33). The spawn-skeleton `CODING AGENT: [INSERT …]` line (line 123) stays a Director-filled literal for ordinary members; reword the explanatory note (line 136) to distinguish the two paths — ordinary member = Director-filled literal, monitor = CLI-substituted `{coding_agent}` — and drop the blanket "no CLI code change is required" assertion. <!-- completed: -->
+- [x] `docs/concepts/coding-agents.md` — in the `cafleet member create` paragraph (lines 30-34), state that for `--role monitor`, omitting `--coding-agent` inherits the spawning Director's backend (explicit flag still wins). <!-- completed: 2026-06-20T09:00 -->
+- [x] `docs/spec/cli-options.md` — update the `--coding-agent` row (line 545) and the `--role` row (line 547) of `member create` to document monitor inheritance, replacing the `--model sonnet` example with the canonical `--model haiku`; add `coding_agent` to the substituted-placeholders list (lines 567-572); add the two fail-loud error strings to the Error Messages section. <!-- completed: 2026-06-20T09:00 -->
+- [x] `docs/concepts/monitoring.md` — at "The monitoring member" spawn line (lines 108-109), which already omits `--coding-agent`, change the `--model sonnet` example to `--model haiku` and add a sentence that omitting `--coding-agent` now inherits the spawning Director's backend. <!-- completed: 2026-06-20T09:00 -->
+- [x] `README.md` — at the §4 monitor spawn example (line 85), which already omits `--coding-agent` and uses `--model haiku`, add a clause that omitting `--coding-agent` inherits the spawning Director's backend (keep the `haiku` example). <!-- completed: 2026-06-20T09:00 -->
+- [x] `skills/cafleet-agent-team-monitoring/SKILL.md` — change `CODING AGENT: claude` → `CODING AGENT: {coding_agent}` in the canonical monitor prompt (line 50); update the placeholder note (line 41) to include `{coding_agent}` and state that `--coding-agent` is omitted so the monitor inherits the Director's backend; keep the Monitor Lifecycle spawn command (line 132) free of `--coding-agent`. <!-- completed: 2026-06-20T09:00 -->
+- [x] `skills/cafleet/reference/director.md` — update the `--coding-agent` row (line 29) and the `--role` row (line 31) for monitor inheritance; add `coding_agent` to the positional-prompt `str.format()` kwargs note (line 33). The spawn-skeleton `CODING AGENT: [INSERT …]` line (line 123) stays a Director-filled literal for ordinary members; reword the explanatory note (line 136) to distinguish the two paths — ordinary member = Director-filled literal, monitor = CLI-substituted `{coding_agent}` — and drop the blanket "no CLI code change is required" assertion. <!-- completed: 2026-06-20T09:00 -->
 
 ### Step 2: CLI implementation
 
