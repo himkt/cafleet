@@ -1,7 +1,7 @@
 # Readable model / coding-agent routing guidance with available-model tables
 
 **Status**: Approved
-**Progress**: 3/13 tasks complete
+**Progress**: 7/13 tasks complete
 **Last Updated**: 2026-06-20
 
 ## Overview
@@ -132,10 +132,10 @@ Every surface that mentions model/backend routing, the `--model` flag, or specif
 
 ### Step 2: Human-facing docs consistency sweep
 
-- [ ] `docs/concepts/coding-agents.md` § Model selection: keep the brief examples, confirm no full list is present, and add NO cross-link into the skill tree. <!-- completed: -->
-- [ ] `docs/spec/cli-options.md` member-create: confirm no duplicated model list; leave the `--model` / spawn-per-backend content as-is. <!-- completed: -->
-- [ ] `docs/reference/coding-agents/codex.md` + `opencode.md`: confirm the example-model sets stay brief and the names match vendor data; trim any drift toward a full catalog. <!-- completed: -->
-- [ ] `README.md` line 83 + `docs/get-started/quickstart.md` line 67 + `docs/how-to/mixed-backend-team.md` line 60: confirm brief examples only, no full list. <!-- completed: -->
+- [x] `docs/concepts/coding-agents.md` § Model selection: keep the brief examples, confirm no full list is present, and add NO cross-link into the skill tree. <!-- completed: 2026-06-20T12:02 -->
+- [x] `docs/spec/cli-options.md` member-create: confirm no duplicated model list; leave the `--model` / spawn-per-backend content as-is. <!-- completed: 2026-06-20T12:02 -->
+- [x] `docs/reference/coding-agents/codex.md` + `opencode.md`: confirm the example-model sets stay brief and the names match vendor data; trim any drift toward a full catalog. <!-- completed: 2026-06-20T12:02 -->
+- [x] `README.md` line 83 + `docs/get-started/quickstart.md` line 67 + `docs/how-to/mixed-backend-team.md` line 60: confirm brief examples only, no full list. <!-- completed: 2026-06-20T12:02 -->
 
 ### Step 3: Agent-facing skill consistency
 
