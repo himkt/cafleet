@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 15/32 tasks complete
+**Progress**: 16/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -398,7 +398,7 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 7: Edit `reference/recovery.md`
 
-- [ ] `L7`→`./supervision.md § Stall Response`; confirm the Shutdown Protocol stays as the canonical full teardown `supervision.md` points to <!-- completed: -->
+- [x] `L7`→`./supervision.md § Stall Response`; confirm the Shutdown Protocol stays as the canonical full teardown `supervision.md` points to <!-- completed: 2026-06-21T08:24 -->
 
 ### Step 8: Rewrite broker-family Director role + SKILL lines (#16-21, #47-55)
 
