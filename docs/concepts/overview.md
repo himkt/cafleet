@@ -47,9 +47,6 @@ flowchart LR
     Monitor -. wake nudge .-> PaneB
 ```
 
-The broker package is the single data access layer. Both the CLI and the Admin
-WebUI call it. No async stores, no HTTP client, no protocol layer.
-
 ## CLI
 
 The canonical CLI surface — every subcommand, option, and option source —
@@ -57,39 +54,24 @@ lives at [CLI options](../spec/cli-options.md).
 
 ## WebUI
 
-A browser-based dashboard served as a SPA at `/`, with no login. The first
-load lands on a fleet picker; selecting a fleet opens a Discord-style unified
-timeline for that fleet — a sidebar of the fleet's agents, a center timeline
-of unicast and broadcast messages, and a bottom input that parses
-`@<agent> text` for unicast and `@all text` for broadcast. Clicking an agent
-in the sidebar opens a per-agent detail panel
-(`#/fleets/<fleetId>/agents/<agentId>`) showing the agent's profile plus
-Inbox / Sent tabs fed by the per-agent message endpoints. The admin is not
-itself a CAFleet agent; the built-in `Administrator` agent is the implicit
-sender on every send.
-
-The WebUI API surface — request / response shape, fleet header convention,
-and ACK chip metadata — lives at [WebUI API](../spec/webui-api.md).
+A browser-based dashboard served as a SPA at `/`, with no login: a fleet
+picker, then a Discord-style unified timeline per fleet — an agent sidebar,
+unicast and broadcast messages, and a bottom input parsing `@<agent> text` and
+`@all text`. The admin is not itself a CAFleet agent; the built-in
+`Administrator` is the implicit sender. The full API surface and per-agent
+routes live at [WebUI API](../spec/webui-api.md).
 
 ## Monitoring
 
-A Director supervises its team on a periodic tick. That tick is supplied by
-`cafleet monitor` — a per-fleet loop the fleet's dedicated monitoring member runs
-as a background task. Each tick it scans the **watched set** (the root Director at
-180 s and every ordinary member at 720 s, each on its own interval) and, when ≥ 1
-watched agent is due, wakes the monitoring member by keystroking a wake nudge into
-its pane. It is a plain loop, not agent reasoning, so the heartbeat works the same
-on any backend. The monitor owns only the *when* (which watched agents are due);
-the monitoring member then inspects each freshly-due agent and re-engages the idle
-Director on demand, and the Director owns the *what* (poll, ACK, dispatch,
-health-check, escalate). See [Monitoring](monitoring.md).
+A Director supervises its team on a periodic tick supplied by `cafleet monitor`
+— a per-fleet loop the fleet's dedicated monitoring member runs as a background
+task. It spends no model tokens and, being a plain loop rather than agent
+reasoning, works the same on any backend. The monitor owns only the scheduling;
+the monitoring member inspects each due agent and re-engages an idle Director,
+who owns the supervision actions. See [Monitoring](monitoring.md).
 
-## Design document orchestration skills
+## Design-document orchestration
 
-CAFleet ships CAFleet-native design-document skills
-(`cafleet-design-doc-create`, `cafleet-design-doc-execute`) that coordinate a
-Director and spawned members entirely through `cafleet message send`, so every
-inter-agent message is persisted in SQLite and visible in the admin WebUI
-timeline — an auditable trail, in contrast to the ephemeral in-memory
-coordination of Agent Teams. See [Quickstart](../get-started/quickstart.md)
-and [Contributing](../get-started/contributing.md).
+CAFleet ships design-document skills that coordinate a Director and members
+entirely through `cafleet message send`, so every inter-agent message is
+persisted and auditable. See [Quickstart](../get-started/quickstart.md).

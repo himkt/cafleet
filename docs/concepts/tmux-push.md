@@ -35,15 +35,12 @@ sequenceDiagram
     Recipient->>DB: message ack → status=completed
 ```
 
-After the broker saves a delivery task, it looks up the recipient's
-`agent_placements` row. Every agent spawned by `cafleet member create` has a
-placement row, and every fleet's root Director also gets one at
-`cafleet fleet create` time (its placement carries `director_agent_id=NULL`
-to indicate "no parent"). Because the recipient pane is resolved by
-`agent_id` alone, Member → Director notifications work automatically once
-the root Director has a placement row. If the recipient has a non-null
-`tmux_pane_id` and is not the sender, the broker keystrokes an inline
-preview of the message itself into the recipient's pane via the
+After saving a delivery task, the broker looks up the recipient's
+`agent_placements` row (the root Director's placement carries
+`director_agent_id=NULL` for "no parent"). The recipient pane is resolved by
+`agent_id` alone, so Member → Director notifications work automatically. If the
+recipient has a non-null `tmux_pane_id` and is not the sender, the broker
+keystrokes an inline preview into the recipient's pane via the
 `tmux.send_inline_preview` helper:
 
 ```text
@@ -66,11 +63,12 @@ prompt has that prompt dismissed before the trailing `Enter` lands. The same
 
 If the recipient's TUI is in a non-input state, the keystroked preview lands
 wherever the cursor is (the same failure mode any pane keystroke has). The
-fallback chain is `cafleet member list --activity` (the Director observes the
-recipient's `last_recv` column went stale), then
-`cafleet member ping --member-id <recipient-id>` (a manual re-poke that injects the
-`cafleet message poll` command + Enter so the recipient catches up via a
-normal `message poll` round-trip).
+fallback is `cafleet member list --activity` (the Director sees the recipient's
+`last_recv` go stale), then `cafleet member ping --member-id <recipient-id>` —
+the manual poll-nudge path: via the `send_poll_trigger` helper (also
+`esc_first=True`) it injects `Esc` → the `cafleet message poll` command →
+`Enter` into the pane and converts a failure to exit 1, so the recipient drains
+whatever accumulated after a missed inline preview.
 
 ## Design principles
 
@@ -91,12 +89,6 @@ normal `message poll` round-trip).
 the `broadcast_summary` task), reflecting how many recipient panes were
 successfully triggered. The count is NOT persisted — it lives only in the
 broker return value.
-
-**Manual entry-point**: `cafleet member ping` is the manual poll-nudge path:
-via the `send_poll_trigger` helper (also `esc_first=True`) it injects `Esc` →
-the `cafleet message poll` command → `Enter` into a member's pane and converts
-a failure to exit 1, for an operator or monitoring loop that needs the
-recipient to drain whatever has accumulated after a missed inline preview.
 
 Body truncation in the preview (the `…` suffix at `CAFLEET_MAX_TEXT_LEN`
 codepoints) is documented in

@@ -4,15 +4,11 @@ icon: lucide/terminal
 
 # Bash routing
 
-Members spawn with workspace-scoped auto-approval enabled — `claude` uses
-`--permission-mode dontAsk`, `codex` uses `--ask-for-approval never
---sandbox workspace-write`, and `opencode` uses `--agent cafleet` to bind
-the `cafleet` agent's permission ruleset (catch-all-allow + specific-deny —
-every permission check resolves to `allow` or `deny`, never `ask`). The Bash
-tool is enabled and routine permission prompts auto-resolve
-silently, so members run cafleet (and any shell command) directly via the
-Bash tool. The default spawn-prompt template tells the member explicitly
-that its harness runs in workspace-scoped auto-approve mode.
+Members spawn with workspace-scoped auto-approval (see [Coding agents](coding-agents.md)
+for the per-backend flags). The Bash tool is enabled and routine permission
+prompts auto-resolve silently, so members run cafleet (and any shell command)
+directly via the Bash tool. The default spawn-prompt template tells the member
+explicitly that its harness runs in workspace-scoped auto-approve mode.
 
 The bash-via-Director protocol is the **fallback** for the harness deny-list:
 workspace-scoped auto-approval does not auto-resolve everything — destructive

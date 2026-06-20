@@ -37,6 +37,7 @@ nav = [
         { "CLI options" = "spec/cli-options.md" },
         { "WebUI API" = "spec/webui-api.md" },
         { "Coding-agent backends" = [
+            { "Claude members" = "reference/coding-agents/claude.md" },
             { "Codex members" = "reference/coding-agents/codex.md" },
             { "Opencode members" = "reference/coding-agents/opencode.md" },
         ] },

@@ -6,9 +6,7 @@ icon: lucide/table
 
 The `Task` payload is fully relational: every routing field plus the message body lives in its own typed column. The only JSON `TEXT` blob is `agents.agent_card_json`, which stores an `AgentCard`-shaped document.
 
-The model is **predominantly relational**: every queried field on `tasks` is a typed column, and the only opaque payload is the `agent_card_json` document on `agents`.
-
-Schema management is handled by Alembic; the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver. The schema is created by a single initial migration; operators apply it once via `cafleet db init` before starting the server.
+Schema management is handled by Alembic; the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver. The schema is managed by a chain of Alembic revisions; run `cafleet db init` to apply them before starting the server — it is idempotent and safe to re-run after upgrades.
 
 ## SQL Schema
 
@@ -49,7 +47,7 @@ Indexes:
 |---|---|---|
 | `idx_agents_fleet_status` | `(fleet_id, status)` | List active agents in a fleet; covers the `WHERE fleet_id = ? AND status = 'active'` predicate. |
 
-Deregistration is a soft-delete: `status='deregistered'` plus `deregistered_at` is set in a single statement. There is no row delete and no background cleanup loop. Active query paths filter `status='active'` so dead rows are invisible to normal traffic.
+Deregistration is a soft-delete: `status='deregistered'` plus `deregistered_at` is set in a single statement. There is no row delete and no background cleanup loop. Active query paths filter `status='active'` so dead rows are invisible to normal traffic, though the WebUI still surfaces deregistered agents and their inbox tasks remain readable.
 
 #### Built-in Administrator agent
 
@@ -66,7 +64,7 @@ Each fleet owns exactly one built-in `Administrator` agent, distinguished by a f
 }
 ```
 
-The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned flags; callers cannot set `cafleet.kind` through any public path. The Administrator row is written as the final operation of the fleet-create bootstrap transaction, and its `registered_at` matches `fleets.created_at`. No migration seeds it — the single initial migration is schema-only.
+The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned flags; callers cannot set `cafleet.kind` through any public path. The Administrator row is written as the final operation of the fleet-create bootstrap transaction, and its `registered_at` matches `fleets.created_at`. No migration seeds it — the Administrator row is written at fleet-create time, not by any schema migration.
 
 **Invariant**: Every fleet has exactly one active `Administrator` agent. The WebUI surfaces a derived `kind` field (`"builtin-administrator"` | `"user"`) so it can locate the Administrator without matching on the name.
 
@@ -77,7 +75,7 @@ The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `task_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer. Identifies a single delivery (unicast row, broadcast delivery row, or broadcast summary row). |
-| `context_id` | `INTEGER` | `NOT NULL`, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The recipient agent for unicast/broadcast deliveries; the broadcaster for `broadcast_summary`; the preserved original `context_id` for ACK/cancel. Always a registered `agent_id`. |
+| `context_id` | `INTEGER` | `NOT NULL`, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The recipient agent for unicast/broadcast deliveries; the broadcaster for `broadcast_summary`; the preserved original for ACK/cancel. See [Storage](../concepts/storage.md) for the contextId routing convention. |
 | `from_agent_id` | `INTEGER` | `NOT NULL` | Sender agent. **Not** a foreign key — historical tasks may outlive their sender. |
 | `to_agent_id` | `INTEGER` | `NOT NULL` | Recipient agent. **`0`** for `broadcast_summary` rows (the "no single recipient" sentinel; real ids are `>= 1` so `0` never collides). |
 | `type` | `TEXT` | `NOT NULL` | `'unicast'` or `'broadcast_summary'`. |
@@ -123,11 +121,11 @@ Per-agent monitoring schedule, one row per **enrolled** agent. The `cafleet moni
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `agent_id` | `INTEGER` | `PRIMARY KEY` (no AUTOINCREMENT), `REFERENCES agents(agent_id) ON DELETE CASCADE` | The enrolled agent. This is the parent `agents.agent_id` value reused as a 1:1 PK (mirrors `agent_placements.agent_id`) — not a freshly minted sequence, so AUTOINCREMENT is deliberately excluded. |
-| `interval_seconds` | `INTEGER` | `NOT NULL`, `DEFAULT 60` | Ping cadence for this agent. The column `DEFAULT 60` is the frozen schema default written by migration `0002`; it is never relied upon, because every enrollment path writes an explicit interval (the root Director **180 s**, an ordinary member **720 s**) and the `0005` backfill does the same. The two role-based defaults live as `DIRECTOR_PING_INTERVAL_SECONDS = 180` and `MEMBER_PING_INTERVAL_SECONDS = 720` in `cafleet/broker/monitor.py`. |
+| `interval_seconds` | `INTEGER` | `NOT NULL`, `DEFAULT 60` | Ping cadence for this agent. The schema `DEFAULT 60` is inert — every enrollment path writes an explicit per-role interval (see [Monitoring](../concepts/monitoring.md) for the watched-set intervals). |
 | `last_ping_at` | `TEXT` | nullable | ISO-8601 of the last check the monitor dispatched for this agent. `NULL` = never pinged ⇒ due immediately. Persisted (not in-memory) so a monitor restart resumes cadence and `monitor status` can display it. |
 | `enabled` | `INTEGER` | `NOT NULL`, `DEFAULT 1` | Boolean stored as SQLite `0`/`1`. `0` = the monitor skips this agent while preserving its interval for re-enable. Every broker read casts it to a Python `bool` at the read boundary, so the integer representation never leaks past the broker (the CLI and the WebUI/JSON contract both see `enabled: bool`). |
 
-Enrollment covers the fleet's **watched set**: the **root Director** (180 s, enrolled in `create_fleet` after its placement row is added) and **every ordinary member** (720 s, enrolled in `register_agent` when it has a placement AND its `agent_card_json.cafleet.kind != "monitoring-member"`). The dedicated **monitoring member** is **not** enrolled — it is the *watcher*, located by its kind marker (see below), not a watched row. The write-only Administrator and card-only `agent register` calls (no placement) are likewise not enrolled. There is no `fleet_id` column — fleet scoping is reached through the `monitor_config.agent_id → agents.agent_id → agents.fleet_id` join (the same pattern `agent_placements` uses). `is_director` is **derived** at scan time (`agent_id == fleets.director_agent_id`), never denormalized, and is retained for the `monitor status` role label (`director` vs `member`).
+Enrollment covers the fleet's **watched set** — which agents are enrolled and at what cadence is defined in [Monitoring](../concepts/monitoring.md). The root Director is enrolled in `create_fleet` after its placement row is added, and every ordinary member is enrolled in `register_agent` when it has a placement AND its `agent_card_json.cafleet.kind != "monitoring-member"`. The dedicated **monitoring member** is **not** enrolled — it is the *watcher*, located by its kind marker (see below), not a watched row. The write-only Administrator and card-only `agent register` calls (no placement) are likewise not enrolled. There is no `fleet_id` column — fleet scoping is reached through the `monitor_config.agent_id → agents.agent_id → agents.fleet_id` join (the same pattern `agent_placements` uses). `is_director` is **derived** at scan time (`agent_id == fleets.director_agent_id`), never denormalized, and is retained for the `monitor status` role label (`director` vs `member`).
 
 The row is hard-deleted (not soft-deleted) when the agent is deregistered, alongside its `agent_placements` row — runtime config with no historical value, on the same lifecycle as the placement.
 
@@ -147,19 +145,6 @@ The dedicated monitoring member is identified the same way the built-in Administ
 ```
 
 The marker is written by `register_agent` when `cafleet member create --role monitor` passes `kind="monitoring-member"` through. It serves two purposes: `register_agent` **skips** the `monitor_config` enrollment for this kind (the monitoring member is the watcher, not a watched agent), and the monitor loop **locates** the watcher by this marker via `find_monitoring_member` — which selects the single active agent whose `json_extract(agent_card_json, '$.cafleet.kind') == "monitoring-member"`, inner-joined to `agent_placements` for its pane. At most one active monitoring member is allowed per fleet; `register_agent` rejects a second.
-
-#### Enrollment-inversion data migration
-
-The one-shot Alembic revision `0005` (data-only, no schema change) brings an upgraded database to the inverted, per-member enrollment world. It first deletes the monitoring member's `monitor_config` rows (the interval is removed):
-
-```sql
-DELETE FROM monitor_config WHERE agent_id IN (
-    SELECT agent_id FROM agents
-    WHERE json_extract(agent_card_json, '$.cafleet.kind') = 'monitoring-member'
-);
-```
-
-then backfills every existing active root Director (180 s) and pane-bound ordinary member (720 s) with `INSERT OR IGNORE`, skipping the Administrator and monitoring member. After it runs, `monitor_config` holds the watched set (the Director + ordinary members); new Directors enroll at `create_fleet` and new members at `register_agent` going forward. The downgrade is a no-op (re-deriving the pre-inversion enrollment is neither possible nor desirable).
 
 ### `monitor_runtime`
 
@@ -211,7 +196,3 @@ The grouping predicate on the wire is `origin_task_id IS NOT NULL`, which cleanl
 ### ACK timestamp inference
 
 The timeline reads each broadcast's per-recipient ACK time from the `status_timestamp` of the matching `completed` delivery row, which is valid because a delivery task makes exactly one state transition over its lifetime (`input_required → completed` on ACK). If a future change adds a second transition that rewrites `status_timestamp`, a dedicated `acknowledged_at` column must be added.
-
-## Deregistered Agents
-
-Deregistration is a soft-delete only. There is no background cleanup loop and no physical removal of agent or task rows. Deregistered agents continue to exist as rows with `status='deregistered'` indefinitely; their inbox tasks remain readable by the WebUI (the only consumer that surfaces deregistered agents). Active query paths filter `status='active'` so dead rows are invisible to normal traffic.

@@ -17,20 +17,10 @@ monitoring member owns its lifetime — there is no detached subprocess and no
 `monitor stop` (stop the background task, or delete the monitoring member, to
 stop it). One monitor per fleet, and one monitoring member per fleet.
 
-The `Esc` safeguard lives wherever a keystroke's target pane **may** be parked
-on a pending permission-approval prompt. Two such paths exist: the
-**message-delivery inline preview** (every inbound `cafleet message send` /
-`broadcast` / `cafleet member nudge`, whose recipient — including a Director — may
-be sitting on a prompt) and `cafleet member ping`. Both press `Escape` first, let
-the pane settle for ~0.1 s, then type the literal text and `Enter`, so the
-trailing `Enter` dismisses a pending prompt instead of blindly confirming it.
-
-The monitor loop's own **wake nudge** is the exception: it keystrokes only into
-the monitoring member's own pane, which runs a read-only routine under `dontAsk`
-and is never parked on a permission prompt, so the wake nudge does **not** lead
-with `Esc` (a leading `Esc` there would only self-interrupt an in-progress
-routine). The safeguard is applied where a prompt may exist and omitted where one
-never does.
+The monitor loop's **wake nudge** keystrokes only the monitoring member's own
+pane — which is never parked on a permission prompt — so it does **not** lead
+with `Esc`, unlike the message-delivery preview and `cafleet member ping`. The
+`Esc`-safeguard mechanics live in [tmux push](tmux-push.md).
 
 ## Heartbeat vs facilitation
 
@@ -62,10 +52,6 @@ persists an ACKable broker task carrying the summary **and** fires the hardened,
 `Esc`-safeguarded inline preview — and by the broker's inline-preview keystroke
 on every inbound `cafleet message send`.
 
-The monitor never reasons about message content — it is the alarm clock; the
-Director is the worker, and the monitoring member is the watcher that inspects
-each freshly-due agent and re-engages a stalled Director on demand.
-
 ## The watched set
 
 Each tick, the monitor evaluates its enrolled, active agents — the **watched
@@ -82,12 +68,8 @@ agent's cadence, so a just-flagged agent is not due again on the next tick — t
 prevents a wake-storm while the watcher is still working. `last_ping_at` means
 "the last time the monitor dispatched a check for this agent."
 
-The loop **never keystrokes a watched pane.** Its only keystroke is the wake
-nudge into the watcher's own pane. Re-engaging the Director — or surfacing a quiet
-member — is always Director-mediated (the monitoring member's `cafleet member
-nudge` for the Director; the broker's inline-preview keystroke on every
-`cafleet message send`, and the Director's `Esc`-safeguarded `cafleet member ping`,
-for a member).
+The loop **never keystrokes a watched pane** — its only keystroke is the wake
+nudge into the watcher's own pane.
 
 `pending_count` (the count of an agent's un-acked inbox items) is still computed
 and shown in `monitor status`, but it does not gate anything — it is purely
@@ -108,10 +90,8 @@ simply continues — there is no one to wake.
 The monitoring member is a single, dedicated coding-agent member — spawned with
 `cafleet member create --role monitor` (the Director passes `--model haiku`) —
 that owns the heartbeat and applies LLM judgment to the watched agents' state.
-Because `--coding-agent` is omitted on this spawn, the monitoring member
-inherits the spawning Director's backend (from the Director's placement row)
-rather than defaulting to `claude`, so it runs on — and reads the overlay of —
-the same backend it watches; an explicit `--coding-agent` still wins. It
+When `--coding-agent` is omitted it inherits the spawning Director's backend
+(see [Coding agents](coding-agents.md)). It
 is identified by `agent_card_json.cafleet.kind == "monitoring-member"` (the same
 `kind`-marker pattern the built-in Administrator uses; no new SQL column) and is
 located by the broker's `find_monitoring_member` lookup (the kind marker joined to
@@ -144,18 +124,10 @@ read/act commands, read-only `cafleet member capture` and `cafleet member nudge`
    task and fires the hardened, `Esc`-safeguarded inline preview into the
    Director's pane. The Director then drives the stalled member.
 
-The monitoring member's *observation* spans the Director **and** every freshly-due
-member, but its *actuation* is **Director-only**: it **never** keystrokes ordinary
-members with task instructions — all member-driving routes back through the
-Director, who owns the whole task. A member that looks stalled is surfaced to the
-Director by the monitoring member's assessment; the Director then re-pings it (via
-`cafleet member ping`) or re-sends the instruction.
-
-Because the monitoring member runs the loop in its own pane, the wake nudge lands
-in that same pane's foreground — a deliberate self-ping. The wake nudge does
-**not** lead with `Esc` (the monitoring member's pane is never on a permission
-prompt), so a wake landing mid-routine does not interrupt the monitoring member's
-own in-progress turn.
+The monitoring member's *observation* spans the Director **and** every
+freshly-due member, but its *actuation* is **Director-only**: it never
+keystrokes ordinary members with task instructions — all member-driving routes
+back through the Director, who owns the whole task.
 
 ## Cadence and tick precision
 
@@ -253,12 +225,6 @@ Two tables back the monitor. Both reuse a parent id as a 1:1 INTEGER primary key
 - **`monitor_runtime`** — one row per fleet, holding the running loop's `pid`,
   `started_at`, `last_tick_at` heartbeat, and `tick_seconds`. "No monitor" is
   modeled cleanly as "no row".
-
-The one-shot Alembic data migration `0005` brings an upgraded database to the
-inverted enrollment world: it deletes the monitoring member's `monitor_config`
-rows and backfills every existing active root Director (180 s) and ordinary member
-(720 s). A live fleet therefore picks up the new watched set on `cafleet db init`
-without losing its heartbeat. The downgrade is a no-op.
 
 See [Data model](../spec/data-model.md) for the full column definitions and the
 [CLI options](../spec/cli-options.md#cafleet-monitor) page for the
