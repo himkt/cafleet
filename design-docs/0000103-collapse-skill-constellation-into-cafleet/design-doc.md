@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 17/32 tasks complete
+**Progress**: 18/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -406,7 +406,7 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 9: Rewrite research-family lines (#22-26, #56-63)
 
-- [ ] `cafleet-research-report` + `cafleet-research-presentation` Director role files + SKILL bodies: monitoring refs → `reference/supervision.md`; `§ The monitoring member`→`roles/monitor.md` <!-- completed: -->
+- [x] `cafleet-research-report` + `cafleet-research-presentation` Director role files + SKILL bodies: monitoring refs → `reference/supervision.md`; `§ The monitoring member`→`roles/monitor.md` <!-- completed: 2026-06-21T08:40 -->
 
 ### Step 10: Rewrite the 11 member base-dir startup bullets (#5-15)
 
