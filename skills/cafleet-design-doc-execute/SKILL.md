@@ -138,7 +138,7 @@ Before registering with CAFleet:
 
 ### Step 3: Register & Spawn Members (Director)
 
-Load the `cafleet` skill, the `cafleet-agent-team-monitoring` skill, and the `cafleet-agent-team-supervision` skill (in that order — monitoring is the foundation layer, supervision the governance layer that depends on it).
+Load the `cafleet` skill and Read its `reference/supervision.md`.
 
 #### 3a. Establish a CAFleet fleet and capture the root Director's `agent_id`
 
@@ -155,9 +155,9 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 3b. Spawn the monitoring member (first-in)
 
-This team **keeps an active heartbeat** (Step 7's Copilot loop needs a turn source — see Step 7), so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`; it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `member create`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; its `monitor start` background task is stopped in Step 8's cleanup (first-out). See the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical spawn prompt and lifecycle, and the `cafleet-agent-team-supervision` skill for supervision obligations (Authorization-Scope Guard, idle semantics).
+This team **keeps an active heartbeat** (Step 7's Copilot loop needs a turn source — see Step 7), so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`; it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `member create`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; its `monitor start` background task is stopped in Step 8's cleanup (first-out). See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
 
-**Spawn-prompt delta (execute only).** Execute's monitoring member runs an **extended** routine versus the canonical `cafleet-agent-team-monitoring` prompt: when it finds the Director **idle**, it nudges **unconditionally** — it does **not** gate the nudge on naming un-acked inbox items or stalled members. The unconditional idle-nudge is what grants the Director a re-poll turn during a quiet Copilot wait (Step 7), so `silence_ticks` can advance even when the inbox is empty and members have already reported their fixes. State this delta in execute's monitoring-member spawn prompt; the canonical `cafleet-agent-team-monitoring` routine keeps its conditional nudge. No Step-7 enter/exit handshake is needed — the monitoring member is PR-agnostic and the Director's Step-7 per-turn checklist consumes the granted turn (harmless outside Step 7: the Director re-polls, finds nothing new, idles again).
+**Spawn-prompt delta (execute only).** Execute's monitoring member runs an **extended** routine versus the canonical `cafleet` skill's `roles/monitor.md` prompt: when it finds the Director **idle**, it nudges **unconditionally** — it does **not** gate the nudge on naming un-acked inbox items or stalled members. The unconditional idle-nudge is what grants the Director a re-poll turn during a quiet Copilot wait (Step 7), so `silence_ticks` can advance even when the inbox is empty and members have already reported their fixes. State this delta in execute's monitoring-member spawn prompt; the canonical `cafleet` skill's `roles/monitor.md` routine keeps its conditional nudge. No Step-7 enter/exit handshake is needed — the monitoring member is PR-agnostic and the Director's Step-7 per-turn checklist consumes the granted turn (harmless outside Step 7: the Director re-polls, finds nothing new, idles again).
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -402,7 +402,7 @@ Once the loop is active (the PR exists and Copilot has been invited), authority 
 
 #### PR Review Loop State
 
-The Director holds two **PR-review-specific** in-context variables across idle-nudge-driven turns (separate from the team-health inbox poll the `cafleet-agent-team-monitoring` skill runs via `cafleet message poll`, which returns only un-acked deliveries and tracks no timestamp). They are NOT persisted to disk — the Director carries them in its own working memory.
+The Director holds two **PR-review-specific** in-context variables across idle-nudge-driven turns (separate from the team-health inbox poll the monitoring loop runs via `cafleet message poll` (per the `cafleet` skill's `reference/supervision.md`), which returns only un-acked deliveries and tracks no timestamp). They are NOT persisted to disk — the Director carries them in its own working memory.
 
 | Variable | Meaning | Update rule |
 |:--|:--|:--|
@@ -417,7 +417,7 @@ The monitoring member's `cafleet monitor` (started in Step 3b) runs unchanged on
 
 On each idle-nudge-driven turn (and in any active turn while Step 7 is in progress), the Director runs — in order:
 
-1. **Team health** (unchanged from the `cafleet-agent-team-monitoring` skill): `member list` → `poll` → `member capture` fallback → nudge stalled members.
+1. **Team health** (unchanged from the `cafleet` skill's `reference/supervision.md`): `member list` → `poll` → `member capture` fallback → nudge stalled members.
 2. **Fetch new PR reviews**: `gh pr view <pr-number> --json reviews` (GraphQL-shaped; fields are `author.login`, `state`, `submittedAt`, `body`) AND `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments` (REST-shaped; fields are `user.login`, `body`, `path`, `line`, `created_at`).
 3. **Filter Copilot-authored entries**: keep items where the login field (`author.login` for `gh pr view` reviews, `user.login` for `gh api` inline comments) matches the regex `^copilot` (case-insensitive). Copilot reviews currently post under a login that begins with `copilot` — the exact slug varies by account plan, so a prefix match is the safe filter.
 4. **New-since-push filter**: keep items whose timestamp (`submittedAt` for reviews, `created_at` for inline comments) is strictly later than `last_push_ts`.

@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 16/32 tasks complete
+**Progress**: 17/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -402,7 +402,7 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 8: Rewrite broker-family Director role + SKILL lines (#16-21, #47-55)
 
-- [ ] `cafleet-design-doc-create`/`-execute`/`-interview` Director role files + SKILL bodies: three-skill loads → "Load `cafleet`, Read `reference/supervision.md`" (drop ordering); `§ The monitoring member`→`roles/monitor.md`; preserve execute's unconditional-nudge delta (R14) <!-- completed: -->
+- [x] `cafleet-design-doc-create`/`-execute`/`-interview` Director role files + SKILL bodies: three-skill loads → "Load `cafleet`, Read `reference/supervision.md`" (drop ordering); `§ The monitoring member`→`roles/monitor.md`; preserve execute's unconditional-nudge delta (R14) <!-- completed: 2026-06-21T08:34 -->
 
 ### Step 9: Rewrite research-family lines (#22-26, #56-63)
 
