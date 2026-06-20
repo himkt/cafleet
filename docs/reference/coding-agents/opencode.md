@@ -17,7 +17,7 @@ cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Opencode-A --description "<one-sentence purpose>" --coding-agent opencode
 ```
 
-The default is `--coding-agent claude`. A single Director may spawn `claude`, `codex`, and `opencode` members in the same fleet — the broker, message lifecycle, and tmux primitives behave identically for all three.
+The default backend, mixed-backend teams, and the shared spawn framing are covered on [Coding agents](../../concepts/coding-agents.md).
 
 The opencode pane runs the bare `opencode` command, which per <https://opencode.ai/docs/cli/> is the documented TUI entry point ("The OpenCode CLI by default starts the TUI when run without any arguments"). The pane stays alive as a long-lived TUI you can scroll, switch to, and observe — matching the operator affordance of `claude` and `codex` panes. The `opencode run` subcommand (the documented headless / scripting entry) is **not** used.
 
@@ -67,22 +67,11 @@ If `~/.opencode/agents/cafleet.md` cannot be written (e.g. `$HOME` is read-only,
 
 ## cafleet usage from inside an opencode pane
 
-Opencode members cannot load Claude Code skills, so their spawn prompt has them read the cafleet skill files by absolute path instead. The same cafleet CLI surface works from an opencode pane unchanged:
-
-```bash
-cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
-cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
-  --to <director-agent-id> --text "..."
-cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
-```
-
-Members substitute the literal ids from their spawn prompt; there is no env-var fallback.
-
-For the full broker CLI reference (register, send, broadcast, poll, ack, cancel, show, agent listing, deregister, member commands), see [CLI options](../../spec/cli-options.md).
+The cafleet CLI works unchanged from an opencode pane; the usage convention — including reading the cafleet skill files by absolute path — is documented on [Coding agents](../../concepts/coding-agents.md). For the full broker CLI reference, see [CLI options](../../spec/cli-options.md).
 
 ## The `!` shell-shortcut convention
 
-Opencode's TUI input box honors a leading-`!` shell shortcut, which cafleet's bash-via-Director fallback uses — see [Bash routing](../../concepts/bash-routing.md).
+Opencode's TUI input box honors the leading-`!` shell shortcut that `cafleet member exec` uses — see [Coding agents](../../concepts/coding-agents.md).
 
 ## Pane-title asymmetry
 

@@ -17,7 +17,7 @@ cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Codex-A --description "<one-sentence purpose>" --coding-agent codex
 ```
 
-The default is `--coding-agent claude`. A single Director may spawn `claude`, `codex`, and `opencode` members in the same fleet — the broker, message lifecycle, and tmux primitives behave identically for all three. See [Opencode members](opencode.md) for opencode-specific operational detail.
+The default backend, mixed-backend teams, and the shared spawn framing are covered on [Coding agents](../../concepts/coding-agents.md).
 
 ## Spawn flags
 
@@ -53,22 +53,11 @@ If the `codex` binary is not on `PATH`, `cafleet member create --coding-agent co
 
 ## cafleet usage from inside a codex pane
 
-Codex members cannot load Claude Code skills, so their spawn prompt has them read the cafleet skill files by absolute path instead. The same cafleet CLI surface works from a codex pane unchanged:
-
-```bash
-cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
-cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
-  --to <director-agent-id> --text "..."
-cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
-```
-
-Members substitute the literal ids from their spawn prompt; there is no env-var fallback.
-
-For the full broker CLI reference (register, send, broadcast, poll, ack, cancel, show, agent listing, deregister, member commands), see [CLI options](../../spec/cli-options.md).
+The cafleet CLI works unchanged from a codex pane; the usage convention — including reading the cafleet skill files by absolute path — is documented on [Coding agents](../../concepts/coding-agents.md). For the full broker CLI reference, see [CLI options](../../spec/cli-options.md).
 
 ## The `!` shell-shortcut convention
 
-Codex CLI honors a leading-`!` shell shortcut on its input line, which cafleet's bash-via-Director fallback uses — see [Bash routing](../../concepts/bash-routing.md).
+Codex honors the leading-`!` shell shortcut that `cafleet member exec` uses — see [Coding agents](../../concepts/coding-agents.md).
 
 ## Pane-title asymmetry
 

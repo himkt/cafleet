@@ -17,15 +17,24 @@ backend is selected at fleet-create and member-create time via
 | `codex`  | `codex --ask-for-approval never --sandbox workspace-write <prompt>` | No `--name` analog; pane title is whatever `codex` emits by default. Operators locate panes via `cafleet member list`. |
 | `opencode` | `opencode --agent cafleet --prompt <prompt>` | No `--name` analog. Long-lived TUI bound to the `cafleet` agent definition at `~/.opencode/agents/cafleet.md`, written on first spawn if absent. Safety floor matches Claude Code's `dontAsk` posture (catch-all-allow + specific-deny ruleset enforced by opencode's own permission system) — NOT Codex's kernel sandbox. |
 
-All three backends honor a leading-`!` shell shortcut on the coding agent's
-input line, so `cafleet member exec` keystrokes `! <command>` + Enter into
-any pane shape and the command runs natively. The `--coding-agent` value is
-one of `claude` / `codex` / `opencode` and is recorded in the placement's
-`coding_agent` column.
-
-Mixed-backend teams are allowed: a single Director may spawn `claude`,
-`codex`, and `opencode` members in the same fleet with no broker-level
+The `--coding-agent` value (`claude` / `codex` / `opencode`) is recorded in
+the placement's `coding_agent` column. Mixed-backend teams are allowed: a
+single Director may spawn all three in the same fleet with no broker-level
 differences.
+
+## cafleet usage from a member pane
+
+The cafleet CLI works unchanged from any backend pane: members substitute the
+literal ids from their spawn prompt (there is no env-var fallback) and run
+`cafleet message poll` / `send` / `ack` and the rest directly. claude panes
+load the Claude Code skills directly, while codex and opencode panes read the
+cafleet skill files by absolute path (their spawn prompts point at the files).
+All three honor a leading-`!` shell shortcut on the coding agent's input line,
+so `cafleet member exec` keystrokes `! <command>` + Enter into any pane shape
+and the command runs natively. For the full broker CLI reference, see
+[CLI options](../spec/cli-options.md).
+
+## Backend selection by `--coding-agent`
 
 For `cafleet fleet create`, the `--coding-agent` flag is operator-declared
 metadata only — cafleet does not spawn the root Director's coding-agent
@@ -40,23 +49,17 @@ default when the flag is omitted.
 
 ## Model selection
 
-`cafleet member create` accepts an optional `--model <string>` that is
-forwarded to the spawned backend binary via that binary's `--model` flag
-(e.g. `--model sonnet` for `claude`, `--model gpt-5.4-mini` for `codex`,
-`--model anthropic/claude-sonnet-4-6` or `--model opencode/big-pickle`
-for `opencode`). When the flag is
-omitted, no model tokens are emitted and each binary uses its own default
-model.
-
-Validation is per-backend: `claude` and `codex` pass any string through
-verbatim — the binary itself rejects unknown models, so newly released
-models work without a cafleet release. `opencode` requires the
-`<provider-id>/<model-id>` format and rejects anything else at create time
-with exit 2, before any agent registration or tmux side effect.
-
-The value is spawn-time only: it is NOT recorded in `agent_placements`,
-requires no migration, and does not appear in `cafleet member list`
-output.
+`cafleet member create --model <string>` forwards the value to the spawned
+backend's own `--model` flag (e.g. `--model sonnet` for `claude`,
+`--model gpt-5.4-mini` for `codex`, `--model anthropic/claude-sonnet-4-6` for
+`opencode`); omit it and each binary uses its own default. Validation is
+per-backend — `claude` and `codex` pass any string through verbatim (the
+binary rejects unknown models), while `opencode` requires the
+`<provider-id>/<model-id>` format and rejects anything else at create time.
+The value is spawn-time only: it is not recorded in `agent_placements` and does
+not appear in `cafleet member list`. The exhaustive `--model` flag detail is in
+[CLI options](../spec/cli-options.md); per-backend model examples live on the
+backend reference pages linked below.
 
 ## Known asymmetries (intentional non-goals)
 
@@ -72,9 +75,10 @@ output.
   rely on deny-list-only safety floors; operators who need kernel-enforced
   isolation should use the `codex` backend.
 
-Operational details for codex members — including the codex CLI version
-pin, install pointer, and verification recipe — live at
-[Codex members](../reference/coding-agents/codex.md). The equivalent for
-opencode lives at [Opencode members](../reference/coding-agents/opencode.md),
-including the preset materialization protocol and the refresh recipe for
-upgrading the preset after a CAFleet release.
+Operational details for each backend live on its reference page:
+[Claude members](../reference/coding-agents/claude.md) (the default backend,
+its spawn flags, and model examples), [Codex members](../reference/coding-agents/codex.md)
+(the codex CLI version pin, install pointer, and verification recipe), and
+[Opencode members](../reference/coding-agents/opencode.md) (the preset
+materialization protocol and the refresh recipe for upgrading the preset after
+a CAFleet release).
