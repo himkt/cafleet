@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 4/32 tasks complete
+**Progress**: 6/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -375,8 +375,8 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 3: Create `roles/monitor.md`
 
-- [ ] Author the monitor role (intro, two-command constraint, 4-step Startup with the `ready: monitor live` gate, on-wake capture-classify-reengage routine, wake-nudge example, Teardown) using angle-bracket placeholders, shape mirroring `roles/member.md` <!-- completed: -->
-- [ ] Document the canonical spawn prompt as the `../reference/director.md` skeleton + a per-role delta (omit `--coding-agent`, carry `{coding_agent}`, `--role monitor --model {monitor_model}`); overlay path `../reference/coding-agent/<name>.md`; verify placeholder names match the overlay keys 1:1 (R12) <!-- completed: -->
+- [x] Author the monitor role (intro, two-command constraint, 4-step Startup with the `ready: monitor live` gate, on-wake capture-classify-reengage routine, wake-nudge example, Teardown) using angle-bracket placeholders, shape mirroring `roles/member.md` <!-- completed: 2026-06-21T07:54 -->
+- [x] Document the canonical spawn prompt as the `../reference/director.md` skeleton + a per-role delta (omit `--coding-agent`, carry `{coding_agent}`, `--role monitor --model {monitor_model}`); overlay path `../reference/coding-agent/<name>.md`; verify placeholder names match the overlay keys 1:1 (R12) <!-- completed: 2026-06-21T07:54 -->
 
 ### Step 4: Create `reference/supervision.md` (merge both deleted team skills)
 
