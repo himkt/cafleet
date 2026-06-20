@@ -10,13 +10,13 @@ Replace the prose-heavy "Model-name-to-backend inference" table in the cafleet s
 
 ## Success Criteria
 
-- [ ] `director.md` § Model-name-to-backend inference presents a 4-row routing summary table — one model-name shape per row, with no single cell combining the infer-rule, the flags, and the omit-default caveat as the original did — replacing the current table body (lines 41-46).
-- [ ] `director.md` gains an "Available models per backend" subsection with three tables: claude (simple list including `best`/`default`/`opusplan`/`sonnet[1m]`/`opus[1m]`), codex (`gpt-5.5`/`gpt-5.4`/`gpt-5.4-mini`/`gpt-5.3-codex-spark`), opencode (curated: OpenAI + Anthropic + Google rows + two collapse notes).
-- [ ] The routing rule documents precedence: slash-form → `opencode` (explicit-only); else `gpt-*` → `codex`; else Claude alias / `claude-*` full name → `claude` (default); else unknown bare name → ask the operator.
-- [ ] `best`/`default`/`opusplan`/`sonnet[1m]`/`opus[1m]` route to `claude`, not the ask-operator branch.
-- [ ] No full available-model list exists outside `director.md`; `cli-options.md`, `coding-agents.md`, `README.md`, `quickstart.md`, `mixed-backend-team.md` retain only brief examples.
-- [ ] The old `| fable, opus, sonnet, or a claude-* full name | claude | … |` row and its three sibling rows no longer appear in any live skill/doc surface — a backtick-tolerant repo grep for that wording returns only design docs (this doc plus the historical `0000082-coding-agent-model-option`, which introduced the table and is preserved per `removal.md`) and the pre-spawn prompt renders under `prompts/`.
-- [ ] Every surface in the Surface Inventory (S3) is updated or explicitly verified as needing no change.
+- [x] `director.md` § Model-name-to-backend inference presents a 4-row routing summary table — one model-name shape per row, with no single cell combining the infer-rule, the flags, and the omit-default caveat as the original did — replacing the current table body (lines 41-46).
+- [x] `director.md` gains an "Available models per backend" subsection with three tables: claude (simple list including `best`/`default`/`opusplan`/`sonnet[1m]`/`opus[1m]`), codex (`gpt-5.5`/`gpt-5.4`/`gpt-5.4-mini`/`gpt-5.3-codex-spark`), opencode (curated: OpenAI + Anthropic + Google rows + two collapse notes).
+- [x] The routing rule documents precedence: slash-form → `opencode` (explicit-only); else `gpt-*` → `codex`; else Claude alias / `claude-*` full name → `claude` (default); else unknown bare name → ask the operator.
+- [x] `best`/`default`/`opusplan`/`sonnet[1m]`/`opus[1m]` route to `claude`, not the ask-operator branch.
+- [x] No full available-model list exists outside `director.md`; `cli-options.md`, `coding-agents.md`, `README.md`, `quickstart.md`, `mixed-backend-team.md` retain only brief examples.
+- [x] The old `| fable, opus, sonnet, or a claude-* full name | claude | … |` row and its three sibling rows no longer appear in any live skill/doc surface — a backtick-tolerant repo grep for that wording returns only design docs (this doc plus the historical `0000082-coding-agent-model-option`, which introduced the table and is preserved per `removal.md`) and the pre-spawn prompt renders under `prompts/`.
+- [x] Every surface in the Surface Inventory (S3) is updated or explicitly verified as needing no change.
 
 ---
 
