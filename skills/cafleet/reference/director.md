@@ -32,7 +32,7 @@ cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
 | `--prompt-file` | no | Absolute path to a UTF-8 file used as the spawn prompt (mutually exclusive with the positional prompt; read verbatim, same `str.format()` pass). Path/file errors are catalogued in [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 | *(positional, after `--`)* | no | Prompt for the spawned process (mutually exclusive with `--prompt-file`; the default template is used if both are omitted). Goes through `str.format()` with `fleet_id` / `agent_id` / `director_agent_id` as kwargs. |
 
-The per-backend spawn argv is in [`cli-options.md`](../../../docs/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the deny-list fallback is [`reference/exec-routing.md`](exec-routing.md). Per-backend deltas: [`codex`](coding-agent/codex.md) / [`opencode`](coding-agent/opencode.md).
+The per-backend spawn argv is in [`cli-options.md`](../../../docs/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the deny-list fallback is [`reference/exec-routing.md`](exec-routing.md). Per-backend deltas: [`claude`](coding-agent/claude.md) / [`codex`](coding-agent/codex.md) / [`opencode`](coding-agent/opencode.md).
 
 ### Model-name-to-backend inference
 
@@ -83,7 +83,7 @@ COMMUNICATION PROTOCOL:
 ‹START CUE›
 ```
 
-The `CODING AGENT:` line names the member's coding-agent backend (`claude` / `codex` / `opencode`). The Director fills it as a rendered literal the same way it fills `BASE` — from the `--coding-agent` value it chose at `member create` — so no CLI code change is required. The member reads its overlay `reference/coding-agent/<name>.md` deterministically from this line and applies the overlay's deltas on top of the base.
+The `CODING AGENT:` line names the member's coding-agent backend (`claude` / `codex` / `opencode`). The Director fills it as a rendered literal the same way it fills `BASE` — from the `--coding-agent` value it chose at `member create` — so no CLI code change is required. The member reads its overlay `coding-agent/<name>.md` deterministically from this line and applies the overlay's deltas on top of the base.
 
 Per-role delta slots (each consuming skill's spawn section fills these):
 
@@ -93,7 +93,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 | `‹role›` + `‹ROLE-DEF SUFFIX›` | The `roles/<role>.md` filename, plus any addendum after "…role definition." — e.g. resume-mode `Follow the Resume Mode section in particular.`; the research roles' `— accountability, …, and shutdown.` enumeration. Empty for most roles. |
 | `‹cafleet-load purpose›` + `‹EXTRA SKILL LOADS›` | The cafleet purpose phrase (`for communication with the Director`, or `for the broker primitives and bash-via-Director routing`), plus any extra startup skills — `cafleet-design-doc` (design-doc family); `cafleet-my-slidev` + `cafleet-create-figure` (Presentation Specialist). |
 | `‹CONTEXT LINES›` | Role inputs, one per line: `DESIGN DOCUMENT` / `OUTPUT PATH` / `CURRENT DATE` / `USER REQUEST` / `OUTPUT DIRECTORY` / `LANGUAGE` / `YOUR ASSIGNMENT` / `OUTPUT FILE` / `YOUR TASK ID` / `REPORT` / `SLIDE FILE` / `SERVER URL` / `ROUND`, etc. |
-| `‹report-hint›` + `‹POLL-HANDLING LINE›` + `‹EXTRA COMMS LINES›` | The `--text` hint (`your report` / `your numbered question list`). The poll-handling line is either the simple `When you see cafleet message poll output with a message from the Director, act on those instructions.` (create / execute / interview) or the **ack-inline** form `…capture the `id:` integer id from each entry as [task-id] and ack it via cafleet message ack … --task-id [task-id], then act on the instructions.` (research / presentation). Extra comms lines: the Manager's `You do NOT talk to Scouts or Researchers directly…` + shared-task-list lines; the Researcher's task-list claim/complete lines. |
+| `‹report-hint›` + `‹POLL-HANDLING LINE›` + `‹EXTRA COMMS LINES›` | The `--text` hint (`your report` / `your numbered question list`). The poll-handling line is either the simple `When you see cafleet message poll output with a message from the Director, act on those instructions.` (create / execute / interview) or the **ack-inline** form `…capture the id: integer id from each entry as [task-id] and ack it via cafleet message ack … --task-id [task-id], then act on the instructions.` (research / presentation). Extra comms lines: the Manager's `You do NOT talk to Scouts or Researchers directly…` + shared-task-list lines; the Researcher's task-list claim/complete lines. |
 | `‹IMPORTANT / ROLE-CONSTRAINT LINES›` | Every `IMPORTANT:` line and hard role constraint, verbatim (see lossless rule). |
 | `‹START CUE›` | The role's closing instruction — e.g. `Start by reading the design document. Then wait for the Director to assign your first step.`; `Read the design document, generate a numbered question list …`; `When complete, send the file path to the Director …`. |
 

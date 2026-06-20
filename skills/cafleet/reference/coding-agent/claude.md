@@ -17,4 +17,6 @@ Decision surface: `AskUserQuestion` takes ≤ 4 options/question; the built-in "
 
 Relaying a member's question: ask the user, then forward via `cafleet member send-input --choice N | --freetext`; keystrokes: `docs/spec/cli-options.md#member-send-input`.
 
+Decision-prompt frame: the `AskUserQuestion` frame spans ~120–200 lines — bump `cafleet member capture --lines` accordingly to show it in full.
+
 Task coordination: the harness `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` tools — register a sub-topic with `TaskCreate`, claim with `TaskUpdate` (set owner + `in_progress`), complete with `TaskUpdate` (`completed`), check progress with `TaskList`.

@@ -31,7 +31,7 @@ The skill writes its working folder to `<CWD>/researches/<topic-slug>/` (one fol
 
 ## Architecture
 
-The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns every member via `cafleet member create --fleet-id [fleet-id] --agent-id [director-agent-id]`. All inter-agent coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered tmux push notifications) and a shared task list.
+The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns every member via `cafleet member create --fleet-id [fleet-id] --agent-id [director-agent-id]`. All inter-agent coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered tmux push notifications) and {task_coord}.
 
 ```text
 User
@@ -100,15 +100,15 @@ Readiness/stall rules (apply per the `cafleet-agent-team-monitoring` skill):
 
 - After Scouts/Researchers have been spawned and tasks have been assigned, expect at least one `00-scout-*.md` or `NN-research-*.md` file to appear after the first round of replies.
 - Do not consider the workflow ready for Step 5 until `report.md` exists.
-- If a member owns an `in_progress` task but their deliverable file is missing past the expected milestone, run the 2-stage health-check from the `cafleet-agent-team-monitoring` skill: `cafleet message poll` → `cafleet member capture --lines 200` → directed `cafleet message send` nudge → user escalation.
+- If a member has an assignment still in progress but their deliverable file is missing past the expected milestone, run the 2-stage health-check from the `cafleet-agent-team-monitoring` skill: `cafleet message poll` → `cafleet member capture --lines 200` → directed `cafleet message send` nudge → user escalation.
 
 ### Step 2: Spawn Manager (Director)
 
 Load the `cafleet` skill and follow its spawn protocol.
 
-#### 2a. Shared task list
+#### 2a. Shared task coordination
 
-Work-coordination substrate: {task_coord}. The on-disk task store is created on the first task creation (typically by the Manager when decomposing the topic). No explicit team-bootstrap step is required.
+Work-coordination substrate: {task_coord}. On a harness task list, the on-disk store is created on the first task creation (typically by the Manager when decomposing the topic) and each sub-topic is one task (`owner: "researcher-NN"`, `status: "in_progress"` → `completed`); on a message-only backend, registrations, claims, and completions ride as cafleet messages with no store to create. Either way, no explicit team-bootstrap step is required.
 
 #### 2b. Locate role definitions (path-by-reference)
 
@@ -196,8 +196,8 @@ With multiple Researchers running in parallel, coordination goes through {task_c
 
 - The Manager registers each sub-topic with {task_coord} before its Researcher is spawned. The registration records the sub-topic, scope, and expected output file path (e.g., `<resolved-path>/01-research-<subtopic>.md`).
 - Each Researcher claims its assignment via {task_coord} on spawn.
-- Researchers mark their task `completed` when their output file is written and the completion report has been sent.
-- The Manager blocks on all research tasks being `completed` before starting compilation. Check the task list for progress.
+- Researchers report their assignment complete via {task_coord} when their output file is written and the completion report has been sent.
+- The Manager blocks until every assignment is reported complete before starting compilation. Check {task_coord} for progress.
 
 The Manager's task-creation calls also serve as the authoritative list of sub-topic scopes — if the Director sees a discrepancy between a spawn request's scope and the corresponding task, treat the task description as canonical and ask the Manager to reconcile.
 
