@@ -1,7 +1,7 @@
 # Reference Documentation Simplification
 
 **Status**: Approved
-**Progress**: 36/39 tasks complete
+**Progress**: 39/39 tasks complete
 **Last Updated**: 2026-06-20
 
 ## Overview
@@ -19,15 +19,15 @@ These four principles govern every per-file action in this document.
 
 ## Success Criteria
 
-- [ ] The 4-line audience preamble ("Like every API page…") is deleted from all four `docs/api/*` pages with zero surviving copies; no `api/index.md` is added.
-- [ ] `docs/reference/coding-agents/claude.md` exists as a structural peer of `codex.md` / `opencode.md` and is registered in the zensical nav under "Coding-agent backends".
-- [ ] Every reference/concept page opens with exactly one lead sentence; no page carries a standalone audience or "Read this page to X" line.
-- [ ] Each topic in the [ownership map](#single-source-ownership-map) appears in full on exactly one page; every other mention is a ≤2-line pointer carrying no duplicated numbers/rationale.
-- [ ] No `docs/spec/*` page narrates a migration revision number or contains raw migration SQL.
-- [ ] `docs/concepts/coding-agents.md` represents all three backends symmetrically and links to all three per-backend reference pages.
-- [ ] The codex/opencode verification recipes remain verbatim and runnable.
-- [ ] All diagrams present before the change are still present after it.
-- [ ] `mise //:docs-build` (runs `uv run zensical build --clean`) builds with no broken internal links.
+- [x] The 4-line audience preamble ("Like every API page…") is deleted from all four `docs/api/*` pages with zero surviving copies; no `api/index.md` is added.
+- [x] `docs/reference/coding-agents/claude.md` exists as a structural peer of `codex.md` / `opencode.md` and is registered in the zensical nav under "Coding-agent backends".
+- [x] Every reference/concept page opens with exactly one lead sentence; no page carries a standalone audience or "Read this page to X" line.
+- [x] Each topic in the [ownership map](#single-source-ownership-map) appears in full on exactly one page; every other mention is a ≤2-line pointer carrying no duplicated numbers/rationale.
+- [x] No `docs/spec/*` page narrates a migration revision number or contains raw migration SQL.
+- [x] `docs/concepts/coding-agents.md` represents all three backends symmetrically and links to all three per-backend reference pages.
+- [x] The codex/opencode verification recipes remain verbatim and runnable.
+- [x] All diagrams present before the change are still present after it.
+- [x] `mise //:docs-build` (runs `uv run zensical build --clean`) builds with no broken internal links.
 
 ---
 
@@ -152,9 +152,10 @@ The authoritative, per-file CUT/MERGE/REWRITE/KEEP list is encoded as the [Imple
 
 ### Step 6: Verification
 
-- [ ] Grep the full `docs/` tree to confirm zero surviving copies of the audience preamble ("Like every API page") and that no `docs/spec/*` page contains a migration revision number or raw migration SQL. <!-- completed: -->
-- [ ] Confirm each ownership-map topic appears in full on exactly its canonical page and as a ≤2-line pointer elsewhere (no duplicated interval numbers outside `monitoring.md`). <!-- completed: -->
-- [ ] Build the docs with `mise //:docs-build` (runs `uv run zensical build --clean`) and confirm no broken internal links, that `claude.md` renders under "Coding-agent backends", and that all pre-existing diagrams still render. <!-- completed: -->
+- [x] Grep the full `docs/` tree to confirm zero surviving copies of the audience preamble ("Like every API page") and that no `docs/spec/*` page contains a migration revision number or raw migration SQL. <!-- completed: 2026-06-20T12:10 -->
+- [x] Confirm each ownership-map topic appears in full on exactly its canonical page and as a ≤2-line pointer elsewhere (no duplicated interval numbers outside `monitoring.md`). <!-- completed: 2026-06-20T12:10 -->
+- [x] Build the docs with `mise //:docs-build` (runs `uv run zensical build --clean`) and confirm no broken internal links, that `claude.md` renders under "Coding-agent backends", and that all pre-existing diagrams still render. <!-- completed: 2026-06-20T12:10 -->
+
 
 ---
 
