@@ -1,7 +1,7 @@
 # Reference Documentation Simplification
 
 **Status**: Approved
-**Progress**: 33/39 tasks complete
+**Progress**: 36/39 tasks complete
 **Last Updated**: 2026-06-20
 
 ## Overview
@@ -146,9 +146,9 @@ The authoritative, per-file CUT/MERGE/REWRITE/KEEP list is encoded as the [Imple
 
 ### Step 5: SKILL.md / README echo demotion (conservative)
 
-- [ ] `README.md` — REWRITE the §monitoring mega-paragraph (L85): compress the full 180 s/720 s + wake-nudge + Esc-safeguard retelling to a 2–3 line summary that ends with the existing `concepts/monitoring/` link. This is overview prose with no agent-behavioral contract, so it is safe to compress. Demote any `--fleet-id` literal-flag rationale prose to a pointer; keep statements of what the product is. <!-- completed: -->
-- [ ] `skills/cafleet/SKILL.md` — SHORTEN the §Required Flags rationale (L32) so the *narrative* "why" points to `cli-options.md#fleet-id`, while KEEPING the load-bearing operational contract line ("Use literal ids, never shell variables"). Do not touch behavioral contract lines elsewhere. <!-- completed: -->
-- [ ] Audit the remaining `SKILL.md` echoes of ownership-map topics (the supervision/monitoring skills, `reference/director.md`) and demote ONLY pure narrative duplications of the 180 s/720 s model to one-line pointers. Explicitly leave the `cafleet-agent-team-monitoring` skill as the agent-facing operational home for the monitoring loop (it is not a docs duplicate — agents act from it), and preserve every operational interval value an agent must use. No skill restructuring. <!-- completed: -->
+- [x] `README.md` — REWRITE the §monitoring mega-paragraph (L85): compress the full 180 s/720 s + wake-nudge + Esc-safeguard retelling to a 2–3 line summary that ends with the existing `concepts/monitoring/` link. This is overview prose with no agent-behavioral contract, so it is safe to compress. Demote any `--fleet-id` literal-flag rationale prose to a pointer; keep statements of what the product is. <!-- completed: 2026-06-20T12:02 -->
+- [x] `skills/cafleet/SKILL.md` — SHORTEN the §Required Flags rationale (L32) so the *narrative* "why" points to `cli-options.md#fleet-id`, while KEEPING the load-bearing operational contract line ("Use literal ids, never shell variables"). Do not touch behavioral contract lines elsewhere. <!-- completed: 2026-06-20T12:02 -->
+- [x] Audit the remaining `SKILL.md` echoes of ownership-map topics (the supervision/monitoring skills, `reference/director.md`) and demote ONLY pure narrative duplications of the 180 s/720 s model to one-line pointers. Explicitly leave the `cafleet-agent-team-monitoring` skill as the agent-facing operational home for the monitoring loop (it is not a docs duplicate — agents act from it), and preserve every operational interval value an agent must use. No skill restructuring. <!-- completed: 2026-06-20T12:02 -->
 
 ### Step 6: Verification
 
