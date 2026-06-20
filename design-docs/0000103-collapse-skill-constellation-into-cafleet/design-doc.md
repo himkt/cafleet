@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 12/32 tasks complete
+**Progress**: 15/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -392,9 +392,9 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 6: Edit `reference/director.md`
 
-- [ ] Delete the `L106` carve-out parenthetical; reframe `L136` as a per-role delta (keep `{coding_agent}` behavior) → `../roles/monitor.md` <!-- completed: -->
-- [ ] Repoint `L31` (A)→`../reference/supervision.md` and (B)→`../roles/monitor.md`; base-dir refs `L122`/`L158`/`L163`→`./base-dir.md` <!-- completed: -->
-- [ ] Run a `director.md`-specific grep to confirm zero deleted-skill refs remain (R4) <!-- completed: -->
+- [x] Delete the `L106` carve-out parenthetical; reframe `L136` as a per-role delta (keep `{coding_agent}` behavior) → `../roles/monitor.md` <!-- completed: 2026-06-21T08:20 -->
+- [x] Repoint `L31` (A)→`../reference/supervision.md` and (B)→`../roles/monitor.md`; base-dir refs `L122`/`L158`/`L163`→`./base-dir.md` <!-- completed: 2026-06-21T08:20 -->
+- [x] Run a `director.md`-specific grep to confirm zero deleted-skill refs remain (R4) <!-- completed: 2026-06-21T08:20 -->
 
 ### Step 7: Edit `reference/recovery.md`
 

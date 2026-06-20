@@ -28,7 +28,7 @@ cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; also recorded as `placement.coding_agent`. When omitted, an ordinary member defaults to `claude`; a `--role monitor` member inherits **your** (the spawning Director's) backend from your placement row, so the monitoring member runs on the same backend it watches. An explicit value always wins. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent. The `opencode` backend materializes its agent preset on first spawn. |
 | `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend and lists a per-backend example; the *Available models per backend* tables below list the common models for each backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
-| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `agent_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop watches the Director and members on their own intervals and wakes the monitoring member when one is due — see the `cafleet-agent-team-monitoring` skill). An ordinary `--role member` with a pane IS enrolled. The LLM is still set by `--model` (the Director passes the monitor model `{monitor_model}`); the backend is inherited from your placement row when `--coding-agent` is omitted (see the `--coding-agent` row). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical prompt and first-in/first-out lifecycle. |
+| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `agent_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop watches the Director and members on their own intervals and wakes the monitoring member when one is due — see [`reference/supervision.md`](supervision.md)). An ordinary `--role member` with a pane IS enrolled. The LLM is still set by `--model` (the Director passes the monitor model `{monitor_model}`); the backend is inherited from your placement row when `--coding-agent` is omitted (see the `--coding-agent` row). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see [`roles/monitor.md`](../roles/monitor.md) for the canonical prompt and first-in/first-out lifecycle. |
 | `--prompt-file` | no | Absolute path to a UTF-8 file used as the spawn prompt (mutually exclusive with the positional prompt; read verbatim, same `str.format()` pass). Path/file errors are catalogued in [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 | *(positional, after `--`)* | no | Prompt for the spawned process (mutually exclusive with `--prompt-file`; the default template is used if both are omitted). Goes through `str.format()` with `fleet_id` / `agent_id` / `director_agent_id` / `coding_agent` (the resolved backend) as kwargs. |
 
@@ -103,7 +103,7 @@ Keep the prompt body focused (the skeleton below): the member loads its role fil
 
 ### Canonical spawn-prompt skeleton
 
-Every CAFleet-native team skill spawns its ordinary members from this one shared frame; each skill supplies only a compact **per-role delta** (a table in that skill) for the parts that vary. (The dedicated **monitoring member** is the exception — its canonical prompt lives in the `cafleet-agent-team-monitoring` skill § The monitoring member.)
+Every CAFleet-native team skill spawns its ordinary members from this one shared frame; each skill supplies only a compact **per-role delta** (a table in that skill) for the parts that vary.
 
 Fixed frame — `{fleet_id}` / `{agent_id}` / `{director_agent_id}` are filled by the CLI's `str.format()` pass; `[INSERT …]` markers are shell-substituted by the Director before `member create`; the `‹…›` slots are filled from the per-role delta:
 
@@ -119,7 +119,7 @@ Load these skills at startup:
 FLEET ID: {fleet_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
+BASE: [INSERT abs BASE path the Director resolved via `reference/base-dir.md`]
 CODING AGENT: [INSERT the backend name the Director chose at member create — claude / codex / opencode]
 ‹CONTEXT LINES›
 
@@ -133,7 +133,7 @@ COMMUNICATION PROTOCOL:
 ‹START CUE›
 ```
 
-The `CODING AGENT:` line names the member's coding-agent backend (`claude` / `codex` / `opencode`), and it is filled by one of two paths. For an **ordinary member** the Director fills it as a rendered literal the same way it fills `BASE` — from the `--coding-agent` value it chose at `member create`. For the **monitoring member** the canonical prompt instead carries the `{coding_agent}` placeholder, which `cafleet member create` substitutes with the resolved backend (the one inherited from the Director's placement row when `--coding-agent` is omitted) — keeping the spawned binary and the overlay selector in lockstep. Either way, the member reads its overlay `coding-agent/<name>.md` deterministically from this line and applies the overlay's deltas on top of the base.
+The `CODING AGENT:` line names the member's coding-agent backend (`claude` / `codex` / `opencode`), and it is filled by one of two paths. For an **ordinary member** the Director fills it as a rendered literal the same way it fills `BASE` — from the `--coding-agent` value it chose at `member create`. The **monitoring member** is spawned from this same skeleton plus its per-role delta ([`roles/monitor.md`](../roles/monitor.md)): the delta omits `--coding-agent`, so the canonical prompt instead carries the `{coding_agent}` placeholder, which `cafleet member create` substitutes with the resolved backend (the one inherited from the Director's placement row) — keeping the spawned binary and the overlay selector in lockstep. Either way, the member reads its overlay `coding-agent/<name>.md` deterministically from this line and applies the overlay's deltas on top of the base.
 
 Per-role delta slots (each consuming skill's spawn section fills these):
 
@@ -155,12 +155,12 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 - All execute roles: `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` and `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`
 - Drafter (normal mode): `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.` and `Do NOT create any design document file until you have received answers.`; (resume mode) `Do NOT ask clarifying questions — the COMMENTs contain the needed information.`
 
-**Member Create — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved by the `cafleet-base-dir` skill) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--prompt-file` write at `<BASE>/prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
+**Member Create — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved per [`reference/base-dir.md`](base-dir.md)) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--prompt-file` write at `<BASE>/prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
 
 - `<role>` is the lowercased `--name`; `<UTC-compact>` is `YYYYMMDDTHHMMSSZ`. Create `<BASE>/prompts/` on first write; on a same-second collision append `_2`, `_3`, … (never overwrite).
 - The pre-spawn file IS the audit artifact — there is no post-spawn re-render. The `--prompt-file` path is the single source of truth for what was spawned, in perpetuity.
 
-**`${BASE} == <unset>` fallback**: when startup-time `${BASE}` resolution returned the `<unset>` sentinel, follow the guarded-skip protocol in the `cafleet-base-dir` skill § *No-bypass write protocol* — skip the `<BASE>/prompts/<role>-<ts>.md` write, fall back to the inline positional form (keep it under ~2 KB, path-by-reference), and emit the anchorless status `audit-disabled no BASE in spawn prompt` once per spawn cycle. The spawn still proceeds.
+**`${BASE} == <unset>` fallback**: when startup-time `${BASE}` resolution returned the `<unset>` sentinel, follow the guarded-skip protocol in [`reference/base-dir.md`](base-dir.md) § *No-bypass write protocol* — skip the `<BASE>/prompts/<role>-<ts>.md` write, fall back to the inline positional form (keep it under ~2 KB, path-by-reference), and emit the anchorless status `audit-disabled no BASE in spawn prompt` once per spawn cycle. The spawn still proceeds.
 
 **Backtick caveat (harness-dependent)**: some environments (including this project) run a Bash-validator hook that rejects any backtick in a `Bash` invocation. When in play, strip backticks from spawn-prompt bodies (plain text instead of code spans); path-by-reference keeps the body short enough that this is easy.
 
