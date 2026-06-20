@@ -27,6 +27,13 @@ run = [
 ]
 description = "Install skills"
 
+[tasks.cafleet-install]
+run = [
+  {"task" = "//admin:build"},
+  {"task" = "//cafleet:install"},
+  {"task" = "//:skill-install"},
+]
+
 [tasks.slidev]
 usage = '''
 arg "<slide>" help="path to slide.md file"
