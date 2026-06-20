@@ -6,12 +6,10 @@ icon: lucide/users
 
 The `cafleet member` CLI subgroup wraps the two-step "register an agent +
 spawn a tmux pane" recipe behind a single command and persists the
-agent-to-pane mapping in the `agent_placements` table.
-
-**Terminology**: A "member" is an agent spawned by a Director via
-`cafleet member create`. It has an associated placement row linking it to a
-specific tmux pane, window, and session. The Director itself is NOT a member
-— it registers with plain `cafleet agent register`.
+agent-to-pane mapping in the `agent_placements` table. A "member" is an agent
+spawned by a Director via `cafleet member create`, with a placement row linking
+it to a specific tmux pane, window, and session. The Director itself is NOT a
+member — it registers with plain `cafleet agent register`.
 
 **Single-Director invariant**: A fleet has exactly one Director — the root
 Director recorded in `fleets.director_agent_id` at `fleet create` time. Only
@@ -66,20 +64,14 @@ The spawn prompt is supplied inline (`-- "<prompt>"`) or via `--prompt-file`
 (an absolute UTF-8 path) — see [CLI options](../spec/cli-options.md)
 `member create`.
 
-## Pane display name
-
-Only the `claude` backend sets the tmux pane title to the member name — see
-[Coding agents](coding-agents.md) for the asymmetry.
-
 ## Commands
 
 `member create`, `member delete`, `member list` (with `--activity` for
-per-member `last_sent` / `last_recv` / `last_ack` / `idle` aggregation),
-`member capture`, `member send-input`, `member exec`, and `member ping`.
-`member create` takes `--agent-id` (the spawning Director's ID, which must
-equal the fleet root); the others target by `--member-id`, scoped to the
-per-subcommand `--fleet-id` — a `--member-id` outside the fleet returns "not found".
-See [CLI options](../spec/cli-options.md) for every flag and the shared
+per-member activity aggregation), `member capture`, `member send-input`,
+`member exec`, and `member ping`. `member create` takes `--agent-id` (the
+spawning Director's ID, which must equal the fleet root); the others target by
+`--member-id`, scoped to the per-subcommand `--fleet-id`. See
+[CLI options](../spec/cli-options.md) for every flag and the shared
 member-resolution rules.
 
 `cafleet member exec` is the bash-routing primitive — see

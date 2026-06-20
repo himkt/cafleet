@@ -5,21 +5,14 @@ icon: lucide/coins
 # Token reduction
 
 CAFleet does not consume LLM tokens itself, but every byte it emits — member
-spawn prompts, message envelopes, poll output, broker auto-injected text,
-the `cafleet` skill, the project `CLAUDE.md` / rules files, the wake-nudge
-keystroke the monitor injects into the monitoring member on each supervision
-tick, and (most expensively) the raw tmux pane content returned
-by `cafleet member capture` — lands in a coding agent's context and bills
-against its tokens. Moving the supervision scheduler out of the coding agents
-into the monitoring member's `cafleet monitor` process
-([Monitoring](monitoring.md)) is itself a per-tick reduction: no agent carries a
-scheduling prompt template in context — the monitor wakes only the monitoring
-member with a single wake-nudge keystroke (fired when a watched agent comes due on
-its own interval — the Director at 180 s, members at 720 s), and the Director is
-re-engaged on demand (the monitoring member's idle nudge plus the broker's
-inline-preview keystroke), not by a per-tick poll keystroke. The
-architectural-shape choices that keep per-message, per-spawn, per-tick, and
-per-context-load cost down are summarized below.
+spawn prompts, message envelopes, poll output, broker auto-injected text, the
+`cafleet` skill, and (most expensively) the raw tmux pane content returned by
+`cafleet member capture` — lands in a coding agent's context and bills against
+its tokens. Moving the supervision scheduler out of the coding agents into the
+monitoring member's `cafleet monitor` process ([Monitoring](monitoring.md))
+removes the per-tick scheduling prompt — no agent carries a scheduling template
+in context. The techniques below catalog the architectural choices that keep
+per-message, per-spawn, per-tick, and per-context-load cost down.
 
 | Technique | Architectural touch-points |
 |---|---|
@@ -28,6 +21,6 @@ per-context-load cost down are summarized below.
 | Skill-file split | The core cafleet skill stays compact (identity + poll/send/ack); director-only, broadcast, exec-routing, recovery, and output-flag content loads from on-demand reference files. |
 | `cafleet member list --activity` | Aggregates per-member message timestamps into `last_sent` / `last_recv` / `last_ack` / `idle` columns; broadcast summary rows are excluded from `last_ack`. |
 | Persisted-shape simplification | Every `Task` field is a flat typed column; the message body lives in `Task.text` and there is no opaque per-task JSON blob. WebUI consumers use the same typed-column flat shape. |
-| Inline message preview | The broker keystrokes a 2-line `[cafleet msg <task_id> from <sender_id> <ts>]` + body preview directly into the recipient's pane. Documented in [tmux push notifications](tmux-push.md); a separate poll-trigger keystroke backs the `cafleet member ping` re-poke. |
+| Inline message preview | The broker keystrokes a 2-line preview into the recipient's pane instead of requiring a poll round-trip — see [tmux push notifications](tmux-push.md). |
 | Agent render slim | Each agent renders to the minimum-required fields by default (`id`, `name`, `description` truncated, `status`, and `coding_agent` from placement); `--full` returns the agent dict unchanged. The agent surfaces never emit `agent_card_json` in either mode. |
 
