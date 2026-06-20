@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 21/32 tasks complete
+**Progress**: 22/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -422,7 +422,7 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 13: Rewrite docs prose (#71-76)
 
-- [ ] `docs/how-to/mixed-backend-team.md`, `docs/how-to/monitor-and-recover.md`, `docs/concepts/monitoring.md`, `docs/spec/cli-options.md:843` → new locations; keep the agent-facing and operator-facing homes independent (no cross-link) <!-- completed: -->
+- [x] `docs/how-to/mixed-backend-team.md`, `docs/how-to/monitor-and-recover.md`, `docs/concepts/monitoring.md`, `docs/spec/cli-options.md:843` → new locations; keep the agent-facing and operator-facing homes independent (no cross-link) <!-- completed: 2026-06-21T09:18 -->
 
 ### Step 14: Delete `configure.md` allowlist lines (#77, R13)
 

@@ -840,7 +840,7 @@ See [Member targeting and key delivery](#member-targeting-and-key-delivery) for 
 
 ### `member nudge`
 
-The monitoring member's purpose-built re-engage primitive. It persists an ACKable broker task **and** fires the `Esc`-safeguarded inline preview into the target's pane (see [tmux push](../concepts/tmux-push.md) for the safeguard). Functionally equivalent to a monitoring-member `cafleet message send --to <director-id>` (both ride the same hardened send path), `member nudge` is the named interface the monitoring/supervision skills point to for re-engaging an idle Director.
+The monitoring member's purpose-built re-engage primitive. It persists an ACKable broker task **and** fires the `Esc`-safeguarded inline preview into the target's pane (see [tmux push](../concepts/tmux-push.md) for the safeguard). Functionally equivalent to a monitoring-member `cafleet message send --to <director-id>` (both ride the same hardened send path), `member nudge` is the named interface the `/cafleet` skill's `roles/monitor.md` and `reference/supervision.md` point to for re-engaging an idle Director.
 
 ```bash
 cafleet member nudge --fleet-id <fleet-id> --agent-id <monitoring-member-id> \

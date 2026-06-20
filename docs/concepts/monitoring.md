@@ -27,12 +27,12 @@ with `Esc`, unlike the message-delivery preview and `cafleet member ping`. The
 The monitor decides only the *when* — which watched agents are due and a single
 keystroke to wake the monitoring member. It MUST NOT poll, ACK, dispatch work,
 health-check, or escalate; those require agent judgment and stay the Director's
-job, defined by the `cafleet-agent-team-supervision` skill (the *what*).
+job, defined in the `/cafleet` skill's `reference/supervision.md` (the *what*).
 
 | Layer | Owns | Lives in |
 |---|---|---|
 | Heartbeat (the *when*) | which watched agents are due; the wake keystroke into the monitoring member | the `cafleet monitor` loop |
-| Facilitation (the *what*) | poll → ACK → dispatch → health-check → escalate | the Director, per the supervision skill |
+| Facilitation (the *what*) | poll → ACK → dispatch → health-check → escalate | the Director, per `/cafleet` `reference/supervision.md` |
 
 The loop's only keystroke is a *wake nudge* (the `send_wake_trigger` helper) into
 the monitoring member's own pane — a single-line instruction to run its

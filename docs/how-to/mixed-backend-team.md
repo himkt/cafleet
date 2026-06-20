@@ -27,8 +27,8 @@ Once they are up, send each member a message asking it to report its
 backend, and confirm all three reply. Then tear the team down.
 ```
 
-Your agent loads the `cafleet` skill plus `cafleet-agent-team-supervision`
-(which loads `cafleet-agent-team-monitoring`) before spawning members.
+Your agent loads the `cafleet` skill and reads its Director-only
+`reference/supervision.md` before spawning members.
 
 The supervision tick is supplied by `cafleet monitor` — a per-fleet loop the
 fleet's dedicated monitoring member runs as a background task in its own pane —
