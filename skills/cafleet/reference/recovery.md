@@ -4,7 +4,7 @@ Director reference for crash / disconnect / idle / wedged-pane recovery. Member-
 
 ## 2-stage health check
 
-Before assuming a member is stalled, run the cheap checks first: poll your own inbox (`cafleet message poll` — the member may have replied via a keystroke you missed) without touching its pane, then capture the member's pane (`cafleet member capture`, default `--lines 30`; bump to `--lines 120`/`200` to show an AskUserQuestion frame). The same poll→capture detection drives the supervision tick — see the `cafleet-agent-team-monitoring` skill § Stall Response.
+Before assuming a member is stalled, run the cheap checks first: poll your own inbox (`cafleet message poll` — the member may have replied via a keystroke you missed) without touching its pane, then capture the member's pane (`cafleet member capture`, default `--lines 30`; bump `--lines` to show a member's full decision-prompt frame — the line count needed is a backend delta, see your overlay). The same poll→capture detection drives the supervision tick — see the `cafleet-agent-team-monitoring` skill § Stall Response.
 
 ## Routine monitoring via `member list --activity`
 
@@ -16,12 +16,12 @@ Once you have a capture, classify the shape:
 
 | Shape | Recovery |
 |---|---|
-| **AskUserQuestion-paused** (4-option frame `1./2./3./4. Type something`) | Three-beat AskUserQuestion-delegated workflow — see [`reference/director.md`](director.md#answer-a-members-askuserquestion-prompt). Director MUST delegate the decision to the user via `AskUserQuestion`, then `cafleet member send-input` with the resolved choice/freetext. |
+| **Decision-prompt paused** (capture shows the member waiting on a user reaction) | The member is relaying a question for the user. Delegate the decision to the user and forward the answer through the Director's decision surface — the concrete relay (and any pane-keystroke primitive) is a backend delta; see your overlay (`coding-agent/<name>.md`) and [`reference/director.md`](director.md#answering-a-members-relayed-question). |
 | **Bash-denied** (member sent a CAFleet message asking the Director to run a command on its behalf) | Bash-via-Director protocol — see [`reference/exec-routing.md`](exec-routing.md). Dispatch via `cafleet member exec`, then immediately `cafleet member ping`. |
 | **Missed inline-preview keystroke** (the recipient's TUI was in a non-input state when the broker keystroked the message preview, so the preview landed elsewhere on the pane and was lost) | `cafleet member ping <member>` re-keystrokes the `cafleet message poll` command into the member's pane. The member runs `cafleet message poll` and drains whatever has accumulated. |
-| **REPL idle / mid tool-call** (capture shows a coding-agent prompt or active tool call, no AskUserQuestion frame) | Wait. The member is doing work. Re-check `member list --activity` next tick; only escalate if `idle` keeps growing AND there is unread inbox. |
+| **REPL idle / mid tool-call** (capture shows a coding-agent prompt or active tool call, not a decision-prompt frame) | Wait. The member is doing work. Re-check `member list --activity` next tick; only escalate if `idle` keeps growing AND there is unread inbox. |
 | **Pane crashed** (capture shows a shell prompt without the coding agent, or the pane is missing entirely) | `cafleet member delete --force` to tear down the registration cleanly, then `cafleet member create` to re-spawn. The previous member's `agent_id` is gone — do not re-use it. |
-| **Truly wedged** (capture shows no progress over multiple ticks, no AskUserQuestion frame, no pending work explanation) | Soft escalation first — `cafleet member ping <member>` to nudge. If unchanged after 2–3 ticks, hard escalation: `cafleet member delete --force` then re-spawn. |
+| **Truly wedged** (capture shows no progress over multiple ticks, no decision-prompt frame, no pending work explanation) | Soft escalation first — `cafleet member ping <member>` to nudge. If unchanged after 2–3 ticks, hard escalation: `cafleet member delete --force` then re-spawn. |
 
 ## Recovering from a tmux disconnect
 
@@ -36,7 +36,7 @@ If `cafleet member capture` exits with a tmux subprocess error (the tmux server 
 The default `cafleet member delete` path sends `/exit`, waits for the pane to close, and on timeout exits 2 with the pane buffer tail on stderr (mechanics in [`cli-options.md`](../../../docs/spec/cli-options.md#member-delete)). Recovery decision tree:
 
 1. **Inspect the tail.** What is the member doing?
-2. **AskUserQuestion-paused** → answer the prompt with `cafleet member send-input --choice N` or `--freetext`, then re-run `cafleet member delete`.
+2. **Decision-prompt paused** → relay the member's question to the user and forward the answer per your overlay's decision surface, then re-run `cafleet member delete`.
 3. **Mid tool-call / mid command** → `cafleet member ping <member>` to nudge it back to a prompt, wait 1–2 ticks, then re-run `cafleet member delete`.
 4. **Truly wedged** → `cafleet member delete --force`, which skips `/exit` and kill-panes immediately. Always exits 0 (idempotent against an already-dead pane).
 

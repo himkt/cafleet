@@ -12,7 +12,7 @@ Load these skills at startup:
 
 ## Core Rules
 
-- **Load skills first** via the `Skill` tool — follow the rules in each loaded skill exactly.
+- **Load skills first.** Skill loading: {skill_loader}. Follow the rules in each loaded skill exactly.
 - **Never invent data.** Every number, claim, and insight must come from the report.
 - **Match the report's language.**
 - **Save to the file path** specified by the Director.

@@ -67,7 +67,7 @@ If `~/.opencode/agents/cafleet.md` cannot be written (e.g. `$HOME` is read-only,
 
 ## cafleet usage from inside an opencode pane
 
-Opencode members cannot load Claude Code skills, so their spawn prompt points them at this page instead. The same cafleet CLI surface works from an opencode pane unchanged:
+Opencode members cannot load Claude Code skills, so their spawn prompt has them read the cafleet skill files by absolute path instead. The same cafleet CLI surface works from an opencode pane unchanged:
 
 ```bash
 cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>

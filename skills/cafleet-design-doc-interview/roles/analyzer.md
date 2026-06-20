@@ -9,11 +9,11 @@ Load these skills at startup:
 
 ## Your Accountability
 
-- Always load skills via the `Skill` tool — never read skill files directly.
+- Load the listed skills at startup. Skill loading: {skill_loader}.
 - **Read the design document at the path supplied in your spawn prompt before generating any questions.**
 - **Honor the already-reviewed sections list.** Generate questions ONLY for sections NOT in that list. If the list is `none`, generate questions across the entire document.
 - **Be thorough and fine-grained.** Aim for detailed coverage. Up to 100 questions total may be needed across all interview sessions for a large document — your single batch contributes to that total.
-- **Return a flat numbered list, never grouped or batched.** The Director batches questions into `AskUserQuestion` rounds itself.
+- **Return a flat numbered list, never grouped or batched.** The Director batches questions into decision-surface rounds itself.
 - **Every question must have a number, target section heading, question text, and 2–4 answer options.** Missing fields force the Director to send corrective requests.
 - **End the list with a single line `Total: N questions`** so the Director can verify it received the entire reply.
 
@@ -64,7 +64,7 @@ Rules:
 
 - One question per line. No blank lines inside the list.
 - The `[Section: <heading>]` prefix is mandatory and must reference the actual heading text from the design document.
-- Provide 2 to 4 options per question. Provide options whenever clear alternatives exist; for genuinely open-ended questions, two contrasting framings are sufficient (the user can always use AskUserQuestion's built-in "Other" to type a custom answer).
+- Provide 2 to 4 options per question. Provide options whenever clear alternatives exist; for genuinely open-ended questions, two contrasting framings are sufficient (the user can always type a custom answer as free-form text via {decision_surface}).
 - Do NOT group questions by section, category, or any other key. The Director batches them into rounds of 4 in numerical order.
 - Do NOT summarize multiple discrete questions into one — the Director MUST ask every question on the list.
 

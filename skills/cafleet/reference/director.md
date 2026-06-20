@@ -1,6 +1,6 @@
 # tmux-backed member commands (`cafleet member *`)
 
-Reference page for the `cafleet member` subgroup — `create`, `delete`, `list` (with `--activity`), `capture`, `send-input`, `exec`, `ping`, `nudge`. All run inside a tmux session, scoped to the per-subcommand `--fleet-id`. `member create` takes `--agent-id` (the spawning Director, validated to equal the fleet root); `member nudge` is the only Director-targeting one and takes **both** `--agent-id` (sender, the monitoring member) and `--member-id` (target); the rest identify their target by `--member-id` alone.
+Reference page for the `cafleet member` subgroup — `create`, `delete`, `list` (with `--activity`), `capture`, `exec`, `ping`, `nudge`. All run inside a tmux session, scoped to the per-subcommand `--fleet-id`. `member create` takes `--agent-id` (the spawning Director, validated to equal the fleet root); `member nudge` is the only Director-targeting one and takes **both** `--agent-id` (sender, the monitoring member) and `--member-id` (target); the rest identify their target by `--member-id` alone.
 
 Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/exec-routing.md`.
 
@@ -17,7 +17,7 @@ cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
 
 cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name monitor --description "Monitoring member: owns the heartbeat" \
-  --role monitor --model sonnet \
+  --role monitor --model {monitor_model} \
   --prompt-file /abs/path/to/<BASE>/prompts/monitor-20260514T145000Z.md
 ```
 
@@ -26,13 +26,13 @@ cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
 | `--agent-id` | yes | The Director's agent ID |
 | `--name` | yes | Display name of the new member |
 | `--description` | yes | One-sentence purpose |
-| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`; also recorded as `placement.coding_agent`. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent. The `opencode` first-spawn preset materialization is in [`opencode.md`](../../../docs/reference/coding-agents/opencode.md). |
-| `--model` | no | Pins the member's LLM (pass-through for `claude` / `codex`; `opencode` requires `<provider-id>/<model-id>` and rejects violations at exit 2). Omitted → the binary's default. Spawn-time only (not persisted). Example models: `claude` → `sonnet`; `codex` → `gpt-5.5`; `opencode` → `anthropic/claude-sonnet-4-6`. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
-| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `agent_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop instead watches the Director at 180 s + members at 720 s and wakes the monitoring member when one is due). An ordinary `--role member` with a pane IS enrolled (720 s). The LLM is still set by `--model` (Director passes `--model sonnet`). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical prompt and first-in/first-out lifecycle. |
+| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`; also recorded as `placement.coding_agent`. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent. The `opencode` backend materializes its agent preset on first spawn. |
+| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend and lists a per-backend example. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
+| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `agent_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop instead watches the Director at 180 s + members at 720 s and wakes the monitoring member when one is due). An ordinary `--role member` with a pane IS enrolled (720 s). The LLM is still set by `--model` (the Director passes the monitor model `{monitor_model}`). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical prompt and first-in/first-out lifecycle. |
 | `--prompt-file` | no | Absolute path to a UTF-8 file used as the spawn prompt (mutually exclusive with the positional prompt; read verbatim, same `str.format()` pass). Path/file errors are catalogued in [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 | *(positional, after `--`)* | no | Prompt for the spawned process (mutually exclusive with `--prompt-file`; the default template is used if both are omitted). Goes through `str.format()` with `fleet_id` / `agent_id` / `director_agent_id` as kwargs. |
 
-The per-backend spawn argv is in [`cli-options.md`](../../../docs/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the deny-list fallback is [`reference/exec-routing.md`](exec-routing.md). Backend operational detail: [`codex.md`](../../../docs/reference/coding-agents/codex.md) / [`opencode.md`](../../../docs/reference/coding-agents/opencode.md).
+The per-backend spawn argv is in [`cli-options.md`](../../../docs/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the deny-list fallback is [`reference/exec-routing.md`](exec-routing.md). Per-backend deltas: [`claude`](coding-agent/claude.md) / [`codex`](coding-agent/codex.md) / [`opencode`](coding-agent/opencode.md).
 
 ### Model-name-to-backend inference
 
@@ -70,6 +70,7 @@ FLEET ID: {fleet_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
 BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
+CODING AGENT: [INSERT the backend name the Director chose at member create — claude / codex / opencode]
 ‹CONTEXT LINES›
 
 COMMUNICATION PROTOCOL:
@@ -82,6 +83,8 @@ COMMUNICATION PROTOCOL:
 ‹START CUE›
 ```
 
+The `CODING AGENT:` line names the member's coding-agent backend (`claude` / `codex` / `opencode`). The Director fills it as a rendered literal the same way it fills `BASE` — from the `--coding-agent` value it chose at `member create` — so no CLI code change is required. The member reads its overlay `coding-agent/<name>.md` deterministically from this line and applies the overlay's deltas on top of the base.
+
 Per-role delta slots (each consuming skill's spawn section fills these):
 
 | Slot | Filled per role with |
@@ -90,7 +93,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 | `‹role›` + `‹ROLE-DEF SUFFIX›` | The `roles/<role>.md` filename, plus any addendum after "…role definition." — e.g. resume-mode `Follow the Resume Mode section in particular.`; the research roles' `— accountability, …, and shutdown.` enumeration. Empty for most roles. |
 | `‹cafleet-load purpose›` + `‹EXTRA SKILL LOADS›` | The cafleet purpose phrase (`for communication with the Director`, or `for the broker primitives and bash-via-Director routing`), plus any extra startup skills — `cafleet-design-doc` (design-doc family); `cafleet-my-slidev` + `cafleet-create-figure` (Presentation Specialist). |
 | `‹CONTEXT LINES›` | Role inputs, one per line: `DESIGN DOCUMENT` / `OUTPUT PATH` / `CURRENT DATE` / `USER REQUEST` / `OUTPUT DIRECTORY` / `LANGUAGE` / `YOUR ASSIGNMENT` / `OUTPUT FILE` / `YOUR TASK ID` / `REPORT` / `SLIDE FILE` / `SERVER URL` / `ROUND`, etc. |
-| `‹report-hint›` + `‹POLL-HANDLING LINE›` + `‹EXTRA COMMS LINES›` | The `--text` hint (`your report` / `your numbered question list`). The poll-handling line is either the simple `When you see cafleet message poll output with a message from the Director, act on those instructions.` (create / execute / interview) or the **ack-inline** form `…capture the `id:` integer id from each entry as [task-id] and ack it via cafleet message ack … --task-id [task-id], then act on the instructions.` (research / presentation). Extra comms lines: the Manager's `You do NOT talk to Scouts or Researchers directly…` + shared-task-list lines; the Researcher's `TaskUpdate` claim/complete lines. |
+| `‹report-hint›` + `‹POLL-HANDLING LINE›` + `‹EXTRA COMMS LINES›` | The `--text` hint (`your report` / `your numbered question list`). The poll-handling line is either the simple `When you see cafleet message poll output with a message from the Director, act on those instructions.` (create / execute / interview) or the **ack-inline** form `…capture the id: integer id from each entry as [task-id] and ack it via cafleet message ack … --task-id [task-id], then act on the instructions.` (research / presentation). Extra comms lines: the Manager's `You do NOT talk to Scouts or Researchers directly…` + shared-task-list lines; the Researcher's task-list claim/complete lines. |
 | `‹IMPORTANT / ROLE-CONSTRAINT LINES›` | Every `IMPORTANT:` line and hard role constraint, verbatim (see lossless rule). |
 | `‹START CUE›` | The role's closing instruction — e.g. `Start by reading the design document. Then wait for the Director to assign your first step.`; `Read the design document, generate a numbered question list …`; `When complete, send the file path to the Director …`. |
 
@@ -111,7 +114,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 
 **Backtick caveat (harness-dependent)**: some environments (including this project) run a Bash-validator hook that rejects any backtick in a `Bash` invocation. When in play, strip backticks from spawn-prompt bodies (plain text instead of code spans); path-by-reference keeps the body short enough that this is easy.
 
-**Pane title (claude backend only)**: `claude --name <member-name>` sets `#{pane_title}` to the member name; `codex` / `opencode` have no `--name` analog (discover panes via `cafleet member list`). The spawn is atomic — a `split-window` or placement-patch failure rolls back the registration (and `/exit`s the pane on a patch failure) — and uses `-d` so the Director keeps focus. See [`member-lifecycle.md`](../../../docs/concepts/member-lifecycle.md).
+**Pane discovery**: discover a member's pane via `cafleet member list` (the `pane_id` column is ground truth for all backends). Pane title: {pane_title}. The spawn is atomic — a `split-window` or placement-patch failure rolls back the registration (and `/exit`s the pane on a patch failure) — and uses `-d` so the Director keeps focus. See [`member-lifecycle.md`](../../../docs/concepts/member-lifecycle.md).
 
 ## Member Delete
 
@@ -142,36 +145,9 @@ cafleet member capture --fleet-id <fleet-id> --member-id <member-agent-id>
 cafleet member capture --fleet-id <fleet-id> --member-id <member-agent-id> --lines 200
 ```
 
-## Member Send-Input
+## Answering a member's relayed question
 
-Forward a restricted keystroke to a member's tmux pane — AskUserQuestion-only, write-path companion to `member capture`. Exactly one of `--choice` (integer `1`–`3`, sends the digit) or `--freetext` (sends `4`, then the literal text, then `Enter`; newlines and a leading `!` rejected — use `member exec` for shell) must appear. Validation and key sequences: [`cli-options.md`](../../../docs/spec/cli-options.md#member-send-input).
-
-### Answer a member's AskUserQuestion prompt
-
-This is the pane-relay application of the canonical rule in the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*.
-
-When `cafleet member capture` reveals a member paused on an AskUserQuestion-shaped 4-option frame (`1. …`, `2. …`, `3. …`, `4. Type something`), the Director MUST delegate the decision to the user via the three-beat shape:
-
-1. **Capture** with `--lines 120` (recommended default; bump to `--lines 200` only if the AskUserQuestion frame is truncated).
-2. **Ask the user via `AskUserQuestion`** with shape-appropriate options (table below). The question text names the member; no preamble sentence above the question.
-3. **Invoke the resolved `cafleet member send-input`** via the Director's own Bash tool. Claude Code's per-call Bash permission prompt is the user-consent surface — never print a fenced `bash` block as an instruction.
-
-#### Pane prompt shapes
-
-The pane is ALWAYS on the AskUserQuestion 4-option frame when `send-input` is appropriate.
-
-| Shape | Member pane looks like | Director's AskUserQuestion options | Resolved send-input call |
-|---|---|---|---|
-| **Choice-routing** | Option labels `1.`/`2.`/`3.` are the decision point. | Mirror UP TO 3 of the member's labels (don't add a 4th — `--choice` is `IntRange(1, 3)` and built-in "Other" handles freetext). | `--choice N` for picked mirror option; `--freetext "<typed>"` for built-in Other. |
-| **Open-ended** | Option labels are NOT useful — the member is waiting for free-form instruction. | 2–4 *complete candidate message bodies*. `label` is a short intent tag (≈12 chars); `description` holds the full draft body. | `--freetext "<picked body>"` or `--freetext "<typed>"`. |
-| **Other shapes** | Pane is NOT on an AskUserQuestion (mid-command, REPL, crashed, yes/no confirmation, mid tool-call). | Do NOT call `AskUserQuestion`; do NOT call `send-input`. Sending any keystroke would corrupt pane state. | None. Escalate via `cafleet message send`, or wait. |
-
-#### AskUserQuestion constraints
-
-- 1–4 questions per call; 2–4 options per question.
-- Built-in "Other" is always exposed by the tool — do NOT add an explicit "Write my own" / "Custom" option.
-- ≥ 5 candidate bodies → narrow to 2–4 (drop near-duplicates, span decision axes). Do NOT paginate.
-- No preamble text above the question — the capture output already printed plus the question text carry all context.
+A fleet member never talks to the user. When it needs a recorded user reaction (approve / choose / confirm / continue-or-abort), it relays the question to the Director via `cafleet message send`, and the Director answers it through {decision_surface}. The question-shape taxonomy and any pane-keystroke relay for forwarding the answer are backend deltas — see your overlay (`coding-agent/<name>.md`). The canonical user-reaction rule is the `cafleet` skill § *Soliciting user reactions*.
 
 ## Member Exec
 

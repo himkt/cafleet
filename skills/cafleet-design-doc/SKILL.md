@@ -8,6 +8,8 @@ allowed-tools: Read, Write, Edit, Glob, Grep
 
 This skill provides a standardized format for creating design documents, specifications, and implementation plans.
 
+**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
+
 ## Additional resources
 
 - For the document template, see [template.md](template.md)

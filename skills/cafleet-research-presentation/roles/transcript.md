@@ -10,7 +10,7 @@ Load these skills at startup:
 
 ## Your Accountability
 
-- Always load skills via the `Skill` tool — never read skill files directly.
+- Load the listed skills at startup. Skill loading: {skill_loader}.
 - **Maintain 1:1 slide correspondence.** Every slide in the deck must have exactly one `## Slide N: [title]` section in the transcript. No slides may be skipped, and no extra sections may be added. Slide numbers and titles must match the presentation exactly.
 - **Never invent data.** All narration must be grounded in the approved report and the slide content. If a fact is not in the report or on the slide, it must not appear in the transcript.
 - **Restructure for oral delivery.** Transform report content into natural spoken language. Do not copy-paste bullet points or report paragraphs. Rephrase for a listener, not a reader. Expand on bullet points without reading them verbatim.

@@ -754,7 +754,7 @@ JSON (`cafleet --json ... member send-input ...`):
 
 #### Director-side usage pattern
 
-The canonical three-beat workflow (`member capture` → AskUserQuestion → `member send-input`) lives in `skills/cafleet/SKILL.md` under "Answer a member's AskUserQuestion prompt". This page documents only the CLI surface.
+The canonical three-beat workflow (`member capture` → AskUserQuestion → `member send-input`) lives in the claude overlay (`skills/cafleet/reference/coding-agent/claude.md`); the backend-neutral relay flow is in `skills/cafleet/reference/director.md` § "Answering a member's relayed question". This page documents only the CLI surface.
 
 ### `member exec`
 

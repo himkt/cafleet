@@ -8,6 +8,8 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch
 
 Implement features based on a design document using up to four roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), and Verifier (E2E/integration testing). Every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline. The Director judges which members to spawn based on the nature of the implementation tasks. For each step, the Tester writes unit tests first, the Director reviews and approves them, then the Programmer implements code to pass the tests. The Director also reviews the Programmer's implementation for code quality and design doc compliance before committing. After all TDD steps, the Verifier performs E2E/integration verification (Phase D) if spawned. After user approval, the Director runs the full publication flow: Step 6 pushes the feature branch and opens a PR with `@copilot` requested, Step 7 runs a Copilot review loop — driven by the monitoring member's idle-nudges on the `cafleet monitor` heartbeat — that routes inline comments to the still-live Programmer / Tester and ends only when the user instructs termination or Copilot reports no remaining concerns, and Step 8 finalizes, commits the completion marker, pushes it (when the branch is tracked on origin), and tears the team down.
 
+**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
+
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
 | **Director** | Main Claude | Register with CAFleet, spawn members via `cafleet member create`, validate doc, assign steps, review tests against design doc, review implementation code for quality and compliance, commit after each phase, escalation arbitration, orchestrate TDD cycle | Write code, write tests | [roles/director.md](roles/director.md) |
@@ -69,7 +71,7 @@ Load the `cafleet-base-dir` skill for the no-bypass write protocol and `<unset>`
 
 - **`$ARGUMENTS` absent** (the discover-all-approved-docs flow): the no-argument form scans `<repo-root>/design-docs/`, so the Director MUST invoke from the repo root. Verify with `git rev-parse --show-toplevel` and abort with a clear "invoke from the repo root" error if `cwd` differs. Then run the skill's **Step 1 (shared-root resolution)**:
 
-  Step 1 resolves `${BASE}` to the CWD (the verified repo root). In the rare edge case where the repo root is itself `$HOME` or under `~/.claude`, Step 1 reaches **Step 2** `AskUserQuestion`; there, explicitly choose the `${CWD}` candidate so `${BASE}` stays the verified repo root — do NOT pick `/tmp/claude-code`, which would make `${RESOLVED_ARGS} = /tmp/claude-code/design-docs/` and point the discovery scan at the wrong directory. With `${BASE}` resolved to the repo root, set `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
+  Step 1 resolves `${BASE}` to the CWD (the verified repo root). In the rare edge case where the repo root is itself `$HOME` or under `~/.claude`, Step 1 reaches **Step 2** of base-dir resolution (its decision-surface prompt); there, explicitly choose the `${CWD}` candidate so `${BASE}` stays the verified repo root — do NOT pick `/tmp/claude-code`, which would make `${RESOLVED_ARGS} = /tmp/claude-code/design-docs/` and point the discovery scan at the wrong directory. With `${BASE}` resolved to the repo root, set `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
 
 #### Phase 2: Three-Tier Detection
 
@@ -98,20 +100,21 @@ When the base directory tier matches:
 |:--|:--|
 | 0 | Error and abort (see Error: Zero Approved below) |
 | 1 | Auto-select: proceed with this document directly |
-| 2–4 | Present options via `AskUserQuestion` (see Selection UI below) |
-| 5+ | Present options via paginated `AskUserQuestion` (see Pagination below) |
+| 2+ | Present the approved docs as choices through {decision_surface} (see Selection below); if {decision_surface} caps how many options it shows at once and the count exceeds that cap, paginate (see Pagination below) |
 
-#### Selection UI (2–4 Approved Docs)
+#### Selection (2+ approved docs)
 
-Use `AskUserQuestion` with one question. Each option label is the slug name (directory name) of the design doc. The built-in "Other" option is always available for the user to type a direct path or cancel.
+Present the approved docs as labeled choices through {decision_surface} — one option per doc, labeled with its slug (directory name). A free-text fallback is always available for the user to type a direct path or cancel.
 
-#### Pagination (5+ Approved Docs)
+#### Pagination (only if {decision_surface} caps the option count)
 
-When there are more than 4 approved docs, `AskUserQuestion`'s option limit (max 4) is exceeded. Use pagination with all options sorted alphabetically by slug:
+If {decision_surface} caps how many options it shows at once (your overlay states the cap) and the approved-doc count exceeds it, paginate with all options sorted alphabetically by slug:
 
-- **Non-last page**: Show 3 options + a 4th option labeled `"More..."`.
-- **Last page rule**: If remaining items after the current page would be ≤ 4, show all remaining items directly (no `"More..."` needed). This avoids a last page with only 1 option, which would violate `AskUserQuestion`'s minimum of 2 options per question.
-- Continue until the user selects a document or uses "Other".
+- **Non-last page**: fill the prompt up to the cap, reserving the last slot for a `"More..."` option that advances to the next page.
+- **Last page rule**: when the remaining items fit within the cap, show them all directly (no `"More..."` needed) — this avoids a last page falling below the surface's minimum option count.
+- Continue until the user selects a document or supplies free-form text.
+
+If {decision_surface} has no such cap (e.g. a plain message that lists all choices at once), present all approved docs in one prompt — no pagination needed.
 
 #### Error: Zero Approved Docs
 
@@ -131,7 +134,7 @@ Before registering with CAFleet:
 2. Check for `COMMENT(` markers using Grep. If found, resolve them directly: apply the requested changes and remove the markers. Verify with Grep that no `COMMENT(` markers remain before proceeding.
 3. Check for `FIXME(claude)` markers in the codebase using Grep. If found, note them for the Programmer to resolve first.
 4. Determine the step order and total number of steps.
-5. **Create a feature branch if on the default branch.** Get the default branch with `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'` and the current branch with `git branch --show-current`. If they match, use `AskUserQuestion` to propose the branch name `feat/<design-doc-slug>` and ask the user to approve before creating it. The user will create the branch themselves or approve the proposed name. If already on a non-default branch, skip this step.
+5. **Create a feature branch if on the default branch.** Get the default branch with `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'` and the current branch with `git branch --show-current`. If they match, use {decision_surface} to propose the branch name `feat/<design-doc-slug>` and ask the user to approve before creating it. The user will create the branch themselves or approve the proposed name. If already on a non-default branch, skip this step.
 
 ### Step 3: Register & Spawn Members (Director)
 
@@ -152,7 +155,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 3b. Spawn the monitoring member (first-in)
 
-This team **keeps an active heartbeat** (Step 7's Copilot loop needs a turn source — see Step 7), so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model sonnet`; it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `member create`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; its `monitor start` background task is stopped in Step 8's cleanup (first-out). See the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical spawn prompt and lifecycle, and the `cafleet-agent-team-supervision` skill for supervision obligations (Authorization-Scope Guard, idle semantics).
+This team **keeps an active heartbeat** (Step 7's Copilot loop needs a turn source — see Step 7), so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`; it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `member create`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; its `monitor start` background task is stopped in Step 8's cleanup (first-out). See the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical spawn prompt and lifecycle, and the `cafleet-agent-team-supervision` skill for supervision obligations (Authorization-Scope Guard, idle semantics).
 
 **Spawn-prompt delta (execute only).** Execute's monitoring member runs an **extended** routine versus the canonical `cafleet-agent-team-monitoring` prompt: when it finds the Director **idle**, it nudges **unconditionally** — it does **not** gate the nudge on naming un-acked inbox items or stalled members. The unconditional idle-nudge is what grants the Director a re-poll turn during a quiet Copilot wait (Step 7), so `silence_ticks` can advance even when the inbox is empty and members have already reported their fixes. State this delta in execute's monitoring-member spawn prompt; the canonical `cafleet-agent-team-monitoring` routine keeps its conditional nudge. No Step-7 enter/exit handshake is needed — the monitoring member is PR-agnostic and the Director's Step-7 per-turn checklist consumes the granted turn (harmless outside Step 7: the Director re-polls, finds nothing new, idles again).
 
@@ -265,7 +268,7 @@ For each step in the design document:
    cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --to <tester-agent-id> --text "ready (paragraph-Implementation > Step N)"
    ```
-2. **Wait for the Tester's `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear)** via `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (per the pointer-marker pairing rule in the Coordination Protocol section above); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via `AskUserQuestion`, write the answer back as `COMMENT(claude): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
+2. **Wait for the Tester's `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear)** via `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (per the pointer-marker pairing rule in the Coordination Protocol section above); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via {decision_surface}, write the answer back as `COMMENT(claude): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
 3. **Review tests** against the design doc. If issues are found, write `COMMENT(director): <issue>` markers at `paragraph-Implementation > Step N` (matching the cafleet pointer per the pointer-marker pairing rule in the Coordination Protocol section above) and reply `ready (paragraph-Implementation > Step N)`; the Tester resolves the markers and replies `addressed (paragraph-Implementation > Step N)`. Repeat until satisfied.
 4. **Commit tests** (separate commands, do NOT chain with `&&`). Recover the per-test file list directly via git (`git status` / `git diff --stat` / `git log --name-only`) — the Tester does not embed file lists in cafleet bodies under the verb + pointer schema.
    - `git add <test-files>`
@@ -313,7 +316,7 @@ If the Verifier was spawned, assign verification:
      --to <verifier-agent-id> --text "ready (doc)"
    ```
 2. The Verifier discovers tools, executes E2E verification, captures evidence, and writes each fail / suggested-fix as a `COMMENT(verifier): <category> <body>` marker (category = impl bug / test gap / spec issue). Marker location MUST match the cafleet pointer used to report the failure — for per-step `escalating (paragraph-Implementation > Step N)` reports, the paired `COMMENT(verifier)` marker lives at the SAME `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in the Coordination Protocol section above). On overall success the Verifier sends a single `complete (doc)`; on failures the Verifier sends one `escalating (paragraph-Implementation > Step N)` per affected step.
-3. **Route failures** by reading the standing `COMMENT(verifier)` markers and dispatching with `ready (paragraph-Implementation > Step N)`: impl-bug markers → Programmer, test-gap markers → Tester, spec-issue markers → Director resolves directly via `COMMENT(director)` arbitration (or escalates to the user via `AskUserQuestion` if a product decision is needed).
+3. **Route failures** by reading the standing `COMMENT(verifier)` markers and dispatching with `ready (paragraph-Implementation > Step N)`: impl-bug markers → Programmer, test-gap markers → Tester, spec-issue markers → Director resolves directly via `COMMENT(director)` arbitration (or escalates to the user via {decision_surface} if a product decision is needed).
 4. Re-verify after fixes. Proceed to User Approval when all verifiable criteria pass.
 
 ### Step 5: User Approval (Director)
@@ -338,7 +341,7 @@ This step is **mandatory** and must not be skipped.
 
 #### Approval Interaction
 
-Use `AskUserQuestion`:
+Use {decision_surface}:
 
 | Option | Label | Description | Behavior |
 |:--|:--|:--|:--|
@@ -357,7 +360,7 @@ When the user selects "Scan for COMMENT markers": scan changed files for `COMMEN
 
 After all `COMMENT(...)` markers are resolved and verified, re-present to user.
 
-When the user selects "Other": interpret intent per [roles/director.md](roles/director.md) rules.
+When the user provides free-form text: interpret intent per [roles/director.md](roles/director.md) rules.
 
 No round limit — the loop continues until the user approves or aborts.
 
@@ -481,9 +484,9 @@ The three Step 6a precondition failures (`gh auth status` fails / on default bra
 | `git push` rejected | stderr of `git push` | Report exact stderr to user, skip Step 7, go to Step 8 local-finalize. NEVER force-push. |
 | `gh pr create` fails | stderr of `gh pr create` | Report, skip Step 7, go to Step 8 local-finalize |
 | `@copilot` reviewer unavailable | `gh api .../requested_reviewers` shows no Copilot AND no prior Copilot review | Report `Copilot reviewer unavailable for this PR`; skip Step 7; go to Step 8 |
-| Fix-push fails mid-loop (any subsequent push after the initial one) | stderr of `git push` | Escalate to user (AskUserQuestion: retry / finalize now / abort) |
-| User selects "Other" in Step 5 with abort-intent text | Existing LLM intent judgment | Abort Flow (unchanged — no push) |
-| User selects "Other" in Step 5 with approve-local intent | Existing LLM intent judgment, extended | Skip Steps 6 + 7; go to Step 8 local-finalize |
+| Fix-push fails mid-loop (any subsequent push after the initial one) | stderr of `git push` | Escalate to user (decision surface: retry / finalize now / abort) |
+| User provides free-form text in Step 5 with abort-intent | Existing LLM intent judgment | Abort Flow (unchanged — no push) |
+| User provides free-form text in Step 5 with approve-local intent | Existing LLM intent judgment, extended | Skip Steps 6 + 7; go to Step 8 local-finalize |
 
 #### User Interjection During Step 7
 
@@ -507,5 +510,5 @@ Runs after Step 7 exits, or directly after Step 5 when Step 6 was skipped (gh no
    - Exit code 0 (branch is tracked on origin): `git push`. Covers both the "Step 6 fully succeeded" path and the "Step 6 partial-fail (push OK, PR create failed)" path.
    - Non-zero exit: skip the push. The docs commit stays local.
    - The Director does NOT re-request Copilot review on this final docs commit.
-5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task (launched in Step 3b, ran unchanged through Step 7) and wait for confirmation; `cafleet member delete` the monitoring member first, then Programmer, Tester, and Verifier if spawned (on exit 2 use `member capture` + `send-input` recovery or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete <fleet-id>`; `cafleet fleet list` to confirm.
+5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task (launched in Step 3b, ran unchanged through Step 7) and wait for confirmation; `cafleet member delete` the monitoring member first, then Programmer, Tester, and Verifier if spawned (on exit 2 use `member capture` + your overlay's decision-prompt recovery or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete <fleet-id>`; `cafleet fleet list` to confirm.
 6. **Report to the user**: include the PR URL (if Step 6 created one), the Copilot loop exit reason (no-concerns / user-terminated / skipped / aborted), and any skipped-step reasons.

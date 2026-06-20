@@ -6,7 +6,7 @@ This file is the role-specific anchor. The actual protocols live in dedicated re
 
 ## Reading order
 
-1. **Before spawning your first member**, Read [`reference/director.md`](../reference/director.md). Covers `member create`, `member delete`, `member list --activity`, `member capture`, `member send-input` (with the AskUserQuestion three-beat delegation workflow), `member exec`, and `member ping`. This is the authoritative reference for every Director-only command.
+1. **Before spawning your first member**, Read [`reference/director.md`](../reference/director.md). Covers `member create`, `member delete`, `member list --activity`, `member capture`, `member exec`, and `member ping` — the backend-neutral Director-only commands. The backend-specific decision-relay primitive (for forwarding a user reaction to a member) lives in your overlay.
 2. **Before processing a member's denial-fallback request**, Read [`reference/exec-routing.md`](../reference/exec-routing.md). Covers how to recognize a member-originated bash request, the `cafleet member exec` dispatch shape, the required `cafleet member ping` follow-up, serialization (process one request at a time in poll order), and the cross-fleet boundary.
 3. **Before tearing down a member or fleet**, Read [`reference/recovery.md`](../reference/recovery.md). Covers the 2-stage health check, stalled-member shape classification, recovery from a wedged `/exit`, and the full Shutdown Protocol (stop the monitor → delete members → verify → `fleet delete` → confirm).
 4. **Before broadcasting**, Read [`reference/broadcast.md`](../reference/broadcast.md). Covers fan-out semantics, the `broadcast_summary` envelope, and threading via `origin_task_id`.
@@ -18,7 +18,7 @@ Angle-bracket tokens are placeholders, **not** shell variables — substitute th
 
 ## Director-only primitives
 
-You own these; members do NOT call them: `member create`, `member delete`, `member list [--activity]`, `member capture`, `member send-input`, `member exec`, `member ping`. `member create` / `member delete` / `member exec` carry operator-impactful effects and stay under `permissions.ask`; `member list` / `member capture` / `member send-input` / `member ping` have no operator-controlled body and are pre-approved (`permissions.allow`), so the Director can fire them during supervision without prompts. Full flags and behavior live in [`reference/director.md`](../reference/director.md); the bash-via-Director fallback that uses `member exec` + `member ping` is in [`reference/exec-routing.md`](../reference/exec-routing.md).
+You own these; members do NOT call them: `member create`, `member delete`, `member list [--activity]`, `member capture`, `member exec`, `member ping` (plus the backend-specific decision-relay primitive your overlay names). `member create` / `member delete` / `member exec` carry operator-impactful effects and stay under `permissions.ask`; `member list` / `member capture` / `member ping` have no operator-controlled body and are pre-approved (`permissions.allow`), so the Director can fire them during supervision without prompts. Full flags and behavior live in [`reference/director.md`](../reference/director.md); the bash-via-Director fallback that uses `member exec` + `member ping` is in [`reference/exec-routing.md`](../reference/exec-routing.md).
 
 ## When you, as Director, want to run your own command
 
@@ -30,6 +30,6 @@ You are the gate for member-originated dispatch requests. Read the member's requ
 
 - **Fulfill** by running `cafleet member exec` then `cafleet member ping` (in that order — see [`reference/exec-routing.md`](../reference/exec-routing.md) § Director-side fallback recipe).
 - **Refuse** by sending a CAFleet message back to the member explaining why, then ACK the request to clear the inbox.
-- **Escalate** to the user via `AskUserQuestion` when judgment is required (the operator at your pane is the final authority).
+- **Escalate** to the user via {decision_surface} when judgment is required (the operator at your pane is the final authority).
 
 Silence breaks the workflow — the member is waiting on either `! <command>` output OR a follow-up message. Always close the loop one way or the other.

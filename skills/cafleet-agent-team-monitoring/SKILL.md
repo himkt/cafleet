@@ -7,6 +7,8 @@ description: "Active monitoring mechanism for CAFleet Directors. Documents the e
 
 Foundation layer for CAFleet Directors. This skill documents the `cafleet monitor` heartbeat that wakes a Director periodically and the team-facilitation instructions it executes on each tick. Load this skill before the `cafleet-agent-team-supervision` skill — supervision builds on the mechanism documented here.
 
+**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
+
 ## Placeholder convention
 
 Angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<member-agent-id>`) are placeholders, **not** shell variables — substitute the literal integer ids from `cafleet fleet create` (which returns both the fleet id and the root Director's `agent_id`, so no separate `cafleet agent register`). The rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
@@ -32,11 +34,11 @@ A member that has gone quiet is surfaced to the Director by the monitoring membe
 
 ## The monitoring member
 
-The monitoring member is a single, dedicated coding-agent member — spawned **first** in the fleet with `cafleet member create --role monitor --model sonnet` — that owns the heartbeat and applies LLM judgment to the watched agents' state (the Director **and** each freshly-due member). `--role monitor` sets `agent_card_json.cafleet.kind == "monitoring-member"`; the monitoring member is **not** enrolled in `monitor_config` — it is the watcher, located by that kind marker (`find_monitoring_member`), and carries no interval of its own. Only one is allowed per fleet (a second `--role monitor` spawn is rejected). It is the **one** process that runs `cafleet monitor start` — the Director no longer runs the monitor itself.
+The monitoring member is a single, dedicated coding-agent member — spawned **first** in the fleet with `cafleet member create --role monitor --model {monitor_model}` — that owns the heartbeat and applies LLM judgment to the watched agents' state (the Director **and** each freshly-due member). `--role monitor` sets `agent_card_json.cafleet.kind == "monitoring-member"`; the monitoring member is **not** enrolled in `monitor_config` — it is the watcher, located by that kind marker (`find_monitoring_member`), and carries no interval of its own. Only one is allowed per fleet (a second `--role monitor` spawn is rejected). It is the **one** process that runs `cafleet monitor start` — the Director no longer runs the monitor itself.
 
 ### Canonical monitoring-member spawn prompt
 
-Render this template to a `--prompt-file` (the `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders are substituted by `cafleet member create`) and spawn with `--role monitor --model sonnet`:
+Render this template to a `--prompt-file` (the `{fleet_id}` / `{agent_id}` / `{director_agent_id}` placeholders are substituted by `cafleet member create`) and spawn with `--role monitor --model {monitor_model}`:
 
 ```text
 You are the Monitoring Member of CAFleet fleet {fleet_id}. Your agent id is
@@ -44,6 +46,8 @@ You are the Monitoring Member of CAFleet fleet {fleet_id}. Your agent id is
 job: keep the Director's supervision heartbeat alive and re-engage the Director
 whenever the team stalls. You never drive ordinary members directly — all
 member-driving routes back through the Director.
+
+CODING AGENT: claude
 
 Your on-wake routine acts through exactly two cafleet member commands: cafleet
 member capture for read-only inspection, and cafleet member nudge to re-engage the
@@ -118,14 +122,14 @@ On every supervision tick — whether fired by the monitoring member's on-demand
 1. **Poll inbox.** `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>` returns only the un-acked (`input_required`) deliveries; ACKing each one (step 2) consumes it, so the next tick's poll surfaces only what has arrived since.
 2. **ACK every message** that requires no further action: `cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>`. Unacknowledged tasks accumulate in the Director's inbox and obscure new arrivals.
 3. **Dispatch queued work.** If a member is idle and inputs are available (review comments to route, the next implementation step in a design doc, reviewer feedback waiting at the Drafter, a teammate reply waiting to be acted on), send the instruction immediately via `cafleet message send`. **Do not wait for a fresh "go" from the user** — the user's original authorization persists across ticks; see the `cafleet-agent-team-supervision` skill § Authorization-Scope Guard.
-4. **Run the health-check sequence** for any member that has not reported recent progress — cheapest, least-intrusive check first: (a) `cafleet member list` (enumerate members + pane status); (b) `cafleet message poll` (progress reports / help requests); (c) for a member silent since the last check, `cafleet member capture` to inspect it (an `AskUserQuestion`-style 4-option frame → see Stall Response for the `member send-input` escape hatch); (d) `cafleet message send` a specific instruction to any stalled/idle member; (e) once all members report completion, tell the user "All deliverables are ready for review."
-5. **Escalate** to the user via `AskUserQuestion` after two nudges produce no progress, or whenever a queued action requires a *new* user decision (option choice, risky/remote-visible operation, ambiguous teammate question). Do **not** emit passive-hold messages like `Skipping. Holding for go.` — the tick is a health check, not a permission renewal.
+4. **Run the health-check sequence** for any member that has not reported recent progress — cheapest, least-intrusive check first: (a) `cafleet member list` (enumerate members + pane status); (b) `cafleet message poll` (progress reports / help requests); (c) for a member silent since the last check, `cafleet member capture` to inspect it (a decision-prompt frame → see Stall Response for the decision-relay escape hatch); (d) `cafleet message send` a specific instruction to any stalled/idle member; (e) once all members report completion, tell the user "All deliverables are ready for review."
+5. **Escalate** to the user via {decision_surface} after two nudges produce no progress, or whenever a queued action requires a *new* user decision (option choice, risky/remote-visible operation, ambiguous teammate question). Do **not** emit passive-hold messages like `Skipping. Holding for go.` — the tick is a health check, not a permission renewal.
 
 ## Monitor Lifecycle
 
 | Phase | Action |
 |---|---|
-| Spawn the monitoring member (first-in) | The **first** `cafleet member create` in the fleet IS the monitoring member: `cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> --name monitor --description <…> --role monitor --model sonnet --prompt-file <rendered monitor prompt>`. It boots, launches `cafleet monitor start` as a background task in its own pane, confirms `monitor status`, and sends `ready: monitor live` to the Director. |
+| Spawn the monitoring member (first-in) | The **first** `cafleet member create` in the fleet IS the monitoring member: `cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> --name monitor --description <…> --role monitor --model {monitor_model} --prompt-file <rendered monitor prompt>`. It boots, launches `cafleet monitor start` as a background task in its own pane, confirms `monitor status`, and sends `ready: monitor live` to the Director. |
 | Gate ordinary members | Wait for the monitoring member's `ready: monitor live` message before the first ordinary `cafleet member create`. The Director MAY run `cafleet monitor status --fleet-id <fleet-id>` itself as optional corroboration, but it waits on the handshake message rather than block-polling status (consistent with the async wait rule). |
 | Run work | The monitor wakes the monitoring member whenever a watched agent is due on its own interval (the root Director at 180 s, ordinary members at 720 s); do not intervene unless an escalation arrives. Each on-demand idle nudge from the monitoring member (or inbound work via inline preview) is the Director's cue to run the 5-step facilitation loop above. |
 | User review | Keep the monitoring member and its `monitor start` task running during the review cycle — revisions and re-reviews still count as in-progress work. |
@@ -151,19 +155,19 @@ cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>
 
 ```bash
 cafleet member capture --fleet-id <fleet-id> \
-  --member-id <member-agent-id> --lines 120
+  --member-id <member-agent-id>
 ```
 
-`--lines 120` is the recommended fallback when classifying a 4-option AskUserQuestion frame (matches the recommendation in `skills/cafleet/reference/director.md` § Answer a member's AskUserQuestion prompt; the CLI flag default is `--lines 30`). Re-run with `--lines 200` as a fallback only if the first capture is truncated above the choice-prompt frame (the `1. …`, `2. …`, `3. …`, `4. Type something` rows are not all visible).
+The capture-line count needed to show a member's full decision-prompt frame — and the concrete frame shape — is a backend delta; see your overlay (`../cafleet/reference/coding-agent/<name>.md`). The `cafleet member capture` default is `--lines 30`.
 
 If `cafleet message poll` shows no recent messages from the member, fall back to capturing the terminal buffer. This is non-intrusive (read-only inspection that works even when the member is mid-task) and replaces raw `tmux capture-pane`.
 
-If the terminal buffer shows the member paused on a 4-option choice prompt (a list of "1. …", "2. …", "3. …", "4. Type something" rows — the shape that `cafleet member send-input` is validated for), the correct unblock is `cafleet member send-input` — never raw `tmux send-keys` — and the Director MUST delegate the decision to the user BEFORE invoking the wrapper. The Director never picks the `--choice` digit or drafts the `--freetext` body on its own judgment. The full three-beat workflow and the pane-shapes table live in the cafleet skill's "Answer a member's AskUserQuestion prompt" section — that is canonical; do not duplicate them here.
+If the terminal buffer shows the member paused on a decision-prompt frame awaiting a user reaction, the correct unblock is the decision-relay primitive your overlay describes — never raw `tmux send-keys` — and the Director MUST delegate the decision to the user BEFORE invoking it. The Director never decides on its own judgment. The concrete pane frame, the three-beat workflow, and the pane-shapes table are backend deltas; the neutral pointer is the cafleet skill's `reference/director.md` § "Answering a member's relayed question".
 
-> **`AskUserQuestion` is a Claude Code idiom.** See the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)* for the canonical caveat — it governs both the "delegate to the user" beat and the Claude-Code-specific `cafleet member send-input` 4-option pane frame.
+> **The decision surface is a backend delta.** The concrete user-reaction surface and the pane-keystroke relay for forwarding an answer are backend-specific — see your overlay (`../cafleet/reference/coding-agent/<name>.md`). The canonical, backend-neutral user-reaction rule is the `cafleet` skill § *Soliciting user reactions*.
 
 ### Escalation
 
-If a member is still unresponsive after 2 nudges via `cafleet message send` AND `cafleet member capture` shows no forward progress in the terminal buffer, escalate to the user via `AskUserQuestion` (per the `cafleet` skill § *Soliciting user reactions (AskUserQuestion)*) with concrete options (e.g. re-nudge once more / re-spawn the member / drop its task).
+If a member is still unresponsive after 2 nudges via `cafleet message send` AND `cafleet member capture` shows no forward progress in the terminal buffer, escalate to the user via {decision_surface} (per the `cafleet` skill § *Soliciting user reactions*) with concrete options (e.g. re-nudge once more / re-spawn the member / drop its task).
 
-The unblock primitives and their ordering — non-intrusive `cafleet message poll` → read-only `cafleet member capture` → authoritative `cafleet message send` → `cafleet member ping` (missed auto-fire / required post-`exec` follow-up) → `cafleet member send-input` (4-option prompt, user-delegated first) → `cafleet member exec "<cmd>"` (shell dispatch) → `cafleet member delete --force` (last resort, never raw `tmux kill-pane`) → escalate to the user via `AskUserQuestion` — are documented in the `cafleet` skill (`reference/director.md`, `reference/recovery.md`, § Routing Bash via the Director) and the supervision Quick Reference table; do not duplicate them here.
+The unblock primitives and their ordering — non-intrusive `cafleet message poll` → read-only `cafleet member capture` → authoritative `cafleet message send` → `cafleet member ping` (missed auto-fire / required post-`exec` follow-up) → the decision-relay primitive your overlay describes (decision-prompt frame, user-delegated first) → `cafleet member exec "<cmd>"` (shell dispatch) → `cafleet member delete --force` (last resort, never raw `tmux kill-pane`) → escalate to the user via {decision_surface} — are documented in the `cafleet` skill (`reference/director.md`, `reference/recovery.md`, § Routing Bash via the Director) and the supervision Quick Reference table; do not duplicate them here.

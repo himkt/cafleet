@@ -11,7 +11,7 @@ Load these skills at startup:
 
 ## Your Accountability
 
-- Always load skills via the `Skill` tool — never read skill files directly.
+- Load the listed skills at startup. Skill loading: {skill_loader}.
 - **Implement code that passes all tests.** For each step, the Tester has already written unit tests. Your job is to write implementation code that makes ALL tests pass while faithfully following the design document specification.
 - **Keep the design document in sync with progress.** Every completed task MUST have its checkbox checked and timestamp set before moving to the next task. The design document is the source of truth for project status.
 - **Escalate blockers immediately.** If you encounter ambiguity, incomplete specs, or suspected test defects, STOP and message the Director via `cafleet message send`. Do not continue with assumptions.
