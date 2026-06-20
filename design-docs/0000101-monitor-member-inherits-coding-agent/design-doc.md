@@ -10,13 +10,13 @@ When the Director spawns the dedicated monitoring member with `cafleet member cr
 
 ## Success Criteria
 
-- [ ] `cafleet member create --role monitor` with `--coding-agent` **omitted** spawns the same backend binary recorded in the spawning Director's placement row, on all three backends.
-- [ ] The monitor's spawn-prompt `CODING AGENT:` line names the inherited backend, so the monitor reads the matching `coding-agent/<name>.md` overlay.
-- [ ] The monitor's own `agent_placements.coding_agent` records the inherited backend (visible in `cafleet member list`).
-- [ ] An **explicit** `--coding-agent <x>` on a monitor still wins — inheritance applies only when the flag is omitted.
-- [ ] Ordinary members (`--role member`, the default) keep today's behavior: omitting `--coding-agent` defaults to `claude`.
-- [ ] When the spawning Director's backend cannot be resolved (no agent row / no placement row), `member create --role monitor` fails loudly with an actionable error and spawns nothing.
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass.
+- [x] `cafleet member create --role monitor` with `--coding-agent` **omitted** spawns the same backend binary recorded in the spawning Director's placement row, on all three backends.
+- [x] The monitor's spawn-prompt `CODING AGENT:` line names the inherited backend, so the monitor reads the matching `coding-agent/<name>.md` overlay.
+- [x] The monitor's own `agent_placements.coding_agent` records the inherited backend (visible in `cafleet member list`).
+- [x] An **explicit** `--coding-agent <x>` on a monitor still wins — inheritance applies only when the flag is omitted.
+- [x] Ordinary members (`--role member`, the default) keep today's behavior: omitting `--coding-agent` defaults to `claude`.
+- [x] When the spawning Director's backend cannot be resolved (no agent row / no placement row), `member create --role monitor` fails loudly with an actionable error and spawns nothing.
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass.
 
 ---
 
