@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 22/32 tasks complete
+**Progress**: 23/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -426,7 +426,7 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 14: Delete `configure.md` allowlist lines (#77, R13)
 
-- [ ] Delete `docs/get-started/configure.md:23-25` (the three deleted-skill `Skill(...)` entries); `Skill(cafleet:cafleet)` already covers; no residue comment <!-- completed: -->
+- [x] Delete `docs/get-started/configure.md:23-25` (the three deleted-skill `Skill(...)` entries); `Skill(cafleet:cafleet)` already covers; no residue comment <!-- completed: 2026-06-21T09:22 -->
 
 ### Step 15: Decide `cli-options.md:986` (#78, R5)
 

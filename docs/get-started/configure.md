@@ -20,9 +20,6 @@ snippets below are the recommended starting points.
     "allow": [
       "Bash(cafleet *)",
       "Skill(cafleet:cafleet)",
-      "Skill(cafleet:cafleet-agent-team-monitoring)",
-      "Skill(cafleet:cafleet-agent-team-supervision)",
-      "Skill(cafleet:cafleet-base-dir)",
       "Skill(cafleet:cafleet-create-figure)",
       "Skill(cafleet:cafleet-design-doc)",
       "Skill(cafleet:cafleet-design-doc-create)",
