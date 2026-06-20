@@ -1,7 +1,7 @@
 # Monitor member inherits the administrator's coding agent
 
 **Status**: Approved
-**Progress**: 0/17 tasks complete
+**Progress**: 17/17 tasks complete
 **Last Updated**: 2026-06-20
 
 ## Overview
@@ -10,13 +10,13 @@ When the Director spawns the dedicated monitoring member with `cafleet member cr
 
 ## Success Criteria
 
-- [ ] `cafleet member create --role monitor` with `--coding-agent` **omitted** spawns the same backend binary recorded in the spawning Director's placement row, on all three backends.
-- [ ] The monitor's spawn-prompt `CODING AGENT:` line names the inherited backend, so the monitor reads the matching `coding-agent/<name>.md` overlay.
-- [ ] The monitor's own `agent_placements.coding_agent` records the inherited backend (visible in `cafleet member list`).
-- [ ] An **explicit** `--coding-agent <x>` on a monitor still wins — inheritance applies only when the flag is omitted.
-- [ ] Ordinary members (`--role member`, the default) keep today's behavior: omitting `--coding-agent` defaults to `claude`.
-- [ ] When the spawning Director's backend cannot be resolved (no agent row / no placement row), `member create --role monitor` fails loudly with an actionable error and spawns nothing.
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass.
+- [x] `cafleet member create --role monitor` with `--coding-agent` **omitted** spawns the same backend binary recorded in the spawning Director's placement row, on all three backends.
+- [x] The monitor's spawn-prompt `CODING AGENT:` line names the inherited backend, so the monitor reads the matching `coding-agent/<name>.md` overlay.
+- [x] The monitor's own `agent_placements.coding_agent` records the inherited backend (visible in `cafleet member list`).
+- [x] An **explicit** `--coding-agent <x>` on a monitor still wins — inheritance applies only when the flag is omitted.
+- [x] Ordinary members (`--role member`, the default) keep today's behavior: omitting `--coding-agent` defaults to `claude`.
+- [x] When the spawning Director's backend cannot be resolved (no agent row / no placement row), `member create --role monitor` fails loudly with an actionable error and spawns nothing.
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass.
 
 ---
 
@@ -145,29 +145,29 @@ The monitor prompt template then uses `CODING AGENT: {coding_agent}` (instead of
 
 ### Step 1: Documentation & skills
 
-- [ ] `docs/concepts/coding-agents.md` — in the `cafleet member create` paragraph (lines 30-34), state that for `--role monitor`, omitting `--coding-agent` inherits the spawning Director's backend (explicit flag still wins). <!-- completed: -->
-- [ ] `docs/spec/cli-options.md` — update the `--coding-agent` row (line 545) and the `--role` row (line 547) of `member create` to document monitor inheritance, replacing the `--model sonnet` example with the canonical `--model haiku`; add `coding_agent` to the substituted-placeholders list (lines 567-572); add the two fail-loud error strings to the Error Messages section. <!-- completed: -->
-- [ ] `docs/concepts/monitoring.md` — at "The monitoring member" spawn line (lines 108-109), which already omits `--coding-agent`, change the `--model sonnet` example to `--model haiku` and add a sentence that omitting `--coding-agent` now inherits the spawning Director's backend. <!-- completed: -->
-- [ ] `README.md` — at the §4 monitor spawn example (line 85), which already omits `--coding-agent` and uses `--model haiku`, add a clause that omitting `--coding-agent` inherits the spawning Director's backend (keep the `haiku` example). <!-- completed: -->
-- [ ] `skills/cafleet-agent-team-monitoring/SKILL.md` — change `CODING AGENT: claude` → `CODING AGENT: {coding_agent}` in the canonical monitor prompt (line 50); update the placeholder note (line 41) to include `{coding_agent}` and state that `--coding-agent` is omitted so the monitor inherits the Director's backend; keep the Monitor Lifecycle spawn command (line 132) free of `--coding-agent`. <!-- completed: -->
-- [ ] `skills/cafleet/reference/director.md` — update the `--coding-agent` row (line 29) and the `--role` row (line 31) for monitor inheritance; add `coding_agent` to the positional-prompt `str.format()` kwargs note (line 33). The spawn-skeleton `CODING AGENT: [INSERT …]` line (line 123) stays a Director-filled literal for ordinary members; reword the explanatory note (line 136) to distinguish the two paths — ordinary member = Director-filled literal, monitor = CLI-substituted `{coding_agent}` — and drop the blanket "no CLI code change is required" assertion. <!-- completed: -->
+- [x] `docs/concepts/coding-agents.md` — in the `cafleet member create` paragraph (lines 30-34), state that for `--role monitor`, omitting `--coding-agent` inherits the spawning Director's backend (explicit flag still wins). <!-- completed: 2026-06-20T09:00 -->
+- [x] `docs/spec/cli-options.md` — update the `--coding-agent` row (line 545) and the `--role` row (line 547) of `member create` to document monitor inheritance, replacing the `--model sonnet` example with the canonical `--model haiku`; add `coding_agent` to the substituted-placeholders list (lines 567-572); add the two fail-loud error strings to the Error Messages section. <!-- completed: 2026-06-20T09:00 -->
+- [x] `docs/concepts/monitoring.md` — at "The monitoring member" spawn line (lines 108-109), which already omits `--coding-agent`, change the `--model sonnet` example to `--model haiku` and add a sentence that omitting `--coding-agent` now inherits the spawning Director's backend. <!-- completed: 2026-06-20T09:00 -->
+- [x] `README.md` — at the §4 monitor spawn example (line 85), which already omits `--coding-agent` and uses `--model haiku`, add a clause that omitting `--coding-agent` inherits the spawning Director's backend (keep the `haiku` example). <!-- completed: 2026-06-20T09:00 -->
+- [x] `skills/cafleet-agent-team-monitoring/SKILL.md` — change `CODING AGENT: claude` → `CODING AGENT: {coding_agent}` in the canonical monitor prompt (line 50); update the placeholder note (line 41) to include `{coding_agent}` and state that `--coding-agent` is omitted so the monitor inherits the Director's backend; keep the Monitor Lifecycle spawn command (line 132) free of `--coding-agent`. <!-- completed: 2026-06-20T09:00 -->
+- [x] `skills/cafleet/reference/director.md` — update the `--coding-agent` row (line 29) and the `--role` row (line 31) for monitor inheritance; add `coding_agent` to the positional-prompt `str.format()` kwargs note (line 33). The spawn-skeleton `CODING AGENT: [INSERT …]` line (line 123) stays a Director-filled literal for ordinary members; reword the explanatory note (line 136) to distinguish the two paths — ordinary member = Director-filled literal, monitor = CLI-substituted `{coding_agent}` — and drop the blanket "no CLI code change is required" assertion. <!-- completed: 2026-06-20T09:00 -->
 
 ### Step 2: CLI implementation
 
-- [ ] `cafleet/src/cafleet/cli/_prompt.py` — add a `coding_agent` parameter to `resolve_prompt`, substitute it in the `template.format(...)` call, and update the docstring + the unknown-placeholder `UsageError` message to list `{coding_agent}`. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/cli/member.py` — change `--coding-agent` to `default=None` with a `show_default` string describing the per-role default. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/cli/member.py` — add the `_resolve_coding_agent` helper (explicit wins; `--role monitor` inherits the Director's `placement.coding_agent`; ordinary member → `claude`; fail loud on unresolvable Director). <!-- completed: -->
-- [ ] `cafleet/src/cafleet/cli/member.py` — call `_resolve_coding_agent(...)` right after `fleet_id` is read (before `CODING_AGENTS[coding_agent]`), and pass `coding_agent=coding_agent` into the `resolve_prompt(...)` call. <!-- completed: -->
+- [x] `cafleet/src/cafleet/cli/_prompt.py` — add a `coding_agent` parameter to `resolve_prompt`, substitute it in the `template.format(...)` call, and update the docstring + the unknown-placeholder `UsageError` message to list `{coding_agent}`. <!-- completed: 2026-06-20T09:14 -->
+- [x] `cafleet/src/cafleet/cli/member.py` — change `--coding-agent` to `default=None` with a `show_default` string describing the per-role default. <!-- completed: 2026-06-20T09:14 -->
+- [x] `cafleet/src/cafleet/cli/member.py` — add the `_resolve_coding_agent` helper (explicit wins; `--role monitor` inherits the Director's `placement.coding_agent`; ordinary member → `claude`; fail loud on unresolvable Director). <!-- completed: 2026-06-20T09:14 -->
+- [x] `cafleet/src/cafleet/cli/member.py` — call `_resolve_coding_agent(...)` right after `fleet_id` is read (before `CODING_AGENTS[coding_agent]`), and pass `coding_agent=coding_agent` into the `resolve_prompt(...)` call. <!-- completed: 2026-06-20T09:14 -->
 
 ### Step 3: Tests
 
-- [ ] `cafleet/tests/cli/test_member.py` — `resolve_prompt` unit tests: a `{coding_agent}` template substitutes the passed backend; an unknown placeholder still raises `UsageError` and the message now lists `{coding_agent}`. <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_member.py` — monitor inheritance: with a non-claude Director (fleet created with `--coding-agent codex` / `opencode`, or its placement patched) and `--coding-agent` omitted, assert the spawned binary (`split_window_recorder[0]["command"][0]`), the monitor's `placement.coding_agent`, and the rendered prompt's `CODING AGENT:` line all equal the Director's backend. <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_member.py` — explicit override: on a non-claude Director, `--role monitor --coding-agent claude` spawns `claude` (explicit wins). <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_member.py` — scope guard: on a non-claude Director, an ordinary member (`--role member`) with `--coding-agent` omitted still spawns `claude`. <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_member.py` — fail-loud (missing placement): `--role monitor` with `--coding-agent` omitted against a Director that has no placement row exits 1 with the "has no placement row" message and records no spawn. <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_member.py` — fail-loud (Director not found): `--role monitor` with `--coding-agent` omitted and `--agent-id` pointing at a nonexistent/inactive agent exits 1 with the "not found in fleet" message and records no spawn, exercising the `director is None` branch. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` — all green; existing monitor tests (`test_member_create__role_monitor_*`) still pass because a claude Director inherits `claude`. <!-- completed: -->
+- [x] `cafleet/tests/cli/test_member.py` — `resolve_prompt` unit tests: a `{coding_agent}` template substitutes the passed backend; an unknown placeholder still raises `UsageError` and the message now lists `{coding_agent}`. <!-- completed: 2026-06-20T09:06 -->
+- [x] `cafleet/tests/cli/test_member.py` — monitor inheritance: with a non-claude Director (fleet created with `--coding-agent codex` / `opencode`, or its placement patched) and `--coding-agent` omitted, assert the spawned binary (`split_window_recorder[0]["command"][0]`), the monitor's `placement.coding_agent`, and the rendered prompt's `CODING AGENT:` line all equal the Director's backend. <!-- completed: 2026-06-20T09:06 -->
+- [x] `cafleet/tests/cli/test_member.py` — explicit override: on a non-claude Director, `--role monitor --coding-agent claude` spawns `claude` (explicit wins). <!-- completed: 2026-06-20T09:06 -->
+- [x] `cafleet/tests/cli/test_member.py` — scope guard: on a non-claude Director, an ordinary member (`--role member`) with `--coding-agent` omitted still spawns `claude`. <!-- completed: 2026-06-20T09:06 -->
+- [x] `cafleet/tests/cli/test_member.py` — fail-loud (missing placement): `--role monitor` with `--coding-agent` omitted against a Director that has no placement row exits 1 with the "has no placement row" message and records no spawn. <!-- completed: 2026-06-20T09:06 -->
+- [x] `cafleet/tests/cli/test_member.py` — fail-loud (Director not found): `--role monitor` with `--coding-agent` omitted and `--agent-id` pointing at a nonexistent/inactive agent exits 1 with the "not found in fleet" message and records no spawn, exercising the `director is None` branch. <!-- completed: 2026-06-20T09:06 -->
+- [x] Run `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` — all green; existing monitor tests (`test_member_create__role_monitor_*`) still pass because a claude Director inherits `claude`. <!-- completed: 2026-06-20T09:15 -->
 
 ---
 

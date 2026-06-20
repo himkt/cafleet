@@ -32,6 +32,11 @@ metadata only — cafleet does not spawn the root Director's coding-agent
 process and cannot auto-detect what is already running, so the operator
 declares which binary is in the pane. For `cafleet member create`, the flag
 both selects which backend is spawned AND is recorded as placement metadata.
+For `--role monitor`, omitting `--coding-agent` inherits the spawning
+Director's backend (read from its placement row) so the monitoring member
+runs on — and reads the overlay of — the same backend it watches; an
+explicit `--coding-agent` still wins. Ordinary members keep the `claude`
+default when the flag is omitted.
 
 ## Model selection
 

@@ -99,6 +99,47 @@ def _rollback_register(new_agent_id: int, *, fleet_id: int, reason: str) -> NoRe
     raise click.ClickException(f"{reason}. Rolled back registration of {new_agent_id}.")
 
 
+def _resolve_coding_agent(
+    coding_agent: str | None,
+    role: str,
+    director_agent_id: int,
+    fleet_id: int,
+) -> str:
+    """Resolve the backend for a new member.
+
+    An explicit ``--coding-agent`` always wins. When the flag is omitted
+    (``coding_agent is None``): ``--role monitor`` inherits the spawning
+    Director's backend from its placement row; an ordinary member defaults
+    to ``claude``.
+    """
+    if coding_agent is not None:
+        return coding_agent
+    if role != "monitor":
+        return "claude"
+    try:
+        director = broker.get_agent(director_agent_id, fleet_id)
+    except Exception as exc:  # broker/DB failure — surface, do not mask
+        raise click.ClickException(
+            f"cannot resolve the monitor's coding agent: failed to fetch "
+            f"Director {director_agent_id}: {exc}. "
+            f"Re-run with an explicit --coding-agent."
+        ) from exc
+    if director is None:
+        raise click.ClickException(
+            f"cannot resolve the monitor's coding agent: Director "
+            f"{director_agent_id} not found in fleet {fleet_id}. "
+            f"Re-run with an explicit --coding-agent."
+        )
+    placement = director["placement"]
+    if placement is None:
+        raise click.ClickException(
+            f"cannot resolve the monitor's coding agent: Director "
+            f"{director_agent_id} has no placement row recording its backend. "
+            f"Re-run with an explicit --coding-agent."
+        )
+    return placement["coding_agent"]
+
+
 @member.command("create")
 @fleet_id_option
 @click.option("--agent-id", type=int, required=True, help="Director's agent ID")
@@ -108,9 +149,9 @@ def _rollback_register(new_agent_id: int, *, fleet_id: int, reason: str) -> NoRe
     "--coding-agent",
     "coding_agent",
     type=click.Choice(list(CODING_AGENTS.keys())),
-    default="claude",
-    show_default=True,
-    help="Coding-agent binary to spawn / declare for the placement.",
+    default=None,
+    show_default="claude; monitor inherits Director's backend",
+    help="Backend binary to spawn / record.",
 )
 @click.option(
     "--model",
@@ -156,6 +197,8 @@ def member_create(
         )
     fleet_id = ctx.obj["fleet_id"]
 
+    coding_agent = _resolve_coding_agent(coding_agent, role, agent_id, fleet_id)
+
     agent = CODING_AGENTS[coding_agent]
 
     try:
@@ -193,7 +236,14 @@ def member_create(
     new_agent_id = result["agent_id"]
 
     try:
-        prompt = resolve_prompt(ctx, agent_id, new_agent_id, prompt_argv, prompt_file)
+        prompt = resolve_prompt(
+            ctx,
+            agent_id,
+            new_agent_id,
+            prompt_argv,
+            prompt_file,
+            coding_agent=coding_agent,
+        )
     except (click.UsageError, click.ClickException):
         # Re-raise unwrapped so the exact message from docs/spec/cli-options.md
         # § Error Messages reaches the operator. Wrapping via _rollback_register

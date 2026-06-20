@@ -73,12 +73,14 @@ def resolve_prompt(
     new_agent_id: int,
     prompt_argv: tuple[str, ...],
     prompt_file: str | None = None,
+    coding_agent: str | None = None,
 ) -> str:
-    """Substitute ``fleet_id`` / ``agent_id`` / ``director_agent_id`` into the spawn prompt.
+    """Substitute ``fleet_id`` / ``agent_id`` / ``director_agent_id`` / ``coding_agent`` into the spawn prompt.
 
     Runs ``str.format`` on the chosen template (file > positional > default)
     so custom prompts must double literal braces (``{{`` / ``}}``) to survive
-    the substitution.
+    the substitution. ``coding_agent`` is the resolved backend, used by the
+    monitor prompt's ``CODING AGENT:`` line.
     """
     fleet_id = ctx.obj["fleet_id"]
     if prompt_file is not None:
@@ -92,12 +94,13 @@ def resolve_prompt(
             fleet_id=fleet_id,
             agent_id=new_agent_id,
             director_agent_id=director_agent_id,
+            coding_agent=coding_agent,
         )
     except KeyError as exc:
         raise click.UsageError(
             f"Unknown placeholder {exc} in custom prompt. "
             "Supported placeholders: {fleet_id}, {agent_id}, "
-            "{director_agent_id}. "
+            "{director_agent_id}, {coding_agent}. "
             "Double literal braces ({{, }}) to keep them as text."
         ) from exc
     except (ValueError, IndexError, AttributeError) as exc:
