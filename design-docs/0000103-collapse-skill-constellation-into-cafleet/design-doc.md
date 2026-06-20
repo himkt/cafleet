@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 19/32 tasks complete
+**Progress**: 20/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -414,7 +414,7 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 11: Rewrite base-dir SKILL bodies (#28-46)
 
-- [ ] Repoint every base-dir SKILL-body reference (create/execute/interview/research-report/research-presentation SKILLs, `cafleet-create-figure/SKILL.md:25` (R6), `cafleet-design-doc/guidelines.md:32`) → `reference/base-dir.md` (preserve anchor names) <!-- completed: -->
+- [x] Repoint every base-dir SKILL-body reference (create/execute/interview/research-report/research-presentation SKILLs, `cafleet-create-figure/SKILL.md:25` (R6), `cafleet-design-doc/guidelines.md:32`) → `reference/base-dir.md` (preserve anchor names) <!-- completed: 2026-06-21T08:58 -->
 
 ### Step 12: Rewrite `.claude/` references (#64-70, R11)
 

@@ -29,7 +29,7 @@ Design documents use a directory-based structure:
 
 - Path: `design-docs/{slug}/design-doc.md`
 - The directory may contain related artifacts (e.g., `question.md` from interviews)
-- The `cafleet-design-doc-create`, `cafleet-design-doc-interview`, and `cafleet-design-doc-execute` skills (which operate on a single document) accept a slug name (e.g., `my-feature`) as argument. The `design-docs/` prefix is auto-prepended via the `cafleet-base-dir` skill integration
+- The `cafleet-design-doc-create`, `cafleet-design-doc-interview`, and `cafleet-design-doc-execute` skills (which operate on a single document) accept a slug name (e.g., `my-feature`) as argument. The `design-docs/` prefix is auto-prepended via the `cafleet` skill's `reference/base-dir.md` integration
 
 ## What "Comprehensive" Means
 
