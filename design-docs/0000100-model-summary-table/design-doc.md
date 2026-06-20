@@ -1,6 +1,6 @@
 # Readable model / coding-agent routing guidance with available-model tables
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 13/13 tasks complete
 **Last Updated**: 2026-06-20
 
@@ -157,3 +157,4 @@ Every surface that mentions model/backend routing, the `--model` flag, or specif
 |------|---------|
 | 2026-06-20 | Initial draft |
 | 2026-06-20 | Reviewer round 1: cite the precise replacement range (table body, lines 41-46) and keep the lead-in; normalize the S2 opencode table to the `opencode/` Zen gateway prefix; decide no human→skill cross-link; align the grep criterion (backtick-tolerant, design-doc-only). |
+| 2026-06-20 | Implemented via the cafleet-design-doc-execute fleet: all 13 tasks + 7 success criteria complete. Step-4 grep accepted the historical-doc hits (`0000082` + `prompts/`) per `removal.md` and reworded SC #6 to match. PR #131 opened; Copilot review loop addressed the `--model` caption wording (×2) and the leaked `S1` design-doc label at `director.md:96`. An independent Opus reviewer approved the final state. Finalized on the reviewer's approval; Copilot's last two comments judged non-blocking (the `SKILL.md` spawn-argv clause is pre-existing/out of scope; the Zen-prefix phrasing is already reconciled at `director.md:96`). Status → Complete. |
