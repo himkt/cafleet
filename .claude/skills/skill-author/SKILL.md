@@ -7,8 +7,8 @@ description: >
   Director/Member team skill, design a multi-agent broker-coordinated skill,
   build a CAFleet-team-driven skill, or write a skill that uses
   `cafleet member create`. This skill is project-local to the cafleet repo and
-  is fully self-contained — no `cafleet-base-dir` skill cross-reference is
-  required to follow the guide.
+  is fully self-contained — no `cafleet` `reference/base-dir.md` cross-reference
+  is required to follow the guide.
 ---
 
 # Skill Author — Integrating the CAFleet-Orchestrated Pattern
@@ -55,7 +55,7 @@ Every CAFleet-orchestrated skill must wire up these five sub-systems, in this or
 
 ### 2.1 Resolve the task-scoped BASE
 
-Before any other work, the Director resolves the task-scoped output directory by following the `cafleet-base-dir` skill's task-scope resolution procedure with a `TASK_NAME` derived from the skill's per-task convention. The procedure uses only `git rev-parse --show-toplevel` (via Bash) and writes nothing at resolution time — there is no `cafleet` CLI subcommand for it.
+Before any other work, the Director resolves the task-scoped output directory by following the `cafleet` skill's `reference/base-dir.md` task-scope resolution procedure with a `TASK_NAME` derived from the skill's per-task convention. The procedure uses only `git rev-parse --show-toplevel` (via Bash) and writes nothing at resolution time — there is no `cafleet` CLI subcommand for it.
 
 `<task-relpath>` is a path under the inferred repo root that describes the per-task folder. The two recognized buckets are:
 
@@ -92,7 +92,7 @@ If the user is not inside a tmux session, `cafleet fleet create` exits 1 with `E
 
 CAFleet members do not auto-poll. The broker delivers a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview` keystroke; that preview is the trigger that wakes the recipient. If the keystroke is missed (pane buffered, recipient mid-Bash, etc.), the message just sits in `INPUT_REQUIRED` until the recipient runs `cafleet message poll` themselves.
 
-Every CAFleet-orchestrated skill runs a dedicated **monitoring member** — it is a session-level requirement, not a per-skill choice. The Director NEVER runs `cafleet monitor start` itself. Instead, the **first** `cafleet member create` in the fleet is a dedicated monitoring member spawned with `--role monitor --model sonnet`; it runs `cafleet monitor start` as a background task in its own pane and reports `ready: monitor live`, which **gates the first ordinary `member create`** (first-in). The monitor loop wakes **only** the monitoring member; on each wake the monitoring member captures the Director's pane, judges it active vs idle, and re-engages an idle Director on demand via `cafleet member nudge` (which persists an ACKable broker task **and** fires the hardened, `Esc`-safeguarded inline preview). The Director is never keystroked by the loop. The `cafleet-agent-team-monitoring` skill documents the monitoring member's canonical spawn prompt and the first-in / first-out lifecycle; the heartbeat is identical on any backend (claude, codex, opencode).
+Every CAFleet-orchestrated skill runs a dedicated **monitoring member** — it is a session-level requirement, not a per-skill choice. The Director NEVER runs `cafleet monitor start` itself. Instead, the **first** `cafleet member create` in the fleet is a dedicated monitoring member spawned with `--role monitor --model sonnet`; it runs `cafleet monitor start` as a background task in its own pane and reports `ready: monitor live`, which **gates the first ordinary `member create`** (first-in). The monitor loop wakes **only** the monitoring member; on each wake the monitoring member captures the Director's pane, judges it active vs idle, and re-engages an idle Director on demand via `cafleet member nudge` (which persists an ACKable broker task **and** fires the hardened, `Esc`-safeguarded inline preview). The Director is never keystroked by the loop. The `cafleet` skill's `roles/monitor.md` documents the monitoring member's canonical spawn prompt and the first-in / first-out lifecycle (the heartbeat mechanism itself lives in `reference/supervision.md`); the heartbeat is identical on any backend (claude, codex, opencode).
 
 The monitoring member runs one of two idle-nudge routines (both spawn the monitoring member; the difference is only *when* it nudges the idle Director):
 
@@ -162,7 +162,7 @@ Load these skills at startup:
 FLEET ID: {fleet_id}
 DIRECTOR AGENT ID: {director_agent_id}
 YOUR AGENT ID: {agent_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet-base-dir` skill]
+BASE: [INSERT abs BASE path the Director resolved via the `cafleet` skill's `reference/base-dir.md`]
 
 <role-specific assignment text — e.g. CURRENT DATE, USER REQUEST, OUTPUT PATH, YOUR TASK ID>
 
@@ -339,7 +339,7 @@ The user invokes `/summarize-pr <pr-number>`. The Director:
 The skill's task convention is `researches/pr-<pr-number>` (PR summaries are research-shaped — one folder per PR with the diff + summary inside).
 
 ```text
-# Resolve task-scope BASE for researches/pr-1234 (cafleet-base-dir skill procedure, built-in tools):
+# Resolve task-scope BASE for researches/pr-1234 (cafleet reference/base-dir.md procedure, built-in tools):
 #   git rev-parse --show-toplevel → /repo
 #   task folder → /repo/researches/pr-1234  (auto-created)
 ```
@@ -477,7 +477,7 @@ Fix: substitute the literal UUIDs printed by `cafleet fleet create` / `cafleet m
 
 Symptom: `git status` shows untracked `prompts/` directory at the repo root after running the skill. Operators add `/prompts/` to `.gitignore`. Per-task evidence is scattered across the repo root instead of co-located with the task folder.
 
-Fix: resolve BASE via the `cafleet-base-dir` skill's task-scope procedure with a `<task-relpath>` (per § 2.1). The resolved `base` IS the task folder; `${BASE}/prompts/` lives inside the task folder. Do NOT resolve the shared-root BASE (no task-relpath) and then write `${BASE}/researches/<slug>/prompts/...` — that pattern produces the stale repo-root artifacts.
+Fix: resolve BASE via the `cafleet` skill's `reference/base-dir.md` task-scope procedure with a `<task-relpath>` (per § 2.1). The resolved `base` IS the task folder; `${BASE}/prompts/` lives inside the task folder. Do NOT resolve the shared-root BASE (no task-relpath) and then write `${BASE}/researches/<slug>/prompts/...` — that pattern produces the stale repo-root artifacts.
 
 ### 7.5 Forgetting to omit the `BASE:` line under `${BASE} == <unset>`
 

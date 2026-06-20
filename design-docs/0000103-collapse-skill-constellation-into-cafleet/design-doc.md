@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 20/32 tasks complete
+**Progress**: 21/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -418,7 +418,7 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 12: Rewrite `.claude/` references (#64-70, R11)
 
-- [ ] `.claude/rules/commands.md:40` (prefix-less path) → `skills/cafleet/reference/supervision.md § Authorization-Scope Guard`; `.claude/skills/skill-author/SKILL.md` lines 10/58/95/165/342/480 → `reference/base-dir.md` / `roles/monitor.md` / `reference/supervision.md` as mapped <!-- completed: -->
+- [x] `.claude/rules/commands.md:40` (prefix-less path) → `skills/cafleet/reference/supervision.md § Authorization-Scope Guard`; `.claude/skills/skill-author/SKILL.md` lines 10/58/95/165/342/480 → `reference/base-dir.md` / `roles/monitor.md` / `reference/supervision.md` as mapped <!-- completed: 2026-06-21T08:26 (Director — member Edit denied on .claude/ under dontAsk) -->
 
 ### Step 13: Rewrite docs prose (#71-76)
 
