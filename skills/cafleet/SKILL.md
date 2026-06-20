@@ -58,7 +58,7 @@ cafleet --json message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
 
 ## Coding-agent backends
 
-Three backends — `claude` (default), `codex`, `opencode` — chosen per member at create time via `--coding-agent`. `--model <m>` pins the LLM and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; both flags, the model-name-to-backend inference, and the spawn-argv detail live in [`reference/director.md`](reference/director.md) (and the `cafleet-agent-team-monitoring` skill for the monitor). All three honor the leading-`!` input shortcut, so `member exec` and inline previews work uniformly. Per-backend deltas: [`claude`](reference/coding-agent/claude.md) / [`codex`](reference/coding-agent/codex.md) / [`opencode`](reference/coding-agent/opencode.md).
+Three backends — `claude` (default), `codex`, `opencode` — chosen per member at create time via `--coding-agent`. `--model <m>` pins the LLM and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; both flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](reference/director.md) (and the `cafleet-agent-team-monitoring` skill for the monitor). All three honor the leading-`!` input shortcut, so `member exec` and inline previews work uniformly. Per-backend deltas: [`claude`](reference/coding-agent/claude.md) / [`codex`](reference/coding-agent/codex.md) / [`opencode`](reference/coding-agent/opencode.md).
 
 ## Soliciting user reactions
 
