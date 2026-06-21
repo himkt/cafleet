@@ -1,11 +1,3 @@
----
-name: cafleet-create-figure
-description: >
-  Create data visualizations and charts using matplotlib. Triggered when user
-  asks to create a chart, plot, graph, or visualize data. Do NOT use plt.show()
-  — always save to PNG files.
----
-
 # Create Figure
 
 Generate matplotlib charts. Scripts, outputs, and data go in separate subdirectories under `figures/`.
@@ -21,7 +13,7 @@ The skill writes a self-contained Python script that imports matplotlib. The run
 
 **Resolve `${BASE}` in this order:**
 
-1. **Calling-context override**: If a parent skill's spawn prompt told you the figure base directory (e.g., the `cafleet-research-presentation` skill passes its research folder as the figure base), use that path literally as `${BASE}`. Skip base-dir resolution.
+1. **Calling-context override**: If a parent skill's spawn prompt told you the figure base directory (e.g., the presentation workflow passes its research folder as the figure base), use that path literally as `${BASE}`. Skip base-dir resolution.
 2. **Otherwise**: Read the `cafleet` skill's `reference/base-dir.md` and follow its procedure (no path argument; CWD-based inference applies). Use the resolved `${BASE}` verbatim — figures/scripts/data land under `${BASE}/figures/{src,output,data}` whatever `${BASE}` resolved to (repo root, `/tmp/claude-code`, etc.).
 
 **Derive the subdirectories** (each is a literal path string you will embed in the script):
@@ -150,7 +142,7 @@ For more complex grids, use `matplotlib.gridspec.GridSpec`.
 
 ### Allowed palette
 
-These approximate the Slidev theme's CSS tokens (defined in OKLCH inside the my-slidev skill's theme stylesheet). When updating colors, keep both in sync.
+These approximate the Slidev theme's CSS tokens (defined in OKLCH inside the theme stylesheet at `slidev/theme/styles/index.css`). When updating colors, keep both in sync.
 
 ```python
 # Primary (use for most bars/lines)

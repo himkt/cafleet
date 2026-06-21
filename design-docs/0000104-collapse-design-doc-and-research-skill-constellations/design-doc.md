@@ -1,7 +1,7 @@
 # Collapse the design-doc and research skill constellations into two umbrella skills
 
 **Status**: Approved
-**Progress**: 7/22 tasks complete
+**Progress**: 12/22 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -119,7 +119,7 @@ Both umbrellas carry exactly one `SKILL.md` with frontmatter. All other moved bo
 
 **`cafleet-research/SKILL.md`** — NEW dispatcher:
 
-- `allowed-tools`: the union across report + presentation + the two utilities. Report/presentation orchestration need `Read, Write, Edit, Glob, Grep, Bash, Task, WebSearch, WebFetch`; the utilities add nothing beyond `Read, Write, Edit, Bash`. Union: `Read, Write, Edit, Glob, Grep, Bash, Task, WebSearch, WebFetch`. (Confirm each source skill's frontmatter at authoring time and take the literal union.)
+- `allowed-tools`: the literal union across report + presentation + the two utilities. `report` grants `Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet`; `presentation` grants `Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, TaskGet, TaskStop`; the two utilities (`create-figure`, `my-slidev`) declare no `allowed-tools`. Literal union (14 tools): `Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet, TaskStop` (there is no bare `Task` tool; the orchestration grants use `Agent` + the `Task*` family).
 - `description`: carries research-report + presentation/slides + chart/figure/visualize triggers so a "make a bar chart" or "build a slide deck" request still auto-fires. Draft wording:
   > Comprehensive multi-source research reports, Slidev presentations, charts, and data visualizations. Use to create a research report (multi-agent Director/Manager/Researcher team writing to researches/<topic>/), build a Slidev presentation / slide deck / reading transcript from a report, create a chart / plot / graph / figure or visualize data with matplotlib, or author slides with the custom Slidev theme. Do NOT do a quick web search and summarize — route through this skill's workflows.
 - body: a dispatcher index routing to `report/report.md` (research) → which chains to `presentation/presentation.md` (slides/transcript), and to `reference/visualization.md` (matplotlib) + `reference/slidev.md` (Slidev theme) for the standalone utility paths. Retains the coding-agent overlay note (`../cafleet/reference/coding-agent/<name>.md`).
@@ -364,17 +364,17 @@ After Steps 1-11 the zero-residue grep returns **0** matches in scope.
 
 ### Step 4: Build the `cafleet-research` umbrella structure
 
-- [ ] `git mv` `cafleet-research-report/{SKILL.md→report/report.md, template.md→report/template.md, roles→report/roles}`; `cafleet-research-presentation/{SKILL.md→presentation/presentation.md, roles→presentation/roles}` <!-- completed: -->
-- [ ] `git mv` `cafleet-create-figure/SKILL.md` → `cafleet-research/reference/visualization.md`; `cafleet-my-slidev/SKILL.md` → `reference/slidev.md`; `cafleet-my-slidev/techniques/` → `reference/slidev/techniques/`; `cafleet-my-slidev/theme/` → `reference/slidev/theme/` (byte-for-byte) <!-- completed: -->
-- [ ] Drop frontmatter from `report/report.md`, `presentation/presentation.md`, `reference/slidev.md`, `reference/visualization.md` <!-- completed: -->
+- [x] `git mv` `cafleet-research-report/{SKILL.md→report/report.md, template.md→report/template.md, roles→report/roles}`; `cafleet-research-presentation/{SKILL.md→presentation/presentation.md, roles→presentation/roles}` <!-- completed: 2026-06-21T02:18 -->
+- [x] `git mv` `cafleet-create-figure/SKILL.md` → `cafleet-research/reference/visualization.md`; `cafleet-my-slidev/SKILL.md` → `reference/slidev.md`; `cafleet-my-slidev/techniques/` → `reference/slidev/techniques/`; `cafleet-my-slidev/theme/` → `reference/slidev/theme/` (byte-for-byte) <!-- completed: 2026-06-21T02:18 -->
+- [x] Drop frontmatter from `report/report.md`, `presentation/presentation.md`, `reference/slidev.md`, `reference/visualization.md` <!-- completed: 2026-06-21T02:18 -->
 
 ### Step 5: Create `cafleet-research/SKILL.md` dispatcher
 
-- [ ] New `SKILL.md`: description carries research-report + presentation/slides + chart/plot/graph/figure/visualize triggers; `allowed-tools` = union of report/presentation/utility grants; dispatcher body routes to `report/`→`presentation/` and to `reference/visualization.md` + `reference/slidev.md`; include the overlay note <!-- completed: -->
+- [x] New `SKILL.md`: description carries research-report + presentation/slides + chart/plot/graph/figure/visualize triggers; `allowed-tools` = union of report/presentation/utility grants; dispatcher body routes to `report/`→`presentation/` and to `reference/visualization.md` + `reference/slidev.md`; include the overlay note <!-- completed: 2026-06-21T02:18 -->
 
 ### Step 6: Repoint Group B intra-umbrella references (#16-24, #41-43)
 
-- [ ] Rewrite the slidev theme headmatter path (#16), the slidev techniques links (#17), the create-figure palette reference (#18); the presentation slug-loads → `reference/` Read pointers + report-workflow pointer (#19-23); the presentation usage/invocation strings (#41-42); the `reference/visualization.md` calling-context example (#43); the cross-umbrella `web-researcher.md` prose pointer (#24); depth-adjust every overlay link in the moved Group B bodies/roles <!-- completed: -->
+- [x] Rewrite the slidev theme headmatter path (#16), the slidev techniques links (#17), the create-figure palette reference (#18); the presentation slug-loads → `reference/` Read pointers + report-workflow pointer (#19-23); the presentation usage/invocation strings (#41-42); the `reference/visualization.md` calling-context example (#43); the cross-umbrella `web-researcher.md` prose pointer (#24); depth-adjust every overlay link in the moved Group B bodies/roles <!-- completed: 2026-06-21T02:18 -->
 
 ### Step 7: Repoint external docs (#25-29)
 

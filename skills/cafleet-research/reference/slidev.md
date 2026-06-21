@@ -1,17 +1,12 @@
----
-name: cafleet-my-slidev
-description: Create Slidev presentations using the custom theme with cover, bullets, two-cols, blank, stats-grid, section-divider, and end layouts. Use when generating presentations from research reports, outlines, or other content. References /slidev for syntax details.
----
-
 # Custom Slidev Theme Presentation Guide
 
-Theme location: `theme/` inside this skill's directory. For Slidev syntax, refer to /slidev or /slidev:slidev — do not read Slidev's upstream source files directly.
+Theme location: `slidev/theme/` next to this reference page. For Slidev syntax, refer to /slidev or /slidev:slidev — do not read Slidev's upstream source files directly.
 
 ## Headmatter
 
 ```yaml
 ---
-theme: <cafleet-plugin-install-dir>/skills/cafleet-my-slidev/theme
+theme: <cafleet-plugin-install-dir>/skills/cafleet-research/reference/slidev/theme
 # Replace <cafleet-plugin-install-dir> with the absolute path to the installed cafleet plugin's directory on this machine.
 # Discovery hints:
 #   - Claude Code:  ~/.claude/plugins/cache/cafleet/cafleet/<version>/   (run `claude plugin list` to find <version>)
@@ -82,13 +77,13 @@ After generating all slides, check every slide:
 
 ### Discipline
 
-- **1-2 colored elements per slide max**; **color for data, not decoration** — only color the specific number or keyword. The full semantic-color palette (green = positive, red = negative, blue = neutral, orange = caution, purple = critical) + decision flow is canonical in [`techniques/formatting.md`](techniques/formatting.md) § Color Discipline.
+- **1-2 colored elements per slide max**; **color for data, not decoration** — only color the specific number or keyword. The full semantic-color palette (green = positive, red = negative, blue = neutral, orange = caution, purple = critical) + decision flow is canonical in [`slidev/techniques/formatting.md`](slidev/techniques/formatting.md) § Color Discipline.
 
 ## Figures
 
 1. **No duplicate titles** — slide heading IS the chart title
 2. **Caption**: `<div class="figure-caption">Source: [N]</div>` — never raw `<div class="text-sm">`
-3. **Colors**: must match the `cafleet-create-figure` skill's palette
+3. **Colors**: must match `visualization.md`'s palette
 4. **Figure-only slide**: `blank` layout with `## Title` + image + caption
 5. **Figure + insight**: `two-cols` with `columns: "3:2"`, chart in `::left::`, text in `::right::`
 
@@ -118,9 +113,9 @@ Auto-rendered: top-level = filled blue circle, nested = hollow. `bullets-sm` has
 
 | Technique | Reference |
 |-----------|-----------|
-| Two-column layout | techniques/two-column-layouts.md |
-| Admonition / Highlight / Font-size formatting | techniques/formatting.md |
-| Math formulas | techniques/math-formulas.md |
+| Two-column layout | slidev/techniques/two-column-layouts.md |
+| Admonition / Highlight / Font-size formatting | slidev/techniques/formatting.md |
+| Math formulas | slidev/techniques/math-formulas.md |
 | Code animations | /slidev (stock `v-click` / `v-clicks` / line-range highlighting) |
 
 ## Autonomous slide generation

@@ -88,17 +88,17 @@ This skill operates on a finalized report. The Director does **not** modify the 
 | Option | Meaning |
 |---|---|
 | **Proceed with current structure** | Continue with `report.md` as-is |
-| **I will edit and re-run** | The user edits `report.md` and re-runs the `cafleet-research-report` skill |
+| **I will edit and re-run** | The user edits `report.md` and re-runs the report workflow |
 
-The user (or a re-run of the `cafleet-research-report` skill) owns report modifications.
+The user (or a re-run of the report workflow) owns report modifications.
 
 ## User Delegation
 
-Per the User Interaction Contract in SKILL.md, the Director originates a decision-surface prompt at exactly two points: (1) Step 4's single post-pipeline approval gate; (2) member-escalated user delegation (classify the question shape, present it on {decision_surface}, relay the user's answer back verbatim — never decide on the user's behalf). This is the application of the canonical rule in the `cafleet` skill § *Soliciting user reactions*. Do NOT use it to ask whether to run/skip/shorten any pipeline step (Steps 0–3 are obligatory, in order); escalate only on an unresolvable technical failure.
+Per the User Interaction Contract in `presentation.md`, the Director originates a decision-surface prompt at exactly two points: (1) Step 4's single post-pipeline approval gate; (2) member-escalated user delegation (classify the question shape, present it on {decision_surface}, relay the user's answer back verbatim — never decide on the user's behalf). This is the application of the canonical rule in the `cafleet` skill § *Soliciting user reactions*. Do NOT use it to ask whether to run/skip/shorten any pipeline step (Steps 0–3 are obligatory, in order); escalate only on an unresolvable technical failure.
 
 ## Server Lifecycle Management
 
-The Director owns the Slidev dev server lifecycle (the Visual Reviewer does not start/stop any server). **Start** it as a backgrounded process via {bg_run} (record the background process handle for shutdown) — the underlying invocation is `bun run slidev --open false <slide>` PTY-wrapped via `script -qfc 'bun run slidev --open false <slide>' /dev/null` (default URL `http://localhost:3030`); see SKILL.md Step 3 *Server Startup*. **Shutdown** via {bg_stop} (using the recorded handle) after all visual-review rounds — never the broad `pkill -f slidev`. Readiness checking is the VR's job (see `roles/visual-reviewer.md`). On start failure: retry the start command once, then escalate to the user via {decision_surface} (options: Retry again / I started it manually — continue / Abort).
+The Director owns the Slidev dev server lifecycle (the Visual Reviewer does not start/stop any server). **Start** it as a backgrounded process via {bg_run} (record the background process handle for shutdown) — the underlying invocation is `bun run slidev --open false <slide>` PTY-wrapped via `script -qfc 'bun run slidev --open false <slide>' /dev/null` (default URL `http://localhost:3030`); see `presentation.md` Step 3 *Server Startup*. **Shutdown** via {bg_stop} (using the recorded handle) after all visual-review rounds — never the broad `pkill -f slidev`. Readiness checking is the VR's job (see `roles/visual-reviewer.md`). On start failure: retry the start command once, then escalate to the user via {decision_surface} (options: Retry again / I started it manually — continue / Abort).
 
 ## Progress Monitoring
 

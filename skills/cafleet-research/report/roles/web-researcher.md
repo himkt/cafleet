@@ -1,10 +1,10 @@
 # web-researcher agent spec
 
-Canonical spec for the embedded web-research agent that returns structured summaries with sources. It is dispatched identically by the Researcher and Scout roles (and is usable standalone). The dispatch recipe lives in [`../SKILL.md`](../SKILL.md) § Spawnable Agents. To dispatch, paste the spec body (everything below the frontmatter) verbatim into the dispatched agent's prompt, or follow it inline.
+Canonical spec for the embedded web-research agent that returns structured summaries with sources. It is dispatched identically by the Researcher and Scout roles (and is usable standalone). The dispatch recipe lives in [`../report.md`](../report.md) § Spawnable Agents. To dispatch, paste the spec body (everything below the frontmatter) verbatim into the dispatched agent's prompt, or follow it inline.
 
 ---
 name: web-researcher
-description: Use this agent to research topics on the web before specification development. Supports parallel research of multiple topics. Returns structured summaries with sources. Best used in combination with the cafleet-design-doc-create skill - run web-researcher first to gather context, then pass results to the cafleet-design-doc-create skill.
+description: Use this agent to research topics on the web before specification development. Supports parallel research of multiple topics. Returns structured summaries with sources. Best used in combination with the cafleet-design-doc skill (create workflow) - run web-researcher first to gather context, then pass results to the cafleet-design-doc skill (create workflow).
 color: blue
 ---
 

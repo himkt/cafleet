@@ -1,19 +1,13 @@
----
-name: cafleet-research-presentation
-description: Create a Slidev presentation and reading transcript from an existing research report folder. Reads report.md and researcher files for context, creates slides using the cafleet-my-slidev skill and a reading transcript. Takes folder path as argument (e.g., topic-name). Do NOT use for research — use the cafleet-research-report skill for that.
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, TaskGet, TaskStop
----
-
 # Research Presentation
 
 Create a Slidev presentation and reading transcript from an existing research report folder using a four-role CAFleet-orchestrated team: Director (orchestrator), Presentation (slides), Transcript (narration), and per-batch Visual Reviewer (screenshot-based QA). The team iterates through content revision and visual review before presenting to the user.
 
-**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
+**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../../cafleet/reference/coding-agent/<name>.md`](../../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
 | **Director** | Main Claude | Bootstrap CAFleet fleet, spawn members, review all deliverables, demand revisions, run Slidev server lifecycle and `agent-browser close --all` safety net | Create slides/transcript, conduct research, modify report, run agent-browser browser-operation commands (except close --all) | [roles/director.md](roles/director.md) |
-| **Presentation** | claude pane (loads the `cafleet-my-slidev` and `cafleet-create-figure` skills) | Create Slidev presentation from report using the `cafleet-my-slidev` skill | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
+| **Presentation** | claude pane (reads the `../reference/slidev.md` and `../reference/visualization.md` pages) | Create Slidev presentation from report using the `../reference/slidev.md` page | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
 | **Transcript** | claude pane | Create reading transcript with 1:1 slide correspondence | Invent data, modify report, conduct research | [roles/transcript.md](roles/transcript.md) |
 | **Visual Reviewer** | claude pane — one per batch | Capture screenshots/snapshots of assigned slides using the agent-browser CLI (`bun run agent-browser ...`) with a per-batch named session (`--session vr-batch-<start>`), identify visual issues including aesthetic quality, report findings to Director | Edit slide.md, modify report, fix issues directly | [roles/visual-reviewer.md](roles/visual-reviewer.md) |
 
@@ -21,7 +15,7 @@ Create a Slidev presentation and reading transcript from an existing research re
 
 The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill (reading its `reference/supervision.md`) and embeds it into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director — see Step 1.
 
-For autonomous Slidev generation, see the `cafleet-my-slidev` skill § Autonomous slide generation.
+For autonomous Slidev generation, see `../reference/slidev.md` § Autonomous slide generation.
 
 ## Architecture
 
@@ -30,7 +24,7 @@ The Director is the root agent of a CAFleet fleet — bootstrapped automatically
 ```text
 User
  +-- Director (main Claude — runs cafleet fleet create, cafleet member create, runs Slidev background server)
-      +-- presentation (claude pane — authors slide.md; loads the cafleet-my-slidev and cafleet-create-figure skills)
+      +-- presentation (claude pane — authors slide.md; reads the slidev.md + visualization.md reference pages)
       +-- transcript   (claude pane — authors transcript.md)
       +-- vr-batch-<start> (claude pane — captures + reports on one slide batch; per-batch spawn/delete)
 ```
@@ -62,7 +56,7 @@ Step 5 (cleanup) is autonomous — no user prompt.
 
 ### Step 0: Validate Input (Director)
 
-1. If `$ARGUMENTS` is absent → error: "Usage: invoke the `cafleet-research-presentation` skill with `<folder-name>`. Specify the folder containing report.md."
+1. If `$ARGUMENTS` is absent → error: "Usage: run the presentation workflow with `<folder-name>`. Specify the folder containing report.md."
 2. Read the `cafleet` skill's `reference/base-dir.md` for the no-bypass write protocol and `<unset>` sentinel contract.
 3. Resolve the task-scoped BASE by calling the resolver positionally with the topic relpath:
 
@@ -73,7 +67,7 @@ Step 5 (cleanup) is autonomous — no user prompt.
      Step 0 treats the canonicalized absolute path as the task folder verbatim if it is strictly under the inferred repo root; otherwise it yields the `<unset>` sentinel. Step 0 does no filename folding, so a raw child path like `/abs/path/to/researches/my-topic/report.md` is taken verbatim as the task folder — a `report.md`-named folder rather than the topic folder, with directory creation deferred to the first consumer write.
 
    Branch on Step 0's outcome: when it **resolves**, set both `${FOLDER}` and `${BASE}` to the resolved task folder (the task folder IS the report folder; no further `${BASE}/researches/...` concatenation). When it yields **`<unset>`** (absolute `$ARGUMENTS` outside the repo root), set `${FOLDER}` to the **canonicalized** absolute path (the same trailing-`/report.md`-stripped path you passed to Step 0) so the report-folder check in step 4 still runs against a folder rather than a file, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet` skill's `reference/base-dir.md` § *The `<unset>` sentinel*.
-4. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Invoke the `cafleet-research-report` skill first to generate a report."
+4. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Run the report workflow (`../report/report.md`) first to generate a report."
 5. Pass `${FOLDER}` as the resolved absolute path to all members in spawn prompts. The audit-file path `${BASE}/prompts/<role>-<UTC-compact>.md` is naturally task-scoped — it lives under `<topic-folder>/prompts/`, not under the repo root.
 
 ### Step 1: Bootstrap CAFleet Fleet & Spawn Presentation + Transcript (Director)
@@ -125,14 +119,14 @@ Both work from `report.md` independently. After the slide deck is finalized (Ste
 
 **Presentation spawn prompt:**
 
-Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Presentation delta below (`{fleet_id}` / `{agent_id}` / `{director_agent_id}` filled by `member create`; `[INSERT …]` markers shell-substituted by the Director first):
+Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Presentation delta below (`{fleet_id}` / `{agent_id}` / `{director_agent_id}` filled by `member create`; `[INSERT …]` markers shell-substituted by the Director first):
 
 | Slot | Presentation Specialist |
 |---|---|
 | ROLE TITLE / TEAM | `the Presentation Specialist` / `research presentation` |
 | role-file | `roles/presentation.md` |
-| cafleet-load purpose + EXTRA SKILLS | `for the broker primitives and bash-via-Director routing`; + `cafleet-my-slidev` (Slidev authoring layouts + rules) + `cafleet-create-figure` (if the report includes data that would render better as a chart) |
-| CONTEXT LINES | `TASK: Create a Slidev presentation from the approved research report.` / `REPORT: [INSERT <folder>/report.md]` / `RESEARCHER FILES: [INSERT <folder>/[0-9][0-9]-research-*.md]` / `LANGUAGE: [INSERT language detected from report.md]` / `FIGURE BASE: [INSERT <folder>]` (substitute literally for the FIGURE_BASE / BASE placeholders in create-figure) / `OUTPUT: [INSERT <folder>/slide.md]` |
+| cafleet-load purpose + EXTRA READS | `for the broker primitives and bash-via-Director routing`; additionally Read the `../reference/slidev.md` page (Slidev authoring layouts + rules) + `../reference/visualization.md` (if the report includes data that would render better as a chart) |
+| CONTEXT LINES | `TASK: Create a Slidev presentation from the approved research report.` / `REPORT: [INSERT <folder>/report.md]` / `RESEARCHER FILES: [INSERT <folder>/[0-9][0-9]-research-*.md]` / `LANGUAGE: [INSERT language detected from report.md]` / `FIGURE BASE: [INSERT <folder>]` (substitute literally for the FIGURE_BASE / BASE placeholders in `../reference/visualization.md`) / `OUTPUT: [INSERT <folder>/slide.md]` |
 | POLL-HANDLING | **ack-inline** form (capture the `id:` integer as `<task-id>` and `cafleet message ack … --task-id <task-id>`, then act) |
 | start cue (verbatim) | `When complete, send the file path to the Director via cafleet message send.` |
 
@@ -149,7 +143,7 @@ Render the prompt to `${BASE}/prompts/presentation-<UTC-compact>.md` per the 1c 
 
 **Transcript spawn prompt:**
 
-Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Transcript delta:
+Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Transcript delta:
 
 | Slot | Transcript Specialist |
 |---|---|
@@ -200,7 +194,7 @@ Once Step 2 converges on an approved slide deck and transcript, the Director run
 1. Install bun dependencies — refer to your host project's `.claude/rules/` for the canonical command (it typically wraps `bun install --frozen-lockfile`).
 2. Start the Slidev dev server **as a backgrounded process** — refer to your host project's `.claude/rules/` for the canonical launcher. The underlying invocation is `bun run slidev --open false <folder>/slide.md` (the `--open false` flag is required for headless review) and the launcher MUST PTY-wrap stdout (e.g., via `script -qfc`) so Slidev does not exit on detecting a non-TTY. **Record the background process handle** your coding agent returns when it backgrounds the process — the overall Step 5 of this skill (*Finalize & Clean Up*, further down the page) needs it to stop the server cleanly without falling back on `pkill`. Run the backgrounded process via {bg_run}; stop it at teardown via {bg_stop}.
 3. Set `<server_url>` to the Slidev dev server URL (default: `http://localhost:3030`). Use this value when spawning Visual Reviewers.
-4. Create the persistent screenshots directory: write `<folder>/screenshots/.keep` (empty file) using the Write tool. This is a one-time operation per `cafleet-research-presentation` skill invocation; do NOT delete or wipe it on subsequent batches. agent-browser does not auto-create parent directories when given an explicit `screenshot <path>`, so this step is required for VR's per-slide capture to succeed.
+4. Create the persistent screenshots directory: write `<folder>/screenshots/.keep` (empty file) using the Write tool. This is a one-time operation per presentation-workflow run; do NOT delete or wipe it on subsequent batches. agent-browser does not auto-create parent directories when given an explicit `screenshot <path>`, so this step is required for VR's per-slide capture to succeed.
 5. The Director MUST NOT run `bun run agent-browser --session vr-batch-* open|snapshot|screenshot|wait|close` (or the equivalent `bun run agent-browser ...`) directly — agent-browser's browser-operation commands are exclusively for Visual Reviewers (the only exception is the `close --all` safety net in Step 5 *Finalize & Clean Up*). The Director MAY run `console` and `errors` for diagnostics if needed (e.g., investigating a stuck VR), but should prefer letting the VR do it.
 
 **Batched Review Loop** (batch_size=10, fresh Visual Reviewer per batch to avoid context overflow):
@@ -244,7 +238,7 @@ while start <= total_slides:
 
 **Visual Reviewer spawn prompt** (per batch):
 
-Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Visual Reviewer delta:
+Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Visual Reviewer delta:
 
 | Slot | Visual Reviewer |
 |---|---|

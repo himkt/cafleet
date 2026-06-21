@@ -1,14 +1,8 @@
----
-name: cafleet-research-report
-description: Create a comprehensive research report with folder-based output. Researchers write findings to individual files, the Manager compiles report.md, and the Director reviews. Output goes to researches/[topic-slug]/. After report approval, offers to chain into the cafleet-research-presentation skill for slides and transcript. Members must always load skills via their backend's skill-loader, not by reading skill files directly. Do NOT do a quick web search and summarize — invoke this skill for thorough, multi-source research.
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet
----
-
 # Research Report
 
-Generate comprehensive research reports using a multi-layer CAFleet-orchestrated team: Director → Manager → Scouts/Researchers. Every member carries serious accountability for the quality of the final deliverable, and the team iterates relentlessly until the report meets the highest standard. After the report is approved, the Director offers to chain into the `cafleet-research-presentation` skill for slides and transcript.
+Generate comprehensive research reports using a multi-layer CAFleet-orchestrated team: Director → Manager → Scouts/Researchers. Every member carries serious accountability for the quality of the final deliverable, and the team iterates relentlessly until the report meets the highest standard. After the report is approved, the Director offers to chain into the presentation workflow (`../presentation/presentation.md`) for slides and transcript.
 
-**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
+**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../../cafleet/reference/coding-agent/<name>.md`](../../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
@@ -126,7 +120,7 @@ Substitute these absolute paths into the spawn prompts below.
 
 **Manager spawn prompt:**
 
-Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Manager delta below (`{fleet_id}` / `{agent_id}` / `{director_agent_id}` filled by `member create`; `[INSERT …]` markers shell-substituted by the Director first):
+Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Manager delta below (`{fleet_id}` / `{agent_id}` / `{director_agent_id}` filled by `member create`; `[INSERT …]` markers shell-substituted by the Director first):
 
 | Slot | Manager |
 |---|---|
@@ -154,7 +148,7 @@ After assessing the topic, the Manager may send the Director one or more Scout s
 
 **Scout spawn prompt:**
 
-Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Scout delta:
+Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Scout delta:
 
 | Slot | Scout |
 |---|---|
@@ -205,7 +199,7 @@ The Manager's task-creation calls also serve as the authoritative list of sub-to
 
 **Researcher spawn prompt:**
 
-Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Researcher delta:
+Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Researcher delta:
 
 | Slot | Researcher |
 |---|---|
@@ -250,7 +244,7 @@ Present the approved report to the user via {decision_surface} (options: **Appro
 
 ### Step 7: Offer Presentation Chaining (Director)
 
-After user approval, offer to create a presentation via {decision_surface} (adapt to user's language). If yes, proceed to Step 8, then invoke the `cafleet-research-presentation` skill with `${OUTPUT_DIR}`. If no, proceed directly to Step 8.
+After user approval, offer to create a presentation via {decision_surface} (adapt to user's language). If yes, proceed to Step 8, then run the presentation workflow (`../presentation/presentation.md`) with `${OUTPUT_DIR}`. If no, proceed directly to Step 8.
 
 ### Step 8: Finalize & Clean Up (Director)
 
