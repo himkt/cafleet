@@ -13,4 +13,16 @@ Substitute these into the base `{…}` placeholders. Each value must be a short 
 | `{pane_title}` | <any `--name`-style pane-title analog, or "no `--name` analog"> |
 | `{skill_loader}` | <the skill-loader, or the read-by-absolute-path fallback, as a noun phrase> |
 
-Notes (one line each, only where a value needs a constraint/caveat the inline value shouldn't carry — e.g. the decision surface's question-shape taxonomy, or "no harness task list" for task coordination).
+## Note → applies at
+
+Required section. Convert every note (a constraint/caveat the inline value shouldn't carry — e.g. the decision surface's question-shape taxonomy, or "no harness task list" for task coordination) into a row of this table. **Every note names the base token/instruction it qualifies**: the *Applies at* cell leads with the `{token}` the note binds to, followed by the base section(s) where it takes effect (`<skill>/<file>` § <heading>). A floating note with no bound anchor is not allowed.
+
+| Note | Applies at |
+|------|-----------|
+| <the caveat, one row each> | `{token}` — `<skill>/<file>` § <base heading> |
+
+## Worked resolution
+
+Required section. Give the canonical monitor-spawn command fully resolved for this backend — every `{placeholder}` replaced by its concrete value — so the reader has a concrete string to match rather than a transformation to invent:
+
+`cafleet member create --role monitor --model <this backend's monitor model>` (members spawned `<this backend's permission flags>`).

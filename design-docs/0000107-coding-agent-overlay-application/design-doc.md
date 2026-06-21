@@ -1,7 +1,7 @@
 # Coding-agent Overlay Application
 
 **Status**: Approved
-**Progress**: 6/23 tasks complete
+**Progress**: 9/23 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -209,9 +209,9 @@ Fresh-session probes are the runtime acceptance test (mirroring 0000105 Step 4 a
 
 ### Step 3: Restructure the overlays and `_template.md`
 
-- [ ] Convert each overlay's free-prose notes into a **Note → applies at** table binding every note to the base token/instruction it qualifies (`claude.md`, `codex.md`, `opencode.md` — Part 3), verifying each anchor against the current base sites. <!-- completed: -->
-- [ ] Add a **Worked resolution** line to each overlay: the canonical monitor-spawn command fully resolved for that backend (Part 4). <!-- completed: -->
-- [ ] Update `_template.md` to document the *Note → applies at* table and the *Worked resolution* line as required overlay sections, with the rule "every note names the base token/instruction it qualifies." <!-- completed: -->
+- [x] Convert each overlay's free-prose notes into a **Note → applies at** table binding every note to the base token/instruction it qualifies (`claude.md`, `codex.md`, `opencode.md` — Part 3), verifying each anchor against the current base sites. <!-- completed: 2026-06-21T10:00 -->
+- [x] Add a **Worked resolution** line to each overlay: the canonical monitor-spawn command fully resolved for that backend (Part 4). <!-- completed: 2026-06-21T10:00 -->
+- [x] Update `_template.md` to document the *Note → applies at* table and the *Worked resolution* line as required overlay sections, with the rule "every note names the base token/instruction it qualifies." <!-- completed: 2026-06-21T10:00 -->
 
 ### Step 4: Propagate the resolve directive to every reader entry point
 

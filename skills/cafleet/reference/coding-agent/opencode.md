@@ -13,6 +13,17 @@ Substitute these into the base `{…}` placeholders.
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading the cafleet `SKILL.md` core + this overlay by the absolute paths the spawn prompt provides |
 
-Decision surface: no in-pane prompt — a fleet member sends its question to the Director, which answers as a plain operator message. The `--agent cafleet` safety floor shows no popup; if a popup ever appears it is a regression to escalate, not a decision point.
+## Note → applies at
 
-Task coordination: no harness task list — track sub-topic registrations, claims, and completions as cafleet messages.
+Every note names the base token/instruction it qualifies.
+
+| Note | Applies at |
+|------|-----------|
+| No in-pane prompt — a fleet member sends its question to the Director, which answers as a plain operator message. The `--agent cafleet` safety floor shows no popup; if a popup ever appears it is a regression to escalate, not a decision point. | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions |
+| No harness task list — track sub-topic registrations, claims, and completions as cafleet messages. | `{task_coord}` — `cafleet-research/report/report.md` task coordination |
+
+## Worked resolution
+
+The canonical monitor-spawn command, fully resolved for this backend:
+
+`cafleet member create --role monitor --model anthropic/claude-haiku-4-5` (members spawned `--agent cafleet`).
