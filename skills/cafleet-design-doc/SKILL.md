@@ -1,14 +1,15 @@
 ---
 name: cafleet-design-doc
 description: >-
-  Design document format spec plus CAFleet-native orchestration to create,
-  validate, and implement design docs. Consult the template/guidelines when
-  editing an existing design doc; or create a new design doc / specification /
-  technical spec (Director/Drafter/Reviewer), validate/interview an existing one
-  through multi-round Q&A, or implement/execute one with a TDD team. Teammates in
-  agent teams must always load this skill by its name cafleet-design-doc via
-  their backend's skill-loader. Do NOT write or implement design docs freeform —
-  route through this skill's workflows.
+  Use when the user asks to create a design doc, design document, specification,
+  or technical spec (create workflow → Director/Drafter/Reviewer team); to
+  validate, review, or interview an existing design doc through multi-round Q&A
+  (interview workflow); or to implement or execute a design doc (execute workflow
+  → TDD team). Also the standardized format spec — consult the template and
+  guidelines when editing a design doc. Always invoke this skill and route into
+  the matching workflow, orchestrated as a CAFleet team. Teammates in agent teams
+  load this skill by its name cafleet-design-doc via their backend's
+  skill-loader.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, AskUserQuestion
 ---
 
@@ -20,15 +21,24 @@ This skill is the umbrella for the full design-document lifecycle: the standardi
 
 **Teammates in agent teams** must always load this skill by its name `cafleet-design-doc` via their backend's skill-loader — never by reading the skill files directly.
 
-## When to use
+## Dispatch
 
-| You want to… | Go to |
+When the user's request matches a scenario below, invoke this skill and run the linked workflow as a full CAFleet team — proactively, the moment the request matches, without waiting for the user to say "use cafleet".
+
+**Routing into a workflow means executing its entire orchestration.** The dedicated monitoring member is spawned first-in (`cafleet member create --role monitor`, gating the team behind its `ready: monitor live` handshake), then the role team, then the workflow body's review and revision rounds run through to approval. The linked workflow body is the authoritative procedure.
+
+| When the user wants to… | Invoke this skill and run |
 |:--|:--|
-| Consult the document template | [reference/template.md](reference/template.md) |
-| Consult section guidelines, quality standards, and formatting rules | [reference/guidelines.md](reference/guidelines.md) |
-| Consult the inter-agent coordination protocol (verb + pointer schema, `COMMENT(role)` markers) | [reference/coordination.md](reference/coordination.md) |
-| Create a new design doc / specification / technical spec (Director/Drafter/Reviewer team) | [create/create.md](create/create.md) |
-| Validate / interview an existing design doc through multi-round Q&A | [interview/interview.md](interview/interview.md) |
-| Implement / execute a design doc with a TDD team | [execute/execute.md](execute/execute.md) |
+| Create a design doc / specification / technical spec | the **create** workflow ([create/create.md](create/create.md)) — Director/Drafter/Reviewer team |
+| Validate / review / interview an existing design doc | the **interview** workflow ([interview/interview.md](interview/interview.md)) — multi-round Q&A |
+| Implement / execute a design doc | the **execute** workflow ([execute/execute.md](execute/execute.md)) — TDD team |
 
-Do NOT write or implement design documents freeform — always route through the workflow bodies above.
+Consult these reference pages directly (no team):
+
+| When the user wants to… | Consult |
+|:--|:--|
+| The document template | [reference/template.md](reference/template.md) |
+| Section guidelines, quality standards, and formatting rules | [reference/guidelines.md](reference/guidelines.md) |
+| The inter-agent coordination protocol (verb + pointer schema, `COMMENT(role)` markers) | [reference/coordination.md](reference/coordination.md) |
+
+Always route design-doc work through the workflow bodies above — each runs the full CAFleet team.
