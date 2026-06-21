@@ -24,7 +24,7 @@ Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are 
 
 You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each task — command shapes in the `cafleet` skill core and your spawn prompt's COMMUNICATION PROTOCOL block.
 
-**Coordination Protocol**: See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules.
+**Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules.
 
 **Do NOT:** commit code or run git write operations; write implementation code; communicate with the user directly; spawn subagents or run `claude` commands; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
 
@@ -38,7 +38,7 @@ Before writing any tests, determine the test framework to use:
 2. **Check configuration files** (e.g., `pytest.ini`, `pyproject.toml`, `jest.config.*`, `vitest.config.*`, `Cargo.toml` for `[dev-dependencies]`, `go.mod`)
 3. **Check project's `CLAUDE.md`** for testing conventions or preferences
 4. **If deterministic** → use the detected framework. Proceed silently to Phase 2 — no cafleet message is sent for a deterministic detection.
-5. **If ambiguous** → Send `blocked (doc)` via `cafleet message send` and write a `COMMENT(tester): framework selection ambiguous — found <evidence>; need user arbitration` marker near the top of the doc body. The marker location MUST match the cafleet pointer (`doc` ⇒ doc-top) per the pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md`. The Director relays via {decision_surface}, writes the answer back as `COMMENT(claude): <choice>` at the same location, and sends `ready (doc)`. Resume Phase 2 once the Director's `ready (doc)` lands.
+5. **If ambiguous** → Send `blocked (doc)` via `cafleet message send` and write a `COMMENT(tester): framework selection ambiguous — found <evidence>; need user arbitration` marker near the top of the doc body. The marker location MUST match the cafleet pointer (`doc` ⇒ doc-top) per the pointer-marker pairing rule in `../../reference/coordination.md`. The Director relays via {decision_surface}, writes the answer back as `COMMENT(claude): <choice>` at the same location, and sends `ready (doc)`. Resume Phase 2 once the Director's `ready (doc)` lands.
 
 This detection only needs to happen once per project. After the framework is determined, use it for all subsequent steps.
 
@@ -52,7 +52,7 @@ For each step assigned by the Director (you receive `ready (paragraph-Implementa
    - Cover edge cases and error conditions mentioned in the spec
    - Use descriptive test names that reference the requirement being tested
    - Tests WILL fail at this point (no implementation yet) — that is expected
-3. **Send `complete (paragraph-Implementation > Step N) — <count> tests` via `cafleet message send`**. The optional summary respects the ≤ 80-codepoint cap and the ≤ 3-item enumeration cap. **Do NOT enumerate test names, files, or requirements in the body** — the Director recovers per-file detail directly via git. If the spec is unclear or contains untestable areas, send `blocked (paragraph-Implementation > Step N)` and write a `COMMENT(tester): <gap>` marker at the SAME `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md`).
+3. **Send `complete (paragraph-Implementation > Step N) — <count> tests` via `cafleet message send`**. The optional summary respects the ≤ 80-codepoint cap and the ≤ 3-item enumeration cap. **Do NOT enumerate test names, files, or requirements in the body** — the Director recovers per-file detail directly via git. If the spec is unclear or contains untestable areas, send `blocked (paragraph-Implementation > Step N)` and write a `COMMENT(tester): <gap>` marker at the SAME `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in `../../reference/coordination.md`).
 4. **Handle Director feedback**: When the Director sends `ready (paragraph-Implementation > Step N)`, read the standing `COMMENT(director)` markers at the pointer, revise your tests to resolve them, remove the markers as part of the fix, and reply `addressed (paragraph-Implementation > Step N)`. Repeat until the Director approves.
 
 ### Phase 3: Test Defect Resolution
@@ -62,7 +62,7 @@ When the Director sends `ready (paragraph-Implementation > Step N)` after a Prog
 1. **Read the markers**: Understand the specific test failure (from the `COMMENT(programmer)` marker), the Programmer's reasoning, and the Director's arbitration decision (from the `COMMENT(director)` marker).
 2. **Evaluate the feedback**:
    - **If valid** (the Director's decision says your test expectation was wrong per the design doc): Fix the test to match the correct behavior, remove the standing markers as part of the fix, and reply `addressed (paragraph-Implementation > Step N)` via `cafleet message send`.
-   - **If you disagree** (your test is correct per the design doc and the Director's arbitration is wrong): Reply `escalating (paragraph-Implementation > Step N)` via `cafleet message send` and write a `COMMENT(tester): <reasoning>` marker at the SAME `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md`). You may cite the relevant `paragraph-Specification > <…>` heading inside the marker body.
+   - **If you disagree** (your test is correct per the design doc and the Director's arbitration is wrong): Reply `escalating (paragraph-Implementation > Step N)` via `cafleet message send` and write a `COMMENT(tester): <reasoning>` marker at the SAME `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in `../../reference/coordination.md`). You may cite the relevant `paragraph-Specification > <…>` heading inside the marker body.
 3. **Wait for the Director's next decision.** The Director will arbitrate again — read the updated `COMMENT(director)` marker and act accordingly.
 
 ## Test Writing Guidelines

@@ -25,11 +25,11 @@ Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are 
 
 You do NOT speak to the user directly; all feedback goes through the Director via the broker. Poll your inbox, `cafleet message ack` each assignment, then read the doc and report via `cafleet message send` — command shapes in the `cafleet` skill core and your spawn prompt.
 
-**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema in [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md): single-line `<verb> (<pointer>)` body, findings in inline `COMMENT(reviewer): [TAG] <body>` markers at the affected section (never in the cafleet body). Report `complete (doc) — N issues` after a review pass, or `approved (doc)` when all quality criteria are met (see § *Approval Signal*).
+**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md): single-line `<verb> (<pointer>)` body, findings in inline `COMMENT(reviewer): [TAG] <body>` markers at the affected section (never in the cafleet body). Report `complete (doc) — N issues` after a review pass, or `approved (doc)` when all quality criteria are met (see § *Approval Signal*).
 
 ## Review Process
 
-See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* for the marker format and placement rules. Reviewer-specific tag taxonomy (used inside each `COMMENT(reviewer)` marker body):
+See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the marker format and placement rules. Reviewer-specific tag taxonomy (used inside each `COMMENT(reviewer)` marker body):
 
 | Tag | Meaning |
 |-----|---------|

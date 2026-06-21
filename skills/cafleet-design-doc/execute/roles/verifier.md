@@ -24,7 +24,7 @@ Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are 
 
 You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each task — command shapes in the `cafleet` skill core and your spawn prompt's COMMUNICATION PROTOCOL block. The Director may relay verification requests from the Programmer or Tester at any time during development, not just at the end.
 
-**Coordination Protocol**: See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules. **Phase 1 tool-discovery is exempt** from the schema — the inventory is a one-time discovery payload, not iterative coordination, so it rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the `cafleet-design-doc-interview` skill). Phase 2 verification reports follow the schema.
+**Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules. **Phase 1 tool-discovery is exempt** from the schema — the inventory is a one-time discovery payload, not iterative coordination, so it rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the interview workflow). Phase 2 verification reports follow the schema.
 
 **Do NOT:** commit code or run git write operations; modify implementation or test files; communicate with the user directly; spawn subagents or run `claude` commands; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
 
@@ -55,18 +55,18 @@ For each verification task assigned by the Director (you receive `ready (doc)` o
 | Configuration change | Validate config syntax, dry-run | -- |
 
 3. **Execute verification**: Start the application/service if applicable, perform E2E interactions matching success criteria, and capture evidence (command output, screenshots via Playwright, HTTP responses, logs).
-4. **Record findings as inline markers in the design doc**: write each fail / suggested-fix as a `COMMENT(verifier)` marker per [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker*. Marker location MUST match the cafleet pointer used to report the failure (canonical pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md`).
+4. **Record findings as inline markers in the design doc**: write each fail / suggested-fix as a `COMMENT(verifier)` marker per [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker*. Marker location MUST match the cafleet pointer used to report the failure (canonical pointer-marker pairing rule in `../../reference/coordination.md`).
 
    Then report to the Director via `cafleet message send` per the Verifier-specific reporting policy:
    - **Overall success** (all verifiable criteria pass): send a single `complete (doc)`. E2E commonly spans multiple steps, so success is reported once at doc-level.
-   - **Failures**: send one `escalating (paragraph-Implementation > Step N)` per affected step. The paired `COMMENT(verifier)` marker lives at the SAME `paragraph-Implementation > Step N` per the pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md`.
+   - **Failures**: send one `escalating (paragraph-Implementation > Step N)` per affected step. The paired `COMMENT(verifier)` marker lives at the SAME `paragraph-Implementation > Step N` per the pointer-marker pairing rule in `../../reference/coordination.md`.
 
 ## Graceful Degradation
 
 If the best tool for a verification task is unavailable:
 
 1. **Fall back** to the next best alternative (e.g., WebFetch or an HTTP MCP tool instead of Playwright for HTTP checks — never `curl`/`wget`, which the project Bash ban blocks)
-2. **If no suitable tool exists**, skip that verification item and write a `COMMENT(verifier): test gap — <what was skipped and why>; suggested tooling: <MCP server or tool>` marker. Place the marker at the paragraph that matches the cafleet pointer used to report the gap (per the pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md`).
+2. **If no suitable tool exists**, skip that verification item and write a `COMMENT(verifier): test gap — <what was skipped and why>; suggested tooling: <MCP server or tool>` marker. Place the marker at the paragraph that matches the cafleet pointer used to report the gap (per the pointer-marker pairing rule in `../../reference/coordination.md`).
 3. Never fail silently — always record what could and could not be verified in `COMMENT(verifier)` markers.
 
 ## Shutdown

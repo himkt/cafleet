@@ -24,7 +24,7 @@ Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are 
 
 You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each task — command shapes in the `cafleet` skill core and your spawn prompt's COMMUNICATION PROTOCOL block.
 
-**Coordination Protocol**: From Step 3 onward (once the draft exists) every cafleet message follows the **verb + pointer + `COMMENT(role)`** schema in [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) — single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(role)` markers. Your Step-2 clarifying-question messages are exempt (free-form multi-line, per coordination.md § Scope).
+**Coordination Protocol**: From Step 3 onward (once the draft exists) every cafleet message follows the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md) — single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(role)` markers. Your Step-2 clarifying-question messages are exempt (free-form multi-line, per coordination.md § Scope).
 
 ## Structured Question Framework
 
@@ -53,13 +53,13 @@ You MUST present questions from at least 3 categories from the framework below. 
 
 1. **Clarify**: Read the target codebase for context. Send clarifying questions to the Director via `cafleet message send` (free-form body — Step 2 is exempt from the verb + pointer schema). Do NOT create any file until this step is complete.
 2. **Draft**: Create the document at the OUTPUT PATH you were given. Use the `cafleet-design-doc` skill template. Omit optional sections unless needed. Send `complete (doc)` for fresh drafts.
-3. **Internal Quality Loop**: The Director will route the Reviewer's feedback via `ready (doc)`. Read the inline `COMMENT(reviewer)` markers in the design doc, apply revisions to the affected sections, and remove each marker as part of the fix. Send `addressed (doc)` for revision rounds (resolving `COMMENT(reviewer)` markers). If you encounter a spec ambiguity you cannot resolve unaided, write a `COMMENT(drafter): <issue>` marker AND send `blocked (<same-pointer>)` — the marker MUST live at the SAME pointer as the cafleet body (per the pointer-marker pairing rule in `../../cafleet-design-doc/coordination.md`). For paragraph-local ambiguities, use `blocked (paragraph-<HeadingPath>)` with the marker at that paragraph; for doc-wide ambiguities, use `blocked (doc)` with the marker placed near the top of the doc body. Repeat until the Reviewer approves.
+3. **Internal Quality Loop**: The Director will route the Reviewer's feedback via `ready (doc)`. Read the inline `COMMENT(reviewer)` markers in the design doc, apply revisions to the affected sections, and remove each marker as part of the fix. Send `addressed (doc)` for revision rounds (resolving `COMMENT(reviewer)` markers). If you encounter a spec ambiguity you cannot resolve unaided, write a `COMMENT(drafter): <issue>` marker AND send `blocked (<same-pointer>)` — the marker MUST live at the SAME pointer as the cafleet body (per the pointer-marker pairing rule in `../../reference/coordination.md`). For paragraph-local ambiguities, use `blocked (paragraph-<HeadingPath>)` with the marker at that paragraph; for doc-wide ambiguities, use `blocked (doc)` with the marker placed near the top of the doc body. Repeat until the Reviewer approves.
 4. **User Approval**: The Director presents the polished draft to the user. If the user returns COMMENT markers or verbal feedback, the Director routes you with `ready (doc)`; resolve the markers and reply `addressed (doc)`. Repeat until approved.
 5. **Finalize**: When the Director signals user approval with `ready (doc)`, update Status, verify implementation steps are actionable, and reply `addressed (doc)` via `cafleet message send`.
 
 ## COMMENT Processing
 
-See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* for the role taxonomy, marker rules, and the issue-vs-status split.
+See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the role taxonomy, marker rules, and the issue-vs-status split.
 
 ## Resume Mode
 

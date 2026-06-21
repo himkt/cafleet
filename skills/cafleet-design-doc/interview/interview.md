@@ -1,31 +1,25 @@
----
-name: cafleet-design-doc-interview
-description: "Validate an existing design document through fine-grained multi-round Q&A using CAFleet-native orchestration. Spawns a short-lived Analyzer member that reads the document and returns a numbered question list; the Director then drives decision-surface Q&A rounds and writes COMMENT(claude) annotations inline. Supports multi-session splitting via question.md progress tracking. Use after the cafleet-design-doc-create skill and before the cafleet-design-doc-execute skill. Takes document path as argument. Do NOT use this to create or execute design documents — use the dedicated skills instead."
-allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion, Bash
----
-
 # Design Doc Interview (CAFleet Edition)
 
 Validate an existing design document through structured, fine-grained Q&A across multiple sessions. The Director (main Claude) drives the conversation and writes annotations; an Analyzer member spawned via `cafleet member create` reads the document and returns the question list, then is torn down before the interview rounds begin. Discrepancies surface as inline `COMMENT(claude)` annotations in the design document. Multi-session splitting via `question.md` prevents context compaction for large interviews.
 
-**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
+**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../../cafleet/reference/coding-agent/<name>.md`](../../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
-| **Director (Interviewer)** | Main Claude | Resolve doc path, parse `question.md` progress, spawn Analyzer, drive decision-surface Q&A rounds, write answers + COMMENT annotations + progress marker | Read the document for question generation (delegated to Analyzer); conduct the Q&A rounds off {decision_surface} | (inline in this SKILL.md) |
+| **Director (Interviewer)** | Main Claude | Resolve doc path, parse `question.md` progress, spawn Analyzer, drive decision-surface Q&A rounds, write answers + COMMENT annotations + progress marker | Read the document for question generation (delegated to Analyzer); conduct the Q&A rounds off {decision_surface} | (inline in this workflow body) |
 | **Analyzer** | CAFleet member spawned via `cafleet member create` | Read the design doc, return a flat numbered question list covering uncovered sections, then idle pending shutdown | Talk to the user; edit any file; persist state across spawns | [roles/analyzer.md](roles/analyzer.md) |
 
 ## Additional resources
 
-- For the document template, see: [../cafleet-design-doc/template.md](../cafleet-design-doc/template.md)
-- For section guidelines and quality standards, see: [../cafleet-design-doc/guidelines.md](../cafleet-design-doc/guidelines.md)
-- Output of the `cafleet-design-doc-create` skill is the input to this skill; this skill's `COMMENT(claude)` markers are consumed by the `cafleet-design-doc-create` skill's resume mode.
+- For the document template, see: [../reference/template.md](../reference/template.md)
+- For section guidelines and quality standards, see: [../reference/guidelines.md](../reference/guidelines.md)
+- Output of the create workflow is the input to this skill; this skill's `COMMENT(claude)` markers are consumed by the create workflow's resume mode.
 
 ## Coordination Protocol
 
-This skill writes only `COMMENT(claude)` markers in the design document; the Director-Analyzer cafleet messages are exempt from the verb + pointer schema (the Analyzer's question list is a one-time multi-line payload, and the Director's user relay goes through {decision_surface}, not cafleet). The `COMMENT(role)` marker format, the `claude` role (the Director as user-mediator, carrying user-derived clarifications), and the one-per-issue / actionable rules are canonical in [../cafleet-design-doc/coordination.md](../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker*.
+This skill writes only `COMMENT(claude)` markers in the design document; the Director-Analyzer cafleet messages are exempt from the verb + pointer schema (the Analyzer's question list is a one-time multi-line payload, and the Director's user relay goes through {decision_surface}, not cafleet). The `COMMENT(role)` marker format, the `claude` role (the Director as user-mediator, carrying user-derived clarifications), and the one-per-issue / actionable rules are canonical in [../reference/coordination.md](../reference/coordination.md) § *COMMENT(role) Marker*.
 
-Interview-specific: place each `COMMENT(claude)` marker on its own line immediately before the section it refers to (e.g. above `### Retry Strategy`); markers persist until the `cafleet-design-doc-create` skill's resume mode resolves them (reads each marker, applies the fix, removes it).
+Interview-specific: place each `COMMENT(claude)` marker on its own line immediately before the section it refers to (e.g. above `### Retry Strategy`); markers persist until the create workflow's resume mode resolves them (reads each marker, applies the fix, removes it).
 
 ## Architecture
 
@@ -127,7 +121,7 @@ Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt 
 
 **Gate**: do not spawn the Analyzer until the monitoring member's `ready: monitor live` handshake (2b) has arrived.
 
-Render the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (`{fleet_id}` / `{agent_id}` / `{director_agent_id}` filled by `member create`; `[INSERT …]` markers shell-substituted by the Director first):
+Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (`{fleet_id}` / `{agent_id}` / `{director_agent_id}` filled by `member create`; `[INSERT …]` markers shell-substituted by the Director first):
 
 | Slot | Analyzer |
 |---|---|
@@ -222,9 +216,9 @@ Present a summary to the user:
 
 | State | Suggested next step |
 |:--|:--|
-| Sections remain (with or without COMMENT markers) | Re-invoke the `cafleet-design-doc-interview` skill with `<doc-path>` for the next session |
-| All sections covered, COMMENT markers present in document | Invoke the `cafleet-design-doc-create` skill with `<doc-path>` to fix annotations (resume mode auto-detects markers and routes to the Drafter), then the `cafleet-design-doc-execute` skill |
-| All sections covered, no COMMENT markers in document | Invoke the `cafleet-design-doc-execute` skill with `<doc-path>` to implement |
+| Sections remain (with or without COMMENT markers) | Re-run the interview workflow with `<doc-path>` for the next session |
+| All sections covered, COMMENT markers present in document | Run the create workflow with `<doc-path>` to fix annotations (resume mode auto-detects markers and routes to the Drafter), then the execute workflow |
+| All sections covered, no COMMENT markers in document | Run the execute workflow with `<doc-path>` to implement |
 
 ## `question.md` Format
 

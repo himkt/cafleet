@@ -38,7 +38,7 @@ Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks 
 
 All Director-to-member messages use the CAFleet message broker. The Director stores each member's `agent_id` at spawn time (from the `cafleet --json member create` response) and substitutes it literally for `<member-agent-id>` as the `--to` target.
 
-**Coordination Protocol**: See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* + § *Copilot Routing* + § *Director Per-File Detail Recovery* for the verb + pointer schema, role taxonomy, marker rules, Copilot anchor classes, and git-plumbing recovery commands. The Verifier's **Phase 1 tool-discovery** message is exempt from the schema (one-time discovery payload).
+**Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* + § *Copilot Routing* + § *Director Per-File Detail Recovery* for the verb + pointer schema, role taxonomy, marker rules, Copilot anchor classes, and git-plumbing recovery commands. The Verifier's **Phase 1 tool-discovery** message is exempt from the schema (one-time discovery payload).
 
 Send tasks to members via `cafleet message send` (a push notification keystrokes the message into the member's pane), poll your inbox with `cafleet --json message poll`, ACK each task, and inspect a stalled member with `cafleet member capture --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
 
@@ -76,11 +76,11 @@ When the user selects "Scan for COMMENT markers":
 
 ### COMMENT Classification by File Location and Role
 
-See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *COMMENT(role) Marker* and § *Copilot Routing* for the role taxonomy, marker-location rules (design-doc → Director resolves directly, source → Programmer, test → Tester), and routing verb + pointer schema. The `drafter` role is N/A in this skill.
+See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* and § *Copilot Routing* for the role taxonomy, marker-location rules (design-doc → Director resolves directly, source → Programmer, test → Tester), and routing verb + pointer schema. The `drafter` role is N/A in this skill.
 
 ### Director's Per-File Detail Recovery
 
-See [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md) § *Director Per-File Detail Recovery* for the git plumbing (`git status` / `git diff --stat` / `git log --name-only` / `git diff -- <pattern>`). This applies in Phase A (test commits), Phase B/C (impl commits), Phase 7d (Copilot fix commits), and Step 8 (finalize commit).
+See [../../reference/coordination.md](../../reference/coordination.md) § *Director Per-File Detail Recovery* for the git plumbing (`git status` / `git diff --stat` / `git log --name-only` / `git diff -- <pattern>`). This applies in Phase A (test commits), Phase B/C (impl commits), Phase 7d (Copilot fix commits), and Step 8 (finalize commit).
 
 ### LLM Intent Judgment
 
@@ -110,7 +110,7 @@ Programmer / Tester / Verifier members are spawned in workspace-scoped auto-appr
 
 | Phase | Expected event | Stall indicator | Director action |
 |:--|:--|:--|:--|
-| Test writing (Phase A) | Tester writes tests for current step | Tester goes idle without reporting test completion | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent stall-nudge — recipient interprets contextually per [../../cafleet-design-doc/coordination.md](../../cafleet-design-doc/coordination.md): same target, same expected action) |
+| Test writing (Phase A) | Tester writes tests for current step | Tester goes idle without reporting test completion | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent stall-nudge — recipient interprets contextually per [../../reference/coordination.md](../../reference/coordination.md): same target, same expected action) |
 | Implementation (Phase B) | Programmer implements code and runs tests | Programmer goes idle without reporting implementation result | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <programmer-agent-id> --text "ready (paragraph-Implementation > Step N)"` (re-sent stall-nudge) |
 | Verification (Phase D) | Verifier performs E2E testing | Verifier goes idle without reporting verification result | `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <verifier-agent-id> --text "ready (doc)"` (re-sent stall-nudge — Verifier reads the design doc and the standing `COMMENT(verifier)` markers) |
 | PR Review (Step 7) | Copilot posts a review or inline comment on `<pr-number>` | No new Copilot-authored entry (login matching `^copilot`, timestamp > `last_push_ts`) on this turn | Increment `silence_ticks`. Evaluate the SKILL Step 7b branch table: exit on a post-push Copilot no-concerns signal (`state == "APPROVED"`, or a review/comment body indicating no remaining concerns); at `silence_ticks >= 30` run the 7e autonomous re-request (check `requested_reviewers`; re-request when Copilot is absent and no post-push review exists), reset `silence_ticks`, and keep waiting. On ≥ 1 new entry reset `silence_ticks = 0`, classify each new inline comment by file path per Step 7c, write `COMMENT(copilot): <body>` at the source `<file>:<line>` for source/test routes (or `COMMENT(director): <body>` at the affected paragraph for design-doc-anchored items, no cafleet route), and dispatch via `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <member-agent-id> --text "ready (<file>:<line>)"`. The loop ends only by Administrator authority. |

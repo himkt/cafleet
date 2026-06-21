@@ -1,7 +1,7 @@
 # Collapse the design-doc and research skill constellations into two umbrella skills
 
 **Status**: Approved
-**Progress**: 0/22 tasks complete
+**Progress**: 7/22 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -112,7 +112,7 @@ Both umbrellas carry exactly one `SKILL.md` with frontmatter. All other moved bo
 
 **`cafleet-design-doc/SKILL.md`** — the existing format skill is rewritten into a dispatcher:
 
-- `allowed-tools`: the **union** of the three workflows' grants. `create` has `Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch`; `execute` adds `Task` (TDD orchestration) and `interview` adds `AskUserQuestion`. Union: `Read, Write, Edit, Glob, Grep, Bash, Task, WebSearch, WebFetch, AskUserQuestion`. The slightly broader grant for a consumer that only wants the format spec is an accepted cost (R3).
+- `allowed-tools`: the **union** of the three workflows' grants. `create` and `execute` each grant `Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch`; `interview` grants `Read, Write, Edit, Glob, Grep, AskUserQuestion, Bash`. Literal union: `Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, AskUserQuestion` (9 tools; no sub-workflow declares `Task`). The slightly broader grant for a consumer that only wants the format spec is an accepted cost (R3).
 - `description`: carries the format-consult trigger PLUS create/implement/validate triggers. Draft wording:
   > Design document format spec plus CAFleet-native orchestration to create, validate, and implement design docs. Consult the template/guidelines when editing an existing design doc; or create a new design doc / specification / technical spec (Director/Drafter/Reviewer), validate/interview an existing one through multi-round Q&A, or implement/execute one with a TDD team. Do NOT write or implement design docs freeform — route through this skill's workflows.
 - body: a dispatcher index — a "when to use" table routing to `reference/template.md`+`guidelines.md`+`coordination.md` (format spec) and to `create/create.md` / `interview/interview.md` / `execute/execute.md` (the three workflows). Retains the coding-agent overlay note (`../cafleet/reference/coding-agent/<name>.md`, unchanged depth) and the "teammates load this skill by name `cafleet-design-doc`" instruction.
@@ -348,19 +348,19 @@ After Steps 1-11 the zero-residue grep returns **0** matches in scope.
 
 ### Step 1: Build the `cafleet-design-doc` umbrella structure
 
-- [ ] `git mv` the format spec to `reference/`: `template.md`, `guidelines.md`, `coordination.md` → `cafleet-design-doc/reference/` <!-- completed: -->
-- [ ] `git mv` the three sub-skills into per-workflow folders: `cafleet-design-doc-create/SKILL.md` → `cafleet-design-doc/create/create.md` (+ `roles/`); `-execute/SKILL.md` → `execute/execute.md` (+ `roles/`); `-interview/SKILL.md` → `interview/interview.md` (+ `roles/analyzer.md`) <!-- completed: -->
-- [ ] Drop `name`/`description`/`allowed-tools` frontmatter from `create/create.md`, `execute/execute.md`, `interview/interview.md` (Director stays inline in `interview.md`) <!-- completed: -->
+- [x] `git mv` the format spec to `reference/`: `template.md`, `guidelines.md`, `coordination.md` → `cafleet-design-doc/reference/` <!-- completed: 2026-06-21T01:52 -->
+- [x] `git mv` the three sub-skills into per-workflow folders: `cafleet-design-doc-create/SKILL.md` → `cafleet-design-doc/create/create.md` (+ `roles/`); `-execute/SKILL.md` → `execute/execute.md` (+ `roles/`); `-interview/SKILL.md` → `interview/interview.md` (+ `roles/analyzer.md`) <!-- completed: 2026-06-21T01:52 -->
+- [x] Drop `name`/`description`/`allowed-tools` frontmatter from `create/create.md`, `execute/execute.md`, `interview/interview.md` (Director stays inline in `interview.md`) <!-- completed: 2026-06-21T01:52 -->
 
 ### Step 2: Rewrite `cafleet-design-doc/SKILL.md` as the dispatcher
 
-- [ ] Rewrite the description to carry create + implement/execute + validate/interview + format-consult triggers; set `allowed-tools` to the three-workflow union; build the dispatcher when-to-use index routing to `reference/{template,guidelines,coordination}.md` and `create/`/`interview/`/`execute/`; keep the overlay note + the "load by name `cafleet-design-doc`" instruction <!-- completed: -->
+- [x] Rewrite the description to carry create + implement/execute + validate/interview + format-consult triggers; set `allowed-tools` to the three-workflow union; build the dispatcher when-to-use index routing to `reference/{template,guidelines,coordination}.md` and `create/`/`interview/`/`execute/`; keep the overlay note + the "load by name `cafleet-design-doc`" instruction <!-- completed: 2026-06-21T01:52 -->
 
 ### Step 3: Repoint Group A intra-umbrella links, slug phrasing, and functional paths (#1-15, #37-40)
 
-- [ ] Rewrite all format-spec links per R-PATHS (#1-10): bodies `../cafleet-design-doc/X.md` → `../reference/X.md`; role files `../../cafleet-design-doc/X.md` → `../../reference/X.md`; depth-adjust every overlay link in the moved bodies/roles <!-- completed: -->
-- [ ] Rewrite the functional role-file paths in `execute/execute.md` L176-178 → `skills/cafleet-design-doc/execute/roles/{programmer,tester,verifier}.md` (#37, R10) <!-- completed: -->
-- [ ] Rewrite slug→workflow phrasing in the moved bodies + format-spec files (#11-15, #38-40), incl. the execute self-invocation prose, the Analyzer-precedent prose in `execute.md` + `execute/roles/verifier.md`; preserve the 0000103 base-dir prose pointer in `reference/guidelines.md` <!-- completed: -->
+- [x] Rewrite all format-spec links per R-PATHS (#1-10): bodies `../cafleet-design-doc/X.md` → `../reference/X.md`; role files `../../cafleet-design-doc/X.md` → `../../reference/X.md`; depth-adjust every overlay link in the moved bodies/roles <!-- completed: 2026-06-21T01:52 -->
+- [x] Rewrite the functional role-file paths in `execute/execute.md` L176-178 → `skills/cafleet-design-doc/execute/roles/{programmer,tester,verifier}.md` (#37, R10) <!-- completed: 2026-06-21T01:52 -->
+- [x] Rewrite slug→workflow phrasing in the moved bodies + format-spec files (#11-15, #38-40), incl. the execute self-invocation prose, the Analyzer-precedent prose in `execute.md` + `execute/roles/verifier.md`; preserve the 0000103 base-dir prose pointer in `reference/guidelines.md` <!-- completed: 2026-06-21T01:52 -->
 
 ### Step 4: Build the `cafleet-research` umbrella structure
 

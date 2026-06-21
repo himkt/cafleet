@@ -1,14 +1,8 @@
----
-name: cafleet-design-doc-execute
-description: "Implement features based on a design document using CAFleet-native orchestration with TDD cycle. Use when the user asks to implement or execute a design document. Takes document path as argument. Do NOT implement a design document by reading it and coding manually — always invoke this skill instead."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch
----
-
 # Design Doc Execute (CAFleet Edition)
 
 Implement features based on a design document using up to four roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), and Verifier (E2E/integration testing). Every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline. The Director judges which members to spawn based on the nature of the implementation tasks. For each step, the Tester writes unit tests first, the Director reviews and approves them, then the Programmer implements code to pass the tests. The Director also reviews the Programmer's implementation for code quality and design doc compliance before committing. After all TDD steps, the Verifier performs E2E/integration verification (Phase D) if spawned. After user approval, the Director runs the full publication flow: Step 6 pushes the feature branch and opens a PR with `@copilot` requested, Step 7 runs a Copilot review loop — driven by the monitoring member's idle-nudges on the `cafleet monitor` heartbeat — that routes inline comments to the still-live Programmer / Tester and ends only when the user instructs termination or Copilot reports no remaining concerns, and Step 8 finalizes, commits the completion marker, pushes it (when the branch is tracked on origin), and tears the team down.
 
-**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
+**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../../cafleet/reference/coding-agent/<name>.md`](../../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
@@ -19,18 +13,18 @@ Implement features based on a design document using up to four roles orchestrate
 
 ## Additional resources
 
-- For the document template, see: [../cafleet-design-doc/template.md](../cafleet-design-doc/template.md)
-- For section guidelines and quality standards, see: [../cafleet-design-doc/guidelines.md](../cafleet-design-doc/guidelines.md)
-- For the inter-agent coordination protocol (verb + pointer schema, `COMMENT(role)` markers), see: [../cafleet-design-doc/coordination.md](../cafleet-design-doc/coordination.md)
+- For the document template, see: [../reference/template.md](../reference/template.md)
+- For section guidelines and quality standards, see: [../reference/guidelines.md](../reference/guidelines.md)
+- For the inter-agent coordination protocol (verb + pointer schema, `COMMENT(role)` markers), see: [../reference/coordination.md](../reference/coordination.md)
 
 ## Coordination Protocol
 
-This skill's Director, Programmer, Tester, and Verifier coordinate via the verb + pointer schema and `COMMENT(role)` markers defined canonically in [../cafleet-design-doc/coordination.md](../cafleet-design-doc/coordination.md) — the single source of truth for the 6 verbs, the 3 pointer forms, the message format, the `COMMENT(role)` marker grammar, the issue/status split, Copilot routing, anchorless status, finalize-time cleanup, and Director per-file detail recovery.
+This skill's Director, Programmer, Tester, and Verifier coordinate via the verb + pointer schema and `COMMENT(role)` markers defined canonically in [../reference/coordination.md](../reference/coordination.md) — the single source of truth for the 6 verbs, the 3 pointer forms, the message format, the `COMMENT(role)` marker grammar, the issue/status split, Copilot routing, anchorless status, finalize-time cleanup, and Director per-file detail recovery.
 
 Two skill-specific notes layer on top of that canonical protocol:
 
-- **Roles in play**: this skill uses only the `director`, `programmer`, `tester`, `verifier`, `claude`, and `copilot` marker roles — never `drafter` or `reviewer` (those belong to the `cafleet-design-doc-create` skill). Copilot review here is the full source-file / design-doc / PR-level routing; finalize happens at `Status: Complete` (Step 8).
-- **Verifier Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the `cafleet-design-doc-interview` skill). Phase 2 verification reports follow the schema.
+- **Roles in play**: this skill uses only the `director`, `programmer`, `tester`, `verifier`, `claude`, and `copilot` marker roles — never `drafter` or `reviewer` (those belong to the create workflow). Copilot review here is the full source-file / design-doc / PR-level routing; finalize happens at `Status: Complete` (Step 8).
+- **Verifier Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the interview workflow). Phase 2 verification reports follow the schema.
 
 ## Architecture
 
@@ -51,7 +45,7 @@ User
 
 ## Process
 
-**Run to completion.** Once `/cafleet-design-doc-execute` is invoked, the fleet operates autonomously and collaboratively through every task in the design document. The Director keeps driving the team — dispatching the next step to each idle member the moment it is ready — until all Implementation tasks and Success Criteria are complete. The designed checkpoints stay in force: the Step 5 user-approval gate, the user's "stop means stop" halt during Step 7, and escalations that require a genuinely new user decision.
+**Run to completion.** Once the execute workflow is invoked, the fleet operates autonomously and collaboratively through every task in the design document. The Director keeps driving the team — dispatching the next step to each idle member the moment it is ready — until all Implementation tasks and Success Criteria are complete. The designed checkpoints stay in force: the Step 5 user-approval gate, the user's "stop means stop" halt during Step 7, and escalations that require a genuinely new user decision.
 
 ### Step 1: Resolve Design Document Path (Director)
 
@@ -173,13 +167,13 @@ Based on the design document steps (see [roles/director.md](roles/director.md) f
 
 Resolve the absolute path of each role file you will reference by path-by-reference in spawn prompts (the member opens the file via `Read` on its first turn — do NOT inline the content):
 
-- `skills/cafleet-design-doc-execute/roles/programmer.md`
-- `skills/cafleet-design-doc-execute/roles/tester.md` (if Tester needed)
-- `skills/cafleet-design-doc-execute/roles/verifier.md` (if Verifier needed)
+- `skills/cafleet-design-doc/execute/roles/programmer.md`
+- `skills/cafleet-design-doc/execute/roles/tester.md` (if Tester needed)
+- `skills/cafleet-design-doc/execute/roles/verifier.md` (if Verifier needed)
 
 #### 3e. Spawn each member via `cafleet member create`
 
-Each member is spawned from the canonical [spawn-prompt skeleton](../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below. `{fleet_id}` / `{agent_id}` / `{director_agent_id}` are filled by `member create`'s `str.format()`; the `[INSERT …]` markers (`[INSERT DESIGN DOC PATH]`, `[INSERT abs path to roles/<role>.md]`) are shell-substituted by the Director first (double any literal `{`/`}` per the Template-safety note in `cafleet/reference/director.md`). All three roles load `cafleet` + `cafleet-design-doc` and take `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` as their only context line; each delta below gives the role's title, role-file, IMPORTANT lines (verbatim), and start cue.
+Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below. `{fleet_id}` / `{agent_id}` / `{director_agent_id}` are filled by `member create`'s `str.format()`; the `[INSERT …]` markers (`[INSERT DESIGN DOC PATH]`, `[INSERT abs path to roles/<role>.md]`) are shell-substituted by the Director first (double any literal `{`/`}` per the Template-safety note in `cafleet/reference/director.md`). All three roles load `cafleet` + `cafleet-design-doc` and take `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` as their only context line; each delta below gives the role's title, role-file, IMPORTANT lines (verbatim), and start cue.
 
 > **Spawn-prompt audit file (two-step pattern)**: every spawn in this skill follows the same two steps — (1) **render** the prompt (substitute the `[INSERT …]` markers; leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass); (2) **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` (`<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; create `${BASE}/prompts/` on first write; same-second collision → append `_2`, `_3`, … — never overwrite), then invoke `cafleet member create --prompt-file <abs path>` (see the per-role spawn templates and commands below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
@@ -225,7 +219,7 @@ Render the prompt to `${BASE}/prompts/tester-<UTC-compact>.md` per the 3e two-st
 
 **Verifier spawn prompt (if needed):**
 
-> **Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the `cafleet-design-doc-interview` skill). Phase 2 verification reports follow the verb + pointer + `COMMENT(verifier)` schema documented in [the Coordination Protocol section above](#coordination-protocol).
+> **Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the interview workflow). Phase 2 verification reports follow the verb + pointer + `COMMENT(verifier)` schema documented in [the Coordination Protocol section above](#coordination-protocol).
 
 | Slot | Verifier |
 |---|---|

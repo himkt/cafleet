@@ -2,7 +2,7 @@
 
 Mechanics for inter-agent coordination. The design document is the substantive communication medium; `cafleet message send --text` carries only a single-line **verb + pointer** poke. Substantive content (feedback, reports, escalation reasons, review items) lives in inline `COMMENT(role)` markers in the design doc — except for source-anchored Copilot inline review, which is annotated in the source file at `<file>:<line>` because that is where the comment lives.
 
-**Scope.** The verb + pointer schema applies to the `cafleet-design-doc-create` and `cafleet-design-doc-execute` skills. Two exchanges are **exempt** and ride as free-form multi-line bodies: the `cafleet-design-doc-create` skill's **Step-2 clarification exchange** (the Drafter's clarifying questions + the Director's user-answers relay, before the design doc exists), and the `cafleet-design-doc-interview` skill's Director-Analyzer messages (which share only the inline `COMMENT(claude)` marker convention — the Analyzer's question-list deliverable is a multi-line payload).
+**Scope.** The verb + pointer schema applies to the create and execute workflows. Two exchanges are **exempt** and ride as free-form multi-line bodies: the create workflow's **Step-2 clarification exchange** (the Drafter's clarifying questions + the Director's user-answers relay, before the design doc exists), and the interview workflow's Director-Analyzer messages (which share only the inline `COMMENT(claude)` marker convention — the Analyzer's question-list deliverable is a multi-line payload).
 
 ## Core Principle
 
@@ -19,7 +19,7 @@ The canonical set is exactly 6. Members and the Director MUST pick from this lis
 | `addressed` | Member → Director, or Director → Director (self-note) | "I resolved a pre-existing marker (a `COMMENT(role)` marker, a Copilot inline comment, or a Director-arbitration note) at the pointer." | Round-2+ work on items already flagged in the doc or in source. |
 | `blocked` | Member → Director | "I cannot proceed at the pointer; the blocker rationale is in a `COMMENT(role)` marker at the same pointer." | Spec ambiguity, missing deps, environmental issues. |
 | `escalating` | Member → Director | "I am escalating an issue (e.g. a suspected test defect) at the pointer; the rationale is in a `COMMENT(role)` marker at the same pointer." | Test-defect arbitration, multi-round disagreements. |
-| `approved` | Reviewer → Director, or Director → user-result | "All quality criteria are met at the pointer (typically `doc`)." | Reviewer approval signal in the `cafleet-design-doc-create` skill. |
+| `approved` | Reviewer → Director, or Director → user-result | "All quality criteria are met at the pointer (typically `doc`)." | Reviewer approval signal in the create workflow. |
 
 **Verb choice for `complete` vs `addressed`**: `complete` signals a fresh deliverable (work that did not previously have a marker waiting). `addressed` signals resolution of a pre-existing marker (any `COMMENT(role)`, any Copilot line, any Director arbitration). When in doubt, ask: "did a marker exist before I started this turn?" — if yes, use `addressed`; if no, use `complete`.
 
@@ -45,7 +45,7 @@ Exactly 3 canonical forms. Use the tightest one that locates the target.
 
 ## Message Format
 
-Every `cafleet message send --text` body, when used to coordinate within a `cafleet-design-doc-create` or `cafleet-design-doc-execute` skill team, MUST match:
+Every `cafleet message send --text` body, when used to coordinate within a create or execute workflow team, MUST match:
 
 ```
 <verb> (<pointer>)
@@ -87,8 +87,8 @@ Roles:
 
 | Role | Who writes it | When |
 |:--|:--|:--|
-| `claude` | The Director acting as user-mediator (existing convention from the `cafleet-design-doc-interview` skill) | Carries user-derived clarifications. Existing usage unchanged. |
-| `director` | The Director | Spec resolution notes, Director judgments, ambiguity arbitration, design-doc-anchored Copilot review (see *Copilot Routing* below), Phase C code-review feedback in the `cafleet-design-doc-execute` skill. |
+| `claude` | The Director acting as user-mediator (existing convention from the interview workflow) | Carries user-derived clarifications. Existing usage unchanged. |
+| `director` | The Director | Spec resolution notes, Director judgments, ambiguity arbitration, design-doc-anchored Copilot review (see *Copilot Routing* below), Phase C code-review feedback in the execute workflow. |
 | `drafter` | The Drafter | Spec ambiguities the Drafter cannot resolve and needs Director input on. |
 | `reviewer` | The Reviewer | Review findings, tagged with the existing `[COMPLIANCE]` / `[GAP]` / `[UNCLEAR]` / `[INCORRECT]` / `[IMPROVEMENT]` taxonomy inside the marker body. |
 | `programmer` | The Programmer | Implementation-side notes, escalation rationales, observations of spec gaps that block implementation. |
@@ -108,7 +108,7 @@ Rules:
 
 | Class | Example | Lifecycle |
 |:--|:--|:--|
-| Issue | `COMMENT(reviewer): [GAP] Specification omits the retry budget.` | Persists in the doc until resolved. The resolver removes the marker as part of the fix. Per `skills/cafleet-design-doc/guidelines.md` § *Completeness Check*, the doc cannot reach `Status: Approved` / `Status: Complete` while any `COMMENT(` marker remains. |
+| Issue | `COMMENT(reviewer): [GAP] Specification omits the retry budget.` | Persists in the doc until resolved. The resolver removes the marker as part of the fix. Per `skills/cafleet-design-doc/reference/guidelines.md` § *Completeness Check*, the doc cannot reach `Status: Approved` / `Status: Complete` while any `COMMENT(` marker remains. |
 | Status | (none — never enters the doc) | Lives only in `cafleet message send` text. |
 
 ## Copilot Routing
@@ -135,12 +135,12 @@ If a member finds themselves needing to send anchorless status updates frequentl
 
 ## Finalize-Time Cleanup
 
-When the design doc moves to `Status: Approved` (the `cafleet-design-doc-create` skill Step 6) or `Status: Complete` (the `cafleet-design-doc-execute` skill Step 8):
+When the design doc moves to `Status: Approved` (the create workflow Step 6) or `Status: Complete` (the execute workflow Step 8):
 
-1. Issue markers (`COMMENT(role)` for `reviewer`, `director`, `drafter`, `programmer`, `tester`, `verifier`, `claude`) MUST already be resolved per `skills/cafleet-design-doc/guidelines.md` § *Completeness Check* — the existing rule "No `COMMENT(` markers remain" stays.
+1. Issue markers (`COMMENT(role)` for `reviewer`, `director`, `drafter`, `programmer`, `tester`, `verifier`, `claude`) MUST already be resolved per `skills/cafleet-design-doc/reference/guidelines.md` § *Completeness Check* — the existing rule "No `COMMENT(` markers remain" stays.
 2. Status markers do not exist in the design doc by construction (split), so there is nothing to strip.
 3. `COMMENT(copilot)` markers in source files are removed by the routed member as part of each fix commit; finalize-time validation only needs to confirm the design doc is marker-free.
 
 ## Director Per-File Detail Recovery
 
-Members do not ship file lists in cafleet bodies (the verb + pointer poke carries none); the Director recovers per-file detail directly via git when a commit message needs it — `git status`, `git diff --stat <base>..HEAD`, `git log <base>..HEAD --name-only`, `git diff <base>..HEAD -- <pattern>`. This applies to every commit the Director makes in the `cafleet-design-doc-execute` skill (test, impl, Copilot-fix, and finalize commits).
+Members do not ship file lists in cafleet bodies (the verb + pointer poke carries none); the Director recovers per-file detail directly via git when a commit message needs it — `git status`, `git diff --stat <base>..HEAD`, `git log <base>..HEAD --name-only`, `git diff <base>..HEAD -- <pattern>`. This applies to every commit the Director makes in the execute workflow (test, impl, Copilot-fix, and finalize commits).
