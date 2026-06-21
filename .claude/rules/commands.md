@@ -5,6 +5,7 @@
 - Run tests: `mise //cafleet:test`
 - Lint: `mise //cafleet:lint`
 - Lint (admin): `mise //admin:lint`
+- Check coding-agent overlay token coverage: `mise //cafleet:lint-overlay` — verifies the overlay/base/template token set is coherent (every canonical token defined in all three overlays + the documented-default table, no orphan tokens, identical note-anchor token set across overlays). Also runs inside `mise //cafleet:test` via `cafleet/tests/coding_agent/test_overlay_coverage.py`.
 - Format: `mise //cafleet:format`
 - Type check: `mise //cafleet:typecheck`
 - Sync dependencies: `mise //:uv-sync`

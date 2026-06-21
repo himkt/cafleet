@@ -26,8 +26,6 @@ coherent and that legitimate base ``{placeholder}`` / ``{token}`` meta-tokens
 are never flagged (SC5).
 """
 
-import pytest
-
 from cafleet.coding_agent.overlay_coverage import (
     CANONICAL_TOKENS,
     META_TOKENS,
@@ -138,13 +136,9 @@ def test_token_coverage_passes_when_every_token_defined_everywhere():
 def test_token_coverage_flags_token_missing_from_one_overlay():
     overlays = _overlays_all_defining_eight()
     overlays["codex"].discard("{monitor_model}")
-    violations = token_coverage_violations(
-        _all_eight(), overlays, _all_eight()
-    )
+    violations = token_coverage_violations(_all_eight(), overlays, _all_eight())
     assert violations
-    assert any(
-        "{monitor_model}" in v and "codex" in v for v in violations
-    ), violations
+    assert any("{monitor_model}" in v and "codex" in v for v in violations), violations
 
 
 def test_token_coverage_flags_token_missing_from_default_table():
@@ -184,9 +178,7 @@ def test_orphan_flagged_when_overlay_defines_token_absent_from_base():
     """A token left in an overlay after removal from the base is an orphan."""
     overlays = _overlays_all_defining_eight()
     overlays["claude"].add("{ghost_token}")
-    violations = orphan_token_violations(
-        _all_eight(), overlays, _all_eight()
-    )
+    violations = orphan_token_violations(_all_eight(), overlays, _all_eight())
     assert violations
     assert any("{ghost_token}" in v for v in violations), violations
 
@@ -250,8 +242,7 @@ def test_meta_tokens_excluded_from_base_token_universe():
     never treated as resolvable tokens."""
     universe = base_token_universe()
     assert not (universe & set(META_TOKENS)), (
-        f"meta-tokens leaked into the token universe: "
-        f"{universe & set(META_TOKENS)}"
+        f"meta-tokens leaked into the token universe: {universe & set(META_TOKENS)}"
     )
 
 
@@ -275,6 +266,4 @@ def test_real_repo_overlay_coverage_is_clean():
     """The aggregate checker — what ``mise //cafleet:lint-overlay`` wraps —
     reports no violations against the live skill tree."""
     violations = check_overlay_coverage()
-    assert violations == [], "overlay coverage violations:\n" + "\n".join(
-        violations
-    )
+    assert violations == [], "overlay coverage violations:\n" + "\n".join(violations)

@@ -1,7 +1,7 @@
 # Coding-agent Overlay Application
 
 **Status**: Approved
-**Progress**: 12/23 tasks complete
+**Progress**: 14/23 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -166,7 +166,12 @@ A static checker keeps the overlay/base/template token set coherent so the resol
 
 **Canonical token set:** the eight resolvable tokens `{decision_surface}`, `{monitor_model}`, `{permission_flags}`, `{bg_run}`, `{bg_stop}`, `{task_coord}`, `{pane_title}`, `{skill_loader}`.
 
-**Meta-token ignore-set:** `{placeholder}` and `{token}` are documentation meta-tokens — they name the token *mechanism* in prose (e.g. `cafleet/SKILL.md:18,24`; Part 4's per-entry-point directive deliberately writes "a literal `{token}` … is a defect" into every base file), not resolvable values. The checker excludes them from every check via a named, extensible ignore-set. The checker's token universe is `matches of \{[a-z_]+\} in base files, minus the ignore-set`. This is the concrete mechanism behind SC5 ("never flags a legitimate base `{placeholder}` token") — the exclusion is documented here, not merely asserted in the criterion.
+**Ignore-set (two documented parts):** the checker's token universe is `matches of \{[a-z_]+\} in base files, minus the ignore-set`, where the ignore-set has two named, extensible parts:
+
+1. **Documentation meta-tokens** — `{placeholder}` and `{token}` name the token *mechanism* in prose (e.g. `cafleet/SKILL.md:18,24`; Part 4's per-entry-point directive deliberately writes "a literal `{token}` … is a defect" into every base file), not resolvable values.
+2. **Non-resolvable template/code tokens** — the 13 brace spans the *base markdown legitimately contains that the overlay never resolves*: the CLI `str.format()` spawn-prompt kwargs (`{fleet_id}`, `{agent_id}`, `{director_agent_id}`, `{coding_agent}`), workflow/doc placeholders (`{slug}`, `{dir_path}`, `{upstream}`), the web-researcher query-template tokens (`{topic}`, `{current_year}`, `{current_month}`), and fenced-code / LaTeX placeholders (`{output_path}`, `{script_stem}`, `{n}`). These are substituted by the CLI, a template engine, or example code — not by the overlay — so they are not resolvable tokens. (Brace spans inside non-markdown files such as the slidev `.vue` components — e.g. JS template literals `${type}` / `${p}` — are outside the checker's `*.md` base scan entirely and need no ignore entry.)
+
+Both parts are explicit module-level frozensets (the meta-token set is public — pinned by a test; the non-resolvable set is documented inline with the reason each token is not overlay-resolvable). A base brace match outside the canonical set *and* both ignore-set parts fails the check — the design's intended "deliberate human triage": a genuinely new resolvable prose token is added to the overlays, a new template/code token is added to the non-resolvable set, never a silent pass. This is the concrete mechanism behind SC5 ("never flags a legitimate base `{placeholder}` token") — the exclusion is documented here, not merely asserted in the criterion.
 
 **Checks:**
 
@@ -174,7 +179,7 @@ A static checker keeps the overlay/base/template token set coherent so the resol
 2. **No orphan tokens.** Every token defined in an overlay value table or the default table appears in at least one base file (catches a token removed from the base but left in an overlay).
 3. **Note-binding integrity.** Every overlay note's "applies at" anchor names a token in the canonical set (and, where it cites a file/section, that file exists); the **note-anchor set** — defined as *the set of tokens that carry ≥ 1 note* in an overlay — is identical across the three overlays (all three = `{decision_surface, task_coord}`), so no backend silently drops a caveat another carries. Per-token note *count* may differ (claude legitimately carries extra `{decision_surface}` rows for `capture --lines` and `send-input`); the check compares the token set, not note multisets.
 
-**Implementation.** A reusable parser plus a pytest test under `cafleet/tests/coding_agent/test_overlay_coverage.py` (the repo's existing consistency guards — e.g. `tests/cli/test_help_budget.py` — are pytest tests, so this runs under `mise //cafleet:test` in CI). A thin `mise //cafleet:lint-overlay` task wraps the same checker for ad-hoc runs. The parser locates the skill root relative to the repo root; token extraction is the regex `\{[a-z_]+\}` over base files, minus the meta-token ignore-set, with the canonical-set membership check catching any newly introduced resolvable token that lacks overlay coverage.
+**Implementation.** A reusable parser plus a pytest test under `cafleet/tests/coding_agent/test_overlay_coverage.py` (the repo's existing consistency guards — e.g. `tests/cli/test_help_budget.py` — are pytest tests, so this runs under `mise //cafleet:test` in CI). A thin `mise //cafleet:lint-overlay` task wraps the same checker for ad-hoc runs. The parser locates the skill root relative to the repo root; token extraction is the regex `\{[a-z_]+\}` over base files, minus the two-part ignore-set (meta-tokens + non-resolvable template/code tokens), with the canonical-set membership check catching any newly introduced resolvable token that lacks overlay coverage.
 
 ### Part 6 — Behavioral validation
 
@@ -223,8 +228,8 @@ For each entry point: upgrade its overlay row #1 to read-and-resolve (matching c
 
 ### Step 5: Automated consistency checker
 
-- [ ] Add the overlay-coverage checker: a reusable parser plus `cafleet/tests/coding_agent/test_overlay_coverage.py` asserting token coverage, no-orphan tokens, and note-binding integrity (Part 5); it must not flag legitimate base `{placeholder}` tokens. <!-- completed: -->
-- [ ] Add a `mise //cafleet:lint-overlay` task wrapping the same checker for ad-hoc runs; document it in `.claude/rules/commands.md`. <!-- completed: -->
+- [x] Add the overlay-coverage checker: a reusable parser plus `cafleet/tests/coding_agent/test_overlay_coverage.py` asserting token coverage, no-orphan tokens, and note-binding integrity (Part 5); it must not flag legitimate base `{placeholder}` tokens. <!-- completed: 2026-06-21T10:46 -->
+- [x] Add a `mise //cafleet:lint-overlay` task wrapping the same checker for ad-hoc runs; document it in `.claude/rules/commands.md`. <!-- completed: 2026-06-21T10:46 -->
 
 ### Step 6: Behavioral validation (fresh-session probes)
 
