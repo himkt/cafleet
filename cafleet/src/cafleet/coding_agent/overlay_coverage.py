@@ -213,7 +213,7 @@ def token_coverage_violations(
         violations.extend(
             f"token coverage: {token} missing from the {backend} overlay value table"
             for backend in _BACKENDS
-            if token not in overlays.get(backend, set())
+            if token not in overlays[backend]
         )
         if token not in default_tokens:
             violations.append(
@@ -234,7 +234,7 @@ def orphan_token_violations(
         violations.extend(
             f"orphan token: {token} defined in the {backend} overlay "
             f"but absent from every base file"
-            for token in sorted(overlays.get(backend, set()))
+            for token in sorted(overlays[backend])
             if token not in base_universe
         )
     violations.extend(
@@ -252,16 +252,16 @@ def note_anchor_violations(anchors: dict[str, set[str]]) -> list[str]:
     for backend in _BACKENDS:
         violations.extend(
             f"note anchor: {token} in the {backend} overlay is not a canonical token"
-            for token in sorted(anchors.get(backend, set()))
+            for token in sorted(anchors[backend])
             if token not in CANONICAL_TOKENS
         )
     union: set[str] = set()
     for backend in _BACKENDS:
-        union |= anchors.get(backend, set())
+        union |= anchors[backend]
     for backend in _BACKENDS:
         violations.extend(
             f"note anchor: {token} carries a note in another overlay but not in {backend}"
-            for token in sorted(union - anchors.get(backend, set()))
+            for token in sorted(union - anchors[backend])
         )
     return violations
 
