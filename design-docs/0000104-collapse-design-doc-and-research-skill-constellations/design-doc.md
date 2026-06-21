@@ -1,7 +1,7 @@
 # Collapse the design-doc and research skill constellations into two umbrella skills
 
-**Status**: Approved
-**Progress**: 17/22 tasks complete
+**Status**: Complete
+**Progress**: 22/22 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -10,18 +10,18 @@ Collapse seven CAFleet skills into two umbrella skills using the per-workflow-fo
 
 ## Success Criteria
 
-- [ ] `grep -rn "cafleet-design-doc-create\|cafleet-design-doc-execute\|cafleet-design-doc-interview\|cafleet-research-report\|cafleet-research-presentation\|cafleet-my-slidev\|cafleet-create-figure" skills/ docs/ README.md .claude/ .claude-plugin/` returns nothing (the `design-docs/` historical record is excluded by the inclusion list; `site/` and repo-root `prompts/` are excluded as generated/historical artifacts).
-- [ ] The surviving umbrella slugs `cafleet-design-doc` and `cafleet-research` are present and registered; `cafleet` is untouched.
-- [ ] The seven skill directories `skills/cafleet-design-doc-create/`, `-execute/`, `-interview/`, `skills/cafleet-research-report/`, `-presentation/`, `skills/cafleet-my-slidev/`, `skills/cafleet-create-figure/` are deleted (staged via `git rm -r`).
-- [ ] `.claude-plugin/plugin.json`'s `"skills"` array no longer registers any of the seven deleted dirs and DOES register `./skills/cafleet-research` (array shrinks 9→3: `cafleet`, `cafleet-design-doc`, `cafleet-research`).
-- [ ] `docs/get-started/configure.md`'s allowlist lists exactly three `Skill(cafleet:…)` entries — `cafleet`, `cafleet-design-doc`, `cafleet-research` — with no residue comment.
-- [ ] Both umbrella `SKILL.md` files carry the union of their sub-workflows' `allowed-tools` and a description carrying ALL sub-trigger keywords (create / implement / validate design doc; research report; presentation / slides; chart / plot / graph / visualize).
-- [ ] The five workflow bodies (`create/create.md`, `execute/execute.md`, `interview/interview.md`, `report/report.md`, `presentation/presentation.md`) and the two utility reference pages (`reference/slidev.md`, `reference/visualization.md`) carry NO frontmatter; only the two umbrella `SKILL.md` files do.
-- [ ] The Slidev theme assets (`reference/slidev/theme/`) are preserved byte-for-byte, and the headmatter `theme:` install-path string resolves to `skills/cafleet-research/reference/slidev/theme`.
-- [ ] Every relative link in every moved/created file resolves (depth rewrites applied; see R-PATHS); no `../cafleet-design-doc/…` link and no dangling `cafleet-my-slidev` / `cafleet-create-figure` skill-load remains.
-- [ ] The execute Director's three functional role-file paths resolve to `skills/cafleet-design-doc/execute/roles/{programmer,tester,verifier}.md` (member spawn unbroken; R10).
-- [ ] The two 0000103-era files (`skills/cafleet/reference/base-dir.md`, `skills/cafleet/reference/director.md`) reference the new umbrella slugs and every 0000103-repointed `reference/*` pointer is preserved (depth-adjusted only where it is a true relative link).
-- [ ] `mise //cafleet:lint` passes (no source code touched; lint confirms nothing regressed).
+- [x] `grep -rn "cafleet-design-doc-create\|cafleet-design-doc-execute\|cafleet-design-doc-interview\|cafleet-research-report\|cafleet-research-presentation\|cafleet-my-slidev\|cafleet-create-figure" skills/ docs/ README.md .claude/ .claude-plugin/` returns nothing (the `design-docs/` historical record is excluded by the inclusion list; `site/` and repo-root `prompts/` are excluded as generated/historical artifacts).
+- [x] The surviving umbrella slugs `cafleet-design-doc` and `cafleet-research` are present and registered; `cafleet` is untouched.
+- [x] The seven skill directories `skills/cafleet-design-doc-create/`, `-execute/`, `-interview/`, `skills/cafleet-research-report/`, `-presentation/`, `skills/cafleet-my-slidev/`, `skills/cafleet-create-figure/` are deleted (staged via `git rm -r`).
+- [x] `.claude-plugin/plugin.json`'s `"skills"` array no longer registers any of the seven deleted dirs and DOES register `./skills/cafleet-research` (array shrinks 9→3: `cafleet`, `cafleet-design-doc`, `cafleet-research`).
+- [x] `docs/get-started/configure.md`'s allowlist lists exactly three `Skill(cafleet:…)` entries — `cafleet`, `cafleet-design-doc`, `cafleet-research` — with no residue comment.
+- [x] Both umbrella `SKILL.md` files carry the union of their sub-workflows' `allowed-tools` and a description carrying ALL sub-trigger keywords (create / implement / validate design doc; research report; presentation / slides; chart / plot / graph / visualize).
+- [x] The five workflow bodies (`create/create.md`, `execute/execute.md`, `interview/interview.md`, `report/report.md`, `presentation/presentation.md`) and the two utility reference pages (`reference/slidev.md`, `reference/visualization.md`) carry NO frontmatter; only the two umbrella `SKILL.md` files do.
+- [x] The Slidev theme assets (`reference/slidev/theme/`) are preserved byte-for-byte, and the headmatter `theme:` install-path string resolves to `skills/cafleet-research/reference/slidev/theme`.
+- [x] Every relative link in every moved/created file resolves (depth rewrites applied; see R-PATHS); no `../cafleet-design-doc/…` link and no dangling `cafleet-my-slidev` / `cafleet-create-figure` skill-load remains.
+- [x] The execute Director's three functional role-file paths resolve to `skills/cafleet-design-doc/execute/roles/{programmer,tester,verifier}.md` (member spawn unbroken; R10).
+- [x] The two 0000103-era files (`skills/cafleet/reference/base-dir.md`, `skills/cafleet/reference/director.md`) reference the new umbrella slugs and every 0000103-repointed `reference/*` pointer is preserved (depth-adjusted only where it is a true relative link).
+- [x] `mise //cafleet:lint` passes (no source code touched; lint confirms nothing regressed).
 
 ---
 
@@ -398,14 +398,14 @@ After Steps 1-11 the zero-residue grep returns **0** matches in scope.
 
 ### Step 12: Verification (zero-residue proof)
 
-- [ ] Run the zero-residue grep for all seven deleted slugs over `skills/ docs/ README.md .claude/ .claude-plugin/`, returning **0** (down from the 92 pre-move line-occurrences; `design-docs/`, `site/`, repo-root `prompts/` excluded as historical/generated). Confirm the seven dirs are gone (staged deletions) and `plugin.json` + `configure.md` list exactly `cafleet`, `cafleet-design-doc`, `cafleet-research` <!-- completed: -->
-- [ ] Confirm every relative link in every moved/created file resolves (R-PATHS): no `../cafleet-design-doc/…` link, no dangling `cafleet-my-slidev`/`cafleet-create-figure` skill-load, correct overlay depths; **the execute Director's three functional role-file paths (#37) resolve to `skills/cafleet-design-doc/execute/roles/…` and the other four workflows' absolute-path-by-reference still resolves (R10)**; the slidev theme path resolves and assets are byte-for-byte; the two utility reference pages + five workflow bodies carry no frontmatter; both dispatcher `SKILL.md` files carry the union allowed-tools + multi-trigger description; the R-SEQ grep confirms 0000103 pointers preserved <!-- completed: -->
-- [ ] `mise //cafleet:lint` passes (no source touched; lint confirms nothing regressed) <!-- completed: -->
-- [ ] Post-merge deployment action (R9): remove/re-sync the seven global mirror dirs `~/.claude/skills/{cafleet-design-doc-create,-execute,-interview,cafleet-research-report,-presentation,cafleet-my-slidev,cafleet-create-figure}` so stale copies stop auto-triggering; record in the Changelog <!-- completed: -->
+- [x] Run the zero-residue grep for all seven deleted slugs over `skills/ docs/ README.md .claude/ .claude-plugin/`, returning **0** (down from the 92 pre-move line-occurrences; `design-docs/`, `site/`, repo-root `prompts/` excluded as historical/generated). Confirm the seven dirs are gone (staged deletions) and `plugin.json` + `configure.md` list exactly `cafleet`, `cafleet-design-doc`, `cafleet-research` <!-- completed: 2026-06-21T02:38 -->
+- [x] Confirm every relative link in every moved/created file resolves (R-PATHS): no `../cafleet-design-doc/…` link, no dangling `cafleet-my-slidev`/`cafleet-create-figure` skill-load, correct overlay depths; **the execute Director's three functional role-file paths (#37) resolve to `skills/cafleet-design-doc/execute/roles/…` and the other four workflows' absolute-path-by-reference still resolves (R10)**; the slidev theme path resolves and assets are byte-for-byte; the two utility reference pages + five workflow bodies carry no frontmatter; both dispatcher `SKILL.md` files carry the union allowed-tools + multi-trigger description; the R-SEQ grep confirms 0000103 pointers preserved <!-- completed: 2026-06-21T02:38 -->
+- [x] `mise //cafleet:lint` passes (no source touched; lint confirms nothing regressed) <!-- completed: 2026-06-21T02:38 -->
+- [x] Post-merge deployment action (R9): remove/re-sync the seven global mirror dirs `~/.claude/skills/{cafleet-design-doc-create,-execute,-interview,cafleet-research-report,-presentation,cafleet-my-slidev,cafleet-create-figure}` so stale copies stop auto-triggering; record in the Changelog <!-- completed: 2026-06-21T03:28 (recorded as a pending post-merge action; see Changelog) -->
 
 ### Step 13: Finalize
 
-- [ ] Set Status → Complete, update Progress, verify all tasks checked with timestamps <!-- completed: -->
+- [x] Set Status → Complete, update Progress, verify all tasks checked with timestamps <!-- completed: 2026-06-21T03:28 -->
 
 ---
 
@@ -416,3 +416,4 @@ After Steps 1-11 the zero-residue grep returns **0** matches in scope.
 | 2026-06-21 | Initial draft |
 | 2026-06-21 | Reviewer round 1: ran an exhaustive per-slug `grep -rn` (92 line-occurrences) and reconciled the blast radius against it; added the functional role-file-path group B.0 (#37, `execute/SKILL.md:176-178`) + risk R10 (functional spawn break); enumerated 7 previously-missed body-prose sites (#37-43: execute self-invocation L54, Analyzer-precedent prose in `execute.md` L228 + `verifier.md` L27, presentation usage/invocation strings L65/L203, `visualization.md` calling-context example L24); dropped the frontmatter `description:` L3 lines from rows #19/#23 (they vanish with the Q4 frontmatter drop); corrected the false "`visualization.md` references no Group B slug" claim; restated the table as 43 enumerated sites that grep-prove a 92→0 reduction; added Success-Criteria + Step-3/6/12 coverage; task count 0/22. |
 | 2026-06-21 | Finalized: user approved via the create-skill review loop (2 rounds — round 1 closed the 5 blast-radius gaps above; round 2 confirmed clean). Blast radius grep-verified to 43 enumerated sites / 92→0 residue. Status → Approved. |
+| 2026-06-21 | Executed via cafleet-design-doc execute workflow (Director + Programmer + Opus Reviewer + monitor). All 12 steps implemented across 6 commits (Group A umbrella; Group B umbrella; external consumers + manifest prune; base-dir.md:61 link fix; review F1 techniques-pointer fix; Copilot C1/C2 fixes). Verification green: zero-residue grep = 0, all relative links resolve, R10/R4/R-SEQ intact, theme byte-for-byte, `mise //cafleet:lint` passes. Two spec-prose errors corrected during execution: the `Task`-in-union claims at L115 (design-doc umbrella → verified 9-tool literal union) and L122 (research umbrella → verified 14-tool literal union: `Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet, TaskStop`). One unenumerated blast-radius site fixed: `skills/cafleet/reference/base-dir.md:61` cross-skill link to the moved `reference/coordination.md` (passed the zero-residue grep because `cafleet-design-doc` is a surviving slug). Opus Reviewer approved twice (initial + after Copilot fixes). PR #136 opened with Copilot review; round 1 addressed (2 low-confidence consistency findings) before user-directed finalize. **R9 (post-merge, PENDING):** after this branch merges, remove/re-sync the seven global mirror dirs under `~/.claude/skills/` so stale copies stop auto-triggering. Status → Complete. |
