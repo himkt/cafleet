@@ -1,6 +1,14 @@
 ---
 name: cafleet-research
-description: "Comprehensive multi-source research reports, Slidev presentations, charts, and data visualizations. Use to create a research report (multi-agent Director/Manager/Researcher team writing to researches/<topic>/), build a Slidev presentation / slide deck / reading transcript from a report, create a chart / plot / graph / figure or visualize data with matplotlib, or author slides with the custom Slidev theme. Members in agent teams load this skill by its name cafleet-research via their backend's skill-loader. Do NOT do a quick web search and summarize — route through this skill's workflows."
+description: >-
+  Comprehensive multi-source research reports, Slidev presentations, charts, and
+  data visualizations. Use to create a research report (multi-agent
+  Director/Manager/Researcher team writing to researches/<topic>/), build a
+  Slidev presentation / slide deck / reading transcript from a report, create a
+  chart / plot / graph / figure or visualize data with matplotlib, or author
+  slides with the custom Slidev theme. Members in agent teams load this skill by
+  its name cafleet-research via their backend's skill-loader. Do NOT do a quick
+  web search and summarize — route through this skill's workflows.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet, TaskStop
 ---
 

@@ -1,6 +1,14 @@
 ---
 name: cafleet-design-doc
-description: "Design document format spec plus CAFleet-native orchestration to create, validate, and implement design docs. Consult the template/guidelines when editing an existing design doc; or create a new design doc / specification / technical spec (Director/Drafter/Reviewer), validate/interview an existing one through multi-round Q&A, or implement/execute one with a TDD team. Teammates in agent teams must always load this skill by its name cafleet-design-doc via their backend's skill-loader. Do NOT write or implement design docs freeform — route through this skill's workflows."
+description: >-
+  Design document format spec plus CAFleet-native orchestration to create,
+  validate, and implement design docs. Consult the template/guidelines when
+  editing an existing design doc; or create a new design doc / specification /
+  technical spec (Director/Drafter/Reviewer), validate/interview an existing one
+  through multi-round Q&A, or implement/execute one with a TDD team. Teammates in
+  agent teams must always load this skill by its name cafleet-design-doc via
+  their backend's skill-loader. Do NOT write or implement design docs freeform —
+  route through this skill's workflows.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, AskUserQuestion
 ---
 

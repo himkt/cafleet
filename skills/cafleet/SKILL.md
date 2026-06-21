@@ -1,6 +1,12 @@
 ---
 name: cafleet
-description: "Interact with the CAFleet message broker and supervise CAFleet agent teams. Use when an agent needs to register, send/receive messages, poll inbox, acknowledge messages, or discover other agents; or when a Director is about to spawn, monitor, health-check, or recover a stalled team of CAFleet members (any `cafleet member create`), which requires the dedicated monitoring member, the heartbeat, and the supervision governance."
+description: >-
+  Interact with the CAFleet message broker and supervise CAFleet agent teams.
+  Use when an agent needs to register, send/receive messages, poll inbox,
+  acknowledge messages, or discover other agents; or when a Director is about to
+  spawn, monitor, health-check, or recover a stalled team of CAFleet members
+  (any `cafleet member create`), which requires the dedicated monitoring member,
+  the heartbeat, and the supervision governance.
 ---
 
 # CAFleet — Message Broker CLI
