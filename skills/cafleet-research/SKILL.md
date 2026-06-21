@@ -27,7 +27,7 @@ Before routing into a workflow or consulting a reference page, Read your overlay
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) | every `{placeholder}` (`{monitor_model}`, `{task_coord}`, `{decision_surface}`, …) in the workflow you route into stays unresolved |
+| 1 | your overlay [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/) | every `{placeholder}` (`{monitor_model}`, `{task_coord}`, `{decision_surface}`, …) in the workflow you route into stays unresolved |
 
 **On-demand — consult directly (no team), only when the task needs it:**
 

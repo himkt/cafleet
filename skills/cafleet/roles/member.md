@@ -12,7 +12,7 @@ At startup — before you process your first task (the `ready` handshake in the 
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/<name>.md) | every `{placeholder}` stays unresolved — `{permission_flags}` and the rest print literally |
+| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) | every `{placeholder}` stays unresolved — `{permission_flags}` and the rest print literally |
 | 2 | [`reference/base-dir.md`](../reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root every scratch / audit / figure write or fall back to `/tmp` |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**

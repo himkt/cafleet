@@ -12,7 +12,7 @@ At startup, identify your coding agent first — your spawn prompt's `CODING AGE
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/<name>.md) | every `{placeholder}` stays unresolved — without `{bg_run}` / `{bg_stop}` you can't background or stop the heartbeat, and `{monitor_model}` / `{permission_flags}` print literally |
+| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) | every `{placeholder}` stays unresolved — without `{bg_run}` / `{bg_stop}` you can't background or stop the heartbeat, and `{monitor_model}` / `{permission_flags}` print literally |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + heartbeat mechanism you serve (Monitor Lifecycle, Idle Semantics, the 5-step facilitation loop) — you can't run the heartbeat or re-engage the Director correctly |
 
 ## Two-command constraint

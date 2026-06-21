@@ -15,13 +15,13 @@ Use the `cafleet` CLI to register as an agent, send and receive messages, and di
 
 ## Required reading
 
-Before your first action other than these Reads, Read every file in the **Load-bearing** table below, in order — each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity. As you read the base, substitute your overlay's value for each `{placeholder}` you encounter.
+Before your first action other than these Reads, Read every file in the **Load-bearing** table below, in order (row #2 applies only if you write files) — each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity. As you read the base, substitute your overlay's value for each `{placeholder}` you encounter.
 
 **Load-bearing — Read in order before acting:**
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>.md`](reference/coding-agent/<name>.md) | every `{placeholder}` in this skill stays unresolved — you emit literal `{monitor_model}`, `{permission_flags}`, `{decision_surface}` |
+| 1 | your overlay [`reference/coding-agent/<name>.md`](reference/coding-agent/) | every `{placeholder}` in this skill stays unresolved — you emit literal `{monitor_model}`, `{permission_flags}`, `{decision_surface}` |
 | 2 | [`reference/base-dir.md`](reference/base-dir.md) — if you write any scratch / audit / figure file | the no-bypass write protocol and the `<unset>` contract — you mis-root every write or fall back to `/tmp` |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**

@@ -10,7 +10,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/<name>.md) | `{skill_loader}` and the other `{placeholder}` tokens stay unresolved — you can't load the `cafleet` skill correctly |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/) | `{skill_loader}` and the other `{placeholder}` tokens stay unresolved — you can't load the `cafleet` skill correctly |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the missing-`BASE` anchorless-status convention and the no-bypass write protocol — you mishandle a `BASE`-less spawn |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the anchorless-status and message-exemption rules — your one-time question-list payload and any status hop get mis-formatted |
 

@@ -10,7 +10,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/<name>.md) | every `{placeholder}` (`{skill_loader}`, `{task_coord}`) stays unresolved |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/) | every `{placeholder}` (`{skill_loader}`, `{task_coord}`) stays unresolved |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root your `NN-research-*.md` output or fall back to `/tmp` |
 | 3 | the embedded web-researcher spec [`web-researcher.md`](web-researcher.md) | the research methodology (Discovery Phase, query formulation, fact verification, output format) you delegate every web-research turn to — you'd search ad hoc and return shallow, under-sourced findings |
 

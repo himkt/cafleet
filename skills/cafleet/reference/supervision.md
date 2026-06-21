@@ -2,7 +2,7 @@
 
 Read this file for CAFleet team supervision — the Director-only governance and the `cafleet monitor` heartbeat mechanism it is performed through. It defines the always-applicable obligations (Core Principle, Communication Model, Idle Semantics, Authorization-Scope Guard, Spawn Protocol), the heartbeat mechanism (the monitor loop, how members are woken, the monitoring member, the 5-step facilitation loop, Monitor Lifecycle), and the recovery surface (Stall Response, User Delegation, Cleanup, Quick Reference). Ordinary members and standalone agents never load it.
 
-**Required reading — your overlay first.** These instructions are backend-neutral and use `{placeholder}` tokens (`{monitor_model}`, `{decision_surface}`, `{permission_flags}`). Before acting on them, Read your overlay [`coding-agent/<name>.md`](coding-agent/<name>.md) — `<name>` is the coding agent named on your spawn prompt's `CODING AGENT:` line — and substitute its value for each token. Skip it and every `{placeholder}` here stays unresolved — you spawn the monitoring member with a literal `--model {monitor_model}` instead of its real model.
+**Required reading — your overlay first.** These instructions are backend-neutral and use `{placeholder}` tokens (`{monitor_model}`, `{decision_surface}`, `{permission_flags}`). Before acting on them, Read your overlay [`coding-agent/<name>.md`](coding-agent/) — `<name>` is the coding agent named on your spawn prompt's `CODING AGENT:` line — and substitute its value for each token. Skip it and every `{placeholder}` here stays unresolved — you spawn the monitoring member with a literal `--model {monitor_model}` instead of its real model.
 
 ## Core Principle
 
@@ -147,13 +147,13 @@ cafleet member capture --fleet-id <fleet-id> \
   --member-id <member-agent-id>
 ```
 
-The capture-line count needed to show a member's full decision-prompt frame — and the concrete frame shape — is a backend delta; see your overlay ([`coding-agent/<name>.md`](coding-agent/<name>.md)). The `cafleet member capture` default is `--lines 30`.
+The capture-line count needed to show a member's full decision-prompt frame — and the concrete frame shape — is a backend delta; see your overlay ([`coding-agent/<name>.md`](coding-agent/)). The `cafleet member capture` default is `--lines 30`.
 
 If `cafleet message poll` shows no recent messages from the member, fall back to capturing the terminal buffer. This is non-intrusive (read-only inspection that works even when the member is mid-task) and replaces raw `tmux capture-pane`.
 
 If the terminal buffer shows the member paused on a decision-prompt frame awaiting a user reaction, the correct unblock is the decision-relay primitive your overlay describes — never raw `tmux send-keys` — and the Director MUST delegate the decision to the user BEFORE invoking it. The Director never decides on its own judgment. The concrete pane frame, the three-beat workflow, and the pane-shapes table are backend deltas; the neutral pointer is [`reference/director.md`](director.md) § *Answering a member's relayed question*.
 
-> **The decision surface is a backend delta.** The concrete user-reaction surface and the pane-keystroke relay for forwarding an answer are backend-specific — see your overlay ([`coding-agent/<name>.md`](coding-agent/<name>.md)). The canonical, backend-neutral user-reaction rule is [`SKILL.md`](../SKILL.md) § *Soliciting user reactions*.
+> **The decision surface is a backend delta.** The concrete user-reaction surface and the pane-keystroke relay for forwarding an answer are backend-specific — see your overlay ([`coding-agent/<name>.md`](coding-agent/)). The canonical, backend-neutral user-reaction rule is [`SKILL.md`](../SKILL.md) § *Soliciting user reactions*.
 
 ### Escalation
 
@@ -194,6 +194,6 @@ Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol (fir
 | Inspect stalled member | `cafleet member capture --fleet-id <s> --member-id <member>` | Replaces raw `tmux capture-pane` |
 | Manual inbox-poll nudge | `cafleet member ping --fleet-id <s> --member-id <member>` | Pre-approved; for missed auto-fires and post-`exec` chains |
 | Shell-dispatch on member's behalf | `cafleet member exec --fleet-id <s> --member-id <member> "<cmd>"` | Per [`reference/exec-routing.md`](exec-routing.md); follow with `member ping` |
-| Answer a member's relayed question | the decision-relay primitive your overlay describes ([`coding-agent/<name>.md`](coding-agent/<name>.md)) | Delegate the decision to the user via {decision_surface} first; never decide silently |
+| Answer a member's relayed question | the decision-relay primitive your overlay describes ([`coding-agent/<name>.md`](coding-agent/)) | Delegate the decision to the user via {decision_surface} first; never decide silently |
 | Relay user input | {decision_surface} → `cafleet message send` | Pass-through; never substitute judgment |
 | Shut down team | [`reference/recovery.md`](recovery.md) § Shutdown Protocol | Stop monitor → delete monitoring member first → `member delete` each ordinary → `fleet delete` |

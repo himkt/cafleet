@@ -30,7 +30,7 @@ The Skill-file split keeps load-bearing protocol out of the eagerly-loaded core 
 
 Each block classifies every link the reader needs into three tables:
 
-- **Load-bearing — Read in order before acting.** The reads the agent cannot reconstruct from the page. Each row carries a concrete "what you lose if you skip it" consequence (a wrong write path, an unresolved `{placeholder}`, a dropped protocol). The agent's overlay (`reference/coding-agent/<name>.md`) is row #1 wherever the page uses `{placeholder}` tokens.
+- **Load-bearing — Read in order before acting.** These are the reads the agent cannot reconstruct from the page. Each row carries a concrete "what you lose if you skip it" consequence (a wrong write path, an unresolved `{placeholder}`, a dropped protocol). The agent's overlay (`reference/coding-agent/<name>.md`) is row #1 wherever the page uses `{placeholder}` tokens.
 - **Load-bearing on trigger — Read at the named moment.** Deferred but mandatory then (teardown, broadcast, a Bash denial), each with its own consequence cell. This preserves the split's lazy-load savings: the read stays deferred, the gate states when it becomes due.
 - **On-demand — Read only when you need that capability.** Genuinely optional; no consequence column.
 

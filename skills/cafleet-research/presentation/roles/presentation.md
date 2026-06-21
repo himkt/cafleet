@@ -10,10 +10,15 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/<name>.md) | every `{placeholder}` (`{skill_loader}`) stays unresolved |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/) | every `{placeholder}` (`{skill_loader}`) stays unresolved |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root `slide.md` / figure writes or fall back to `/tmp` |
 | 3 | [`../../reference/slidev.md`](../../reference/slidev.md) | the Slidev authoring layouts, the mandatory Self-Review Checklist, color discipline, and citation rules — your deck uses wrong layouts and fails review |
-| 4 | [`../../reference/visualization.md`](../../reference/visualization.md) | the Chart Type Selection and Color Rules — your figures pick the wrong chart type or off-palette colors (read when the report has data that renders better as a chart) |
+
+**Load-bearing on trigger — Read at the named moment, before that action:**
+
+| Read | Read before you… | What you lose if you skip it |
+|------|------------------|------------------------------|
+| [`../../reference/visualization.md`](../../reference/visualization.md) | render a chart / figure (the report has data better shown as a chart) | the Chart Type Selection and Color Rules — your figures pick the wrong chart type or off-palette colors |
 
 ## Core Rules
 

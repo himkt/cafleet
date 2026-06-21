@@ -12,7 +12,7 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/<name>.md) | every `{placeholder}` stays unresolved — you emit literal `{decision_surface}` / `{monitor_model}` / `{permission_flags}` and lack the backend decision-relay primitive |
+| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) | every `{placeholder}` stays unresolved — you emit literal `{decision_surface}` / `{monitor_model}` / `{permission_flags}` and lack the backend decision-relay primitive |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + `cafleet monitor` heartbeat (monitor-first spawn, the `ready: monitor live` gate, the 5-step facilitation loop, the Authorization-Scope Guard) — you spawn an unsupervised team |
 | 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `delete` / `list --activity` / `capture` / `exec` / `ping`) and the canonical spawn-prompt skeleton — you can't spawn or drive members |
 
