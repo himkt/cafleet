@@ -154,10 +154,10 @@ def _overlay_path(backend: str) -> Path:
     return _coding_agent_dir() / f"{backend}.md"
 
 
-def _overlay_value_tokens(backend: str) -> set[str]:
-    """Tokens defined in an overlay's value table — the first-column cell of each
-    row before the ``## Note → applies at`` heading."""
-    lines = _overlay_path(backend).read_text(encoding="utf-8").splitlines()
+def _value_table_tokens(path: Path) -> set[str]:
+    """First-column ``{token}`` cells of a value table — the rows before the
+    ``## Note → applies at`` heading."""
+    lines = path.read_text(encoding="utf-8").splitlines()
     value_lines: list[str] = []
     for ln in lines:
         if ln.strip() == _NOTE_HEADING:
@@ -169,6 +169,16 @@ def _overlay_value_tokens(backend: str) -> set[str]:
         if len(cells) > 1:
             tokens |= extract_tokens(cells[1])
     return tokens
+
+
+def _overlay_value_tokens(backend: str) -> set[str]:
+    """Tokens defined in an overlay's value table."""
+    return _value_table_tokens(_overlay_path(backend))
+
+
+def _template_value_tokens() -> set[str]:
+    """Tokens defined in ``_template.md``'s value table (the new-backend skeleton)."""
+    return _value_table_tokens(_coding_agent_dir() / "_template.md")
 
 
 def _overlay_note_anchors(backend: str) -> set[str]:
@@ -300,6 +310,23 @@ def note_path_violations(
     return violations
 
 
+def template_token_violations(template_tokens: set[str]) -> list[str]:
+    """``_template.md``'s value table must define exactly the canonical token set
+    — no missing token (a new backend would lack it) and no extra (drift)."""
+    violations: list[str] = []
+    violations.extend(
+        f"template token: {token} is in the canonical set "
+        f"but missing from the _template.md value table"
+        for token in sorted(CANONICAL_TOKENS - template_tokens)
+    )
+    violations.extend(
+        f"template token: {token} is in the _template.md value table "
+        f"but not in the canonical set"
+        for token in sorted(template_tokens - CANONICAL_TOKENS)
+    )
+    return violations
+
+
 def check_overlay_coverage() -> list[str]:
     """Run all checks against the live skill tree; return all violations."""
     root = _skill_root()
@@ -308,11 +335,13 @@ def check_overlay_coverage() -> list[str]:
     default_tokens = _default_table_tokens()
     anchors = {backend: _overlay_note_anchors(backend) for backend in _BACKENDS}
     cited_paths = {backend: _overlay_note_paths(backend) for backend in _BACKENDS}
+    template_tokens = _template_value_tokens()
     return (
         token_coverage_violations(base_universe, overlays, default_tokens)
         + orphan_token_violations(base_universe, overlays, default_tokens)
         + note_anchor_violations(anchors)
         + note_path_violations(cited_paths, root)
+        + template_token_violations(template_tokens)
     )
 
 

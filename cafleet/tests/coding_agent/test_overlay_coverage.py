@@ -36,6 +36,7 @@ from cafleet.coding_agent.overlay_coverage import (
     note_anchor_violations,
     note_path_violations,
     orphan_token_violations,
+    template_token_violations,
     token_coverage_violations,
 )
 
@@ -265,6 +266,31 @@ def test_note_path_passes_when_every_cited_path_exists(tmp_path):
         "opencode": {"cafleet-research/report/report.md"},
     }
     assert note_path_violations(cited_paths, tmp_path) == []
+
+
+# --------------------------------------------------------------------------
+# Template token parity (pure logic)
+# --------------------------------------------------------------------------
+
+
+def test_template_tokens_pass_when_equal_to_canonical_set():
+    """``_template.md``'s value table must define exactly the canonical set."""
+    assert template_token_violations(_all_eight()) == []
+
+
+def test_template_tokens_flag_a_missing_canonical_token():
+    template_tokens = _all_eight()
+    template_tokens.discard("{pane_title}")
+    violations = template_token_violations(template_tokens)
+    assert violations
+    assert any("{pane_title}" in v for v in violations), violations
+
+
+def test_template_tokens_flag_an_extra_non_canonical_token():
+    template_tokens = _all_eight() | {"{extra_token}"}
+    violations = template_token_violations(template_tokens)
+    assert violations
+    assert any("{extra_token}" in v for v in violations), violations
 
 
 # --------------------------------------------------------------------------
