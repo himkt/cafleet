@@ -1,7 +1,7 @@
 # Restore Workflow Auto-Invocation for the CAFleet Design-Doc and Research Skills
 
 **Status**: Approved
-**Progress**: 10/11 tasks complete
+**Progress**: 11/11 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -10,14 +10,14 @@ The `cafleet-design-doc` and `cafleet-research` umbrella skills no longer reliab
 
 ## Success Criteria
 
-- [ ] Each umbrella `SKILL.md` frontmatter `description` leads with crisp, scenario-keyed triggers phrased in the user's own likely wording, so the coding agent auto-invokes the skill without an explicit "use cafleet" instruction.
-- [ ] **Behavioral validation passes**: in a fresh coding-agent session, a triggering prompt that does NOT mention cafleet (e.g. "create a design doc for X", "research topic Y") causes the agent to (a) auto-invoke the matching skill and (b) route into the workflow such that the dedicated monitoring member is spawned first-in. This behavioral outcome — not a structural re-read — is the gate for marking the work complete.
-- [ ] Each `SKILL.md` body presents an **imperative, scenario-linked dispatch** that names, for each scenario, the affirmative action (invoke this skill and run the matching workflow as a full CAFleet team) and the link to the workflow body.
-- [ ] Both `SKILL.md` files state affirmatively that routing into a workflow means executing its **entire** orchestration: the dedicated monitoring member spawned first-in, then the role team, then the message-broker quality loop — so the "full orchestration once entered" half of the bug is addressed at the dispatch point.
-- [ ] All trigger and dispatch language is **affirmative-only** (positive spec, no named "Do NOT write directly / Do NOT use EnterPlanMode / Do NOT web-search-and-summarize" prohibitions), per `affirmative-writing.md`.
-- [ ] The base instructions stay backend-neutral: the coding-agent overlay note and the "teammates load this skill by its name … via their backend's skill-loader" note are retained unchanged in intent, per `.claude/rules/coding-agent-overlay.md`.
-- [ ] The fix surface is the **two `SKILL.md` files only** — no workflow body (`create`/`execute`/`interview`/`report`/`presentation`), no role file, and no `reference/*` page is modified.
-- [ ] No documentation drift: `README.md`, `docs/get-started/*`, and `docs/how-to/design-doc-development.md` continue to describe the skills accurately after the rewrite; a doc is edited only if a trigger statement in it actually drifts.
+- [x] Each umbrella `SKILL.md` frontmatter `description` leads with crisp, scenario-keyed triggers phrased in the user's own likely wording, so the coding agent auto-invokes the skill without an explicit "use cafleet" instruction.
+- [x] **Behavioral validation passes**: in a fresh coding-agent session, a triggering prompt that does NOT mention cafleet (e.g. "create a design doc for X", "research topic Y") causes the agent to (a) auto-invoke the matching skill and (b) route into the workflow such that the dedicated monitoring member is spawned first-in. This behavioral outcome — not a structural re-read — is the gate for marking the work complete.
+- [x] Each `SKILL.md` body presents an **imperative, scenario-linked dispatch** that names, for each scenario, the affirmative action (invoke this skill and run the matching workflow as a full CAFleet team) and the link to the workflow body.
+- [x] Both `SKILL.md` files state affirmatively that routing into a workflow means executing its **entire** orchestration: the dedicated monitoring member spawned first-in, then the role team, then the message-broker quality loop — so the "full orchestration once entered" half of the bug is addressed at the dispatch point.
+- [x] All trigger and dispatch language is **affirmative-only** (positive spec, no named "Do NOT write directly / Do NOT use EnterPlanMode / Do NOT web-search-and-summarize" prohibitions), per `affirmative-writing.md`.
+- [x] The base instructions stay backend-neutral: the coding-agent overlay note and the "teammates load this skill by its name … via their backend's skill-loader" note are retained unchanged in intent, per `.claude/rules/coding-agent-overlay.md`.
+- [x] The fix surface is the **two `SKILL.md` files only** — no workflow body (`create`/`execute`/`interview`/`report`/`presentation`), no role file, and no `reference/*` page is modified.
+- [x] No documentation drift: `README.md`, `docs/get-started/*`, and `docs/how-to/design-doc-development.md` continue to describe the skills accurately after the rewrite; a doc is edited only if a trigger statement in it actually drifts.
 
 ## Background
 
@@ -138,7 +138,12 @@ The intro paragraph, the coding-agent-overlay note, and the teammates-load-by-na
 
 ### Step 4: Behavioral validation (gate for completion)
 
-- [ ] In a fresh coding-agent session, issue a triggering prompt for each skill that does NOT mention cafleet — e.g. "create a design doc for <X>" and "research <Y>" — and confirm the agent (a) auto-invokes the matching skill and (b) routes into the workflow such that the dedicated monitoring member is the first `cafleet member create`. Record the outcome. This behavioral pass — not the Step 3 structural re-read — is what authorizes marking the design complete. <!-- completed: -->
+- [x] In a fresh coding-agent session, issue a triggering prompt for each skill that does NOT mention cafleet — e.g. "create a design doc for <X>" and "research <Y>" — and confirm the agent (a) auto-invokes the matching skill and (b) routes into the workflow such that the dedicated monitoring member is the first `cafleet member create`. Record the outcome. This behavioral pass — not the Step 3 structural re-read — is what authorizes marking the design complete. <!-- completed: 2026-06-21T06:03 -->
+
+**Step 4 outcome (recorded).** Prerequisite caught during execution: the repo `SKILL.md` edits are not loaded by agents until synced to `~/.claude/skills/` via `gh skill install` (`mise //:skill-install`). The validation below was run only after that deploy, against the live new descriptions. Two fresh coding-agent sessions were issued non-cafleet triggering prompts ("create a design doc for a per-client rate-limiting feature" and "create a multi-source research report on WebAssembly component model adoption"):
+
+> - **design-doc**: auto-invoked `cafleet-design-doc` from the bare prompt → create workflow; confirmed the first `cafleet member create` is the monitoring member (`--role monitor --model haiku`) gating the Drafter/Reviewer. No "use cafleet" cue needed; the agent cited the new dispatch line "without waiting for the user to say 'use cafleet'".
+> - **research**: saw both `cafleet-research` and the competing generic `deep-research`, and chose `cafleet-research` on the trigger match → report workflow; confirmed the first `cafleet member create` is the monitoring member (`--role monitor --model haiku`) gating all spawns. No "use cafleet" cue needed.
 
 ## Changelog
 
