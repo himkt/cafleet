@@ -4,6 +4,23 @@ You are a **member** spawned by `cafleet member create`. You run in workspace-sc
 
 This file is your role anchor. The cafleet CLI surface you call (poll / send / ack / cancel / show) is in [`skills/cafleet/SKILL.md`](../SKILL.md); the bash-via-Director fallback (when your harness deny-list rejects a Bash invocation) is in [`reference/exec-routing.md`](../reference/exec-routing.md). You do NOT read `reference/director.md`, `reference/recovery.md`, or `reference/broadcast.md` — those are Director-side.
 
+## Required reading
+
+At startup — before you process your first task (the `ready` handshake in the next section excepted) — Read every file in the **Load-bearing** table below, in order. Each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it.
+
+**Load-bearing — Read in order before acting:**
+
+| # | Read | What you lose if you skip it |
+|---|------|------------------------------|
+| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/<name>.md) | every `{placeholder}` stays unresolved — `{permission_flags}` and the rest print literally |
+| 2 | [`reference/base-dir.md`](../reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root every scratch / audit / figure write or fall back to `/tmp` |
+
+**Load-bearing on trigger — Read at the named moment, before that action:**
+
+| Read | Read before you… | What you lose if you skip it |
+|------|------------------|------------------------------|
+| [`reference/exec-routing.md`](../reference/exec-routing.md) | route a Bash-denied command to the Director | the reconsider-then-route protocol and the dispatch shape — you stall, fabricate output, or prompt the operator needlessly |
+
 ## On spawn — send the ready signal (FIRST ACTION)
 
 Your very first Bash call sends a `ready` message to the Director (it matches the literal `ready` prefix to detect you are alive and dispatches your first task on that tick):

@@ -1,7 +1,7 @@
 # Skill Linked-Content Enforcement
 
 **Status**: Approved
-**Progress**: 7/27 tasks complete
+**Progress**: 11/27 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -177,10 +177,10 @@ The `SKILL.md:18-27` "Read on demand" list is rewritten into the three-way class
 
 ### Step 3: Apply to `cafleet` role + reference entry points
 
-- [ ] Add the Required-reading block to `cafleet/roles/director.md`: upgrade the existing "Reading order" per-trigger gates into the **Load-bearing on trigger** sub-table (add consequence cells), keeping their deferred nature — do not force them eager. <!-- completed: -->
-- [ ] Add the Required-reading block to `cafleet/roles/member.md` (overlay, base-dir eager; exec-routing as load-bearing on trigger — a Bash denial). <!-- completed: -->
-- [ ] Add the Required-reading block to `cafleet/roles/monitor.md` (overlay, supervision). <!-- completed: -->
-- [ ] Reclassify the on-demand menus inside `cafleet/reference/supervision.md` (surface B). <!-- completed: -->
+- [x] Add the Required-reading block to `cafleet/roles/director.md`: upgrade the existing "Reading order" per-trigger gates into the **Load-bearing on trigger** sub-table (add consequence cells), keeping their deferred nature — do not force them eager. <!-- completed: 2026-06-21T08:05 -->
+- [x] Add the Required-reading block to `cafleet/roles/member.md` (overlay, base-dir eager; exec-routing as load-bearing on trigger — a Bash denial). <!-- completed: 2026-06-21T08:05 -->
+- [x] Add the Required-reading block to `cafleet/roles/monitor.md` (overlay, supervision). <!-- completed: 2026-06-21T08:05 -->
+- [x] Reclassify the on-demand menus inside `cafleet/reference/supervision.md` (surface B). <!-- completed: 2026-06-21T08:05 -->
 
 ### Step 4: Apply to `cafleet-design-doc`
 

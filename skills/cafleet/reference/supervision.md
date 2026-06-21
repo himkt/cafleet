@@ -2,7 +2,7 @@
 
 Read this file for CAFleet team supervision — the Director-only governance and the `cafleet monitor` heartbeat mechanism it is performed through. It defines the always-applicable obligations (Core Principle, Communication Model, Idle Semantics, Authorization-Scope Guard, Spawn Protocol), the heartbeat mechanism (the monitor loop, how members are woken, the monitoring member, the 5-step facilitation loop, Monitor Lifecycle), and the recovery surface (Stall Response, User Delegation, Cleanup, Quick Reference). Ordinary members and standalone agents never load it.
 
-**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`coding-agent/<name>.md`](coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
+**Required reading — your overlay first.** These instructions are backend-neutral and use `{placeholder}` tokens (`{monitor_model}`, `{decision_surface}`, `{permission_flags}`). Before acting on them, Read your overlay [`coding-agent/<name>.md`](coding-agent/<name>.md) — `<name>` is the coding agent named on your spawn prompt's `CODING AGENT:` line — and substitute its value for each token. Skip it and every `{placeholder}` here stays unresolved — you spawn the monitoring member with a literal `--model {monitor_model}` instead of its real model.
 
 ## Core Principle
 

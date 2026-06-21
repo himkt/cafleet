@@ -4,13 +4,31 @@ You are a **Director** managing one or more members in a CAFleet team. Members s
 
 This file is the role-specific anchor. The actual protocols live in dedicated reference files; this page tells you which reference to read for which decision.
 
-## Reading order
+## Required reading
 
-1. **Before spawning your first member**, Read [`reference/director.md`](../reference/director.md). Covers `member create`, `member delete`, `member list --activity`, `member capture`, `member exec`, and `member ping` — the backend-neutral Director-only commands. The backend-specific decision-relay primitive (for forwarding a user reaction to a member) lives in your overlay.
-2. **Before processing a member's denial-fallback request**, Read [`reference/exec-routing.md`](../reference/exec-routing.md). Covers how to recognize a member-originated bash request, the `cafleet member exec` dispatch shape, the required `cafleet member ping` follow-up, serialization (process one request at a time in poll order), and the cross-fleet boundary.
-3. **Before tearing down a member or fleet**, Read [`reference/recovery.md`](../reference/recovery.md). Covers the 2-stage health check, stalled-member shape classification, recovery from a wedged `/exit`, and the full Shutdown Protocol (stop the monitor → delete members → verify → `fleet delete` → confirm).
-4. **Before broadcasting**, Read [`reference/broadcast.md`](../reference/broadcast.md). Covers fan-out semantics, the `broadcast_summary` envelope, and threading via `origin_task_id`.
-5. **For `--full` opt-back-in semantics**, Read [`reference/output-flags.md`](../reference/output-flags.md).
+Before spawning your first member, Read every file in the **Load-bearing** table below, in order — each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it.
+
+**Load-bearing — Read in order before acting:**
+
+| # | Read | What you lose if you skip it |
+|---|------|------------------------------|
+| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/<name>.md) | every `{placeholder}` stays unresolved — you emit literal `{decision_surface}` / `{monitor_model}` / `{permission_flags}` and lack the backend decision-relay primitive |
+| 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + `cafleet monitor` heartbeat (monitor-first spawn, the `ready: monitor live` gate, the 5-step facilitation loop, the Authorization-Scope Guard) — you spawn an unsupervised team |
+| 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `delete` / `list --activity` / `capture` / `exec` / `ping`) and the canonical spawn-prompt skeleton — you can't spawn or drive members |
+
+**Load-bearing on trigger — Read at the named moment, before that action:**
+
+| Read | Read before you… | What you lose if you skip it |
+|------|------------------|------------------------------|
+| [`reference/exec-routing.md`](../reference/exec-routing.md) | process a member's denial-fallback request | the `cafleet member exec` dispatch shape, the required `cafleet member ping` follow-up, and serialization (one request at a time, poll order) — the member stalls waiting on `! <command>` output |
+| [`reference/recovery.md`](../reference/recovery.md) | tear down or recover a member / fleet | the 2-stage health check, stalled-member classification, and the first-out Shutdown Protocol order (stop monitor → delete members → verify → `fleet delete`) — you orphan panes / leak the fleet |
+| [`reference/broadcast.md`](../reference/broadcast.md) | broadcast to the fleet | the fan-out semantics, the `broadcast_summary` envelope, and `origin_task_id` threading — your broadcast misfires |
+
+**On-demand — Read only when you need that capability:**
+
+| Read | When |
+|------|------|
+| [`reference/output-flags.md`](../reference/output-flags.md) | you need `--full` / `--json` / `--quiet` opt-back-in semantics |
 
 ## Placeholder convention
 
