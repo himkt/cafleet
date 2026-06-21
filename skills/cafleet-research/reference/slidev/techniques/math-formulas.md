@@ -53,7 +53,7 @@ Where:
 
 ## Formula Admonition Rules
 
-The wrapping rule (§ Display (Block) Formulas above) admits exactly these exceptions; the `formula` type uses a larger content font (`1rem`) for math readability (full Admonition details in `techniques/formatting.md`):
+The wrapping rule (§ Display (Block) Formulas above) admits exactly these exceptions; the `formula` type uses a larger content font (`1rem`) for math readability (full Admonition details in `formatting.md`):
 
 | Math Type | Treatment |
 |-----------|-----------|

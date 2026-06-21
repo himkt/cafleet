@@ -36,7 +36,7 @@ Always leave a blank line after the opening tag and before the closing tag for m
 | `type` | String | `'note'` | One of: `note`, `important`, `tip`, `warning`, `caution`, `formula` |
 | `title` | String | Auto from type | Box title text. Defaults to capitalized type name |
 
-The `formula` type has a larger content font size (`1rem` vs `0.85rem`) for better readability of KaTeX-rendered math. All display math (`$$...$$`) must be wrapped in `<Admonition type="formula">` — see `techniques/math-formulas.md`.
+The `formula` type has a larger content font size (`1rem` vs `0.85rem`) for better readability of KaTeX-rendered math. All display math (`$$...$$`) must be wrapped in `<Admonition type="formula">` — see `math-formulas.md`.
 
 ### When to use Admonitions vs alternatives
 
