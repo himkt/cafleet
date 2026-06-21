@@ -1,7 +1,7 @@
 # Coding-agent Overlay Application
 
 **Status**: Approved
-**Progress**: 3/23 tasks complete
+**Progress**: 6/23 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -203,9 +203,9 @@ Fresh-session probes are the runtime acceptance test (mirroring 0000105 Step 4 a
 
 ### Step 2: Define the canonical Resolve checkpoint in `cafleet/SKILL.md`
 
-- [ ] Add the `## Resolve your overlay` sub-section (Part 1) immediately beneath the Required-reading block: the three-beat procedure (materialize values / apply notes / emission self-check), the resolution order, and the backend-neutral documented-default table. <!-- completed: -->
-- [ ] Upgrade the overlay Required-reading row #1 (Part 2): change the verb to read-and-resolve and rewrite the consequence cell to name all three application-failure modes (literal token, wrong/default value, ignored note). <!-- completed: -->
-- [ ] Replace the passive trailing clause on `cafleet/SKILL.md:18` ("As you read the base, substitute your overlay's value for each `{placeholder}` you encounter") with the active pointer to *Resolve your overlay* — a replacement, leaving no residue (removal-completeness). <!-- completed: -->
+- [x] Add the `## Resolve your overlay` sub-section (Part 1) immediately beneath the Required-reading block: the three-beat procedure (materialize values / apply notes / emission self-check), the resolution order, and the backend-neutral documented-default table. <!-- completed: 2026-06-21T09:54 -->
+- [x] Upgrade the overlay Required-reading row #1 (Part 2): change the verb to read-and-resolve and rewrite the consequence cell to name all three application-failure modes (literal token, wrong/default value, ignored note). <!-- completed: 2026-06-21T09:54 -->
+- [x] Replace the passive trailing clause on `cafleet/SKILL.md:18` ("As you read the base, substitute your overlay's value for each `{placeholder}` you encounter") with the active pointer to *Resolve your overlay* — a replacement, leaving no residue (removal-completeness). <!-- completed: 2026-06-21T09:54 -->
 
 ### Step 3: Restructure the overlays and `_template.md`
 
