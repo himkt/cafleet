@@ -67,6 +67,9 @@ _IGNORE_TOKENS = META_TOKENS | NON_RESOLVABLE_TOKENS
 
 _TOKEN_RE = re.compile(r"\{[a-z_]+\}")
 
+# Backticked skill-root-relative ``*.md`` path cited in a note's applies-at cell.
+_MD_PATH_RE = re.compile(r"`([^`]+\.md)`")
+
 _BACKENDS = ("claude", "codex", "opencode")
 
 # Skill families whose markdown forms the backend-neutral "base".
@@ -179,6 +182,18 @@ def _overlay_note_anchors(backend: str) -> set[str]:
     return anchors
 
 
+def _overlay_note_paths(backend: str) -> set[str]:
+    """Skill-root-relative ``*.md`` paths cited in an overlay's note applies-at
+    cells (the backticked file references each note binds to)."""
+    lines = _overlay_path(backend).read_text(encoding="utf-8").splitlines()
+    paths: set[str] = set()
+    for row in _table_rows(_section(lines, _NOTE_HEADING)):
+        cells = _cells(row)
+        if len(cells) > 2:
+            paths |= set(_MD_PATH_RE.findall(cells[2]))
+    return paths
+
+
 def _default_table_tokens() -> set[str]:
     """Tokens with a row in the ``### Documented defaults`` table in
     ``cafleet/SKILL.md`` (first-column cell)."""
@@ -266,16 +281,37 @@ def note_anchor_violations(anchors: dict[str, set[str]]) -> list[str]:
     return violations
 
 
+def note_path_violations(
+    cited_paths: dict[str, set[str]],
+    skill_root: Path,
+) -> list[str]:
+    """Every ``*.md`` path cited in a note's applies-at cell must resolve to an
+    existing file under ``skill_root`` (design Part 5 check 3: "where it cites a
+    file/section, that file exists")."""
+    violations: list[str] = []
+    for backend, paths in cited_paths.items():
+        violations.extend(
+            f"note reference: {backend} overlay cites `{rel_path}` in a note "
+            f"applies-at cell, but no such file exists under the skills root"
+            for rel_path in sorted(paths)
+            if not (skill_root / rel_path).is_file()
+        )
+    return violations
+
+
 def check_overlay_coverage() -> list[str]:
-    """Run the three checks against the live skill tree; return all violations."""
+    """Run all checks against the live skill tree; return all violations."""
+    root = _skill_root()
     base_universe = base_token_universe()
     overlays = {backend: _overlay_value_tokens(backend) for backend in _BACKENDS}
     default_tokens = _default_table_tokens()
     anchors = {backend: _overlay_note_anchors(backend) for backend in _BACKENDS}
+    cited_paths = {backend: _overlay_note_paths(backend) for backend in _BACKENDS}
     return (
         token_coverage_violations(base_universe, overlays, default_tokens)
         + orphan_token_violations(base_universe, overlays, default_tokens)
         + note_anchor_violations(anchors)
+        + note_path_violations(cited_paths, root)
     )
 
 

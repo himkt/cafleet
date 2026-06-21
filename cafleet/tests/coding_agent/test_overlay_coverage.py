@@ -33,6 +33,7 @@ from cafleet.coding_agent.overlay_coverage import (
     check_overlay_coverage,
     extract_tokens,
     note_anchor_violations,
+    note_path_violations,
     orphan_token_violations,
     token_coverage_violations,
 )
@@ -230,6 +231,39 @@ def test_note_anchors_flagged_when_anchor_is_not_a_canonical_token():
     violations = note_anchor_violations(anchors)
     assert violations
     assert any("{not_a_token}" in v for v in violations), violations
+
+
+# --------------------------------------------------------------------------
+# Check 3 — note-binding file existence (pure logic)
+# --------------------------------------------------------------------------
+
+
+def test_note_path_flags_cited_md_path_missing_under_skill_root(tmp_path):
+    """A note that cites a ``*.md`` path with no file under the skill root is
+    a violation that names the missing path; an existing path is not."""
+    existing = tmp_path / "cafleet" / "SKILL.md"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("# stub\n")
+    cited_paths = {
+        "claude": {"cafleet/SKILL.md", "cafleet/reference/gone.md"},
+    }
+    violations = note_path_violations(cited_paths, tmp_path)
+    assert violations
+    assert any("cafleet/reference/gone.md" in v for v in violations), violations
+    assert not any("cafleet/SKILL.md" in v for v in violations), violations
+
+
+def test_note_path_passes_when_every_cited_path_exists(tmp_path):
+    for rel in ("cafleet/SKILL.md", "cafleet-research/report/report.md"):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# stub\n")
+    cited_paths = {
+        "claude": {"cafleet/SKILL.md"},
+        "codex": {"cafleet-research/report/report.md"},
+        "opencode": {"cafleet-research/report/report.md"},
+    }
+    assert note_path_violations(cited_paths, tmp_path) == []
 
 
 # --------------------------------------------------------------------------
