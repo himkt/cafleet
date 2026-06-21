@@ -25,7 +25,7 @@ This skill is the umbrella for research and presentation media: two CAFleet-nati
 
 When the user's request matches a scenario below, invoke this skill and run the linked workflow as a full CAFleet team — proactively, the moment the request matches, without waiting for the user to say "use cafleet".
 
-**Routing into the report or presentation workflow means executing its entire orchestration.** The dedicated monitoring member is spawned first-in (`cafleet member create --role monitor`, gating the team behind its `ready: monitor live` handshake), then the role team, then the message-broker quality loop iterates to approval. The linked workflow body is the authoritative procedure.
+**Routing into the report or presentation workflow means executing its entire orchestration.** The dedicated monitoring member is spawned first-in (`cafleet member create --role monitor`, gating the team behind its `ready: monitor live` handshake), then the role team, then the workflow body's review and revision rounds run through to approval. The linked workflow body is the authoritative procedure.
 
 | When the user wants to… | Invoke this skill and run |
 |:--|:--|
