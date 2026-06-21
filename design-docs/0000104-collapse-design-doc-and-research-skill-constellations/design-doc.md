@@ -1,7 +1,7 @@
 # Collapse the design-doc and research skill constellations into two umbrella skills
 
 **Status**: Approved
-**Progress**: 12/22 tasks complete
+**Progress**: 17/22 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -378,23 +378,23 @@ After Steps 1-11 the zero-residue grep returns **0** matches in scope.
 
 ### Step 7: Repoint external docs (#25-29)
 
-- [ ] `configure.md` allowlist (#25: delete 7, add `cafleet-research`, keep `cafleet` + `cafleet-design-doc`); `design-doc-development.md` (#26); `contributing.md` (#27); `quickstart.md` (#28); `README.md` (#29) — agent-facing and operator-facing homes stay independent (no cross-link) <!-- completed: -->
+- [x] `configure.md` allowlist (#25: delete 7, add `cafleet-research`, keep `cafleet` + `cafleet-design-doc`); `design-doc-development.md` (#26); `contributing.md` (#27); `quickstart.md` (#28); `README.md` (#29) — agent-facing and operator-facing homes stay independent (no cross-link) <!-- completed: 2026-06-21T02:30 -->
 
 ### Step 8: Repoint `.claude/` (#30-32)
 
-- [ ] `commands.md` artifact-runner rows (#30); `skill-author/SKILL.md` prose (#31); verify `coding-agent-overlay.md` enumeration still describes the new layout (#32) <!-- completed: -->
+- [x] `commands.md` artifact-runner rows (#30); `skill-author/SKILL.md` prose (#31); verify `coding-agent-overlay.md` enumeration still describes the new layout (#32) <!-- completed: 2026-06-21T02:30 -->
 
 ### Step 9: Update 0000103-era files (preserve-not-regress, #34-36)
 
-- [ ] Slug-text updates only to `cafleet/reference/base-dir.md` L28/L29 and `cafleet/reference/director.md` L144; confirm every other 0000103 `reference/*` pointer in these files is untouched (R-SEQ grep) <!-- completed: -->
+- [x] Slug-text updates only to `cafleet/reference/base-dir.md` L28/L29 and `cafleet/reference/director.md` L144; confirm every other 0000103 `reference/*` pointer in these files is untouched (R-SEQ grep) <!-- completed: 2026-06-21T02:30 -->
 
 ### Step 10: Prune and register the plugin manifest (#33)
 
-- [ ] Remove the 7 deleted-dir entries from `.claude-plugin/plugin.json`'s `"skills"` array; add `"./skills/cafleet-research"` (array 9→3); no residue comment <!-- completed: -->
+- [x] Remove the 7 deleted-dir entries from `.claude-plugin/plugin.json`'s `"skills"` array; add `"./skills/cafleet-research"` (array 9→3); no residue comment <!-- completed: 2026-06-21T02:33 -->
 
 ### Step 11: Delete the seven old skill directories
 
-- [ ] `git rm -r skills/cafleet-design-doc-create skills/cafleet-design-doc-execute skills/cafleet-design-doc-interview skills/cafleet-research-report skills/cafleet-research-presentation skills/cafleet-my-slidev skills/cafleet-create-figure` (LAST, after all repointing AND the manifest prune) <!-- completed: -->
+- [x] All seven old skill dirs removed — staged-deleted via `git mv` during Steps 1 & 4 (Groups A+B, already committed), so no separate `git rm -r` was needed; verified gone with no untracked leftovers (only the 2 git-mv scaffold `.keep` files remain, flagged for staging cleanup) <!-- completed: 2026-06-21T02:33 -->
 
 ### Step 12: Verification (zero-residue proof)
 

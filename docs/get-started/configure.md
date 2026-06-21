@@ -20,14 +20,8 @@ snippets below are the recommended starting points.
     "allow": [
       "Bash(cafleet *)",
       "Skill(cafleet:cafleet)",
-      "Skill(cafleet:cafleet-create-figure)",
       "Skill(cafleet:cafleet-design-doc)",
-      "Skill(cafleet:cafleet-design-doc-create)",
-      "Skill(cafleet:cafleet-design-doc-execute)",
-      "Skill(cafleet:cafleet-design-doc-interview)",
-      "Skill(cafleet:cafleet-my-slidev)",
-      "Skill(cafleet:cafleet-research-presentation)",
-      "Skill(cafleet:cafleet-research-report)"
+      "Skill(cafleet:cafleet-research)"
     ],
     "ask": [
       "Bash(cafleet * member exec *)"

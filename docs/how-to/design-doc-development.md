@@ -14,22 +14,22 @@ order.
 Create a design doc for <one-line feature description>.
 ```
 
-Triggers the `cafleet-design-doc-create` skill — a Director / Drafter /
-Reviewer team drafts the design document.
+Triggers the `cafleet-design-doc` skill's create workflow — a Director /
+Drafter / Reviewer team drafts the design document.
 
 ```text
 Interview me about design-docs/NNNNNNN-<slug>.
 ```
 
-Triggers the `cafleet-design-doc-interview` skill — a Director + Analyzer
-pair annotates the document with your answers.
+Triggers the `cafleet-design-doc` skill's interview workflow — a Director +
+Analyzer pair annotates the document with your answers.
 
 ```text
 Implement design-docs/NNNNNNN-<slug>.
 ```
 
-Triggers the `cafleet-design-doc-execute` skill — a Director / Programmer /
-Tester team implements the document.
+Triggers the `cafleet-design-doc` skill's execute workflow — a Director /
+Programmer / Tester team implements the document.
 
 The contributor-facing description of this loop, including what to pass to
 each skill, lives in [Contributing](../get-started/contributing.md).
