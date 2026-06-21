@@ -27,7 +27,7 @@ run = [
 ]
 description = "Install skills"
 
-[tasks.cafleet-install]
+[tasks.all-install]
 run = [
   {"task" = "//admin:build"},
   {"task" = "//cafleet:install"},
