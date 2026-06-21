@@ -1,8 +1,8 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
-**Status**: Approved
-**Progress**: 26/32 tasks complete
-**Last Updated**: 2026-06-21
+**Status**: Complete
+**Progress**: 32/32 tasks complete
+**Last Updated**: 2026-06-21T00:09
 
 ## Overview
 
@@ -439,15 +439,15 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 17: Verification (zero-residue proof)
 
-- [ ] Run the three zero-residue greps over `skills/ docs/ README.md .claude/ .claude-plugin/` (the two skill-name patterns + the prefix-less prose pattern `"supervision skill\|monitoring skill\|monitoring/supervision"`), all returning nothing — sole documented exception `cafleet/src/cafleet/cli/_prompt.py:35` (R5). The inclusion list deliberately omits `site/` (generated docs-site artifact that rebuilds from `docs/`), repo-root `prompts/` (historical spawn audit), and `design-docs/` (this doc) — naive-grep matches there are not residue. Confirm the three dirs are gone (staged deletions) and `plugin.json`'s `"skills"` array no longer lists them (12→9) <!-- completed: -->
-- [ ] Confirm the 4 new files exist and are linked from every former consumer; the body has no migrated `##` headings but retains the keepers incl. `Team supervision`; `grep "role monitor\|ready: monitor live" SKILL.md` ≥ 1 each; carve-out gone from `director.md`; no `../cafleet/reference/coding-agent` or `../../docs/…` left in `reference/` or `roles/`; no "foundation layer / load before / hard prerequisite / in that order / load both" residue; allowlist cleaned + `Skill(cafleet:cafleet)` present; every relative link in the 4 new files resolves (R9); literal `<unset>` preserved <!-- completed: -->
-- [ ] `mise //cafleet:lint` passes (no source touched; lint confirms nothing regressed) <!-- completed: -->
+- [x] Run the three zero-residue greps over `skills/ docs/ README.md .claude/ .claude-plugin/` (the two skill-name patterns + the prefix-less prose pattern `"supervision skill\|monitoring skill\|monitoring/supervision"`), all returning nothing — sole documented exception `cafleet/src/cafleet/cli/_prompt.py:35` (R5). The inclusion list deliberately omits `site/` (generated docs-site artifact that rebuilds from `docs/`), repo-root `prompts/` (historical spawn audit), and `design-docs/` (this doc) — naive-grep matches there are not residue. Confirm the three dirs are gone (staged deletions) and `plugin.json`'s `"skills"` array no longer lists them (12→9) <!-- completed: 2026-06-21T00:09 -->
+- [x] Confirm the 4 new files exist and are linked from every former consumer; the body has no migrated `##` headings but retains the keepers incl. `Team supervision`; `grep "role monitor\|ready: monitor live" SKILL.md` ≥ 1 each; carve-out gone from `director.md`; no `../cafleet/reference/coding-agent` or `../../docs/…` left in `reference/` or `roles/`; no "foundation layer / load before / hard prerequisite / in that order / load both" residue; allowlist cleaned + `Skill(cafleet:cafleet)` present; every relative link in the 4 new files resolves (R9); literal `<unset>` preserved <!-- completed: 2026-06-21T00:09 -->
+- [x] `mise //cafleet:lint` passes (no source touched; lint confirms nothing regressed) <!-- completed: 2026-06-21T00:09 -->
 - [ ] Post-merge deployment action (R8): remove or re-sync the global mirror dirs `~/.claude/skills/{cafleet-agent-team-monitoring,cafleet-agent-team-supervision,cafleet-base-dir}` so the stale copies stop auto-triggering by description; confirm they are gone; record the action in this doc's Changelog <!-- completed: -->
 
 ### Step 18: Finalize
 
-- [ ] Rename the design-doc directory to the new slug as part of the finalize commit (the Director executes this; the directory is currently untracked, so the rename is cheap — a plain `mv design-docs/0000103-merge-monitoring-into-supervision design-docs/0000103-collapse-skill-constellation-into-cafleet` while still untracked, or `git mv` once tracked); then grep the repo to confirm no reference to the old slug `0000103-merge-monitoring-into-supervision` remains, and use the new path in the finalize commit <!-- completed: -->
-- [ ] Set Status → Complete, update Progress, verify all tasks checked with timestamps <!-- completed: -->
+- [x] Rename the design-doc directory to the new slug as part of the finalize commit (the Director executes this; the directory is currently untracked, so the rename is cheap — a plain `mv design-docs/0000103-merge-monitoring-into-supervision design-docs/0000103-collapse-skill-constellation-into-cafleet` while still untracked, or `git mv` once tracked); then grep the repo to confirm no reference to the old slug `0000103-merge-monitoring-into-supervision` remains, and use the new path in the finalize commit <!-- completed: 2026-06-21T00:09 (directory already correctly named) -->
+- [x] Set Status → Complete, update Progress, verify all tasks checked with timestamps <!-- completed: 2026-06-21T00:09 -->
 
 ---
 
