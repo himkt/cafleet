@@ -13,10 +13,19 @@ Substitute these into the base `{…}` placeholders.
 | `{pane_title}` | `claude --name <member-name>` sets `#{pane_title}` to the member name |
 | `{skill_loader}` | the Skill tool (dispatch sub-agents via the Agent tool) |
 
-Decision surface: `AskUserQuestion` takes ≤ 4 options/question; the built-in "Other" is the free-text path (don't add an explicit "Other"). Question shapes → AskUserQuestion form: choice among ≤ 4 labeled options; approve-or-revise (two options); continue-or-abort (two options); open-ended draft-comparison (2–4 full candidate bodies). A standalone agent calls it directly; a fleet member routes its question to the Director, which relays it.
+## Note → applies at
 
-Relaying a member's question: ask the user, then forward via `cafleet member send-input --choice N | --freetext`; keystrokes: `docs/spec/cli-options.md#member-send-input`.
+Every note names the base token/instruction it qualifies.
 
-Decision-prompt frame: the `AskUserQuestion` frame spans ~120–200 lines — bump `cafleet member capture --lines` accordingly to show it in full.
+| Note | Applies at |
+|------|-----------|
+| `AskUserQuestion` takes ≤ 4 options/question; the built-in "Other" is the free-text path (don't add an explicit "Other"). Question shapes → form: choice among ≤ 4 labeled options; approve-or-revise (two options); continue-or-abort (two options); open-ended draft-comparison (2–4 full candidate bodies). | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions; `cafleet-design-doc/create/create.md` Step 2 question batch |
+| The `AskUserQuestion` frame spans ~120–200 lines — bump `cafleet member capture --lines` accordingly to show it in full. | `{decision_surface}` relay — `cafleet/reference/director.md` § Answering a member's relayed question |
+| Relay a member's question: ask the user, then forward via `cafleet member send-input --choice N \| --freetext` (keystrokes: `docs/spec/cli-options.md#member-send-input`). | `{decision_surface}` relay — same |
+| `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet`: register a sub-topic with `TaskCreate`, claim with `TaskUpdate` (owner + `in_progress`), complete with `TaskUpdate` (`completed`), check progress with `TaskList`. | `{task_coord}` — `cafleet-research/report/report.md` task coordination |
 
-Task coordination: the harness `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` tools — register a sub-topic with `TaskCreate`, claim with `TaskUpdate` (set owner + `in_progress`), complete with `TaskUpdate` (`completed`), check progress with `TaskList`.
+## Worked resolution
+
+The canonical monitor-spawn command, fully resolved for this backend:
+
+`cafleet member create --role monitor --model haiku` (members spawned `--permission-mode dontAsk`).

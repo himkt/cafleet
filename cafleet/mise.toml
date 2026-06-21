@@ -13,6 +13,10 @@ run = [
 ]
 description = "Run ruff linter and format check"
 
+[tasks.lint-overlay]
+run = "uv run --package cafleet python -m cafleet.coding_agent.overlay_coverage"
+description = "Check coding-agent overlay/base/template token coverage (design 0000107 Part 5)"
+
 [tasks.format]
 run = [
   "uv run --package cafleet ruff check --fix .",

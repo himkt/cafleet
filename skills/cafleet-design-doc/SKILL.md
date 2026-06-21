@@ -27,7 +27,7 @@ Before routing into a workflow or consulting a reference page, Read your overlay
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/) | every `{placeholder}` (`{monitor_model}`, `{decision_surface}`, …) in the workflow you route into stays unresolved |
+| 1 | your overlay [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` in the workflow you route into, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 
 **On-demand — consult directly (no team), only when the task needs it:**
 
@@ -38,6 +38,8 @@ Before routing into a workflow or consulting a reference page, Read your overlay
 | [reference/coordination.md](reference/coordination.md) | you need the inter-agent verb + pointer + `COMMENT(role)` schema |
 
 Each workflow body (create / interview / execute) carries its own Required-reading block for the team it runs — base-dir, supervision, and coordination are gated there, not on this dispatch surface.
+
+Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
 
 ## Dispatch
 

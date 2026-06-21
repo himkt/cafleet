@@ -12,7 +12,7 @@ At startup — before you process your first task (the `ready` handshake in the 
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) | every `{placeholder}` stays unresolved — `{permission_flags}` and the rest print literally |
+| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{permission_flags}` / `{task_coord}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | [`reference/base-dir.md`](../reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root every scratch / audit / figure write or fall back to `/tmp` |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**
@@ -20,6 +20,8 @@ At startup — before you process your first task (the `ready` handshake in the 
 | Read | Read before you… | What you lose if you skip it |
 |------|------------------|------------------------------|
 | [`reference/exec-routing.md`](../reference/exec-routing.md) | route a Bash-denied command to the Director | the reconsider-then-route protocol and the dispatch shape — you stall, fabricate output, or prompt the operator needlessly |
+
+Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
 
 ## On spawn — send the ready signal (FIRST ACTION)
 

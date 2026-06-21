@@ -8,7 +8,19 @@ Backend-specific deltas live in `skills/cafleet/reference/coding-agent/<name>.md
 
 ## How the base and overlay connect
 
-Every base instruction that varies by backend states the neutral behavior and points the agent at its overlay. The overlay is not an in-stream aside to consult lazily: it is **row #1 of each reader entry point's Required-reading block** — the first load-bearing read, gated before any other action. An agent identifies its coding agent — the spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity — reads `reference/coding-agent/<name>.md` first, then applies the overlay's deltas on top of every base instruction it reads. Skip it and every `{placeholder}` token stays unresolved — the agent emits literal `{monitor_model}`, `{permission_flags}`, and the rest. Authors write the base neutrally, put every backend specific in the overlay, and list the overlay as the first load-bearing row wherever an entry point uses `{placeholder}` tokens.
+Every base instruction that varies by backend states the neutral behavior and points the agent at its overlay. The overlay is not an in-stream aside to consult lazily: it is **row #1 of each reader entry point's Required-reading block** — the first load-bearing read, gated before any other action. That row is **read-and-resolve**, not read-only. An agent identifies its coding agent — the spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity — reads `reference/coding-agent/<name>.md` first, then **resolves** it before its first action:
+
+1. **Materialize values.** For every `{placeholder}` token it will use, take the concrete value from the overlay's table and use that literal value — never the brace token.
+2. **Apply notes.** At each base instruction named in the overlay's *Note → applies at* table, follow that note's caveat there.
+3. **Self-check at emission.** A literal `{token}` in any command run, any message sent, or anything shown to the user is a defect — resolve it before emitting.
+
+Skip resolution and the agent emits a literal `{monitor_model}` / `{permission_flags}`, guesses a wrong or default value, or ignores a backend note — the three application-failure modes the resolve step closes. The canonical procedure, with the resolution order, lives in `skills/cafleet/SKILL.md` § *Resolve your overlay*.
+
+**Documented defaults.** When an overlay omits a token, or an agent cannot identify its backend, each token has a documented backend-neutral default: the lowest-common-denominator form that functions on every backend (message-only coordination, POSIX backgrounding, a neutral mode description). This is a legitimate default per `affirmative-writing.md` — absence of an overlay value is an expected, valid state with a well-defined correct behavior — not an error-swallowing fallback. The default table is canonical in `skills/cafleet/SKILL.md` § *Resolve your overlay*.
+
+**Static coverage guard.** A static checker (`cafleet/tests/coding_agent/test_overlay_coverage.py`, also runnable via `mise //cafleet:lint-overlay`) keeps the overlay/base/template token set coherent so the resolve step always has complete data: every base token is defined in all three overlays and the default table, no overlay defines a token the base never uses, and the note-anchor token set is identical across the three overlays. It is a static data-contract guard, not a runtime application enforcer.
+
+Authors write the base neutrally, put every backend specific in the overlay, and list the overlay as the first load-bearing read wherever an entry point uses `{placeholder}` tokens.
 
 ## Two independent homes
 

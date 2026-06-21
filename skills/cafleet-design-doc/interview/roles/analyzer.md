@@ -10,9 +10,11 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/) | `{skill_loader}` and the other `{placeholder}` tokens stay unresolved — you can't load the `cafleet` skill correctly |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}` / `{permission_flags}` (can't load the `cafleet` skill), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the missing-`BASE` anchorless-status convention and the no-bypass write protocol — you mishandle a `BASE`-less spawn |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the anchorless-status and message-exemption rules — your one-time question-list payload and any status hop get mis-formatted |
+
+Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
 
 ## Your Accountability
 

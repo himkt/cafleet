@@ -15,13 +15,13 @@ Use the `cafleet` CLI to register as an agent, send and receive messages, and di
 
 ## Required reading
 
-Before your first action other than these Reads, Read every file in the **Load-bearing** table below, in order (row #2 applies only if you write files) — each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity. As you read the base, substitute your overlay's value for each `{placeholder}` you encounter.
+Before your first action other than these Reads, Read every file in the **Load-bearing** table below, in order (row #2 applies only if you write files) — each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity. After reading your overlay, **resolve** it before acting — see *Resolve your overlay* below.
 
 **Load-bearing — Read in order before acting:**
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>.md`](reference/coding-agent/) | every `{placeholder}` in this skill stays unresolved — you emit literal `{monitor_model}`, `{permission_flags}`, `{decision_surface}` |
+| 1 | your overlay [`reference/coding-agent/<name>.md`](reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{monitor_model}` / `{permission_flags}`, **or** guess a wrong/default value (spawn the monitor on the wrong model), **or** ignore a backend note (codex has no harness task list) |
 | 2 | [`reference/base-dir.md`](reference/base-dir.md) — if you write any scratch / audit / figure file | the no-bypass write protocol and the `<unset>` contract — you mis-root every write or fall back to `/tmp` |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**
@@ -42,6 +42,29 @@ Before your first action other than these Reads, Read every file in the **Load-b
 Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`member create` / `delete` / `list --activity` / `capture` / `exec` / `ping`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
 
 Exhaustive per-subcommand flags, exit codes, and error strings live in [`docs/spec/cli-options.md`](../../docs/spec/cli-options.md).
+
+## Resolve your overlay
+
+You have read your overlay (Required-reading row #1). Before your first action, resolve it:
+
+1. **Materialize values.** For every `{placeholder}` token you will use this session, take the concrete value from your overlay's table and use that literal value — never the brace token. Resolution order for each token: (i) your overlay's value; (ii) the documented default below, only if your overlay omits the token or you cannot identify your backend. Never a literal `{token}`, never an ad-hoc guess.
+2. **Apply notes.** When you reach a base instruction named in your overlay's *Note → applies at* table, follow that note's caveat there (e.g. on codex, coordinate via cafleet messages, not a harness task list; on opencode, treat a permission popup as a regression to escalate, not a decision point).
+3. **Self-check at emission.** A literal `{token}` in any command you run, any message you send, or anything you show the user is a defect — stop and resolve it before emitting.
+
+### Documented defaults
+
+Used only when your overlay omits a token or your backend is unknown. Each default is the correct neutral-floor behavior — the form that functions on every backend — not a guess.
+
+| Token | Documented default (overlay silent / backend unknown) |
+|-------|-------------------------------------------------------|
+| `{decision_surface}` | a Director-relayed operator message (a member always routes to the Director) |
+| `{monitor_model}` | the spawning Director's own model (inherit the parent) — a safe floor, possibly cost-suboptimal |
+| `{permission_flags}` | describe the mode neutrally as "workspace-scoped auto-approval" — for prose uses only; spawn-flag construction never falls here |
+| `{bg_run}` | a backgrounded `!` shell command |
+| `{bg_stop}` | killing the recorded background process |
+| `{task_coord}` | cafleet messages |
+| `{pane_title}` | no `--name` analog |
+| `{skill_loader}` | reading the skill's `SKILL.md` + your overlay by absolute path |
 
 ## Required Flags
 
