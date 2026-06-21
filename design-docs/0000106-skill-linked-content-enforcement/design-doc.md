@@ -1,7 +1,7 @@
 # Skill Linked-Content Enforcement
 
-**Status**: Implementation Complete (behavioral validation deferred — see Step 6 + Success Criterion #5)
-**Progress**: 22/27 tasks complete (5 remaining = Step 6 behavioral probes, deferred to post-merge operator)
+**Status**: Complete
+**Progress**: 22/27 tasks complete (5 remaining = Step 6 behavioral probes, deferred to post-merge operator validation)
 **Last Updated**: 2026-06-21
 
 ## Overview
