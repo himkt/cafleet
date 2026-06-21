@@ -15,8 +15,9 @@ Three checks (Part 5):
 2. **No orphan tokens** — every token defined in an overlay value table or in
    the default table appears in at least one base file.
 3. **Note-binding integrity** — every overlay note's *applies-at* anchor names
-   a canonical token, and the note-anchor *token set* (tokens carrying ≥ 1
-   note) is identical across the three overlays. Per-token note count may
+   a canonical token, every cited ``*.md`` note path resolves to an existing
+   file under the skill root, and the note-anchor *token set* (tokens carrying
+   ≥ 1 note) is identical across the three overlays. Per-token note count may
    differ; the check compares the set, not the multiset.
 
 The pure-set check functions (``token_coverage_violations`` etc.) are exercised

@@ -8,7 +8,8 @@ checks run against the live skill tree:
    defined in all three overlay value tables, and has a documented-default row.
 2. **No orphan tokens** — every overlay/default token appears in a base file.
 3. **Note-binding integrity** — every overlay note's *applies-at* anchor is a
-   canonical token, and the note-anchor token set is identical across overlays.
+   canonical token, the note-anchor token set is identical across overlays, and
+   every cited ``*.md`` note path resolves to an existing file.
 
 The pure-set functions (:func:`token_coverage_violations` etc.) take crafted
 inputs; the live-tree aggregate (:func:`check_overlay_coverage`) wires the
