@@ -58,7 +58,7 @@ Every CAFleet member, every consumer skill, and every Director MUST follow this 
 
 3. **Members never re-resolve BASE.** The Director's spawn-prompt substitution delivers `${BASE}` to each spawned member as a literal absolute path baked into the spawn prompt. Members MUST use that literal path verbatim. Members DO Read this file at startup (per their role file's *Load at Startup* block) to pick up the no-bypass write protocol and the `<unset>` sentinel contract — but they MUST NOT run the resolution procedure (Steps 0–2) or otherwise derive a new `${BASE}` of their own. Re-resolving would invite drift if the Director's resolved BASE changed mid-session.
 
-4. **Missing-BASE-line anchorless status.** If a member's spawn prompt is missing the `BASE:` line entirely (an expected outcome when the Director resolved `${BASE} = <unset>`), the member treats the audit-file feature as disabled and emits a single CAFleet message back to the Director as a parens-free anchorless status (per [`../../cafleet-design-doc/coordination.md`](../../cafleet-design-doc/coordination.md) § *Anchorless Status*):
+4. **Missing-BASE-line anchorless status.** If a member's spawn prompt is missing the `BASE:` line entirely (an expected outcome when the Director resolved `${BASE} = <unset>`), the member treats the audit-file feature as disabled and emits a single CAFleet message back to the Director as a parens-free anchorless status (per [`../../cafleet-design-doc/reference/coordination.md`](../../cafleet-design-doc/reference/coordination.md) § *Anchorless Status*):
 
    ```
    audit-disabled no BASE in spawn prompt
