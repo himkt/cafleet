@@ -1,7 +1,7 @@
 # Restore Workflow Auto-Invocation for the CAFleet Design-Doc and Research Skills
 
 **Status**: Approved
-**Progress**: 9/11 tasks complete
+**Progress**: 10/11 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -134,7 +134,7 @@ The intro paragraph, the coding-agent-overlay note, and the teammates-load-by-na
 
 ### Step 3: Drift audit (docs)
 
-- [ ] Re-read both rewritten `SKILL.md` files and confirm: triggers lead the description, language is affirmative-only, dispatch is scenario-linked, and the full-team statement is present in the body. Then audit `README.md`, `docs/get-started/*`, and `docs/how-to/design-doc-development.md` for trigger-statement drift; edit a doc only if it actually drifted (expectation: no edits needed, since those surfaces reference the skills by name and by workflow). <!-- completed: -->
+- [x] Re-read both rewritten `SKILL.md` files and confirm: triggers lead the description, language is affirmative-only, dispatch is scenario-linked, and the full-team statement is present in the body. Then audit `README.md`, `docs/get-started/*`, and `docs/how-to/design-doc-development.md` for trigger-statement drift; edit a doc only if it actually drifted (expectation: no edits needed, since those surfaces reference the skills by name and by workflow). <!-- completed: 2026-06-21T05:36 -->
 
 ### Step 4: Behavioral validation (gate for completion)
 
