@@ -222,3 +222,4 @@ For each probe: open a fresh coding-agent session, give the triggering prompt, a
 |------|---------|
 | 2026-06-21 | Initial draft |
 | 2026-06-21 | Implementation Steps 1–5 + 7 complete (Required-reading blocks across all three skill families; removal sweep + lint/test clean: 871 tests pass). Step 6 behavioral validation deferred to post-merge operator per user decision (probes need the branch skills deployed to `~/.claude/skills/`). One review defect caught and fixed (leftover table-row fragment in interview analyzer). |
+| 2026-06-21 | PR #140 opened with Copilot review requested. Opus precision-and-minimality review pass (1 fix: stale `Load at Startup` back-reference in `base-dir.md`). Copilot review pass: overlay row #1 read-before-token-use across 13 role intros + overlay row linked in `cafleet/SKILL.md`. Copilot loop ended by user termination; team torn down. |
