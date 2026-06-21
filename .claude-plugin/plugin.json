@@ -10,13 +10,7 @@
   "keywords": ["messaging", "broker", "agents", "cli", "design-doc"],
   "skills": [
     "./skills/cafleet",
-    "./skills/cafleet-create-figure",
     "./skills/cafleet-design-doc",
-    "./skills/cafleet-design-doc-create",
-    "./skills/cafleet-design-doc-execute",
-    "./skills/cafleet-design-doc-interview",
-    "./skills/cafleet-my-slidev",
-    "./skills/cafleet-research-presentation",
-    "./skills/cafleet-research-report"
+    "./skills/cafleet-research"
   ]
 }

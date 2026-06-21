@@ -25,8 +25,8 @@ When the consuming skill operates on a per-task folder, it picks the task-folder
 
 | Consumer | Canonical task-folder path form | Canonicalization steps |
 |:--|:--|:--|
-| The `cafleet-design-doc-create` / `cafleet-design-doc-execute` / `cafleet-design-doc-interview` skills | `design-docs/<slug>` | (1) strip trailing `/design-doc.md` if present; (2) strip leading `design-docs/` if present; (3) prepend `design-docs/`. **Absolute paths**: apply ONLY step 1 (strip a trailing `/design-doc.md`); skip the bucket strip/prepend (steps 2–3) — the absolute path is used verbatim as the task folder (the trailing-filename strip stops a child file path from becoming a directory named after the file). |
-| The `cafleet-research-report` / `cafleet-research-presentation` skills | `researches/<topic-slug>` | (1) strip trailing `/report.md` (or other known per-topic filenames) if present; (2) strip leading `researches/` if present; (3) prepend `researches/`. **Absolute paths**: apply ONLY step 1 (strip a trailing `/report.md`); skip the bucket strip/prepend (steps 2–3) — the absolute path is used verbatim as the task folder. |
+| The `cafleet-design-doc` skill (create/execute/interview workflows) | `design-docs/<slug>` | (1) strip trailing `/design-doc.md` if present; (2) strip leading `design-docs/` if present; (3) prepend `design-docs/`. **Absolute paths**: apply ONLY step 1 (strip a trailing `/design-doc.md`); skip the bucket strip/prepend (steps 2–3) — the absolute path is used verbatim as the task folder (the trailing-filename strip stops a child file path from becoming a directory named after the file). |
+| The `cafleet-research` skill (report/presentation workflows) | `researches/<topic-slug>` | (1) strip trailing `/report.md` (or other known per-topic filenames) if present; (2) strip leading `researches/` if present; (3) prepend `researches/`. **Absolute paths**: apply ONLY step 1 (strip a trailing `/report.md`); skip the bucket strip/prepend (steps 2–3) — the absolute path is used verbatim as the task folder. |
 
 Skipping canonicalization resolves the wrong BASE — a directory literally named `design-doc.md` (or `report.md`, etc.) instead of the intended task folder.
 
@@ -58,7 +58,7 @@ Every CAFleet member, every consumer skill, and every Director MUST follow this 
 
 3. **Members never re-resolve BASE.** The Director's spawn-prompt substitution delivers `${BASE}` to each spawned member as a literal absolute path baked into the spawn prompt. Members MUST use that literal path verbatim. Members DO Read this file at startup (per their role file's *Load at Startup* block) to pick up the no-bypass write protocol and the `<unset>` sentinel contract — but they MUST NOT run the resolution procedure (Steps 0–2) or otherwise derive a new `${BASE}` of their own. Re-resolving would invite drift if the Director's resolved BASE changed mid-session.
 
-4. **Missing-BASE-line anchorless status.** If a member's spawn prompt is missing the `BASE:` line entirely (an expected outcome when the Director resolved `${BASE} = <unset>`), the member treats the audit-file feature as disabled and emits a single CAFleet message back to the Director as a parens-free anchorless status (per [`../../cafleet-design-doc/coordination.md`](../../cafleet-design-doc/coordination.md) § *Anchorless Status*):
+4. **Missing-BASE-line anchorless status.** If a member's spawn prompt is missing the `BASE:` line entirely (an expected outcome when the Director resolved `${BASE} = <unset>`), the member treats the audit-file feature as disabled and emits a single CAFleet message back to the Director as a parens-free anchorless status (per [`../../cafleet-design-doc/reference/coordination.md`](../../cafleet-design-doc/reference/coordination.md) § *Anchorless Status*):
 
    ```
    audit-disabled no BASE in spawn prompt

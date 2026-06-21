@@ -1,6 +1,6 @@
 # Coding-agent overlay
 
-cafleet skill instructions are backend-neutral by default. Write the base — every cafleet-family `SKILL.md`, every `roles/*.md`, and every `skills/cafleet/reference/*.md` outside `reference/coding-agent/` — so it reads the same for an agent on any coding-agent backend.
+cafleet skill instructions are backend-neutral by default. Write the base — every cafleet-family `SKILL.md`, every per-workflow body (`<workflow>/<workflow>.md`), every `roles/*.md`, and every `reference/*.md` page (outside `skills/cafleet/reference/coding-agent/`) — so it reads the same for an agent on any coding-agent backend.
 
 ## Where backend specifics live
 

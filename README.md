@@ -68,7 +68,7 @@ After the demonstration, please shutdown the team.
 
 CAFleet provides the builtin skills for Spec Driven Development (SDD). **We're using CAFleet to develop CAFleet!**
 
-Invoke the `cafleet-design-doc-create` skill with a one-line request, e.g.:
+Invoke the `cafleet-design-doc` skill (create workflow) with a one-line request, e.g.:
 
 ```text
 I want to create a simple TUI calculator. Please create a design doc using the CAFleet skill.

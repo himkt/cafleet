@@ -52,14 +52,14 @@ reinstalls from the committed lockfile and cannot update it.
 CAFleet uses its own design-doc-driven development skills to evolve the
 codebase. Some tips for new contributors:
 
-1. Invoke the `cafleet-design-doc-create` skill with a one-line description —
+1. Invoke the `cafleet-design-doc` skill (create workflow) with a one-line description —
    orchestrates a Director / Drafter / Reviewer team to produce a design doc
    under `design-docs/NNNNNNN-<slug>/`.
-2. Invoke the `cafleet-design-doc-interview` skill with the path
+2. Invoke the `cafleet-design-doc` skill (interview workflow) with the path
    `design-docs/NNNNNNN-<slug>` — fine-grained Q&A pass that annotates the
-   doc with `COMMENT(claude)` markers for the `cafleet-design-doc-create`
-   skill's resume mode to absorb.
-3. Invoke the `cafleet-design-doc-execute` skill with the path
+   doc with `COMMENT(claude)` markers for the create workflow's resume mode
+   to absorb.
+3. Invoke the `cafleet-design-doc` skill (execute workflow) with the path
    `design-docs/NNNNNNN-<slug>` — TDD-cycle implementation pass (Director /
    Programmer / Tester / optional Verifier).
 

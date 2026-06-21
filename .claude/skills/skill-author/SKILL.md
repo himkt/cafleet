@@ -97,7 +97,7 @@ Every CAFleet-orchestrated skill runs a dedicated **monitoring member** — it i
 The monitoring member runs one of two idle-nudge routines (both spawn the monitoring member; the difference is only *when* it nudges the idle Director):
 
 - **Conditional idle-nudge (canonical).** The monitoring member re-engages the Director only when it can name what needs attention (un-acked inbox items, stalled members). Use this for skills whose Director makes forward progress from member replies — the conditional nudge surfaces real stalls without busy-waking the Director.
-- **Unconditional idle-nudge (extended).** For skills whose Director must wake on a cadence that is NOT driven by member replies — e.g. polling an external service (CI, a code-review bot) that never keystrokes the Director's pane — the monitoring member nudges the idle Director unconditionally, granting it a re-poll turn even when the inbox is empty. The `cafleet-design-doc-execute` skill's Copilot-review loop is the reference.
+- **Unconditional idle-nudge (extended).** For skills whose Director must wake on a cadence that is NOT driven by member replies — e.g. polling an external service (CI, a code-review bot) that never keystrokes the Director's pane — the monitoring member nudges the idle Director unconditionally, granting it a re-poll turn even when the inbox is empty. The `cafleet-design-doc` skill's execute workflow Copilot-review loop is the reference.
 
 ### 2.4 Spawn members with `cafleet member create --prompt-file <abs path>`
 
@@ -299,7 +299,7 @@ The recipient reads the cafleet body, navigates to the pointer, reads the standi
 
 ### 5.5 The role taxonomy
 
-The marker role identifier in `COMMENT(<role>)` is one of: `claude` (user-derived clarifications baked into the doc), `director`, `programmer`, `tester`, `reviewer`, `verifier`, `analyzer`, `drafter`. New roles for new skills SHOULD be added to this list; do not abbreviate. The `claude` role is reserved for the `cafleet-design-doc-interview` skill's user-derived clarifications and the `cafleet-design-doc-execute` skill's test-framework arbitration; do not use it for arbitrary "Claude said this" content.
+The marker role identifier in `COMMENT(<role>)` is one of: `claude` (user-derived clarifications baked into the doc), `director`, `programmer`, `tester`, `reviewer`, `verifier`, `analyzer`, `drafter`. New roles for new skills SHOULD be added to this list; do not abbreviate. The `claude` role is reserved for the `cafleet-design-doc` skill's interview-workflow user-derived clarifications and its execute-workflow test-framework arbitration; do not use it for arbitrary "Claude said this" content.
 
 ### 5.6 Anchorless status
 
