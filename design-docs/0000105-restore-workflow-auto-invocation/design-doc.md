@@ -1,6 +1,6 @@
 # Restore Workflow Auto-Invocation for the CAFleet Design-Doc and Research Skills
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 11/11 tasks complete
 **Last Updated**: 2026-06-21
 
@@ -151,3 +151,4 @@ The intro paragraph, the coding-agent-overlay note, and the teammates-load-by-na
 |------|---------|
 | 2026-06-21 | Initial draft |
 | 2026-06-21 | Reviewer round 1: triggers lead both descriptions (orchestration mechanics moved to body only); added behavioral-validation gate (Step 4); recorded rationale for affirmative-only vs. the rule-endorsed paired form; preserved the research chaining-context sentence; stated the frontmatter preservation invariant (corrected — no `metadata` block in the on-disk source). |
+| 2026-06-21 | Execution complete (Steps 1–4): both `SKILL.md` rewritten; drift audit found no doc edits; behavioral gate passed after `gh skill install` deploy (both skills auto-invoke and route monitor-first from non-cafleet prompts). Opus review round (ship-as-is + closing-line tightening). Copilot review on PR #138: applied the quality-loop wording generalization; declined 4 stylistic nits as out-of-spec; loop ended by user termination. |
