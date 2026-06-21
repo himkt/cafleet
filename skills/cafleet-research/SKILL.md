@@ -17,9 +17,26 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, Agent, 
 
 This skill is the umbrella for research and presentation media: two CAFleet-native **orchestration workflows** (research report, presentation) plus two load-on-demand utility **reference pages** (matplotlib visualization, the custom Slidev theme). It is a dispatcher — route to the matching workflow body to run a team, or read a reference page for a standalone utility.
 
-**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
-
 **Teammates in agent teams** that need this skill load it by its name `cafleet-research` via their backend's skill-loader — never by reading the skill files directly.
+
+## Required reading
+
+Before routing into a workflow or consulting a reference page, Read your overlay — it is row #1 below. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; a standalone / main-session reader uses its own identity.
+
+**Load-bearing — Read before acting:**
+
+| # | Read | What you lose if you skip it |
+|---|------|------------------------------|
+| 1 | your overlay [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) | every `{placeholder}` (`{monitor_model}`, `{task_coord}`, `{decision_surface}`, …) in the workflow you route into stays unresolved |
+
+**On-demand — consult directly (no team), only when the task needs it:**
+
+| Read | When |
+|------|------|
+| [reference/visualization.md](reference/visualization.md) | you are creating a chart / plot / graph / figure or visualizing data |
+| [reference/slidev.md](reference/slidev.md) | you are authoring slides with the custom Slidev theme (layouts, components, techniques) |
+
+Each workflow body (report / presentation) carries its own Required-reading block for the team it runs — base-dir and supervision are gated there, not on this dispatch surface.
 
 ## Dispatch
 
@@ -32,11 +49,6 @@ When the user's request matches a scenario below, invoke this skill and run the 
 | Research a topic / create a multi-source research report | the **report** workflow ([report/report.md](report/report.md)) — Director/Manager/Researcher team → `researches/<topic>/` |
 | Build a presentation / slide deck / reading transcript from a report | the **presentation** workflow ([presentation/presentation.md](presentation/presentation.md)) |
 
-Consult these reference pages directly (no team):
-
-| When the user wants to… | Consult |
-|:--|:--|
-| Create a chart / plot / graph / figure or visualize data | the **visualization** reference ([reference/visualization.md](reference/visualization.md)) |
-| Author slides with the custom Slidev theme (layouts, components, techniques) | the **slidev** reference ([reference/slidev.md](reference/slidev.md)) |
+For a chart/figure or the Slidev theme — consult the **On-demand** reference pages in § Required reading above (no team needed).
 
 The report workflow chains into the presentation workflow after user approval. The two reference pages are standalone utilities the presentation workflow also reads. Always route research work through the workflow bodies above — each runs the full CAFleet team.

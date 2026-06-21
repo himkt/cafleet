@@ -1,7 +1,7 @@
 # Skill Linked-Content Enforcement
 
 **Status**: Approved
-**Progress**: 14/27 tasks complete
+**Progress**: 18/27 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -190,10 +190,10 @@ The `SKILL.md:18-27` "Read on demand" list is rewritten into the three-way class
 
 ### Step 5: Apply to `cafleet-research`
 
-- [ ] Reclassify the `cafleet-research/SKILL.md` reference-page menu (visualization/slidev as on-demand utilities) and promote the overlay to Required-reading. <!-- completed: -->
-- [ ] Add the Required-reading block to `report/report.md` and `presentation/presentation.md`. <!-- completed: -->
-- [ ] Add the Required-reading block to every `roles/*.md` under `report/` and `presentation/` (scout/researcher include `web-researcher.md`; presentation includes `slidev.md` + `visualization.md`). <!-- completed: -->
-- [ ] Reclassify the techniques menu in `reference/slidev.md` (surface B). <!-- completed: -->
+- [x] Reclassify the `cafleet-research/SKILL.md` reference-page menu (visualization/slidev as on-demand utilities) and promote the overlay to Required-reading. <!-- completed: 2026-06-21T08:35 -->
+- [x] Add the Required-reading block to `report/report.md` and `presentation/presentation.md`. <!-- completed: 2026-06-21T08:35 -->
+- [x] Add the Required-reading block to every `roles/*.md` under `report/` and `presentation/` (scout/researcher include `web-researcher.md`; presentation includes `slidev.md` + `visualization.md`). <!-- completed: 2026-06-21T08:35 -->
+- [x] Reclassify the techniques menu in `reference/slidev.md` (surface B). <!-- completed: 2026-06-21T08:35 -->
 
 ### Step 6: Behavioral validation (fresh-session probes)
 
