@@ -66,8 +66,6 @@ Used only when your overlay omits a token or your backend is unknown. Each defau
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading the skill's `SKILL.md` + your overlay by absolute path |
 
-Two tokens carry a tradeoff the cell only flags. `{monitor_model}` defaults to inheriting the Director's model because no portable cheap-model literal exists (`haiku`, `gpt-5.4-mini`, and `anthropic/claude-haiku-4-5` are each backend-specific); the neutral floor guarantees the monitor runs while accepting a possible cost regression — the cost-optimal value is the overlay's job. `{permission_flags}` defaults only for prose uses: the flag *names* are backend-specific, so spawn-flag construction is always a Director action with a resolved backend and never reaches this default.
-
 ## Required Flags
 
 Every `cafleet` invocation that touches agents or messages carries two literal integer ids (no env-var fallback):
