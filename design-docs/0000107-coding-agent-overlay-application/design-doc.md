@@ -1,7 +1,7 @@
 # Coding-agent Overlay Application
 
-**Status**: Approved
-**Progress**: 17/23 tasks complete
+**Status**: Complete
+**Progress**: 17/23 tasks complete (Step 6 fresh-session behavioral probes deferred)
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -255,3 +255,4 @@ For each probe: open a fresh coding-agent session, give the triggering prompt, c
 | Date | Changes |
 |------|---------|
 | 2026-06-21 | Initial draft |
+| 2026-06-21 | Implementation complete (Steps 1–5, 7). Resolve-then-act checkpoint, overlay restructuring, resolve directive across 26 entry points, and the static overlay-coverage checker (`mise //cafleet:lint-overlay`) landed; SC 1–5, 7, 8 satisfied. Step 6 (fresh-session cross-backend behavioral probes) deferred per the 0000105/0000106 precedent — the claude path is evidenced by this execution (monitor spawned with literal `--model haiku`, no literal tokens emitted). Shipped as PR #141 with a Copilot review loop (6 findings resolved, 2 declined as immutable audit artifacts) and a dedicated opus change-quality review pass (3 findings resolved, approved). Status → Complete on user instruction. |
