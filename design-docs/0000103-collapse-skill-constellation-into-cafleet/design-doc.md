@@ -1,8 +1,8 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
-**Status**: Approved
-**Progress**: 0/32 tasks complete
-**Last Updated**: 2026-06-21
+**Status**: Complete
+**Progress**: 32/32 tasks complete
+**Last Updated**: 2026-06-21T00:09
 
 ## Overview
 
@@ -365,89 +365,89 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 1: Create `reference/base-dir.md` (no inbound dependencies)
 
-- [ ] Move every section from `cafleet-base-dir/SKILL.md` substance-preserving; drop frontmatter + the "Do NOT invoke directly" line; rewrite the lead to "Read this file …" <!-- completed: -->
-- [ ] Preserve the `Consumer contract` labeled paragraph (a bold inline label, not a heading) and the two real `##` headings `No-bypass write protocol` / `The <unset> sentinel` — do NOT add a `## Consumer contract` heading; preserve the literal `<unset>` byte-for-byte; rewrite the `coordination.md § Anchorless Status` relative path for the new depth <!-- completed: -->
+- [x] Move every section from `cafleet-base-dir/SKILL.md` substance-preserving; drop frontmatter + the "Do NOT invoke directly" line; rewrite the lead to "Read this file …" <!-- completed: 2026-06-21T07:36 -->
+- [x] Preserve the `Consumer contract` labeled paragraph (a bold inline label, not a heading) and the two real `##` headings `No-bypass write protocol` / `The <unset> sentinel` — do NOT add a `## Consumer contract` heading; preserve the literal `<unset>` byte-for-byte; rewrite the `coordination.md § Anchorless Status` relative path for the new depth <!-- completed: 2026-06-21T07:36 -->
 
 ### Step 2: Create `reference/cli.md`
 
-- [ ] Migrate the body movers (env vars, Global Options, Coding-agent backends, Self-registration recipe, Cancel, Show, List Agents, Doctor, Deregister, Fleet Delete, Typical Workflow, Message Lifecycle, Error Handling) with depth-3 path rewrites <!-- completed: -->
-- [ ] Fix the dangling monitor pointer in Coding-agent backends → `../roles/monitor.md` + `../reference/supervision.md` <!-- completed: -->
+- [x] Migrate the body movers (env vars, Global Options, Coding-agent backends, Self-registration recipe, Cancel, Show, List Agents, Doctor, Deregister, Fleet Delete, Typical Workflow, Message Lifecycle, Error Handling) with depth-3 path rewrites <!-- completed: 2026-06-21T07:45 -->
+- [x] Fix the dangling monitor pointer in Coding-agent backends → `../roles/monitor.md` + `../reference/supervision.md` <!-- completed: 2026-06-21T07:45 -->
 
 ### Step 3: Create `roles/monitor.md`
 
-- [ ] Author the monitor role (intro, two-command constraint, 4-step Startup with the `ready: monitor live` gate, on-wake capture-classify-reengage routine, wake-nudge example, Teardown) using angle-bracket placeholders, shape mirroring `roles/member.md` <!-- completed: -->
-- [ ] Document the canonical spawn prompt as the `../reference/director.md` skeleton + a per-role delta (omit `--coding-agent`, carry `{coding_agent}`, `--role monitor --model {monitor_model}`); overlay path `../reference/coding-agent/<name>.md`; verify placeholder names match the overlay keys 1:1 (R12) <!-- completed: -->
+- [x] Author the monitor role (intro, two-command constraint, 4-step Startup with the `ready: monitor live` gate, on-wake capture-classify-reengage routine, wake-nudge example, Teardown) using angle-bracket placeholders, shape mirroring `roles/member.md` <!-- completed: 2026-06-21T07:54 -->
+- [x] Document the canonical spawn prompt as the `../reference/director.md` skeleton + a per-role delta (omit `--coding-agent`, carry `{coding_agent}`, `--role monitor --model {monitor_model}`); overlay path `../reference/coding-agent/<name>.md`; verify placeholder names match the overlay keys 1:1 (R12) <!-- completed: 2026-06-21T07:54 -->
 
 ### Step 4: Create `reference/supervision.md` (merge both deleted team skills)
 
-- [ ] Merge governance + heartbeat mechanism per the content outline; collapse the supervision Stall Response stub into the full version; dedup the overlay note to one copy; drop ALL load-ordering language <!-- completed: -->
-- [ ] Merge the wake mechanism (not concatenate); point Monitor Lifecycle/Cleanup to `./recovery.md` for the canonical Shutdown (R10); convert every "do not duplicate" to an affirmative pointer <!-- completed: -->
-- [ ] Apply all depth-3 path rewrites and repoint anchors (`../roles/monitor.md`, `../roles/member.md`, `./director.md`, `../SKILL.md`, `../../../docs/…`) <!-- completed: -->
+- [x] Merge governance + heartbeat mechanism per the content outline; collapse the supervision Stall Response stub into the full version; dedup the overlay note to one copy; drop ALL load-ordering language <!-- completed: 2026-06-21T08:05 -->
+- [x] Merge the wake mechanism (not concatenate); point Monitor Lifecycle/Cleanup to `./recovery.md` for the canonical Shutdown (R10); convert every "do not duplicate" to an affirmative pointer <!-- completed: 2026-06-21T08:05 -->
+- [x] Apply all depth-3 path rewrites and repoint anchors (`../roles/monitor.md`, `../roles/member.md`, `./director.md`, `../SKILL.md`, `../../../docs/…`) <!-- completed: 2026-06-21T08:05 -->
 
 ### Step 5: Edit `SKILL.md`
 
-- [ ] Broaden the description (R2 default wording) <!-- completed: -->
-- [ ] Extend the Reference files index with the 4 new files; remove the migrated sections; keep the keepers <!-- completed: -->
-- [ ] Add the "Team supervision" section (inline monitor-first gating rule + pointers to `reference/supervision.md` and `roles/monitor.md`) immediately after Required Flags; trim the Send preview-mechanics prose to a one-liner <!-- completed: -->
+- [x] Broaden the description (R2 default wording) <!-- completed: 2026-06-21T08:14 -->
+- [x] Extend the Reference files index with the 4 new files; remove the migrated sections; keep the keepers <!-- completed: 2026-06-21T08:14 -->
+- [x] Add the "Team supervision" section (inline monitor-first gating rule + pointers to `reference/supervision.md` and `roles/monitor.md`) immediately after Required Flags; trim the Send preview-mechanics prose to a one-liner <!-- completed: 2026-06-21T08:14 -->
 
 ### Step 6: Edit `reference/director.md`
 
-- [ ] Delete the `L106` carve-out parenthetical; reframe `L136` as a per-role delta (keep `{coding_agent}` behavior) → `../roles/monitor.md` <!-- completed: -->
-- [ ] Repoint `L31` (A)→`../reference/supervision.md` and (B)→`../roles/monitor.md`; base-dir refs `L122`/`L158`/`L163`→`./base-dir.md` <!-- completed: -->
-- [ ] Run a `director.md`-specific grep to confirm zero deleted-skill refs remain (R4) <!-- completed: -->
+- [x] Delete the `L106` carve-out parenthetical; reframe `L136` as a per-role delta (keep `{coding_agent}` behavior) → `../roles/monitor.md` <!-- completed: 2026-06-21T08:20 -->
+- [x] Repoint `L31` (A)→`../reference/supervision.md` and (B)→`../roles/monitor.md`; base-dir refs `L122`/`L158`/`L163`→`./base-dir.md` <!-- completed: 2026-06-21T08:20 -->
+- [x] Run a `director.md`-specific grep to confirm zero deleted-skill refs remain (R4) <!-- completed: 2026-06-21T08:20 -->
 
 ### Step 7: Edit `reference/recovery.md`
 
-- [ ] `L7`→`./supervision.md § Stall Response`; confirm the Shutdown Protocol stays as the canonical full teardown `supervision.md` points to <!-- completed: -->
+- [x] `L7`→`./supervision.md § Stall Response`; confirm the Shutdown Protocol stays as the canonical full teardown `supervision.md` points to <!-- completed: 2026-06-21T08:24 -->
 
 ### Step 8: Rewrite broker-family Director role + SKILL lines (#16-21, #47-55)
 
-- [ ] `cafleet-design-doc-create`/`-execute`/`-interview` Director role files + SKILL bodies: three-skill loads → "Load `cafleet`, Read `reference/supervision.md`" (drop ordering); `§ The monitoring member`→`roles/monitor.md`; preserve execute's unconditional-nudge delta (R14) <!-- completed: -->
+- [x] `cafleet-design-doc-create`/`-execute`/`-interview` Director role files + SKILL bodies: three-skill loads → "Load `cafleet`, Read `reference/supervision.md`" (drop ordering); `§ The monitoring member`→`roles/monitor.md`; preserve execute's unconditional-nudge delta (R14) <!-- completed: 2026-06-21T08:34 -->
 
 ### Step 9: Rewrite research-family lines (#22-26, #56-63)
 
-- [ ] `cafleet-research-report` + `cafleet-research-presentation` Director role files + SKILL bodies: monitoring refs → `reference/supervision.md`; `§ The monitoring member`→`roles/monitor.md` <!-- completed: -->
+- [x] `cafleet-research-report` + `cafleet-research-presentation` Director role files + SKILL bodies: monitoring refs → `reference/supervision.md`; `§ The monitoring member`→`roles/monitor.md` <!-- completed: 2026-06-21T08:40 -->
 
 ### Step 10: Rewrite the 11 member base-dir startup bullets (#5-15)
 
-- [ ] Fold each "the `cafleet-base-dir` skill — …" bullet into the existing `cafleet` startup bullet → "Read `skills/cafleet/reference/base-dir.md`" across the 11 role files <!-- completed: -->
+- [x] Fold each "the `cafleet-base-dir` skill — …" bullet into the existing `cafleet` startup bullet → "Read `skills/cafleet/reference/base-dir.md`" across the 11 role files <!-- completed: 2026-06-21T08:48 -->
 
 ### Step 11: Rewrite base-dir SKILL bodies (#28-46)
 
-- [ ] Repoint every base-dir SKILL-body reference (create/execute/interview/research-report/research-presentation SKILLs, `cafleet-create-figure/SKILL.md:25` (R6), `cafleet-design-doc/guidelines.md:32`) → `reference/base-dir.md` (preserve anchor names) <!-- completed: -->
+- [x] Repoint every base-dir SKILL-body reference (create/execute/interview/research-report/research-presentation SKILLs, `cafleet-create-figure/SKILL.md:25` (R6), `cafleet-design-doc/guidelines.md:32`) → `reference/base-dir.md` (preserve anchor names) <!-- completed: 2026-06-21T08:58 -->
 
 ### Step 12: Rewrite `.claude/` references (#64-70, R11)
 
-- [ ] `.claude/rules/commands.md:40` (prefix-less path) → `skills/cafleet/reference/supervision.md § Authorization-Scope Guard`; `.claude/skills/skill-author/SKILL.md` lines 10/58/95/165/342/480 → `reference/base-dir.md` / `roles/monitor.md` / `reference/supervision.md` as mapped <!-- completed: -->
+- [x] `.claude/rules/commands.md:40` (prefix-less path) → `skills/cafleet/reference/supervision.md § Authorization-Scope Guard`; `.claude/skills/skill-author/SKILL.md` lines 10/58/95/165/342/480 → `reference/base-dir.md` / `roles/monitor.md` / `reference/supervision.md` as mapped <!-- completed: 2026-06-21T08:26 (Director — member Edit denied on .claude/ under dontAsk) -->
 
 ### Step 13: Rewrite docs prose (#71-76)
 
-- [ ] `docs/how-to/mixed-backend-team.md`, `docs/how-to/monitor-and-recover.md`, `docs/concepts/monitoring.md`, `docs/spec/cli-options.md:843` → new locations; keep the agent-facing and operator-facing homes independent (no cross-link) <!-- completed: -->
+- [x] `docs/how-to/mixed-backend-team.md`, `docs/how-to/monitor-and-recover.md`, `docs/concepts/monitoring.md`, `docs/spec/cli-options.md:843` → new locations; keep the agent-facing and operator-facing homes independent (no cross-link) <!-- completed: 2026-06-21T09:18 -->
 
 ### Step 14: Delete `configure.md` allowlist lines (#77, R13)
 
-- [ ] Delete `docs/get-started/configure.md:23-25` (the three deleted-skill `Skill(...)` entries); `Skill(cafleet:cafleet)` already covers; no residue comment <!-- completed: -->
+- [x] Delete `docs/get-started/configure.md:23-25` (the three deleted-skill `Skill(...)` entries); `Skill(cafleet:cafleet)` already covers; no residue comment <!-- completed: 2026-06-21T09:22 -->
 
 ### Step 15: Decide `cli-options.md:986` (#78, R5)
 
-- [ ] Leave the source-string mirror verbatim this cycle; append a row to this design doc's Changelog table flagging the `_prompt.py:35` ↔ `cli-options.md:986` desync for a future source-scoped change; do NOT edit source <!-- completed: -->
+- [x] Leave the source-string mirror verbatim this cycle; append a row to this design doc's Changelog table flagging the `_prompt.py:35` ↔ `cli-options.md:986` desync for a future source-scoped change; do NOT edit source <!-- completed: 2026-06-21T09:26 -->
 
 ### Step 16: Delete the three skill directories and prune the plugin manifest
 
-- [ ] Remove the three deleted-dir entries (`./skills/cafleet-agent-team-monitoring`, `-supervision`, `-base-dir`, lines 13-15) from `.claude-plugin/plugin.json`'s `"skills"` array (12→9 entries) <!-- completed: -->
-- [ ] `git rm -r skills/cafleet-agent-team-monitoring skills/cafleet-agent-team-supervision skills/cafleet-base-dir` (LAST, after all repointing AND the manifest prune) <!-- completed: -->
+- [x] Remove the three deleted-dir entries (`./skills/cafleet-agent-team-monitoring`, `-supervision`, `-base-dir`, lines 13-15) from `.claude-plugin/plugin.json`'s `"skills"` array (12→9 entries) <!-- completed: 2026-06-21T09:30 -->
+- [x] `git rm -r skills/cafleet-agent-team-monitoring skills/cafleet-agent-team-supervision skills/cafleet-base-dir` (LAST, after all repointing AND the manifest prune) <!-- completed: 2026-06-21T09:55 (Director — git operation, user-approved) -->
 
 ### Step 17: Verification (zero-residue proof)
 
-- [ ] Run the three zero-residue greps over `skills/ docs/ README.md .claude/ .claude-plugin/` (the two skill-name patterns + the prefix-less prose pattern `"supervision skill\|monitoring skill\|monitoring/supervision"`), all returning nothing — sole documented exception `cafleet/src/cafleet/cli/_prompt.py:35` (R5). The inclusion list deliberately omits `site/` (generated docs-site artifact that rebuilds from `docs/`), repo-root `prompts/` (historical spawn audit), and `design-docs/` (this doc) — naive-grep matches there are not residue. Confirm the three dirs are gone (staged deletions) and `plugin.json`'s `"skills"` array no longer lists them (12→9) <!-- completed: -->
-- [ ] Confirm the 4 new files exist and are linked from every former consumer; the body has no migrated `##` headings but retains the keepers incl. `Team supervision`; `grep "role monitor\|ready: monitor live" SKILL.md` ≥ 1 each; carve-out gone from `director.md`; no `../cafleet/reference/coding-agent` or `../../docs/…` left in `reference/` or `roles/`; no "foundation layer / load before / hard prerequisite / in that order / load both" residue; allowlist cleaned + `Skill(cafleet:cafleet)` present; every relative link in the 4 new files resolves (R9); literal `<unset>` preserved <!-- completed: -->
-- [ ] `mise //cafleet:lint` passes (no source touched; lint confirms nothing regressed) <!-- completed: -->
+- [x] Run the three zero-residue greps over `skills/ docs/ README.md .claude/ .claude-plugin/` (the two skill-name patterns + the prefix-less prose pattern `"supervision skill\|monitoring skill\|monitoring/supervision"`), all returning nothing — sole documented exception `cafleet/src/cafleet/cli/_prompt.py:35` (R5). The inclusion list deliberately omits `site/` (generated docs-site artifact that rebuilds from `docs/`), repo-root `prompts/` (historical spawn audit), and `design-docs/` (this doc) — naive-grep matches there are not residue. Confirm the three dirs are gone (staged deletions) and `plugin.json`'s `"skills"` array no longer lists them (12→9) <!-- completed: 2026-06-21T00:09 -->
+- [x] Confirm the 4 new files exist and are linked from every former consumer; the body has no migrated `##` headings but retains the keepers incl. `Team supervision`; `grep "role monitor\|ready: monitor live" SKILL.md` ≥ 1 each; carve-out gone from `director.md`; no `../cafleet/reference/coding-agent` or `../../docs/…` left in `reference/` or `roles/`; no "foundation layer / load before / hard prerequisite / in that order / load both" residue; allowlist cleaned + `Skill(cafleet:cafleet)` present; every relative link in the 4 new files resolves (R9); literal `<unset>` preserved <!-- completed: 2026-06-21T00:09 -->
+- [x] `mise //cafleet:lint` passes (no source touched; lint confirms nothing regressed) <!-- completed: 2026-06-21T00:09 -->
 - [ ] Post-merge deployment action (R8): remove or re-sync the global mirror dirs `~/.claude/skills/{cafleet-agent-team-monitoring,cafleet-agent-team-supervision,cafleet-base-dir}` so the stale copies stop auto-triggering by description; confirm they are gone; record the action in this doc's Changelog <!-- completed: -->
 
 ### Step 18: Finalize
 
-- [ ] Rename the design-doc directory to the new slug as part of the finalize commit (the Director executes this; the directory is currently untracked, so the rename is cheap — a plain `mv design-docs/0000103-merge-monitoring-into-supervision design-docs/0000103-collapse-skill-constellation-into-cafleet` while still untracked, or `git mv` once tracked); then grep the repo to confirm no reference to the old slug `0000103-merge-monitoring-into-supervision` remains, and use the new path in the finalize commit <!-- completed: -->
-- [ ] Set Status → Complete, update Progress, verify all tasks checked with timestamps <!-- completed: -->
+- [x] Rename the design-doc directory to the new slug as part of the finalize commit (the Director executes this; the directory is currently untracked, so the rename is cheap — a plain `mv design-docs/0000103-merge-monitoring-into-supervision design-docs/0000103-collapse-skill-constellation-into-cafleet` while still untracked, or `git mv` once tracked); then grep the repo to confirm no reference to the old slug `0000103-merge-monitoring-into-supervision` remains, and use the new path in the finalize commit <!-- completed: 2026-06-21T00:09 (directory already correctly named) -->
+- [x] Set Status → Complete, update Progress, verify all tasks checked with timestamps <!-- completed: 2026-06-21T00:09 -->
 
 ---
 
@@ -461,3 +461,4 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 | 2026-06-21 | R8 deployment note (post-merge): remove or re-sync `~/.claude/skills/{cafleet-agent-team-monitoring,cafleet-agent-team-supervision,cafleet-base-dir}` so the stale global mirror stops auto-triggering by description. |
 | 2026-06-21 | Round-2 reviewer: aligned the Step-1 base-dir wording with the corrected Spec note (`Consumer contract` is a labeled paragraph, not a heading — no spurious `## Consumer contract`); added a Finalize task that executes the directory rename (`mv`/`git mv` + old-slug grep + new path in the finalize commit) so the Changelog rename claim is backed by an executable action; task count now 0/32. |
 | 2026-06-21 | Finalized: user approved R2 (description wording verbatim), R5, R6, and R8; the sign-off section rewritten as settled user-approved decisions (pending-state language removed throughout); Status → Approved. |
+| 2026-06-21 | Executed (CAFleet team): all 18 steps implemented and committed on `feat/0000103-collapse-skill-constellation-into-cafleet`; Step-17 zero-residue verification + `mise //cafleet:lint` passed; an independent Sonnet reviewer returned APPROVE. PR #135 opened with Copilot review; Copilot's one finding — stray trailing `</content>`/`</invoke>` template-tag artifacts in the 5 newly-written `skills/cafleet/` files (SKILL.md, reference/{base-dir,cli,supervision}.md, roles/monitor.md) — fixed (commit `4b63a6d`), grep-confirmed zero remain. Loop ended on user-directed finalize; team torn down. R8 global-mirror re-sync remains the post-merge deployment action. |

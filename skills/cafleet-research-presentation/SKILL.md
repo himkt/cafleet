@@ -19,7 +19,7 @@ Create a Slidev presentation and reading transcript from an existing research re
 
 ## Prerequisites
 
-The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` and `cafleet-agent-team-monitoring` skills and embeds them into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director — see Step 1.
+The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill (reading its `reference/supervision.md`) and embeds it into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director — see Step 1.
 
 For autonomous Slidev generation, see the `cafleet-my-slidev` skill § Autonomous slide generation.
 
@@ -63,7 +63,7 @@ Step 5 (cleanup) is autonomous — no user prompt.
 ### Step 0: Validate Input (Director)
 
 1. If `$ARGUMENTS` is absent → error: "Usage: invoke the `cafleet-research-presentation` skill with `<folder-name>`. Specify the folder containing report.md."
-2. Load the `cafleet-base-dir` skill for the no-bypass write protocol and `<unset>` sentinel contract.
+2. Read the `cafleet` skill's `reference/base-dir.md` for the no-bypass write protocol and `<unset>` sentinel contract.
 3. Resolve the task-scoped BASE by calling the resolver positionally with the topic relpath:
 
    - If `$ARGUMENTS` is a relative folder name (e.g. `my-topic`), **canonicalize first** to the bare topic slug `$CANONICAL_SLUG`: strip a trailing `/report.md` if present, then strip a leading `researches/` prefix if present — so `$CANONICAL_SLUG` carries no `researches/`. Then run the skill's **Step 0 (task-scope resolution)** with the relpath `researches/$CANONICAL_SLUG`; the single `researches/` prepend happens only here, at the call site. Stripping the leading `researches/` during canonicalization is what prevents a doubled `researches/researches/my-topic` when `$ARGUMENTS` already begins with `researches/`.
@@ -72,13 +72,13 @@ Step 5 (cleanup) is autonomous — no user prompt.
 
      Step 0 treats the canonicalized absolute path as the task folder verbatim if it is strictly under the inferred repo root; otherwise it yields the `<unset>` sentinel. Step 0 does no filename folding, so a raw child path like `/abs/path/to/researches/my-topic/report.md` is taken verbatim as the task folder — a `report.md`-named folder rather than the topic folder, with directory creation deferred to the first consumer write.
 
-   Branch on Step 0's outcome: when it **resolves**, set both `${FOLDER}` and `${BASE}` to the resolved task folder (the task folder IS the report folder; no further `${BASE}/researches/...` concatenation). When it yields **`<unset>`** (absolute `$ARGUMENTS` outside the repo root), set `${FOLDER}` to the **canonicalized** absolute path (the same trailing-`/report.md`-stripped path you passed to Step 0) so the report-folder check in step 4 still runs against a folder rather than a file, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet-base-dir` skill § *The `<unset>` sentinel*.
+   Branch on Step 0's outcome: when it **resolves**, set both `${FOLDER}` and `${BASE}` to the resolved task folder (the task folder IS the report folder; no further `${BASE}/researches/...` concatenation). When it yields **`<unset>`** (absolute `$ARGUMENTS` outside the repo root), set `${FOLDER}` to the **canonicalized** absolute path (the same trailing-`/report.md`-stripped path you passed to Step 0) so the report-folder check in step 4 still runs against a folder rather than a file, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet` skill's `reference/base-dir.md` § *The `<unset>` sentinel*.
 4. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Invoke the `cafleet-research-report` skill first to generate a report."
 5. Pass `${FOLDER}` as the resolved absolute path to all members in spawn prompts. The audit-file path `${BASE}/prompts/<role>-<UTC-compact>.md` is naturally task-scoped — it lives under `<topic-folder>/prompts/`, not under the repo root.
 
 ### Step 1: Bootstrap CAFleet Fleet & Spawn Presentation + Transcript (Director)
 
-Load the `cafleet` and `cafleet-agent-team-monitoring` skills for their heartbeat, facilitation, and Stall Response policy. The fleet runs a dedicated monitoring member (the **first** `cafleet member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director via `cafleet member nudge`; the Director does **not** run `cafleet monitor` itself. Gate the Presentation/Transcript spawns on the monitoring member's `ready: monitor live` handshake (first-in) — see 1b.
+Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and Stall Response policy. The fleet runs a dedicated monitoring member (the **first** `cafleet member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director via `cafleet member nudge`; the Director does **not** run `cafleet monitor` itself. Gate the Presentation/Transcript spawns on the monitoring member's `ready: monitor live` handshake (first-in) — see 1b.
 
 #### 1a. Environment precheck and fleet bootstrap
 
@@ -105,7 +105,7 @@ cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id
   --prompt-file ${BASE}/prompts/monitor-<UTC-compact>.md
 ```
 
-See the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical spawn prompt and lifecycle. The monitoring member is stopped and deleted first in the Step 5 teardown (first-out). Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
+See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle. The monitoring member is stopped and deleted first in the Step 5 teardown (first-out). Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 
@@ -115,7 +115,7 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 - `roles/transcript.md`
 - `roles/visual-reviewer.md`
 
-> **Spawn mechanics**: path-by-reference is required because cafleet `member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). `str.format()` runs over the prompt with `fleet_id` / `agent_id` / `director_agent_id` as kwargs — leave those single-braced, double any other literal `{` / `}`. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE `cafleet member create --prompt-file <abs path>` (the pre-spawn file IS both the CLI input and the permanent audit artifact); see the `cafleet-base-dir` skill § *No-bypass write protocol* and `reference/director.md` § *Member Create — Scratch and audit files* for the contract incl. the `${BASE} == <unset>` guarded-skip + inline fallback.
+> **Spawn mechanics**: path-by-reference is required because cafleet `member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). `str.format()` runs over the prompt with `fleet_id` / `agent_id` / `director_agent_id` as kwargs — leave those single-braced, double any other literal `{` / `}`. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE `cafleet member create --prompt-file <abs path>` (the pre-spawn file IS both the CLI input and the permanent audit artifact); see the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files* for the contract incl. the `${BASE} == <unset>` guarded-skip + inline fallback.
 
 #### 1d. Spawn Presentation + Transcript in parallel
 

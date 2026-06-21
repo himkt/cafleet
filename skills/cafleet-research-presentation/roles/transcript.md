@@ -5,8 +5,7 @@ You are the **Transcript Specialist** in a research presentation team. You bear 
 ## Load at Startup
 
 Load these skills at startup:
-- the `cafleet-base-dir` skill — for the no-bypass write protocol and BASE-derived path conventions
-- the `cafleet` skill — for communication with the Director
+- the `cafleet` skill — for communication with the Director; also Read its `reference/base-dir.md` for the no-bypass write protocol and BASE-derived path conventions
 
 ## Your Accountability
 

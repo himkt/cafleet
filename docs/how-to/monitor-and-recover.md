@@ -20,8 +20,8 @@ monitoring member by keystroking a wake nudge into its pane. That wake nudge doe
 never parked on a permission prompt; the `Esc` safeguard instead lives on the
 broker's inline preview and `cafleet member ping`, whose targets may be on a
 prompt. The monitoring member is spawned **first**; it starts the loop and reports
-`ready: monitor live` (its canonical spawn prompt lives in the
-`cafleet-agent-team-monitoring` skill):
+`ready: monitor live` (its canonical spawn prompt lives in the `/cafleet`
+skill's `roles/monitor.md`):
 
 ```bash
 cafleet member create --fleet-id 1 --agent-id 2 \
@@ -52,8 +52,8 @@ member that has gone quiet, inspect its pane, and recover it with the
 mildest intervention that works — only delete it as a last resort.
 ```
 
-Your agent loads the `cafleet` skill plus `cafleet-agent-team-monitoring` /
-`cafleet-agent-team-supervision` (recovery ladder and idle semantics).
+Your agent loads the `cafleet` skill and reads its Director-only
+`reference/supervision.md` (recovery ladder and idle semantics, plus the monitoring mechanism).
 
 ## What to expect
 

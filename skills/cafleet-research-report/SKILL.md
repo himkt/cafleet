@@ -23,7 +23,7 @@ Generate comprehensive research reports using a multi-layer CAFleet-orchestrated
 
 ## Prerequisites
 
-The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill and the `cafleet-agent-team-monitoring` skill and embeds them into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director — see Step 1.
+The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill (reading its `reference/supervision.md`) and embeds it into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director — see Step 1.
 
 ## Output
 
@@ -51,7 +51,7 @@ Members cannot talk to the user directly — the Director always relays. Members
 
 Before creating the team, resolve the task-scoped base directory for this run.
 
-1. Load the `cafleet-base-dir` skill for the no-bypass write protocol and `<unset>` sentinel contract.
+1. Read the `cafleet` skill's `reference/base-dir.md` for the no-bypass write protocol and `<unset>` sentinel contract.
 2. Resolve the task-scoped BASE by calling the resolver positionally with the topic relpath:
 
    Run the skill's **Step 0 (task-scope resolution)** with the relpath `researches/[topic-slug]`.
@@ -76,7 +76,7 @@ Capture `fleet_id` and `director.agent_id` from the response. Treat `fleet_id` a
 
 ### Step 1: Supervision Model (Director — spawn the monitoring member first)
 
-Load the `cafleet` skill and the `cafleet-agent-team-monitoring` skill for their heartbeat, facilitation, and Stall Response policy. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and Stall Response policy. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
 Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the audit-file pattern this skill uses for every spawn, then spawn:
 
@@ -88,7 +88,7 @@ cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id
   --prompt-file ${BASE}/prompts/monitor-<UTC-compact>.md
 ```
 
-See the `cafleet-agent-team-monitoring` skill § The monitoring member for the canonical spawn prompt and lifecycle. The monitoring member is stopped and deleted first in the Step 8 teardown (first-out).
+See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle. The monitoring member is stopped and deleted first in the Step 8 teardown (first-out).
 
 On each active turn, check `${OUTPUT_DIR}` for these expected deliverables:
 
@@ -96,11 +96,11 @@ On each active turn, check `${OUTPUT_DIR}` for these expected deliverables:
 - `00-scout-*.md` — Scout landscape/discovery notes (one or more files may exist)
 - `NN-research-*.md` — Researcher findings files for delegated sub-topics (`NN` is the assigned number; one or more files may exist)
 
-Readiness/stall rules (apply per the `cafleet-agent-team-monitoring` skill):
+Readiness/stall rules (apply per the `cafleet` skill's `reference/supervision.md`):
 
 - After Scouts/Researchers have been spawned and tasks have been assigned, expect at least one `00-scout-*.md` or `NN-research-*.md` file to appear after the first round of replies.
 - Do not consider the workflow ready for Step 5 until `report.md` exists.
-- If a member has an assignment still in progress but their deliverable file is missing past the expected milestone, run the 2-stage health-check from the `cafleet-agent-team-monitoring` skill: `cafleet message poll` → `cafleet member capture --lines 200` → directed `cafleet message send` nudge → user escalation.
+- If a member has an assignment still in progress but their deliverable file is missing past the expected milestone, run the 2-stage health-check from the `cafleet` skill's `reference/supervision.md`: `cafleet message poll` → `cafleet member capture --lines 200` → directed `cafleet message send` nudge → user escalation.
 
 ### Step 2: Spawn Manager (Director)
 
@@ -120,7 +120,7 @@ The Director references each role definition by its **absolute path** in the spa
 
 Substitute these absolute paths into the spawn prompts below.
 
-> **Spawn mechanics**: path-by-reference is required because cafleet `member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). `str.format()` runs over the prompt with `fleet_id` / `agent_id` / `director_agent_id` as kwargs — leave those single-braced, double any other literal `{` / `}`. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE `cafleet member create --prompt-file <abs path>` (the pre-spawn file IS both the CLI input and the permanent audit artifact); see the `cafleet-base-dir` skill § *No-bypass write protocol* and `reference/director.md` § *Member Create — Scratch and audit files* for the contract incl. the `${BASE} == <unset>` guarded-skip + inline fallback.
+> **Spawn mechanics**: path-by-reference is required because cafleet `member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). `str.format()` runs over the prompt with `fleet_id` / `agent_id` / `director_agent_id` as kwargs — leave those single-braced, double any other literal `{` / `}`. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE `cafleet member create --prompt-file <abs path>` (the pre-spawn file IS both the CLI input and the permanent audit artifact); see the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files* for the contract incl. the `${BASE} == <unset>` guarded-skip + inline fallback.
 
 #### 2c. Spawn the Manager
 

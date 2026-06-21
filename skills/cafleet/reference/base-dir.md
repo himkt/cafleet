@@ -1,19 +1,12 @@
----
-name: cafleet-base-dir
-description: >
-  Resolve the base directory for output files. Loaded by consuming skills
-  via the `cafleet-base-dir` skill. Do NOT invoke directly.
----
-
 # Base Directory Resolution
 
-The `cafleet-base-dir` skill is the single authoritative resolver for every CAFleet scratch / audit / figure path. The resolution outcome (`${BASE}`) is the only legitimate root for those writes. Consuming skills MUST NOT compute `${BASE}` independently and MUST NOT fall back to `/tmp` when resolution returns the `<unset>` sentinel.
+Read this file for the base-directory resolution procedure and the no-bypass write protocol. This procedure is the single authoritative resolver for every CAFleet scratch / audit / figure path. The resolution outcome (`${BASE}`) is the only legitimate root for those writes. Consuming skills MUST NOT compute `${BASE}` independently and MUST NOT fall back to `/tmp` when resolution returns the `<unset>` sentinel.
 
-`/tmp/claude-code` remains a perfectly valid resolved `${BASE}` when this skill explicitly selects it via the `AskUserQuestion` branch — only **bypassing** base-dir to write to `/tmp` without its consent is forbidden.
+`/tmp/claude-code` remains a perfectly valid resolved `${BASE}` when this procedure explicitly selects it via the `AskUserQuestion` branch — only **bypassing** base-dir to write to `/tmp` without its consent is forbidden.
 
 ## Procedure
 
-This skill resolves `${BASE}` using only `git rev-parse --show-toplevel` (Bash) and `AskUserQuestion`. It writes nothing at resolution time. Claude's job is to (a) pick the task-scope branch (Step 0) when the consuming skill operates on a per-task folder, otherwise the shared-root branch (Step 1); and (b) drive `AskUserQuestion` (Step 2) only when Step 1 reaches branch 3 (CWD is `$HOME` or under `~/.claude`).
+This procedure resolves `${BASE}` using only `git rev-parse --show-toplevel` (Bash) and `AskUserQuestion`. It writes nothing at resolution time. Claude's job is to (a) pick the task-scope branch (Step 0) when the consuming skill operates on a per-task folder, otherwise the shared-root branch (Step 1); and (b) drive `AskUserQuestion` (Step 2) only when Step 1 reaches branch 3 (CWD is `$HOME` or under `~/.claude`).
 
 ### Step 0. Task-scope resolution (preferred for task-aware consuming skills)
 
@@ -53,7 +46,7 @@ Present the candidates via `AskUserQuestion` ("Select the base directory for out
 - `${CWD}` → `${BASE} = ${CWD}` (the CWD literal from the candidates list)
 - `Other` (free text) → `${BASE} = user input` (resolve against `${CWD}` if relative)
 
-The chosen value is `${BASE}`. Nothing is persisted; if the skill reloads in the same `$HOME` / `~/.claude` CWD, this branch re-prompts.
+The chosen value is `${BASE}`. Nothing is persisted; if the procedure reloads in the same `$HOME` / `~/.claude` CWD, this branch re-prompts.
 
 ## No-bypass write protocol
 
@@ -63,9 +56,9 @@ Every CAFleet member, every consumer skill, and every Director MUST follow this 
 
 2. **`${BASE} == <unset>` is a hard stop, not a fallback.** If `${BASE}` is the literal sentinel `<unset>` (absolute-path argument branch), any code that tries to compute a path from `${BASE}` MUST abort with `Error: BASE is <unset>; refusing to fall back to /tmp`. The loud failure is the safety net for sites that forgot to guard explicitly.
 
-3. **Members never re-resolve BASE.** The Director's spawn-prompt substitution delivers `${BASE}` to each spawned member as a literal absolute path baked into the spawn prompt. Members MUST use that literal path verbatim. Members DO load this skill at startup (per their role file's *Load at Startup* block) to pick up the no-bypass write protocol and the `<unset>` sentinel contract — but they MUST NOT run the resolution procedure (Steps 0–2) or otherwise derive a new `${BASE}` of their own. Re-resolving would invite drift if the Director's resolved BASE changed mid-session.
+3. **Members never re-resolve BASE.** The Director's spawn-prompt substitution delivers `${BASE}` to each spawned member as a literal absolute path baked into the spawn prompt. Members MUST use that literal path verbatim. Members DO Read this file at startup (per their role file's *Load at Startup* block) to pick up the no-bypass write protocol and the `<unset>` sentinel contract — but they MUST NOT run the resolution procedure (Steps 0–2) or otherwise derive a new `${BASE}` of their own. Re-resolving would invite drift if the Director's resolved BASE changed mid-session.
 
-4. **Missing-BASE-line anchorless status.** If a member's spawn prompt is missing the `BASE:` line entirely (an expected outcome when the Director resolved `${BASE} = <unset>`), the member treats the audit-file feature as disabled and emits a single CAFleet message back to the Director as a parens-free anchorless status (per `skills/cafleet-design-doc/coordination.md` § *Anchorless Status*):
+4. **Missing-BASE-line anchorless status.** If a member's spawn prompt is missing the `BASE:` line entirely (an expected outcome when the Director resolved `${BASE} = <unset>`), the member treats the audit-file feature as disabled and emits a single CAFleet message back to the Director as a parens-free anchorless status (per [`../../cafleet-design-doc/coordination.md`](../../cafleet-design-doc/coordination.md) § *Anchorless Status*):
 
    ```
    audit-disabled no BASE in spawn prompt
@@ -75,4 +68,4 @@ Every CAFleet member, every consumer skill, and every Director MUST follow this 
 
 ## The `<unset>` sentinel
 
-`cafleet-base-dir` is the only producer of `BASE=<unset>` — the literal string `"<unset>"` (case-sensitive), returned by the absolute-path-arg branch (Step 0). A consumer with `${BASE} == <unset>` follows the **No-bypass write protocol** above: **guard** every audit-file write with an explicit `${BASE} != <unset>` check at the call site (a guarded skip is the intended path — no silent no-op, no `/tmp` fallback); **omit** the `BASE:` line entirely from spawn prompts (never write the literal `BASE: <unset>`), so the member's existence-check treats audit-files as disabled; and **loud-error** on any unguarded `Path(BASE) / …` computation (the abort string in item 2).
+This resolution procedure is the only producer of `BASE=<unset>` — the literal string `"<unset>"` (case-sensitive), returned by the absolute-path-arg branch (Step 0). A consumer with `${BASE} == <unset>` follows the **No-bypass write protocol** above: **guard** every audit-file write with an explicit `${BASE} != <unset>` check at the call site (a guarded skip is the intended path — no silent no-op, no `/tmp` fallback); **omit** the `BASE:` line entirely from spawn prompts (never write the literal `BASE: <unset>`), so the member's existence-check treats audit-files as disabled; and **loud-error** on any unguarded `Path(BASE) / …` computation (the abort string in item 2).
