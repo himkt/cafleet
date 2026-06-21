@@ -1,7 +1,7 @@
 # Skill Linked-Content Enforcement
 
-**Status**: Approved
-**Progress**: 18/27 tasks complete
+**Status**: Implementation Complete (behavioral validation deferred — see Step 6 + Success Criterion #5)
+**Progress**: 22/27 tasks complete (5 remaining = Step 6 behavioral probes, deferred to post-merge operator)
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -10,13 +10,13 @@ Agents reliably enter a cafleet-family skill but routinely do **not** follow its
 
 ## Success Criteria
 
-- [ ] Every reader entry point (each `SKILL.md` dispatch surface, each workflow body, each `roles/*.md`) carries a **Required reading** block scoped to that reader's role.
-- [ ] Every linked reference an entry point names is classified **load-bearing** (for that reader) or **optional/on-demand**, and every load-bearing entry carries a one-line "what you lose if you skip it" consequence.
-- [ ] The overlay (`reference/coding-agent/<name>.md`) is the first load-bearing read in every entry point that uses `{placeholder}` tokens.
-- [ ] **Per-reader-role is preserved (hard constraint):** no member entry point force-reads a Director-only reference page; the 0000103/0000104 token-reduction split stays intact (members still skip `cafleet/reference/*` governance).
-- [ ] **Behavioral validation passes:** in a fresh coding-agent session, a triggering prompt causes the reader to apply at least one protocol it could only know by reading a linked file (per the per-family probes in Step 6).
-- [ ] No new tooling is added (prose/instruction-design only): no mise lint task, no runtime read-assertion handshake.
-- [ ] Removal is complete: no load-bearing link is left in the old undifferentiated "Read on demand" phrasing; the entry points read as if the soft phrasing for load-bearing content never existed.
+- [x] Every reader entry point (each `SKILL.md` dispatch surface, each workflow body, each `roles/*.md`) carries a **Required reading** block scoped to that reader's role.
+- [x] Every linked reference an entry point names is classified **load-bearing** (for that reader) or **optional/on-demand**, and every load-bearing entry carries a one-line "what you lose if you skip it" consequence.
+- [x] The overlay (`reference/coding-agent/<name>.md`) is the first load-bearing read in every entry point that uses `{placeholder}` tokens.
+- [x] **Per-reader-role is preserved (hard constraint):** no member entry point force-reads a Director-only reference page; the 0000103/0000104 token-reduction split stays intact (members still skip `cafleet/reference/*` governance).
+- [ ] **Behavioral validation passes:** in a fresh coding-agent session, a triggering prompt causes the reader to apply at least one protocol it could only know by reading a linked file (per the per-family probes in Step 6). **— DEFERRED to post-merge operator validation (user decision, 2026-06-21): the probes only exercise the new content after the branch's `skills/` edits are deployed to `~/.claude/skills/` via `mise //:skill-install`; running them pre-merge would deploy un-merged changes into the live global environment. See Step 6.**
+- [x] No new tooling is added (prose/instruction-design only): no mise lint task, no runtime read-assertion handshake.
+- [x] Removal is complete: no load-bearing link is left in the old undifferentiated "Read on demand" phrasing; the entry points read as if the soft phrasing for load-bearing content never existed.
 
 ---
 
@@ -199,6 +199,8 @@ The `SKILL.md:18-27` "Read on demand" list is rewritten into the three-way class
 
 For each probe: open a fresh coding-agent session, give the triggering prompt, and confirm the reader applies a protocol knowable only from a linked file. Pass = protocol applied; fail = generic/wrong behavior.
 
+**Deferred to post-merge operator validation (user decision, 2026-06-21).** These probes only exercise the new Required-reading blocks once the branch's `skills/` edits are deployed to `~/.claude/skills/` (via `mise //:skill-install` / `gh skill install`) — fresh coding-agent sessions load skills from the global home, not the repo (precedent: 0000105 Step 4, which validated only after that deploy). To avoid deploying un-merged changes into the live global environment, the five probes below run after this branch merges and the skills are installed; they remain the acceptance test for Success Criterion #5.
+
 - [ ] **cafleet / base-dir:** spawn a member with no `BASE:` line; confirm it emits the parens-free anchorless status `audit-disabled no BASE in spawn prompt` (knowable only from `base-dir.md` § No-bypass write protocol) rather than falling back to `/tmp`. <!-- completed: -->
 - [ ] **cafleet / overlay:** confirm a Director spawns the monitor with `--model haiku` (the `{monitor_model}` value lives only in `reference/coding-agent/claude.md`). <!-- completed: -->
 - [ ] **cafleet-design-doc / coordination:** confirm a Drafter/Reviewer uses the verb + pointer `COMMENT(role)` schema from `reference/coordination.md` rather than free-form bodies. <!-- completed: -->
@@ -207,10 +209,10 @@ For each probe: open a fresh coding-agent session, give the triggering prompt, a
 
 ### Step 7: Removal sweep & consistency check
 
-- [ ] Grep the three skill families for residual undifferentiated "Read on demand" phrasing on load-bearing links; confirm each is either reclassified or genuinely on-demand. <!-- completed: -->
-- [ ] Confirm no member entry point lists a Director-only reference page (per-reader-role hard constraint); confirm the 0000103/0000104 token split is intact. <!-- completed: -->
-- [ ] Verify every Required-reading link resolves to an existing file/section (no dangling pointers introduced). <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` and `mise //cafleet:test` to confirm no skill-loading test or doc check regressed. <!-- completed: -->
+- [x] Grep the three skill families for residual undifferentiated "Read on demand" phrasing on load-bearing links; confirm each is either reclassified or genuinely on-demand. <!-- completed: 2026-06-21T08:40 --> No "Read on demand" phrasing remains; the SKILL.md menus are reclassified into the three-way tables.
+- [x] Confirm no member entry point lists a Director-only reference page (per-reader-role hard constraint); confirm the 0000103/0000104 token split is intact. <!-- completed: 2026-06-21T08:40 --> No ordinary member role lists supervision/director/recovery/broadcast in its block; member.md:5 negatively states the exclusion; monitor lists only supervision (its governance); monitor's recovery/director refs are contextual pointers, not block entries.
+- [x] Verify every Required-reading link resolves to an existing file/section (no dangling pointers introduced). <!-- completed: 2026-06-21T08:40 --> All targets exist; relative depths reuse the already-working link forms in each file.
+- [x] Run `mise //cafleet:lint` and `mise //cafleet:test` to confirm no skill-loading test or doc check regressed. <!-- completed: 2026-06-21T08:40 --> lint clean (113 files formatted); 871 tests passed.
 
 ---
 
@@ -219,3 +221,4 @@ For each probe: open a fresh coding-agent session, give the triggering prompt, a
 | Date | Changes |
 |------|---------|
 | 2026-06-21 | Initial draft |
+| 2026-06-21 | Implementation Steps 1–5 + 7 complete (Required-reading blocks across all three skill families; removal sweep + lint/test clean: 871 tests pass). Step 6 behavioral validation deferred to post-merge operator per user decision (probes need the branch skills deployed to `~/.claude/skills/`). One review defect caught and fixed (leftover table-row fragment in interview analyzer). |
