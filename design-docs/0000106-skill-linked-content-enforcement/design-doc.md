@@ -1,7 +1,7 @@
 # Skill Linked-Content Enforcement
 
 **Status**: Approved
-**Progress**: 4/27 tasks complete
+**Progress**: 7/27 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -171,9 +171,9 @@ The `SKILL.md:18-27` "Read on demand" list is rewritten into the three-way class
 
 ### Step 2: Define the canonical block in the `cafleet` skill
 
-- [ ] Add the canonical **Required reading** block format to `cafleet/SKILL.md`, scoped to a skill-loading agent (overlay; base-dir if writing). <!-- completed: -->
-- [ ] Rewrite the `cafleet/SKILL.md:18-27` "Read on demand" menu into the three-way classification (surface B): `base-dir.md` eager load-bearing-for-writers; `recovery.md`/`broadcast.md`/`exec-routing.md` load-bearing-on-trigger (with consequence cells); `cli.md`/`output-flags.md` genuinely optional; `supervision.md`/`director.md` point to the Director role block. <!-- completed: -->
-- [ ] Move the overlay paragraph (`cafleet/SKILL.md:31-33`) into Required-reading row #1 with the unresolved-`{placeholder}` consequence — delete the standalone paragraph (content moves, not duplicated). <!-- completed: -->
+- [x] Add the canonical **Required reading** block format to `cafleet/SKILL.md`, scoped to a skill-loading agent (overlay; base-dir if writing). <!-- completed: 2026-06-21T07:58 -->
+- [x] Rewrite the `cafleet/SKILL.md:18-27` "Read on demand" menu into the three-way classification (surface B): `base-dir.md` eager load-bearing-for-writers; `recovery.md`/`broadcast.md`/`exec-routing.md` load-bearing-on-trigger (with consequence cells); `cli.md`/`output-flags.md` genuinely optional; `supervision.md`/`director.md` point to the Director role block. <!-- completed: 2026-06-21T07:58 -->
+- [x] Move the overlay paragraph (`cafleet/SKILL.md:31-33`) into Required-reading row #1 with the unresolved-`{placeholder}` consequence — delete the standalone paragraph (content moves, not duplicated). <!-- completed: 2026-06-21T07:58 -->
 
 ### Step 3: Apply to `cafleet` role + reference entry points
 

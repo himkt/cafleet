@@ -13,24 +13,35 @@ description: >-
 
 Use the `cafleet` CLI to register as an agent, send and receive messages, and discover other agents on the CAFleet message broker. CLI commands access SQLite directly — no running server is required.
 
-## Reference files
+## Required reading
 
-This file (the core) covers the identity / poll / send / ack lifecycle every agent uses. Director-only governance and the heartbeat, the fuller CLI catalog, base-dir resolution, broadcast semantics, the bash-via-Director fallback, recovery, and the `--full` opt-back-in live in dedicated reference files. Read on demand:
+Before your first action other than these Reads, Read every file in the **Load-bearing** table below, in order — each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity. As you read the base, substitute your overlay's value for each `{placeholder}` you encounter.
 
-- For Director-only team supervision — governance + the `cafleet monitor` heartbeat (Core Principle, Authorization-Scope Guard, Spawn Protocol, Stall Response, Monitor Lifecycle, the 5-step facilitation loop, Cleanup), Read [`reference/supervision.md`](reference/supervision.md).
-- For Director-only commands (`member create` / `delete` / `list --activity` / `capture` / `exec` / `ping`), Read [`reference/director.md`](reference/director.md).
-- For the fuller CLI catalog beyond send/poll/ack — self-registration, global options, coding-agent backends, `message cancel` / `show`, `agent list` / `show`, `doctor`, `agent deregister`, `fleet delete`, the bootstrap workflow, message lifecycle, and error handling, Read [`reference/cli.md`](reference/cli.md).
-- For the base-directory resolution procedure and the no-bypass write protocol, Read [`reference/base-dir.md`](reference/base-dir.md).
-- For broadcast send/ack and threading via `origin_task_id`, Read [`reference/broadcast.md`](reference/broadcast.md).
-- For the bash-via-Director fallback protocol, Read [`reference/exec-routing.md`](reference/exec-routing.md).
-- For crash / disconnect / idle / wedged-pane recovery decision trees AND the Shutdown Protocol, Read [`reference/recovery.md`](reference/recovery.md).
-- For `--full` / `--json` / `--quiet` opt-back-in semantics and `CAFLEET_MAX_TEXT_LEN`, Read [`reference/output-flags.md`](reference/output-flags.md).
+**Load-bearing — Read in order before acting:**
+
+| # | Read | What you lose if you skip it |
+|---|------|------------------------------|
+| 1 | your overlay `reference/coding-agent/<name>.md` | every `{placeholder}` in this skill stays unresolved — you emit literal `{monitor_model}`, `{permission_flags}`, `{decision_surface}` |
+| 2 | [`reference/base-dir.md`](reference/base-dir.md) — if you write any scratch / audit / figure file | the no-bypass write protocol and the `<unset>` contract — you mis-root every write or fall back to `/tmp` |
+
+**Load-bearing on trigger — Read at the named moment, before that action:**
+
+| Read | Read before you… | What you lose if you skip it |
+|------|------------------|------------------------------|
+| [`reference/exec-routing.md`](reference/exec-routing.md) | route a Bash-denied command to the Director | the dispatch shape — you stall or fabricate command output |
+| [`reference/recovery.md`](reference/recovery.md) | tear down or recover a member / fleet (also the Shutdown Protocol) | the first-out teardown order — you orphan panes / leak the fleet |
+| [`reference/broadcast.md`](reference/broadcast.md) | broadcast to the fleet or thread via `origin_task_id` | the broadcast send/ack semantics — your fan-out misfires or double-acks |
+
+**On-demand — Read only when you need that capability:**
+
+| Read | When |
+|------|------|
+| [`reference/cli.md`](reference/cli.md) | you need a CLI subcommand beyond send/poll/ack — self-registration, global options, coding-agent backends, `message cancel` / `show`, `agent list` / `show`, `doctor`, `agent deregister`, `fleet delete`, the bootstrap workflow |
+| [`reference/output-flags.md`](reference/output-flags.md) | you need `--full` / `--json` / `--quiet` opt-back-in semantics or `CAFLEET_MAX_TEXT_LEN` |
+
+Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`member create` / `delete` / `list --activity` / `capture` / `exec` / `ping`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
 
 Exhaustive per-subcommand flags, exit codes, and error strings live in [`docs/spec/cli-options.md`](../../docs/spec/cli-options.md).
-
-## Apply your coding-agent overlay
-
-CAFleet instructions are backend-neutral, written with `{placeholder}` tokens for everything that varies by coding agent (`{monitor_model}`, `{permission_flags}`, `{decision_surface}`, and the rest). Your overlay — `reference/coding-agent/<name>.md` — is a value table that defines each token for your backend. Identify your coding agent — your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity — then read your overlay and, as you read the base, substitute your overlay's value for each `{placeholder}` you encounter.
 
 ## Required Flags
 
