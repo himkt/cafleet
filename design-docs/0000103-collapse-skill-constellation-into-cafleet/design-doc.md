@@ -1,7 +1,7 @@
 # Collapse the CAFleet skill constellation into a single `/cafleet` umbrella skill
 
 **Status**: Approved
-**Progress**: 24/32 tasks complete
+**Progress**: 26/32 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -434,8 +434,8 @@ The user approved R2, R5, R6, and R8 on 2026-06-21; the Send preview-mechanics t
 
 ### Step 16: Delete the three skill directories and prune the plugin manifest
 
-- [ ] Remove the three deleted-dir entries (`./skills/cafleet-agent-team-monitoring`, `-supervision`, `-base-dir`, lines 13-15) from `.claude-plugin/plugin.json`'s `"skills"` array (12→9 entries) <!-- completed: -->
-- [ ] `git rm -r skills/cafleet-agent-team-monitoring skills/cafleet-agent-team-supervision skills/cafleet-base-dir` (LAST, after all repointing AND the manifest prune) <!-- completed: -->
+- [x] Remove the three deleted-dir entries (`./skills/cafleet-agent-team-monitoring`, `-supervision`, `-base-dir`, lines 13-15) from `.claude-plugin/plugin.json`'s `"skills"` array (12→9 entries) <!-- completed: 2026-06-21T09:30 -->
+- [x] `git rm -r skills/cafleet-agent-team-monitoring skills/cafleet-agent-team-supervision skills/cafleet-base-dir` (LAST, after all repointing AND the manifest prune) <!-- completed: 2026-06-21T09:55 (Director — git operation, user-approved) -->
 
 ### Step 17: Verification (zero-residue proof)
 
