@@ -39,4 +39,4 @@ Consult these reference pages directly (no team):
 | Create a chart / plot / graph / figure or visualize data | the **visualization** reference ([reference/visualization.md](reference/visualization.md)) |
 | Author slides with the custom Slidev theme (layouts, components, techniques) | the **slidev** reference ([reference/slidev.md](reference/slidev.md)) |
 
-The report workflow chains into the presentation workflow after user approval. The two reference pages are standalone utilities the presentation workflow also reads. Always route research and report work through the workflow bodies above — each runs the full CAFleet team.
+The report workflow chains into the presentation workflow after user approval. The two reference pages are standalone utilities the presentation workflow also reads. Always route research work through the workflow bodies above — each runs the full CAFleet team.

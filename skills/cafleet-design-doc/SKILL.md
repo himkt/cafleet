@@ -41,4 +41,4 @@ Consult these reference pages directly (no team):
 | Section guidelines, quality standards, and formatting rules | [reference/guidelines.md](reference/guidelines.md) |
 | The inter-agent coordination protocol (verb + pointer schema, `COMMENT(role)` markers) | [reference/coordination.md](reference/coordination.md) |
 
-Always route design-doc creation and implementation through the workflow bodies above — each runs the full CAFleet team.
+Always route design-doc work through the workflow bodies above — each runs the full CAFleet team.
