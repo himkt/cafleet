@@ -125,7 +125,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 |---|---|
 | ROLE TITLE / TEAM | `the Presentation Specialist` / `research presentation` |
 | role-file | `roles/presentation.md` |
-| cafleet-load purpose + EXTRA READS | `for the broker primitives and bash-via-Director routing`; additionally Read the `../reference/slidev.md` page (Slidev authoring layouts + rules) + `../reference/visualization.md` (if the report includes data that would render better as a chart) |
+| cafleet-load purpose + EXTRA SKILL LOADS | `for the broker primitives and bash-via-Director routing`; additionally Read the `../reference/slidev.md` page (Slidev authoring layouts + rules) + `../reference/visualization.md` (if the report includes data that would render better as a chart) |
 | CONTEXT LINES | `TASK: Create a Slidev presentation from the approved research report.` / `REPORT: [INSERT <folder>/report.md]` / `RESEARCHER FILES: [INSERT <folder>/[0-9][0-9]-research-*.md]` / `LANGUAGE: [INSERT language detected from report.md]` / `FIGURE BASE: [INSERT <folder>]` (substitute literally for the FIGURE_BASE / BASE placeholders in `../reference/visualization.md`) / `OUTPUT: [INSERT <folder>/slide.md]` |
 | POLL-HANDLING | **ack-inline** form (capture the `id:` integer as `<task-id>` and `cafleet message ack … --task-id <task-id>`, then act) |
 | start cue (verbatim) | `When complete, send the file path to the Director via cafleet message send.` |
