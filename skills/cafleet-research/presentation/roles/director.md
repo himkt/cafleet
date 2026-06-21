@@ -10,8 +10,10 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/) | every `{placeholder}` (`{monitor_model}`, `{decision_surface}`, `{bg_run}`, `{bg_stop}`) stays unresolved — you spawn the monitor with a literal `--model {monitor_model}` or can't background / stop the Slidev server |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` / `{bg_run}` / `{bg_stop}` (spawn the monitor with `--model {monitor_model}` or can't background / stop the Slidev server), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
+
+Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
 
 ## Your Accountability
 

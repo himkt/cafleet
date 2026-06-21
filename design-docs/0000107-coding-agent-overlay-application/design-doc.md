@@ -1,7 +1,7 @@
 # Coding-agent Overlay Application
 
 **Status**: Approved
-**Progress**: 9/23 tasks complete
+**Progress**: 12/23 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -217,9 +217,9 @@ Fresh-session probes are the runtime acceptance test (mirroring 0000105 Step 4 a
 
 For each entry point: upgrade its overlay row #1 to read-and-resolve (matching consequence wording), add the one-line resolve directive beneath its Required-reading block, and replace any passive "substitute … as you encounter" aside it carries. Split per family (matching 0000106's per-family propagation Steps 3/4/5) for trackability and reviewable per-family commits.
 
-- [ ] `cafleet` family: `roles/director.md`, `roles/member.md`, `roles/monitor.md` (`SKILL.md` is already covered by Step 2). <!-- completed: -->
-- [ ] `cafleet-design-doc` family: `SKILL.md`, the three workflow bodies (`create/create.md`, `interview/interview.md`, `execute/execute.md`), and every `roles/*.md` under them. <!-- completed: -->
-- [ ] `cafleet-research` family: `SKILL.md`, both workflow bodies (`report/report.md`, `presentation/presentation.md`), and every `roles/*.md` under them. <!-- completed: -->
+- [x] `cafleet` family: `roles/director.md`, `roles/member.md`, `roles/monitor.md` (`SKILL.md` is already covered by Step 2). <!-- completed: 2026-06-21T10:06 -->
+- [x] `cafleet-design-doc` family: `SKILL.md`, the three workflow bodies (`create/create.md`, `interview/interview.md`, `execute/execute.md`), and every `roles/*.md` under them. <!-- completed: 2026-06-21T10:18 -->
+- [x] `cafleet-research` family: `SKILL.md`, both workflow bodies (`report/report.md`, `presentation/presentation.md`), and every `roles/*.md` under them. <!-- completed: 2026-06-21T10:30 -->
 
 ### Step 5: Automated consistency checker
 
