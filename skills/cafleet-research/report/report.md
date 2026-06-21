@@ -2,7 +2,17 @@
 
 Generate comprehensive research reports using a multi-layer CAFleet-orchestrated team: Director → Manager → Scouts/Researchers. Every member carries serious accountability for the quality of the final deliverable, and the team iterates relentlessly until the report meets the highest standard. After the report is approved, the Director offers to chain into the presentation workflow (`../presentation/presentation.md`) for slides and transcript.
 
-**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../../cafleet/reference/coding-agent/<name>.md`](../../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
+## Required reading
+
+Before any orchestration action — fleet create, spawn, or message — Read every file in the **Load-bearing** table below, in order. Each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; as main session, use your own identity.
+
+**Load-bearing — Read in order before acting:**
+
+| # | Read | What you lose if you skip it |
+|---|------|------------------------------|
+| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>.md`](../../cafleet/reference/coding-agent/) | every `{placeholder}` (`{monitor_model}`, `{task_coord}`, `{decision_surface}`) stays unresolved — you spawn the monitor with a literal `--model {monitor_model}` |
+| 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root the spawn-prompt audit files and `${OUTPUT_DIR}` or fall back to `/tmp` |
+| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised team |
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
@@ -45,7 +55,7 @@ Members cannot talk to the user directly — the Director always relays. Members
 
 Before creating the team, resolve the task-scoped base directory for this run.
 
-1. Read the `cafleet` skill's `reference/base-dir.md` for the no-bypass write protocol and `<unset>` sentinel contract.
+1. Apply the no-bypass write protocol and `<unset>` sentinel contract from the `cafleet` skill's `reference/base-dir.md` (§ Required reading above).
 2. Resolve the task-scoped BASE by calling the resolver positionally with the topic relpath:
 
    Run the skill's **Step 0 (task-scope resolution)** with the relpath `researches/[topic-slug]`.
@@ -70,7 +80,7 @@ Capture `fleet_id` and `director.agent_id` from the response. Treat `fleet_id` a
 
 ### Step 1: Supervision Model (Director — spawn the monitoring member first)
 
-Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and Stall Response policy. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
 Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the audit-file pattern this skill uses for every spawn, then spawn:
 

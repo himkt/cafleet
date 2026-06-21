@@ -4,6 +4,17 @@ You are a member spawned with `cafleet member create --role monitor` — the fle
 
 This file is your role anchor. The cafleet CLI surface you call (send / poll / ack) is in [`skills/cafleet/SKILL.md`](../SKILL.md); the governance + heartbeat mechanism you are part of is in [`reference/supervision.md`](../reference/supervision.md).
 
+## Required reading
+
+At startup, identify your coding agent first — your spawn prompt's `CODING AGENT:` line names it — then Read every file in the **Load-bearing** table below, in order. Each carries a protocol you cannot reconstruct from this page. Complete these Reads before you launch the heartbeat ({bg_run} `cafleet monitor start`); the overlay (row #1) is what resolves `{bg_run}`.
+
+**Load-bearing — Read in order before acting:**
+
+| # | Read | What you lose if you skip it |
+|---|------|------------------------------|
+| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) | every `{placeholder}` stays unresolved — without `{bg_run}` / `{bg_stop}` you can't background or stop the heartbeat, and `{monitor_model}` / `{permission_flags}` print literally |
+| 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + heartbeat mechanism you serve (Monitor Lifecycle, Idle Semantics, the 5-step facilitation loop) — you can't run the heartbeat or re-engage the Director correctly |
+
 ## Two-command constraint
 
 Your on-wake routine acts through exactly two `cafleet member` commands:
@@ -77,4 +88,4 @@ Your spawn prompt is built from the SAME canonical skeleton ordinary members use
 
 - **Omit `--coding-agent`** at `cafleet member create`: you inherit the spawning Director's backend, and the `{coding_agent}` placeholder in the prompt is substituted by `cafleet member create` with that resolved backend, so your `CODING AGENT:` line matches the binary you run on.
 - Pass `--role monitor --model {monitor_model}`.
-- Read your overlay at [`reference/coding-agent/<name>.md`](../reference/coding-agent/<name>.md) — `<name>` is the backend named on your `CODING AGENT:` line — and apply its deltas (`{bg_run}`, `{bg_stop}`, `{monitor_model}`, `{permission_flags}`) on top of this role.
+- Apply your overlay's deltas (`{bg_run}`, `{bg_stop}`, `{monitor_model}`, `{permission_flags}`) on top of this role — the overlay is Required-reading row #1 (above); `<name>` is the backend named on your `CODING AGENT:` line.

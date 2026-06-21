@@ -8,7 +8,7 @@ Backend-specific deltas live in `skills/cafleet/reference/coding-agent/<name>.md
 
 ## How the base and overlay connect
 
-Every base instruction that varies by backend states the neutral behavior and points the agent at its overlay. An agent reads the base, identifies its coding agent — the spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity — reads `reference/coding-agent/<name>.md`, and applies the overlay's deltas on top of every base instruction. Authors write the base neutrally and put every backend specific in the overlay.
+Every base instruction that varies by backend states the neutral behavior and points the agent at its overlay. The overlay is not an in-stream aside to consult lazily: it is **row #1 of each reader entry point's Required-reading block** — the first load-bearing read, gated before any other action. An agent identifies its coding agent — the spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity — reads `reference/coding-agent/<name>.md` first, then applies the overlay's deltas on top of every base instruction it reads. Skip it and every `{placeholder}` token stays unresolved — the agent emits literal `{monitor_model}`, `{permission_flags}`, and the rest. Authors write the base neutrally, put every backend specific in the overlay, and list the overlay as the first load-bearing row wherever an entry point uses `{placeholder}` tokens.
 
 ## Two independent homes
 

@@ -111,12 +111,14 @@ Auto-rendered: top-level = filled blue circle, nested = hollow. `bullets-sm` has
 
 ## Techniques
 
-| Technique | Reference |
-|-----------|-----------|
-| Two-column layout | slidev/techniques/two-column-layouts.md |
-| Admonition / Highlight / Font-size formatting | slidev/techniques/formatting.md |
-| Math formulas | slidev/techniques/math-formulas.md |
-| Code animations | /slidev (stock `v-click` / `v-clicks` / line-range highlighting) |
+On-demand — Read a technique page only when the slide you are authoring needs it:
+
+| Read | When |
+|------|------|
+| `slidev/techniques/two-column-layouts.md` | you are building a two-column slide |
+| `slidev/techniques/formatting.md` | you need Admonition / Highlight / font-size formatting (or the Color-Discipline palette) |
+| `slidev/techniques/math-formulas.md` | the slide carries math formulas |
+| /slidev (stock `v-click` / `v-clicks` / line-range highlighting) | you need code animations |
 
 ## Autonomous slide generation
 
