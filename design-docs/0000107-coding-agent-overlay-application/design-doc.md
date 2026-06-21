@@ -1,7 +1,7 @@
 # Coding-agent Overlay Application
 
 **Status**: Approved
-**Progress**: 14/23 tasks complete
+**Progress**: 17/23 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -244,9 +244,9 @@ For each probe: open a fresh coding-agent session, give the triggering prompt, c
 
 ### Step 7: Removal sweep & consistency check
 
-- [ ] Grep the three skill families for residual passive application asides ("substitute … as you read the base", "as you encounter") on load-bearing surfaces; confirm each is replaced by the resolve directive. <!-- completed: -->
-- [ ] Confirm no entry point ships a literal-token example where a resolved value is required (the base legitimately retains `{placeholder}` tokens in instructional text; examples that model emission show resolved values). <!-- completed: -->
-- [ ] Confirm the overlay-coverage checker is green and run `mise //cafleet:lint` and `mise //cafleet:test`. <!-- completed: -->
+- [x] Grep the three skill families for residual passive application asides ("substitute … as you read the base", "as you encounter") on load-bearing surfaces; confirm each is replaced by the resolve directive. <!-- completed: 2026-06-21T10:52 -->
+- [x] Confirm no entry point ships a literal-token example where a resolved value is required (the base legitimately retains `{placeholder}` tokens in instructional text; examples that model emission show resolved values). <!-- completed: 2026-06-21T10:52 -->
+- [x] Confirm the overlay-coverage checker is green and run `mise //cafleet:lint` and `mise //cafleet:test`. <!-- completed: 2026-06-21T10:52 -->
 
 ---
 
