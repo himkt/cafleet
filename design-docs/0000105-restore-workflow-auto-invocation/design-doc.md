@@ -1,7 +1,7 @@
 # Restore Workflow Auto-Invocation for the CAFleet Design-Doc and Research Skills
 
 **Status**: Approved
-**Progress**: 4/11 tasks complete
+**Progress**: 9/11 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -126,11 +126,11 @@ The intro paragraph, the coding-agent-overlay note, and the teammates-load-by-na
 
 ### Step 2: Rewrite `cafleet-research/SKILL.md`
 
-- [ ] Replace the frontmatter `description` with the affirmative, scenario-keyed, trigger-leading text per the Specification, applying the frontmatter preservation invariant from Step 1. <!-- completed: -->
-- [ ] Replace the passive "## When to use" table with the imperative scenario-linked dispatch section (team workflows table + utility references), including the "routing = full team orchestration" statement for the report and presentation workflows. <!-- completed: -->
-- [ ] Fold the preserved research chaining-context sentence in under the dispatch tables (per Specification § Preserve the research chaining context). <!-- completed: -->
-- [ ] Convert the residual "Do NOT do a quick web search and summarize — route through the workflows above" phrasing to its affirmative equivalent and remove the prohibition phrasing. <!-- completed: -->
-- [ ] Confirm the coding-agent-overlay note and the members-load-by-name note are retained and unchanged in intent. <!-- completed: -->
+- [x] Replace the frontmatter `description` with the affirmative, scenario-keyed, trigger-leading text per the Specification, applying the frontmatter preservation invariant from Step 1. <!-- completed: 2026-06-21T05:34 -->
+- [x] Replace the passive "## When to use" table with the imperative scenario-linked dispatch section (team workflows table + utility references), including the "routing = full team orchestration" statement for the report and presentation workflows. <!-- completed: 2026-06-21T05:34 -->
+- [x] Fold the preserved research chaining-context sentence in under the dispatch tables (per Specification § Preserve the research chaining context). <!-- completed: 2026-06-21T05:34 -->
+- [x] Convert the residual "Do NOT do a quick web search and summarize — route through the workflows above" phrasing to its affirmative equivalent and remove the prohibition phrasing. <!-- completed: 2026-06-21T05:34 -->
+- [x] Confirm the coding-agent-overlay note and the members-load-by-name note are retained and unchanged in intent. <!-- completed: 2026-06-21T05:34 -->
 
 ### Step 3: Drift audit (docs)
 
