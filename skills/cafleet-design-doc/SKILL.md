@@ -17,9 +17,27 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, AskUser
 
 This skill is the umbrella for the full design-document lifecycle: the standardized **format spec** plus three CAFleet-native **orchestration workflows** (create, validate/interview, implement/execute). It is a dispatcher — consult a reference page for the format, or route to the matching workflow body to run a team.
 
-**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
-
 **Teammates in agent teams** must always load this skill by its name `cafleet-design-doc` via their backend's skill-loader — never by reading the skill files directly.
+
+## Required reading
+
+Before routing into a workflow or consulting a reference page, Read your overlay — it is row #1 below. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; a standalone / main-session reader uses its own identity.
+
+**Load-bearing — Read before acting:**
+
+| # | Read | What you lose if you skip it |
+|---|------|------------------------------|
+| 1 | your overlay [`../cafleet/reference/coding-agent/<name>.md`](../cafleet/reference/coding-agent/<name>.md) | every `{placeholder}` (`{monitor_model}`, `{decision_surface}`, …) in the workflow you route into stays unresolved |
+
+**On-demand — consult directly (no team), only when the task needs it:**
+
+| Read | When |
+|------|------|
+| [reference/template.md](reference/template.md) | you are writing or checking a doc against the standard structure |
+| [reference/guidelines.md](reference/guidelines.md) | you need section guidelines, quality standards, or formatting rules |
+| [reference/coordination.md](reference/coordination.md) | you need the inter-agent verb + pointer + `COMMENT(role)` schema |
+
+Each workflow body (create / interview / execute) carries its own Required-reading block for the team it runs — base-dir, supervision, and coordination are gated there, not on this dispatch surface.
 
 ## Dispatch
 
@@ -33,12 +51,6 @@ When the user's request matches a scenario below, invoke this skill and run the 
 | Validate / review / interview an existing design doc | the **interview** workflow ([interview/interview.md](interview/interview.md)) — multi-round Q&A |
 | Implement / execute a design doc | the **execute** workflow ([execute/execute.md](execute/execute.md)) — TDD team |
 
-Consult these reference pages directly (no team):
-
-| When the user wants to… | Consult |
-|:--|:--|
-| The document template | [reference/template.md](reference/template.md) |
-| Section guidelines, quality standards, and formatting rules | [reference/guidelines.md](reference/guidelines.md) |
-| The inter-agent coordination protocol (verb + pointer schema, `COMMENT(role)` markers) | [reference/coordination.md](reference/coordination.md) |
+For the document template, section guidelines, or the coordination protocol — consult the **On-demand** reference pages in § Required reading above (no team needed).
 
 Always route design-doc work through the workflow bodies above — each runs the full CAFleet team.

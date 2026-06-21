@@ -2,7 +2,18 @@
 
 Implement features based on a design document using up to four roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), and Verifier (E2E/integration testing). Every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline. The Director judges which members to spawn based on the nature of the implementation tasks. For each step, the Tester writes unit tests first, the Director reviews and approves them, then the Programmer implements code to pass the tests. The Director also reviews the Programmer's implementation for code quality and design doc compliance before committing. After all TDD steps, the Verifier performs E2E/integration verification (Phase D) if spawned. After user approval, the Director runs the full publication flow: Step 6 pushes the feature branch and opens a PR with `@copilot` requested, Step 7 runs a Copilot review loop — driven by the monitoring member's idle-nudges on the `cafleet monitor` heartbeat — that routes inline comments to the still-live Programmer / Tester and ends only when the user instructs termination or Copilot reports no remaining concerns, and Step 8 finalizes, commits the completion marker, pushes it (when the branch is tracked on origin), and tears the team down.
 
-**Coding-agent overlay.** These instructions are backend-neutral; read your overlay at [`../../cafleet/reference/coding-agent/<name>.md`](../../cafleet/reference/coding-agent/<name>.md) — `<name>` is your coding agent, named by your spawn prompt's `CODING AGENT:` line — and apply its deltas on top of them.
+## Required reading
+
+Before any orchestration action — fleet create, spawn, or message — Read every file in the **Load-bearing** table below, in order. Each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; as main session, use your own identity.
+
+**Load-bearing — Read in order before acting:**
+
+| # | Read | What you lose if you skip it |
+|---|------|------------------------------|
+| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>.md`](../../cafleet/reference/coding-agent/<name>.md) | every `{placeholder}` (`{monitor_model}`, `{decision_surface}`, `{permission_flags}`) stays unresolved — you spawn the monitor with a literal `--model {monitor_model}` |
+| 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
+| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, the facilitation loop that drives the Step 7 Copilot wait) — you spawn an unsupervised team |
+| 4 | [`../reference/coordination.md`](../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema and Copilot routing — you coordinate in free-form bodies and findings / Copilot comments get mis-routed |
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
@@ -53,7 +64,7 @@ Before validation, resolve `$ARGUMENTS` into a concrete `design-doc.md` path.
 
 #### Phase 1: Base Directory Resolution
 
-Read the `cafleet` skill's `reference/base-dir.md` for the no-bypass write protocol and `<unset>` sentinel contract. Then resolve BASE based on whether `$ARGUMENTS` was supplied:
+Apply the no-bypass write protocol and `<unset>` sentinel contract from the `cafleet` skill's `reference/base-dir.md` (§ Required reading above). Then resolve BASE based on whether `$ARGUMENTS` was supplied:
 
 - **`$ARGUMENTS` present** (the typical execute-a-specific-doc flow): canonicalize `$ARGUMENTS` and call the task-scope resolver positionally. `$ARGUMENTS` is normally a slug name (`0000060-skill-task-scoped-base-dir`) or a path containing such a slug.
 
@@ -132,7 +143,7 @@ Before registering with CAFleet:
 
 ### Step 3: Register & Spawn Members (Director)
 
-Load the `cafleet` skill and Read its `reference/supervision.md`.
+Load the `cafleet` skill; its `reference/supervision.md` governance is § Required reading above.
 
 #### 3a. Establish a CAFleet fleet and capture the root Director's `agent_id`
 

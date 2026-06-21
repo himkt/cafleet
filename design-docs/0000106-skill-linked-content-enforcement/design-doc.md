@@ -1,7 +1,7 @@
 # Skill Linked-Content Enforcement
 
 **Status**: Approved
-**Progress**: 11/27 tasks complete
+**Progress**: 14/27 tasks complete
 **Last Updated**: 2026-06-21
 
 ## Overview
@@ -184,9 +184,9 @@ The `SKILL.md:18-27` "Read on demand" list is rewritten into the three-way class
 
 ### Step 4: Apply to `cafleet-design-doc`
 
-- [ ] Reclassify the `cafleet-design-doc/SKILL.md` reference-page menu (template/guidelines/coordination) and promote the overlay to Required-reading. <!-- completed: -->
-- [ ] Add the Required-reading block to `create/create.md`, `interview/interview.md`, `execute/execute.md`. <!-- completed: -->
-- [ ] Add the Required-reading block to every `roles/*.md` under `create/`, `interview/`, `execute/`. <!-- completed: -->
+- [x] Reclassify the `cafleet-design-doc/SKILL.md` reference-page menu (template/guidelines/coordination) and promote the overlay to Required-reading. <!-- completed: 2026-06-21T08:20 -->
+- [x] Add the Required-reading block to `create/create.md`, `interview/interview.md`, `execute/execute.md`. <!-- completed: 2026-06-21T08:20 -->
+- [x] Add the Required-reading block to every `roles/*.md` under `create/`, `interview/`, `execute/`. <!-- completed: 2026-06-21T08:20 -->
 
 ### Step 5: Apply to `cafleet-research`
 
