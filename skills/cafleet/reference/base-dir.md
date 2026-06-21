@@ -69,5 +69,3 @@ Every CAFleet member, every consumer skill, and every Director MUST follow this 
 ## The `<unset>` sentinel
 
 This resolution procedure is the only producer of `BASE=<unset>` — the literal string `"<unset>"` (case-sensitive), returned by the absolute-path-arg branch (Step 0). A consumer with `${BASE} == <unset>` follows the **No-bypass write protocol** above: **guard** every audit-file write with an explicit `${BASE} != <unset>` check at the call site (a guarded skip is the intended path — no silent no-op, no `/tmp` fallback); **omit** the `BASE:` line entirely from spawn prompts (never write the literal `BASE: <unset>`), so the member's existence-check treats audit-files as disabled; and **loud-error** on any unguarded `Path(BASE) / …` computation (the abort string in item 2).
-</content>
-</invoke>

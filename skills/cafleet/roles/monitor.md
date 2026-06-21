@@ -78,4 +78,3 @@ Your spawn prompt is built from the SAME canonical skeleton ordinary members use
 - **Omit `--coding-agent`** at `cafleet member create`: you inherit the spawning Director's backend, and the `{coding_agent}` placeholder in the prompt is substituted by `cafleet member create` with that resolved backend, so your `CODING AGENT:` line matches the binary you run on.
 - Pass `--role monitor --model {monitor_model}`.
 - Read your overlay at [`reference/coding-agent/<name>.md`](../reference/coding-agent/<name>.md) — `<name>` is the backend named on your `CODING AGENT:` line — and apply its deltas (`{bg_run}`, `{bg_stop}`, `{monitor_model}`, `{permission_flags}`) on top of this role.
-</content>

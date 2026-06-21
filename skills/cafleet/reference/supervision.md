@@ -197,4 +197,3 @@ Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol (fir
 | Answer a member's relayed question | the decision-relay primitive your overlay describes ([`coding-agent/<name>.md`](coding-agent/<name>.md)) | Delegate the decision to the user via {decision_surface} first; never decide silently |
 | Relay user input | {decision_surface} → `cafleet message send` | Pass-through; never substitute judgment |
 | Shut down team | [`reference/recovery.md`](recovery.md) § Shutdown Protocol | Stop monitor → delete monitoring member first → `member delete` each ordinary → `fleet delete` |
-</content>

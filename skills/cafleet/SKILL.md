@@ -85,4 +85,3 @@ Moves a task from `input_required` to `completed`. `--task-id` required; `--quie
 ```bash
 cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
 ```
-</content>

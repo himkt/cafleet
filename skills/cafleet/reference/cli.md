@@ -112,4 +112,3 @@ Messages are tasks with three states: **input_required** (delivered, awaiting AC
 ## Error Handling
 
 Errors print to stderr and exit non-zero; `cafleet --json <cmd>` emits them machine-parseably. The most common: missing `--fleet-id` (exit 1), missing `--agent-id` (`Error: Missing option '--agent-id'.`, exit 2), and `member` commands outside a tmux session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages).
-</content>
