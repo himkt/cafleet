@@ -12,8 +12,10 @@ At startup, identify your coding agent first — your spawn prompt's `CODING AGE
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) | every `{placeholder}` stays unresolved — without `{bg_run}` / `{bg_stop}` you can't background or stop the heartbeat, and `{monitor_model}` / `{permission_flags}` print literally |
+| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{bg_run}` / `{bg_stop}` / `{monitor_model}` / `{permission_flags}` (can't background or stop the heartbeat), **or** guess a wrong/default value, **or** ignore a backend note |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + heartbeat mechanism you serve (Monitor Lifecycle, Idle Semantics, the 5-step facilitation loop) — you can't run the heartbeat or re-engage the Director correctly |
+
+Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
 
 ## Two-command constraint
 

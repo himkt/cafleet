@@ -12,7 +12,7 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) | every `{placeholder}` stays unresolved — you emit literal `{decision_surface}` / `{monitor_model}` / `{permission_flags}` and lack the backend decision-relay primitive |
+| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{decision_surface}` / `{monitor_model}` / `{permission_flags}`, **or** guess a wrong/default value (spawn the monitor on the wrong model), **or** ignore a backend note (codex has no harness task list) |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + `cafleet monitor` heartbeat (monitor-first spawn, the `ready: monitor live` gate, the 5-step facilitation loop, the Authorization-Scope Guard) — you spawn an unsupervised team |
 | 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `delete` / `list --activity` / `capture` / `exec` / `ping`) and the canonical spawn-prompt skeleton — you can't spawn or drive members |
 
@@ -29,6 +29,8 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 | Read | When |
 |------|------|
 | [`reference/output-flags.md`](../reference/output-flags.md) | you need `--full` / `--json` / `--quiet` opt-back-in semantics |
+
+Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
 
 ## Placeholder convention
 
