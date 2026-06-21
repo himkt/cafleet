@@ -21,7 +21,7 @@ Before your first action other than these Reads, Read every file in the **Load-b
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay `reference/coding-agent/<name>.md` | every `{placeholder}` in this skill stays unresolved — you emit literal `{monitor_model}`, `{permission_flags}`, `{decision_surface}` |
+| 1 | your overlay [`reference/coding-agent/<name>.md`](reference/coding-agent/<name>.md) | every `{placeholder}` in this skill stays unresolved — you emit literal `{monitor_model}`, `{permission_flags}`, `{decision_surface}` |
 | 2 | [`reference/base-dir.md`](reference/base-dir.md) — if you write any scratch / audit / figure file | the no-bypass write protocol and the `<unset>` contract — you mis-root every write or fall back to `/tmp` |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**

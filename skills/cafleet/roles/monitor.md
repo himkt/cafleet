@@ -6,7 +6,7 @@ This file is your role anchor. The cafleet CLI surface you call (send / poll / a
 
 ## Required reading
 
-At startup — before you launch the heartbeat ({bg_run} `cafleet monitor start`) — Read every file in the **Load-bearing** table below, in order. Each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it.
+At startup, identify your coding agent first — your spawn prompt's `CODING AGENT:` line names it — then Read every file in the **Load-bearing** table below, in order. Each carries a protocol you cannot reconstruct from this page. Complete these Reads before you launch the heartbeat ({bg_run} `cafleet monitor start`); the overlay (row #1) is what resolves `{bg_run}`.
 
 **Load-bearing — Read in order before acting:**
 
