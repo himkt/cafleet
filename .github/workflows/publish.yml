@@ -30,5 +30,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release upload "${{ github.event.release.tag_name }}"
-          "cafleet-skills-v${{ github.event.release.tag_name }}.zip" --clobber
+          gh release upload "${{ github.event.release.tag_name }}" "cafleet-skills-v${{ github.event.release.tag_name }}.zip" --clobber
