@@ -1,6 +1,6 @@
 # Upload skills artifacts on release
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 3/3 tasks complete
 **Last Updated**: 2026-06-22
 
@@ -95,9 +95,7 @@ jobs:
       - name: Upload skills archive to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release upload "${{ github.event.release.tag_name }}"
-          "cafleet-skills-v${{ github.event.release.tag_name }}.zip" --clobber
+        run: gh release upload "${{ github.event.release.tag_name }}" "cafleet-skills-v${{ github.event.release.tag_name }}.zip" --clobber
 ```
 
 ### Documentation surface
@@ -127,3 +125,5 @@ No README, `docs/`, or `SKILL.md` changes are made — a deliberate scoping deci
 | Date | Changes |
 |------|---------|
 | 2026-06-22 | Initial draft |
+| 2026-06-22 | Implemented; collapsed the upload step's `run:` to a single line per Administrator PR review on #144 |
+| 2026-06-22 | Marked complete |
