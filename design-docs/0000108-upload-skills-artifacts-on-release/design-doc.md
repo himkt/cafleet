@@ -1,7 +1,7 @@
 # Upload skills artifacts on release
 
 **Status**: Approved
-**Progress**: 2/3 tasks complete
+**Progress**: 3/3 tasks complete
 **Last Updated**: 2026-06-22
 
 ## Overview
@@ -118,7 +118,7 @@ No README, `docs/`, or `SKILL.md` changes are made — a deliberate scoping deci
 
 ### Step 2: Validate the workflow
 
-- [ ] Parse the workflow to confirm it is well-formed YAML. `actionlint` is not part of the repo toolchain (no `mise` task wraps it), so run the one-off parse `uv run --with pyyaml python -c "import yaml; yaml.safe_load(open('.github/workflows/publish.yml'))"` — it exits non-zero on a syntax error. Then confirm by inspection that the `zip` target is `skills` and the asset filename is `cafleet-skills-v${{ github.event.release.tag_name }}.zip`. <!-- completed: -->
+- [x] Parse the workflow to confirm it is well-formed YAML. `actionlint` is not part of the repo toolchain (no `mise` task wraps it), so run the one-off parse `uv run --with pyyaml python -c "import yaml; yaml.safe_load(open('.github/workflows/publish.yml'))"` — it exits non-zero on a syntax error. Then confirm by inspection that the `zip` target is `skills` and the asset filename is `cafleet-skills-v${{ github.event.release.tag_name }}.zip`. <!-- completed: 2026-06-22T11:48 -->
 
 ---
 
