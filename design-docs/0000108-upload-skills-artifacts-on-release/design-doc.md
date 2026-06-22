@@ -1,6 +1,6 @@
 # Upload skills artifacts on release
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 3/3 tasks complete
 **Last Updated**: 2026-06-22
 
@@ -126,3 +126,4 @@ No README, `docs/`, or `SKILL.md` changes are made — a deliberate scoping deci
 |------|---------|
 | 2026-06-22 | Initial draft |
 | 2026-06-22 | Implemented; collapsed the upload step's `run:` to a single line per Administrator PR review on #144 |
+| 2026-06-22 | Marked complete |
