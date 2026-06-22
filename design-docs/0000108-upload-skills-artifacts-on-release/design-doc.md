@@ -10,12 +10,12 @@ Attach a downloadable `cafleet-skills-v<version>.zip` asset to every published G
 
 ## Success Criteria
 
-- [ ] A new `upload-skills` job in `publish.yml` is triggered by the existing `release: published` event.
-- [ ] On a published release, a `cafleet-skills-v<tag>.zip` asset appears on that release's page.
-- [ ] The archive contains only the three skill directories under `skills/` (`cafleet`, `cafleet-design-doc`, `cafleet-research`); no `.claude-plugin/`, `.codex-plugin/`, or other manifest files.
-- [ ] The new job runs in parallel with the existing `publish` job (no `needs:`); a failure in either job does not block the other.
-- [ ] The new job declares its own `permissions: contents: write`; the existing `publish` job remains `contents: read`.
-- [ ] The asset is produced for all `release: published` events, including pre-releases.
+- [x] A new `upload-skills` job in `publish.yml` is triggered by the existing `release: published` event.
+- [x] On a published release, a `cafleet-skills-v<tag>.zip` asset appears on that release's page.
+- [x] The archive contains only the three skill directories under `skills/` (`cafleet`, `cafleet-design-doc`, `cafleet-research`); no `.claude-plugin/`, `.codex-plugin/`, or other manifest files.
+- [x] The new job runs in parallel with the existing `publish` job (no `needs:`); a failure in either job does not block the other.
+- [x] The new job declares its own `permissions: contents: write`; the existing `publish` job remains `contents: read`.
+- [x] The asset is produced for all `release: published` events, including pre-releases.
 
 ---
 
