@@ -178,3 +178,85 @@ def test_db_init_ahead_errors(tmp_path, monkeypatch):
     finally:
         conn.close()
     assert rows == [("9999_future_revision",)]
+
+
+def test_run_db_init_creates_schema_at_head(tmp_path, monkeypatch, capsys):
+    """``run_db_init()`` called directly creates the schema at head.
+
+    Exercises the reusable helper the way ``cafleet setup``'s database half
+    invokes it -- no CLI runner, no skills mocking.
+    """
+    db_file = tmp_path / "data" / "cafleet.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+
+    assert not db_file.parent.exists()
+
+    from cafleet.cli.db import run_db_init
+
+    run_db_init()
+
+    assert db_file.parent.exists()
+    assert db_file.exists()
+
+    tables = _table_names(db_file)
+    expected = {"fleets", "agents", "tasks", "agent_placements", "alembic_version"}
+    assert expected <= tables
+
+    assert "applied" in capsys.readouterr().out.lower()
+
+
+def test_run_db_init_idempotent_reports_already_at_head(tmp_path, monkeypatch, capsys):
+    """A second direct ``run_db_init()`` is a no-op reporting ``Already at head``."""
+    db_file = tmp_path / "cafleet.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+
+    from cafleet.cli.db import run_db_init
+
+    run_db_init()
+    capsys.readouterr()
+
+    conn = sqlite3.connect(str(db_file))
+    try:
+        version_after_first = conn.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    run_db_init()
+
+    assert "already at head" in capsys.readouterr().out.lower()
+
+    conn = sqlite3.connect(str(db_file))
+    try:
+        version_after_second = conn.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert version_after_second == version_after_first
+
+
+def test_db_init_delegates_to_run_db_init(monkeypatch):
+    """``cafleet db init`` is a thin wrapper that calls ``run_db_init()``."""
+    calls = []
+
+    from cafleet.cli import db as db_module
+
+    monkeypatch.setattr(db_module, "run_db_init", lambda: calls.append(True))
+
+    from cafleet.cli import cli
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["db", "init"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [True]
