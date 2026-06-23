@@ -43,15 +43,6 @@ behalf of a member; the operator should confirm each invocation.
     Typically the config entries below go in `~/.codex/config.toml`.
 
 ```toml
-[marketplaces.cafleet]
-last_updated = "2026-05-16T11:56:51Z"
-last_revision = "03a8caa66c8a7981345d74fe3aec9a6e498792a1"
-source_type = "git"
-source = "https://github.com/himkt/cafleet.git"
-
-[plugins."cafleet@cafleet"]
-enabled = true
-
 [sandbox_workspace_write]
 writable_roots = ["/home/<you>/.local/share/cafleet"]
 ```
@@ -114,7 +105,7 @@ MCP servers (MCP-contributed tools bypass the deny-list).
 
 ## Building docs locally
 
-Once the CLI is installed and the plugin enabled, you can build the
+Once the CLI is installed, you can build the
 documentation site (this site) locally with:
 
 ```bash

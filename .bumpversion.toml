@@ -8,21 +8,6 @@ message = "Bump version: {current_version} → {new_version}"
 allow_shell_hooks = true
 
 [[tool.bumpversion.files]]
-filename = ".codex-plugin/plugin.json"
-search   = "\"version\": \"{current_version}\""
-replace  = "\"version\": \"{new_version}\""
-
-[[tool.bumpversion.files]]
-filename = ".claude-plugin/marketplace.json"
-search   = "\"version\": \"{current_version}\""
-replace  = "\"version\": \"{new_version}\""
-
-[[tool.bumpversion.files]]
-filename = ".claude-plugin/plugin.json"
-search   = "\"version\": \"{current_version}\""
-replace  = "\"version\": \"{new_version}\""
-
-[[tool.bumpversion.files]]
 filename = "cafleet/pyproject.toml"
 search   = "version = \"{current_version}\""
 replace  = "version = \"{new_version}\""

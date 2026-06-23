@@ -60,24 +60,7 @@ mise //:skill-install
 ```
 
 This runs `gh skill install ./ --from-local` for each backend, placing the
-skills from your checkout (not a Release) into the three agent homes. You can
-also install from the published repository with the GitHub CLI or a
-coding-agent marketplace:
-
-```bash
-gh skill install himkt/cafleet --agent claude-code
-gh skill install himkt/cafleet --agent codex
-gh skill install himkt/cafleet --agent opencode
-```
-
-```text
-# Claude Code marketplace
-/plugin marketplace add himkt/cafleet
-/plugin install cafleet@cafleet
-
-# Codex
-codex plugin marketplace add himkt/cafleet
-```
+skills from your checkout (not a Release) into the three agent homes.
 
 Once the CLI and at least one coding-agent skill set are installed, continue to
 the [Configure](configure.md) page for the recommended per-agent settings.
