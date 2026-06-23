@@ -23,8 +23,7 @@ def db() -> None:
     """Database schema management commands."""
 
 
-@db.command("init")
-def init() -> None:
+def run_db_init() -> None:
     """Initialize or migrate the registry database to the head revision."""
     sync_url = _sync_db_url()
     db_file_str = make_url(sync_url).database
@@ -90,3 +89,9 @@ def init() -> None:
                 click.echo(f"Upgraded from {old_rev} to {head_rev}.")
         finally:
             engine.dispose()
+
+
+@db.command("init")
+def init() -> None:
+    """Initialize or migrate the registry database to the head revision."""
+    run_db_init()

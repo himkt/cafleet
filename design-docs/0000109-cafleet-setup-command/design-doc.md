@@ -1,7 +1,7 @@
 # cafleet setup command
 
 **Status**: Approved
-**Progress**: 4/13 tasks complete
+**Progress**: 5/13 tasks complete
 **Last Updated**: 2026-06-22
 
 ## Overview
@@ -184,7 +184,7 @@ This change adds a CLI command but no new config/env surface (`config.py` is unc
 
 ### Step 2: Refactor the database init code path for reuse
 
-- [ ] Extract the body of `db.init()` in `cafleet/src/cafleet/cli/db.py` into a module-level `run_db_init() -> None`, preserving the unknown-revision and orphan-tables guards and all echo messages; make `db.init()` a thin wrapper calling it. <!-- completed: -->
+- [x] Extract the body of `db.init()` in `cafleet/src/cafleet/cli/db.py` into a module-level `run_db_init() -> None`, preserving the unknown-revision and orphan-tables guards and all echo messages; make `db.init()` a thin wrapper calling it. <!-- completed: 2026-06-23T08:27 -->
 
 ### Step 3: Implement the `cafleet setup` command
 
