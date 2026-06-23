@@ -1,7 +1,7 @@
 # Remove marketplace install instructions
 
-**Status**: Approved
-**Progress**: 7/9 tasks complete
+**Status**: Complete
+**Progress**: 9/9 tasks complete
 **Last Updated**: 2026-06-23
 
 ## Overview
@@ -10,13 +10,13 @@ Now that `cafleet setup` (design `0000109`) is the single end-user install path 
 
 ## Success Criteria
 
-- [ ] No marketplace/plugin install instruction remains in `docs/get-started/install.md`, `README.md`, or `docs/get-started/configure.md` (no `/plugin marketplace add`, `/plugin install`, `codex plugin marketplace add`, `gh skill install himkt/cafleet`, or `[marketplaces.cafleet]` config block).
-- [ ] The four manifest files are deleted: `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json` (and the now-empty `.claude-plugin/`, `.codex-plugin/`, `.agents/` directories are gone).
-- [ ] The three `.bumpversion.toml` `[[tool.bumpversion.files]]` entries that targeted the deleted manifests are removed; a `bump-my-version` dry run succeeds against the remaining files.
-- [ ] `mise //:skill-install` (`gh skill install ./ --from-local`) still installs all three skills into all three agent homes **after** the manifests are deleted — empirically verified; this gates the manifest deletion.
-- [ ] `cafleet setup` (end-user) and `mise //:skill-install` (contributor) are the only two documented install paths; `cafleet setup` is the only end-user one.
-- [ ] A repo-wide search for the removed terms returns hits only inside `design-docs/` (the historical record).
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass.
+- [x] No marketplace/plugin install instruction remains in `docs/get-started/install.md`, `README.md`, or `docs/get-started/configure.md` (no `/plugin marketplace add`, `/plugin install`, `codex plugin marketplace add`, `gh skill install himkt/cafleet`, or `[marketplaces.cafleet]` config block).
+- [x] The four manifest files are deleted: `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json` (and the now-empty `.claude-plugin/`, `.codex-plugin/`, `.agents/` directories are gone).
+- [x] The three `.bumpversion.toml` `[[tool.bumpversion.files]]` entries that targeted the deleted manifests are removed; a `bump-my-version` dry run succeeds against the remaining files.
+- [x] `mise //:skill-install` (`gh skill install ./ --from-local`) still installs all three skills into all three agent homes **after** the manifests are deleted — empirically verified; this gates the manifest deletion.
+- [x] `cafleet setup` (end-user) and `mise //:skill-install` (contributor) are the only two documented install paths; `cafleet setup` is the only end-user one.
+- [x] A repo-wide search for the removed terms returns hits only inside `design-docs/` (the historical record).
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass.
 
 ---
 
@@ -141,8 +141,8 @@ This is a real-command verification run in the working tree, consistent with the
 
 ### Step 4: Sweep and validate
 
-- [ ] Repo-wide `git grep` (tracked files only — excludes `node_modules/`, the gitignored `site/` build artifacts, and `researches/`) for `marketplace`, `/plugin install`, `/plugin marketplace`, `codex plugin marketplace`, `gh skill install himkt/cafleet`, `.claude-plugin`, `.codex-plugin`, `.agents/plugins` — confirm the only remaining hits are inside `design-docs/` (the historical record, including this doc). The term `gh skill install himkt/cafleet` is the specific published-repo form and will not match `mise.toml`'s kept `gh skill install ./ --from-local`. Fix any stray hit found outside `design-docs/`. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test`; fix any findings. <!-- completed: -->
+- [x] Repo-wide `git grep` (tracked files only — excludes `node_modules/`, the gitignored `site/` build artifacts, and `researches/`) for `marketplace`, `/plugin install`, `/plugin marketplace`, `codex plugin marketplace`, `gh skill install himkt/cafleet`, `.claude-plugin`, `.codex-plugin`, `.agents/plugins` — confirm the only remaining hits are inside `design-docs/` (the historical record, including this doc). The term `gh skill install himkt/cafleet` is the specific published-repo form and will not match `mise.toml`'s kept `gh skill install ./ --from-local`. Fix any stray hit found outside `design-docs/`. <!-- completed: 2026-06-23T13:10 -->
+- [x] Run `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test`; fix any findings. <!-- completed: 2026-06-23T13:10 -->
 
 ---
 
@@ -151,3 +151,4 @@ This is a real-command verification run in the working tree, consistent with the
 | Date | Changes |
 |------|---------|
 | 2026-06-23 | Initial draft |
+| 2026-06-23 | Implemented via CAFleet execute team. Steps 1–4 complete: marketplace/plugin install instructions removed from README.md, install.md, configure.md; four manifest files and three .bumpversion.toml blocks deleted. Verification gate passed (skill-install works without manifests; bump-my-version dry run clean). Sweep clean (removed terms only in design-docs/); lint, typecheck, 928 tests pass. Independent Opus review and Copilot review both clean. Status → Complete. |
