@@ -10,16 +10,16 @@ Add a `cafleet setup` CLI command that onboards a new machine in one step: it do
 
 ## Success Criteria
 
-- [ ] `cafleet setup` runs **both** halves: installs skills into every detected agent home **and** migrates the database to head.
-- [ ] The skills version is the **installed `cafleet` CLI version** (`importlib.metadata.version("cafleet")`); the skills half downloads `cafleet-skills-v<cli_version>.zip` from the Release tagged `<cli_version>` of `himkt/cafleet` over the public REST API using only the Python standard library (no new dependency, `gh` not required at runtime).
-- [ ] Auto-detect installs skills only into agent homes that exist: `claude` → `~/.claude/skills/`, `codex` → `~/.codex/skills/`, `opencode` → `~/.config/opencode/skills/`.
-- [ ] `--agent claude|codex|opencode` (repeatable, duplicate values deduped silently) scopes the **skills** targets to the named agents; the database half still runs.
-- [ ] Each of the three skill directories is **replaced** (removed then re-extracted) at every target, so re-running `cafleet setup` against the same installed CLI version yields the same tree (per-resolved-version idempotency).
-- [ ] Archive members with path-traversal / zip-slip paths (`..` or absolute) are rejected before extraction.
-- [ ] A `skills/` directory whose entries are not exactly the three `SKILL_DIRS` directories — an extra directory, a missing one, or any stray non-directory file — is treated as malformed.
-- [ ] The database half reuses the exact `cafleet db init` migration code path (including the refuse-on-unknown-revision guard); no migration logic is duplicated.
-- [ ] The two halves run independently — a failure in one does not abort the other — each prints its own status, and the command exits non-zero if **either** half fails.
-- [ ] `docs/get-started/install.md` and `README.md` present `cafleet setup` as the recommended end-user onboarding path; `gh skill install` / `mise //:skill-install` remain documented only as the contributor/local-dev path.
+- [x] `cafleet setup` runs **both** halves: installs skills into every detected agent home **and** migrates the database to head.
+- [x] The skills version is the **installed `cafleet` CLI version** (`importlib.metadata.version("cafleet")`); the skills half downloads `cafleet-skills-v<cli_version>.zip` from the Release tagged `<cli_version>` of `himkt/cafleet` over the public REST API using only the Python standard library (no new dependency, `gh` not required at runtime).
+- [x] Auto-detect installs skills only into agent homes that exist: `claude` → `~/.claude/skills/`, `codex` → `~/.codex/skills/`, `opencode` → `~/.config/opencode/skills/`.
+- [x] `--agent claude|codex|opencode` (repeatable, duplicate values deduped silently) scopes the **skills** targets to the named agents; the database half still runs.
+- [x] Each of the three skill directories is **replaced** (removed then re-extracted) at every target, so re-running `cafleet setup` against the same installed CLI version yields the same tree (per-resolved-version idempotency).
+- [x] Archive members with path-traversal / zip-slip paths (`..` or absolute) are rejected before extraction.
+- [x] A `skills/` directory whose entries are not exactly the three `SKILL_DIRS` directories — an extra directory, a missing one, or any stray non-directory file — is treated as malformed.
+- [x] The database half reuses the exact `cafleet db init` migration code path (including the refuse-on-unknown-revision guard); no migration logic is duplicated.
+- [x] The two halves run independently — a failure in one does not abort the other — each prints its own status, and the command exits non-zero if **either** half fails.
+- [x] `docs/get-started/install.md` and `README.md` present `cafleet setup` as the recommended end-user onboarding path; `gh skill install` / `mise //:skill-install` remain documented only as the contributor/local-dev path.
 
 ---
 
