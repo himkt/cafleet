@@ -1,7 +1,7 @@
 # Remove marketplace install instructions
 
 **Status**: Approved
-**Progress**: 3/9 tasks complete
+**Progress**: 7/9 tasks complete
 **Last Updated**: 2026-06-23
 
 ## Overview
@@ -131,13 +131,13 @@ This is a real-command verification run in the working tree, consistent with the
 
 ### Step 2: Delete manifests and version coupling
 
-- [ ] Delete `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`; remove the `.claude-plugin/`, `.codex-plugin/`, `.agents/` directories if they are then empty. <!-- completed: -->
-- [ ] Remove the three `[[tool.bumpversion.files]]` blocks in `.bumpversion.toml` that target the deleted manifests (keep the `cafleet/pyproject.toml` and `uv.lock` blocks). <!-- completed: -->
+- [x] Delete `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`; remove the `.claude-plugin/`, `.codex-plugin/`, `.agents/` directories if they are then empty. <!-- completed: 2026-06-23T12:58 -->
+- [x] Remove the three `[[tool.bumpversion.files]]` blocks in `.bumpversion.toml` that target the deleted manifests (keep the `cafleet/pyproject.toml` and `uv.lock` blocks). <!-- completed: 2026-06-23T12:24 -->
 
 ### Step 3: Verification gate (gates Step 2)
 
-- [ ] Run `mise //:skill-install` after the manifests are deleted and confirm `gh skill install ./ --from-local` succeeds for all three backends, with the three skill directories present under `~/.claude/skills/`, `~/.codex/skills/`, and `~/.config/opencode/skills/`. On failure, revert Step 2 and escalate `blocked (paragraph-Implementation > Step 3)` with the exact error — do not restore a partial manifest silently. <!-- completed: -->
-- [ ] Run `bump-my-version` in dry-run mode (e.g. `uv run bump-my-version bump --dry-run patch`) and confirm it resolves cleanly against the remaining files (no reference to the deleted manifests). <!-- completed: -->
+- [x] Run `mise //:skill-install` after the manifests are deleted and confirm `gh skill install ./ --from-local` succeeds for all three backends, with the three skill directories present under `~/.claude/skills/`, `~/.codex/skills/`, and `~/.config/opencode/skills/`. On failure, revert Step 2 and escalate `blocked (paragraph-Implementation > Step 3)` with the exact error — do not restore a partial manifest silently. <!-- completed: 2026-06-23T13:08 -->
+- [x] Run `bump-my-version` in dry-run mode (e.g. `uv run bump-my-version bump --dry-run patch`) and confirm it resolves cleanly against the remaining files (no reference to the deleted manifests). <!-- completed: 2026-06-23T13:08 -->
 
 ### Step 4: Sweep and validate
 
