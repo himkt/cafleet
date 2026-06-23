@@ -1,7 +1,7 @@
 # cafleet setup command
 
 **Status**: Approved
-**Progress**: 5/13 tasks complete
+**Progress**: 8/13 tasks complete
 **Last Updated**: 2026-06-22
 
 ## Overview
@@ -195,9 +195,9 @@ This change adds a CLI command but no new config/env surface (`config.py` is unc
 
 ### Step 4: Tests
 
-- [ ] Add `cafleet/tests/cli/test_setup.py` using `click.testing.CliRunner`, monkeypatching `importlib.metadata.version("cafleet")`, the `GET /releases/tags/<cli_version>` response, and the asset download (a synthetic in-memory zip; redirect-following is out of scope — monkeypatch the URL directly), with `AGENT_SKILLS_DIRS` pointed at `tmp_path` homes. Cover: auto-detect installs only into present homes; `--agent` scoping including silent dedupe of repeated values; `--agent` valid while the DB half still runs; replace/idempotency (a second run against the same version leaves a clean tree); zip-slip member rejected (nothing extracted); an extra entry under `skills/` (extra dir or stray file) → malformed; **a missing skill dir (`skills/` holds only two of the three `SKILL_DIRS`) → malformed**; missing-asset generic message; **404 no-release-for-version**; the network-error path including folded 403/5xx; `BadZipFile` → malformed; **unwritable target** (`PermissionError` during install); and **zero homes detected** (auto-detect resolves an empty set). Every *Error handling* row has a corresponding case. <!-- completed: -->
-- [ ] Add the two **independence** cases under full `cafleet setup`: (a) force the skills half to fail (malformed asset) and assert the DB half still ran (schema created at head), exit code == 1, and both per-half status lines printed; (b) force the DB half to fail (orphan-tables DB) while skills succeed, and assert skills were still installed, exit code == 1, and both status lines printed. <!-- completed: -->
-- [ ] Add a database-half test that invokes `run_db_init()` **directly** as a unit test (no skills mocking) against a temp SQLite — creates the schema at head; a re-run reports "Already at head"; confirm `cafleet db init` is otherwise unchanged. (The DB half under full `cafleet setup` is already exercised by the main test above, where the skills half is mocked.) <!-- completed: -->
+- [x] Add `cafleet/tests/cli/test_setup.py` using `click.testing.CliRunner`, monkeypatching `importlib.metadata.version("cafleet")`, the `GET /releases/tags/<cli_version>` response, and the asset download (a synthetic in-memory zip; redirect-following is out of scope — monkeypatch the URL directly), with `AGENT_SKILLS_DIRS` pointed at `tmp_path` homes. Cover: auto-detect installs only into present homes; `--agent` scoping including silent dedupe of repeated values; `--agent` valid while the DB half still runs; replace/idempotency (a second run against the same version leaves a clean tree); zip-slip member rejected (nothing extracted); an extra entry under `skills/` (extra dir or stray file) → malformed; **a missing skill dir (`skills/` holds only two of the three `SKILL_DIRS`) → malformed**; missing-asset generic message; **404 no-release-for-version**; the network-error path including folded 403/5xx; `BadZipFile` → malformed; **unwritable target** (`PermissionError` during install); and **zero homes detected** (auto-detect resolves an empty set). Every *Error handling* row has a corresponding case. <!-- completed: 2026-06-23T08:31 -->
+- [x] Add the two **independence** cases under full `cafleet setup`: (a) force the skills half to fail (malformed asset) and assert the DB half still ran (schema created at head), exit code == 1, and both per-half status lines printed; (b) force the DB half to fail (orphan-tables DB) while skills succeed, and assert skills were still installed, exit code == 1, and both status lines printed. <!-- completed: 2026-06-23T08:31 -->
+- [x] Add a database-half test that invokes `run_db_init()` **directly** as a unit test (no skills mocking) against a temp SQLite — creates the schema at head; a re-run reports "Already at head"; confirm `cafleet db init` is otherwise unchanged. (The DB half under full `cafleet setup` is already exercised by the main test above, where the skills half is mocked.) <!-- completed: 2026-06-23T08:31 -->
 
 ### Step 5: Validate
 
