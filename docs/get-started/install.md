@@ -23,9 +23,10 @@ things, and runs both on every invocation:
   Release and extracts the three skill directories (`cafleet`,
   `cafleet-design-doc`, `cafleet-research`) into every detected coding-agent
   home: `claude` → `~/.claude/skills/`, `codex` → `~/.codex/skills/`,
-  `opencode` → `~/.config/opencode/skills/`. Only homes that already exist are
-  targeted. Scope the install to specific agents with
-  `--agent claude|codex|opencode` (repeatable).
+  `opencode` → `~/.config/opencode/skills/`. With auto-detect, only homes that
+  already exist are targeted. Scope the install to specific agents with
+  `--agent claude|codex|opencode` (repeatable) — an explicitly named agent's
+  home is created if it does not yet exist.
 - **Migrates the database** to the head Alembic revision — the same code path
   as `cafleet db init`.
 
