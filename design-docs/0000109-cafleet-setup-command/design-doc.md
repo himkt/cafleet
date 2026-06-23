@@ -1,8 +1,8 @@
 # cafleet setup command
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 13/13 tasks complete
-**Last Updated**: 2026-06-22
+**Last Updated**: 2026-06-23
 
 ## Overview
 
@@ -211,3 +211,4 @@ This change adds a CLI command but no new config/env surface (`config.py` is unc
 |------|---------|
 | 2026-06-22 | Initial draft |
 | 2026-06-22 | Interview pivot: skills version derived from the installed CLI version (no latest-stable); flag surface reduced to `--agent` only (dropped `--skills-only`/`--db-only`/`--release-tag`); added zip-slip rejection and strict `skills/` layout validation; removed the asset-availability-precondition guard. |
+| 2026-06-23 | Implemented via TDD (PR #146): docs-first onboarding rewrite, `run_db_init()` extraction, `cafleet setup` command, 27 setup tests + 3 `run_db_init` tests (928 total). Opus review pass; Copilot review addressed (GitHub-API parse + zip-extract OSError folded to clean ClickExceptions, install-doc `--agent` clarification). Status → Complete. |
