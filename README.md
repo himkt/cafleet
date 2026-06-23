@@ -25,7 +25,7 @@ cafleet setup               # install the skills + migrate the database
 
 The default database is `~/.local/share/cafleet/cafleet.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
 
-Contributors working from a clone install the skills from the working tree instead with `mise //:skill-install` (or `gh skill install` / a coding-agent marketplace from the published repo). Full install details, including the upgrade warning for pre-integer-PK databases, are on the Install page: <https://himkt.github.io/cafleet/get-started/install/>.
+Contributors working from a clone install the skills from the working tree with `mise //:skill-install`. Full install details, including the upgrade warning for pre-integer-PK databases, are on the Install page: <https://himkt.github.io/cafleet/get-started/install/>.
 
 Per-coding-agent config (Claude `permissions.allow`, Codex `config.toml` + rules, opencode) lives on the Configure page: <https://himkt.github.io/cafleet/get-started/configure/>.
 
