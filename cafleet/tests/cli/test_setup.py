@@ -390,6 +390,37 @@ def test_network_error_folded(homes, registry_db, monkeypatch, api_error):
     assert "could not reach the github api" in result.output.lower()
 
 
+@pytest.mark.parametrize(
+    "download_error",
+    [
+        urllib.error.URLError("connection reset"),
+        urllib.error.HTTPError(
+            url=DOWNLOAD_URL, code=403, msg="expired", hdrs=None, fp=None
+        ),
+        urllib.error.HTTPError(
+            url=DOWNLOAD_URL, code=500, msg="server error", hdrs=None, fp=None
+        ),
+    ],
+    ids=["urlerror", "http-403", "http-500"],
+)
+def test_download_network_error_folded(homes, registry_db, monkeypatch, download_error):
+    """A network failure on the asset download folds into the same message.
+
+    The release lookup succeeds; the failure happens while streaming the asset,
+    so this exercises the second ``urlopen`` call (step 4), distinct from the
+    release-lookup path covered by ``test_network_error_folded``.
+    """
+    _make_home(homes["claude"])
+    _mock_release(
+        monkeypatch, zip_bytes=_make_skills_zip(), download_error=download_error
+    )
+
+    result = _run_setup(["--agent", "claude"])
+
+    assert result.exit_code == 1, result.output
+    assert "could not reach the github api" in result.output.lower()
+
+
 # --------------------------------------------------------------------------- #
 # Install-time filesystem errors                                             #
 # --------------------------------------------------------------------------- #
