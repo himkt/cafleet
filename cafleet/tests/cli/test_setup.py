@@ -19,7 +19,6 @@ Contract notes for the implementation under test (``cafleet.cli.setup``):
 import importlib.metadata
 import io
 import json
-import socket
 import sqlite3
 import urllib.error
 import urllib.request
@@ -171,9 +170,7 @@ def test_autodetect_installs_only_present_homes(homes, registry_db, monkeypatch)
     assert _installed_skill_dirs(homes["claude"]) == set(SKILL_DIR_NAMES)
     assert _installed_skill_dirs(homes["opencode"]) == set(SKILL_DIR_NAMES)
     assert not homes["codex"].exists()
-    assert {"fleets", "agents", "tasks", "alembic_version"} <= _table_names(
-        registry_db
-    )
+    assert {"fleets", "agents", "tasks", "alembic_version"} <= _table_names(registry_db)
 
 
 def test_agent_flag_scopes_targets_and_dedupes(homes, registry_db, monkeypatch):
@@ -248,15 +245,13 @@ def test_replace_idempotency_second_run_clean_tree(homes, registry_db, monkeypat
     assert first.exit_code == 0, first.output
     assert not stale.exists()  # replaced, not merged
     tree_after_first = sorted(
-        p.relative_to(homes["claude"]).as_posix()
-        for p in homes["claude"].rglob("*")
+        p.relative_to(homes["claude"]).as_posix() for p in homes["claude"].rglob("*")
     )
 
     second = _run_setup(["--agent", "claude"])
     assert second.exit_code == 0, second.output
     tree_after_second = sorted(
-        p.relative_to(homes["claude"]).as_posix()
-        for p in homes["claude"].rglob("*")
+        p.relative_to(homes["claude"]).as_posix() for p in homes["claude"].rglob("*")
     )
     assert tree_after_second == tree_after_first
 
@@ -380,7 +375,7 @@ def test_no_release_for_version(homes, registry_db, monkeypatch):
         urllib.error.HTTPError(
             url="https://api", code=500, msg="server error", hdrs=None, fp=None
         ),
-        socket.timeout("timed out"),
+        TimeoutError("timed out"),
     ],
     ids=["urlerror", "http-403", "http-500", "timeout"],
 )

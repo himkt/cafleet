@@ -3,7 +3,6 @@
 import importlib.metadata
 import json
 import shutil
-import socket
 import tempfile
 import urllib.error
 import urllib.request
@@ -45,9 +44,7 @@ def _resolve_targets(agents: tuple[str, ...]) -> list[str]:
 
 def _resolve_download_url(cli_version: str) -> str:
     """Look up the release for ``cli_version`` and return its skills asset URL."""
-    api_url = (
-        f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{cli_version}"
-    )
+    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{cli_version}"
     req = urllib.request.Request(
         api_url,
         headers={"Accept": "application/vnd.github+json", "User-Agent": "cafleet"},
@@ -63,7 +60,7 @@ def _resolve_download_url(cli_version: str) -> str:
         raise click.ClickException(
             f"could not reach the GitHub API ({exc.reason})"
         ) from exc
-    except (urllib.error.URLError, socket.timeout) as exc:
+    except (urllib.error.URLError, TimeoutError) as exc:
         reason = getattr(exc, "reason", exc)
         raise click.ClickException(
             f"could not reach the GitHub API ({reason})"
@@ -73,9 +70,7 @@ def _resolve_download_url(cli_version: str) -> str:
     for asset in json.loads(body)["assets"]:
         if asset["name"] == asset_name:
             return asset["browser_download_url"]
-    raise click.ClickException(
-        f"asset {asset_name} not found in release {cli_version}"
-    )
+    raise click.ClickException(f"asset {asset_name} not found in release {cli_version}")
 
 
 def _download_and_extract(download_url: str, dest_root: Path) -> Path:
@@ -93,7 +88,7 @@ def _download_and_extract(download_url: str, dest_root: Path) -> Path:
         raise click.ClickException(
             f"could not reach the GitHub API ({exc.reason})"
         ) from exc
-    except (urllib.error.URLError, socket.timeout) as exc:
+    except (urllib.error.URLError, TimeoutError) as exc:
         reason = getattr(exc, "reason", exc)
         raise click.ClickException(
             f"could not reach the GitHub API ({reason})"

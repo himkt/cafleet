@@ -1,7 +1,7 @@
 # cafleet setup command
 
 **Status**: Approved
-**Progress**: 12/13 tasks complete
+**Progress**: 13/13 tasks complete
 **Last Updated**: 2026-06-22
 
 ## Overview
@@ -201,7 +201,7 @@ This change adds a CLI command but no new config/env surface (`config.py` is unc
 
 ### Step 5: Validate
 
-- [ ] Run `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test`; fix any findings. <!-- completed: -->
+- [x] Run `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test`; fix any findings. <!-- completed: 2026-06-23T08:44 -->
 
 ---
 
