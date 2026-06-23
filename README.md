@@ -12,43 +12,20 @@ Agent Teams reinvented for collaborative coding across multiple coding-agent bac
 
 ## 2. Install
 
-CAFleet works with three coding agents: `claude` (Claude Code), `codex` (OpenAI Codex CLI), and `opencode`.
-Install the plugin in whichever one you use — the broker CLI is shared.
+CAFleet works with three coding agents: `claude` (Claude Code), `codex` (OpenAI Codex CLI), and `opencode`. The broker CLI is shared by all three; the skills are installed per backend you use.
 
-### 2.1. CAFleet skills
-
-Use your favorite tool to install skills (for example, GitHub CLI `gh skill`, vercel `skills`, or the marketplace of each coding agent).
-
-#### (a) GitHub CLI (recommended)
-
-```bash
-gh skill install himkt/cafleet --agent claude-code
-gh skill install himkt/cafleet --agent codex
-gh skill install himkt/cafleet --agent opencode
-```
-
-#### (b) Claude Code marketplace (if you prefer)
-
-```text
-/plugin marketplace add himkt/cafleet
-/plugin install cafleet@cafleet
-```
-
-#### (c) Codex (if you prefer)
-
-```bash
-codex plugin marketplace add himkt/cafleet
-```
-
-
-### 2.2. CAFleet CLI (required for CAFleet to function)
+The recommended end-user path is two commands:
 
 ```bash
 uv tool install cafleet     # or: pip install cafleet
-cafleet db init             # apply schema migrations (idempotent; rerun after upgrades)
+cafleet setup               # install the skills + migrate the database
 ```
 
+`cafleet setup` installs the skills matching your installed `cafleet` version into every detected coding-agent home (`~/.claude`, `~/.codex`, `~/.config/opencode`) and migrates the database to head — the same migration code path as `cafleet db init`. Scope the skills install to specific agents with `--agent claude|codex|opencode` (repeatable). Re-run it after upgrading the package to refresh the skills and apply new migrations.
+
 The default database is `~/.local/share/cafleet/cafleet.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
+
+Contributors working from a clone install the skills from the working tree instead with `mise //:skill-install` (or `gh skill install` / a coding-agent marketplace from the published repo). Full install details, including the upgrade warning for pre-integer-PK databases, are on the Install page: <https://himkt.github.io/cafleet/get-started/install/>.
 
 Per-coding-agent config (Claude `permissions.allow`, Codex `config.toml` + rules, opencode) lives on the Configure page: <https://himkt.github.io/cafleet/get-started/configure/>.
 

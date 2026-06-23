@@ -1,7 +1,7 @@
 # cafleet setup command
 
 **Status**: Approved
-**Progress**: 0/13 tasks complete
+**Progress**: 4/13 tasks complete
 **Last Updated**: 2026-06-22
 
 ## Overview
@@ -177,10 +177,10 @@ This change adds a CLI command but no new config/env surface (`config.py` is unc
 
 ### Step 1: Documentation first
 
-- [ ] Rewrite `docs/get-started/install.md` end-user flow around `uv tool install cafleet` → `cafleet setup`; move `gh skill install` / `mise //:skill-install` to a contributor/local-dev note; keep the integer-PK upgrade warning. <!-- completed: -->
-- [ ] Update `README.md` so onboarding points to `cafleet setup`, consistent with the install page. <!-- completed: -->
-- [ ] Add the `cafleet setup` row + detail section (the single `--agent` flag; note skills track the installed CLI version; no exit-codes table) to `docs/spec/cli-options.md`. <!-- completed: -->
-- [ ] Update affected `SKILL.md` / skill CLI-reference pages (notably `skills/cafleet/SKILL.md`) so the documented onboarding matches `cafleet setup`. <!-- completed: -->
+- [x] Rewrite `docs/get-started/install.md` end-user flow around `uv tool install cafleet` → `cafleet setup`; move `gh skill install` / `mise //:skill-install` to a contributor/local-dev note; keep the integer-PK upgrade warning. <!-- completed: 2026-06-23T08:22 -->
+- [x] Update `README.md` so onboarding points to `cafleet setup`, consistent with the install page. <!-- completed: 2026-06-23T08:22 -->
+- [x] Add the `cafleet setup` row + detail section (the single `--agent` flag; note skills track the installed CLI version; no exit-codes table) to `docs/spec/cli-options.md`. <!-- completed: 2026-06-23T08:22 -->
+- [x] Update affected `SKILL.md` / skill CLI-reference pages (notably `skills/cafleet/SKILL.md`) so the documented onboarding matches `cafleet setup`. <!-- completed: 2026-06-23T08:22 -->
 
 ### Step 2: Refactor the database init code path for reuse
 
