@@ -67,9 +67,13 @@ def _resolve_download_url(cli_version: str) -> str:
         ) from exc
 
     asset_name = f"cafleet-skills-v{cli_version}.zip"
-    for asset in json.loads(body)["assets"]:
-        if asset["name"] == asset_name:
-            return asset["browser_download_url"]
+    try:
+        assets = json.loads(body)["assets"]
+        for asset in assets:
+            if asset["name"] == asset_name:
+                return asset["browser_download_url"]
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise click.ClickException("could not parse the GitHub API response") from exc
     raise click.ClickException(f"asset {asset_name} not found in release {cli_version}")
 
 
@@ -105,7 +109,7 @@ def _download_and_extract(download_url: str, dest_root: Path) -> Path:
                         "rejecting the archive"
                     )
             zf.extractall(extract_root)
-    except zipfile.BadZipFile as exc:
+    except (zipfile.BadZipFile, OSError) as exc:
         raise click.ClickException("release asset is malformed") from exc
 
     skills_root = extract_root / "skills"

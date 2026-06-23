@@ -69,8 +69,13 @@ def _mock_release(
     assets=None,
     api_error=None,
     download_error=None,
+    release_body=None,
 ):
-    """Patch the version lookup and ``urlopen`` for the skills-half network calls."""
+    """Patch the version lookup and ``urlopen`` for the skills-half network calls.
+
+    ``release_body`` overrides the API response payload with raw bytes (used to
+    inject unparseable / non-assets JSON); otherwise it is built from ``assets``.
+    """
     real_version = importlib.metadata.version
 
     def fake_version(package):
@@ -78,9 +83,10 @@ def _mock_release(
 
     monkeypatch.setattr(importlib.metadata, "version", fake_version)
 
-    if assets is None:
-        assets = [{"name": ASSET_NAME, "browser_download_url": DOWNLOAD_URL}]
-    release_body = json.dumps({"tag_name": version, "assets": assets}).encode()
+    if release_body is None:
+        if assets is None:
+            assets = [{"name": ASSET_NAME, "browser_download_url": DOWNLOAD_URL}]
+        release_body = json.dumps({"tag_name": version, "assets": assets}).encode()
 
     def fake_urlopen(req, timeout=None):
         url = req.full_url if hasattr(req, "full_url") else req
@@ -326,6 +332,26 @@ def test_bad_zip_is_malformed(homes, registry_db, monkeypatch):
     assert "malformed" in result.output.lower()
 
 
+def test_extractall_oserror_is_malformed(homes, registry_db, monkeypatch):
+    """An ``OSError`` raised mid-extraction is reported as the malformed-asset error.
+
+    The archive passes the zip-slip and bad-zip pre-checks; the failure happens
+    inside ``ZipFile.extractall`` (e.g. a filesystem error during extraction).
+    """
+    _make_home(homes["claude"])
+    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+
+    def boom(self, *args, **kwargs):
+        raise OSError("extraction failed")
+
+    monkeypatch.setattr(zipfile.ZipFile, "extractall", boom)
+
+    result = _run_setup(["--agent", "claude"])
+
+    assert result.exit_code == 1, result.output
+    assert "malformed" in result.output.lower()
+
+
 # --------------------------------------------------------------------------- #
 # Release / network resolution                                               #
 # --------------------------------------------------------------------------- #
@@ -344,6 +370,22 @@ def test_missing_asset_message(homes, registry_db, monkeypatch):
     assert result.exit_code == 1, result.output
     assert ASSET_NAME in result.output
     assert "not found" in result.output.lower()
+
+
+@pytest.mark.parametrize(
+    "release_body",
+    [b"this is not json", b'{"tag_name": "0.12.2"}'],
+    ids=["non-json", "no-assets-key"],
+)
+def test_unparseable_api_response(homes, registry_db, monkeypatch, release_body):
+    """A 200 body that is not JSON, or lacks the ``assets`` array, is rejected."""
+    _make_home(homes["claude"])
+    _mock_release(monkeypatch, release_body=release_body)
+
+    result = _run_setup(["--agent", "claude"])
+
+    assert result.exit_code == 1, result.output
+    assert "could not parse the github api response" in result.output.lower()
 
 
 def test_no_release_for_version(homes, registry_db, monkeypatch):
