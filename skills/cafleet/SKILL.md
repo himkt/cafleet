@@ -70,7 +70,7 @@ Used only when your overlay omits a token or your backend is unknown. Each defau
 
 Every `cafleet` invocation that touches agents or messages carries two literal integer ids (no env-var fallback):
 
-- `--fleet-id <int>` — per-subcommand (placed **after** the subcommand name), required on every client + member subcommand. Rejected with `No such option` on `db init` / `fleet *` / `server` / `doctor`. Missing it exits with `Error: --fleet-id <int> is required for this subcommand. …`.
+- `--fleet-id <int>` — per-subcommand (placed **after** the subcommand name), required on every client + member subcommand. Rejected with `No such option` on `db init` / `setup` / `fleet *` / `server` / `doctor`. Missing it exits with `Error: --fleet-id <int> is required for this subcommand. …`.
 - `--agent-id <int>` — per-subcommand, required on every subcommand **except** `register` (which returns the new `agent_id` to record and reuse).
 
 Use literal ids, never shell variables — `permissions.allow` matches Bash invocations as fixed strings, so `$VAR` expansion breaks the match and forces prompts. See [`cli-options.md`](../../docs/spec/cli-options.md#fleet-id) for the rationale and [`permissions.allow` coverage](../../docs/spec/cli-options.md#permissionsallow-coverage) for the pattern set.

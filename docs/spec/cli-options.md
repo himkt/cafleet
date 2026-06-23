@@ -13,6 +13,7 @@ One row per subcommand. "Identity flag" is the per-subcommand option naming the 
 | Subcommand | Purpose | `--fleet-id` | Identity flag | Section |
 |---|---|---|---|---|
 | `db init` | Create or migrate the SQLite schema to head | no | none | [db init](#db-init) |
+| `setup` | Install the skills + migrate the schema to head | no | none | [setup](#cafleet-setup) |
 | `fleet create` | Create a fleet with its root Director and Administrator | no | none | [fleet create](#fleet-create) |
 | `fleet list` | List non-deleted fleets | no | none | [fleet list](#fleet-list) |
 | `fleet show` | Show one fleet (soft-deleted included) | no | none | [fleet show](#fleet-show) |
@@ -85,7 +86,7 @@ Placed **before** the subcommand:
 
 ## Fleet ID (`--fleet-id`) {#fleet-id}
 
-`--fleet-id` is a **per-subcommand option** (not a top-level option). It names the fleet the command acts on and is placed immediately **after** the subcommand name (the canonical position), ahead of the other flags — e.g. `cafleet message poll --fleet-id <id> --agent-id <id>`. It is typed `int`; a non-integer fails with Click's standard `Error: Invalid value for '--fleet-id': '<x>' is not a valid integer.` (exit 2). Every client/member/monitor leaf command that touches agents, messages, members, or the scheduler carries it; `db init`, `fleet *`, `server`, and `doctor` do **not** accept it and reject it with `No such option: --fleet-id`. Which subcommand takes it is in the [Subcommand summary](#subcommand-summary).
+`--fleet-id` is a **per-subcommand option** (not a top-level option). It names the fleet the command acts on and is placed immediately **after** the subcommand name (the canonical position), ahead of the other flags — e.g. `cafleet message poll --fleet-id <id> --agent-id <id>`. It is typed `int`; a non-integer fails with Click's standard `Error: Invalid value for '--fleet-id': '<x>' is not a valid integer.` (exit 2). Every client/member/monitor leaf command that touches agents, messages, members, or the scheduler carries it; `db init`, `setup`, `fleet *`, `server`, and `doctor` do **not** accept it and reject it with `No such option: --fleet-id`. Which subcommand takes it is in the [Subcommand summary](#subcommand-summary).
 
 It is a literal CLI flag rather than an environment variable because Claude Code's `permissions.allow` matches Bash invocations as literal command strings: a literal `--fleet-id <int>` keeps the invocation a fixed string an allow pattern can match, while shell-expansion (`export FLEET_ID=56` then `$FLEET_ID`) breaks the match and forces per-invocation permission prompts that interrupt agent work. Substitute the literal integer ids printed by `cafleet fleet create` and `cafleet agent register` — never shell variables to hold them. Matching also depends on the canonical flag order (`--fleet-id` first, immediately after the subcommand name); a different order does not match — see [`permissions.allow` coverage](#permissionsallow-coverage).
 
@@ -147,6 +148,36 @@ cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id> --full   # f
 ```
 
 This applies to CLI emit sites only. FastAPI `/api/*` responses (see [webui-api.md](./webui-api.md)) are unchanged — the WebUI is human-facing and renders full bodies. `agent.description`, `skills[].description`, `agent_card_json` sub-fields, and `member capture` content are also untouched.
+
+## `cafleet setup` — One-Step Onboarding {#cafleet-setup}
+
+Installs the coding-agent skills **and** migrates the database in one command —
+the recommended end-user onboarding path (see
+[Install](../get-started/install.md)). It always runs both halves; they are
+independent, so a failure in one does not abort the other, and the command
+exits non-zero if either half fails.
+
+The skills installed always match the **installed `cafleet` CLI version**:
+setup reads that version, downloads the matching
+`cafleet-skills-v<version>.zip` asset from the corresponding GitHub Release of
+`himkt/cafleet`, and extracts the three skill directories (`cafleet`,
+`cafleet-design-doc`, `cafleet-research`) into each target agent home,
+replacing any existing copy. The database half reuses the `cafleet db init`
+migration code path (including its unknown-revision guard).
+
+`cafleet setup` does NOT accept `--fleet-id`. Supplying it exits 2 with
+`No such option: --fleet-id`, matching the `db init` / `fleet *` / `server` /
+`doctor` pattern.
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent` | no | One of `claude`, `codex`, or `opencode`; repeatable (`multiple=True`), duplicate values deduped silently. Scopes the **skills** targets to exactly the named agents; the database half runs regardless. Omitted → auto-detect every agent whose home directory exists (`~/.claude`, `~/.codex`, `~/.config/opencode`). An explicitly named agent's home/skills tree is created if missing; auto-detect installs only where the home already exists. An unknown value fails Click's choice check (exit 2). |
+
+For a database-only run, use [`db init`](#db-init); setup has no
+skills-only / db-only toggle. Failures surface as runtime error messages — no
+release for the installed version, a missing or malformed skills asset, the
+GitHub API unreachable, an unwritable target, or zero detected agent homes —
+so there is no exit-codes table.
 
 ## `cafleet db` — Schema Management
 

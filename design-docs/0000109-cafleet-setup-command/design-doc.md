@@ -1,8 +1,8 @@
 # cafleet setup command
 
-**Status**: Approved
-**Progress**: 0/13 tasks complete
-**Last Updated**: 2026-06-22
+**Status**: Complete
+**Progress**: 13/13 tasks complete
+**Last Updated**: 2026-06-23
 
 ## Overview
 
@@ -10,16 +10,16 @@ Add a `cafleet setup` CLI command that onboards a new machine in one step: it do
 
 ## Success Criteria
 
-- [ ] `cafleet setup` runs **both** halves: installs skills into every detected agent home **and** migrates the database to head.
-- [ ] The skills version is the **installed `cafleet` CLI version** (`importlib.metadata.version("cafleet")`); the skills half downloads `cafleet-skills-v<cli_version>.zip` from the Release tagged `<cli_version>` of `himkt/cafleet` over the public REST API using only the Python standard library (no new dependency, `gh` not required at runtime).
-- [ ] Auto-detect installs skills only into agent homes that exist: `claude` → `~/.claude/skills/`, `codex` → `~/.codex/skills/`, `opencode` → `~/.config/opencode/skills/`.
-- [ ] `--agent claude|codex|opencode` (repeatable, duplicate values deduped silently) scopes the **skills** targets to the named agents; the database half still runs.
-- [ ] Each of the three skill directories is **replaced** (removed then re-extracted) at every target, so re-running `cafleet setup` against the same installed CLI version yields the same tree (per-resolved-version idempotency).
-- [ ] Archive members with path-traversal / zip-slip paths (`..` or absolute) are rejected before extraction.
-- [ ] A `skills/` directory whose entries are not exactly the three `SKILL_DIRS` directories — an extra directory, a missing one, or any stray non-directory file — is treated as malformed.
-- [ ] The database half reuses the exact `cafleet db init` migration code path (including the refuse-on-unknown-revision guard); no migration logic is duplicated.
-- [ ] The two halves run independently — a failure in one does not abort the other — each prints its own status, and the command exits non-zero if **either** half fails.
-- [ ] `docs/get-started/install.md` and `README.md` present `cafleet setup` as the recommended end-user onboarding path; `gh skill install` / `mise //:skill-install` remain documented only as the contributor/local-dev path.
+- [x] `cafleet setup` runs **both** halves: installs skills into every detected agent home **and** migrates the database to head.
+- [x] The skills version is the **installed `cafleet` CLI version** (`importlib.metadata.version("cafleet")`); the skills half downloads `cafleet-skills-v<cli_version>.zip` from the Release tagged `<cli_version>` of `himkt/cafleet` over the public REST API using only the Python standard library (no new dependency, `gh` not required at runtime).
+- [x] Auto-detect installs skills only into agent homes that exist: `claude` → `~/.claude/skills/`, `codex` → `~/.codex/skills/`, `opencode` → `~/.config/opencode/skills/`.
+- [x] `--agent claude|codex|opencode` (repeatable, duplicate values deduped silently) scopes the **skills** targets to the named agents; the database half still runs.
+- [x] Each of the three skill directories is **replaced** (removed then re-extracted) at every target, so re-running `cafleet setup` against the same installed CLI version yields the same tree (per-resolved-version idempotency).
+- [x] Archive members with path-traversal / zip-slip paths (`..` or absolute) are rejected before extraction.
+- [x] A `skills/` directory whose entries are not exactly the three `SKILL_DIRS` directories — an extra directory, a missing one, or any stray non-directory file — is treated as malformed.
+- [x] The database half reuses the exact `cafleet db init` migration code path (including the refuse-on-unknown-revision guard); no migration logic is duplicated.
+- [x] The two halves run independently — a failure in one does not abort the other — each prints its own status, and the command exits non-zero if **either** half fails.
+- [x] `docs/get-started/install.md` and `README.md` present `cafleet setup` as the recommended end-user onboarding path; `gh skill install` / `mise //:skill-install` remain documented only as the contributor/local-dev path.
 
 ---
 
@@ -177,31 +177,31 @@ This change adds a CLI command but no new config/env surface (`config.py` is unc
 
 ### Step 1: Documentation first
 
-- [ ] Rewrite `docs/get-started/install.md` end-user flow around `uv tool install cafleet` → `cafleet setup`; move `gh skill install` / `mise //:skill-install` to a contributor/local-dev note; keep the integer-PK upgrade warning. <!-- completed: -->
-- [ ] Update `README.md` so onboarding points to `cafleet setup`, consistent with the install page. <!-- completed: -->
-- [ ] Add the `cafleet setup` row + detail section (the single `--agent` flag; note skills track the installed CLI version; no exit-codes table) to `docs/spec/cli-options.md`. <!-- completed: -->
-- [ ] Update affected `SKILL.md` / skill CLI-reference pages (notably `skills/cafleet/SKILL.md`) so the documented onboarding matches `cafleet setup`. <!-- completed: -->
+- [x] Rewrite `docs/get-started/install.md` end-user flow around `uv tool install cafleet` → `cafleet setup`; move `gh skill install` / `mise //:skill-install` to a contributor/local-dev note; keep the integer-PK upgrade warning. <!-- completed: 2026-06-23T08:22 -->
+- [x] Update `README.md` so onboarding points to `cafleet setup`, consistent with the install page. <!-- completed: 2026-06-23T08:22 -->
+- [x] Add the `cafleet setup` row + detail section (the single `--agent` flag; note skills track the installed CLI version; no exit-codes table) to `docs/spec/cli-options.md`. <!-- completed: 2026-06-23T08:22 -->
+- [x] Update affected `SKILL.md` / skill CLI-reference pages (notably `skills/cafleet/SKILL.md`) so the documented onboarding matches `cafleet setup`. <!-- completed: 2026-06-23T08:22 -->
 
 ### Step 2: Refactor the database init code path for reuse
 
-- [ ] Extract the body of `db.init()` in `cafleet/src/cafleet/cli/db.py` into a module-level `run_db_init() -> None`, preserving the unknown-revision and orphan-tables guards and all echo messages; make `db.init()` a thin wrapper calling it. <!-- completed: -->
+- [x] Extract the body of `db.init()` in `cafleet/src/cafleet/cli/db.py` into a module-level `run_db_init() -> None`, preserving the unknown-revision and orphan-tables guards and all echo messages; make `db.init()` a thin wrapper calling it. <!-- completed: 2026-06-23T08:27 -->
 
 ### Step 3: Implement the `cafleet setup` command
 
-- [ ] Create `cafleet/src/cafleet/cli/setup.py` with the `setup` command: constants (`GITHUB_REPO`, `SKILL_DIRS`, `HTTP_TIMEOUT`, `AGENT_SKILLS_DIRS`) and the sole `--agent` flag (repeatable choice, deduped; Click's choice check is the only validation). <!-- completed: -->
-- [ ] Implement the skills half: resolve target agents (auto-detect or `--agent`), read the installed version via `importlib.metadata.version("cafleet")`, resolve the Release via `GET /repos/himkt/cafleet/releases/tags/<cli_version>`, locate `cafleet-skills-v<cli_version>.zip`, download to a temp file (timeout `HTTP_TIMEOUT`), reject zip-slip members, extract + validate the `skills/` layout is exactly `SKILL_DIRS` (download/extract/validate before any rmtree), then install each skill dir with replace semantics. <!-- completed: -->
-- [ ] Implement the database half by calling `run_db_init()`, and the independent-halves orchestration (always run both, collect per-half failures, print per-half status, exit non-zero if either failed). <!-- completed: -->
-- [ ] Register `setup` in `cafleet/src/cafleet/cli/__init__.py` via `cli.add_command(setup)`. <!-- completed: -->
+- [x] Create `cafleet/src/cafleet/cli/setup.py` with the `setup` command: constants (`GITHUB_REPO`, `SKILL_DIRS`, `HTTP_TIMEOUT`, `AGENT_SKILLS_DIRS`) and the sole `--agent` flag (repeatable choice, deduped; Click's choice check is the only validation). <!-- completed: 2026-06-23T08:40 -->
+- [x] Implement the skills half: resolve target agents (auto-detect or `--agent`), read the installed version via `importlib.metadata.version("cafleet")`, resolve the Release via `GET /repos/himkt/cafleet/releases/tags/<cli_version>`, locate `cafleet-skills-v<cli_version>.zip`, download to a temp file (timeout `HTTP_TIMEOUT`), reject zip-slip members, extract + validate the `skills/` layout is exactly `SKILL_DIRS` (download/extract/validate before any rmtree), then install each skill dir with replace semantics. <!-- completed: 2026-06-23T08:40 -->
+- [x] Implement the database half by calling `run_db_init()`, and the independent-halves orchestration (always run both, collect per-half failures, print per-half status, exit non-zero if either failed). <!-- completed: 2026-06-23T08:40 -->
+- [x] Register `setup` in `cafleet/src/cafleet/cli/__init__.py` via `cli.add_command(setup)`. <!-- completed: 2026-06-23T08:40 -->
 
 ### Step 4: Tests
 
-- [ ] Add `cafleet/tests/cli/test_setup.py` using `click.testing.CliRunner`, monkeypatching `importlib.metadata.version("cafleet")`, the `GET /releases/tags/<cli_version>` response, and the asset download (a synthetic in-memory zip; redirect-following is out of scope — monkeypatch the URL directly), with `AGENT_SKILLS_DIRS` pointed at `tmp_path` homes. Cover: auto-detect installs only into present homes; `--agent` scoping including silent dedupe of repeated values; `--agent` valid while the DB half still runs; replace/idempotency (a second run against the same version leaves a clean tree); zip-slip member rejected (nothing extracted); an extra entry under `skills/` (extra dir or stray file) → malformed; **a missing skill dir (`skills/` holds only two of the three `SKILL_DIRS`) → malformed**; missing-asset generic message; **404 no-release-for-version**; the network-error path including folded 403/5xx; `BadZipFile` → malformed; **unwritable target** (`PermissionError` during install); and **zero homes detected** (auto-detect resolves an empty set). Every *Error handling* row has a corresponding case. <!-- completed: -->
-- [ ] Add the two **independence** cases under full `cafleet setup`: (a) force the skills half to fail (malformed asset) and assert the DB half still ran (schema created at head), exit code == 1, and both per-half status lines printed; (b) force the DB half to fail (orphan-tables DB) while skills succeed, and assert skills were still installed, exit code == 1, and both status lines printed. <!-- completed: -->
-- [ ] Add a database-half test that invokes `run_db_init()` **directly** as a unit test (no skills mocking) against a temp SQLite — creates the schema at head; a re-run reports "Already at head"; confirm `cafleet db init` is otherwise unchanged. (The DB half under full `cafleet setup` is already exercised by the main test above, where the skills half is mocked.) <!-- completed: -->
+- [x] Add `cafleet/tests/cli/test_setup.py` using `click.testing.CliRunner`, monkeypatching `importlib.metadata.version("cafleet")`, the `GET /releases/tags/<cli_version>` response, and the asset download (a synthetic in-memory zip; redirect-following is out of scope — monkeypatch the URL directly), with `AGENT_SKILLS_DIRS` pointed at `tmp_path` homes. Cover: auto-detect installs only into present homes; `--agent` scoping including silent dedupe of repeated values; `--agent` valid while the DB half still runs; replace/idempotency (a second run against the same version leaves a clean tree); zip-slip member rejected (nothing extracted); an extra entry under `skills/` (extra dir or stray file) → malformed; **a missing skill dir (`skills/` holds only two of the three `SKILL_DIRS`) → malformed**; missing-asset generic message; **404 no-release-for-version**; the network-error path including folded 403/5xx; `BadZipFile` → malformed; **unwritable target** (`PermissionError` during install); and **zero homes detected** (auto-detect resolves an empty set). Every *Error handling* row has a corresponding case. <!-- completed: 2026-06-23T08:31 -->
+- [x] Add the two **independence** cases under full `cafleet setup`: (a) force the skills half to fail (malformed asset) and assert the DB half still ran (schema created at head), exit code == 1, and both per-half status lines printed; (b) force the DB half to fail (orphan-tables DB) while skills succeed, and assert skills were still installed, exit code == 1, and both status lines printed. <!-- completed: 2026-06-23T08:31 -->
+- [x] Add a database-half test that invokes `run_db_init()` **directly** as a unit test (no skills mocking) against a temp SQLite — creates the schema at head; a re-run reports "Already at head"; confirm `cafleet db init` is otherwise unchanged. (The DB half under full `cafleet setup` is already exercised by the main test above, where the skills half is mocked.) <!-- completed: 2026-06-23T08:31 -->
 
 ### Step 5: Validate
 
-- [ ] Run `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test`; fix any findings. <!-- completed: -->
+- [x] Run `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test`; fix any findings. <!-- completed: 2026-06-23T08:44 -->
 
 ---
 
@@ -211,3 +211,4 @@ This change adds a CLI command but no new config/env surface (`config.py` is unc
 |------|---------|
 | 2026-06-22 | Initial draft |
 | 2026-06-22 | Interview pivot: skills version derived from the installed CLI version (no latest-stable); flag surface reduced to `--agent` only (dropped `--skills-only`/`--db-only`/`--release-tag`); added zip-slip rejection and strict `skills/` layout validation; removed the asset-availability-precondition guard. |
+| 2026-06-23 | Implemented via TDD (PR #146): docs-first onboarding rewrite, `run_db_init()` extraction, `cafleet setup` command, 27 setup tests + 3 `run_db_init` tests (928 total). Opus review pass; Copilot review addressed (GitHub-API parse + zip-extract OSError folded to clean ClickExceptions, install-doc `--agent` clarification). Status → Complete. |
