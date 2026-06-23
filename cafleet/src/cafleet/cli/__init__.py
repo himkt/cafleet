@@ -10,6 +10,7 @@ from cafleet.cli.member import member
 from cafleet.cli.message import message
 from cafleet.cli.monitor import monitor
 from cafleet.cli.server import server
+from cafleet.cli.setup import setup as setup_command
 
 
 @click.group()
@@ -32,3 +33,4 @@ cli.add_command(member)
 cli.add_command(monitor)
 cli.add_command(server)
 cli.add_command(doctor)
+cli.add_command(setup_command)

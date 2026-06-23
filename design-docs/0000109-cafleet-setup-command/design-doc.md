@@ -1,7 +1,7 @@
 # cafleet setup command
 
 **Status**: Approved
-**Progress**: 8/13 tasks complete
+**Progress**: 12/13 tasks complete
 **Last Updated**: 2026-06-22
 
 ## Overview
@@ -188,10 +188,10 @@ This change adds a CLI command but no new config/env surface (`config.py` is unc
 
 ### Step 3: Implement the `cafleet setup` command
 
-- [ ] Create `cafleet/src/cafleet/cli/setup.py` with the `setup` command: constants (`GITHUB_REPO`, `SKILL_DIRS`, `HTTP_TIMEOUT`, `AGENT_SKILLS_DIRS`) and the sole `--agent` flag (repeatable choice, deduped; Click's choice check is the only validation). <!-- completed: -->
-- [ ] Implement the skills half: resolve target agents (auto-detect or `--agent`), read the installed version via `importlib.metadata.version("cafleet")`, resolve the Release via `GET /repos/himkt/cafleet/releases/tags/<cli_version>`, locate `cafleet-skills-v<cli_version>.zip`, download to a temp file (timeout `HTTP_TIMEOUT`), reject zip-slip members, extract + validate the `skills/` layout is exactly `SKILL_DIRS` (download/extract/validate before any rmtree), then install each skill dir with replace semantics. <!-- completed: -->
-- [ ] Implement the database half by calling `run_db_init()`, and the independent-halves orchestration (always run both, collect per-half failures, print per-half status, exit non-zero if either failed). <!-- completed: -->
-- [ ] Register `setup` in `cafleet/src/cafleet/cli/__init__.py` via `cli.add_command(setup)`. <!-- completed: -->
+- [x] Create `cafleet/src/cafleet/cli/setup.py` with the `setup` command: constants (`GITHUB_REPO`, `SKILL_DIRS`, `HTTP_TIMEOUT`, `AGENT_SKILLS_DIRS`) and the sole `--agent` flag (repeatable choice, deduped; Click's choice check is the only validation). <!-- completed: 2026-06-23T08:40 -->
+- [x] Implement the skills half: resolve target agents (auto-detect or `--agent`), read the installed version via `importlib.metadata.version("cafleet")`, resolve the Release via `GET /repos/himkt/cafleet/releases/tags/<cli_version>`, locate `cafleet-skills-v<cli_version>.zip`, download to a temp file (timeout `HTTP_TIMEOUT`), reject zip-slip members, extract + validate the `skills/` layout is exactly `SKILL_DIRS` (download/extract/validate before any rmtree), then install each skill dir with replace semantics. <!-- completed: 2026-06-23T08:40 -->
+- [x] Implement the database half by calling `run_db_init()`, and the independent-halves orchestration (always run both, collect per-half failures, print per-half status, exit non-zero if either failed). <!-- completed: 2026-06-23T08:40 -->
+- [x] Register `setup` in `cafleet/src/cafleet/cli/__init__.py` via `cli.add_command(setup)`. <!-- completed: 2026-06-23T08:40 -->
 
 ### Step 4: Tests
 
