@@ -21,19 +21,6 @@ Example: `design-docs/0000001-a2a-registry-broker/design-doc.md`
 
 Look at existing directories in `design-docs/` and use the next sequential number.
 
-## Implementation Order
+---
 
-When implementing a design document, ALWAYS update documentation FIRST before writing any code.
-
-The first implementation step in every design document must be:
-- Update the appropriate `docs/concepts/<page>.md` page (or add a new Concepts page if the feature introduces a new architectural axis)
-- Update `docs/` directory with usage and configuration details
-- Update `README.md` so it stays consistent with `docs/concepts/` and `docs/` (use the `/update-readme` skill when the change surface is large)
-- Update every affected skill under `skills/*/SKILL.md`
-- Update project rules if needed
-
-`README.md` is a first-class documentation target on par with `docs/concepts/` and `docs/`. Any change that affects architecture, CLI surface, API surface, configuration, or project structure MUST be reflected in `README.md` in the same design-doc cycle. Treat README drift as a blocker for "documentation complete".
-
-`SKILL.md` files are **equally** first-class documentation targets. Any change that alters CLI commands, flags, environment variables, required arguments, output formats, or the expected invocation workflow MUST be reflected in every affected `SKILL.md` in the same design-doc cycle. Skill drift — where a `SKILL.md` example no longer matches the actual CLI — is a blocker for "documentation complete", because Claude Code loads these skills as ground truth and will produce broken tool calls when they go stale.
-
-Only after documentation is complete should code implementation begin.
+For the documentation-first implementation order and the first-class documentation targets (README, SPEC, docs, skills), see `documentation-maintenance.md`.
