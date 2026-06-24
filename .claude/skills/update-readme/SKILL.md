@@ -1,7 +1,7 @@
 ---
 name: update-readme
 description: >-
-  Update README.md and SPEC.md based on docs/concepts/ and docs/ directory. Use
+  Update README.md and SPEC.md based on docs/concepts/ and docs/ directories. Use
   when documentation sources change and README or the reimplementation
   specification (SPEC.md) need to reflect the latest state.
 allowed-tools: Agent

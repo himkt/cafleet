@@ -1957,10 +1957,9 @@ configured HTTP application:
    it. With no directory given, it resolves the default dist dir (`<webui module
    dir>/dist`).
 4. If the warning is enabled **and** the resolved dist path does not exist, print
-   this exact two-line text to **stderr** (one time, at factory call):
+   this exact one-line text to **stderr** (one time, at factory call):
    ```
-   warning: admin WebUI is not built.
-   will return 404. Run 'mise //admin:build'.
+   warning: admin WebUI is not built. / will return 404. Run 'mise //admin:build'.
    ```
 5. If the dist path exists, mount the SPA static file server at `/`, named
    `webui`. If it does not exist, no mount is added: `/` and every non-API path
