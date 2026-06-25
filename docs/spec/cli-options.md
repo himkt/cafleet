@@ -627,7 +627,7 @@ prints `No messages found.`.
 | `--task-id` | yes | Task to fetch. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
 
-## `cafleet pane` — Pane Interaction
+## `cafleet pane` — Pane Interaction {#cafleet-pane}
 
 The `cafleet pane` subgroup keystrokes a pane-bound agent and must be run inside a tmux session. Every subcommand targets its agent by `--agent-id` (the **target**, scoped to the per-subcommand `--fleet-id`) and delivers keystrokes into that agent's tmux pane: `capture | input | exec | wake`. They share the resolution, key-delivery, and exit-code rules below; each subcommand's own section documents only its unique flags, key sequence, validation, and output.
 

@@ -30,7 +30,7 @@ cd cafleet
 
 mise //:uv-sync
 mise //cafleet:install    # editable uv tool install of the cafleet CLI
-cafleet db init           # apply schema migrations (idempotent; rerun after upgrades)
+cafleet setup             # create the database schema (idempotent; the DB half runs even if the skills half is skipped)
 
 mise //cafleet:lint       # ruff check + ruff format --check
 mise //cafleet:format     # ruff format

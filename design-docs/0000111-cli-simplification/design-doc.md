@@ -1,7 +1,7 @@
 # CLI Simplification: Redesign the cafleet Command Surface and Rewrite SPEC.md
 
 **Status**: Approved
-**Progress**: 16/28 tasks complete
+**Progress**: 20/28 tasks complete
 **Last Updated**: 2026-06-25
 
 ## Overview
@@ -449,17 +449,17 @@ authoritative reimplementation spec; only the contract surfaces change):
 
 ### Step 4: docs/ — get-started, how-to, reference, api, index
 
-- [ ] `docs/index.md`, `docs/get-started/index.md`,
+- [x] `docs/index.md`, `docs/get-started/index.md`,
       `docs/get-started/install.md`, `docs/get-started/quickstart.md`,
       `docs/get-started/configure.md` (add `CAFLEET_FLEET_ID`),
       `docs/get-started/contributing.md` — update CLI examples and `setup`
-      (no `db init`). <!-- completed: -->
-- [ ] `docs/how-to/mixed-backend-team.md`, `docs/how-to/monitor-and-recover.md`,
-      `docs/how-to/design-doc-development.md` — rename old commands. <!-- completed: -->
-- [ ] `docs/reference/coding-agents/claude.md`, `.../codex.md`,
+      (no `db init`). <!-- completed: 2026-06-25T09:30 -->
+- [x] `docs/how-to/mixed-backend-team.md`, `docs/how-to/monitor-and-recover.md`,
+      `docs/how-to/design-doc-development.md` — rename old commands. <!-- completed: 2026-06-25T09:30 -->
+- [x] `docs/reference/coding-agents/claude.md`, `.../codex.md`,
       `.../opencode.md` — update CLI examples (`agent spawn`, `pane *`); the two
-      opencode base dirs are unchanged. <!-- completed: -->
-- [ ] `docs/api/coding-agent.md` — env injection / no mini-language. <!-- completed: -->
+      opencode base dirs are unchanged. <!-- completed: 2026-06-25T09:30 -->
+- [x] `docs/api/coding-agent.md` — env injection / no mini-language. <!-- completed: 2026-06-25T09:30 -->
 
 ### Step 5: .claude/rules and project skill
 
