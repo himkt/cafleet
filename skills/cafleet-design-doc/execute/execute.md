@@ -19,7 +19,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
-| **Director** | Main Claude | Register with CAFleet, spawn members via `cafleet member create`, validate doc, assign steps, review tests against design doc, review implementation code for quality and compliance, commit after each phase, escalation arbitration, orchestrate TDD cycle | Write code, write tests | [roles/director.md](roles/director.md) |
+| **Director** | Main Claude | Register with CAFleet, spawn members via `cafleet agent spawn`, validate doc, assign steps, review tests against design doc, review implementation code for quality and compliance, commit after each phase, escalation arbitration, orchestrate TDD cycle | Write code, write tests | [roles/director.md](roles/director.md) |
 | **Programmer** | Member agent | Implement code to pass tests, run tests, report results via `cafleet message send`, escalate test defects to Director, update design doc checkboxes and Progress counter | Write or modify tests, commit code, communicate with user directly | [roles/programmer.md](roles/programmer.md) |
 | **Tester** | Member agent | Read design doc, write unit tests per step, fix tests based on Director feedback, report to Director via `cafleet message send` | Write implementation code, commit code, communicate with user directly | [roles/tester.md](roles/tester.md) |
 | **Verifier** | Member agent (optional) | E2E/integration testing, tool discovery, evidence collection (screenshots, logs, output), failure reporting with suggested fixes | Write code, write tests, commit, communicate with user directly | [roles/verifier.md](roles/verifier.md) |
@@ -41,11 +41,11 @@ Two skill-specific notes layer on top of that canonical protocol:
 
 ## Architecture
 
-The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` (no separate `cafleet agent register` call) — and spawns each needed member via `cafleet member create`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
+The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` (no separate `cafleet agent register` call) — and spawns each needed member via `cafleet agent spawn`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
 
 ```
 User
- +-- Director (main Claude -- cafleet fleet create, cafleet member create, orchestrates TDD cycle)
+ +-- Director (main Claude -- cafleet fleet create, cafleet agent spawn, orchestrates TDD cycle)
       +-- Programmer (member agent -- implements code to pass tests)
       +-- Tester (member agent -- writes unit tests per step)
       +-- Verifier (member agent, optional -- E2E/integration testing)
@@ -53,7 +53,7 @@ User
 
 ## Prerequisites
 
-- The Director MUST be running inside a tmux session (required by `cafleet member create`). Verify by running `cafleet doctor` before spawning anyone — it reports the tmux session/window/pane identifiers and exits non-zero with a clear message when the environment is not ready. If `cafleet doctor` reports a problem, abort and surface its message to the user. Do NOT invoke `tmux display-message`, `printenv TMUX`, or any other raw tmux/env probe — `cafleet doctor` is the only supported environment check (see `skills/cafleet/SKILL.md` § *use cafleet primitives only*).
+- The Director MUST be running inside a tmux session (required by `cafleet agent spawn`). Verify by running `cafleet doctor` before spawning anyone — it reports the tmux session/window/pane identifiers and exits non-zero with a clear message when the environment is not ready. If `cafleet doctor` reports a problem, abort and surface its message to the user. Do NOT invoke `tmux display-message`, `printenv TMUX`, or any other raw tmux/env probe — `cafleet doctor` is the only supported environment check (see `skills/cafleet/SKILL.md` § *use cafleet primitives only*).
 - `gh` must be authenticated for Steps 6 + 7. Lack of auth is NOT fatal — the Director checks `gh auth status` at Step 6a and falls back to Step 8 local-finalize, skipping the PR and Copilot review loop entirely. All other prerequisites (tmux, approved design doc, feature branch) remain unchanged.
 
 ## Process
@@ -162,7 +162,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 3b. Spawn the monitoring member (first-in)
 
-This team **keeps an active heartbeat** (Step 7's Copilot loop needs a turn source — see Step 7), so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`; it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `member create`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; its `monitor start` background task is stopped in Step 8's cleanup (first-out). See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
+This team **keeps an active heartbeat** (Step 7's Copilot loop needs a turn source — see Step 7), so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet agent spawn` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`; it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `agent spawn`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; its `monitor start` background task is stopped in Step 8's cleanup (first-out). See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
 
 **Spawn-prompt delta (execute only).** Execute's monitoring member runs an **extended** routine versus the canonical `cafleet` skill's `roles/monitor.md` prompt: when it finds the Director **idle**, it nudges **unconditionally** — it does **not** gate the nudge on naming un-acked inbox items or stalled members. The unconditional idle-nudge is what grants the Director a re-poll turn during a quiet Copilot wait (Step 7), so `silence_ticks` can advance even when the inbox is empty and members have already reported their fixes. State this delta in execute's monitoring-member spawn prompt; the canonical `cafleet` skill's `roles/monitor.md` routine keeps its conditional nudge. No Step-7 enter/exit handshake is needed — the monitoring member is PR-agnostic and the Director's Step-7 per-turn checklist consumes the granted turn (harmless outside Step 7: the Director re-polls, finds nothing new, idles again).
 
@@ -184,11 +184,11 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 - `skills/cafleet-design-doc/execute/roles/tester.md` (if Tester needed)
 - `skills/cafleet-design-doc/execute/roles/verifier.md` (if Verifier needed)
 
-#### 3e. Spawn each member via `cafleet member create`
+#### 3e. Spawn each member via `cafleet agent spawn`
 
-Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below. `{fleet_id}` / `{agent_id}` / `{director_agent_id}` are filled by `member create`'s `str.format()`; the `[INSERT …]` markers (`[INSERT DESIGN DOC PATH]`, `[INSERT abs path to roles/<role>.md]`) are shell-substituted by the Director first (double any literal `{`/`}` per the Template-safety note in `cafleet/reference/director.md`). All three roles load `cafleet` + `cafleet-design-doc` and take `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` as their only context line; each delta below gives the role's title, role-file, IMPORTANT lines (verbatim), and start cue.
+Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below. The skeleton's `$CAFLEET_*` identity references resolve from the member's injected env vars at runtime; the `[INSERT …]` markers (`[INSERT DESIGN DOC PATH]`, `[INSERT abs path to roles/<role>.md]`) are rendered by the Director first. The prompt is delivered verbatim — no `{placeholder}` substitution and no brace escaping. All three roles load `cafleet` + `cafleet-design-doc` and take `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` as their only context line; each delta below gives the role's title, role-file, IMPORTANT lines (verbatim), and start cue.
 
-> **Spawn-prompt audit file (two-step pattern)**: every spawn in this skill follows the same two steps — (1) **render** the prompt (substitute the `[INSERT …]` markers; leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass); (2) **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` (`<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; create `${BASE}/prompts/` on first write; same-second collision → append `_2`, `_3`, … — never overwrite), then invoke `cafleet member create --prompt-file <abs path>` (see the per-role spawn templates and commands below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
+> **Spawn-prompt audit file (two-step pattern)**: every spawn in this skill follows the same two steps — (1) **render** the prompt (substitute the `[INSERT …]` markers; the prompt is delivered **verbatim** — identity reaches the member via the injected `CAFLEET_*` env vars, with no `{placeholder}` substitution); (2) **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` (`<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; create `${BASE}/prompts/` on first write; same-second collision → append `_2`, `_3`, … — never overwrite), then invoke `cafleet agent spawn --prompt-file <abs path>` (see the per-role spawn templates and commands below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Agent Spawn — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 **Programmer spawn prompt** (skeleton + delta):
 
@@ -199,10 +199,10 @@ Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/
 | IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` |
 | start cue | `Start by reading the design document. Then wait for the Director to assign your first step.` |
 
-Render the prompt to `${BASE}/prompts/programmer-<UTC-compact>.md` per the 3e two-step audit-file pattern (leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass), then spawn with `--prompt-file`:
+Render the prompt to `${BASE}/prompts/programmer-<UTC-compact>.md` per the 3e two-step audit-file pattern (delivered verbatim; identity comes via the injected `CAFLEET_*` env vars), then spawn with `--prompt-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+   cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Programmer" \
      --description "Implements code to pass tests per step" \
      --prompt-file ${BASE}/prompts/programmer-<UTC-compact>.md
@@ -222,7 +222,7 @@ Render the prompt to `${BASE}/prompts/programmer-<UTC-compact>.md` per the 3e tw
 Render the prompt to `${BASE}/prompts/tester-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--prompt-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+   cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Tester" \
      --description "Writes unit tests per step" \
      --prompt-file ${BASE}/prompts/tester-<UTC-compact>.md
@@ -244,7 +244,7 @@ Render the prompt to `${BASE}/prompts/tester-<UTC-compact>.md` per the 3e two-st
 Render the prompt to `${BASE}/prompts/verifier-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--prompt-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+   cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Verifier" \
      --description "E2E/integration testing and evidence collection" \
      --prompt-file ${BASE}/prompts/verifier-<UTC-compact>.md
@@ -255,7 +255,7 @@ Render the prompt to `${BASE}/prompts/verifier-<UTC-compact>.md` per the 3e two-
 #### 3f. Verify members are live
 
 ```bash
-cafleet member list --fleet-id <fleet-id>
+cafleet agent list --fleet-id <fleet-id>
 ```
 
 All spawned members must show `status: active` with a non-null `pane_id`. If any is missing or pending, retry the spawn before proceeding.
@@ -375,7 +375,7 @@ No round limit — the loop continues until the user approves or aborts.
 
 1. Update design document Status to "Aborted", add Changelog entry. Place a `COMMENT(director): aborting — finalize and stand by` marker near the top of the doc body (above the Overview section — `Status:` is bold metadata, not a heading, so it is not a valid `paragraph-` target). Notify any still-live members with a single `cafleet message send --fleet-id <fleet-id> ... --text "ready (doc)"` per member so they read the marker and stand by.
 2. Commit (separate commands): `git add <design-doc>` then `git commit -m "docs: mark design doc as aborted"`
-3. Follow Shutdown Protocol (Step 8: stop the monitoring member's `monitor start` background task, then delete the monitoring member first and the remaining members, and run `cafleet fleet delete <fleet-id>` to tear down the fleet and sweep the root Director + Administrator).
+3. Follow Shutdown Protocol (Step 8: stop the monitoring member's `monitor start` background task, then delete the monitoring member first and the remaining members, and run `cafleet fleet delete --fleet-id <fleet-id>` to tear down the fleet and sweep the root Director + Administrator).
 
 ### Step 6: Push & Create PR (Director)
 
@@ -424,7 +424,7 @@ The monitoring member's `cafleet monitor` (started in Step 3b) runs unchanged on
 
 On each idle-nudge-driven turn (and in any active turn while Step 7 is in progress), the Director runs — in order:
 
-1. **Team health** (unchanged from the `cafleet` skill's `reference/supervision.md`): `member list` → `poll` → `member capture` fallback → nudge stalled members.
+1. **Team health** (unchanged from the `cafleet` skill's `reference/supervision.md`): `agent list` → `poll` → `pane capture` fallback → nudge stalled members.
 2. **Fetch new PR reviews**: `gh pr view <pr-number> --json reviews` (GraphQL-shaped; fields are `author.login`, `state`, `submittedAt`, `body`) AND `gh api repos/<owner>/<repo>/pulls/<pr-number>/comments` (REST-shaped; fields are `user.login`, `body`, `path`, `line`, `created_at`).
 3. **Filter Copilot-authored entries**: keep items where the login field (`author.login` for `gh pr view` reviews, `user.login` for `gh api` inline comments) matches the regex `^copilot` (case-insensitive). Copilot reviews currently post under a login that begins with `copilot` — the exact slug varies by account plan, so a prefix match is the safe filter.
 4. **New-since-push filter**: keep items whose timestamp (`submittedAt` for reviews, `created_at` for inline comments) is strictly later than `last_push_ts`.
@@ -517,5 +517,5 @@ Runs after Step 7 exits, or directly after Step 5 when Step 6 was skipped (gh no
    - Exit code 0 (branch is tracked on origin): `git push`. Covers both the "Step 6 fully succeeded" path and the "Step 6 partial-fail (push OK, PR create failed)" path.
    - Non-zero exit: skip the push. The docs commit stays local.
    - The Director does NOT re-request Copilot review on this final docs commit.
-5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task (launched in Step 3b, ran unchanged through Step 7) and wait for confirmation; `cafleet member delete` the monitoring member first, then Programmer, Tester, and Verifier if spawned (on exit 2 use `member capture` + your overlay's decision-prompt recovery or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete <fleet-id>`; `cafleet fleet list` to confirm.
+5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task (launched in Step 3b, ran unchanged through Step 7) and wait for confirmation; `cafleet agent deregister` the monitoring member first, then Programmer, Tester, and Verifier if spawned (on the 15 s timeout (exit 1) use `pane capture` + your overlay's decision-prompt recovery or `--force`); `cafleet agent list` to verify the roster is empty; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
 6. **Report to the user**: include the PR URL (if Step 6 created one), the Copilot loop exit reason (no-concerns / user-terminated / skipped / aborted), and any skipped-step reasons.

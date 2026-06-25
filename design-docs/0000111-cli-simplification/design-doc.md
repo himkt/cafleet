@@ -1,7 +1,7 @@
 # CLI Simplification: Redesign the cafleet Command Surface and Rewrite SPEC.md
 
 **Status**: Approved
-**Progress**: 23/28 tasks complete
+**Progress**: 28/28 tasks complete
 **Last Updated**: 2026-06-25
 
 ## Overview
@@ -473,24 +473,24 @@ authoritative reimplementation spec; only the contract surfaces change):
 
 ### Step 6: skills/** (SKILL.md, workflow bodies, roles, reference)
 
-- [ ] `skills/cafleet/SKILL.md` and `skills/cafleet/reference/*` — `cli.md`,
+- [x] `skills/cafleet/SKILL.md` and `skills/cafleet/reference/*` — `cli.md`,
       `director.md`, `recovery.md`, `supervision.md`, `broadcast.md`,
       `output-flags.md`, `exec-routing.md`, and the `coding-agent/` overlays
       (`_template.md`, `claude.md`, `codex.md`, `opencode.md`); plus
-      `skills/cafleet/roles/{director,member,monitor}.md`. <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/**` — `SKILL.md`, `reference/coordination.md`,
+      `skills/cafleet/roles/{director,member,monitor}.md`. <!-- completed: 2026-06-25T10:20 -->
+- [x] `skills/cafleet-design-doc/**` — `SKILL.md`, `reference/coordination.md`,
       and every `create/`, `interview/`, `execute/` workflow body + `roles/*.md`
-      that embeds old `cafleet member`/`message` commands. <!-- completed: -->
-- [ ] `skills/cafleet-research/**` — `SKILL.md` and every `report/`,
-      `presentation/` workflow body + `roles/*.md` with old commands. <!-- completed: -->
-- [ ] **Additive edit (not a rename):** document the env-var identity convention
+      that embeds old `cafleet member`/`message` commands. <!-- completed: 2026-06-25T10:20 -->
+- [x] `skills/cafleet-research/**` — `SKILL.md` and every `report/`,
+      `presentation/` workflow body + `roles/*.md` with old commands. <!-- completed: 2026-06-25T10:20 -->
+- [x] **Additive edit (not a rename):** document the env-var identity convention
       in the cafleet skill — teach reading `$CAFLEET_AGENT_ID` /
       `$CAFLEET_DIRECTOR_AGENT_ID` and passing them explicitly (the read-then-pass
       convention that replaces the dropped `{agent_id}`/`{director_agent_id}` brace
       mini-language, per §9), in `skills/cafleet/SKILL.md`, the relevant
-      `reference/*` pages, and the `roles/*.md` spawn-prompt guidance. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint-overlay` to confirm the coding-agent overlay token
-      set stays coherent after the renames. <!-- completed: -->
+      `reference/*` pages, and the `roles/*.md` spawn-prompt guidance. <!-- completed: 2026-06-25T10:20 -->
+- [x] Run `mise //cafleet:lint-overlay` to confirm the coding-agent overlay token
+      set stays coherent after the renames. <!-- completed: 2026-06-25T10:20 -->
 
 ---
 
