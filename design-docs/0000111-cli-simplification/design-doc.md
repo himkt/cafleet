@@ -1,7 +1,7 @@
 # CLI Simplification: Redesign the cafleet Command Surface and Rewrite SPEC.md
 
 **Status**: Approved
-**Progress**: 3/28 tasks complete
+**Progress**: 4/28 tasks complete
 **Last Updated**: 2026-06-25
 
 ## Overview
@@ -422,8 +422,8 @@ authoritative reimplementation spec; only the contract surfaces change):
 
 ### Step 2: README.md
 
-- [ ] Update `README.md` to the new command tree, groups, and any CLI examples
-      (architecture/CLI-surface section). <!-- completed: -->
+- [x] Update `README.md` to the new command tree, groups, and any CLI examples
+      (architecture/CLI-surface section). <!-- completed: 2026-06-25T08:48 -->
 
 ### Step 3: docs/ — concepts and spec pages (contract-facing)
 
