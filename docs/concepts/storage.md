@@ -7,10 +7,9 @@ icon: lucide/database
 ## Backend
 
 Everything is persisted in a single SQLite database accessed through
-SQLAlchemy 2.x with the sync `pysqlite` driver. Schema changes are managed
-by Alembic, bundled inside the `cafleet` wheel and applied via
-`cafleet db init`. There is no separate database daemon to operate, monitor,
-or back up — the database is a single file.
+SQLAlchemy 2.x with the sync `pysqlite` driver. The schema is a single baseline
+created in one pass by `cafleet setup`. There is no separate database daemon to
+operate, monitor, or back up — the database is a single file.
 
 The default database path is `~/.local/share/cafleet/cafleet.db` (XDG state
 directory), expanded once at config load time. Override with the
@@ -30,11 +29,12 @@ schema.
 
 ## Schema management
 
-The schema is managed by a chain of Alembic migrations. Operators run
-`cafleet db init` once before starting the server; it is idempotent and safe
-to re-run after upgrades, refuses to auto-downgrade a database that is ahead
-of the bundled head, and refuses an unversioned database with tables it does
-not recognize. Without `db init`, the first request fails with
+The schema is a **single baseline** — one ordered `CREATE` sequence that yields
+the final schema directly, with no migration chain, no version table, and no
+in-place upgrade path. Operators run `cafleet setup` once before starting the
+server; the create uses `CREATE TABLE IF NOT EXISTS`, so it is idempotent and
+safe to re-run (re-running creates nothing new). Existing databases are not
+migrated. Without `cafleet setup`, the first request fails with
 `OperationalError: no such table: agents`.
 
 ## No physical cleanup

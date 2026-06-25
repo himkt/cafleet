@@ -6,11 +6,11 @@ icon: lucide/table
 
 The `Task` payload is fully relational: every routing field plus the message body lives in its own typed column. The only JSON `TEXT` blob is `agents.agent_card_json`, which stores an `AgentCard`-shaped document.
 
-Schema management is handled by Alembic; the runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver. The schema is managed by a chain of Alembic revisions; run `cafleet db init` to apply them before starting the server — it is idempotent and safe to re-run after upgrades.
+The runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver. The schema is a **single baseline** created in one pass; run `cafleet setup` to create it before starting the server — the create is idempotent (`CREATE TABLE IF NOT EXISTS`) and safe to re-run. There is no migration chain and no in-place upgrade path (see [Storage](../concepts/storage.md)).
 
 ## SQL Schema
 
-All tables key on `INTEGER` columns. The three minted-id tables (`fleets`, `agents`, `tasks`) use `INTEGER PRIMARY KEY AUTOINCREMENT`. AUTOINCREMENT creates a per-table `sqlite_sequence` row that tracks the high-water mark, so **ids are never reused** — even after the highest row is deleted. The first AUTOINCREMENT value is `1`, so real ids are always `>= 1`; this leaves `0` free as a sentinel (see `tasks.to_agent_id`). The other tables — `agent_placements`, `monitor_config`, and `monitor_runtime` — are the integer PKs **without** AUTOINCREMENT: each reuses a parent id (`agents.agent_id` for the first two, `fleets.fleet_id` for `monitor_runtime`) as a 1:1 PK rather than minting a fresh sequence.
+All tables key on `INTEGER` columns. The three minted-id tables (`fleets`, `agents`, `tasks`) use `INTEGER PRIMARY KEY AUTOINCREMENT`. AUTOINCREMENT creates a per-table `sqlite_sequence` row that tracks the high-water mark, so **ids are never reused** — even after the highest row is deleted. The first AUTOINCREMENT value is `1`, so real ids are always `>= 1`. The other tables — `agent_placements`, `monitor_config`, and `monitor_runtime` — are the integer PKs **without** AUTOINCREMENT: each reuses a parent id (`agents.agent_id` for the first two, `fleets.fleet_id` for `monitor_runtime`) as a 1:1 PK rather than minting a fresh sequence.
 
 ### `fleets`
 
@@ -64,7 +64,7 @@ Each fleet owns exactly one built-in `Administrator` agent, distinguished by a f
 }
 ```
 
-The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned flags; callers cannot set `cafleet.kind` through any public path. The Administrator row is written as the final operation of the fleet-create bootstrap transaction, and its `registered_at` matches `fleets.created_at`. No migration seeds it — the Administrator row is written at fleet-create time, not by any schema migration.
+The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned flags; callers cannot set `cafleet.kind` through any public path. The Administrator row is written as the final operation of the fleet-create bootstrap transaction, and its `registered_at` matches `fleets.created_at`. The Administrator row is written at fleet-create time, not seeded by the schema.
 
 **Invariant**: Every fleet has exactly one active `Administrator` agent. The WebUI surfaces a derived `kind` field (`"builtin-administrator"` | `"user"`) so it can locate the Administrator without matching on the name.
 
@@ -77,7 +77,7 @@ The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned 
 | `task_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer. Identifies a single delivery (unicast row, broadcast delivery row, or broadcast summary row). |
 | `context_id` | `INTEGER` | `NOT NULL`, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The recipient agent for unicast/broadcast deliveries; the broadcaster for `broadcast_summary`; the preserved original for ACK/cancel. See [Storage](../concepts/storage.md) for the contextId routing convention. |
 | `from_agent_id` | `INTEGER` | `NOT NULL` | Sender agent. **Not** a foreign key — historical tasks may outlive their sender. |
-| `to_agent_id` | `INTEGER` | `NOT NULL` | Recipient agent. **`0`** for `broadcast_summary` rows (the "no single recipient" sentinel; real ids are `>= 1` so `0` never collides). |
+| `to_agent_id` | `INTEGER` | nullable | Recipient agent. **`NULL`** for `broadcast_summary` rows (they have no single recipient). |
 | `type` | `TEXT` | `NOT NULL` | `'unicast'` or `'broadcast_summary'`. |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; set at insert time, never updated. |
 | `status_state` | `TEXT` | `NOT NULL` | `input_required`, `completed`, or `canceled`. |
@@ -112,7 +112,7 @@ Indexes:
 
 Placement rows are hard-deleted (not soft-deleted) when the agent is deregistered through any path. They have no historical value and must not outlive the agent they describe.
 
-If a user kills a pane manually without going through `cafleet member delete`, the placement row stays until the next `member delete` resolves it; the "pane already gone" case is handled gracefully.
+If a user kills a pane manually without going through `cafleet agent deregister`, the placement row stays until the next `agent deregister` resolves it; the "pane already gone" case is handled gracefully.
 
 ### `monitor_config`
 
@@ -144,7 +144,7 @@ The dedicated monitoring member is identified the same way the built-in Administ
 }
 ```
 
-The marker is written by `register_agent` when `cafleet member create --role monitor` passes `kind="monitoring-member"` through. It serves two purposes: `register_agent` **skips** the `monitor_config` enrollment for this kind (the monitoring member is the watcher, not a watched agent), and the monitor loop **locates** the watcher by this marker via `find_monitoring_member` — which selects the single active agent whose `json_extract(agent_card_json, '$.cafleet.kind') == "monitoring-member"`, inner-joined to `agent_placements` for its pane. At most one active monitoring member is allowed per fleet; `register_agent` rejects a second.
+The marker is written by `register_agent` when `cafleet agent spawn --role monitor` passes `kind="monitoring-member"` through. It serves two purposes: `register_agent` **skips** the `monitor_config` enrollment for this kind (the monitoring member is the watcher, not a watched agent), and the monitor loop **locates** the watcher by this marker via `find_monitoring_member` — which selects the single active agent whose `json_extract(agent_card_json, '$.cafleet.kind') == "monitoring-member"`, inner-joined to `agent_placements` for its pane. At most one active monitoring member is allowed per fleet; `register_agent` rejects a second.
 
 ### `monitor_runtime`
 

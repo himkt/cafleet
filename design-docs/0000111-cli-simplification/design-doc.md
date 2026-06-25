@@ -1,7 +1,7 @@
 # CLI Simplification: Redesign the cafleet Command Surface and Rewrite SPEC.md
 
 **Status**: Approved
-**Progress**: 4/28 tasks complete
+**Progress**: 16/28 tasks complete
 **Last Updated**: 2026-06-25
 
 ## Overview
@@ -427,25 +427,25 @@ authoritative reimplementation spec; only the contract surfaces change):
 
 ### Step 3: docs/ — concepts and spec pages (contract-facing)
 
-- [ ] `docs/spec/cli-options.md` — rewrite the full command/option reference to
-      the new surface (the largest single edit). <!-- completed: -->
-- [ ] `docs/spec/data-model.md` — nullable `to_agent_id`; single-baseline schema
-      (drop migration-chain language). <!-- completed: -->
-- [ ] `docs/spec/message-envelope.md` — `to_agent_id` nullable; broadcast
-      `recipients`/`delivered` split. <!-- completed: -->
-- [ ] `docs/spec/webui-api.md` — confirm/adjust any references to schema or
-      command names. <!-- completed: -->
-- [ ] `docs/concepts/overview.md` — command-group overview (`agent`/`pane`/`message`). <!-- completed: -->
-- [ ] `docs/concepts/member-lifecycle.md` — reframe around `agent spawn` / `agent
-      deregister --force`; rename references. <!-- completed: -->
-- [ ] `docs/concepts/tmux-push.md` — `pane` group ops; `pane wake` modes. <!-- completed: -->
-- [ ] `docs/concepts/bash-routing.md` — `pane exec`, `pane wake --poll-only`. <!-- completed: -->
-- [ ] `docs/concepts/monitoring.md` — monitor + `pane wake` wording. <!-- completed: -->
-- [ ] `docs/concepts/storage.md` — single-baseline schema; remove `db init`
-      upgrade language. <!-- completed: -->
-- [ ] `docs/concepts/coding-agents.md` — env-var context injection (no prompt
-      mini-language). <!-- completed: -->
-- [ ] `docs/concepts/token-reduction.md` — update any command references. <!-- completed: -->
+- [x] `docs/spec/cli-options.md` — rewrite the full command/option reference to
+      the new surface (the largest single edit). <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/spec/data-model.md` — nullable `to_agent_id`; single-baseline schema
+      (drop migration-chain language). <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/spec/message-envelope.md` — `to_agent_id` nullable; broadcast
+      `recipients`/`delivered` split. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/spec/webui-api.md` — confirm/adjust any references to schema or
+      command names. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/overview.md` — command-group overview (`agent`/`pane`/`message`). <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/member-lifecycle.md` — reframe around `agent spawn` / `agent
+      deregister --force`; rename references. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/tmux-push.md` — `pane` group ops; `pane wake` modes. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/bash-routing.md` — `pane exec`, `pane wake --poll-only`. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/monitoring.md` — monitor + `pane wake` wording. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/storage.md` — single-baseline schema; remove `db init`
+      upgrade language. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/coding-agents.md` — env-var context injection (no prompt
+      mini-language). <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/token-reduction.md` — update any command references. <!-- completed: 2026-06-25T09:05 -->
 
 ### Step 4: docs/ — get-started, how-to, reference, api, index
 

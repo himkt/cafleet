@@ -71,7 +71,7 @@ A poll result with one unicast delivery (id `42`, from `7`, body `"build OK"`).
 
 > Indented here for readability; the actual `--json` output is a single compact line with no whitespace. `--full` only changes which fields are emitted, never the encoding.
 
-A broadcast summary row carries `kind: "broadcast_summary"` (or `type` in `--full`) and `origin: <id>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"`. The `message broadcast` response always contains exactly this single summary task plus the wrapper-level `notifications_sent_count` field — there is no per-recipient envelope list. `--full` renders that single summary task in full (verbose envelope / typed-column dict) instead of the one-line summary, but never adds per-recipient envelopes (see [`--full` semantics](cli-options.md#full-semantics) for the cross-subcommand summary).
+A broadcast summary row carries `kind: "broadcast_summary"` (or `type` in `--full`) and `origin: <id>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"`. The `message broadcast` response always contains exactly this single summary task plus the wrapper-level `recipients` (the real recipient count `N`) and `delivered` (the count of best-effort inline previews that landed) fields — there is no per-recipient envelope list. `--full` renders that single summary task in full (verbose envelope / typed-column dict) instead of the one-line summary, but never adds per-recipient envelopes (see [`--full` semantics](cli-options.md#full-semantics) for the cross-subcommand summary).
 
 ### Text mode
 
@@ -84,7 +84,7 @@ build OK
 
 Optional segments `| kind:<kind>` and `| origin:<id>` are appended to line 1 when the task is a broadcast summary (`type != "unicast"`) or has a non-NULL `origin_task_id`, respectively. The body line is omitted entirely when the resulting body is the empty string.
 
-`--full` switches to a variable-length labeled block — one field per line (`id`, `state`, `from`, `to`, `type`, `text`), with the `to:` line omitted for broadcast-summary rows (`to_agent_id == 0`) and the `text:` line omitted when the body is empty. So a fresh unicast delivery prints six lines, while a broadcast-summary row with no recipient prints fewer. Text mode omits the `text:` line entirely only when the resulting body is the empty string (deliveries explicitly sent with an empty body). Broadcast summary rows are NOT empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. Body truncation (the `…` suffix at `CAFLEET_MAX_TEXT_LEN` codepoints) is documented in [cli-options.md](cli-options.md#message-body-truncation).
+`--full` switches to a variable-length labeled block — one field per line (`id`, `state`, `from`, `to`, `type`, `text`), with the `to:` line omitted for broadcast-summary rows (`to_agent_id IS NULL`) and the `text:` line omitted when the body is empty. So a fresh unicast delivery prints six lines, while a broadcast-summary row with no recipient prints fewer. Text mode omits the `text:` line entirely only when the resulting body is the empty string (deliveries explicitly sent with an empty body). Broadcast summary rows are NOT empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. Body truncation (the `…` suffix at `CAFLEET_MAX_TEXT_LEN` codepoints) is documented in [cli-options.md](cli-options.md#message-body-truncation).
 
 ## Flag cross-reference
 
@@ -92,7 +92,6 @@ The flags that govern envelope rendering are documented in [cli-options.md](cli-
 
 - [`--json`](cli-options.md#global-options) — emit JSON output (compact).
 - [`--full`](cli-options.md#full-semantics) — return the full typed-column envelope and untruncated body.
-- [`--quiet`](cli-options.md#message-body-truncation) — on `message send` / `message ack` / `member ping`, emit only the new task id.
 
 `CAFLEET_MAX_TEXT_LEN` (default `200`) controls body truncation in the rendered envelope; it is documented under [Message Body Truncation](cli-options.md#message-body-truncation).
 
