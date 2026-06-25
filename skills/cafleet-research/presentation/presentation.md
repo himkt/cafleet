@@ -211,9 +211,9 @@ Once Step 2 converges on an approved slide deck and transcript, the Director run
 
 **Batched Review Loop** (batch_size=10, fresh Visual Reviewer per batch to avoid context overflow):
 
-Run the loop serially: spawn one VR member via `cafleet agent spawn`, wait for its report, run the fix-and-recheck sub-loop, then run `cafleet agent deregister` to close the pane (sends `/exit`, waits up to 15 s). Do not spawn multiple VRs in parallel — fixes from one batch can affect later batches, and parallel agent-browser sessions race on the same Slidev dev server.
+Run the loop serially: spawn one VR member via `cafleet agent spawn`, wait for its report, run the fix-and-recheck sub-loop, then run `cafleet agent deregister` to close the pane (sends the backend exit keystroke, waits up to 15 s). Do not spawn multiple VRs in parallel — fixes from one batch can affect later batches, and parallel agent-browser sessions race on the same Slidev dev server.
 
-> **Per-batch teardown**: `cafleet agent deregister` blocks ≈15 s per batch (`/exit` + tmux layout rebalance) — the documented trade-off for context isolation. `--force` is an escape hatch for stuck panes, not the default.
+> **Per-batch teardown**: `cafleet agent deregister` blocks ≈15 s per batch (exit keystroke + tmux layout rebalance) — the documented trade-off for context isolation. `--force` is an escape hatch for stuck panes, not the default.
 
 ```
 total_slides = count slides in slide.md
@@ -240,7 +240,7 @@ while start <= total_slides:
         # VR writes the next capture to `vr<start>-r<vr_round>-p<slide_number>.png` and
         # the next persisted report to `vr<start>-r<vr_round>.md`, preserving prior rounds
 
-    # Explicit close handshake before delete: the VR cannot reliably run extra commands after /exit.
+    # Explicit close handshake before deregister: the VR cannot reliably run extra commands after the exit keystroke.
     cafleet message send --fleet-id [fleet-id] --agent-id [director-agent-id] \
         --to [vr-batch-agent-id] --text "CLOSE: run `bun run agent-browser --session vr-batch-<start> close`, then reply 'closed'."
     wait for the VR's "closed" confirmation via cafleet message poll
