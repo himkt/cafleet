@@ -68,7 +68,7 @@ Used only when your overlay omits a token or your backend is unknown. Each defau
 
 ## Required Flags
 
-Every `cafleet` invocation that touches agents or messages carries two integer ids:
+Every `cafleet` invocation that touches agents or messages is **fleet-scoped** — it carries `--fleet-id` — and most additionally carry an acting/target `--agent-id`:
 
 - `--fleet-id <int>` — per-subcommand (placed **after** the subcommand name), required on every `agent *` / `pane *` / `message *` / `monitor *` subcommand plus `fleet show` / `fleet delete`. **Defaults from `CAFLEET_FLEET_ID`** when that env var is set (an explicit `--fleet-id` overrides it). Rejected with `No such option` on `setup` / `fleet create` / `fleet list` / `server` / `doctor`. A missing value is a parser-native missing-required-option error (exit 2).
 - `--agent-id <int>` — carried by `agent show` / `agent deregister` / `agent spawn`, every `pane *` command, every `message *` command, and `monitor config`. Its polarity is the **requester** on `agent show` / `message *`, and the **target** on `agent deregister` / `pane *`. (`agent register`, `agent list`, `monitor start` / `monitor status`, and the `fleet *` commands take **no** `--agent-id`; `register` instead returns the new `agent_id` to record and reuse.)

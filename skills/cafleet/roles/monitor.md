@@ -50,7 +50,7 @@ Every wake stays within those two pane actions. You never keystroke task instruc
 
 A wake is a single-line `[monitor] wake: N agent(s) due — …` nudge keystroked into this pane by the loop. It does **not** lead with `Esc` — your pane runs a read-only routine and is never on a permission-approval prompt, so a leading `Esc` would only self-interrupt an in-progress routine. Open by reading the freshly-due agents the nudge names, then act through `cafleet pane capture` and `cafleet pane wake --message` only:
 
-1. **Read the named due set.** Each freshly-due agent is rendered `<role> <id> (<name>)` (role `director` or `member`). Those agents, plus the Director, are who you inspect this wake. (`cafleet monitor status --fleet-id <fleet-id>` is available as optional context — e.g. to read intervals or pending counts — but the nudge's named list is authoritative for the due set.)
+1. **Read the named due set.** Each freshly-due agent is rendered `<role> <id> (<name>)` (role `director` or `member`). Those agents, plus the Director, are who you inspect this wake. (`cafleet monitor status --fleet-id $CAFLEET_FLEET_ID` is available as optional context — e.g. to read intervals or pending counts — but the nudge's named list is authoritative for the due set.)
 2. **Capture each named due agent (read-only)** and judge whether it is active or idle and progressing or stalled:
    ```bash
    cafleet pane capture --fleet-id $CAFLEET_FLEET_ID --agent-id <id> --lines 120
