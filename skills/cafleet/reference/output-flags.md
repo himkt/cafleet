@@ -1,6 +1,6 @@
 # Output flags — `--full` / `--json`
 
-`--full` and `--json` are cafleet's output-control flags over its compact default output: both opt back into untruncated / structured output. There is no `--quiet` flag.
+`--full` and `--json` are cafleet's two **independent, composable** output-control flags over its compact default output. `--full` opts back into untruncated, every-field output — it bypasses the truncation caps. `--json` switches the encoding to structured JSON but is **still truncated** unless combined with `--full` (`--json --full` gives untruncated JSON). There is no `--quiet` flag.
 
 ## `--full` (cross-subcommand escape hatch)
 
