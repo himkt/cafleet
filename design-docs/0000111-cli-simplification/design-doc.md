@@ -19,18 +19,18 @@ documentation-maintenance rule makes those first-class targets.
 
 ## Success Criteria
 
-- [ ] `SPEC.md` describes the new CLI surface end-to-end (command tree, options,
+- [x] `SPEC.md` describes the new CLI surface end-to-end (command tree, options,
       `CAFLEET_*` config, single-baseline schema, HTTP API, error/exit model,
       output rules) with no residue of the removed surface.
-- [ ] The new command tree is fully specified: every command, option name, type,
+- [x] The new command tree is fully specified: every command, option name, type,
       default, required-ness, documented-vs-hidden status, and exit code.
-- [ ] Every old→new command/flag mapping is captured so reimplementers and
+- [x] Every old→new command/flag mapping is captured so reimplementers and
       doc-editors can mechanically translate.
-- [ ] The schema simplifications (single baseline `CREATE`, nullable
+- [x] The schema simplifications (single baseline `CREATE`, nullable
       `to_agent_id`) are specified at contract level.
-- [ ] The coding-agent simplification (env-var context injection replacing the
+- [x] The coding-agent simplification (env-var context injection replacing the
       prompt mini-language) is specified.
-- [ ] A complete, file-by-file follow-up checklist enumerates every `docs/`,
+- [x] A complete, file-by-file follow-up checklist enumerates every `docs/`,
       `README.md`, `.claude/rules/`, and `skills/**` edit required to keep
       documentation in sync (the code refactor itself is out of scope).
 
