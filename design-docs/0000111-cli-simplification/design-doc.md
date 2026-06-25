@@ -1,6 +1,6 @@
 # CLI Simplification: Redesign the cafleet Command Surface and Rewrite SPEC.md
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 28/28 tasks complete
 **Last Updated**: 2026-06-25
 
@@ -501,3 +501,4 @@ authoritative reimplementation spec; only the contract surfaces change):
 | 2026-06-24 | Initial draft |
 | 2026-06-24 | Reviewer-approved after 3 rounds; finalized (Status: Approved). |
 | 2026-06-24 | Reverted the `message`→`msg` rename; the `message` group name is retained. |
+| 2026-06-25 | Executed all 6 Implementation steps (28/28 tasks); SPEC, README, docs, .claude rules, and skills swept to the new surface. Two opus reviews (APPROVE) + Copilot review on PR #150 (rounds 1–2 resolved). Round-3 Copilot comments were the intended documentation-first gap (docs lead the code refactor, which is out of scope); loop terminated by the Administrator. Status: Complete. |
