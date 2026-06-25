@@ -1,8 +1,8 @@
 # CLI Simplification: Redesign the cafleet Command Surface and Rewrite SPEC.md
 
 **Status**: Approved
-**Progress**: 0/28 tasks complete
-**Last Updated**: 2026-06-24
+**Progress**: 3/28 tasks complete
+**Last Updated**: 2026-06-25
 
 ## Overview
 
@@ -412,13 +412,13 @@ authoritative reimplementation spec; only the contract surfaces change):
 
 ### Step 1: Rewrite SPEC.md to the new surface
 
-- [ ] Apply the §14 rewrite plan to `SPEC.md` section by section. <!-- completed: -->
-- [ ] Verify no residue of removed surface remains (no `member` group, no `db
+- [x] Apply the §14 rewrite plan to `SPEC.md` section by section. <!-- completed: 2026-06-25T08:35 -->
+- [x] Verify no residue of removed surface remains (no `member` group, no `db
       init`, no positional `fleet_id`, no `to_agent_id = 0`, no migration chain,
       no `--quiet`/`--tail`, no prompt mini-language, no dual absent glyph, no
-      exit-code split). <!-- completed: -->
-- [ ] Confirm the new command checklist lists all 25 commands with exact options,
-      types, defaults, hidden-vs-documented, and exit codes. <!-- completed: -->
+      exit-code split). <!-- completed: 2026-06-25T08:35 -->
+- [x] Confirm the new command checklist lists all 25 commands with exact options,
+      types, defaults, hidden-vs-documented, and exit codes. <!-- completed: 2026-06-25T08:35 -->
 
 ### Step 2: README.md
 
