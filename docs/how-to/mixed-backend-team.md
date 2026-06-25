@@ -12,7 +12,7 @@ with one member per backend and messages each of them.
 ## Prerequisites
 
 - The backend binaries you want to mix (`claude`, `codex`, `opencode`) are on
-  `PATH` — `member create` exits 1 with `Error: binary <name> not found on
+  `PATH` — `agent spawn` exits 1 with `Error: binary <name> not found on
   PATH` otherwise.
 - You have followed [Install](../get-started/install.md) and
   [Configure](../get-started/configure.md), and you are inside a tmux
@@ -33,7 +33,7 @@ Your agent loads the `cafleet` skill and reads its Director-only
 The supervision tick is supplied by `cafleet monitor` — a per-fleet loop the
 fleet's dedicated monitoring member runs as a background task in its own pane —
 and works the same on **any** backend (`claude`, `codex`, or `opencode`). The
-monitoring member (the first `cafleet member create`, `--role monitor`) is the
+monitoring member (the first `cafleet agent spawn`, `--role monitor`) is the
 one process that runs `cafleet monitor start`; each tick the loop scans the
 watched set (the Director at 180 s and every ordinary member at 720 s) and wakes
 the monitoring member whenever a watched agent is due, which inspects it and
@@ -71,7 +71,7 @@ cafleet fleet create --label "demo" --coding-agent claude
 Spawn one member per backend:
 
 ```bash
-cafleet member create --fleet-id 1 --agent-id 2 \
+cafleet agent spawn --fleet-id 1 --agent-id 2 \
   --name "alice" --description "claude member" \
   --coding-agent claude -- "You are alice. Wait for instructions."
 ```
@@ -81,7 +81,7 @@ cafleet member create --fleet-id 1 --agent-id 2 \
 ```
 
 ```bash
-cafleet member create --fleet-id 1 --agent-id 2 \
+cafleet agent spawn --fleet-id 1 --agent-id 2 \
   --name "bob" --description "codex member" \
   --coding-agent codex -- "You are bob. Wait for instructions."
 ```
@@ -91,7 +91,7 @@ cafleet member create --fleet-id 1 --agent-id 2 \
 ```
 
 ```bash
-cafleet member create --fleet-id 1 --agent-id 2 \
+cafleet agent spawn --fleet-id 1 --agent-id 2 \
   --name "carol" --description "opencode member" \
   --coding-agent opencode -- "You are carol. Wait for instructions."
 ```
@@ -105,16 +105,17 @@ List the panes — only the `claude` pane titles itself with the member name
 so use the `pane_id` column to locate `bob` and `carol`:
 
 ```bash
-cafleet member list --fleet-id 1
+cafleet agent list --fleet-id 1
 ```
 
 ```
-3 members:
-  agent_id        name      status  backend   session  window_id  pane_id  created_at
-  --------------  --------  ------  --------  -------  ---------  -------  --------------------
-  4               alice     active  claude    main     @1         %7       2026-06-11T09:01:00.000000+00:00
-  5               bob       active  codex     main     @1         %8       2026-06-11T09:02:00.000000+00:00
-  6               carol     active  opencode  main     @1         %9       2026-06-11T09:03:00.000000+00:00
+agent_id  name           status  backend   pane_id
+--------  -------------  ------  --------  -------
+2         Director       active  claude    %0
+3         Administrator  active  -         -
+4         alice          active  claude    %7
+5         bob            active  codex     %8
+6         carol          active  opencode  %9
 ```
 
 Message each member — repeat with `--to 5` and `--to 6`; the envelope and
@@ -131,26 +132,26 @@ Message sent.
 alice: report status
 ```
 
-Tear down — repeat `member delete` for members `5` and `6`, then delete the
+Tear down — repeat `agent deregister` for members `5` and `6`, then delete the
 fleet:
 
 ```bash
-cafleet member delete --fleet-id 1 --member-id 4
+cafleet agent deregister --fleet-id 1 --agent-id 4
 ```
 
 ```
-Member deleted.
+Agent deregistered successfully.
   agent_id:  4
   pane_id:   %7 (closed)
 ```
 
 ```bash
-cafleet fleet delete 1
+cafleet fleet delete --fleet-id 1
 ```
 
 ```
 Deleted fleet 1. Deregistered 2 agents.
 ```
 
-Every `member create` / `member delete` flag and exit code is documented in
-[CLI options](../spec/cli-options.md#member-commands).
+Every `agent spawn` / `agent deregister` flag and exit code is documented in
+[CLI options](../spec/cli-options.md#agent-spawn).

@@ -1,8 +1,8 @@
 # CLI Simplification: Redesign the cafleet Command Surface and Rewrite SPEC.md
 
-**Status**: Approved
-**Progress**: 0/28 tasks complete
-**Last Updated**: 2026-06-24
+**Status**: Complete
+**Progress**: 28/28 tasks complete
+**Last Updated**: 2026-06-25
 
 ## Overview
 
@@ -19,18 +19,18 @@ documentation-maintenance rule makes those first-class targets.
 
 ## Success Criteria
 
-- [ ] `SPEC.md` describes the new CLI surface end-to-end (command tree, options,
+- [x] `SPEC.md` describes the new CLI surface end-to-end (command tree, options,
       `CAFLEET_*` config, single-baseline schema, HTTP API, error/exit model,
       output rules) with no residue of the removed surface.
-- [ ] The new command tree is fully specified: every command, option name, type,
+- [x] The new command tree is fully specified: every command, option name, type,
       default, required-ness, documented-vs-hidden status, and exit code.
-- [ ] Every old→new command/flag mapping is captured so reimplementers and
+- [x] Every old→new command/flag mapping is captured so reimplementers and
       doc-editors can mechanically translate.
-- [ ] The schema simplifications (single baseline `CREATE`, nullable
+- [x] The schema simplifications (single baseline `CREATE`, nullable
       `to_agent_id`) are specified at contract level.
-- [ ] The coding-agent simplification (env-var context injection replacing the
+- [x] The coding-agent simplification (env-var context injection replacing the
       prompt mini-language) is specified.
-- [ ] A complete, file-by-file follow-up checklist enumerates every `docs/`,
+- [x] A complete, file-by-file follow-up checklist enumerates every `docs/`,
       `README.md`, `.claude/rules/`, and `skills/**` edit required to keep
       documentation in sync (the code refactor itself is out of scope).
 
@@ -412,83 +412,85 @@ authoritative reimplementation spec; only the contract surfaces change):
 
 ### Step 1: Rewrite SPEC.md to the new surface
 
-- [ ] Apply the §14 rewrite plan to `SPEC.md` section by section. <!-- completed: -->
-- [ ] Verify no residue of removed surface remains (no `member` group, no `db
+- [x] Apply the §14 rewrite plan to `SPEC.md` section by section. <!-- completed: 2026-06-25T08:35 -->
+- [x] Verify no residue of removed surface remains (no `member` group, no `db
       init`, no positional `fleet_id`, no `to_agent_id = 0`, no migration chain,
       no `--quiet`/`--tail`, no prompt mini-language, no dual absent glyph, no
-      exit-code split). <!-- completed: -->
-- [ ] Confirm the new command checklist lists all 25 commands with exact options,
-      types, defaults, hidden-vs-documented, and exit codes. <!-- completed: -->
+      exit-code split). <!-- completed: 2026-06-25T08:35 -->
+- [x] Confirm the new command checklist lists all 25 commands with exact options,
+      types, defaults, hidden-vs-documented, and exit codes. <!-- completed: 2026-06-25T08:35 -->
 
 ### Step 2: README.md
 
-- [ ] Update `README.md` to the new command tree, groups, and any CLI examples
-      (architecture/CLI-surface section). <!-- completed: -->
+- [x] Update `README.md` to the new command tree, groups, and any CLI examples
+      (architecture/CLI-surface section). <!-- completed: 2026-06-25T08:48 -->
 
 ### Step 3: docs/ — concepts and spec pages (contract-facing)
 
-- [ ] `docs/spec/cli-options.md` — rewrite the full command/option reference to
-      the new surface (the largest single edit). <!-- completed: -->
-- [ ] `docs/spec/data-model.md` — nullable `to_agent_id`; single-baseline schema
-      (drop migration-chain language). <!-- completed: -->
-- [ ] `docs/spec/message-envelope.md` — `to_agent_id` nullable; broadcast
-      `recipients`/`delivered` split. <!-- completed: -->
-- [ ] `docs/spec/webui-api.md` — confirm/adjust any references to schema or
-      command names. <!-- completed: -->
-- [ ] `docs/concepts/overview.md` — command-group overview (`agent`/`pane`/`message`). <!-- completed: -->
-- [ ] `docs/concepts/member-lifecycle.md` — reframe around `agent spawn` / `agent
-      deregister --force`; rename references. <!-- completed: -->
-- [ ] `docs/concepts/tmux-push.md` — `pane` group ops; `pane wake` modes. <!-- completed: -->
-- [ ] `docs/concepts/bash-routing.md` — `pane exec`, `pane wake --poll-only`. <!-- completed: -->
-- [ ] `docs/concepts/monitoring.md` — monitor + `pane wake` wording. <!-- completed: -->
-- [ ] `docs/concepts/storage.md` — single-baseline schema; remove `db init`
-      upgrade language. <!-- completed: -->
-- [ ] `docs/concepts/coding-agents.md` — env-var context injection (no prompt
-      mini-language). <!-- completed: -->
-- [ ] `docs/concepts/token-reduction.md` — update any command references. <!-- completed: -->
+- [x] `docs/spec/cli-options.md` — rewrite the full command/option reference to
+      the new surface (the largest single edit). <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/spec/data-model.md` — nullable `to_agent_id`; single-baseline schema
+      (drop migration-chain language). <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/spec/message-envelope.md` — `to_agent_id` nullable; broadcast
+      `recipients`/`delivered` split. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/spec/webui-api.md` — confirm/adjust any references to schema or
+      command names. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/overview.md` — command-group overview (`agent`/`pane`/`message`). <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/member-lifecycle.md` — reframe around `agent spawn` / `agent
+      deregister --force`; rename references. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/tmux-push.md` — `pane` group ops; `pane wake` modes. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/bash-routing.md` — `pane exec`, `pane wake --poll-only`. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/monitoring.md` — monitor + `pane wake` wording. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/storage.md` — single-baseline schema; remove `db init`
+      upgrade language. <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/coding-agents.md` — env-var context injection (no prompt
+      mini-language). <!-- completed: 2026-06-25T09:05 -->
+- [x] `docs/concepts/token-reduction.md` — update any command references. <!-- completed: 2026-06-25T09:05 -->
 
 ### Step 4: docs/ — get-started, how-to, reference, api, index
 
-- [ ] `docs/index.md`, `docs/get-started/index.md`,
+- [x] `docs/index.md`, `docs/get-started/index.md`,
       `docs/get-started/install.md`, `docs/get-started/quickstart.md`,
       `docs/get-started/configure.md` (add `CAFLEET_FLEET_ID`),
       `docs/get-started/contributing.md` — update CLI examples and `setup`
-      (no `db init`). <!-- completed: -->
-- [ ] `docs/how-to/mixed-backend-team.md`, `docs/how-to/monitor-and-recover.md`,
-      `docs/how-to/design-doc-development.md` — rename old commands. <!-- completed: -->
-- [ ] `docs/reference/coding-agents/claude.md`, `.../codex.md`,
+      (no `db init`). <!-- completed: 2026-06-25T09:30 -->
+- [x] `docs/how-to/mixed-backend-team.md`, `docs/how-to/monitor-and-recover.md`,
+      `docs/how-to/design-doc-development.md` — rename old commands. <!-- completed: 2026-06-25T09:30 -->
+- [x] `docs/reference/coding-agents/claude.md`, `.../codex.md`,
       `.../opencode.md` — update CLI examples (`agent spawn`, `pane *`); the two
-      opencode base dirs are unchanged. <!-- completed: -->
-- [ ] `docs/api/coding-agent.md` — env injection / no mini-language. <!-- completed: -->
+      opencode base dirs are unchanged. <!-- completed: 2026-06-25T09:30 -->
+- [x] `docs/api/coding-agent.md` — env injection / no mini-language. <!-- completed: 2026-06-25T09:30 -->
 
 ### Step 5: .claude/rules and project skill
 
-- [ ] `.claude/rules/bash-tool.md` — `cafleet member ping`→`pane wake
+<!-- COMMENT(director): Step 5 resolution (member Edit denied on `.claude/`). The Director applied the two `.claude/rules` edits directly: bash-tool.md renamed (`member create`→`agent spawn`, `member exec`→`pane exec`, `member ping`→`pane wake --poll-only`, `--member-id`→`--agent-id`); coding-agent-overlay.md verified to need NO change (no `cafleet member` CLI references — it documents the `{monitor_model}`/`{permission_flags}` overlay token-resolution mechanism, distinct from the removed spawn-prompt mini-language). REMAINING for the Programmer: author the COMPLETE rewritten `.claude/skills/skill-author/SKILL.md` to `${BASE}/scratch/skill-author-SKILL.md` (a path you can write), then reply `addressed`; the Director places it into `.claude/` and commits. Scope = (a) command renames (`member create`→`agent spawn`, `member delete`→`agent deregister`, `member nudge`→`pane wake --message`, `--member-id`→`--agent-id`; keep `--role monitor`/`--model`); AND (b) the §9 rewrite — drop the `{fleet_id}`/`{agent_id}`/`{director_agent_id}` str.format mini-language teaching (§2.4 step 1, §3.1–3.3, §3.5, the §6 worked example) and replace it with the verbatim-prompt + env-var identity convention (`CAFLEET_FLEET_ID` auto-defaults `--fleet-id`; `CAFLEET_AGENT_ID`/`CAFLEET_DIRECTOR_AGENT_ID` are read from env and passed explicitly), matching the committed SPEC §6.7/§7.1. The §9 rewrite is required because `agent spawn` no longer runs str.format, so a rename-only edit would teach a removed mechanism (no-skill-drift rule). -->
+
+- [x] `.claude/rules/bash-tool.md` — `cafleet member ping`→`pane wake
       --poll-only`; `cafleet member exec`→`pane exec`; Director-side
-      `member ping`/`member exec` primitives renamed. <!-- completed: -->
-- [ ] `.claude/rules/coding-agent-overlay.md` — overlay command references. <!-- completed: -->
-- [ ] `.claude/skills/skill-author/SKILL.md` — `cafleet member create` examples. <!-- completed: -->
+      `member ping`/`member exec` primitives renamed. <!-- completed: 2026-06-25T09:28 -->
+- [x] `.claude/rules/coding-agent-overlay.md` — overlay command references (verified: no `cafleet member` CLI references; no change needed). <!-- completed: 2026-06-25T09:28 -->
+- [x] `.claude/skills/skill-author/SKILL.md` — `cafleet member create`→`agent spawn` examples, plus the §9 rewrite of the str.format spawn-prompt mini-language to the `CAFLEET_*` env-var identity convention. <!-- completed: 2026-06-25T09:38 -->
 
 ### Step 6: skills/** (SKILL.md, workflow bodies, roles, reference)
 
-- [ ] `skills/cafleet/SKILL.md` and `skills/cafleet/reference/*` — `cli.md`,
+- [x] `skills/cafleet/SKILL.md` and `skills/cafleet/reference/*` — `cli.md`,
       `director.md`, `recovery.md`, `supervision.md`, `broadcast.md`,
       `output-flags.md`, `exec-routing.md`, and the `coding-agent/` overlays
       (`_template.md`, `claude.md`, `codex.md`, `opencode.md`); plus
-      `skills/cafleet/roles/{director,member,monitor}.md`. <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/**` — `SKILL.md`, `reference/coordination.md`,
+      `skills/cafleet/roles/{director,member,monitor}.md`. <!-- completed: 2026-06-25T10:20 -->
+- [x] `skills/cafleet-design-doc/**` — `SKILL.md`, `reference/coordination.md`,
       and every `create/`, `interview/`, `execute/` workflow body + `roles/*.md`
-      that embeds old `cafleet member`/`message` commands. <!-- completed: -->
-- [ ] `skills/cafleet-research/**` — `SKILL.md` and every `report/`,
-      `presentation/` workflow body + `roles/*.md` with old commands. <!-- completed: -->
-- [ ] **Additive edit (not a rename):** document the env-var identity convention
+      that embeds old `cafleet member`/`message` commands. <!-- completed: 2026-06-25T10:20 -->
+- [x] `skills/cafleet-research/**` — `SKILL.md` and every `report/`,
+      `presentation/` workflow body + `roles/*.md` with old commands. <!-- completed: 2026-06-25T10:20 -->
+- [x] **Additive edit (not a rename):** document the env-var identity convention
       in the cafleet skill — teach reading `$CAFLEET_AGENT_ID` /
       `$CAFLEET_DIRECTOR_AGENT_ID` and passing them explicitly (the read-then-pass
       convention that replaces the dropped `{agent_id}`/`{director_agent_id}` brace
       mini-language, per §9), in `skills/cafleet/SKILL.md`, the relevant
-      `reference/*` pages, and the `roles/*.md` spawn-prompt guidance. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint-overlay` to confirm the coding-agent overlay token
-      set stays coherent after the renames. <!-- completed: -->
+      `reference/*` pages, and the `roles/*.md` spawn-prompt guidance. <!-- completed: 2026-06-25T10:20 -->
+- [x] Run `mise //cafleet:lint-overlay` to confirm the coding-agent overlay token
+      set stays coherent after the renames. <!-- completed: 2026-06-25T10:20 -->
 
 ---
 
@@ -499,3 +501,4 @@ authoritative reimplementation spec; only the contract surfaces change):
 | 2026-06-24 | Initial draft |
 | 2026-06-24 | Reviewer-approved after 3 rounds; finalized (Status: Approved). |
 | 2026-06-24 | Reverted the `message`→`msg` rename; the `message` group name is retained. |
+| 2026-06-25 | Executed all 6 Implementation steps (28/28 tasks); SPEC, README, docs, .claude rules, and skills swept to the new surface. Two opus reviews (APPROVE) + Copilot review on PR #150 (rounds 1–2 resolved). Round-3 Copilot comments were the intended documentation-first gap (docs lead the code refactor, which is out of scope); loop terminated by the Administrator. Status: Complete. |

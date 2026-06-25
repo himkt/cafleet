@@ -26,4 +26,4 @@ Every note names the base token/instruction it qualifies.
 
 The canonical monitor-spawn command, fully resolved for this backend:
 
-`cafleet member create --role monitor --model gpt-5.4-mini` (members spawned `--ask-for-approval never --sandbox workspace-write`).
+`cafleet agent spawn --role monitor --model gpt-5.4-mini` (members spawned `--ask-for-approval never --sandbox workspace-write`).

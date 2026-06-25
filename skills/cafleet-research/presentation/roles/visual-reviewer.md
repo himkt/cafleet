@@ -27,7 +27,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 **Do NOT:** Edit `slide.md` or any other file; fix visual issues directly; modify the report or transcript; communicate with the user directly.
 
-**Browser lifecycle:** When the Director sends a `CLOSE:` message via `cafleet message send`, run `bun run agent-browser --session vr-batch-[start] close` and then reply `closed` via `cafleet message send` so the Director can proceed to `cafleet member delete`. Do NOT rely on `/exit` to trigger any post-shutdown action — once `/exit` arrives the claude process is shutting down and additional commands are not guaranteed to run. The Director's `bun run agent-browser close --all` cleanup safety net is a last-resort sweep, not the primary close path.
+**Browser lifecycle:** When the Director sends a `CLOSE:` message via `cafleet message send`, run `bun run agent-browser --session vr-batch-[start] close` and then reply `closed` via `cafleet message send` so the Director can proceed to `cafleet agent deregister`. Do NOT rely on the exit keystroke to trigger any post-shutdown action — once it arrives the claude process is shutting down and additional commands are not guaranteed to run. The Director's `bun run agent-browser close --all` cleanup safety net is a last-resort sweep, not the primary close path.
 
 ## Communication Protocol
 
@@ -152,4 +152,4 @@ On a re-check request (delivered via `cafleet message send`), repeat the full Pe
 The Director's batch teardown is a two-step explicit handshake, not a pre-exit hook:
 
 1. The Director sends a `CLOSE:` message via `cafleet message send`. Run `bun run agent-browser --session vr-batch-[start] close` to release the browser daemon for this batch, then reply `closed` via `cafleet message send` so the Director knows it is safe to delete you.
-2. After your `closed` confirmation, the Director runs `cafleet member delete` on your `agent_id`, which sends `/exit` and waits up to 15 s for your `claude` process to exit. No additional commands run after `/exit` arrives — the close handshake in step 1 is the only reliable point at which the browser daemon is released.
+2. After your `closed` confirmation, the Director runs `cafleet agent deregister` on your `agent_id`, which sends the backend exit keystroke and waits up to 15 s for your `claude` process to exit. No additional commands run after the exit keystroke arrives — the close handshake in step 1 is the only reliable point at which the browser daemon is released.

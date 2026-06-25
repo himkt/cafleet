@@ -12,7 +12,7 @@ use. The recommended end-user path installs both in two commands.
 
 ```bash
 uv tool install cafleet     # or: pip install cafleet
-cafleet setup               # install the skills + migrate the database
+cafleet setup               # install the skills + create the database schema
 ```
 
 `cafleet setup` is the one-step onboarding command. It does two independent
@@ -27,27 +27,27 @@ things, and runs both on every invocation:
   already exist are targeted. Scope the install to specific agents with
   `--agent claude|codex|opencode` (repeatable) — an explicitly named agent's
   home is created if it does not yet exist.
-- **Migrates the database** to the head Alembic revision — the same code path
-  as `cafleet db init`.
+- **Creates the database schema** — a single baseline (`CREATE TABLE IF NOT
+  EXISTS`), with no migration chain and no separate `db init` command.
 
 Each skill directory is fully replaced on every run, so re-running
 `cafleet setup` after upgrading the package refreshes the skills to the new
-version and applies any new migrations in the same step.
+version; the schema create is idempotent and a no-op when the tables already
+exist.
 
 The default database lives at `~/.local/share/cafleet/cafleet.db`. Override
 with the `CAFLEET_DATABASE_URL` environment variable — use an absolute path,
 since SQLAlchemy does not expand `~` in SQLite URLs.
 
-!!! warning "Upgrading across the integer-PK rearchitecture"
+!!! warning "No migration from an older schema"
 
-    There is **no data migration and no backward compatibility** across the
-    integer-PK rearchitecture. Delete any pre-existing database. The default
-    file moved from `~/.local/share/cafleet/registry.db` to
-    `~/.local/share/cafleet/cafleet.db`, so the old file is left untouched and
-    ignored — remove it manually. If you set `CAFLEET_DATABASE_URL` to a custom
-    path holding an old (UUID-era) schema, the database half of `cafleet setup`
-    (like `cafleet db init`) refuses to run against its unknown Alembic
-    revision; delete that file and re-run `cafleet setup`.
+    The schema is a single baseline, with **no migration path and no backward
+    compatibility** with any older schema. `cafleet setup` creates the tables
+    fresh (`CREATE TABLE IF NOT EXISTS`) but never migrates or alters
+    pre-existing tables, so an old-schema database is **not** upgraded. Delete
+    any pre-existing database and let `cafleet setup` recreate it. If you set
+    `CAFLEET_DATABASE_URL` to a custom path holding an old schema, delete that
+    file and re-run `cafleet setup`.
 
 ## Contributor / local-dev install
 

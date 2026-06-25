@@ -12,10 +12,10 @@ cafleet message broadcast --fleet-id <fleet-id> --agent-id <my-agent-id> \
 | `--text <body>` | yes | Message body fanned out to every active recipient (except the sender and the built-in Administrator). |
 | `--full` | no | Renders the single `broadcast_summary` task in full; never adds per-recipient rows or a `recipient_ids` list. See [`reference/output-flags.md`](output-flags.md). |
 
-The broker writes one delivery row per recipient (each visible via that recipient's `cafleet message poll`) plus one `broadcast_summary` row addressed back to the broadcaster, and returns only that summary task plus a top-level `notifications_sent_count` (how many recipient panes the inline-preview keystroke reached — see [`reference/recovery.md`](recovery.md) for the miss-handling chain). Default echo is one line:
+The broker writes one delivery row per recipient (each visible via that recipient's `cafleet message poll`) plus one `broadcast_summary` row addressed back to the broadcaster, and returns only that summary task plus two top-level fields: `recipients` (the real recipient count `N`) and `delivered` (how many recipient panes the inline-preview keystroke reached — see [`reference/recovery.md`](recovery.md) for the miss-handling chain). The two diverge when any preview fails to land. Default echo is one line:
 
 ```
-broadcast id=<id> recipients=<count>
+broadcast id=<id> recipients=<N> delivered=<k>
 ```
 
 Recipients ack their own delivery row exactly like a unicast message; the summary row is a sender-side artifact and is not acked by recipients:

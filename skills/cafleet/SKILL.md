@@ -5,7 +5,7 @@ description: >-
   Use when an agent needs to register, send/receive messages, poll inbox,
   acknowledge messages, or discover other agents; or when a Director is about to
   spawn, monitor, health-check, or recover a stalled team of CAFleet members
-  (any `cafleet member create`), which requires the dedicated monitoring member,
+  (any `cafleet agent spawn`), which requires the dedicated monitoring member,
   the heartbeat, and the supervision governance.
 ---
 
@@ -37,9 +37,9 @@ Before your first action other than these Reads, Read every file in the **Load-b
 | Read | When |
 |------|------|
 | [`reference/cli.md`](reference/cli.md) | you need a CLI subcommand beyond send/poll/ack — self-registration, global options, coding-agent backends, `message cancel` / `show`, `agent list` / `show`, `doctor`, `agent deregister`, `fleet delete`, the bootstrap workflow |
-| [`reference/output-flags.md`](reference/output-flags.md) | you need `--full` / `--json` / `--quiet` opt-back-in semantics or `CAFLEET_MAX_TEXT_LEN` |
+| [`reference/output-flags.md`](reference/output-flags.md) | you need `--full` / `--json` opt-back-in semantics or `CAFLEET_MAX_TEXT_LEN` |
 
-Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`member create` / `delete` / `list --activity` / `capture` / `exec` / `ping`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
+Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`agent spawn` / `agent deregister` / `agent list --activity` / `pane capture` / `pane exec` / `pane wake`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
 
 Exhaustive per-subcommand flags, exit codes, and error strings live in [`docs/spec/cli-options.md`](../../docs/spec/cli-options.md).
 
@@ -68,18 +68,28 @@ Used only when your overlay omits a token or your backend is unknown. Each defau
 
 ## Required Flags
 
-Every `cafleet` invocation that touches agents or messages carries two literal integer ids (no env-var fallback):
+Every `cafleet` invocation that touches agents or messages is **fleet-scoped** — it carries `--fleet-id` — and most additionally carry an acting/target `--agent-id`:
 
-- `--fleet-id <int>` — per-subcommand (placed **after** the subcommand name), required on every client + member subcommand. Rejected with `No such option` on `db init` / `setup` / `fleet *` / `server` / `doctor`. Missing it exits with `Error: --fleet-id <int> is required for this subcommand. …`.
-- `--agent-id <int>` — per-subcommand, required on every subcommand **except** `register` (which returns the new `agent_id` to record and reuse).
+- `--fleet-id <int>` — per-subcommand (placed **after** the subcommand name), required on every `agent *` / `pane *` / `message *` / `monitor *` subcommand plus `fleet show` / `fleet delete`. **Defaults from `CAFLEET_FLEET_ID`** when that env var is set (an explicit `--fleet-id` overrides it). Rejected with `No such option` on `setup` / `fleet create` / `fleet list` / `server` / `doctor`. A missing value is a parser-native missing-required-option error (exit 2).
+- `--agent-id <int>` — carried by `agent show` / `agent deregister` / `agent spawn`, every `pane *` command, every `message *` command, and `monitor config`. Its polarity is the **requester** on `agent show` / `message *`, and the **target** on `agent deregister` / `pane *`. (`agent register`, `agent list`, `monitor start` / `monitor status`, and the `fleet *` commands take **no** `--agent-id`; `register` instead returns the new `agent_id` to record and reuse.)
 
-Use literal ids, never shell variables — `permissions.allow` matches Bash invocations as fixed strings, so `$VAR` expansion breaks the match and forces prompts. See [`cli-options.md`](../../docs/spec/cli-options.md#fleet-id) for the rationale and [`permissions.allow` coverage](../../docs/spec/cli-options.md#permissionsallow-coverage) for the pattern set.
+In the Director's own commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet agent register` / `cafleet agent spawn` — never your own exported shell variables. `permissions.allow` matches Bash invocations as fixed strings, so an ad-hoc `export FLEET_ID=…; --fleet-id $FLEET_ID` breaks the match and forces prompts. See [`cli-options.md`](../../docs/spec/cli-options.md#fleet-id) for the rationale and [`permissions.allow` coverage](../../docs/spec/cli-options.md#permissionsallow-coverage) for the pattern set.
 
-CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT`, `CAFLEET_MAX_TEXT_LEN`) are catalogued in [`reference/cli.md`](reference/cli.md) § Environment variables.
+### Spawned-member identity via `CAFLEET_*` env vars
+
+A member spawned by `cafleet agent spawn` receives three identity values injected into its pane environment at spawn time (the prompt is delivered **verbatim** — there is no `{placeholder}` substitution):
+
+- `CAFLEET_FLEET_ID` — the member's fleet; it **auto-defaults `--fleet-id`**, so the member may omit `--fleet-id`.
+- `CAFLEET_AGENT_ID` — the member's **own** id (allocated during the spawn, so the Director cannot know it at render time).
+- `CAFLEET_DIRECTOR_AGENT_ID` — the member's Director id.
+
+`CAFLEET_AGENT_ID` and `CAFLEET_DIRECTOR_AGENT_ID` are **not** bound to any flag default (because `--agent-id` is polarity-overloaded). A spawned member **reads them from its environment and passes them explicitly**: a poll is `cafleet message poll --agent-id $CAFLEET_AGENT_ID`; a self-attributed send is `cafleet message send --agent-id $CAFLEET_AGENT_ID --to $CAFLEET_DIRECTOR_AGENT_ID --text "..."`. Referencing these cafleet-injected vars is the sanctioned identity convention — distinct from exporting your own ad-hoc shell vars — and replaces the dropped `{agent_id}` / `{director_agent_id}` prompt mini-language. A Director may also embed the literal `fleet_id` / `director_agent_id` it knows into the verbatim spawn prompt.
+
+CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFLEET_FLEET_ID`, `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT`, `CAFLEET_MAX_TEXT_LEN`) are catalogued in [`reference/cli.md`](reference/cli.md) § Environment variables.
 
 ## Team supervision
 
-When a Director spawns a team, the **FIRST** member created is the dedicated monitoring member (`cafleet member create --role monitor --model {monitor_model}`). It owns the heartbeat and gates every ordinary `member create` behind its `ready: monitor live` handshake. The Director never runs `cafleet monitor start` itself.
+When a Director spawns a team, the **FIRST** member created is the dedicated monitoring member (`cafleet agent spawn --role monitor --model {monitor_model}`). It owns the heartbeat and gates every ordinary `agent spawn` behind its `ready: monitor live` handshake. The Director never runs `cafleet monitor start` itself.
 
 For the full governance + heartbeat mechanism (Core Principle, Communication Model, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, Stall Response, Cleanup, the 5-step facilitation loop, Monitor Lifecycle), Read [`reference/supervision.md`](reference/supervision.md).
 
@@ -95,7 +105,7 @@ In every example, substitute the literal integer ids printed by `cafleet fleet c
 - `<target-agent-id>` — the recipient of a unicast message
 - `<task-id>` — the task id printed by `message poll` / `message send`
 
-Every id input (`--fleet-id`, `--agent-id`, `--to`, `--id`, `--member-id`, `--task-id`) is a DB-assigned integer (typically 1–4 digits), passed in full — no prefix resolution. A non-integer fails with Click's standard not-a-valid-integer error (exit 2).
+Every id input (`--fleet-id`, `--agent-id`, `--to`, `--id`, `--from`, `--task-id`) is a DB-assigned integer (typically 1–4 digits), passed in full — no prefix resolution. A non-integer fails with Click's standard not-a-valid-integer error (exit 2).
 
 ## Soliciting user reactions
 
@@ -108,7 +118,7 @@ cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --to <target-agent-id> --text "Did the API schema change?"
 ```
 
-`--to` (recipient id) and `--text` (body, truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` by default) are required; `--full` / `--quiet` per [`reference/output-flags.md`](reference/output-flags.md). After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast` / `member nudge`), caught on the next manual `message poll` or a Director `cafleet member ping` if missed; full mechanics in [`tmux-push.md`](../../docs/concepts/tmux-push.md).
+`--to` (recipient id) and `--text` (body, truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` by default) are required; `--full` per [`reference/output-flags.md`](reference/output-flags.md). After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast` / `pane wake --message`), caught on the next manual `message poll` or a Director `cafleet pane wake --poll-only` if missed; full mechanics in [`tmux-push.md`](../../docs/concepts/tmux-push.md).
 
 ## Poll (Check Inbox)
 
@@ -120,7 +130,7 @@ cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id> [--full]
 
 ## Acknowledge (ACK)
 
-Moves a task from `input_required` to `completed`. `--task-id` required; `--quiet` emits only the acked id.
+Moves a task from `input_required` to `completed`. `--task-id` required.
 
 ```bash
 cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>

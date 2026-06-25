@@ -18,28 +18,28 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Placeholder convention
 
-Angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<drafter-agent-id>`, `<reviewer-agent-id>`, `<member-agent-id>`) are placeholders, **not** shell variables — substitute the literal integer ids from `cafleet fleet create` (which returns the fleet id AND the root Director's `agent_id`, so no separate `cafleet agent register`) and `cafleet member create`. The rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
+Angle-bracket tokens (`<fleet-id>`, `<director-agent-id>`, `<drafter-agent-id>`, `<reviewer-agent-id>`, `<member-agent-id>`) are placeholders, **not** shell variables — substitute the literal integer ids from `cafleet fleet create` (which returns the fleet id AND the root Director's `agent_id`, so no separate `cafleet agent register`) and `cafleet agent spawn`. The rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet fleet and spawn the monitoring member first.** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and governance policy. Create a CAFleet fleet via `cafleet fleet create --json` (must be run inside a tmux session) — this bootstraps the fleet, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. The **first** `cafleet member create` is the dedicated monitoring member (`--role monitor --model {monitor_model}`), which runs `cafleet monitor start` in its own pane and reports `ready: monitor live`; gate the Drafter/Reviewer spawns on that handshake (first-in). The monitoring member re-engages you via `cafleet member nudge` when you go idle; you do **not** run the monitor yourself.
+- **Bootstrap the CAFleet fleet and spawn the monitoring member first.** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and governance policy. Create a CAFleet fleet via `cafleet fleet create --json` (must be run inside a tmux session) — this bootstraps the fleet, registers the root Director (you), writes your placement row, and seeds the built-in Administrator in one transaction. Capture `director.agent_id` from the JSON response; there is no separate `cafleet agent register` step. The **first** `cafleet agent spawn` is the dedicated monitoring member (`--role monitor --model {monitor_model}`), which runs `cafleet monitor start` in its own pane and reports `ready: monitor live`; gate the Drafter/Reviewer spawns on that handshake (first-in). The monitoring member re-engages you via `cafleet pane wake --message` when you go idle; you do **not** run the monitor yourself.
 - **Enforce the clarification gate.** The Drafter MUST ask clarifying questions before drafting. If the Drafter sends a draft without having asked questions first, reject it via `cafleet message send` and instruct the Drafter to ask questions first.
 - **Relay communication faithfully.** Members cannot communicate with the user directly. You relay the Drafter's questions to the user via {decision_surface}, and relay the user's answers back to the Drafter via `cafleet message send`.
 - **Orchestrate the internal quality loop.** After the Drafter produces a draft, route it to the Reviewer via `cafleet message send`. If the Reviewer has feedback, route it back to the Drafter for refinement via `cafleet message send`, then back to the Reviewer. Repeat until the Reviewer explicitly signals satisfaction. Do NOT present the draft to the user until the Reviewer has approved it.
 - **Present the polished draft to the user.** Only after the Reviewer is satisfied, present the draft to the user for approval via {decision_surface}.
 - **Drive user feedback iterations.** Process the user's feedback selection and route revisions through the quality loop before re-presenting.
-- **Clean up when done.** Delete each member via `cafleet member delete`, and tear down the fleet via `cafleet fleet delete <fleet-id>` after the user approves (or aborts). The root Director cannot be deregistered with `cafleet agent deregister` — `fleet delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
+- **Clean up when done.** Delete each member via `cafleet agent deregister`, and tear down the fleet via `cafleet fleet delete --fleet-id <fleet-id>` after the user approves (or aborts). The root Director cannot be deregistered with `cafleet agent deregister` — `fleet delete` is the only supported teardown path and performs the Director + Administrator + member-sweep atomically.
 
 ## Idle Semantics & Stall Response
 
-Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet member capture` fallback → the decision-relay three-beat for a paused decision-prompt frame, per your overlay) follow the `cafleet` skill's `reference/supervision.md` § Idle Semantics and § Stall Response. Two skill-specific rungs are NOT in those skills and stay here:
+Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet pane capture` fallback → the decision-relay three-beat for a paused decision-prompt frame, per your overlay) follow the `cafleet` skill's `reference/supervision.md` § Idle Semantics and § Stall Response. Two skill-specific rungs are NOT in those skills and stay here:
 
-- **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet member capture --member-id <member-agent-id> --lines 200`, then escalate — in that order.
-- **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via {decision_surface} with concrete options (re-spawn / redistribute / drop scope). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
+- **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet pane capture --agent-id <member-agent-id> --lines 200`, then escalate — in that order.
+- **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via {decision_surface} with concrete options (re-spawn / redistribute / drop scope). Do NOT silently `cafleet agent deregister` and re-spawn — the user might know something you don't (intentional pause, network glitch).
 
 ## Communication Protocol
 
-All Director-to-member messages use the CAFleet message broker. The Director stores each member's `agent_id` at spawn time (from the `cafleet --json member create` response) and substitutes it literally for `<member-agent-id>` as the `--to` target.
+All Director-to-member messages use the CAFleet message broker. The Director stores each member's `agent_id` at spawn time (from the `cafleet --json agent spawn` response) and substitutes it literally for `<member-agent-id>` as the `--to` target.
 
 **Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema — single-line `<verb> (<pointer>)` poke; substantive content (Reviewer findings, Drafter spec questions, Director arbitration) in inline `COMMENT(role)` markers in the design document. Canonical mechanics + the Step-2 clarification exemption (your "User answers: …" relay rides free-form before the doc exists): [../../reference/coordination.md](../../reference/coordination.md).
 
@@ -48,7 +48,7 @@ All Director-to-member messages use the CAFleet message broker. The Director sto
 cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --to <member-agent-id> --text "<instruction>"
 ```
-A push notification keystrokes the message into the member's pane (see the `cafleet` skill § Send). Poll your inbox with `cafleet --json message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`, ACK each task with `cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>`, and inspect a stalled member with `cafleet member capture --member-id <member-agent-id> --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
+A push notification keystrokes the message into the member's pane (see the `cafleet` skill § Send). Poll your inbox with `cafleet --json message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`, ACK each task with `cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>`, and inspect a stalled member with `cafleet pane capture --agent-id <member-agent-id> --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
 
 ## User Interaction Rules
 
@@ -69,12 +69,12 @@ When the user provides free-form text instead of a listed option, use LLM reason
 
 ### Abort Detection
 
-- If abort intent is detected, trigger the Abort Flow — delete all members, and run `cafleet fleet delete <fleet-id>` to soft-delete the fleet and sweep the root Director + Administrator in one transaction.
+- If abort intent is detected, trigger the Abort Flow — delete all members, and run `cafleet fleet delete --fleet-id <fleet-id>` to soft-delete the fleet and sweep the root Director + Administrator in one transaction.
 - If non-abort intent is detected (e.g., verbal feedback), explain that feedback should be provided via COMMENT markers in the design document, then re-prompt with the same three-option pattern.
 
 ## Progress Monitoring
 
-Track team progress on each active turn — woken by members' replies (broker inline previews) and your own periodic polling — using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next (`cafleet member ping` for manual re-poke). Supervision obligations (Authorization-Scope Guard, idle semantics) come from the `cafleet` skill's `reference/supervision.md`.
+Track team progress on each active turn — woken by members' replies (broker inline previews) and your own periodic polling — using the 2-stage health check (poll → pane capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next (`cafleet pane wake --poll-only` for manual re-poke). Supervision obligations (Authorization-Scope Guard, idle semantics) come from the `cafleet` skill's `reference/supervision.md`.
 
 ### User delegation for a member's relayed question
 
@@ -82,7 +82,7 @@ When a member pauses on a decision-prompt pane frame awaiting a user reaction, t
 
 ### Routing member bash requests
 
-Drafter and Reviewer members are spawned in workspace-scoped auto-approval mode ({permission_flags}; Bash tool enabled, permission prompts auto-resolve), so they run shell commands directly by default. The bash-via-Director protocol is the fallback when a member's Bash invocation is rejected by the Claude Code harness deny-list (destructive operations such as `git push`). In that case the member auto-routes by sending a plain shell-command request via `cafleet message send`, and the Director responds by sending `! <command>` keystrokes through `cafleet member exec`. Process such requests one at a time in poll order. Full invocation + flag layout in the `cafleet` skill § Routing Bash via the Director.
+Drafter and Reviewer members are spawned in workspace-scoped auto-approval mode ({permission_flags}; Bash tool enabled, permission prompts auto-resolve), so they run shell commands directly by default. The bash-via-Director protocol is the fallback when a member's Bash invocation is rejected by the Claude Code harness deny-list (destructive operations such as `git push`). In that case the member auto-routes by sending a plain shell-command request via `cafleet message send`, and the Director responds by sending `! <command>` keystrokes through `cafleet pane exec`. Process such requests one at a time in poll order. Full invocation + flag layout in the `cafleet` skill § Routing Bash via the Director.
 
 ### Skill-specific milestones
 
@@ -95,4 +95,4 @@ Drafter and Reviewer members are spawned in workspace-scoped auto-approval mode 
 
 ## Shutdown Protocol
 
-Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for its confirmation, then `cafleet member delete` the monitoring member first and each ordinary member → `cafleet member list` verification → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check.
+Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for its confirmation, then `cafleet agent deregister` the monitoring member first and each ordinary member → `cafleet agent list` verification → `cafleet fleet delete --fleet-id <fleet-id>` → `cafleet fleet list` sanity check.

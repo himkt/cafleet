@@ -25,17 +25,17 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Prerequisites
 
-The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill (reading its `reference/supervision.md`) and embeds it into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director — see Step 1.
+The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill (reading its `reference/supervision.md`) and embeds it into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `agent spawn`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director — see Step 1.
 
 For autonomous Slidev generation, see `../reference/slidev.md` § Autonomous slide generation.
 
 ## Architecture
 
-The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns every member via `cafleet member create --fleet-id [fleet-id] --agent-id [director-agent-id]`. All inter-agent coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered tmux push notifications).
+The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns every member via `cafleet agent spawn --fleet-id [fleet-id] --agent-id [director-agent-id]`. All inter-agent coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered tmux push notifications).
 
 ```text
 User
- +-- Director (main Claude — runs cafleet fleet create, cafleet member create, runs Slidev background server)
+ +-- Director (main Claude — runs cafleet fleet create, cafleet agent spawn, runs Slidev background server)
       +-- presentation (claude pane — authors slide.md; reads the slidev.md + visualization.md reference pages)
       +-- transcript   (claude pane — authors transcript.md)
       +-- vr-batch-<start> (claude pane — captures + reports on one slide batch; per-batch spawn/delete)
@@ -43,7 +43,7 @@ User
 
 Members cannot talk to the user directly — the Director always relays.
 
-> **Literal-integer-id flag rule** — every `cafleet ...` invocation carries the literal `fleet_id` / `agent_id` integer ids as flags (per-subcommand, after the subcommand name), never shell variables; substitute the integer ids printed by `cafleet fleet create` / `cafleet member create` directly. See the `cafleet` skill for the full convention.
+> **Literal-integer-id flag rule** — every `cafleet ...` invocation carries the literal `fleet_id` / `agent_id` integer ids as flags (per-subcommand, after the subcommand name), never shell variables; substitute the integer ids printed by `cafleet fleet create` / `cafleet agent spawn` directly. See the `cafleet` skill for the full convention.
 
 ## Director Process
 
@@ -84,7 +84,7 @@ Step 5 (cleanup) is autonomous — no user prompt.
 
 ### Step 1: Bootstrap CAFleet Fleet & Spawn Presentation + Transcript (Director)
 
-Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The fleet runs a dedicated monitoring member (the **first** `cafleet member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director via `cafleet member nudge`; the Director does **not** run `cafleet monitor` itself. Gate the Presentation/Transcript spawns on the monitoring member's `ready: monitor live` handshake (first-in) — see 1b.
+Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The fleet runs a dedicated monitoring member (the **first** `cafleet agent spawn`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the idle Director via `cafleet pane wake --message`; the Director does **not** run `cafleet monitor` itself. Gate the Presentation/Transcript spawns on the monitoring member's `ready: monitor live` handshake (first-in) — see 1b.
 
 #### 1a. Environment precheck and fleet bootstrap
 
@@ -93,18 +93,18 @@ cafleet doctor
 cafleet --json fleet create --label "present-[topic-slug]"
 ```
 
-`cafleet doctor` confirms the Director is inside a tmux session (a hard requirement of `cafleet member create`). On non-zero exit, abort and surface the error to the user — do NOT attempt raw `tmux` probes as a workaround.
+`cafleet doctor` confirms the Director is inside a tmux session (a hard requirement of `cafleet agent spawn`). On non-zero exit, abort and surface the error to the user — do NOT attempt raw `tmux` probes as a workaround.
 
 `cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current tmux pane, and seeds the built-in Administrator. Capture `fleet_id` and `director.agent_id` from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
 
 #### 1b. Spawn the monitoring member (first-in)
 
-The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Presentation/Transcript spawns** (1d) — do not spawn an ordinary member until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+The **first** `cafleet agent spawn` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Presentation/Transcript spawns** (1d) — do not spawn an ordinary member until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the audit-file pattern in 1c, then spawn:
+Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet pane wake --message` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the audit-file pattern in 1c, then spawn:
 
 ```bash
-cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
+cafleet --json agent spawn --fleet-id [fleet-id] --agent-id [director-agent-id] \
   --name "monitor" \
   --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
   --role monitor --model {monitor_model} \
@@ -121,7 +121,7 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 - `roles/transcript.md`
 - `roles/visual-reviewer.md`
 
-> **Spawn mechanics**: path-by-reference is required because cafleet `member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). `str.format()` runs over the prompt with `fleet_id` / `agent_id` / `director_agent_id` as kwargs — leave those single-braced, double any other literal `{` / `}`. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE `cafleet member create --prompt-file <abs path>` (the pre-spawn file IS both the CLI input and the permanent audit artifact); see the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files* for the contract incl. the `${BASE} == <unset>` guarded-skip + inline fallback.
+> **Spawn mechanics**: path-by-reference is required because cafleet `agent spawn` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The prompt is delivered **verbatim** — there is no `str.format()` pass and no brace handling; identity reaches the member via the injected `CAFLEET_*` env vars. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE `cafleet agent spawn --prompt-file <abs path>` (the pre-spawn file IS both the CLI input and the permanent audit artifact); see the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Agent Spawn — Scratch and audit files* for the contract incl. the `${BASE} == <unset>` guarded-skip + inline fallback.
 
 #### 1d. Spawn Presentation + Transcript in parallel
 
@@ -131,7 +131,7 @@ Both work from `report.md` independently. After the slide deck is finalized (Ste
 
 **Presentation spawn prompt:**
 
-Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Presentation delta below (`{fleet_id}` / `{agent_id}` / `{director_agent_id}` filled by `member create`; `[INSERT …]` markers shell-substituted by the Director first):
+Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Presentation delta below (the skeleton's `$CAFLEET_*` identity references resolve from the member's injected env vars at runtime; `[INSERT …]` markers rendered by the Director first; the prompt is delivered verbatim):
 
 | Slot | Presentation Specialist |
 |---|---|
@@ -142,10 +142,10 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | POLL-HANDLING | **ack-inline** form (capture the `id:` integer as `<task-id>` and `cafleet message ack … --task-id <task-id>`, then act) |
 | start cue (verbatim) | `When complete, send the file path to the Director via cafleet message send.` |
 
-Render the prompt to `${BASE}/prompts/presentation-<UTC-compact>.md` per the 1c two-step audit-file pattern (leave `{fleet_id}` / `{agent_id}` / `{director_agent_id}` intact for the CLI's `str.format()` pass), then spawn with `--prompt-file`:
+Render the prompt to `${BASE}/prompts/presentation-<UTC-compact>.md` per the 1c two-step audit-file pattern (delivered verbatim; identity comes via the injected `CAFLEET_*` env vars), then spawn with `--prompt-file`:
 
    ```bash
-   cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
+   cafleet --json agent spawn --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "presentation" \
      --description "Authors slide.md" \
      --prompt-file ${BASE}/prompts/presentation-<UTC-compact>.md
@@ -169,7 +169,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 Render the prompt to `${BASE}/prompts/transcript-<UTC-compact>.md` per the 1c two-step audit-file pattern, then spawn with `--prompt-file`:
 
    ```bash
-   cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
+   cafleet --json agent spawn --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "transcript" \
      --description "Authors transcript.md" \
      --prompt-file ${BASE}/prompts/transcript-<UTC-compact>.md
@@ -211,9 +211,9 @@ Once Step 2 converges on an approved slide deck and transcript, the Director run
 
 **Batched Review Loop** (batch_size=10, fresh Visual Reviewer per batch to avoid context overflow):
 
-Run the loop serially: spawn one VR member via `cafleet member create`, wait for its report, run the fix-and-recheck sub-loop, then run `cafleet member delete` to close the pane (sends `/exit`, waits up to 15 s). Do not spawn multiple VRs in parallel — fixes from one batch can affect later batches, and parallel agent-browser sessions race on the same Slidev dev server.
+Run the loop serially: spawn one VR member via `cafleet agent spawn`, wait for its report, run the fix-and-recheck sub-loop, then run `cafleet agent deregister` to close the pane (sends the backend exit keystroke, waits up to 15 s). Do not spawn multiple VRs in parallel — fixes from one batch can affect later batches, and parallel agent-browser sessions race on the same Slidev dev server.
 
-> **Per-batch teardown**: `cafleet member delete` blocks ≈15 s per batch (`/exit` + tmux layout rebalance) — the documented trade-off for context isolation. `--force` is an escape hatch for stuck panes, not the default.
+> **Per-batch teardown**: `cafleet agent deregister` blocks ≈15 s per batch (exit keystroke + tmux layout rebalance) — the documented trade-off for context isolation. `--force` is an escape hatch for stuck panes, not the default.
 
 ```
 total_slides = count slides in slide.md
@@ -223,10 +223,10 @@ while start <= total_slides:
     end = min(start + 9, total_slides)
 
     vr_round = 1                               # current VR round number; bumped on each re-check
-    spawn VR member via cafleet member create (name="vr-batch-<start>") with slides [start..end], ROUND=vr_round
+    spawn VR member via cafleet agent spawn (name="vr-batch-<start>") with slides [start..end], ROUND=vr_round
     # spawn prompt MUST include `RESEARCH FOLDER: <folder>` and `ROUND: 1` lines so the VR
     # can build screenshot/report paths
-    # capture the printed agent_id as [vr-batch-agent-id] for subsequent message send / member delete
+    # capture the printed agent_id as [vr-batch-agent-id] for subsequent message send / agent deregister
 
     while True:                                # initial review (r1) + up to 2 re-checks (r2, r3)
         wait for report from VR for round <vr_round> via cafleet message poll arrival
@@ -240,11 +240,11 @@ while start <= total_slides:
         # VR writes the next capture to `vr<start>-r<vr_round>-p<slide_number>.png` and
         # the next persisted report to `vr<start>-r<vr_round>.md`, preserving prior rounds
 
-    # Explicit close handshake before delete: the VR cannot reliably run extra commands after /exit.
+    # Explicit close handshake before deregister: the VR cannot reliably run extra commands after the exit keystroke.
     cafleet message send --fleet-id [fleet-id] --agent-id [director-agent-id] \
         --to [vr-batch-agent-id] --text "CLOSE: run `bun run agent-browser --session vr-batch-<start> close`, then reply 'closed'."
     wait for the VR's "closed" confirmation via cafleet message poll
-    cafleet member delete --fleet-id [fleet-id] --member-id [vr-batch-agent-id]
+    cafleet agent deregister --fleet-id [fleet-id] --agent-id [vr-batch-agent-id]
     start = end + 1
 ```
 
@@ -264,13 +264,13 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 Render the prompt to `${BASE}/prompts/vr-batch-<start>-<UTC-compact>.md` per the 1c two-step audit-file pattern (`<start>` matches the batch's first-slide index used in `--name`; each VR batch gets its own timestamped file — no overwriting), then spawn with `--prompt-file`:
 
    ```bash
-   cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
+   cafleet --json agent spawn --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "vr-batch-<start>" \
      --description "Visual Reviewer for slides <start>..<end>" \
      --prompt-file ${BASE}/prompts/vr-batch-<start>-<UTC-compact>.md
    ```
 
-   Capture the printed `agent_id` as `[vr-batch-agent-id]` for subsequent `cafleet message send` / `member delete` calls.
+   Capture the printed `agent_id` as `[vr-batch-agent-id]` for subsequent `cafleet message send` / `agent deregister` calls.
 
 ### Step 4: User Approval & Revision Loop (Director)
 
@@ -291,7 +291,7 @@ No round limit — loop until approved.
 
 **Only enter after the user approves in Step 4.**
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation, then `cafleet member delete` the monitoring member first, then Presentation, Transcript, and any active VR batch — but **for an active VR batch, run the close handshake first**: the Director sends `CLOSE:` via `cafleet message send`, the VR runs `bun run agent-browser --session vr-batch-<start> close` and replies `closed`, THEN delete it. Verify the roster is empty with `cafleet member list`.
+Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation, then `cafleet agent deregister` the monitoring member first, then Presentation, Transcript, and any active VR batch — but **for an active VR batch, run the close handshake first**: the Director sends `CLOSE:` via `cafleet message send`, the VR runs `bun run agent-browser --session vr-batch-<start> close` and replies `closed`, THEN delete it. Verify the roster is empty with `cafleet agent list`.
 
 Then the presentation-specific teardown:
 
@@ -300,6 +300,6 @@ Then the presentation-specific teardown:
    bun run agent-browser close --all
    ```
 2. **Stop the Slidev dev server** via {bg_stop} (using the handle recorded in Step 3, Server Startup substep 2) — never the broad `pkill -f slidev`, which matches too widely and leaks stdout until the process is stopped through its recorded handle.
-3. `cafleet fleet delete [fleet-id]` (positional); `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.
+3. `cafleet fleet delete --fleet-id [fleet-id]`; `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.
 
 $ARGUMENTS

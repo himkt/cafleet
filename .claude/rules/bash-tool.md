@@ -4,7 +4,7 @@ This rule fires every time you reach for the Bash tool as a CAFleet team member.
 
 ## The MUST rule
 
-> **If you are a CAFleet member spawned by `cafleet member create`, your harness runs in `--permission-mode dontAsk`. Your Bash tool is ENABLED and permission prompts auto-resolve silently. Run cafleet (and any other shell command) directly via the Bash tool. No prefix, no Director routing, no operator prompts.**
+> **If you are a CAFleet member spawned by `cafleet agent spawn`, your harness runs in `--permission-mode dontAsk`. Your Bash tool is ENABLED and permission prompts auto-resolve silently. Run cafleet (and any other shell command) directly via the Bash tool. No prefix, no Director routing, no operator prompts.**
 
 ## How to detect that you are a CAFleet member
 
@@ -47,9 +47,9 @@ cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --text "Please run \`<command>\` for me — my Bash tool denied it (<denial reason if known>)."
 ```
 
-Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet member exec <command>`, which keystrokes `! <command>` + Enter into your pane via Claude Code's `!` shortcut. The captured stdout/stderr lands in your next-turn context.
+Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet pane exec <command>`, which keystrokes `! <command>` + Enter into your pane via Claude Code's `!` shortcut. The captured stdout/stderr lands in your next-turn context.
 
-If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member exec <command>` from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
+If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet pane exec <command>` from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
 
 ### Why no operator-prompts-for-routing
 
@@ -67,19 +67,19 @@ The Bash tool is the entry point for every shell-execution request. If you can p
 
 If you are the **Director** (not a member), this rule applies in reverse only when a member auto-routes a denied command to you.
 
-For the **inbox-poll-only nudge case** (the monitoring loop wants the member to re-check its inbox after a missed broker auto-fire, or after a long idle window), the Director's primitive is `cafleet member ping`. This subcommand takes no positional argument — its action is fixed (it injects `Esc` + `cafleet message poll --fleet-id <s> --agent-id <m>` + Enter into the member's pane via the existing `tmux.send_poll_trigger` helper; the leading `Esc` is the permission-prompt safeguard, inherited because `send_poll_trigger` now passes `esc_first=True`) — so it is pre-approved in `permissions.allow` and fires without a per-call confirmation prompt:
+For the **inbox-poll-only nudge case** (the monitoring loop wants the member to re-check its inbox after a missed broker auto-fire, or after a long idle window), the Director's primitive is `cafleet pane wake --poll-only`. The `--poll-only` mode carries no message — its action is fixed (it injects `Esc` + `cafleet message poll --fleet-id <s> --agent-id <m>` + Enter into the member's pane via the existing `tmux.send_poll_trigger` helper; the leading `Esc` is the permission-prompt safeguard, inherited because `send_poll_trigger` now passes `esc_first=True`) — so it is pre-approved in `permissions.allow` and fires without a per-call confirmation prompt:
 
 ```bash
-cafleet member ping --fleet-id <fleet-id> \
-  --member-id <member-agent-id>
+cafleet pane wake --fleet-id <fleet-id> \
+  --agent-id <member-agent-id> --poll-only
 ```
 
-For the **shell-dispatch fallback** (a member auto-routed a denied command and needs the Director to dispatch arbitrary shell on its behalf), the Director's primitive is `cafleet member exec`. This subcommand carries the operator-controlled command as a positional argument, so it remains under `permissions.ask` for per-call confirmation:
+For the **shell-dispatch fallback** (a member auto-routed a denied command and needs the Director to dispatch arbitrary shell on its behalf), the Director's primitive is `cafleet pane exec`. This subcommand carries the operator-controlled command as a positional argument, so it remains under `permissions.ask` for per-call confirmation:
 
 ```bash
-cafleet member exec --fleet-id <fleet-id> \
-  --member-id <member-agent-id> \
+cafleet pane exec --fleet-id <fleet-id> \
+  --agent-id <member-agent-id> \
   "<command>"
 ```
 
-See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full shell-dispatch protocol, serialization rules, and the cross-fleet boundary (a `--member-id` outside `--fleet-id` returns "not found"; there is no caller-auth check — any agent in the fleet is a valid target).
+See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full shell-dispatch protocol, serialization rules, and the cross-fleet boundary (an `--agent-id` outside `--fleet-id` returns "not found"; there is no caller-auth check — any agent in the fleet is a valid target).

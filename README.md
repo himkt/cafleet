@@ -18,14 +18,14 @@ The recommended end-user path is two commands:
 
 ```bash
 uv tool install cafleet     # or: pip install cafleet
-cafleet setup               # install the skills + migrate the database
+cafleet setup               # install the skills + create the database schema
 ```
 
-`cafleet setup` installs the skills matching your installed `cafleet` version into every detected coding-agent home (`~/.claude`, `~/.codex`, `~/.config/opencode`) and migrates the database to head — the same migration code path as `cafleet db init`. Scope the skills install to specific agents with `--agent claude|codex|opencode` (repeatable). Re-run it after upgrading the package to refresh the skills and apply new migrations.
+`cafleet setup` installs the skills matching your installed `cafleet` version into every detected coding-agent home (`~/.claude`, `~/.codex`, `~/.config/opencode`) and creates the database schema. Scope the skills install to specific agents with `--agent claude|codex|opencode` (repeatable). Re-run it after upgrading the package to refresh the skills.
 
 The default database is `~/.local/share/cafleet/cafleet.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
 
-Contributors working from a clone install the skills from the working tree with `mise //:skill-install`. Full install details, including the upgrade warning for pre-integer-PK databases, are on the Install page: <https://himkt.github.io/cafleet/get-started/install/>.
+Contributors working from a clone install the skills from the working tree with `mise //:skill-install`. Full install details are on the Install page: <https://himkt.github.io/cafleet/get-started/install/>.
 
 Per-coding-agent config (Claude `permissions.allow`, Codex `config.toml` + rules, opencode) lives on the Configure page: <https://himkt.github.io/cafleet/get-started/configure/>.
 
@@ -57,9 +57,9 @@ You can see the existing design docs on [`design-docs/`](design-docs/), which ar
 
 ## 4. Architecture
 
-CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file SQLite database. Fleets partition agents into isolated namespaces; the CLI accesses SQLite directly through a shared `broker` module, so no HTTP server is required for agent operations. Members spawn as tmux panes running any of the three coding-agent backends, optionally pinned to a specific LLM via `cafleet member create --model <m>` (e.g. `sonnet`, `gpt-5.4-mini`, `anthropic/claude-sonnet-4-6`, `opencode/big-pickle`). Full architecture documentation is published at <https://himkt.github.io/cafleet/concepts/overview/>.
+CAFleet ships a unified `cafleet` CLI and an admin WebUI on top of a single-file SQLite database. Fleets partition agents into isolated namespaces; the CLI accesses SQLite directly through a shared `broker` module, so no HTTP server is required for agent operations. Members spawn as tmux panes running any of the three coding-agent backends, optionally pinned to a specific LLM via `cafleet agent spawn --model <m>` (e.g. `sonnet`, `gpt-5.4-mini`, `anthropic/claude-sonnet-4-6`, `opencode/big-pickle`). Full architecture documentation is published at <https://himkt.github.io/cafleet/concepts/overview/>.
 
-A Director supervises its team on a periodic heartbeat supplied by `cafleet monitor` — a per-fleet loop the fleet's dedicated **monitoring member** runs as a background task in its own pane. It spends no model tokens and works on any backend: the monitor schedules the heartbeat, and the monitoring member inspects each due agent and re-engages an idle Director on demand. Spawn the monitoring member first (`cafleet member create … --role monitor --model haiku`); it launches `cafleet monitor start`, and stopping that background task or `fleet delete` ends the loop. See <https://himkt.github.io/cafleet/concepts/monitoring/>.
+A Director supervises its team on a periodic heartbeat supplied by `cafleet monitor` — a per-fleet loop the fleet's dedicated **monitoring member** runs as a background task in its own pane. It spends no model tokens and works on any backend: the monitor schedules the heartbeat, and the monitoring member inspects each due agent and re-engages an idle Director on demand. Spawn the monitoring member first (`cafleet agent spawn … --role monitor --model haiku`); it launches `cafleet monitor start`, and stopping that background task or `fleet delete` ends the loop. See <https://himkt.github.io/cafleet/concepts/monitoring/>.
 
 ## 5. Contributing
 

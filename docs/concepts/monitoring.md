@@ -19,8 +19,8 @@ stop it). One monitor per fleet, and one monitoring member per fleet.
 
 The monitor loop's **wake nudge** keystrokes only the monitoring member's own
 pane — which is never parked on a permission prompt — so it does **not** lead
-with `Esc`, unlike the message-delivery preview and `cafleet member ping`. The
-`Esc`-safeguard mechanics live in [tmux push](tmux-push.md).
+with `Esc`, unlike the message-delivery preview and `cafleet pane wake
+--poll-only`. The `Esc`-safeguard mechanics live in [tmux push](tmux-push.md).
 
 ## Heartbeat vs facilitation
 
@@ -47,10 +47,10 @@ The wake nudge does not lead with `Esc` — `send_wake_trigger` does not pass
 `esc_first`, because the monitoring member's pane is never on a permission prompt.
 
 The Director receives **no** keystroke from the loop. It is re-engaged only on
-demand: by the monitoring member's idle nudge — `cafleet member nudge`, which
-persists an ACKable broker task carrying the summary **and** fires the hardened,
-`Esc`-safeguarded inline preview — and by the broker's inline-preview keystroke
-on every inbound `cafleet message send`.
+demand: by the monitoring member's idle nudge — `cafleet pane wake --message`,
+which persists an ACKable broker task carrying the summary **and** fires the
+hardened, `Esc`-safeguarded inline preview — and by the broker's inline-preview
+keystroke on every inbound `cafleet message send`.
 
 ## The watched set
 
@@ -88,7 +88,7 @@ simply continues — there is no one to wake.
 ## The monitoring member
 
 The monitoring member is a single, dedicated coding-agent member — spawned with
-`cafleet member create --role monitor` (the Director passes `--model haiku`) —
+`cafleet agent spawn --role monitor` (the Director passes `--model haiku`) —
 that owns the heartbeat and applies LLM judgment to the watched agents' state.
 When `--coding-agent` is omitted it inherits the spawning Director's backend
 (see [Coding agents](coding-agents.md)). It
@@ -102,27 +102,29 @@ second `--role monitor` spawn is rejected.
 
 On each wake the loop keystrokes a nudge **naming the freshly-due agents** into
 its own pane, and the monitoring member runs its routine — staying within two
-read/act commands, read-only `cafleet member capture` and `cafleet member nudge`:
+read/act commands, read-only `cafleet pane capture` and `cafleet pane wake
+--message`:
 
 1. **Read the freshly-due agents named in the wake nudge** — each rendered as
    `<role> <id> (<name>)`. Those agents, plus the Director, are who you inspect
    this wake. (`cafleet monitor status` is available as optional context — e.g. to
    read intervals or pending counts — but it is **not** the source of the due set;
    the nudge's named list is authoritative.)
-2. **Capture each named due agent's pane** via `cafleet member capture --member-id
-   <id>` (read-only; `member capture` accepts any in-fleet agent with a placement,
+2. **Capture each named due agent's pane** via `cafleet pane capture --agent-id
+   <id>` (read-only; `pane capture` accepts any in-fleet agent with a placement,
    the root Director included) and judge it active/idle and progressing/stalled.
-3. **Always also capture the Director's pane** via `cafleet member capture
-   --member-id <director-id>` and classify it ACTIVE vs IDLE — the Director is the
+3. **Always also capture the Director's pane** via `cafleet pane capture
+   --agent-id <director-id>` and classify it ACTIVE vs IDLE — the Director is the
    only actuation target. (If the Director is itself among the named due agents,
    step 2 already captured it; step 3 only adds the Director when it is not in the
    named list.)
-4. **Re-engage the Director** via `cafleet member nudge --member-id <director-id>`
-   when the Director is idle with un-ACKed inbox / stalled members, **or** when
-   any named due agent looks stalled — naming what needs attention (idle
-   Director, stalled member `<id>`). `member nudge` persists an ACKable broker
-   task and fires the hardened, `Esc`-safeguarded inline preview into the
-   Director's pane. The Director then drives the stalled member.
+4. **Re-engage the Director** via `cafleet pane wake --agent-id <director-id>
+   --message --from <monitoring-member-id> --text "..."` when the Director is idle
+   with un-ACKed inbox / stalled members, **or** when any named due agent looks
+   stalled — naming what needs attention (idle Director, stalled member `<id>`).
+   `pane wake --message` persists an ACKable broker task and fires the hardened,
+   `Esc`-safeguarded inline preview into the Director's pane. The Director then
+   drives the stalled member.
 
 The monitoring member's *observation* spans the Director **and** every
 freshly-due member, but its *actuation* is **Director-only**: it never
@@ -180,7 +182,7 @@ flowchart LR
     Tick -. wake nudge .-> PaneMon["monitoring member pane"]
 ```
 
-- **Spawned first.** The monitoring member is the **first** `member create` in
+- **Spawned first.** The monitoring member is the **first** `agent spawn` in
   the fleet (first-in). After it boots it launches `cafleet monitor start --fleet-id N` as a **background task** in its own pane, confirms with `cafleet monitor
   status`, and reports `ready: monitor live` to the Director. Receipt of that
   handshake is the gate for spawning ordinary members — this is the only
@@ -194,7 +196,7 @@ flowchart LR
   member's pane is killed: the Director messages the monitoring member to stop
   its `monitor start` background task (the task-stop delivers SIGTERM/SIGINT, so
   the loop runs its `finally` and clears the runtime row), the monitoring member
-  confirms, and only then does the Director `cafleet member delete` it — first,
+  confirms, and only then does the Director `cafleet agent deregister` it — first,
   before the ordinary members. A hard pane-kill instead leaves the heartbeat to
   go stale, after which `status` reports stopped (the accepted degraded path).
   There is no `monitor stop` command. `fleet delete` needs no stop step — a
