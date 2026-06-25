@@ -1,7 +1,7 @@
 # CLI Simplification: Redesign the cafleet Command Surface and Rewrite SPEC.md
 
 **Status**: Approved
-**Progress**: 20/28 tasks complete
+**Progress**: 23/28 tasks complete
 **Last Updated**: 2026-06-25
 
 ## Overview
@@ -463,11 +463,13 @@ authoritative reimplementation spec; only the contract surfaces change):
 
 ### Step 5: .claude/rules and project skill
 
-- [ ] `.claude/rules/bash-tool.md` — `cafleet member ping`→`pane wake
+<!-- COMMENT(director): Step 5 resolution (member Edit denied on `.claude/`). The Director applied the two `.claude/rules` edits directly: bash-tool.md renamed (`member create`→`agent spawn`, `member exec`→`pane exec`, `member ping`→`pane wake --poll-only`, `--member-id`→`--agent-id`); coding-agent-overlay.md verified to need NO change (no `cafleet member` CLI references — it documents the `{monitor_model}`/`{permission_flags}` overlay token-resolution mechanism, distinct from the removed spawn-prompt mini-language). REMAINING for the Programmer: author the COMPLETE rewritten `.claude/skills/skill-author/SKILL.md` to `${BASE}/scratch/skill-author-SKILL.md` (a path you can write), then reply `addressed`; the Director places it into `.claude/` and commits. Scope = (a) command renames (`member create`→`agent spawn`, `member delete`→`agent deregister`, `member nudge`→`pane wake --message`, `--member-id`→`--agent-id`; keep `--role monitor`/`--model`); AND (b) the §9 rewrite — drop the `{fleet_id}`/`{agent_id}`/`{director_agent_id}` str.format mini-language teaching (§2.4 step 1, §3.1–3.3, §3.5, the §6 worked example) and replace it with the verbatim-prompt + env-var identity convention (`CAFLEET_FLEET_ID` auto-defaults `--fleet-id`; `CAFLEET_AGENT_ID`/`CAFLEET_DIRECTOR_AGENT_ID` are read from env and passed explicitly), matching the committed SPEC §6.7/§7.1. The §9 rewrite is required because `agent spawn` no longer runs str.format, so a rename-only edit would teach a removed mechanism (no-skill-drift rule). -->
+
+- [x] `.claude/rules/bash-tool.md` — `cafleet member ping`→`pane wake
       --poll-only`; `cafleet member exec`→`pane exec`; Director-side
-      `member ping`/`member exec` primitives renamed. <!-- completed: -->
-- [ ] `.claude/rules/coding-agent-overlay.md` — overlay command references. <!-- completed: -->
-- [ ] `.claude/skills/skill-author/SKILL.md` — `cafleet member create` examples. <!-- completed: -->
+      `member ping`/`member exec` primitives renamed. <!-- completed: 2026-06-25T09:28 -->
+- [x] `.claude/rules/coding-agent-overlay.md` — overlay command references (verified: no `cafleet member` CLI references; no change needed). <!-- completed: 2026-06-25T09:28 -->
+- [x] `.claude/skills/skill-author/SKILL.md` — `cafleet member create`→`agent spawn` examples, plus the §9 rewrite of the str.format spawn-prompt mini-language to the `CAFLEET_*` env-var identity convention. <!-- completed: 2026-06-25T09:38 -->
 
 ### Step 6: skills/** (SKILL.md, workflow bodies, roles, reference)
 
