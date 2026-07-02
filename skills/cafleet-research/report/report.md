@@ -84,14 +84,14 @@ Capture `fleet_id` and `director.agent_id` from the response. Treat `fleet_id` a
 
 Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The **first** `cafleet agent spawn` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet pane wake --message` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the audit-file pattern this skill uses for every spawn, then spawn:
+Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet pane wake --message` only when un-acked inbox items or stalled members can be named) to a `--text-file` per the audit-file pattern this skill uses for every spawn, then spawn:
 
 ```bash
 cafleet --json agent spawn --fleet-id [fleet-id] --agent-id [director-agent-id] \
   --name "monitor" \
   --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
   --role monitor --model {monitor_model} \
-  --prompt-file ${BASE}/prompts/monitor-<UTC-compact>.md
+  --text-file ${BASE}/prompts/monitor-<UTC-compact>.md
 ```
 
 See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle. The monitoring member is stopped and deleted first in the Step 8 teardown (first-out).
@@ -126,7 +126,7 @@ The Director references each role definition by its **absolute path** in the spa
 
 Substitute these absolute paths into the spawn prompts below.
 
-> **Spawn mechanics**: path-by-reference is required because cafleet `agent spawn` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The prompt is delivered **verbatim** — there is no `str.format()` pass and no brace handling; identity reaches the member via the injected `CAFLEET_*` env vars. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE `cafleet agent spawn --prompt-file <abs path>` (the pre-spawn file IS both the CLI input and the permanent audit artifact); see the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Agent Spawn — Scratch and audit files* for the contract incl. the `${BASE} == <unset>` guarded-skip + inline fallback.
+> **Spawn mechanics**: path-by-reference is required because cafleet `agent spawn` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The prompt is delivered **verbatim** — there is no `str.format()` pass and no brace handling; identity reaches the member via the injected `CAFLEET_*` env vars. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE `cafleet agent spawn --text-file <abs path>` (the pre-spawn file IS both the CLI input and the permanent audit artifact); see the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Agent Spawn — Scratch and audit files* for the contract incl. the `${BASE} == <unset>` guarded-skip + inline fallback.
 
 #### 2c. Spawn the Manager
 
@@ -143,13 +143,13 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | POLL-HANDLING + extra comms | **ack-inline** form (capture the `id:` integer as `[task-id]` and `cafleet message ack … --task-id [task-id]`, then act); plus `You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.` and `The team coordinates sub-topic assignments via {task_coord}.` |
 | start cue (verbatim) | `To request Scouts or Researchers, send the Director a cafleet message specifying: role (Scout or Researcher), scope, search angles, and output file path. The Director will spawn them via cafleet agent spawn and relay their completion reports back to you.` + `Your first compiled report will be reviewed critically by the Director. Aim for highest quality on the first attempt.` |
 
-Render the prompt to `${BASE}/prompts/manager-<UTC-compact>.md` per the 2b two-step audit-file pattern (delivered verbatim; identity comes via the injected `CAFLEET_*` env vars), then spawn with `--prompt-file`:
+Render the prompt to `${BASE}/prompts/manager-<UTC-compact>.md` per the 2b two-step audit-file pattern (delivered verbatim; identity comes via the injected `CAFLEET_*` env vars), then spawn with `--text-file`:
 
    ```bash
    cafleet --json agent spawn --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "manager" \
      --description "Compiles the research report" \
-     --prompt-file ${BASE}/prompts/manager-<UTC-compact>.md
+     --text-file ${BASE}/prompts/manager-<UTC-compact>.md
    ```
 
    Capture the printed `agent_id` and substitute it for `[manager-agent-id]` in every subsequent `cafleet` call that targets the Manager.
@@ -171,13 +171,13 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | POLL-HANDLING | **ack-inline** form (capture the `id:` integer as `[task-id]` and `cafleet message ack … --task-id [task-id]`, then act) |
 | start cue (verbatim) | `Write findings to the output file, then send the Director a completion summary. The Director will relay your findings to the Manager.` |
 
-Render the prompt to `${BASE}/prompts/<scout-name>-<UTC-compact>.md` per the 2b two-step audit-file pattern (use `scout` for a single Scout, `scout-1`/`scout-2`/… for multiple; `<scout-name>` is the lowercased `--name`), then spawn with `--prompt-file`:
+Render the prompt to `${BASE}/prompts/<scout-name>-<UTC-compact>.md` per the 2b two-step audit-file pattern (use `scout` for a single Scout, `scout-1`/`scout-2`/… for multiple; `<scout-name>` is the lowercased `--name`), then spawn with `--text-file`:
 
    ```bash
    cafleet --json agent spawn --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "scout-<NN>" \
      --description "Landscape scout" \
-     --prompt-file ${BASE}/prompts/scout-<NN>-<UTC-compact>.md
+     --text-file ${BASE}/prompts/scout-<NN>-<UTC-compact>.md
    ```
 
    Capture the printed `agent_id` for each Scout and substitute it into subsequent `cafleet message send` calls targeting that Scout.
@@ -222,13 +222,13 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | POLL-HANDLING + extra comms | **ack-inline** form; plus `On start, claim your assignment via {task_coord}.` and `Report completion via {task_coord} when done.` |
 | start cue (verbatim) | `Write findings to the output file, then send the Director a completion summary. The Director will relay findings and any follow-up questions between you and the Manager.` |
 
-Render the prompt to `${BASE}/prompts/researcher-<NN>-<UTC-compact>.md` per the 2b two-step audit-file pattern, then spawn with `--prompt-file`:
+Render the prompt to `${BASE}/prompts/researcher-<NN>-<UTC-compact>.md` per the 2b two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
    cafleet --json agent spawn --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "researcher-NN" \
      --description "Researcher for sub-topic <slug>" \
-     --prompt-file ${BASE}/prompts/researcher-NN-<UTC-compact>.md
+     --text-file ${BASE}/prompts/researcher-NN-<UTC-compact>.md
    ```
 
    The Director repeats this step whenever the Manager requests additional Researchers (coverage gaps, failed investigations, revision-driven re-research). Any new Researcher must first have a task created by the Manager; the Director includes the `taskId` in the spawn prompt.

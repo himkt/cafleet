@@ -99,7 +99,7 @@ The monitoring member runs one of two idle-nudge routines (both spawn the monito
 - **Conditional idle-nudge (canonical).** The monitoring member re-engages the Director only when it can name what needs attention (un-acked inbox items, stalled members). Use this for skills whose Director makes forward progress from member replies — the conditional nudge surfaces real stalls without busy-waking the Director.
 - **Unconditional idle-nudge (extended).** For skills whose Director must wake on a cadence that is NOT driven by member replies — e.g. polling an external service (CI, a code-review bot) that never keystrokes the Director's pane — the monitoring member nudges the idle Director unconditionally, granting it a re-poll turn even when the inbox is empty. The `cafleet-design-doc` skill's execute workflow Copilot-review loop is the reference.
 
-### 2.4 Spawn members with `cafleet agent spawn --prompt-file <abs path>`
+### 2.4 Spawn members with `cafleet agent spawn --text-file <abs path>`
 
 For each member you spawn, follow the **two-step render-to-file pattern**:
 
@@ -107,22 +107,22 @@ For each member you spawn, follow the **two-step render-to-file pattern**:
 
 2. **Write the rendered text** to `${BASE}/prompts/<role>-<UTC-compact>.md` where `<UTC-compact>` is `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")` (Python). Create `${BASE}/prompts/` on first write via `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`. On same-second collisions, append `_2`, `_3`, … to the filename until it is unique — never overwrite. **The pre-spawn file IS the audit artifact.** There is no second post-spawn re-render; the file is both the CLI input and the permanent record of what was spawned.
 
-3. **Spawn with `--prompt-file`** pointing at the absolute path of the rendered file:
+3. **Spawn with `--text-file`** pointing at the absolute path of the rendered file:
 
    ```bash
    cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "<member-name>" \
      --description "<one-sentence purpose>" \
-     --prompt-file ${BASE}/prompts/<role>-<UTC-compact>.md
+     --text-file ${BASE}/prompts/<role>-<UTC-compact>.md
    ```
 
    Capture the printed `agent_id` from the JSON response and substitute it for the member's id in every subsequent `cafleet ...` call **the Director** makes that targets it. (The member itself learns its own id from the injected `$CAFLEET_AGENT_ID` — § 3.2.)
 
-#### Why the two-step pattern instead of inline `prompt_argv`?
+#### Why the two-step pattern instead of inline `--text`?
 
-`cafleet agent spawn` accepts the spawn prompt either as an inline positional `prompt_argv` argument or via `--prompt-file <abs path>`. Inline passes the prompt to `tmux split-window` as a single positional argument; tmux fails with `command too long` once the shell-quoted prompt grows past a few KB, and cafleet rolls back the agent registration. Real role files are typically 5–15 KB and the spawn prompt that includes them often pushes well past 20 KB. `--prompt-file` reads the file inside the cafleet process and writes the text to the new pane through a separate path that is not size-limited.
+`cafleet agent spawn` accepts the spawn prompt either inline via `--text` or via `--text-file <abs path>`. The inline `--text` form passes the prompt to `tmux split-window` as a single positional argument; tmux fails with `command too long` once the shell-quoted prompt grows past a few KB, and cafleet rolls back the agent registration. Real role files are typically 5–15 KB and the spawn prompt that includes them often pushes well past 20 KB. `--text-file` reads the file inside the cafleet process and writes the text to the new pane through a separate path that is not size-limited.
 
-Use `--prompt-file` always. The inline `prompt_argv` form exists only as the documented fallback when `${BASE}` is `<unset>` and the audit-file write is impossible (see § 4).
+Use `--text-file` always. The inline `--text` form exists only as the documented fallback when `${BASE}` is `<unset>` and the audit-file write is impossible (see § 4).
 
 #### Path-by-reference for role files
 
@@ -211,11 +211,11 @@ A common mistake is to leave a literal `[INSERT abs path to roles/<role>.md]` in
 
 Spawn prompt body references the role file by absolute path. The role file lives in `<your skill dir>/roles/<role>.md`. Compute the absolute path once at Director startup and substitute it into every spawn prompt that needs it. Do NOT inline the role file content.
 
-### 3.5 The `command too long` cliff and `--prompt-file`
+### 3.5 The `command too long` cliff and `--text-file`
 
 `tmux split-window` accepts the spawn prompt as a single positional argument. Linux's `ARG_MAX` (the `execve()` argument-list size limit) and tmux's own command parser combine to fail with `command too long` once the shell-quoted prompt grows past a few KB. Even with role content not inlined, a prompt with multiple `[INSERT …]` substitutions + the identity block + the communication protocol + role-specific assignment text often exceeds the limit.
 
-`--prompt-file <abs path>` sidesteps this. cafleet reads the file inside its own process and writes the text to the new pane through a separate path that is not size-limited. **Use `--prompt-file` for every spawn.** The inline `prompt_argv` form is the documented fallback only for the `${BASE} == <unset>` case where the file write is impossible.
+`--text-file <abs path>` sidesteps this. cafleet reads the file inside its own process and writes the text to the new pane through a separate path that is not size-limited. **Use `--text-file` for every spawn.** The inline `--text` form is the documented fallback only for the `${BASE} == <unset>` case where the file write is impossible.
 
 ### 3.6 The `${BASE} == <unset>` skip semantics
 
@@ -223,7 +223,7 @@ When the base-dir resolution yields the `unset` outcome (absolute-path argument 
 
 - **Skip the audit-file write.** Do not try to write `<unset>/prompts/<role>-<UTC-compact>.md` — that is a literal path with a `<` in it, which most filesystems reject. The guard is `if BASE != "<unset>"`.
 - **Omit the `BASE:` line from the spawn prompt.** The spawn prompt does NOT include the literal string `BASE: <unset>` — the line is dropped entirely. The member's existence-check naturally treats audit-file features as disabled.
-- **Fall back to inline `prompt_argv`** for the `cafleet agent spawn` call (the file-write path is gone, so the only way to get the prompt to cafleet is inline). Be aware that this risks the `command too long` failure mode for prompts above the tmux limit; surface that as a hard error to the user, not as a silent retry.
+- **Fall back to inline `--text`** for the `cafleet agent spawn` call (the file-write path is gone, so the only way to get the prompt to cafleet is inline). Be aware that this risks the `command too long` failure mode for prompts above the tmux limit; surface that as a hard error to the user, not as a silent retry.
 - **Loud-error on unguarded BASE-derivation.** If a code path under `${BASE} == <unset>` reaches an unguarded `Path(BASE) / …` computation, abort with the standardized error: `Error: BASE is <unset>; refusing to fall back to /tmp`.
 
 The member, after spawn, emits a single CAFleet message back to the Director as a parens-free anchorless status:
@@ -371,7 +371,7 @@ Like every CAFleet-orchestrated skill, `summarize-pr` spawns a dedicated monitor
 cafleet --json agent spawn --fleet-id 7 --agent-id 8 \
   --name "monitor" --description "Monitoring member: owns the heartbeat" \
   --role monitor --model sonnet \
-  --prompt-file /repo/researches/pr-1234/prompts/monitor-20260516T003300Z.md
+  --text-file /repo/researches/pr-1234/prompts/monitor-20260516T003300Z.md
 # → {"agent_id": 10, ...}
 ```
 
@@ -412,7 +412,7 @@ The Director writes this rendered text to `/repo/researches/pr-1234/prompts/summ
 cafleet --json agent spawn --fleet-id 7 --agent-id 8 \
   --name "summarizer" \
   --description "Digests a PR diff into a 200-word risk summary" \
-  --prompt-file /repo/researches/pr-1234/prompts/summarizer-20260516T003344Z.md
+  --text-file /repo/researches/pr-1234/prompts/summarizer-20260516T003344Z.md
 # → {"agent_id": 11, ...}
 ```
 
@@ -472,7 +472,7 @@ Fix: every message you act on, ack it. Acking moves the task from `INPUT_REQUIRE
 
 Symptom: `cafleet agent spawn` exits non-zero with `Error: tmux split-window failed: command too long`, the agent registration is rolled back, no member pane appears.
 
-Fix: use `--prompt-file` (always) and reference the role file by absolute path inside the spawn prompt, not by inlining the content.
+Fix: use `--text-file` (always) and reference the role file by absolute path inside the spawn prompt, not by inlining the content.
 
 ### 7.3 Shell-variable-substituting the Director's own literal ids
 

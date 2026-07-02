@@ -14,9 +14,11 @@ CAFleet members spawned via `cafleet agent spawn` do not act autonomously. They 
 
 Supervision happens over the CAFleet message broker: the Director `cafleet message send`s a member → the broker keystrokes a 2-line inline preview into the member's pane (it processes the preview as a fresh user-turn; the full body is fetched via `cafleet message poll`) → the member acts and replies via `cafleet message send` → the broker keystrokes that reply into the Director's pane, which the Director ACKs (`cafleet message ack`). The inline-preview mechanics are canonical in [`SKILL.md`](../SKILL.md) § Send and [`tmux-push.md`](../../../docs/concepts/tmux-push.md).
 
+**Long or multi-line bodies.** `message send` / `message broadcast` / `pane wake --message` accept a `--text-file <path>` (or `--text-file -` for stdin) alternative to inline `--text`. A long or multi-line body MUST be passed via `--text-file`, never inline `--text`, so it never lands on the command line and hits the shell's `ARG_MAX` limit. Short one-line bodies stay fine inline with `--text`.
+
 **Facilitation cue (load-bearing).** The monitor loop does **not** wake the Director (it wakes only the monitoring member — firing whenever a watched agent is due on its own interval; see § The monitor heartbeat). The Director is re-engaged on demand: by the monitoring member's idle nudge (`cafleet pane wake --message`, which persists an ACKable broker task **and** fires the hardened, `Esc`-safeguarded inline preview, when the monitoring member finds the Director idle), and by the broker's inline-preview keystroke on every inbound `cafleet message send`. **Treat each such re-engagement as the cue to run the entire 5-step facilitation loop** (poll → ACK → dispatch → health-check → escalate), NOT to read the inbox and stop.
 
-The Director never polls a member's pane via raw `tmux`. Inspection is via `cafleet pane capture`; write is via `cafleet pane exec` / `cafleet pane wake --poll-only` (plus the decision-relay primitive your overlay describes). See [`SKILL.md`](../SKILL.md) and [`reference/cli.md`](cli.md) for the canonical command surface.
+The Director never polls a member's pane via raw `tmux`. Inspection is via `cafleet pane capture`; write is via `cafleet pane exec` / `cafleet pane wake --poll-only`. See [`SKILL.md`](../SKILL.md) and [`reference/cli.md`](cli.md) for the canonical command surface.
 
 The Director's plain output is **not visible to members** — the only Director→member channel is `cafleet message send` (and the Director-only keystroke primitives above for special cases).
 
@@ -85,7 +87,7 @@ Every time you spawn a member:
 1. **Verify env, then ensure supervision is running**:
    - **Pre-spawn env-check (gating)**: run `cafleet doctor`. If it exits non-zero or reports missing `TMUX` / `TMUX_PANE`, ABORT the spawn and surface the error — `cafleet agent spawn` requires the Director inside a tmux pane. This is the canonical pane-identity probe; do NOT use raw `tmux display-message` / `TMUX` expansion. Backend-binary availability is NOT a separate step — `agent spawn` does its own `PATH` check and errors if the binary is missing (see [`cli-options.md`](../../../docs/spec/cli-options.md#agent-spawn)); do NOT pre-probe with `<backend> --version` / `which`.
    - **Monitoring member up + monitor live before any ordinary member** — the spawn-gate is canonical in [`roles/monitor.md`](../roles/monitor.md) (the first `agent spawn` is `--role monitor --model {monitor_model}`; its `ready: monitor live` handshake gates the first ordinary `agent spawn`; wait on the message, do not block-poll status).
-2. **Spawn the member** via `cafleet agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> --name <name> --description <desc> --prompt-file <abs path to ${BASE}/prompts/<role>-<UTC-compact>.md>`. The pre-spawn file IS both the CLI input and the permanent audit artifact; the audit-file convention (with the `${BASE} == <unset>` guarded-skip + inline fallback), the `--model` flag, and the model-name→backend inference are canonical in [`reference/director.md`](director.md) § Member Create.
+2. **Spawn the member** via `cafleet agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> --name <name> --description <desc> --text-file <abs path to ${BASE}/prompts/<role>-<UTC-compact>.md>`. The pre-spawn file IS both the CLI input and the permanent audit artifact; the audit-file convention (with the `${BASE} == <unset>` guarded-skip + inline fallback), the `--model` flag, and the model-name→backend inference are canonical in [`reference/director.md`](director.md) § Member Create.
 3. **Include the ready-signal directive in the spawn prompt.** Every spawn prompt MUST instruct the member, as its first Bash call, to send `cafleet message send … --text "ready"` (canonical wording in [`roles/member.md`](../roles/member.md) § *On spawn — send the ready signal*). It is the ONLY signal that the coding agent inside the pane has actually booted; a prompt missing it is a defect — fix and re-spawn.
 4. **Verify the member is placed** by checking that `cafleet agent list --fleet-id <fleet-id>` shows the new member with a non-null `pane_id`. This confirms the pane was created. Liveness of the coding agent inside the pane is confirmed asynchronously when the ready signal arrives — NOT by `agent list`.
 5. **End the active turn after spawn-and-verify.** The ready signal arrives via broker auto-fire (member's `cafleet message send` → 2-line inline preview keystroked into your pane via `tmux.send_inline_preview`), with the monitoring member's idle nudge as the time-based backstop. You process it — ACK, dispatch first task — in your next active turn. See § *Asynchronous Wait Rule* below.
@@ -118,7 +120,7 @@ On every supervision tick — whether fired by the monitoring member's on-demand
 
 | Phase | Action |
 |---|---|
-| Spawn the monitoring member (first-in) | The **first** `cafleet agent spawn` in the fleet IS the monitoring member: `cafleet agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> --name monitor --description <…> --role monitor --model {monitor_model} --prompt-file <rendered monitor prompt>`. It boots, launches `cafleet monitor start` as a background task in its own pane, confirms `monitor status`, and sends `ready: monitor live` to the Director. |
+| Spawn the monitoring member (first-in) | The **first** `cafleet agent spawn` in the fleet IS the monitoring member: `cafleet agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> --name monitor --description <…> --role monitor --model {monitor_model} --text-file <rendered monitor prompt>`. It boots, launches `cafleet monitor start` as a background task in its own pane, confirms `monitor status`, and sends `ready: monitor live` to the Director. |
 | Gate ordinary members | Wait for the monitoring member's `ready: monitor live` message before the first ordinary `cafleet agent spawn`. The Director MAY run `cafleet monitor status --fleet-id <fleet-id>` itself as optional corroboration, but it waits on the handshake message rather than block-polling status (consistent with the async wait rule). |
 | Run work | The monitor wakes the monitoring member whenever a watched agent is due on its own interval (the root Director at 180 s, ordinary members at 720 s); do not intervene unless an escalation arrives. Each on-demand idle nudge from the monitoring member (or inbound work via inline preview) is the Director's cue to run the 5-step facilitation loop above. |
 | User review | Keep the monitoring member and its `monitor start` task running during the review cycle — revisions and re-reviews still count as in-progress work. |
@@ -147,19 +149,17 @@ cafleet pane capture --fleet-id <fleet-id> \
   --agent-id <member-agent-id>
 ```
 
-The capture-line count needed to show a member's full decision-prompt frame — and the concrete frame shape — is a backend delta; see your overlay ([`coding-agent/<name>.md`](coding-agent/)). The `cafleet pane capture` default is `--lines 30`.
+The `cafleet pane capture` default is `--lines 30`; bump `--lines` to show more of a stalled member's buffer.
 
 If `cafleet message poll` shows no recent messages from the member, fall back to capturing the terminal buffer. This is non-intrusive (read-only inspection that works even when the member is mid-task) and replaces raw `tmux capture-pane`.
 
-If the terminal buffer shows the member paused on a decision-prompt frame awaiting a user reaction, the correct unblock is the decision-relay primitive your overlay describes — never raw `tmux send-keys` — and the Director MUST delegate the decision to the user BEFORE invoking it. The Director never decides on its own judgment. The concrete pane frame, the three-beat workflow, and the pane-shapes table are backend deltas; the neutral pointer is [`reference/director.md`](director.md) § *Answering a member's relayed question*.
-
-> **The decision surface is a backend delta.** The concrete user-reaction surface and the pane-keystroke relay for forwarding an answer are backend-specific — see your overlay ([`coding-agent/<name>.md`](coding-agent/)). The canonical, backend-neutral user-reaction rule is [`SKILL.md`](../SKILL.md) § *Soliciting user reactions*.
+> **The decision surface is a backend delta.** The concrete user-reaction surface by which the Director asks the user is backend-specific — see your overlay ([`coding-agent/<name>.md`](coding-agent/)). The canonical, backend-neutral user-reaction rule is [`SKILL.md`](../SKILL.md) § *Soliciting user reactions*.
 
 ### Escalation
 
 If a member is still unresponsive after 2 nudges via `cafleet message send` AND `cafleet pane capture` shows no forward progress in the terminal buffer, escalate to the user via {decision_surface} (per [`SKILL.md`](../SKILL.md) § *Soliciting user reactions*) with concrete options (e.g. re-nudge once more / re-spawn the member / drop its task).
 
-The unblock primitives and their ordering — non-intrusive `cafleet message poll` → read-only `cafleet pane capture` → authoritative `cafleet message send` → `cafleet pane wake --poll-only` (missed auto-fire / required post-`exec` follow-up) → the decision-relay primitive your overlay describes (decision-prompt frame, user-delegated first) → `cafleet pane exec "<cmd>"` (shell dispatch) → `cafleet agent deregister --force` (last resort, never raw `tmux kill-pane`) → escalate to the user via {decision_surface} — are documented in [`reference/director.md`](director.md), [`reference/recovery.md`](recovery.md), [`reference/exec-routing.md`](exec-routing.md), and the § Quick Reference table below.
+The unblock primitives and their ordering — non-intrusive `cafleet message poll` → read-only `cafleet pane capture` → authoritative `cafleet message send` → `cafleet pane wake --poll-only` (missed auto-fire / required post-`exec` follow-up) → `cafleet pane exec "<cmd>"` (shell dispatch) → `cafleet agent deregister --force` (last resort, never raw `tmux kill-pane`) → escalate to the user via {decision_surface} — are documented in [`reference/director.md`](director.md), [`reference/recovery.md`](recovery.md), [`reference/exec-routing.md`](exec-routing.md), and the § Quick Reference table below.
 
 ## User Delegation Protocol
 
@@ -169,14 +169,12 @@ CAFleet members never talk to the user directly — the Director relays. This is
 2. **Ask the user.** No preamble sentence above the question — the conversation context plus the question text carry it.
 3. **Relay the answer back** via `cafleet message send` to the originating member. Pass through the user's selection verbatim; do not substitute your own judgment. If the user provided free-form text instead of a listed option, send that text.
 
-**For a member paused on a decision-prompt pane frame** awaiting a user reaction, follow your overlay's decision-relay workflow — the concrete pane frame, the three-beat capture/ask/relay, and the pane-shapes table are backend deltas. The neutral pointer is [`reference/director.md`](director.md) § *Answering a member's relayed question*.
-
 **What you MUST NOT do:**
 
 - Decide on the user's behalf, even when the answer looks obvious.
 - Batch multiple members' questions into a single user prompt unless they are genuinely the same decision.
 - Summarize or paraphrase the user's answer when relaying — pass it through.
-- Print a fenced `bash` block of a pane-relay command for the user to paste — invoke any such primitive via the Director's own Bash tool; the coding agent's per-call permission prompt is the consent surface.
+- Print a fenced `bash` block of a pane command (`pane exec` / `pane wake`) for the user to paste — invoke any such primitive via the Director's own Bash tool; the coding agent's per-call permission prompt is the consent surface.
 
 ## Cleanup Protocol
 
@@ -187,13 +185,13 @@ Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol (fir
 | Action | Primitive | Notes |
 |---|---|---|
 | Verify Director pane env | `cafleet doctor` | Pre-spawn precondition; gating. Aborts the spawn protocol when `TMUX` / `TMUX_PANE` are missing. Replaces raw `tmux display-message` and `TMUX` env-var expansion. |
-| Start the supervision tick | Spawn the monitoring member first: `cafleet agent spawn --fleet-id <s> --agent-id <director> --name monitor --description <…> --role monitor --model {monitor_model} --prompt-file <…>`; it runs `cafleet monitor start` in its own pane — see [`roles/monitor.md`](../roles/monitor.md) | Its `ready: monitor live` handshake gates the first ordinary `agent spawn`. |
-| Spawn member | `cafleet agent spawn --fleet-id <s> --agent-id <director> --name <n> --description <d> --prompt-file <abs path to ${BASE}/prompts/<role>-<UTC-compact>.md>` | Pre-spawn file IS the audit artifact (see [`reference/director.md`](director.md) § *Agent Spawn — Scratch and audit files*). Verify with `cafleet agent list`. Inline `-- "<prompt>"` is still permitted for trivial one-line spawns. |
+| Start the supervision tick | Spawn the monitoring member first: `cafleet agent spawn --fleet-id <s> --agent-id <director> --name monitor --description <…> --role monitor --model {monitor_model} --text-file <…>`; it runs `cafleet monitor start` in its own pane — see [`roles/monitor.md`](../roles/monitor.md) | Its `ready: monitor live` handshake gates the first ordinary `agent spawn`. |
+| Spawn member | `cafleet agent spawn --fleet-id <s> --agent-id <director> --name <n> --description <d> --text-file <abs path to ${BASE}/prompts/<role>-<UTC-compact>.md>` | Pre-spawn file IS the audit artifact (see [`reference/director.md`](director.md) § *Agent Spawn — Scratch and audit files*). Verify with `cafleet agent list`. Inline `--text "<prompt>"` is still permitted for trivial one-line spawns. |
 | Message member | `cafleet message send --fleet-id <s> --agent-id <director> --to <member> --text "..."` | Broker keystrokes an inline preview into the member's pane |
 | ACK reply | `cafleet message ack --fleet-id <s> --agent-id <director> --task-id <task>` | Unacknowledged tasks accumulate; ACK every reply you act on |
 | Inspect stalled member | `cafleet pane capture --fleet-id <s> --agent-id <member>` | Replaces raw `tmux capture-pane` |
 | Manual inbox-poll nudge | `cafleet pane wake --fleet-id <s> --agent-id <member> --poll-only` | Pre-approved; for missed auto-fires and post-`exec` chains |
 | Shell-dispatch on member's behalf | `cafleet pane exec --fleet-id <s> --agent-id <member> "<cmd>"` | Per [`reference/exec-routing.md`](exec-routing.md); follow with `pane wake --poll-only` |
-| Answer a member's relayed question | the decision-relay primitive your overlay describes ([`coding-agent/<name>.md`](coding-agent/)) | Delegate the decision to the user via {decision_surface} first; never decide silently |
+| Answer a member's relayed question | {decision_surface} → `cafleet message send` | Ask the user via {decision_surface} first, then relay the answer back to the member as a message; never decide silently |
 | Relay user input | {decision_surface} → `cafleet message send` | Pass-through; never substitute judgment |
 | Shut down team | [`reference/recovery.md`](recovery.md) § Shutdown Protocol | Stop monitor → deregister monitoring member first → `agent deregister` each ordinary → `fleet delete` |

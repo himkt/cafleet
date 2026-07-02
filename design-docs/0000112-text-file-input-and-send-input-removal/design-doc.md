@@ -1,7 +1,7 @@
 # Unified `--text` / `--text-file` Input and `send-input` Removal
 
 **Status**: Approved
-**Progress**: 11/35 tasks complete
+**Progress**: 19/35 tasks complete
 **Last Updated**: 2026-07-02
 
 ## Overview
@@ -161,14 +161,14 @@ Delete every occurrence — no deprecation notice anywhere (per `.claude/rules/r
 
 ### Step 3: Skills
 
-- [ ] Rename `--prompt-file` → `--text-file` in every spawn recipe: `skills/cafleet-design-doc/create/create.md`, `execute/execute.md`, `interview/interview.md`, `skills/cafleet-research/report/report.md`, `presentation/presentation.md`. <!-- completed: -->
-- [ ] `skills/cafleet/reference/director.md` — § Member Create table (`--prompt-file`/positional rows → `--text`/`--text-file`; drop the default-template clause), the spawn-size-limit guidance (line ~100), and the audit-file `--prompt-file` references → `--text-file`. <!-- completed: -->
-- [ ] `skills/cafleet/reference/director.md` — § *Answering a member's relayed question*: strip the pane-keystroke-relay clause; state the answer returns via `cafleet message send`. <!-- completed: -->
-- [ ] `skills/cafleet/reference/supervision.md` — `--prompt-file` → `--text-file` (lines ~88, 121, 190, 191); remove the member-pane decision-relay references (lines ~154, 168–172), keeping the Director→user `{decision_surface}` escalation. <!-- completed: -->
-- [ ] `skills/cafleet/reference/coding-agent/claude.md` — remove the two `{decision_surface}` relay Note rows (pane-capture-for-frame; `pane input --choice/--freetext` relay); keep the question-shape row. <!-- completed: -->
-- [ ] `skills/cafleet/SKILL.md` — remove any `send-input` / "Answering a member's AskUserQuestion prompt" references; keep § *Soliciting user reactions*. <!-- completed: -->
-- [ ] `.claude/skills/skill-author/SKILL.md` — `--prompt-file` → `--text-file` in §2.4 / §3.5; replace the positional `prompt_argv` fallback discussion with `--text` (inline) / `--text-file` (file). <!-- completed: -->
-- [ ] Add explicit guidance in `skills/cafleet/reference/director.md` and `skills/cafleet/reference/supervision.md` that long or multi-line **message bodies** (`message send` / `broadcast` / `nudge`) must be passed via `--text-file` (or `-` stdin), not `--text`, to avoid `ARG_MAX`. <!-- completed: -->
+- [x] Rename `--prompt-file` → `--text-file` in every spawn recipe: `skills/cafleet-design-doc/create/create.md`, `execute/execute.md`, `interview/interview.md`, `skills/cafleet-research/report/report.md`, `presentation/presentation.md`. <!-- completed: 2026-07-02T14:45 -->
+- [x] `skills/cafleet/reference/director.md` — § Member Create table (`--prompt-file`/positional rows → `--text`/`--text-file`; drop the default-template clause), the spawn-size-limit guidance (line ~100), and the audit-file `--prompt-file` references → `--text-file`. <!-- completed: 2026-07-02T14:45 -->
+- [x] `skills/cafleet/reference/director.md` — § *Answering a member's relayed question*: strip the pane-keystroke-relay clause; state the answer returns via `cafleet message send`. <!-- completed: 2026-07-02T14:45 -->
+- [x] `skills/cafleet/reference/supervision.md` — `--prompt-file` → `--text-file` (lines ~88, 121, 190, 191); remove the member-pane decision-relay references (lines ~154, 168–172), keeping the Director→user `{decision_surface}` escalation. <!-- completed: 2026-07-02T14:45 -->
+- [x] `skills/cafleet/reference/coding-agent/claude.md` — remove the two `{decision_surface}` relay Note rows (pane-capture-for-frame; `pane input --choice/--freetext` relay); keep the question-shape row. <!-- completed: 2026-07-02T14:45 -->
+- [x] `skills/cafleet/SKILL.md` — remove any `send-input` / "Answering a member's AskUserQuestion prompt" references; keep § *Soliciting user reactions*. <!-- completed: 2026-07-02T14:45 -->
+- [x] `.claude/skills/skill-author/SKILL.md` — `--prompt-file` → `--text-file` in §2.4 / §3.5; replace the positional `prompt_argv` fallback discussion with `--text` (inline) / `--text-file` (file). <!-- completed: 2026-07-02T14:48 (Director — .claude/ deny-list) -->
+- [x] Add explicit guidance in `skills/cafleet/reference/director.md` and `skills/cafleet/reference/supervision.md` that long or multi-line **message bodies** (`message send` / `broadcast` / `nudge`) must be passed via `--text-file` (or `-` stdin), not `--text`, to avoid `ARG_MAX`. <!-- completed: 2026-07-02T14:45 -->
 
 ### Step 4: Shared helper (code)
 

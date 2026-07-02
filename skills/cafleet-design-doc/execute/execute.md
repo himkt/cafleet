@@ -188,7 +188,7 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 
 Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below. The skeleton's `$CAFLEET_*` identity references resolve from the member's injected env vars at runtime; the `[INSERT …]` markers (`[INSERT DESIGN DOC PATH]`, `[INSERT abs path to roles/<role>.md]`) are rendered by the Director first. The prompt is delivered verbatim — no `{placeholder}` substitution and no brace escaping. All three roles load `cafleet` + `cafleet-design-doc` and take `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` as their only context line; each delta below gives the role's title, role-file, IMPORTANT lines (verbatim), and start cue.
 
-> **Spawn-prompt audit file (two-step pattern)**: every spawn in this skill follows the same two steps — (1) **render** the prompt (substitute the `[INSERT …]` markers; the prompt is delivered **verbatim** — identity reaches the member via the injected `CAFLEET_*` env vars, with no `{placeholder}` substitution); (2) **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` (`<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; create `${BASE}/prompts/` on first write; same-second collision → append `_2`, `_3`, … — never overwrite), then invoke `cafleet agent spawn --prompt-file <abs path>` (see the per-role spawn templates and commands below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Agent Spawn — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
+> **Spawn-prompt audit file (two-step pattern)**: every spawn in this skill follows the same two steps — (1) **render** the prompt (substitute the `[INSERT …]` markers; the prompt is delivered **verbatim** — identity reaches the member via the injected `CAFLEET_*` env vars, with no `{placeholder}` substitution); (2) **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` (`<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; create `${BASE}/prompts/` on first write; same-second collision → append `_2`, `_3`, … — never overwrite), then invoke `cafleet agent spawn --text-file <abs path>` (see the per-role spawn templates and commands below). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Agent Spawn — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 **Programmer spawn prompt** (skeleton + delta):
 
@@ -199,13 +199,13 @@ Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/
 | IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` |
 | start cue | `Start by reading the design document. Then wait for the Director to assign your first step.` |
 
-Render the prompt to `${BASE}/prompts/programmer-<UTC-compact>.md` per the 3e two-step audit-file pattern (delivered verbatim; identity comes via the injected `CAFLEET_*` env vars), then spawn with `--prompt-file`:
+Render the prompt to `${BASE}/prompts/programmer-<UTC-compact>.md` per the 3e two-step audit-file pattern (delivered verbatim; identity comes via the injected `CAFLEET_*` env vars), then spawn with `--text-file`:
 
    ```bash
    cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Programmer" \
      --description "Implements code to pass tests per step" \
-     --prompt-file ${BASE}/prompts/programmer-<UTC-compact>.md
+     --text-file ${BASE}/prompts/programmer-<UTC-compact>.md
    ```
 
    Parse `agent_id` from the JSON response and substitute it for `<programmer-agent-id>` in every subsequent command.
@@ -219,13 +219,13 @@ Render the prompt to `${BASE}/prompts/programmer-<UTC-compact>.md` per the 3e tw
 | IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: Do NOT write implementation code — only test code.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` |
 | start cue | `Start by reading the design document. Then wait for the Director to assign your first step.` |
 
-Render the prompt to `${BASE}/prompts/tester-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--prompt-file`:
+Render the prompt to `${BASE}/prompts/tester-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
    cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Tester" \
      --description "Writes unit tests per step" \
-     --prompt-file ${BASE}/prompts/tester-<UTC-compact>.md
+     --text-file ${BASE}/prompts/tester-<UTC-compact>.md
    ```
 
    Parse `agent_id` from the JSON response and substitute it for `<tester-agent-id>` in every subsequent command.
@@ -241,13 +241,13 @@ Render the prompt to `${BASE}/prompts/tester-<UTC-compact>.md` per the 3e two-st
 | IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code or modify implementation/test files.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` |
 | start cue | `Start by reading the design document and discovering available tools. Then wait for the Director to assign your first verification task.` |
 
-Render the prompt to `${BASE}/prompts/verifier-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--prompt-file`:
+Render the prompt to `${BASE}/prompts/verifier-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
    cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Verifier" \
      --description "E2E/integration testing and evidence collection" \
-     --prompt-file ${BASE}/prompts/verifier-<UTC-compact>.md
+     --text-file ${BASE}/prompts/verifier-<UTC-compact>.md
    ```
 
    Parse `agent_id` from the JSON response and substitute it for `<verifier-agent-id>` in every subsequent command.

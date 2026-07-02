@@ -101,14 +101,14 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 The **first** `cafleet agent spawn` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet pane wake --message` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the two-step audit-file pattern in Step 1c, then spawn:
+Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet pane wake --message` only when un-acked inbox items or stalled members can be named) to a `--text-file` per the two-step audit-file pattern in Step 1c, then spawn:
 
 ```bash
 cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name "monitor" \
   --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
   --role monitor --model {monitor_model} \
-  --prompt-file ${BASE}/prompts/monitor-<UTC-compact>.md
+  --text-file ${BASE}/prompts/monitor-<UTC-compact>.md
 ```
 
 See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The heartbeat runs unchanged through the quality loop; its `monitor start` background task is stopped first in Step 6's teardown (first-out).
@@ -122,7 +122,7 @@ The Director references each role definition by **absolute path** in the spawn p
 
 Substitute these absolute paths into the spawn prompts below.
 
-> **Spawn-prompt audit file (two-step pattern)**: every spawn in this skill follows the same two steps — (1) **render** the prompt (substitute the `[INSERT …]` markers; the prompt is delivered **verbatim** — identity reaches the member via the injected `CAFLEET_*` env vars, with no `{placeholder}` substitution); (2) **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` (`<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; create `${BASE}/prompts/` on first write; same-second collision → append `_2`, `_3`, … — never overwrite), then invoke `cafleet agent spawn --prompt-file <abs path>` (see Step 1d / 1e for the per-role spawn templates and commands). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Agent Spawn — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
+> **Spawn-prompt audit file (two-step pattern)**: every spawn in this skill follows the same two steps — (1) **render** the prompt (substitute the `[INSERT …]` markers; the prompt is delivered **verbatim** — identity reaches the member via the injected `CAFLEET_*` env vars, with no `{placeholder}` substitution); (2) **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` (`<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; create `${BASE}/prompts/` on first write; same-second collision → append `_2`, `_3`, … — never overwrite), then invoke `cafleet agent spawn --text-file <abs path>` (see Step 1d / 1e for the per-role spawn templates and commands). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Agent Spawn — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 #### 1d. Spawn the Drafter
 
@@ -138,13 +138,13 @@ Substitute these absolute paths into the spawn prompts below.
 | CONTEXT LINES | `OUTPUT PATH: [INSERT DOC PATH]` + a blank line + `The user's request: [INSERT USER'S ORIGINAL REQUEST]` | `DESIGN DOCUMENT: [INSERT DOC PATH]` |
 | IMPORTANT / start cue (verbatim) | `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.` / `Send your questions to the Director who will relay them to the user.` / `Start by reading the target codebase for context, then send your clarifying questions.` / `Do NOT create any design document file until you have received answers.` | `This is a RESUME run. The document contains COMMENT markers from a previous interview. Follow the Resume Mode instructions in your role definition.` / `Do NOT ask clarifying questions — the COMMENTs contain the needed information.` / `Start by reading the design document.` |
 
-Render the prompt to `${BASE}/prompts/drafter-<UTC-compact>.md` per the Step 1c two-step audit-file pattern (both normal and resume modes — delivered verbatim; identity comes via the injected `CAFLEET_*` env vars), then spawn with `--prompt-file`:
+Render the prompt to `${BASE}/prompts/drafter-<UTC-compact>.md` per the Step 1c two-step audit-file pattern (both normal and resume modes — delivered verbatim; identity comes via the injected `CAFLEET_*` env vars), then spawn with `--text-file`:
 
    ```bash
    cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Drafter" \
      --description "Writes and revises the design document" \
-     --prompt-file ${BASE}/prompts/drafter-<UTC-compact>.md
+     --text-file ${BASE}/prompts/drafter-<UTC-compact>.md
    ```
 
    Parse `agent_id` from the JSON response and substitute it for `<drafter-agent-id>` in every subsequent command.
@@ -161,13 +161,13 @@ Render the prompt to `${BASE}/prompts/drafter-<UTC-compact>.md` per the Step 1c 
 | CONTEXT LINES | `DESIGN DOCUMENT: [INSERT DOC PATH]` |
 | start cue (verbatim) | `Wait for the Director to assign a document for review (cafleet body: ready (doc)). When you receive that message, the doc pointer refers to the DESIGN DOCUMENT path above — read that file and provide specific, actionable feedback per the role definition.` |
 
-Render the prompt to `${BASE}/prompts/reviewer-<UTC-compact>.md` per the Step 1c two-step audit-file pattern, then spawn with `--prompt-file`:
+Render the prompt to `${BASE}/prompts/reviewer-<UTC-compact>.md` per the Step 1c two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
    cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Reviewer" \
      --description "Critically reviews drafts for rule compliance and quality" \
-     --prompt-file ${BASE}/prompts/reviewer-<UTC-compact>.md
+     --text-file ${BASE}/prompts/reviewer-<UTC-compact>.md
    ```
 
    Parse `agent_id` from the JSON response and substitute it for `<reviewer-agent-id>` in every subsequent command.

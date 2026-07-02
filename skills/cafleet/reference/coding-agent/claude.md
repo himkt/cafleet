@@ -20,8 +20,6 @@ Every note names the base token/instruction it qualifies.
 | Note | Applies at |
 |------|-----------|
 | `AskUserQuestion` takes ≤ 4 options/question; the built-in "Other" is the free-text path (don't add an explicit "Other"). Question shapes → form: choice among ≤ 4 labeled options; approve-or-revise (two options); continue-or-abort (two options); open-ended draft-comparison (2–4 full candidate bodies). | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions; `cafleet-design-doc/create/create.md` Step 2 question batch |
-| The `AskUserQuestion` frame spans ~120–200 lines — bump `cafleet pane capture --lines` accordingly to show it in full. | `{decision_surface}` relay — `cafleet/reference/director.md` § Answering a member's relayed question |
-| Relay a member's question: ask the user, then forward via `cafleet pane input --choice N \| --freetext` (keystrokes: `docs/spec/cli-options.md#pane-input`). | `{decision_surface}` relay — same |
 | `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet`: register a sub-topic with `TaskCreate`, claim with `TaskUpdate` (owner + `in_progress`), complete with `TaskUpdate` (`completed`), check progress with `TaskList`. | `{task_coord}` — `cafleet-research/report/report.md` task coordination |
 
 ## Worked resolution
