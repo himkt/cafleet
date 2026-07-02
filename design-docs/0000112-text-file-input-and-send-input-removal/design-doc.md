@@ -10,12 +10,12 @@ Give every text-body CLI command (`message send`, `message broadcast`, `member n
 
 ## Success Criteria
 
-- [ ] All four text-body commands accept exactly `--text <str>` and `--text-file <path>`, mutually exclusive, exactly one required.
-- [ ] `--text-file` accepts an absolute or CWD-relative path, reads UTF-8, and treats `-` as "read the whole body from stdin".
-- [ ] A single shared helper is the sole source of truth for mutual-exclusivity, path resolution, UTF-8 decoding, stdin handling, empty-body rejection, and the associated error strings.
-- [ ] `member create` exposes the same pair as the other three: `--prompt-file` is hard-renamed to `--text-file` (no alias), `--text` is added, and the positional prompt argument is removed.
-- [ ] `member send-input` and the `send_choice_key` / `send_freetext_and_submit` tmux helpers no longer exist anywhere in source, tests, docs, SPEC, or skills.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
+- [x] All four text-body commands accept exactly `--text <str>` and `--text-file <path>`, mutually exclusive, exactly one required.
+- [x] `--text-file` accepts an absolute or CWD-relative path, reads UTF-8, and treats `-` as "read the whole body from stdin".
+- [x] A single shared helper is the sole source of truth for mutual-exclusivity, path resolution, UTF-8 decoding, stdin handling, empty-body rejection, and the associated error strings.
+- [x] `member create` exposes the same pair as the other three: `--prompt-file` is hard-renamed to `--text-file` (no alias), `--text` is added, and the positional prompt argument is removed.
+- [x] `member send-input` and the `send_choice_key` / `send_freetext_and_submit` tmux helpers no longer exist anywhere in source, tests, docs, SPEC, or skills.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
 
@@ -191,12 +191,12 @@ Delete every occurrence — no deprecation notice anywhere (per `.claude/rules/r
 
 ### Step 7: Tests
 
-- [ ] Delete `cafleet/tests/cli/test_member_send_input.py`, `cafleet/tests/multiplexer/test_tmux_send_helpers.py`, and `cafleet/tests/cli/test_member_prompt_template.py` (the three `MEMBER_PROMPT_TEMPLATE` tests fail at import once the constant is gone). <!-- completed: -->
-- [ ] Remove the `send_choice_key` / `send_freetext_and_submit` slices from `test_tmux.py` (incl. the Esc-first-safeguard assertions) and `test_help_budget.py`; in `test_member_delete.py` (`:297`, `:357`) update the recovery-hint output assertions to the new hint text (no `send-input`). <!-- completed: -->
-- [ ] Update `cafleet/tests/cli/test_member.py`: `--prompt-file` → `--text-file`; add `--text`; remove positional-prompt and default-template cases; add a regression that bare `member create` (neither flag) now errors, and that the positional argument no longer parses. <!-- completed: -->
-- [ ] Add shared-helper tests (new `test_text_input.py`): xor + required, absolute path, CWD-relative path, `-` stdin, UTF-8 decode, CRLF preservation, empty inline/file/stdin rejection, and each file error surface. <!-- completed: -->
-- [ ] Add `--text-file` / stdin / empty-body coverage to `message send`, `message broadcast`, and `member nudge` tests. <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:lint-overlay`; fix any fallout. <!-- completed: -->
+- [x] Delete `cafleet/tests/cli/test_member_send_input.py`, `cafleet/tests/multiplexer/test_tmux_send_helpers.py`, and `cafleet/tests/cli/test_member_prompt_template.py` (the three `MEMBER_PROMPT_TEMPLATE` tests fail at import once the constant is gone). <!-- completed: 2026-07-02T15:45 -->
+- [x] Remove the `send_choice_key` / `send_freetext_and_submit` slices from `test_tmux.py` (incl. the Esc-first-safeguard assertions) and `test_help_budget.py`; in `test_member_delete.py` (`:297`, `:357`) update the recovery-hint output assertions to the new hint text (no `send-input`). <!-- completed: 2026-07-02T15:45 -->
+- [x] Update `cafleet/tests/cli/test_member.py`: `--prompt-file` → `--text-file`; add `--text`; remove positional-prompt and default-template cases; add a regression that bare `member create` (neither flag) now errors, and that the positional argument no longer parses. <!-- completed: 2026-07-02T15:45 -->
+- [x] Add shared-helper tests (new `test_text_input.py`): xor + required, absolute path, CWD-relative path, `-` stdin, UTF-8 decode, CRLF preservation, empty inline/file/stdin rejection, and each file error surface. <!-- completed: 2026-07-02T15:45 -->
+- [x] Add `--text-file` / stdin / empty-body coverage to `message send`, `message broadcast`, and `member nudge` tests. <!-- completed: 2026-07-02T15:45 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:lint-overlay`; fix any fallout. <!-- completed: 2026-07-02T15:45 -->
 
 ---
 
