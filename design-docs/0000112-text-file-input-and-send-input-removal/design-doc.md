@@ -1,7 +1,7 @@
 # Unified `--text` / `--text-file` Input and `send-input` Removal
 
 **Status**: Approved
-**Progress**: 0/35 tasks complete
+**Progress**: 7/35 tasks complete
 **Last Updated**: 2026-07-02
 
 ## Overview
@@ -144,13 +144,13 @@ Delete every occurrence — no deprecation notice anywhere (per `.claude/rules/r
 
 ### Step 1: Concepts & user docs
 
-- [ ] `docs/concepts/member-lifecycle.md` — change the spawn-prompt line ("supplied inline (`-- "<prompt>"`) or via `--prompt-file`") to `--text` (inline) / `--text-file` (file or `-` stdin). <!-- completed: -->
-- [ ] `docs/spec/cli-options.md` — replace the `### agent spawn` `--prompt-file` + positional rows (~lines 493–571) with `--text` / `--text-file`; document xor + exactly-one-required, absolute/CWD-relative paths, `-` stdin, and the empty-body rejection. This also removes the "Neither `--prompt-file` nor positional prompt | The built-in default prompt template, verbatim." state row (~line 519) — the neither-flag case is now a usage error, so that phrase and its "default template" wording go. <!-- completed: -->
-- [ ] `docs/spec/cli-options.md` — add `--text-file` to `message send`, `message broadcast`, and `member nudge`; add the shared text-input error-message rows (mutual-exclusivity, empty, file-not-found/unreadable/non-UTF-8, empty-stdin). <!-- completed: -->
-- [ ] `docs/spec/cli-options.md` — remove the `### `pane input`` section (~666–733), its error rows (~926–929), and its subcommand-summary line. <!-- completed: -->
-- [ ] `docs/how-to/monitor-and-recover.md` — remove the `pane input --choice/--freetext` recovery-ladder rung and renumber the ladder; update the monitor-spawn example from `--prompt-file` to `--text-file`. <!-- completed: -->
-- [ ] `docs/concepts/token-reduction.md` — the "Slim member spawn prompt" row cites "The default spawn-prompt template is ~60 tokens"; reword to drop the removed default-template reference (spawn prompts are now always explicitly supplied via `--text` / `--text-file`; the slim-identity-via-env-vars point stays). <!-- completed: -->
-- [ ] `docs/concepts/bash-routing.md` — the "The default spawn-prompt template tells the member … Bash tool" sentence references the removed default template; reword so it does not name a `member create` default that no longer exists. <!-- completed: -->
+- [x] `docs/concepts/member-lifecycle.md` — change the spawn-prompt line ("supplied inline (`-- "<prompt>"`) or via `--prompt-file`") to `--text` (inline) / `--text-file` (file or `-` stdin). <!-- completed: 2026-07-02T14:11 -->
+- [x] `docs/spec/cli-options.md` — replace the `### agent spawn` `--prompt-file` + positional rows (~lines 493–571) with `--text` / `--text-file`; document xor + exactly-one-required, absolute/CWD-relative paths, `-` stdin, and the empty-body rejection. This also removes the "Neither `--prompt-file` nor positional prompt | The built-in default prompt template, verbatim." state row (~line 519) — the neither-flag case is now a usage error, so that phrase and its "default template" wording go. <!-- completed: 2026-07-02T14:11 -->
+- [x] `docs/spec/cli-options.md` — add `--text-file` to `message send`, `message broadcast`, and `member nudge`; add the shared text-input error-message rows (mutual-exclusivity, empty, file-not-found/unreadable/non-UTF-8, empty-stdin). <!-- completed: 2026-07-02T14:11 -->
+- [x] `docs/spec/cli-options.md` — remove the `### `pane input`` section (~666–733), its error rows (~926–929), and its subcommand-summary line. <!-- completed: 2026-07-02T14:11 -->
+- [x] `docs/how-to/monitor-and-recover.md` — remove the `pane input --choice/--freetext` recovery-ladder rung and renumber the ladder; update the monitor-spawn example from `--prompt-file` to `--text-file`. <!-- completed: 2026-07-02T14:11 -->
+- [x] `docs/concepts/token-reduction.md` — the "Slim member spawn prompt" row cites "The default spawn-prompt template is ~60 tokens"; reword to drop the removed default-template reference (spawn prompts are now always explicitly supplied via `--text` / `--text-file`; the slim-identity-via-env-vars point stays). <!-- completed: 2026-07-02T14:11 -->
+- [x] `docs/concepts/bash-routing.md` — the "The default spawn-prompt template tells the member … Bash tool" sentence references the removed default template; reword so it does not name a `member create` default that no longer exists. <!-- completed: 2026-07-02T14:11 -->
 
 ### Step 2: README.md & SPEC.md
 
