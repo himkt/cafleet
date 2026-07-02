@@ -1,6 +1,6 @@
 # Unified `--text` / `--text-file` Input and `send-input` Removal
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 35/35 tasks complete
 **Last Updated**: 2026-07-03
 
@@ -205,3 +205,4 @@ Delete every occurrence — no deprecation notice anywhere (per `.claude/rules/r
 | Date | Changes |
 |------|---------|
 | 2026-07-02 | Initial draft |
+| 2026-07-03 | Implemented all 35 tasks (documentation-first, then code + tests via a CAFleet TDD team). 922 tests + lint + typecheck + lint-overlay green. Independently audited by a Fable 5 reviewer; 6 doc-accuracy / removal-residue findings fixed. Status → Complete (local finalize; no push/PR per user). |
