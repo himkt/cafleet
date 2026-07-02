@@ -1,7 +1,7 @@
 # Unified `--text` / `--text-file` Input and `send-input` Removal
 
 **Status**: Approved
-**Progress**: 7/35 tasks complete
+**Progress**: 11/35 tasks complete
 **Last Updated**: 2026-07-02
 
 ## Overview
@@ -154,10 +154,10 @@ Delete every occurrence — no deprecation notice anywhere (per `.claude/rules/r
 
 ### Step 2: README.md & SPEC.md
 
-- [ ] `README.md` — reflect the unified `--text` / `--text-file` pair on the four commands, the removal of `send-input`, and the removal of `--prompt-file` / the positional prompt argument. <!-- completed: -->
-- [ ] `SPEC.md` — update the spawn-prompt-resolution and `member create` surfaces to `--text` / `--text-file` (xor, required; no default template), including the placeholder-substitution note. <!-- completed: -->
-- [ ] `SPEC.md` — add `--text-file` and the xor/empty semantics to `message send`, `message broadcast`, and `member nudge`. <!-- completed: -->
-- [ ] `SPEC.md` — remove the `member send-input` option spec, the `send_choice_key` / `send_freetext_and_submit` protocol specs + method-list entries + Esc-first note, and the `pane input` future-note. <!-- completed: -->
+- [x] `README.md` — reflect the unified `--text` / `--text-file` pair on the four commands, the removal of `send-input`, and the removal of `--prompt-file` / the positional prompt argument. <!-- completed: 2026-07-02T14:28 -->
+- [x] `SPEC.md` — update the spawn-prompt-resolution and `member create` surfaces to `--text` / `--text-file` (xor, required; no default template), including the placeholder-substitution note. <!-- completed: 2026-07-02T14:28 -->
+- [x] `SPEC.md` — add `--text-file` and the xor/empty semantics to `message send`, `message broadcast`, and `member nudge`. <!-- completed: 2026-07-02T14:28 -->
+- [x] `SPEC.md` — remove the `member send-input` option spec, the `send_choice_key` / `send_freetext_and_submit` protocol specs + method-list entries + Esc-first note, and the `pane input` future-note. <!-- completed: 2026-07-02T14:28 -->
 
 ### Step 3: Skills
 
