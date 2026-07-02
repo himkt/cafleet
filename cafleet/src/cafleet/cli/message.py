@@ -4,6 +4,7 @@ import click
 
 from cafleet import broker, output
 from cafleet.cli._helpers import client_command, fleet_id_option, full_flag, quiet_flag
+from cafleet.cli._text_input import read_text_input
 
 
 @click.group()
@@ -15,7 +16,13 @@ def message() -> None:
 @fleet_id_option
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
 @click.option("--to", type=int, required=True, help="Recipient agent ID")
-@click.option("--text", required=True, help="Message text")
+@click.option("--text", "text", default=None, help="Message body (inline).")
+@click.option(
+    "--text-file",
+    "text_file",
+    default=None,
+    help="File (UTF-8) or '-' for stdin.",
+)
 @full_flag
 @quiet_flag
 @click.pass_context
@@ -28,21 +35,28 @@ def message() -> None:
     ),
     truncates_task_text=True,
 )
-def message_send(ctx, agent_id, to, text, full, quiet):
+def message_send(ctx, agent_id, to, text, text_file, full, quiet):
     """Send a unicast message to another agent."""
     fleet_id = ctx.obj["fleet_id"]
+    body = read_text_input(text, text_file)
     return broker.send_message(
         fleet_id,
         agent_id,
         to,
-        text,
+        body,
     )
 
 
 @message.command("broadcast")
 @fleet_id_option
 @click.option("--agent-id", type=int, required=True, help="Agent ID")
-@click.option("--text", required=True, help="Message text")
+@click.option("--text", "text", default=None, help="Message body (inline).")
+@click.option(
+    "--text-file",
+    "text_file",
+    default=None,
+    help="File (UTF-8) or '-' for stdin.",
+)
 @full_flag
 @click.pass_context
 @client_command(
@@ -54,12 +68,13 @@ def message_send(ctx, agent_id, to, text, full, quiet):
     ),
     truncates_task_text=True,
 )
-def message_broadcast(ctx, agent_id, text, full):
+def message_broadcast(ctx, agent_id, text, text_file, full):
     """Broadcast a message to all agents."""
+    body = read_text_input(text, text_file)
     return broker.broadcast_message(
         ctx.obj["fleet_id"],
         agent_id,
-        text,
+        body,
     )
 
 

@@ -1,58 +1,29 @@
-"""Tests for ``resolve_prompt`` and ``cafleet member create``.
+"""Tests for ``cafleet member create`` and ``cafleet member nudge``.
 
-Covers placeholder substitution (default + custom + doubled brace + error
-branches), `--prompt-file` validation matrix, spawn-argv shape per backend,
-permission-mode injection, and binary-missing exit messages.
+Covers the unified ``--text`` / ``--text-file`` input pair (design 0000112 §3):
+xor + exactly-one-required, inline placeholder substitution, the ``--text-file``
+path / stdin / error matrix, spawn-argv shape per backend, permission-mode
+injection, ``--role`` handling, and the ``member nudge`` body-input surface.
+
+Body resolution + validation live in the shared ``read_text_input`` helper
+(unit-tested in ``test_text_input.py``); ``member create`` additionally runs
+``substitute_spawn_placeholders`` over the resolved body. These tests exercise
+both through the real CLI.
 """
 
 import json
 import os
 import sys
 
-import click
 import pytest
 from click.testing import CliRunner
 
 from cafleet import broker, config
 from cafleet.broker import _shared
 from cafleet.cli import cli
-from cafleet.cli._prompt import resolve_prompt
 from cafleet.db.models import Agent
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.multiplexer import tmux as multiplexer_tmux
-
-
-@pytest.fixture
-def fleet_id():
-    return 100
-
-
-@pytest.fixture
-def director_agent_id():
-    return 200
-
-
-@pytest.fixture
-def new_agent_id():
-    return 300
-
-
-@pytest.fixture
-def ctx(fleet_id):
-    command = click.Command("member-create")
-    context = click.Context(command)
-    context.obj = {"fleet_id": fleet_id, "json_output": False}
-    return context
-
-
-@pytest.fixture
-def mock_get_agent(monkeypatch):
-    def fake_get_agent(agent_id, fleet_id):
-        return {"agent_id": agent_id, "name": "Director-X"}
-
-    monkeypatch.setattr(broker, "get_agent", fake_get_agent)
-    return fake_get_agent
-
 
 _CLI_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
@@ -119,12 +90,14 @@ def _invoke_member_create(
     director_id: int,
     *,
     coding_agent: str = "claude",
-    prompt_file: str | None = None,
-    inline_prompt: str | None = None,
+    text: str | None = None,
+    text_file: str | None = None,
+    positional: str | None = None,
     name: str = "Member",
     json_output: bool = False,
     model: str | None = None,
     role: str | None = None,
+    stdin: bytes | None = None,
 ):
     args: list[str] = []
     if json_output:
@@ -149,115 +122,126 @@ def _invoke_member_create(
         args.extend(["--model", model])
     if role is not None:
         args.extend(["--role", role])
-    if prompt_file is not None:
-        args.extend(["--prompt-file", prompt_file])
-    if inline_prompt is not None:
-        args.extend(["--", inline_prompt])
+    if text_file is not None:
+        args.extend(["--text-file", text_file])
+    if text is not None:
+        args.extend(["--text", text])
+    if positional is not None:
+        args.extend(["--", positional])
+    if stdin is not None:
+        return runner.invoke(cli, args, input=stdin)
     return runner.invoke(cli, args)
 
 
-@pytest.mark.parametrize(
-    ("scenario", "prompt_argv", "asserts"),
-    [
-        ("default_path_all_placeholders_substituted", (), "default"),
-        (
-            "custom_path_substitutes_agent_id",
-            ("message", "for", "{agent_id}"),
-            "agent_id_only",
-        ),
-        (
-            "custom_path_no_placeholders_passthrough",
-            ("no", "placeholders", "here"),
-            "passthrough",
-        ),
-        (
-            "doubled_brace_collapses_to_single",
-            ("data", "is", "{{not", "a", "placeholder}}", "closed"),
-            "doubled_brace",
-        ),
-    ],
-)
-def test_resolve_prompt__substitution_matrix(
-    ctx,
-    director_agent_id,
-    new_agent_id,
-    fleet_id,
-    mock_get_agent,
-    scenario,
-    prompt_argv,
-    asserts,
+# --- member create: unified --text / --text-file surface (§3) --------------
+
+
+def test_member_create__neither_flag_is_usage_error(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
 ):
-    result = resolve_prompt(
-        ctx,
-        director_agent_id=director_agent_id,
-        new_agent_id=new_agent_id,
-        prompt_argv=prompt_argv,
+    # Removing the default template makes a bare `member create` (neither flag)
+    # a usage error resolved by the shared helper — no spawn.
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(runner, fleet_id, director_id)
+    assert result.exit_code == 2, result.output
+    assert "Provide exactly one of --text or --text-file." in result.output
+    assert split_window_recorder == []
+
+
+def test_member_create__positional_prompt_no_longer_parses(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    # The `@click.argument("prompt_argv")` is gone, so the old inline form
+    # `member create ... -- "<prompt>"` is now a parse error.
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner, fleet_id, director_id, positional="hello positional"
     )
-    if asserts == "default":
-        assert str(fleet_id) in result
-        assert str(new_agent_id) in result
-        assert str(director_agent_id) in result
-        for raw in ("{fleet_id}", "{agent_id}", "{director_agent_id}"):
-            assert raw not in result
-    elif asserts == "agent_id_only":
-        assert result == f"message for {new_agent_id}"
-    elif asserts == "passthrough":
-        assert result == "no placeholders here"
-    else:
-        assert result == "data is {not a placeholder} closed"
-        assert str(new_agent_id) not in result
-        assert str(director_agent_id) not in result
+    assert result.exit_code == 2, result.output
+    assert "extra argument" in result.output.lower()
+    assert split_window_recorder == []
 
 
-@pytest.mark.parametrize(
-    ("scenario", "prompt_argv", "expect_message_contains"),
-    [
-        (
-            "unknown_placeholder",
-            ("hello", "{foo}"),
-            ("foo", "{fleet_id}", "{agent_id}"),
-        ),
-        ("unmatched_brace", ("hello", "{unclosed"), ("{{", "}}")),
-        ("attribute_access", ("hello", "{agent_id.foo}"), ("{{", "}}")),
-    ],
-)
-def test_resolve_prompt__malformed_raises_usage_error(
-    ctx,
-    director_agent_id,
-    new_agent_id,
-    mock_get_agent,
-    scenario,
-    prompt_argv,
-    expect_message_contains,
-):
-    with pytest.raises(click.UsageError) as exc_info:
-        resolve_prompt(
-            ctx,
-            director_agent_id=director_agent_id,
-            new_agent_id=new_agent_id,
-            prompt_argv=prompt_argv,
-        )
-    message = str(exc_info.value)
-    for needle in expect_message_contains:
-        assert needle in message
-
-
-def test_prompt_file__relative_path_rejected(
+def test_member_create__text_and_text_file_mutually_exclusive(
+    tmp_path,
     bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
     fleet_id, director_id, runner = bootstrapped_fleet
+    prompt_path = tmp_path / "prompt.md"
+    prompt_path.write_text("hello", encoding="utf-8")
     result = _invoke_member_create(
         runner,
         fleet_id,
         director_id,
-        prompt_file="./foo.md",
+        text="hello inline",
+        text_file=str(prompt_path),
     )
     assert result.exit_code == 2, result.output
-    assert "--prompt-file requires an absolute path" in result.output
-    assert "./foo.md" in result.output
+    assert "--text and --text-file are mutually exclusive." in result.output
     assert split_window_recorder == []
+
+
+def test_member_create__inline_text_substitutes_placeholders(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    # --text feeds the same placeholder substitution the old positional form did.
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        text="agent={agent_id} director={director_agent_id}",
+        json_output=True,
+    )
+    assert result.exit_code == 0, result.output
+    new_id = json.loads(result.output)["agent_id"]
+    assert (
+        split_window_recorder[0]["command"][-1]
+        == f"agent={new_id} director={director_id}"
+    )
+
+
+def test_member_create__text_file_relative_path_accepted(
+    tmp_path,
+    monkeypatch,
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    # The old --prompt-file rejected relative paths; --text-file resolves them
+    # against the CWD (design 0000112 §1 relaxation).
+    fleet_id, director_id, runner = bootstrapped_fleet
+    (tmp_path / "prompt.md").write_text("relative body", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    result = _invoke_member_create(runner, fleet_id, director_id, text_file="prompt.md")
+    assert result.exit_code == 0, result.output
+    assert split_window_recorder[0]["command"][-1] == "relative body"
+
+
+def test_member_create__text_file_dash_reads_stdin(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    # `--text-file -` reads the spawn prompt from stdin, then substitutes.
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        director_id,
+        text_file="-",
+        stdin=b"spawn body from stdin",
+    )
+    assert result.exit_code == 0, result.output
+    assert split_window_recorder[0]["command"][-1] == "spawn body from stdin"
 
 
 @pytest.mark.parametrize(
@@ -276,7 +260,7 @@ def test_prompt_file__relative_path_rejected(
         ("unknown_placeholder", "unknown_placeholder", 2, "Unknown placeholder"),
     ],
 )
-def test_prompt_file__error_variants(
+def test_member_create__text_file_error_variants(
     tmp_path,
     bootstrapped_fleet,
     split_window_recorder,
@@ -301,7 +285,7 @@ def test_prompt_file__error_variants(
     elif fixture_setup == "bad_utf8":
         target = tmp_path / "bad.md"
         target.write_bytes(b"\xff\xfe\xfd")
-    else:
+    else:  # unknown_placeholder — read succeeds, substitution rejects it (exit 2)
         target = tmp_path / "prompt.md"
         target.write_text("hi {unknown}", encoding="utf-8")
 
@@ -309,7 +293,7 @@ def test_prompt_file__error_variants(
         runner,
         fleet_id,
         director_id,
-        prompt_file=str(target),
+        text_file=str(target),
     )
     assert result.exit_code == expected_exit, result.output
     assert expected_substring in result.output
@@ -320,7 +304,7 @@ def test_prompt_file__error_variants(
     sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0),
     reason="POSIX-only test; root bypasses the read-permission check",
 )
-def test_prompt_file__not_readable_exits_with_message(
+def test_member_create__text_file_not_readable_exits_with_message(
     tmp_path,
     bootstrapped_fleet,
     split_window_recorder,
@@ -335,7 +319,7 @@ def test_prompt_file__not_readable_exits_with_message(
             runner,
             fleet_id,
             director_id,
-            prompt_file=str(unreadable_file),
+            text_file=str(unreadable_file),
         )
         assert result.exit_code == 1, result.output
         assert "file is not readable" in result.output
@@ -345,62 +329,6 @@ def test_prompt_file__not_readable_exits_with_message(
         unreadable_file.chmod(0o644)
 
 
-def test_prompt_file__mutually_exclusive_with_positional(
-    tmp_path,
-    bootstrapped_fleet,
-    split_window_recorder,
-    stub_coding_agent_binaries,
-):
-    fleet_id, director_id, runner = bootstrapped_fleet
-    prompt_path = tmp_path / "prompt.md"
-    prompt_path.write_text("hello", encoding="utf-8")
-    result = _invoke_member_create(
-        runner,
-        fleet_id,
-        director_id,
-        prompt_file=str(prompt_path),
-        inline_prompt="hello positional",
-    )
-    assert result.exit_code == 2, result.output
-    assert (
-        "--prompt-file and the positional prompt argument are mutually exclusive"
-        in result.output
-    )
-    assert split_window_recorder == []
-
-
-def test_prompt_file__parity_with_positional_form(tmp_path):
-    fleet_id = 100
-    director_id = 200
-    new_agent_id = 300
-    template = "hello {agent_id} from director {director_agent_id}"
-
-    command = click.Command("member-create")
-    ctx = click.Context(command)
-    ctx.obj = {"fleet_id": fleet_id, "json_output": False}
-
-    inline_result = resolve_prompt(
-        ctx,
-        director_agent_id=director_id,
-        new_agent_id=new_agent_id,
-        prompt_argv=tuple(template.split(" ")),
-        prompt_file=None,
-    )
-    prompt_path = tmp_path / "prompt.md"
-    prompt_path.write_text(template, encoding="utf-8")
-    file_result = resolve_prompt(
-        ctx,
-        director_agent_id=director_id,
-        new_agent_id=new_agent_id,
-        prompt_argv=(),
-        prompt_file=str(prompt_path),
-    )
-
-    assert inline_result == file_result
-    assert str(new_agent_id) in file_result
-    assert str(director_id) in file_result
-
-
 @pytest.mark.parametrize(
     ("scenario", "content"),
     [
@@ -408,7 +336,7 @@ def test_prompt_file__parity_with_positional_form(tmp_path):
         ("preserves_surrounding_whitespace", "   \n  hello world  \n   "),
     ],
 )
-def test_prompt_file__preserves_whitespace_verbatim(
+def test_member_create__text_file_preserves_whitespace_verbatim(
     tmp_path,
     bootstrapped_fleet,
     split_window_recorder,
@@ -423,7 +351,7 @@ def test_prompt_file__preserves_whitespace_verbatim(
         runner,
         fleet_id,
         director_id,
-        prompt_file=str(prompt_path),
+        text_file=str(prompt_path),
     )
     assert result.exit_code == 0, result.output
     assert split_window_recorder[0]["command"][-1] == content
@@ -445,7 +373,7 @@ def test_member_create__backend_spawn_argv_shape(
         fleet_id,
         director_id,
         coding_agent=coding_agent,
-        prompt_file=str(prompt_path),
+        text_file=str(prompt_path),
         name=f"Member-{coding_agent}",
     )
     assert result.exit_code == 0, result.output
@@ -482,7 +410,7 @@ def test_member_create__codex_placement_records_codex(
         fleet_id,
         director_id,
         coding_agent="codex",
-        inline_prompt="hello",
+        text="hello",
         name="Codex-Member",
         json_output=True,
     )
@@ -505,7 +433,7 @@ def test_member_create__binary_missing_exits_with_backend_specific_message(
         fleet_id,
         director_id,
         coding_agent=coding_agent,
-        inline_prompt="hello",
+        text="hello",
         name=coding_agent.capitalize(),
     )
     assert result.exit_code == 1, result.output
@@ -523,7 +451,7 @@ def test_member_create__model_claude_tokens_between_name_and_prompt(
         runner,
         fleet_id,
         director_id,
-        inline_prompt="hello",
+        text="hello",
         name="Drafter",
         model="sonnet",
     )
@@ -551,7 +479,7 @@ def test_member_create__model_codex_tokens_between_sandbox_and_prompt(
         fleet_id,
         director_id,
         coding_agent="codex",
-        inline_prompt="hello",
+        text="hello",
         name="Codex-Member",
         model="gpt-5.4-mini",
     )
@@ -584,7 +512,7 @@ def test_member_create__model_opencode_tokens_before_prompt_pair(
         fleet_id,
         director_id,
         coding_agent="opencode",
-        inline_prompt="hello",
+        text="hello",
         name="OC-Member",
         model="anthropic/claude-sonnet-4-6",
     )
@@ -616,7 +544,7 @@ def test_member_create__no_model_flag_emits_no_model_token(
         fleet_id,
         director_id,
         coding_agent=coding_agent,
-        inline_prompt="hello",
+        text="hello",
         name="Plain-Member",
     )
     assert result.exit_code == 0, result.output
@@ -636,7 +564,7 @@ def test_member_create__claude_codex_empty_model_passes_through(
         fleet_id,
         director_id,
         coding_agent=coding_agent,
-        inline_prompt="hello",
+        text="hello",
         name="Empty-Model",
         model="",
     )
@@ -657,7 +585,7 @@ def test_member_create__opencode_invalid_model_exits_2_with_no_side_effects(
         fleet_id,
         director_id,
         coding_agent="opencode",
-        inline_prompt="hello",
+        text="hello",
         name="Rejected-Member",
         model="no-slash",
     )
@@ -686,7 +614,7 @@ def test_member_create__opencode_invalid_model_wins_over_missing_binary(
         fleet_id,
         director_id,
         coding_agent="opencode",
-        inline_prompt="hello",
+        text="hello",
         name="Rejected-Member",
         model="no-slash",
     )
@@ -706,7 +634,7 @@ def test_member_create__claude_default_injects_dontask_permission_mode(
         runner,
         fleet_id,
         director_id,
-        inline_prompt="hello",
+        text="hello",
         name="Drafter",
     )
     assert result.exit_code == 0, result.output
@@ -739,7 +667,7 @@ def test_member_create__role_monitor_sets_kind_not_enrolled(
         runner,
         fleet_id,
         director_id,
-        inline_prompt="hello",
+        text="hello",
         name="Watcher",
         role="monitor",
         json_output=True,
@@ -763,7 +691,7 @@ def test_member_create__role_member_enrolls_720(
         runner,
         fleet_id,
         director_id,
-        inline_prompt="hello",
+        text="hello",
         name="Ordinary",
         role="member",
         json_output=True,
@@ -789,7 +717,7 @@ def test_member_create__default_role_is_member_enrolled_720(
         runner,
         fleet_id,
         director_id,
-        inline_prompt="hello",
+        text="hello",
         name="Plain",
         json_output=True,
     )
@@ -811,7 +739,7 @@ def test_member_create__second_role_monitor_rejected(
         runner,
         fleet_id,
         director_id,
-        inline_prompt="hi",
+        text="hi",
         name="Watcher-1",
         role="monitor",
     )
@@ -822,7 +750,7 @@ def test_member_create__second_role_monitor_rejected(
         runner,
         fleet_id,
         director_id,
-        inline_prompt="hi",
+        text="hi",
         name="Watcher-2",
         role="monitor",
     )
@@ -841,7 +769,7 @@ def test_member_create__invalid_role_choice_rejected(
         runner,
         fleet_id,
         director_id,
-        inline_prompt="hi",
+        text="hi",
         name="Bad-Role",
         role="director",
     )
@@ -849,7 +777,7 @@ def test_member_create__invalid_role_choice_rejected(
     assert "not one of" in result.output
 
 
-# --- member nudge (design 0000092 §4, B5) ----------------------------------
+# --- member nudge (design 0000092 §4, B5; 0000112 §3 text-input) -----------
 
 
 @pytest.fixture
@@ -873,9 +801,11 @@ def _invoke_member_nudge(
     fleet_id: int,
     sender_id: int,
     target_id: int,
-    text: str,
+    text: str | None = None,
     *,
+    text_file: str | None = None,
     json_output: bool = False,
+    stdin: bytes | None = None,
 ):
     args: list[str] = []
     if json_output:
@@ -890,10 +820,14 @@ def _invoke_member_nudge(
             str(sender_id),
             "--member-id",
             str(target_id),
-            "--text",
-            text,
         ]
     )
+    if text_file is not None:
+        args.extend(["--text-file", text_file])
+    if text is not None:
+        args.extend(["--text", text])
+    if stdin is not None:
+        return runner.invoke(cli, args, input=stdin)
     return runner.invoke(cli, args)
 
 
@@ -902,7 +836,7 @@ def _create_member(
 ) -> int:
     """Create an ordinary member via the CLI; return its agent id (pane %42)."""
     result = _invoke_member_create(
-        runner, fleet_id, director_id, inline_prompt="hi", name=name, json_output=True
+        runner, fleet_id, director_id, text="hi", name=name, json_output=True
     )
     assert result.exit_code == 0, result.output
     return json.loads(result.output)["agent_id"]
@@ -975,6 +909,58 @@ def test_member_nudge__persisted_task_is_ackable_by_recipient(
     assert broker.poll_tasks(target_id) == []
 
 
+def test_member_nudge__text_file_body_reaches_target(
+    tmp_path,
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    inline_preview_recorder,
+):
+    # member nudge gains the same --text-file input as the other commands; the
+    # file body is delivered verbatim (no placeholder substitution).
+    fleet_id, director_id, runner = bootstrapped_fleet
+    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    body_file = tmp_path / "nudge.md"
+    body_file.write_text("long re-engage body {agent_id}", encoding="utf-8")
+
+    result = _invoke_member_nudge(
+        runner,
+        fleet_id,
+        sender_id,
+        director_id,
+        text_file=str(body_file),
+        json_output=True,
+    )
+    assert result.exit_code == 0, result.output
+    task_id = json.loads(result.output)["task_id"]
+    task = broker.get_task(fleet_id, task_id)["task"]
+    # Verbatim — the {agent_id} token is NOT substituted for nudge bodies.
+    assert task["text"] == "long re-engage body {agent_id}"
+
+
+def test_member_nudge__stdin_body_reaches_target(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    inline_preview_recorder,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+
+    result = _invoke_member_nudge(
+        runner,
+        fleet_id,
+        sender_id,
+        director_id,
+        text_file="-",
+        json_output=True,
+        stdin=b"piped nudge body",
+    )
+    assert result.exit_code == 0, result.output
+    task_id = json.loads(result.output)["task_id"]
+    assert broker.get_task(fleet_id, task_id)["task"]["text"] == "piped nudge body"
+
+
 @pytest.mark.parametrize("scenario", ["unknown", "inactive", "cross_fleet"])
 def test_member_nudge__target_not_found_exits_1(
     bootstrapped_fleet,
@@ -1023,6 +1009,63 @@ def test_member_nudge__empty_text_rejected_exit_2(
     result = _invoke_member_nudge(runner, fleet_id, sender_id, director_id, text)
     assert result.exit_code == 2, result.output
     assert "text may not be empty." in result.output
+    assert inline_preview_recorder == []
+
+
+def test_member_nudge__empty_text_file_rejected_exit_1(
+    tmp_path,
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    inline_preview_recorder,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    empty_file = tmp_path / "empty.md"
+    empty_file.write_bytes(b"")
+    result = _invoke_member_nudge(
+        runner, fleet_id, sender_id, director_id, text_file=str(empty_file)
+    )
+    assert result.exit_code == 1, result.output
+    assert f"--text-file {empty_file}: file is empty." in result.output
+    assert inline_preview_recorder == []
+
+
+def test_member_nudge__neither_flag_rejected_exit_2(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    inline_preview_recorder,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    result = _invoke_member_nudge(runner, fleet_id, sender_id, director_id)
+    assert result.exit_code == 2, result.output
+    assert "Provide exactly one of --text or --text-file." in result.output
+    assert inline_preview_recorder == []
+
+
+def test_member_nudge__both_flags_rejected_exit_2(
+    tmp_path,
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    inline_preview_recorder,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    body_file = tmp_path / "nudge.md"
+    body_file.write_text("file body", encoding="utf-8")
+    result = _invoke_member_nudge(
+        runner,
+        fleet_id,
+        sender_id,
+        director_id,
+        "inline body",
+        text_file=str(body_file),
+    )
+    assert result.exit_code == 2, result.output
+    assert "--text and --text-file are mutually exclusive." in result.output
     assert inline_preview_recorder == []
 
 
@@ -1207,36 +1250,6 @@ def make_bootstrapped_fleet(tmp_path, monkeypatch, _reset_engine_singletons):
     return _make
 
 
-def test_resolve_prompt__coding_agent_token_substitutes_resolved_backend(
-    ctx, director_agent_id, new_agent_id
-):
-    # A {coding_agent} placeholder is replaced with the backend passed in.
-    result = resolve_prompt(
-        ctx,
-        director_agent_id=director_agent_id,
-        new_agent_id=new_agent_id,
-        prompt_argv=("CODING", "AGENT:", "{coding_agent}"),
-        coding_agent="codex",
-    )
-    assert result == "CODING AGENT: codex"
-
-
-def test_resolve_prompt__unknown_placeholder_message_now_lists_coding_agent(
-    ctx, director_agent_id, new_agent_id
-):
-    # An unknown placeholder still raises, and the supported-placeholder list
-    # in the message now advertises {coding_agent}.
-    with pytest.raises(click.UsageError) as exc_info:
-        resolve_prompt(
-            ctx,
-            director_agent_id=director_agent_id,
-            new_agent_id=new_agent_id,
-            prompt_argv=("hello", "{foo}"),
-            coding_agent="claude",
-        )
-    assert "{coding_agent}" in str(exc_info.value)
-
-
 @pytest.mark.parametrize("backend", ["codex", "opencode"])
 def test_member_create__role_monitor_inherits_director_backend(
     make_bootstrapped_fleet,
@@ -1252,7 +1265,7 @@ def test_member_create__role_monitor_inherits_director_backend(
         runner,
         fleet_id,
         director_id,
-        inline_prompt="CODING AGENT: {coding_agent}",
+        text="CODING AGENT: {coding_agent}",
         name="Watcher",
         role="monitor",
         json_output=True,
@@ -1270,6 +1283,9 @@ def test_member_create__role_monitor_explicit_coding_agent_wins(
     stub_coding_agent_binaries,
 ):
     # An explicit --coding-agent claude beats the codex Director's backend.
+    # Build the argv directly: _invoke_member_create omits --coding-agent when
+    # its value is claude (the omit-for-claude default the other tests rely on),
+    # so proving "explicit claude wins" requires actually sending the flag.
     fleet_id, director_id, runner = make_bootstrapped_fleet("codex")
     result = runner.invoke(
         cli,
@@ -1284,12 +1300,12 @@ def test_member_create__role_monitor_explicit_coding_agent_wins(
             "--name",
             "Watcher",
             "--description",
-            "monitor for tests",
+            "Watcher for tests",
             "--role",
             "monitor",
             "--coding-agent",
             "claude",
-            "--",
+            "--text",
             "hello",
         ],
     )
@@ -1310,7 +1326,7 @@ def test_member_create__role_member_omitted_flag_stays_claude(
         runner,
         fleet_id,
         director_id,
-        inline_prompt="hello",
+        text="hello",
         name="Ordinary",
         role="member",
         json_output=True,
@@ -1335,7 +1351,7 @@ def test_member_create__role_monitor_fail_loud_missing_placement(
         runner,
         fleet_id,
         no_placement_id,
-        inline_prompt="hello",
+        text="hello",
         name="Watcher",
         role="monitor",
     )
@@ -1356,7 +1372,7 @@ def test_member_create__role_monitor_fail_loud_director_not_found(
         runner,
         fleet_id,
         999999,
-        inline_prompt="hello",
+        text="hello",
         name="Watcher",
         role="monitor",
     )

@@ -71,12 +71,10 @@ def _send_literal_then_enter(
         # member that might be on a prompt) and ``send_inline_preview`` (every
         # inbound ``message send`` / ``broadcast`` / ``member nudge`` — any
         # recipient, the Director included). It is NOT applied where a leading
-        # ``Esc`` would mis-fire — ``send_exit`` (``Esc`` before ``/exit``),
-        # ``send_bash_command`` (``Esc`` before ``! <cmd>``), and the
-        # ``send-input`` helpers (``send_choice_key`` / ``send_freetext_and_submit``
-        # deliberately ANSWER a live AskUserQuestion prompt that an ``Esc`` would
-        # dismiss) — nor where the pane is never on a prompt: ``send_wake_trigger``
-        # (the monitoring member's own read-only pane).
+        # ``Esc`` would mis-fire — ``send_exit`` (``Esc`` before ``/exit``) and
+        # ``send_bash_command`` (``Esc`` before ``! <cmd>``) — nor where the pane
+        # is never on a prompt: ``send_wake_trigger`` (the monitoring member's own
+        # read-only pane).
         _run_tolerating_pane_gone(
             ["tmux", "send-keys", "-t", target_pane_id, "Escape"],
             ignore_missing=ignore_missing,
@@ -306,19 +304,6 @@ class TmuxMultiplexer:
         except TmuxError:
             return False
         return True
-
-    def send_choice_key(self, *, target_pane_id: str, digit: int) -> None:
-        """Send a single digit key in {1, 2, 3} to the pane (no Enter)."""
-        if digit not in (1, 2, 3):
-            raise TmuxError(f"send_choice_key: digit must be 1, 2, or 3 (got {digit})")
-        _run(["tmux", "send-keys", "-t", target_pane_id, str(digit)])
-
-    def send_freetext_and_submit(self, *, target_pane_id: str, text: str) -> None:
-        """Send ``4`` + literal ``text`` + Enter as three separate send-keys calls."""
-        if "\n" in text or "\r" in text:
-            raise TmuxError("send_freetext_and_submit: text may not contain newlines")
-        _run(["tmux", "send-keys", "-t", target_pane_id, "4"])
-        _send_literal_then_enter(target_pane_id=target_pane_id, payload=text)
 
     def send_bash_command(self, *, target_pane_id: str, command: str) -> None:
         """Send ``! <command>`` + Enter, routing shell via the coding agent's ``!`` shortcut."""

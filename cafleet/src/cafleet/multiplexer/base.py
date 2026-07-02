@@ -209,35 +209,6 @@ class Multiplexer(Protocol):
         """
         ...
 
-    def send_choice_key(self, *, target_pane_id: str, digit: int) -> None:
-        """Keystroke a single digit (no Enter) into the pane.
-
-        Used by Director-driven AskUserQuestion answers to select one of the
-        first three options. The tmux backend rejects digits outside
-        ``{1, 2, 3}``. Enter is not sent because the AskUserQuestion frame
-        commits the selection on digit press.
-
-        Args:
-            target_pane_id: Recipient pane id.
-            digit: Decimal digit ``1``, ``2``, or ``3``.
-        """
-        ...
-
-    def send_freetext_and_submit(self, *, target_pane_id: str, text: str) -> None:
-        """Keystroke ``4`` + literal ``text`` + Enter into the pane.
-
-        Used by Director-driven AskUserQuestion freetext answers. The leading
-        ``4`` selects the "Type something" option in the AskUserQuestion
-        frame; the literal text is then typed in and Enter submits it. The
-        tmux backend rejects newlines in ``text`` so each call is exactly
-        one prompt submission.
-
-        Args:
-            target_pane_id: Recipient pane id.
-            text: Literal text to type into the pane (no newlines).
-        """
-        ...
-
     def send_bash_command(self, *, target_pane_id: str, command: str) -> None:
         """Keystroke ``! <command>`` + Enter into the pane.
 

@@ -1,8 +1,8 @@
 # Unified `--text` / `--text-file` Input and `send-input` Removal
 
 **Status**: Approved
-**Progress**: 19/35 tasks complete
-**Last Updated**: 2026-07-02
+**Progress**: 35/35 tasks complete
+**Last Updated**: 2026-07-03
 
 ## Overview
 
@@ -172,22 +172,22 @@ Delete every occurrence — no deprecation notice anywhere (per `.claude/rules/r
 
 ### Step 4: Shared helper (code)
 
-- [ ] Rename `cafleet/src/cafleet/cli/_prompt.py` → `_text_input.py`; implement `read_text_input(text, text_file)` per §1 (xor+required, abs/CWD-relative path, `-` stdin, UTF-8, uniform empty-body rejection, generic `--text-file` error strings). <!-- completed: -->
-- [ ] Add `substitute_spawn_placeholders(body, *, fleet_id, agent_id, director_agent_id, coding_agent)` per §2; delete `resolve_prompt`, `read_prompt_file`, and `MEMBER_PROMPT_TEMPLATE`. <!-- completed: -->
+- [x] Rename `cafleet/src/cafleet/cli/_prompt.py` → `_text_input.py`; implement `read_text_input(text, text_file)` per §1 (xor+required, abs/CWD-relative path, `-` stdin, UTF-8, uniform empty-body rejection, generic `--text-file` error strings). <!-- completed: 2026-07-02T15:30 -->
+- [x] Add `substitute_spawn_placeholders(body, *, fleet_id, agent_id, director_agent_id, coding_agent)` per §2; delete `resolve_prompt`, `read_prompt_file`, and `MEMBER_PROMPT_TEMPLATE`. <!-- completed: 2026-07-02T15:30 -->
 
 ### Step 5: Wire the four commands (code)
 
-- [ ] `message.py` `message_send` — drop `required=True` on `--text`, add `--text-file`, resolve via `read_text_input`. <!-- completed: -->
-- [ ] `message.py` `message_broadcast` — drop `required=True` on `--text`, add `--text-file`, resolve via `read_text_input`. <!-- completed: -->
-- [ ] `member.py` `member_nudge` — add `--text-file`, resolve via `read_text_input`, drop the now-redundant `if not text.strip()` check. <!-- completed: -->
-- [ ] `member.py` `member_create` — rename `--prompt-file` → `--text-file`, add `--text`, remove `@click.argument("prompt_argv")` and the prompt mutual-exclusion guard, resolve via `read_text_input` then `substitute_spawn_placeholders`; update the import from `_prompt` → `_text_input`. <!-- completed: -->
+- [x] `message.py` `message_send` — drop `required=True` on `--text`, add `--text-file`, resolve via `read_text_input`. <!-- completed: 2026-07-02T15:30 -->
+- [x] `message.py` `message_broadcast` — drop `required=True` on `--text`, add `--text-file`, resolve via `read_text_input`. <!-- completed: 2026-07-02T15:30 -->
+- [x] `member.py` `member_nudge` — add `--text-file`, resolve via `read_text_input`, drop the now-redundant `if not text.strip()` check. <!-- completed: 2026-07-02T15:30 -->
+- [x] `member.py` `member_create` — rename `--prompt-file` → `--text-file`, add `--text`, remove `@click.argument("prompt_argv")` and the prompt mutual-exclusion guard, resolve via `read_text_input` then `substitute_spawn_placeholders`; update the import from `_prompt` → `_text_input`. <!-- completed: 2026-07-02T15:30 -->
 
 ### Step 6: Remove `send-input` (code)
 
-- [ ] `member.py` — delete the `member_send_input` command and its `--choice` / `--freetext` options. <!-- completed: -->
-- [ ] `member.py` — update the `member delete` timeout recovery hint (~line 412) to drop the `answer any prompt with \`cafleet member send-input\`` clause (leaving `inspect with \`cafleet member capture\`, then re-run … or \`--force\``). <!-- completed: -->
-- [ ] `multiplexer/tmux.py` — delete `send_choice_key` and `send_freetext_and_submit`. <!-- completed: -->
-- [ ] `multiplexer/base.py` — delete the `send_choice_key` / `send_freetext_and_submit` protocol entries. <!-- completed: -->
+- [x] `member.py` — delete the `member_send_input` command and its `--choice` / `--freetext` options. <!-- completed: 2026-07-02T15:39 -->
+- [x] `member.py` — update the `member delete` timeout recovery hint (~line 412) to drop the `answer any prompt with \`cafleet member send-input\`` clause (leaving `inspect with \`cafleet member capture\`, then re-run … or \`--force\``). <!-- completed: 2026-07-02T15:39 -->
+- [x] `multiplexer/tmux.py` — delete `send_choice_key` and `send_freetext_and_submit`. <!-- completed: 2026-07-02T15:39 -->
+- [x] `multiplexer/base.py` — delete the `send_choice_key` / `send_freetext_and_submit` protocol entries. <!-- completed: 2026-07-02T15:39 -->
 
 ### Step 7: Tests
 
