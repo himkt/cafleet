@@ -211,9 +211,9 @@ Edges (who depends on whom):
    rolls back the persisted task on a failed keystroke. Truncation happens
    broker-side; the keystroke mechanics are multiplexer-side.
 2. **CLI ↔ multiplexer ↔ coding-agent agent-spawn.** `cafleet agent spawn`
-   (§6.3) sequences: resolve backend → `validate_model` → `ensure_available`
-   → broker `register_agent` (placement with `tmux_pane_id` unset) → resolve the
-   prompt via the shared `--text` / `--text-file` reader, then substitute
+   (§6.3) sequences: resolve backend → `validate_model` → resolve the prompt
+   body via the shared `--text` / `--text-file` reader → `ensure_available`
+   → broker `register_agent` (placement with `tmux_pane_id` unset) → substitute
    `{fleet_id}` / `{agent_id}` / `{director_agent_id}` / `{coding_agent}`
    placeholders (§6.3) → `build_spawn_argv` (§6.7) →
    multiplexer `split_window` (§6.5), injecting `CAFLEET_DATABASE_URL`,
@@ -1032,15 +1032,15 @@ Options: `--agent-id` (integer, required — the Director),
 `--text` / `--text-file` body pair (exactly one required; §6.3 [text-body
 input](#text-body-input)), and `--full` (documented). Sequence:
 
-1. **Resolve the body** — via the shared `--text` / `--text-file` reader (§6.3
+1. Read `fleet_id`; resolve the coding agent; look up the backend.
+2. **Model validation** — validate `--model`; a failure → usage error (exit 2)
+   with the backend's message, **before any registration or tmux side effect**.
+3. **Resolve the body** — via the shared `--text` / `--text-file` reader (§6.3
    [text-body input](#text-body-input)): exactly-one-required, `-` stdin, abs /
    CWD-relative path, UTF-8, uniform empty-body rejection. A mutual-exclusivity
    or empty-inline error is a usage error (exit 2); a file / stdin surface is an
    application error (exit 1). Resolved **before any registration or tmux side
    effect**; substitution (step 6) is deferred until the new agent id exists.
-2. Read `fleet_id`; resolve the coding agent; look up the backend.
-3. **Model validation** — validate `--model`; a failure → usage error (exit 2)
-   with the backend's message, **before any registration or tmux side effect**.
 4. **Preconditions** — ensure tmux available, the backend binary on PATH, and
    discover the tmux context; any tmux/runtime error → application error (exit
    1).
@@ -1050,7 +1050,7 @@ input](#text-body-input)), and `--full` (documented). Sequence:
    application error verbatim (preserves the one-monitoring-member message); wrap
    any other exception as `register failed: <error>`. Capture the new agent id.
 6. **Substitute placeholders** (below) — run `str.format` over the resolved body
-   (step 1), substituting `{fleet_id}` / `{agent_id}` (the new agent id from step
+   (step 3), substituting `{fleet_id}` / `{agent_id}` (the new agent id from step
    5) / `{director_agent_id}` / `{coding_agent}`. An unknown-placeholder or
    malformed-brace error is a usage error (exit 2); on it,
    **deregister-with-warning, then re-raise the original error unwrapped** —

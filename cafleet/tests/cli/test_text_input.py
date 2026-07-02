@@ -77,8 +77,7 @@ def test_read_text_input__absolute_path_read_and_decoded(tmp_path):
 
 
 def test_read_text_input__relative_path_resolved_against_cwd(tmp_path, monkeypatch):
-    # The old read_prompt_file rejected relative paths; §1 relaxes that — a
-    # relative path is now resolved against the current working directory.
+    # A relative path is resolved against the current working directory (§1).
     (tmp_path / "rel.txt").write_text("relative body", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     assert read_text_input(None, "rel.txt") == "relative body"

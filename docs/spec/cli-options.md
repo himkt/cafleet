@@ -770,7 +770,7 @@ A target with no placement pane prints the `no pane; task queued` variant. A tar
 |---|---|
 | `0` | `--poll-only` keystroke dispatched, or `--message` task persisted (preview dispatched or best-effort no-op). |
 | `1` | Target not found (cross-fleet / unknown / inactive `--agent-id`), an in-fleet target with no placement row, a pending placement, a `--poll-only` non-delivery, or the `--message` sender (`--from`) not active in the fleet — see [Error Messages](#error-messages). |
-| `2` | Both/neither of `--poll-only` / `--message`; `--message` missing `--from` or a body; both/neither of `--text` / `--text-file`; empty / whitespace-only body. |
+| `2` | Both/neither of `--poll-only` / `--message`; `--message` missing `--from` or a body; both/neither of `--text` / `--text-file`; empty / whitespace-only inline `--text`. |
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 

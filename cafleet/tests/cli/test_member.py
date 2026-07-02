@@ -155,8 +155,8 @@ def test_member_create__positional_prompt_no_longer_parses(
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
-    # The `@click.argument("prompt_argv")` is gone, so the old inline form
-    # `member create ... -- "<prompt>"` is now a parse error.
+    # `member create` takes no positional argument — a bare positional after
+    # the options is a parse error.
     fleet_id, director_id, runner = bootstrapped_fleet
     result = _invoke_member_create(
         runner, fleet_id, director_id, positional="hello positional"
@@ -192,7 +192,7 @@ def test_member_create__inline_text_substitutes_placeholders(
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
-    # --text feeds the same placeholder substitution the old positional form did.
+    # --text is placeholder-substituted before it becomes the spawn prompt (§2).
     fleet_id, director_id, runner = bootstrapped_fleet
     result = _invoke_member_create(
         runner,
@@ -216,8 +216,7 @@ def test_member_create__text_file_relative_path_accepted(
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
-    # The old --prompt-file rejected relative paths; --text-file resolves them
-    # against the CWD (design 0000112 §1 relaxation).
+    # `--text-file` resolves a relative path against the CWD (design 0000112 §1).
     fleet_id, director_id, runner = bootstrapped_fleet
     (tmp_path / "prompt.md").write_text("relative body", encoding="utf-8")
     monkeypatch.chdir(tmp_path)

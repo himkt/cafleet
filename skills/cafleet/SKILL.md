@@ -89,7 +89,7 @@ CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFL
 
 ## Team supervision
 
-When a Director spawns a team, the **FIRST** member created is the dedicated monitoring member (`cafleet agent spawn --role monitor --model {monitor_model}`). It owns the heartbeat and gates every ordinary `agent spawn` behind its `ready: monitor live` handshake. The Director never runs `cafleet monitor start` itself.
+When a Director spawns a team, the **FIRST** member created is the dedicated monitoring member (`cafleet agent spawn --role monitor --model {monitor_model} --text-file <rendered monitor prompt>`). It owns the heartbeat and gates every ordinary `agent spawn` behind its `ready: monitor live` handshake. The Director never runs `cafleet monitor start` itself.
 
 For the full governance + heartbeat mechanism (Core Principle, Communication Model, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, Stall Response, Cleanup, the 5-step facilitation loop, Monitor Lifecycle), Read [`reference/supervision.md`](reference/supervision.md).
 

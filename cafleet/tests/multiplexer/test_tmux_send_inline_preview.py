@@ -67,8 +67,8 @@ def test_send_inline_preview__happy_path_envelope_body_and_submit(monkeypatch):
     assert captured[-1] == ["tmux", "send-keys", "-t", "%9", "Enter"]
     assert any(s > 0 for s in sleep_calls)
 
-    # Anti-regression: must NOT prepend the AskUserQuestion option-4 keystroke
-    # (i.e. ``send_freetext_and_submit`` is not reused).
+    # Anti-regression: the inline preview never sends a bare `4` keystroke as
+    # one of its single-arg send-keys calls.
     for argv in captured:
         if argv[:4] == ["tmux", "send-keys", "-t", "%9"] and len(argv) == 5:
             assert argv[4] != "4"
