@@ -2,7 +2,7 @@
 
 import contextlib
 import os
-from typing import NoReturn
+from typing import Literal, NoReturn, overload
 
 import click
 
@@ -25,12 +25,6 @@ def member():
     """Manage tmux-backed member agents (Director only)."""
 
 
-_PLACEMENT_MISSING_DEFAULT = (
-    "agent {member_id} has no placement row; it was not "
-    "spawned via `cafleet member create`."
-)
-
-
 def _require_member_pane(placement: dict, member_id: int, action: str) -> str:
     pane_id = placement["tmux_pane_id"]
     if pane_id is None:
@@ -41,26 +35,40 @@ def _require_member_pane(placement: dict, member_id: int, action: str) -> str:
     return pane_id
 
 
+@overload
 def _load_authorized_member(
     fleet_id: int,
     member_id: int,
     *,
-    placement_missing_template: str = _PLACEMENT_MISSING_DEFAULT,
-) -> tuple[dict, dict]:
+    allow_missing_placement: Literal[True],
+) -> tuple[dict, dict | None]: ...
+
+
+@overload
+def _load_authorized_member(
+    fleet_id: int,
+    member_id: int,
+) -> tuple[dict, dict]: ...
+
+
+def _load_authorized_member(
+    fleet_id: int,
+    member_id: int,
+    *,
+    allow_missing_placement: bool = False,
+) -> tuple[dict, dict | None]:
     """Resolve a fleet-scoped member's agent + placement.
 
     The only boundary is fleet isolation: ``broker.get_agent(member_id,
     fleet_id)`` returns ``None`` for a ``member_id`` that is not an active agent
     of ``fleet_id``, so a cross-fleet / unknown / inactive target raises "not
-    found". There is no caller-auth check — any active in-fleet agent with a
-    placement row (the root Director included) is a valid target; an in-fleet
-    agent without a placement row raises the placement-missing error below.
-
-    ``placement_missing_template`` is a ``{member_id}`` format string for the
-    "no placement" path, because each caller points users at a different
-    follow-up command (``cafleet member create`` by default; ``cafleet agent
-    deregister`` from delete). Pane-id presence is NOT checked here — delete
-    tolerates a pending placement while the others reject it.
+    found". There is no caller-auth check — any active in-fleet agent is a
+    valid target. An in-fleet agent without a placement row raises the
+    placement-missing error, unless the caller opts in via
+    ``allow_missing_placement`` (``member show`` and ``member delete`` do —
+    both resolve a placementless target successfully and receive
+    ``placement=None``). Pane-id presence is NOT checked here — delete
+    tolerates a pending placement while the pane verbs reject it.
 
     Callers MUST use ``target["agent_id"]``, since reassigning the
     ``member_id`` local param does not propagate to the caller.
@@ -72,9 +80,10 @@ def _load_authorized_member(
     if target is None:
         raise click.ClickException(f"Agent {member_id} not found")
     placement = target["placement"]
-    if placement is None:
+    if placement is None and not allow_missing_placement:
         raise click.ClickException(
-            placement_missing_template.format(member_id=member_id)
+            f"agent {member_id} has no placement row; it was not "
+            f"spawned via `cafleet member create`."
         )
     return target, placement
 
@@ -86,8 +95,8 @@ def _deregister_with_warning(new_agent_id: int, *, fleet_id: int) -> None:
     except Exception as drop_exc:
         click.echo(
             f"WARNING: rollback deregister failed — agent {new_agent_id} is "
-            f"orphaned in the registry. Run `cafleet agent deregister "
-            f"--fleet-id {fleet_id} --agent-id {new_agent_id}` manually to clean up. "
+            f"orphaned in the registry. Run `cafleet member delete "
+            f"--fleet-id {fleet_id} --member-id {new_agent_id}` manually to clean up. "
             f"Cause: {drop_exc}",
             err=True,
         )
@@ -313,8 +322,6 @@ def member_delete(ctx, member_id, force):
     """Deregister a member agent and close its tmux pane."""
     fleet_id = ctx.obj["fleet_id"]
 
-    ensure_tmux_or_die()
-
     fleet = broker.get_fleet(fleet_id)
     if fleet is not None and member_id == fleet["director_agent_id"]:
         raise click.ClickException(
@@ -324,23 +331,21 @@ def member_delete(ctx, member_id, force):
     target, placement = _load_authorized_member(
         fleet_id,
         member_id,
-        placement_missing_template=(
-            "agent {member_id} has no placement; use `cafleet agent deregister` instead"
-        ),
+        allow_missing_placement=True,
     )
     member_id = target["agent_id"]
-    pane_id = placement["tmux_pane_id"]
+    pane_id = placement["tmux_pane_id"] if placement is not None else None
 
     if pane_id is None:
-        try:
-            broker.deregister_agent(member_id)
-        except Exception as exc:
-            raise click.ClickException(f"deregister failed: {exc}") from exc
-        pane_status = "(pending — no pane)"
+        # Pure registry soft-delete — no tmux requirement off the pane paths.
+        _deregister_or_die(member_id)
+        pane_status = "(no placement)" if placement is None else "(pending — no pane)"
         _emit_member_delete_output(
             ctx, member_id, pane_status, header="Member deleted."
         )
         return
+
+    ensure_tmux_or_die()
 
     if force:
         try:
@@ -351,10 +356,7 @@ def member_delete(ctx, member_id, force):
                 f"The tmux server may be unreachable. Verify with 'cafleet doctor', "
                 f"then re-run the command."
             ) from exc
-        try:
-            broker.deregister_agent(member_id)
-        except Exception as exc:
-            raise click.ClickException(f"deregister failed: {exc}") from exc
+        _deregister_or_die(member_id)
         pane_status = f"{pane_id} (killed)"
         _emit_member_delete_output(
             ctx, member_id, pane_status, header="Member deleted (--force)."
@@ -381,10 +383,7 @@ def member_delete(ctx, member_id, force):
         ) from exc
 
     if gone:
-        try:
-            broker.deregister_agent(member_id)
-        except Exception as exc:
-            raise click.ClickException(f"deregister failed: {exc}") from exc
+        _deregister_or_die(member_id)
         pane_status = f"{pane_id} (closed)"
         _emit_member_delete_output(
             ctx, member_id, pane_status, header="Member deleted."
@@ -424,6 +423,21 @@ def member_delete(ctx, member_id, force):
     ctx.exit(2)
 
 
+def _deregister_or_die(member_id: int) -> None:
+    """Deregister, surfacing the broker's own guards verbatim.
+
+    The root-Director and Administrator guards raise ``ClickException``
+    subclasses with user-facing messages; only unexpected failures get the
+    ``deregister failed:`` wrapping.
+    """
+    try:
+        broker.deregister_agent(member_id)
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        raise click.ClickException(f"deregister failed: {exc}") from exc
+
+
 def _emit_member_delete_output(
     ctx: click.Context,
     member_id: int,
@@ -443,6 +457,31 @@ def _emit_member_delete_output(
         click.echo(f"  pane_id:   {pane_status}")
 
 
+@member.command("show")
+@fleet_id_option
+@director_member_options
+@click.option(
+    "--full",
+    "full",
+    is_flag=True,
+    default=False,
+    help="Verbose labeled block (text mode only).",
+)
+@click.pass_context
+def member_show(ctx, member_id, full):
+    """Show one agent's detail (registry read; no tmux required)."""
+    fleet_id = ctx.obj["fleet_id"]
+    target, _placement = _load_authorized_member(
+        fleet_id,
+        member_id,
+        allow_missing_placement=True,
+    )
+    if ctx.obj["json_output"]:
+        click.echo(output.format_json(target))
+    else:
+        click.echo(output.format_agent(target, full=full))
+
+
 @member.command("list")
 @fleet_id_option
 @click.option(
@@ -452,12 +491,23 @@ def _emit_member_delete_output(
     default=False,
     hidden=True,
 )
+@click.option(
+    "--all",
+    "all_agents",
+    is_flag=True,
+    default=False,
+    help="List every active agent of the fleet.",
+)
 @click.pass_context
-def member_list(ctx, activity):
-    """List every member of the fleet (the root Director is excluded)."""
+def member_list(ctx, activity, all_agents):
+    """List the fleet's members; --all lists every active agent of the fleet."""
     fleet_id = ctx.obj["fleet_id"]
+    if all_agents and activity:
+        raise click.UsageError("--all and --activity are mutually exclusive.")
     try:
-        if activity:
+        if all_agents:
+            rows = broker.list_roster(fleet_id)
+        elif activity:
             rows = broker.list_members_with_activity(fleet_id)
         else:
             rows = broker.list_members(fleet_id)
@@ -467,6 +517,8 @@ def member_list(ctx, activity):
         raise click.ClickException(str(exc)) from exc
     if ctx.obj["json_output"]:
         click.echo(output.format_json(rows))
+    elif all_agents:
+        click.echo(output.format_member_roster(rows))
     elif activity:
         click.echo(output.format_member_list_activity(rows))
     else:

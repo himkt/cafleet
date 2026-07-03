@@ -54,7 +54,7 @@ cafleet member create --fleet-id 1 --agent-id 2 \
   --text "You are Claude-Smoke. Reply hello when polled."
 # Expect: the backend defaults to claude (no --coding-agent needed).
 
-cafleet agent list --fleet-id 1
+cafleet member list --fleet-id 1 --all
 # Expect: the new agent's row, backend column shows 'claude'; the pane title shows the member name.
 
 cafleet message send --fleet-id 1 --agent-id 2 \

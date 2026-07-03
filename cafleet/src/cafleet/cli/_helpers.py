@@ -55,28 +55,16 @@ def client_command(
     requires_agent_fleet: bool = False,
     text_formatter: Callable[..., str] | None = None,
     truncates_task_text: bool = False,
-    renders_agent_card: bool = False,
 ):
-    """Subsume the boilerplate blocks shared by client subcommands.
+    """Subsume the boilerplate blocks shared by the ``message`` subcommands.
 
     Branches:
     - ``truncates_task_text=True`` → JSON output goes through
       ``render_tasks_in_result`` + ``truncate_task_text``; text formatter is
       called as ``text_formatter(result, full=, quiet=)``.
-    - ``renders_agent_card=True`` → JSON output goes through
-      ``render_agents_in_result``; text formatter is called as
-      ``text_formatter(result, full=)``.
-    - Neither → JSON output is the raw broker result; text formatter is
+    - Otherwise → JSON output is the raw broker result; text formatter is
       called as ``text_formatter(result)``.
-
-    The two ``renders_*`` flags are mutually exclusive — a command renders
-    tasks OR agent cards, never both.
     """
-    if truncates_task_text and renders_agent_card:
-        raise ValueError(
-            "client_command: truncates_task_text and renders_agent_card "
-            "are mutually exclusive."
-        )
 
     def decorator(func):
         @functools.wraps(func)
@@ -100,8 +88,6 @@ def client_command(
                 if truncates_task_text:
                     output.truncate_task_text(result, full=full)
                     rendered = output.render_tasks_in_result(result, full=full)
-                elif renders_agent_card:
-                    rendered = output.render_agents_in_result(result, full=full)
                 else:
                     rendered = result
                 if ctx.obj["json_output"]:
@@ -110,8 +96,6 @@ def client_command(
                     if truncates_task_text:
                         extra = {"quiet": kwargs["quiet"]} if "quiet" in kwargs else {}
                         click.echo(text_formatter(result, full=full, **extra))
-                    elif renders_agent_card:
-                        click.echo(text_formatter(result, full=full))
                     else:
                         click.echo(text_formatter(result))
                 else:

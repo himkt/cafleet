@@ -144,11 +144,6 @@ no separate server binary; `cafleet server` constructs the WebUI app and serves
 it. The reference implementation's server target maps to "construct the WebUI
 application object and serve it".
 
-The overlay-coverage check (dev tooling invoked by
-`mise //cafleet:lint-overlay`) is **not** part of the runtime modules. It
-validates markdown skill files, not runtime behavior, and may be kept as a
-standalone lint in any language.
-
 ---
 
 ## 4. Architecture & module dependency graph
@@ -581,9 +576,11 @@ in `get_agent` / `list_agents` / `list_fleet_agents` per §5.4;
   - Insert the agent; if `placement` given, insert it; then, **only if `kind` is
     neither monitoring-member nor administrator**, enroll the agent at 720s.
 - **`get_agent(agent_id, fleet_id)`** — **active only**. Returns `{agent_id,
-  name, description, status, registered_at, kind, placement}` where `kind` is
-  `ADMINISTRATOR_KIND` if the card marks an administrator else `"user"`; None if
-  absent.
+  name, description, status, registered_at, kind, skills, placement}` where
+  `skills` is the card's `skills` list (usually `[]`) and `kind` is one of four
+  values: `director` (derived: `agent_id == fleets.director_agent_id`),
+  `administrator` (the card marks an administrator), `monitor` (the card marks
+  a monitoring member), else `member`; `placement` is None if absent.
 - **`list_agents(fleet_id)`** — `{agent_id, name, description, status,
   registered_at}` per **active** agent; `status` is hardcoded `"active"`.
 - **`deregister_agent(agent_id)`** — soft-delete one agent + drop placement +
@@ -592,7 +589,7 @@ in `get_agent` / `list_agents` / `list_fleet_agents` per §5.4;
   delete' instead`; if it is an Administrator → application error `Administrator
   cannot be deregistered`. The root-Director guard raises a single
   **application** error (exit 1) here on the broker side and identically on the
-  `cafleet agent deregister` CLI side (§6.3) — one error model for the same
+  `cafleet member delete` CLI side (§6.3) — one error model for the same
   string and condition. Flip `active → deregistered` (stamp `deregistered_at`);
   if a row was flipped, hard-delete its placement and monitor_config row. Returns
   `true` iff a row was flipped.
@@ -625,6 +622,13 @@ A "member" is an agent joined to its placement, excluding the root Director.
   a single `now`: take the non-null of `(last_sent, last_recv)`; none → `idle =
   null`; else `most_recent` = lexicographic max of the ISO timestamps, `idle =
   max(0, floor(now − most_recent))` in seconds.
+- **`list_roster(fleet_id)`** — every **active agent** of the fleet, not just
+  members: active agents LEFT OUTER JOIN `agent_placements`, joined against
+  `fleets` for the `director` kind derivation, the card `kind` derived in SQL
+  via `json_extract`. Returns the `list_members` row shape plus `kind` (the
+  same four values as `get_agent`), with `placement` null for placementless
+  rows. Backs `member list --all`; `list_members` /
+  `list_members_with_activity` are untouched.
 
 #### Messaging
 
@@ -836,7 +840,7 @@ environment default** — the guard never defaults to an arbitrary fleet, and a
 spawned member reads its fleet id from the `FLEET ID:` line the CLI rendered
 into its spawn prompt (the placeholder substitution below).
 
-Subcommands taking `--fleet-id`: all of `agent *`, `member *`, `message *`,
+Subcommands taking `--fleet-id`: all of `member *`, `message *`,
 `monitor *`, plus `fleet show` and `fleet delete`. Commands that do not operate
 within a single existing fleet — `setup`, `doctor`, `server`, `fleet create`,
 `fleet list` — do not declare it and reject `--fleet-id` with the parser's
@@ -844,14 +848,14 @@ unknown-option error (exit 2).
 
 #### Shared flags & the identity options
 
-- `--full` — boolean, default `false`. On `agent list`/`show`, `member create`,
+- `--full` — boolean, default `false`. On `member show`, `member create`,
   `fleet create`, and every `message` subcommand.
 - `--agent-id` — required integer. Its polarity is overloaded by design (§1):
-  the **calling agent (requester)** on `agent show` and every `message *`
-  subcommand; the **target agent** on `agent deregister`; the **acting
-  Director** on `member create`; the **sender** on `member nudge`.
-- `--member-id` — required integer on `member delete` / `capture` / `exec` /
-  `ping` / `nudge`, always naming the **target member**. Help text:
+  the **calling agent (requester)** on every `message *`
+  subcommand; the **acting Director** on `member create`; the **sender** on
+  `member nudge`.
+- `--member-id` — required integer on `member delete` / `show` / `capture` /
+  `exec` / `ping` / `nudge`, always naming the **target member**. Help text:
   `Target member's agent ID`.
 
 #### Shared `--text` / `--text-file` body input {#text-body-input}
@@ -887,16 +891,13 @@ The body is returned **verbatim** (no stripping). Empty-body rejection is
 multi-line bodies use `--text-file` (or `-` stdin) to bypass the shell's
 `ARG_MAX` limit.
 
-#### The `client_command` wrapper (agent + message groups)
+#### The `client_command` wrapper (message group)
 
-The `agent` and `message` groups route every leaf handler (which returns a
-broker result) through one shared wrapper, configured per command by four
+The `message` group routes every leaf handler (which returns a
+broker result) through one shared wrapper, configured per command by three
 switches: `requires_agent_fleet`; a text renderer (optional);
 `truncates_task_text` (route through task truncation + task-list rendering, call
-the renderer with `full`); `renders_agent_card` (route through
-agent-card rendering, call the renderer with `full` only). `truncates_task_text`
-and `renders_agent_card` are mutually exclusive (configuring both is a
-construction-time programmer error). Per invocation, in order:
+the renderer with `full`). Per invocation, in order:
 
 1. **Fleet read** — read `fleet_id` from context (the required `--fleet-id`
    option populated it).
@@ -905,37 +906,12 @@ construction-time programmer error). Per invocation, in order:
    is not a fleet member → application error (exit 1) `agent <agent_id> is not a
    member of fleet <fleet_id>.`. **Runs before the handler body.**
 3. **Handler call.**
-4. **Render branch** — truncate-task / render-agent / pass-through.
+4. **Render branch** — truncate-task / pass-through.
 5. **Emit branch** — if global `--json`, emit compact JSON; else if a text
    renderer is configured, call it (`truncates_task_text` passes `full`); else
    emit JSON.
 6. **Exception wrap** — re-raise an application/usage error unchanged; wrap any
    other exception as an application error (exit 1) carrying its message.
-
-#### `agent` group
-
-The agent registry: `register | list | show | deregister`. It never touches
-tmux — the pane-bound member lifecycle (spawn, teardown, keystroke interaction)
-lives in the `member` group below.
-
-- **register** — `--name` (string, required), `--description` (string,
-  required), `--skills` (string, optional); when present `--skills` is parsed as
-  JSON, a failure → application error `Invalid JSON in --skills: <error>`. No
-  fleet-gate.
-- **list** — `--full`. Renders an indexed agent list of the fleet's active
-  agents; when an agent has a placement, its row shows a placement/pane column.
-  Empty case `No agents found.`. (Per-member activity aggregation lives on
-  `member list --activity`.)
-- **show** — `--agent-id` (integer, required, fleet-gated requester), `--id`
-  (integer, required, agent to show), `--full`. Target not found →
-  application error `Agent <id> not found`.
-- **deregister** — `--agent-id` (integer, required, fleet-gated **target**).
-  Registry-only soft-delete via the broker — no tmux interaction and no
-  `--force`. Nothing deregistered → application error `agent <agent_id> not
-  found or already deregistered.`; the broker's root-Director and Administrator
-  guards (§6.2) surface verbatim. Success text `Agent deregistered
-  successfully.`; JSON `{"status": "deregistered"}`. A member with a live pane
-  is torn down by `member delete` instead.
 
 #### `doctor`
 
@@ -1007,11 +983,13 @@ These helpers back the `member` subcommands. The target member is named by
   <member_id> has no pane yet (pending placement) — nothing to <action>.`.
 - **Load-authorized-member** — fetch the member within the fleet: not found →
   `Agent <member_id> not found`; other fetch failure → `failed to fetch member:
-  <error>`; absent placement → a caller-supplied "placement missing" message
-  (default ``agent <member_id> has no placement row; it was not spawned via
-  `cafleet member create`.``). Does **not** check pane presence (`member delete`
-  tolerates a pending placement, and `member nudge` tolerates a pending pane).
-  Callers re-fetch by the canonical agent id.
+  <error>`; absent placement → application error ``agent <member_id> has no
+  placement row; it was not spawned via `cafleet member create`.``, unless the
+  caller opts into tolerating a missing placement (`member show` and `member
+  delete` do — a placementless target resolves successfully). Does **not**
+  check pane presence (`member delete` tolerates a pending placement, and
+  `member nudge` tolerates a pending pane). Callers re-fetch by the canonical
+  agent id.
 - **Deregister-with-warning** — best-effort deregister; on failure print a
   `WARNING: rollback deregister failed …` line to **stderr**, do not raise.
 - **Rollback-register** — deregister-with-warning, then raise an application
@@ -1075,25 +1053,34 @@ orphan row survives; the best-effort cleanup never masks the original error.
 
 The pane-teardown + registry-soft-delete op. Options: `--member-id`
 (integer, required — the **target**), `--force` / `-f` (boolean, default
-`false`).
+`false`). The tmux precondition fires only on the pane-teardown paths (live
+pane id) — a placementless or pending-placement delete is a pure registry
+operation and succeeds outside tmux.
 
-1. Ensure tmux available.
-2. **Root-Director guard, before any pane mutation** — fetch the fleet; if the
+1. **Root-Director guard, before any pane mutation** — fetch the fleet; if the
    target is the fleet's Director → application error (exit 1) `cannot deregister
    the root Director; use 'cafleet fleet delete' instead` (the same string and
-   exit code the broker's `deregister_agent` guard raises, §6.2).
-3. Load the authorized member with placement-missing message ``agent <member_id>
-   has no placement; use `cafleet agent deregister` instead``; re-fetch
-   the canonical id and read the pane id.
+   exit code the broker's `deregister_agent` guard raises, §6.2). The broker's
+   Administrator guard (`Administrator cannot be deregistered`, §6.2) surfaces
+   verbatim from the deregister call on every path below.
+2. Load the authorized member **tolerating a missing placement**; re-fetch
+   the canonical id and read the pane id (absent when placementless or
+   pending).
+3. **No placement row** — registry soft-delete via the broker (a failure →
+   application error `deregister failed: <error>`). Success: header `Member
+   deleted.`, pane status `(no placement)`, exit 0. No tmux requirement.
 4. **Pending placement** (no pane yet) — registry soft-delete via
    the broker (a failure → application error `deregister failed: <error>`).
    Success: header `Member deleted.`, pane status `(pending — no pane)`, exit 0.
-5. **`--force`** (has pane) — kill the pane immediately, skipping the graceful
+   No tmux requirement.
+5. **`--force`** (has pane) — ensure tmux available, then kill the pane
+   immediately, skipping the graceful
    wait (tolerating a missing pane); a tmux error → application error `kill_pane
    failed for pane <pane_id>: <error>. The tmux server may be unreachable. Verify
    with 'cafleet doctor', then re-run the command.`. Then deregister; header
    `Member deleted (--force).`, pane status `<pane_id> (killed)`, exit 0.
-6. **Default path** (has pane) — send the backend exit keystroke (tolerating a
+6. **Default path** (has pane) — ensure tmux available, then send the backend
+   exit keystroke (tolerating a
    missing pane; a tmux error → application error `send_exit failed for pane
    <pane_id>: <error>. The tmux server may be unreachable. Verify with 'cafleet
    doctor', then re-run 'cafleet member delete', or use '--force' to kill the
@@ -1113,14 +1100,36 @@ The pane-teardown + registry-soft-delete op. Options: `--member-id`
 Success text: the header line plus indented `agent_id:` / `pane_id:` lines;
 JSON: `{agent_id, pane_status}`.
 
+#### `member show`
+
+Registry read — no tmux requirement and no requester gate. Options:
+`--member-id` (integer, required — the **target**; any active in-fleet agent,
+placed or placementless, the root Director and Administrator included),
+`--full` (documented; affects **text mode only**). Load the target tolerating
+a missing placement: cross-fleet / unknown / inactive → application error
+`Agent <member_id> not found`. JSON emits the broker `get_agent` dict
+unchanged (§6.2) regardless of `--full`; text renders via `format_agent`
+(§6.4) — compact `<agent_id> <name> <status>` by default, the labeled verbose
+block (`kind`, `skills`, placement sub-block) with `--full`.
+
 #### `member list`
 
-`member list` takes `--activity` (hidden boolean, default `false`). Lists the
+`member list` takes `--activity` (hidden boolean, default `false`) and `--all`
+(boolean, default `false`); both together → usage error (exit 2) `--all and
+--activity are mutually exclusive.`. Default: lists the
 fleet's members — active agents with a placement row, the root Director
 excluded. The base list is a placement table (agent id, name, status, backend,
 session, window id, pane id — `(pending)` when unset — and created-at); the
 `--activity` rows instead carry the per-member send/recv/ack/idle aggregates.
 Empty case `0 members.`. JSON emits the raw rows.
+
+`--all` instead lists every **active agent** of the fleet via `list_roster`
+(§6.2): the header is `<N> agents:`; the table gains a `kind` column (the four
+`get_agent` values) and renders `-` in every placement column (backend,
+session, window id, pane id, created-at) for placementless rows. JSON emits
+the raw roster rows (the member-row shape plus `kind`, `placement` null when
+placementless). The default (no `--all`) output is byte-identical to the
+members-only listing above.
 
 #### `member capture`
 
@@ -1192,7 +1201,7 @@ A shared `_require_live_fleet` guard fetches the fleet; missing or soft-deleted
   time. Not running / no row → a not-running payload (`running` false; `pid`,
   `last_tick_at`, `last_tick_age_seconds`, `started_at` null; `tick_seconds`
   from the row when present, else null). Else a live payload with
-  `last_tick_age_seconds`. Per-agent list from the monitor targets, each
+  `last_tick_age_seconds`. Per-agent rows from the monitor targets, each
   carrying `agent_id`, `name`, `interval_seconds`, `last_ping_at`,
   `last_ping_age_seconds`, `enabled`, `pending_count`, and a `role` of
   `director`/`member`. Payload `{runtime, agents}`.
@@ -1285,8 +1294,9 @@ sets no exit codes. (`doctor` output is produced by the CLI, §6.3, not here.)
 
 The text-vs-JSON selection is the CLI's: `--full` and `--json` are **documented**
 flags (Q5 hidden-flag cleanup). The `--json` emit path is **not** unified — the
-`agent`/`message` groups emit JSON via the global `--json` through
-`client_command`, while the `fleet` group keeps its own local `--json` flag OR-ed
+`message` group emits JSON via the global `--json` through
+`client_command`, the `member` group emits it per-handler off the same global
+flag, while the `fleet` group keeps its own local `--json` flag OR-ed
 with the global one and its own emit path (§7.3). The single absent glyph below
 and the compact-JSON rules apply to both paths.
 
@@ -1307,11 +1317,9 @@ call formatters.
 `truncate_text(value, full, limit)`; `truncate_task_text(result, full, limit)`
 (in-place); `render_task(task, full)` → `{id, from, ts, text, kind?, origin?}`;
 `render_tasks_in_result(result, full)` (non-mutating, unwraps `{task: …}`
-envelopes and flat task dicts); `render_agent(agent, full)` → `{id, name,
-description, status, coding_agent?}` (description truncated to **60**);
-`render_agents_in_result(result, full)` (non-mutating).
+envelopes and flat task dicts).
 
-**Formatter functions:** `format_register`; `format_task`; `format_indexed_list`
+**Formatter functions:** `format_task`; `format_indexed_list`
 (joins formatted items with one blank line between, `empty_msg` when empty —
 not numbered); `format_agent`; `format_fleet_create`; `format_member`;
 `format_member_list`; `format_member_list_activity`; `format_monitor_status`;
@@ -1328,7 +1336,7 @@ ISO→`HH:MM:SS` extractor; an idle-seconds humanizer; a ping-age humanizer.
 - The effective limit is the explicit `limit` argument when given, else
   `max_text_len` (default `200`, from config) — the **only** config dependency.
 - The **agent-description limit is a hardcoded literal `60`**, independent of
-  `max_text_len`; both `render_agent` and `format_agent` verbose apply it.
+  `max_text_len`; `format_agent` verbose applies it.
 
 #### Compact-JSON rules
 
@@ -1368,8 +1376,8 @@ the **last** `\r` (CR-redraw defrag: a TUI redraw `prefix\rNEW` keeps only
 #### Mutation contract
 
 `truncate_task_text` **mutates its input in place** and returns the same object.
-`render_tasks_in_result` and `render_agents_in_result` are **non-mutating** (they
-build new structures, shallow-copying any envelope). Preserve the distinction; in
+`render_tasks_in_result` is **non-mutating** (it
+builds new structures, shallow-copying any envelope). Preserve the distinction; in
 a language with no aliasing concern, preserve the *observable* result.
 
 #### Field access / optionality
@@ -1388,10 +1396,13 @@ Every field is read with required access unless marked optional; required access
   `{task: {…}}`; `format_task`
   unwraps when the inner value is a dict; the render walker unwraps when it is a
   dict containing `task_id`.
-- **Agent** (`render_agent` / `format_agent`): `agent_id` (req), `name` (req),
-  `description` (req, truncated to 60), `status` (req), `placement` (optional;
-  `coding_agent` emitted only if placement present and contains it).
-- **Register** (`format_register`): `agent_id`, `name` (both req).
+- **Agent** (`format_agent`): `agent_id` (req), `name` (req),
+  `description` (req, truncated to 60), `status` (req), `kind` (req, verbose),
+  `skills` (req, verbose; a compact JSON array, `-` when empty), `placement`
+  (optional; verbose renders the placement sub-block when present,
+  `placement:   none` otherwise, with `-` for a null field inside it).
+- **Roster row (`member list --all`)**: the member-list row plus `kind`;
+  every placement cell renders `-` for a placementless row.
 - **Fleet-create** (`format_fleet_create`): `fleet_id` (req), `director` (req
   nested) → `agent_id` (req), `name`/`placement` (req, verbose);
   `director.placement` (verbose) → `tmux_session`/`tmux_window_id`/`tmux_pane_id`
@@ -1417,15 +1428,6 @@ and both list rows, but **not** in the verbose `format_member` block.
 
 #### Exact text layouts
 
-`format_register` — 3 lines (`agent_id:` + two spaces; `name:` + six spaces, so
-values align):
-
-```
-Agent registered successfully!
-  agent_id:  <agent_id>
-  name:      <name>
-```
-
 `format_task` — **compact** line 1 by concatenation: `[<id> | from:<from> |
 <ts>]`, with ` | kind:<kind>` inserted before `]` when a `kind` is present and
 ` | origin:<origin>` inserted (after kind) when an `origin` is present; if the
@@ -1436,7 +1438,12 @@ then `  to:    <to_agent_id>` **only when `to_agent_id` is non-null**, then `  t
 
 `format_agent` — **compact**: `<agent_id> <name> <status>` (single spaces, no
 labels). **Verbose** (description truncated to 60): `  agent_id:    <agent_id>`,
-`  name:        <name>`, `  description: <description>`, `  status:      <status>`.
+`  name:        <name>`, `  description: <description>`, `  status:      <status>`,
+`  kind:        <kind>`, `  skills:      <skills>` (a compact JSON array, `-`
+when empty), then the placement block — `  placement:   none` when no placement
+row exists, else `  placement:` followed by the indented
+`    director_agent_id:` / `    backend:` / `    session:` / `    window_id:` /
+`    pane_id:` / `    created_at:` lines, each null field rendering `-`.
 
 `format_fleet_create` — **compact**: `<fleet_id> director=<director.agent_id>
 admin=<administrator_agent_id>`. **Verbose** — 7 lines; first two are bare
@@ -2066,8 +2073,8 @@ exact error details (each serialized as `{"detail": <string>}`):
 When projecting broker message rows to the wire (inbox / sent / timeline):
 `status_state` → `status`, `text` → `body`. The monitor-config projection renames
 nothing but **drops** `agent_id`. `GET /api/fleets` returns a **bare JSON
-array**; every other list endpoint wraps in an object (agent listings under
-`agents`, message listings under `messages`). All HTTP errors serialize as
+array**; every other list endpoint wraps in an object (agent rows under
+`agents`, message rows under `messages`). All HTTP errors serialize as
 `{"detail": <string>}`; body-validation failures use the framework's default
 `422` validation-error body instead.
 
@@ -2372,18 +2379,12 @@ exit 0, bypasses `--fleet-id`).
 - [ ] `cafleet fleet show` (`--fleet-id`, `--json`)
 - [ ] `cafleet fleet delete` (`--fleet-id`)
 
-**`agent`:**
-
-- [ ] `cafleet agent register` (`--name`, `--description`, `--skills`)
-- [ ] `cafleet agent list` (`--full`)
-- [ ] `cafleet agent show` (`--agent-id` requester, `--id` target, `--full`)
-- [ ] `cafleet agent deregister` (`--agent-id` target)
-
 **`member`:**
 
 - [ ] `cafleet member create` (`--agent-id` Director, `--name`, `--description`, `--coding-agent`, `--model`, `--role`=member, `--text` / `--text-file` xor-required, `--full`)
-- [ ] `cafleet member delete` (`--member-id` target, `--force`/`-f`)
-- [ ] `cafleet member list` (`--activity`)
+- [ ] `cafleet member delete` (`--member-id` target, `--force`/`-f`; placementless target → registry soft-delete, exit 0)
+- [ ] `cafleet member show` (`--member-id` target, `--full`)
+- [ ] `cafleet member list` (`--activity`, `--all`; mutually exclusive)
 - [ ] `cafleet member capture` (`--member-id`, `--lines`=**20** / `--tail` alias, `--ansi`/`--no-ansi`)
 - [ ] `cafleet member exec` (`--member-id`, positional `command`)
 - [ ] `cafleet member ping` (`--member-id`, `--quiet`)
@@ -2404,7 +2405,7 @@ exit 0, bypasses `--fleet-id`).
 - [ ] `cafleet monitor status`
 - [ ] `cafleet monitor config` (`--agent-id`, `--interval`≥1, `--enable`/`--disable`)
 
-Every `agent *`, `member *`, `message *`, and `monitor *` command, plus `fleet
+Every `member *`, `message *`, and `monitor *` command, plus `fleet
 show` and `fleet delete`, takes the **required `--fleet-id` option** (integer);
 a missing `--fleet-id` is the shared callback's application error (exit 1,
 §6.3). It is omitted from the per-command rows above to avoid repetition.
@@ -2432,10 +2433,7 @@ failure, and an exception's exact internal-repr fragment.
 
 The decisions that shape this surface (full rationale in the design doc):
 
-- **Registry and lifecycle split into `agent` + `member`.** The registry lives
-  under `agent` (`register`/`list`/`show`/`deregister`); the pane-bound member
-  lifecycle and keystroke interaction live under `member`
-  (`create`/`delete`/`list`/`capture`/`exec`/`ping`/`nudge`).
+- **`member` is the single agent-lifecycle surface.** `member` owns agent registration, teardown, introspection (`show`, `list --all`), and keystroke interaction (`create`/`delete`/`show`/`list`/`capture`/`exec`/`ping`/`nudge`). There is no separate `agent` group.
 - **`--fleet-id` is a required option with no environment default** (§6.3); a
   missing value is the shared callback's exit-1 error.
 - **One error/exit model** (§7.2): usage → exit 2, application/runtime → exit
@@ -2450,7 +2448,7 @@ The decisions that shape this surface (full rationale in the design doc):
   `{agent_id}` / `{director_agent_id}` / `{coding_agent}` placeholder
   substitution; no identity environment variable is injected.
 - **Single absent glyph** (§6.4): ASCII `-` everywhere.
-- **`--json` dual path retained** (§7.3): the `agent`/`message` global path and
+- **`--json` dual path retained** (§7.3): the `member`/`message` global path and
   the `fleet` local-flag path are not unified.
 
 ### Per-module clarifications

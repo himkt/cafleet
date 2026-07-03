@@ -3,16 +3,7 @@
 from collections.abc import Callable
 from typing import Any
 
-from cafleet.output.render import render_task, truncate_text
-
-
-def format_register(data: dict) -> str:
-    lines = [
-        "Agent registered successfully!",
-        f"  agent_id:  {data['agent_id']}",
-        f"  name:      {data['name']}",
-    ]
-    return "\n".join(lines)
+from cafleet.output.render import format_json, render_task, truncate_text
 
 
 def format_task(task: dict, *, full: bool = False) -> str:
@@ -70,22 +61,47 @@ def format_indexed_list(
 
 
 def format_agent(agent: dict, *, full: bool = False) -> str:
-    """Render an agent as text.
+    """Render an agent (the ``member show`` shape) as text.
 
     ``full=False`` (default): 1-line compact ``<id> <name> <status>``.
-    ``full=True``: 4-line block exposing the full ``agent_id``, ``name``,
-    truncated ``description`` (60 codepoints + ``…``), and ``status``.
+    ``full=True``: labeled block exposing ``agent_id``, ``name``, truncated
+    ``description`` (60 codepoints + ``…``), ``status``, ``kind``, ``skills``
+    (compact JSON array, ``-`` when empty), and the placement sub-block
+    (``placement:   none`` when no placement row exists; ``None`` fields
+    inside the placement render ``-``).
     """
     if not full:
         return f"{agent['agent_id']} {agent['name']} {agent['status']}"
     description = truncate_text(agent["description"], full=False, limit=60)
+    skills = agent["skills"]
     lines = [
         f"  agent_id:    {agent['agent_id']}",
         f"  name:        {agent['name']}",
         f"  description: {description}",
         f"  status:      {agent['status']}",
+        f"  kind:        {agent['kind']}",
+        f"  skills:      {format_json(skills) if skills else '-'}",
     ]
+    placement = agent["placement"]
+    if placement is None:
+        lines.append("  placement:   none")
+    else:
+        lines.extend(
+            [
+                "  placement:",
+                f"    director_agent_id: {_dash_if_none(placement['director_agent_id'])}",
+                f"    backend:           {placement['coding_agent']}",
+                f"    session:           {placement['tmux_session']}",
+                f"    window_id:         {placement['tmux_window_id']}",
+                f"    pane_id:           {_dash_if_none(placement['tmux_pane_id'])}",
+                f"    created_at:        {placement['created_at']}",
+            ]
+        )
     return "\n".join(lines)
+
+
+def _dash_if_none(value) -> str:
+    return "-" if value is None else str(value)
 
 
 def format_fleet_create(data: dict, *, full: bool = False) -> str:
@@ -251,6 +267,44 @@ def format_monitor_config(cfg: dict) -> str:
         f"agent {cfg['agent_id']}: interval {cfg['interval_seconds']}s, "
         f"{state}, last_ping {last_ping}"
     )
+
+
+def format_member_roster(agents: list) -> str:
+    """Render the ``member list --all`` roster as text.
+
+    One row per active agent of the fleet with a ``kind`` column; every
+    placement cell renders ``-`` for a placementless row, and a placed row
+    with no pane yet renders ``(pending)`` in ``pane_id`` (matching
+    :func:`format_member_list`).
+    """
+    if not agents:
+        return "0 agents."
+    count = len(agents)
+    lines = [f"{count} agent{'s' if count > 1 else ''}:"]
+    lines.append(
+        "  agent_id  name           status  kind           backend  session  "
+        "window_id  pane_id  created_at"
+    )
+    lines.append(
+        "  --------  -------------  ------  -------------  -------  -------  "
+        "---------  -------  --------------------"
+    )
+    for a in agents:
+        placement = a["placement"]
+        if placement is None:
+            backend = session_name = window_id = pane = created_at = "-"
+        else:
+            backend = placement["coding_agent"]
+            session_name = placement["tmux_session"]
+            window_id = placement["tmux_window_id"]
+            pane = placement["tmux_pane_id"] or "(pending)"
+            created_at = placement["created_at"]
+        lines.append(
+            f"  {str(a['agent_id']):<8}  {a['name']:<13}  {a['status']:<6}  "
+            f"{a['kind']:<13}  {backend:<7}  {session_name:<7}  "
+            f"{window_id:<9}  {pane:<7}  {created_at}"
+        )
+    return "\n".join(lines)
 
 
 def format_member_list(members: list) -> str:

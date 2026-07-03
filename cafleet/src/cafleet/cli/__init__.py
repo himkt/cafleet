@@ -2,7 +2,6 @@
 
 import click
 
-from cafleet.cli.agent import agent
 from cafleet.cli.db import db as db_group
 from cafleet.cli.doctor import doctor
 from cafleet.cli.fleet import fleet
@@ -27,7 +26,6 @@ def cli(ctx, json_output):
 
 cli.add_command(db_group)
 cli.add_command(fleet)
-cli.add_command(agent)
 cli.add_command(message)
 cli.add_command(member)
 cli.add_command(monitor)

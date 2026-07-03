@@ -1,7 +1,7 @@
 # Absorb the `agent` CLI group into `member`
 
-**Status**: Approved
-**Progress**: 0/31 tasks complete
+**Status**: Complete
+**Progress**: 31/31 tasks complete
 **Last Updated**: 2026-07-03
 
 ## Overview
@@ -10,13 +10,13 @@ Remove the `cafleet agent` CLI group (`register | list | show | deregister`) and
 
 ## Success Criteria
 
-- [ ] `cafleet agent …` exits 2 with Click's `Error: No such command 'agent'.`; `cafleet/src/cafleet/cli/agent.py` no longer exists.
-- [ ] `cafleet member show --fleet-id <f> --member-id <id>` renders detail (description, status, kind, skills, placement block) for any active in-fleet agent, placed or placementless, without requiring tmux.
-- [ ] `cafleet member list --fleet-id <f> --all` lists every active agent of the fleet — root Director, Administrator, monitoring member, ordinary members, placementless rows — with a `kind` column; the default (no `--all`) output is byte-identical to today's.
-- [ ] `cafleet member delete` on an active placementless agent soft-deletes it and exits 0 (the `use \`cafleet agent deregister\` instead` error path is gone); the root-Director and Administrator guards still reject with the existing broker error strings.
-- [ ] No `cafleet agent ` invocation and no two-word subcommand mention (`agent register` / `agent list` / `agent show` / `agent deregister`) remains in `docs/`, `SPEC.md`, `README.md`, `CLAUDE.md`, `skills/`, `.claude/`, `admin/src/`, or `cafleet/` — excluding `design-docs/`, the pre-existing `"cafleet agent spawn"` entry in `spawn_prompt_guard.py` `FORBIDDEN_PATTERNS` and its tests (a 0000113 guard string, deliberately retained), and the regression-guard test `cafleet/tests/cli/test_agent_group_removed.py` (an absence-test the removal rule permits; it embeds the legacy invocation it asserts is rejected).
-- [ ] `FORBIDDEN_PATTERNS` in `spawn_prompt_guard.py` is unchanged — no new anti-`cafleet agent` pattern or assertion is added anywhere (user decision).
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:lint-overlay`, and `mise //cafleet:lint-spawn-guard` pass.
+- [x] `cafleet agent …` exits 2 with Click's `Error: No such command 'agent'.`; `cafleet/src/cafleet/cli/agent.py` no longer exists.
+- [x] `cafleet member show --fleet-id <f> --member-id <id>` renders detail (description, status, kind, skills, placement block) for any active in-fleet agent, placed or placementless, without requiring tmux.
+- [x] `cafleet member list --fleet-id <f> --all` lists every active agent of the fleet — root Director, Administrator, monitoring member, ordinary members, placementless rows — with a `kind` column; the default (no `--all`) output is byte-identical to today's.
+- [x] `cafleet member delete` on an active placementless agent soft-deletes it and exits 0 (the `use \`cafleet agent deregister\` instead` error path is gone); the root-Director and Administrator guards still reject with the existing broker error strings.
+- [x] No `cafleet agent ` invocation and no two-word subcommand mention (`agent register` / `agent list` / `agent show` / `agent deregister`) remains in `docs/`, `SPEC.md`, `README.md`, `CLAUDE.md`, `skills/`, `.claude/`, `admin/src/`, or `cafleet/` — excluding `design-docs/` and the regression-guard test `cafleet/tests/cli/test_agent_group_removed.py` (an absence-test the removal rule permits; it embeds the legacy invocation it asserts is rejected).
+- [x] No anti-`cafleet agent` guard pattern or assertion exists anywhere (user decision — Decision 4; the spawn-prompt guard tooling that carried the pre-existing `"cafleet agent spawn"` pattern was itself removed mid-execution per Decision 6).
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
 
@@ -35,6 +35,7 @@ Design 0000114 (splitting `member` into `agent` + `pane`) was rejected and abort
 | 3 | `member show` flag shape | Bare `--member-id <target>` only; the `agent show` requester flag (`--agent-id`) and its fleet-membership gate are dropped — consistent with the rest of the `member` group. |
 | 4 | Drift guard | **No new guard patterns.** A guard pattern string is itself a standing mention of the dead command. `FORBIDDEN_PATTERNS` is unchanged; no anti-`cafleet agent` assertion is added anywhere. One-time migration only. |
 | 5 | WebUI scope | Minimal: only the two empty-state strings naming `cafleet agent register` change (point at `cafleet member create`); the HTTP API and everything else is untouched. |
+| 6 | Guard tooling (mid-execution instruction) | **Removed entirely.** The `mise //cafleet:lint-overlay` / `mise //cafleet:lint-spawn-guard` tasks, their modules (`coding_agent/overlay_coverage.py`, `spawn_prompt_guard.py`), their tests, and every non-`design-docs/` mention are deleted (commit 7fd5d202). Design-doc-specific tooling does not stay in `mise.toml`. |
 
 ---
 
@@ -197,58 +198,58 @@ Documentation is edited **first**, per `.claude/rules/documentation-maintenance.
 
 ### Step 1: docs/ (documentation first)
 
-- [ ] `docs/spec/cli-options.md`: subcommand summary, `--full` semantics, Fleet ID / Agent ID / Member ID sections, member-resolution rules <!-- completed: -->
-- [ ] `docs/spec/cli-options.md`: delete § `cafleet agent`; add § `member show`; extend § `member delete` and § `member list`; rewrite the Error Messages table rows per the spec <!-- completed: -->
-- [ ] `docs/concepts/member-lifecycle.md`: Director-bootstrap sentence, delete-ordering paragraph, Commands section <!-- completed: -->
-- [ ] `docs/spec/data-model.md` line 128 reword <!-- completed: -->
-- [ ] Replace the five roster examples: `docs/get-started/quickstart.md`, `docs/how-to/mixed-backend-team.md`, `docs/reference/coding-agents/{claude,codex,opencode}.md` <!-- completed: -->
-- [ ] Sweep the rest of `docs/` for legacy phrasing (`cafleet agent`, the four subcommands, "registry-only"/"paneless" teardown pointers) <!-- completed: -->
+- [x] `docs/spec/cli-options.md`: subcommand summary, `--full` semantics, Fleet ID / Agent ID / Member ID sections, member-resolution rules <!-- completed: 2026-07-03T17:16 -->
+- [x] `docs/spec/cli-options.md`: delete § `cafleet agent`; add § `member show`; extend § `member delete` and § `member list`; rewrite the Error Messages table rows per the spec <!-- completed: 2026-07-03T17:16 -->
+- [x] `docs/concepts/member-lifecycle.md`: Director-bootstrap sentence, delete-ordering paragraph, Commands section <!-- completed: 2026-07-03T17:20 -->
+- [x] `docs/spec/data-model.md` line 128 reword <!-- completed: 2026-07-03T17:20 -->
+- [x] Replace the five roster examples: `docs/get-started/quickstart.md`, `docs/how-to/mixed-backend-team.md`, `docs/reference/coding-agents/{claude,codex,opencode}.md` <!-- completed: 2026-07-03T17:20 -->
+- [x] Sweep the rest of `docs/` for legacy phrasing (`cafleet agent`, the four subcommands, "registry-only"/"paneless" teardown pointers) <!-- completed: 2026-07-03T17:24 -->
 
 ### Step 2: SPEC.md + README.md
 
-- [ ] `SPEC.md` §6.3: shared flags / polarity / `client_command` wrapper contract <!-- completed: -->
-- [ ] `SPEC.md`: delete the `agent` group section; specify `member show`, `member list --all`, `member delete` no-placement success in the `member` group section <!-- completed: -->
-- [ ] `SPEC.md`: error-model cross-references (~595, ~1086) + §10 checklist <!-- completed: -->
-- [ ] `README.md` CLI-surface update + sweep (via `/update-readme`) <!-- completed: -->
+- [x] `SPEC.md` §6.3: shared flags / polarity / `client_command` wrapper contract <!-- completed: 2026-07-03T17:33 -->
+- [x] `SPEC.md`: delete the `agent` group section; specify `member show`, `member list --all`, `member delete` no-placement success in the `member` group section <!-- completed: 2026-07-03T17:33 -->
+- [x] `SPEC.md`: error-model cross-references (~595, ~1086) + §10 checklist <!-- completed: 2026-07-03T17:33 -->
+- [x] `README.md` CLI-surface update + sweep (via `/update-readme`) <!-- completed: 2026-07-03T17:42 -->
 
 ### Step 3: skills/
 
-- [ ] `skills/cafleet/SKILL.md` <!-- completed: -->
-- [ ] `skills/cafleet/reference/cli.md` (delete the self-registration recipe; migrate List Agents / Deregister; relocate the Administrator reserved-name caution) <!-- completed: -->
-- [ ] `skills/cafleet/reference/output-flags.md` <!-- completed: -->
-- [ ] `skills/cafleet/reference/director.md` <!-- completed: -->
-- [ ] `skills/cafleet-design-doc` workflow bodies + Director role files (remove the dead-command remarks) <!-- completed: -->
-- [ ] Sweep all of `skills/` for the four subcommand names <!-- completed: -->
+- [x] `skills/cafleet/SKILL.md` <!-- completed: 2026-07-03T22:29 -->
+- [x] `skills/cafleet/reference/cli.md` (delete the self-registration recipe; migrate List Agents / Deregister; relocate the Administrator reserved-name caution) <!-- completed: 2026-07-03T22:29 -->
+- [x] `skills/cafleet/reference/output-flags.md` <!-- completed: 2026-07-03T22:29 -->
+- [x] `skills/cafleet/reference/director.md` <!-- completed: 2026-07-03T22:29 -->
+- [x] `skills/cafleet-design-doc` workflow bodies + Director role files (remove the dead-command remarks) <!-- completed: 2026-07-03T22:29 -->
+- [x] Sweep all of `skills/` for the four subcommand names <!-- completed: 2026-07-03T22:29 -->
 
 ### Step 4: project rules sweep
 
-- [ ] Confirm `.claude/rules/`, `.claude/skills/skill-author/`, and `CLAUDE.md` carry no `cafleet agent` mentions (none expected) <!-- completed: -->
+- [x] Confirm `.claude/rules/`, `.claude/skills/skill-author/`, and `CLAUDE.md` carry no `cafleet agent` mentions (none expected) <!-- completed: 2026-07-03T22:31 -->
 
 ### Step 5: broker + CLI code
 
-- [ ] `broker/members.py`: `list_roster(fleet_id)` (active agents, LEFT OUTER placement join, SQL-derived 4-value `kind`) <!-- completed: -->
-- [ ] `broker/agents.py`: `get_agent` returns `skills` and the 4-value `kind`; verify WebUI `get_agent` consumers tolerate both <!-- completed: -->
-- [ ] `cli/member.py`: `member show` (`--member-id`, `--full`, no tmux, no requester gate) + formatter (`format_agent` extension: kind / skills / placement block) <!-- completed: -->
-- [ ] `cli/member.py`: `member list --all` (+ `--activity` exclusivity, `N agents:` table with `kind` column and `-` placement cells) <!-- completed: -->
-- [ ] `cli/member.py`: `member delete` placementless soft-delete, tmux-guard relaxation, `_load_authorized_member` simplification, rollback-warning re-point (lines 61 / 89 / 328) <!-- completed: -->
-- [ ] Delete `cli/agent.py`; unwire from `cli/main.py`; retire `renders_agent_card` + `render_agents_in_result` + `render_agent` / `_render_agent_item` (+ their `output/__init__.py` exports) + `format_register` <!-- completed: -->
+- [x] `broker/members.py`: `list_roster(fleet_id)` (active agents, LEFT OUTER placement join, SQL-derived 4-value `kind`) <!-- completed: 2026-07-03T22:44 -->
+- [x] `broker/agents.py`: `get_agent` returns `skills` and the 4-value `kind`; verify WebUI `get_agent` consumers tolerate both <!-- completed: 2026-07-03T22:44 -->
+- [x] `cli/member.py`: `member show` (`--member-id`, `--full`, no tmux, no requester gate) + formatter (`format_agent` extension: kind / skills / placement block) <!-- completed: 2026-07-03T22:44 -->
+- [x] `cli/member.py`: `member list --all` (+ `--activity` exclusivity, `N agents:` table with `kind` column and `-` placement cells) <!-- completed: 2026-07-03T22:44 -->
+- [x] `cli/member.py`: `member delete` placementless soft-delete, tmux-guard relaxation, `_load_authorized_member` simplification, rollback-warning re-point (lines 61 / 89 / 328) <!-- completed: 2026-07-03T22:44 -->
+- [x] Delete `cli/agent.py`; unwire from `cli/main.py`; retire `renders_agent_card` + `render_agents_in_result` + `render_agent` / `_render_agent_item` (+ their `output/__init__.py` exports) + `format_register` <!-- completed: 2026-07-03T22:44 -->
 
 ### Step 6: WebUI strings
 
-- [ ] `admin/src/components/Dashboard.tsx:131` and `Sidebar.tsx:115` → `cafleet member create` <!-- completed: -->
+- [x] `admin/src/components/Dashboard.tsx:131` and `Sidebar.tsx:115` → `cafleet member create` <!-- completed: 2026-07-03T22:44 -->
 
 ### Step 7: tests
 
-- [ ] Delete `cafleet/tests/cli/test_agent.py`; add the regression guard at `cafleet/tests/cli/test_agent_group_removed.py`: `cafleet agent list --fleet-id 1` exits 2 with `No such command 'agent'` (this file is the named carve-out in criterion 5 and the Step 8 grep) <!-- completed: -->
-- [ ] `member show` tests: found / not-found / placementless / `--full` block / `--json` shape / no tmux required <!-- completed: -->
-- [ ] `member list --all` tests: kind derivation (director / administrator / monitor / member), `-` placement cells, JSON shape, `--activity` exclusivity, default output unchanged <!-- completed: -->
-- [ ] `member delete` tests: placementless soft-delete success, Administrator guard, tmux not required off the pane paths; update `tests/cli/test_member_delete.py:498` (old error-string assertion) <!-- completed: -->
-- [ ] Delete `tests/output/test_render_agent.py` (it exercises the retired `render_agent` path directly); add coverage for the extended `member show` formatter; reword the `tests/cli/test_message.py:4` docstring mention <!-- completed: -->
+- [x] Delete `cafleet/tests/cli/test_agent.py`; add the regression guard at `cafleet/tests/cli/test_agent_group_removed.py`: `cafleet agent list --fleet-id 1` exits 2 with `No such command 'agent'` (this file is the named carve-out in criterion 5 and the Step 8 grep) <!-- completed: 2026-07-03T22:38 -->
+- [x] `member show` tests: found / not-found / placementless / `--full` block / `--json` shape / no tmux required <!-- completed: 2026-07-03T22:38 -->
+- [x] `member list --all` tests: kind derivation (director / administrator / monitor / member), `-` placement cells, JSON shape, `--activity` exclusivity, default output unchanged <!-- completed: 2026-07-03T22:38 -->
+- [x] `member delete` tests: placementless soft-delete success, Administrator guard, tmux not required off the pane paths; update `tests/cli/test_member_delete.py:498` (old error-string assertion) <!-- completed: 2026-07-03T22:38 -->
+- [x] Delete `tests/output/test_render_agent.py` (it exercises the retired `render_agent` path directly); add coverage for the extended `member show` formatter; reword the `tests/cli/test_message.py:4` docstring mention <!-- completed: 2026-07-03T22:38 -->
 
 ### Step 8: verification
 
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:lint-overlay`, `mise //cafleet:lint-spawn-guard` all pass <!-- completed: -->
-- [ ] Full-corpus grep for the exact patterns `cafleet agent `, `agent register`, `agent list`, `agent show`, `agent deregister` over `docs/ SPEC.md README.md CLAUDE.md skills/ .claude/ admin/src/ cafleet/` (excluding `design-docs/`, the retained `"cafleet agent spawn"` guard string in `spawn_prompt_guard.py` + `tests/test_spawn_prompt_guard.py`, and `cafleet/tests/cli/test_agent_group_removed.py`) returns nothing <!-- completed: -->
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` all pass (the run at completion time also included the `lint-overlay` / `lint-spawn-guard` gates, removed later the same day per Decision 6) <!-- completed: 2026-07-03T22:48 -->
+- [x] Full-corpus grep for the exact patterns `cafleet agent `, `agent register`, `agent list`, `agent show`, `agent deregister` over `docs/ SPEC.md README.md CLAUDE.md skills/ .claude/ admin/src/ cafleet/` (excluding `design-docs/` and `cafleet/tests/cli/test_agent_group_removed.py`) returns nothing <!-- completed: 2026-07-03T22:48 -->
 
 ---
 
@@ -259,3 +260,5 @@ Documentation is edited **first**, per `.claude/rules/documentation-maintenance.
 | 2026-07-03 | Initial draft |
 | 2026-07-03 | Review round 1: named the regression-guard test (`test_agent_group_removed.py`) as a grep-gate carve-out; retired `render_agent` / `_render_agent_item` + exports; made the grep patterns exact |
 | 2026-07-03 | User approved — Status: Approved |
+| 2026-07-03 | Mid-execution user instruction (Decision 6): removed the `lint-overlay` / `lint-spawn-guard` tooling entirely — mise tasks, modules, tests, and all non-`design-docs/` mentions (commit 7fd5d202); reworded Success Criteria 5–7 and the Step 8 verification tasks to read true post-removal (Reviewer round 1) |
+| 2026-07-03 | Fresh Fable Reviewer approved after 2 rounds (3 round-1 findings: kind-derivation dedup, `member list` docstring, design-doc SC consistency); PR #161 opened; Copilot review skipped per user instruction — Status: Complete |

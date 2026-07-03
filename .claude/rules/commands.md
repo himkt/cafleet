@@ -5,8 +5,6 @@
 - Run tests: `mise //cafleet:test`
 - Lint: `mise //cafleet:lint`
 - Lint (admin): `mise //admin:lint`
-- Check coding-agent overlay token coverage: `mise //cafleet:lint-overlay` — verifies the overlay/base/template token set is coherent (every canonical token defined in all three overlays + the documented-default table, no orphan tokens, identical note-anchor token set across overlays). Also runs inside `mise //cafleet:test` via `cafleet/tests/coding_agent/test_overlay_coverage.py`.
-- Check spawn-prompt / CLI-name drift: `mise //cafleet:lint-spawn-guard` — scans the project-local edit surface (`skills/`, `docs/`, `SPEC.md`, `README.md`, project-local `.claude/rules/` + `.claude/skills/skill-author/`, `CLAUDE.md`; `design-docs/` excluded) for the forbidden legacy command names and dollar-sign identity env references (the exact patterns live in `cafleet/src/cafleet/spawn_prompt_guard.py`). Also runs inside `mise //cafleet:test` via `cafleet/tests/test_spawn_prompt_guard.py`.
 - Format: `mise //cafleet:format`
 - Type check: `mise //cafleet:typecheck`
 - Sync dependencies: `mise //:uv-sync`

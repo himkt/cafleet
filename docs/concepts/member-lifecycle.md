@@ -8,8 +8,9 @@ The `cafleet member` CLI group wraps the two-step "register an agent + spawn a
 tmux pane" recipe behind `cafleet member create` and persists the agent-to-pane
 mapping in the `agent_placements` table. A "member" is an agent with a placement
 row — spawned by a Director via `cafleet member create`, linking it to a specific
-tmux pane, window, and session. The Director itself is NOT a member — it
-registers with plain `cafleet agent register`.
+tmux pane, window, and session. The Director itself is NOT a member — it is
+bootstrapped internally by `cafleet fleet create`, along with the built-in
+Administrator.
 
 **Single-Director invariant**: A fleet has exactly one Director — the root
 Director recorded in `fleets.director_agent_id` at `fleet create` time. Only
@@ -64,8 +65,8 @@ registers the command before Enter), poll `list-panes` until the pane disappears
 (15 s timeout), then deregister. On timeout, capture the pane tail and fail
 loudly with exit code 2; the operator reruns with `--force` for an atomic
 kill+deregister. A member with a pending placement (no pane yet) is a plain
-registry soft-delete. A registry-only agent (no placement row) is not a member —
-deregister it with `cafleet agent deregister` instead.
+registry soft-delete, and so is a placementless agent (no placement row) —
+`cafleet member delete` soft-deletes both without touching tmux.
 
 ## Spawn-prompt input modes
 
@@ -80,8 +81,10 @@ prompt text must be doubled (`{{`, `}}`) — see
 ## Commands
 
 The lifecycle ops live in the `member` group: `member create`, `member delete`
-(with `--force` for an atomic kill+deregister), and `member list` (with
-`--activity` for per-member activity aggregation). Keystroke interaction lives
+(with `--force` for an atomic kill+deregister), `member show` (single-agent
+detail — kind, skills, placement block), and `member list` (with `--activity`
+for per-member activity aggregation, or `--all` to list every active agent of
+the fleet with a `kind` column). Keystroke interaction lives
 in the same group: `member capture`, `member exec`, `member ping`, and
 `member nudge`. `member create` takes `--agent-id` (the spawning Director's ID,
 which must equal the fleet root); every other lifecycle verb targets its member

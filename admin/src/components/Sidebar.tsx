@@ -112,7 +112,7 @@ export default function Sidebar({ agents, onSelectAgent }: SidebarProps) {
       {agents.length === 0 && (
         <p className="p-3 text-xs text-text-faint">
           No agents registered in this fleet. Use the{" "}
-          <code className="font-mono text-text-muted">cafleet agent register</code>{" "}
+          <code className="font-mono text-text-muted">cafleet member create</code>{" "}
           CLI to add one.
         </p>
       )}

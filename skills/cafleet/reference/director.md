@@ -26,7 +26,7 @@ cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
 | Flag | Required | Notes |
 |---|---|---|
 | `--agent-id` | yes | The Director's agent ID |
-| `--name` | yes | Display name of the new member |
+| `--name` | yes | Display name of the new member. **Reserved name — `Administrator`**: every fleet is auto-seeded with one built-in `Administrator` (marked `agent_card_json.cafleet.kind == "builtin-administrator"`, protected against deregister and Director placement); do NOT name a member that. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; also recorded as `placement.coding_agent`. When omitted, an ordinary member defaults to `claude`; a `--role monitor` member inherits **your** (the spawning Director's) backend from your placement row, so the monitoring member runs on the same backend it watches. An explicit value always wins. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent. The `opencode` backend materializes its agent preset on first spawn. |
 | `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend and lists a per-backend example; the *Available models per backend* tables below list the common models for each backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
@@ -168,7 +168,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 
 ## Member Delete
 
-The CLI sends the backend exit keystroke, waits for the pane to close (15 s timeout), then deregisters and rebalances the layout; on timeout it exits 2 with the pane buffer tail on stderr (no deregister). `--force` / `-f` skips the wait and kill-panes immediately (exit 0 even if the pane was already gone). A member with a pending placement (no pane yet) is a plain registry soft-delete; a paneless registry-only agent is torn down with `cafleet agent deregister` instead.
+The CLI sends the backend exit keystroke, waits for the pane to close (15 s timeout), then deregisters and rebalances the layout; on timeout it exits 2 with the pane buffer tail on stderr (no deregister). `--force` / `-f` skips the wait and kill-panes immediately (exit 0 even if the pane was already gone). A member with a pending placement (no pane yet) is a plain registry soft-delete, and so is a placementless agent — `member delete` handles both without touching tmux.
 
 ```bash
 cafleet member delete --fleet-id <fleet-id> --member-id <member-id>

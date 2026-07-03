@@ -18,8 +18,6 @@ Skip resolution and the agent emits a literal `{monitor_model}` / `{permission_f
 
 **Documented defaults.** When an overlay omits a token, or an agent cannot identify its backend, each token has a documented backend-neutral default: the lowest-common-denominator form that functions on every backend (message-only coordination, POSIX backgrounding, a neutral mode description). This is a legitimate default per `affirmative-writing.md` — absence of an overlay value is an expected, valid state with a well-defined correct behavior — not an error-swallowing fallback. The default table is canonical in `skills/cafleet/SKILL.md` § *Resolve your overlay*.
 
-**Static coverage guard.** A static checker (`cafleet/tests/coding_agent/test_overlay_coverage.py`, also runnable via `mise //cafleet:lint-overlay`) keeps the overlay/base/template token set coherent so the resolve step always has complete data: every base token is defined in all three overlays and the default table, no overlay defines a token the base never uses, and the note-anchor token set is identical across the three overlays. It is a static data-contract guard, not a runtime application enforcer.
-
 Authors write the base neutrally, put every backend specific in the overlay, and list the overlay as the first load-bearing read wherever an entry point uses `{placeholder}` tokens.
 
 ## Two independent homes

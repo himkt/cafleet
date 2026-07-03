@@ -105,17 +105,18 @@ List the panes — only the `claude` pane titles itself with the member name
 so use the `pane_id` column to locate `bob` and `carol`:
 
 ```bash
-cafleet agent list --fleet-id 1
+cafleet member list --fleet-id 1 --all
 ```
 
 ```
-agent_id  name           status  backend   pane_id
---------  -------------  ------  --------  -------
-2         Director       active  claude    %0
-3         Administrator  active  -         -
-4         alice          active  claude    %7
-5         bob            active  codex     %8
-6         carol          active  opencode  %9
+5 agents:
+  agent_id  name           status  kind           backend   session  window_id  pane_id  created_at
+  --------  -------------  ------  -------------  --------  -------  ---------  -------  --------------------
+  2         Director       active  director       claude    main     @3         %0       2026-04-15T10:00:00+00:00
+  3         Administrator  active  administrator  -         -        -          -        -
+  4         alice          active  member         claude    main     @3         %7       2026-04-15T10:01:00+00:00
+  5         bob            active  member         codex     main     @3         %8       2026-04-15T10:02:00+00:00
+  6         carol          active  member         opencode  main     @3         %9       2026-04-15T10:03:00+00:00
 ```
 
 Message each member — repeat with `--to 5` and `--to 6`; the envelope and

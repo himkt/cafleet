@@ -177,9 +177,10 @@ def get_agent(agent_id: int, fleet_id: int) -> dict | None:
 
     Returns:
         Dict with ``agent_id``, ``name``, ``description``, ``status``,
-        ``registered_at``, ``kind`` (``"user"`` or the Administrator kind),
-        and ``placement`` (the placement sub-dict or ``None``). Returns
-        ``None`` if no active agent matches.
+        ``registered_at``, ``kind`` (``director`` / ``administrator`` /
+        ``monitor`` / ``member``), ``skills`` (the card's skills list,
+        usually ``[]``), and ``placement`` (the placement sub-dict or
+        ``None``). Returns ``None`` if no active agent matches.
     """
     with _shared.read_session() as session:
         agent = session.execute(
@@ -197,17 +198,26 @@ def get_agent(agent_id: int, fleet_id: int) -> dict | None:
             select(AgentPlacement).where(AgentPlacement.agent_id == agent_id)
         ).scalar_one_or_none()
 
+        is_root_director = session.execute(
+            select(
+                exists().where(
+                    Fleet.fleet_id == fleet_id,
+                    Fleet.director_agent_id == agent_id,
+                )
+            )
+        ).scalar_one()
+
+    card = json.loads(agent.agent_card_json) if agent.agent_card_json else {}
     result: dict = {
         "agent_id": agent.agent_id,
         "name": agent.name,
         "description": agent.description,
         "status": agent.status,
         "registered_at": agent.registered_at,
-        "kind": (
-            _shared.ADMINISTRATOR_KIND
-            if _shared.is_administrator(agent.agent_card_json)
-            else "user"
+        "kind": _shared.derive_agent_kind(
+            is_root_director, card.get("cafleet", {}).get("kind")
         ),
+        "skills": card.get("skills", []),
         "placement": None,
     }
     if placement_row is not None:

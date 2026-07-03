@@ -57,7 +57,7 @@ Your agent loads the `cafleet` skill and reads its Director-only
 
 ## What to expect
 
-The agent lists the roster with per-agent idle times, captures the pane of
+The agent renders the roster with per-agent idle times, captures the pane of
 any member that has gone quiet, and climbs the recovery ladder from mildest
 to harshest: re-poke the inbox, dispatch a shell
 command ([Bash routing](../concepts/bash-routing.md)), and only as a last

@@ -120,6 +120,9 @@ def test_format_agent_full__description_truncated_at_60(
         "name": "Claude-B",
         "description": description,
         "status": "active",
+        "kind": "member",
+        "skills": [],
+        "placement": None,
     }
     rendered = output.format_agent(agent, full=True)
     assert expected_present_in_render in rendered

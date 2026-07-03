@@ -15,6 +15,9 @@ def _agent(
         "name": name,
         "description": description,
         "status": status,
+        "kind": "member",
+        "skills": [],
+        "placement": None,
     }
 
 
@@ -83,7 +86,15 @@ def test_format_agent__compact_shape_and_default_kwarg():
 def test_format_agent__full_layout_has_labels_and_more_lines():
     full = output.format_agent(_agent(), full=True)
     compact = output.format_agent(_agent(), full=False)
-    for needle in ("agent_id:", "name:", "description:", "status:"):
+    for needle in (
+        "agent_id:",
+        "name:",
+        "description:",
+        "status:",
+        "kind:",
+        "skills:",
+        "placement:",
+    ):
         assert needle in full
     assert full.count("\n") > compact.count("\n")
 
