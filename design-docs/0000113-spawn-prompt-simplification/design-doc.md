@@ -1,7 +1,7 @@
 # Simplify Director Spawn Prompts and Reconcile CLI-Name Drift (Issue #155)
 
 **Status**: Approved
-**Progress**: 27/35 tasks complete
+**Progress**: 30/35 tasks complete
 **Last Updated**: 2026-07-02
 
 ## Overview
@@ -182,9 +182,9 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 
 ### Step 6: static drift-guard test
 
-- [ ] Add `cafleet/src/cafleet/spawn_prompt_guard.py` (or equivalent module) with a pure `check_spawn_prompt_drift()` returning file/line/pattern violations for the three forbidden patterns over the project-local edit surface (`skills/`, `docs/`, `SPEC.md`, `README.md`, project-local `.claude/rules/` + `.claude/skills/skill-author/`, `CLAUDE.md`), excluding `design-docs/` and the promoted `~/.claude/` copies <!-- completed: -->
-- [ ] Add `cafleet/tests/.../test_spawn_prompt_guard.py`: crafted passing/failing inputs for the pure function + a live-tree "clean" assertion <!-- completed: -->
-- [ ] Add a `mise //cafleet:lint-spawn-guard` task and wire it into `mise //cafleet:test`; document both in `.claude/rules/commands.md` <!-- completed: -->
+- [x] Add `cafleet/src/cafleet/spawn_prompt_guard.py` (or equivalent module) with a pure `check_spawn_prompt_drift()` returning file/line/pattern violations for the three forbidden patterns over the project-local edit surface (`skills/`, `docs/`, `SPEC.md`, `README.md`, project-local `.claude/rules/` + `.claude/skills/skill-author/`, `CLAUDE.md`), excluding `design-docs/` and the promoted `~/.claude/` copies <!-- completed: 2026-07-03T14:20 -->
+- [x] Add `cafleet/tests/.../test_spawn_prompt_guard.py`: crafted passing/failing inputs for the pure function + a live-tree "clean" assertion <!-- completed: 2026-07-03T14:20 -->
+- [x] Add a `mise //cafleet:lint-spawn-guard` task and wire it into `mise //cafleet:test`; document both in `.claude/rules/commands.md` <!-- completed: 2026-07-03T14:20 -->
 
 ### Step 7: source (only if strictly required)
 
