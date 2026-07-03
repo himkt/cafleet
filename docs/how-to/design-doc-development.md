@@ -29,7 +29,8 @@ Implement design-docs/NNNNNNN-<slug>.
 ```
 
 Triggers the `cafleet-design-doc` skill's execute workflow — a Director /
-Programmer / Tester team implements the document.
+Programmer / Tester team implements the document and a fresh Reviewer member
+reviews it before your approval.
 
 The contributor-facing description of this loop, including what to pass to
 each skill, lives in [Contributing](../get-started/contributing.md).

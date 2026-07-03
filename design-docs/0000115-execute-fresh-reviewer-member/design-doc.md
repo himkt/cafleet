@@ -1,7 +1,7 @@
 # Fresh Reviewer Member Replaces the Copilot Review in the Execute Workflow
 
 **Status**: Approved
-**Progress**: 26/37 tasks complete
+**Progress**: 32/37 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -205,15 +205,15 @@ No other code changes: `cafleet member create --model` already passes any backen
 
 ### Step 6: Peripheral docs
 
-- [ ] Remove the Copilot reference sentence from the "Unconditional idle-nudge (extended)" bullet in `.claude/skills/skill-author/SKILL.md` <!-- completed: -->
-- [ ] Update the execute-workflow team description in `docs/how-to/design-doc-development.md` <!-- completed: -->
-- [ ] Update the execute-workflow team parenthetical in `docs/get-started/contributing.md` <!-- completed: -->
+- [x] Remove the Copilot reference sentence from the "Unconditional idle-nudge (extended)" bullet in `.claude/skills/skill-author/SKILL.md` <!-- completed: 2026-07-04T00:37 -->
+- [x] Update the execute-workflow team description in `docs/how-to/design-doc-development.md` <!-- completed: 2026-07-04T00:37 -->
+- [x] Update the execute-workflow team parenthetical in `docs/get-started/contributing.md` <!-- completed: 2026-07-04T00:37 -->
 
 ### Step 7: Coverage-guard code
 
 - [x] Add `"{reviewer_model}"` to `CANONICAL_TOKENS` in `cafleet/src/cafleet/coding_agent/overlay_coverage.py`; update the count comment and the `main()` success message to 9 <!-- completed: 2026-07-04T00:09 -->
-- [ ] Update `cafleet/tests/coding_agent/test_overlay_coverage.py`: add the token to `_EXPECTED_CANONICAL`, update docstrings/comments, rename the count-carrying helpers and test to count-free names <!-- completed: -->
-- [ ] Delete the "(Copilot round-2)" provenance parenthetical from the `test_member_nudge__tmux_unavailable_exits_one` docstring in `cafleet/tests/cli/test_member.py` <!-- completed: -->
+- [x] Update `cafleet/tests/coding_agent/test_overlay_coverage.py`: add the token to `_EXPECTED_CANONICAL`, update docstrings/comments, rename the count-carrying helpers and test to count-free names <!-- completed: 2026-07-04T00:04 -->
+- [x] Delete the "(Copilot round-2)" provenance parenthetical from the `test_member_nudge__tmux_unavailable_exits_one` docstring in `cafleet/tests/cli/test_member.py` <!-- completed: 2026-07-04T00:04 -->
 
 ### Step 8: Verification sweep
 
