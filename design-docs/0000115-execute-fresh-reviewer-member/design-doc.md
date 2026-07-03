@@ -1,7 +1,7 @@
 # Fresh Reviewer Member Replaces the Copilot Review in the Execute Workflow
 
 **Status**: Approved
-**Progress**: 32/37 tasks complete
+**Progress**: 37/37 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -10,13 +10,13 @@ Replace the execute workflow's GitHub Copilot review (Step 6 `@copilot` request 
 
 ## Success Criteria
 
-- [ ] `skills/cafleet-design-doc/execute/execute.md` contains a Reviewer review-loop step that (a) is gated on all Implementation tasks checked AND all Success Criteria verified, (b) spawns the Reviewer at that point and no earlier, with `--model {reviewer_model}`, and (c) precedes the user-approval step.
-- [ ] `skills/cafleet-design-doc/execute/roles/reviewer.md` exists and specifies the fresh-context constraint, the read-execute review scope, the `COMMENT(reviewer): [TAG]` marker protocol, and the `approved (doc)` signal.
-- [ ] `grep -ri copilot` over the spawn-guard edit surface (`skills/`, `docs/`, `SPEC.md`, `README.md`, `CLAUDE.md`, project-local `.claude/rules/` + `.claude/skills/skill-author/`) returns **zero** hits for the review feature — the only permitted residual is the unrelated statistics example in `skills/cafleet-research/report/roles/researcher.md` ("among Copilot-enabled users").
-- [ ] `grep -rni unconditional skills/` returns no hits — the execute-only monitoring-member delta is gone and the execute monitor spawns from the canonical `cafleet` skill `roles/monitor.md` prompt. (`.claude/skills/skill-author/SKILL.md` keeps its generic "Unconditional idle-nudge (extended)" pattern bullet — only its Copilot reference sentence is removed — so it is deliberately outside this grep.)
-- [ ] `{reviewer_model}` is defined in all three overlays, `_template.md`, and the documented-defaults table; `mise //cafleet:lint-overlay` passes reporting 9 canonical tokens.
-- [ ] The per-backend model tables in `skills/cafleet/reference/director.md` § *Available models per backend* carry an intelligence level per model, and each overlay's `{reviewer_model}` value equals the entry its backend's table marks highest — for codex and opencode directly (`gpt-5.5`, `opencode/gpt-5.5-pro`); for claude via the `best` alias, which the table defines as resolving to the highest available model (Fable 5 if the org has access, else the latest Opus).
-- [ ] `mise //cafleet:test` and `mise //cafleet:lint-spawn-guard` pass.
+- [x] `skills/cafleet-design-doc/execute/execute.md` contains a Reviewer review-loop step that (a) is gated on all Implementation tasks checked AND all Success Criteria verified, (b) spawns the Reviewer at that point and no earlier, with `--model {reviewer_model}`, and (c) precedes the user-approval step.
+- [x] `skills/cafleet-design-doc/execute/roles/reviewer.md` exists and specifies the fresh-context constraint, the read-execute review scope, the `COMMENT(reviewer): [TAG]` marker protocol, and the `approved (doc)` signal.
+- [x] `grep -ri copilot` over the spawn-guard edit surface (`skills/`, `docs/`, `SPEC.md`, `README.md`, `CLAUDE.md`, project-local `.claude/rules/` + `.claude/skills/skill-author/`) returns **zero** hits for the review feature — the only permitted residual is the unrelated statistics example in `skills/cafleet-research/report/roles/researcher.md` ("among Copilot-enabled users").
+- [x] `grep -rni unconditional skills/` returns no hits — the execute-only monitoring-member delta is gone and the execute monitor spawns from the canonical `cafleet` skill `roles/monitor.md` prompt. (`.claude/skills/skill-author/SKILL.md` keeps its generic "Unconditional idle-nudge (extended)" pattern bullet — only its Copilot reference sentence is removed — so it is deliberately outside this grep.)
+- [x] `{reviewer_model}` is defined in all three overlays, `_template.md`, and the documented-defaults table; `mise //cafleet:lint-overlay` passes reporting 9 canonical tokens.
+- [x] The per-backend model tables in `skills/cafleet/reference/director.md` § *Available models per backend* carry an intelligence level per model, and each overlay's `{reviewer_model}` value equals the entry its backend's table marks highest — for codex and opencode directly (`gpt-5.5`, `opencode/gpt-5.5-pro`); for claude via the `best` alias, which the table defines as resolving to the highest available model (Fable 5 if the org has access, else the latest Opus).
+- [x] `mise //cafleet:test` and `mise //cafleet:lint-spawn-guard` pass.
 
 ---
 
@@ -217,11 +217,11 @@ No other code changes: `cafleet member create --model` already passes any backen
 
 ### Step 8: Verification sweep
 
-- [ ] `grep -ri copilot` over the repo excluding `design-docs/`, `researches/`, `node_modules/`, `.git/` — zero feature hits (the researcher.md statistics example is the only permitted residual) <!-- completed: -->
-- [ ] `grep -rni unconditional skills/` — zero hits <!-- completed: -->
-- [ ] `mise //cafleet:lint-overlay` passes reporting 9 canonical tokens <!-- completed: -->
-- [ ] `mise //cafleet:test` passes <!-- completed: -->
-- [ ] `mise //cafleet:lint-spawn-guard` passes <!-- completed: -->
+- [x] `grep -ri copilot` over the repo excluding `design-docs/`, `researches/`, `node_modules/`, `.git/` — zero feature hits (the researcher.md statistics example is the only permitted residual) <!-- completed: 2026-07-04T00:39 -->
+- [x] `grep -rni unconditional skills/` — zero hits <!-- completed: 2026-07-04T00:39 -->
+- [x] `mise //cafleet:lint-overlay` passes reporting 9 canonical tokens <!-- completed: 2026-07-04T00:39 -->
+- [x] `mise //cafleet:test` passes <!-- completed: 2026-07-04T00:39 -->
+- [x] `mise //cafleet:lint-spawn-guard` passes <!-- completed: 2026-07-04T00:39 -->
 
 ---
 
