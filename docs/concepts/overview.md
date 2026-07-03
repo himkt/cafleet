@@ -55,14 +55,14 @@ The `cafleet` CLI is organized as three top-level commands (`setup`, `doctor`,
 | Group | Scope | Subcommands |
 |---|---|---|
 | `fleet` | fleet lifecycle | `create`, `list`, `show`, `delete` |
-| `agent` | registry + pane-bound lifecycle | `register`, `list`, `show`, `deregister`, `spawn` |
-| `pane` | keystroke interaction with a pane-bound agent | `capture`, `input`, `exec`, `wake` |
+| `agent` | the agent registry | `register`, `list`, `show`, `deregister` |
+| `member` | pane-bound member lifecycle + keystroke interaction | `create`, `delete`, `list`, `capture`, `exec`, `ping`, `nudge` |
 | `message` | the message broker | `send`, `broadcast`, `poll`, `ack`, `cancel`, `show` |
 | `monitor` | the supervision scheduler | `start`, `status`, `config` |
 
-`agent` is the single mental model for the registry and lifecycle (a "member" is
-just an agent with a placement); `pane` is the single home for keystroke
-interaction with a pane-bound agent. The canonical CLI surface — every
+`agent` is the registry (a "member" is just an agent with a placement);
+`member` is the single home for the pane-bound lifecycle — spawn, teardown, and
+keystroke interaction. The canonical CLI surface — every
 subcommand, option, and option source — lives at
 [CLI options](../spec/cli-options.md).
 

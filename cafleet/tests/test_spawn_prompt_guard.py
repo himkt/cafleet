@@ -2,20 +2,8 @@
 
 These tests are the executable specification for the checker
 (``cafleet.spawn_prompt_guard``), which both this pytest module and the
-``mise //cafleet:lint-spawn-guard`` task wrap.
-
-The guard scans the project-local edit surface — the repo ``skills/`` tree,
-``docs/``, ``SPEC.md``, ``README.md``, the project-local ``.claude/``
-(``rules/`` + ``skills/skill-author/``), and ``CLAUDE.md`` — excluding
-``design-docs/`` (the historical record), and returns a violation naming the
-file, line, and matched pattern for any occurrence of:
-
-1. ``$CAFLEET_FLEET_ID`` / ``$CAFLEET_AGENT_ID`` / ``$CAFLEET_DIRECTOR_AGENT_ID``
-   — dollar-sign identity env refs (the fiction issue #155 removes); the bare
-   dollar-less names in the CLI env-var catalog are NOT matched.
-2. ``cafleet agent spawn`` — removed command; now ``cafleet member create``.
-3. ``cafleet pane `` (with trailing space / subcommand) — removed group; now
-   ``cafleet member *``.
+``mise //cafleet:lint-spawn-guard`` task wrap. The forbidden patterns and the
+scan-surface spec are canonical in that module's docstring.
 
 The pure scanner (:func:`scan_text`) is exercised with crafted inputs so a
 no-op implementation cannot pass; the tree walker
