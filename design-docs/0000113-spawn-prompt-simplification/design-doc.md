@@ -1,7 +1,7 @@
 # Simplify Director Spawn Prompts and Reconcile CLI-Name Drift (Issue #155)
 
 **Status**: Approved
-**Progress**: 25/35 tasks complete
+**Progress**: 27/35 tasks complete
 **Last Updated**: 2026-07-02
 
 ## Overview
@@ -177,8 +177,8 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 
 ### Step 5: project rules
 
-- [ ] Reconcile `.claude/rules/bash-tool.md`: `pane exec`/`pane wake --poll-only` → `member exec`/`member ping`, `agent spawn`/`agent deregister` → `member create`/`member delete`, and the Director-side dispatch primitives <!-- completed: -->
-- [ ] Scan `CLAUDE.md`, `.claude/rules/commands.md`, and `skill-author` skill for old-surface references and reconcile <!-- completed: -->
+- [x] Reconcile `.claude/rules/bash-tool.md`: `pane exec`/`pane wake --poll-only` → `member exec`/`member ping`, `agent spawn`/`agent deregister` → `member create`/`member delete`, and the Director-side dispatch primitives <!-- completed: 2026-07-03T13:42 -->
+- [x] Scan `CLAUDE.md`, `.claude/rules/commands.md`, and `skill-author` skill for old-surface references and reconcile <!-- completed: 2026-07-03T13:42 -->
 
 ### Step 6: static drift-guard test
 
