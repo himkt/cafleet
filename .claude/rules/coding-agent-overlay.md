@@ -4,7 +4,7 @@ cafleet skill instructions are backend-neutral by default. Write the base — ev
 
 ## Where backend specifics live
 
-Backend-specific deltas live in `skills/cafleet/reference/coding-agent/<name>.md`, one overlay per backend (`claude`, `codex`, `opencode`), with the canonical skeleton in `_template.md`. Each overlay carries that backend's concrete realization of the six deltas: the decision surface, the monitor model, the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, and the skill-loading recipe.
+Backend-specific deltas live in `skills/cafleet/reference/coding-agent/<name>.md`, one overlay per backend (`claude`, `codex`, `opencode`), with the canonical skeleton in `_template.md`. Each overlay carries that backend's concrete realization of the six deltas: the decision surface, the per-role model pins (monitor + reviewer), the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, and the skill-loading recipe.
 
 ## How the base and overlay connect
 

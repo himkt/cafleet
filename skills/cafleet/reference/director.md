@@ -61,28 +61,28 @@ Precedence matters for the slash case: `anthropic/claude-sonnet-4-6` contains bo
 
 **Claude Code (`--coding-agent claude`)** — simple list:
 
-| Model | For |
-|---|---|
-| `fable` | hardest, longest-running tasks |
-| `opus` | complex reasoning |
-| `sonnet` | everyday coding |
-| `haiku` | fast, simple tasks |
-| `best` | Fable 5 if the org has access, else the latest Opus |
-| `default` | clears the override; returns to the account-tier model |
-| `opusplan` | `opus` in Plan Mode, `sonnet` during execution |
-| `sonnet[1m]` | `sonnet` with a 1M-token context window |
-| `opus[1m]` | `opus` with a 1M-token context window |
+| Model | For | Intelligence |
+|---|---|---|
+| `fable` | hardest, longest-running tasks | highest |
+| `opus` | complex reasoning | high |
+| `sonnet` | everyday coding | medium |
+| `haiku` | fast, simple tasks | low |
+| `best` | Fable 5 if the org has access, else the latest Opus | resolves to the highest available (Fable 5 if the org has access, else the latest Opus) |
+| `default` | clears the override; returns to the account-tier model | that of the account-tier model it returns to |
+| `opusplan` | `opus` in Plan Mode, `sonnet` during execution | high (`opus`) in Plan Mode, medium (`sonnet`) during execution |
+| `sonnet[1m]` | `sonnet` with a 1M-token context window | medium (same as `sonnet`) |
+| `opus[1m]` | `opus` with a 1M-token context window | high (same as `opus`) |
 
 Full names: `claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5`.
 
 **Codex (`--coding-agent codex`)**:
 
-| Model | Notes |
-|---|---|
-| `gpt-5.5` | newest frontier; default / recommended |
-| `gpt-5.4` | flagship frontier — professional coding & reasoning |
-| `gpt-5.4-mini` | fast, efficient mini — responsive tasks and subagents |
-| `gpt-5.3-codex-spark` | text-only research preview (ChatGPT Pro) — near-instant iteration |
+| Model | Notes | Intelligence |
+|---|---|---|
+| `gpt-5.5` | newest frontier; default / recommended | highest |
+| `gpt-5.4` | flagship frontier — professional coding & reasoning | high |
+| `gpt-5.4-mini` | fast, efficient mini — responsive tasks and subagents | medium |
+| `gpt-5.3-codex-spark` | text-only research preview (ChatGPT Pro) — near-instant iteration | low |
 
 **OpenCode Zen (`--coding-agent opencode`)** — the OpenCode Zen catalog ([opencode.ai/docs/zen](https://opencode.ai/docs/zen/)). Every Zen model is passed with the `opencode/` gateway prefix, i.e. `opencode/<model-id>` (e.g. `opencode/gpt-5.5`, `opencode/claude-sonnet-4-6`, `opencode/gemini-3.5-flash`). The Models column lists the bare `<model-id>`; prepend `opencode/`:
 
@@ -94,6 +94,8 @@ Full names: `claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-ha
 
 Other providers: Qwen, DeepSeek, Kimi, GLM, MiniMax, Grok.
 Free (limited beta): Big Pickle, DeepSeek V4 Flash Free, MiMo-V2.5 Free, North Mini Code Free, Nemotron 3 Ultra Free.
+
+Intelligence ranking within the Zen catalog: `gpt-5.5-pro` highest, then `gpt-5.5` / `claude-opus-4-8`, then the mid-tier `gpt-5.4` / `claude-sonnet-4-6`, then the fast tier. Each overlay's `{reviewer_model}` value equals the entry its backend's table marks as highest intelligence — directly for codex (`gpt-5.5`) and opencode (`opencode/gpt-5.5-pro`); for claude via the `best` alias, which resolves to the highest available model (Fable 5 if the org has access, else the latest Opus).
 
 The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`; the Zen catalog above is normalized to the `opencode/` gateway prefix, and the direct-provider examples elsewhere in `director.md` / `README.md` / `coding-agents.md` stay valid.
 

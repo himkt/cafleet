@@ -1,0 +1,20 @@
+CLARIFYING QUESTIONS — design 0000115 (execute workflow: fresh Reviewer member replaces Copilot review). From the Drafter, for relay to the user.
+
+UNDERSTANDING TO CONFIRM: New execute flow = Steps 1-4 unchanged (per-step TDD + Phase D verification) -> when ALL Implementation tasks + Success Criteria are complete, the Director spawns a NEW Reviewer member (fresh, zero implementation context, most-intelligent model per coding-agent overlay) -> review-and-revise loop (Reviewer findings routed to Programmer/Tester; repeat until the Reviewer approves) -> admin (user) approval as today -> finalize + teardown. The GitHub Copilot review (today's Step 6 @copilot request + Step 7 Copilot loop) is removed entirely. Is this correct? Any adjustments?
+
+[Purpose & Scope]
+Q1 — Fate of push + PR creation: Today's Step 6 also pushes the feature branch and opens the PR (`gh pr create --fill`) before the Copilot loop. After removing Copilot, should the workflow: (a) KEEP push + PR creation after admin approval, dropping only the @copilot review request and the Step 7 loop [recommended — publication flow survives, only the Copilot review dies], or (b) drop push/PR entirely (local finalize only)?
+
+Q2 — Removal blast radius: The `copilot` marker role and the "Copilot Routing" section live in the SHARED coordination.md, and the create workflow name-drops them too ("Copilot review in this skill is design-doc-anchored only"). Per the repo's removal rule (total cleanup, no orphan mentions), should we remove ALL Copilot machinery from the whole cafleet-design-doc skill family (coordination.md Copilot Routing section + `copilot` marker role, create.md mentions, Copilot commit-message rows in director.md, the skill-author SKILL.md reference to the Copilot loop) [recommended], or restrict removal strictly to execute-workflow files?
+
+[Interface / Review mechanics]
+Q3 — Reviewer's review scope: Confirm the Reviewer reviews the full feature-branch diff (`git diff <base>..HEAD`) against the design doc — checking design-doc compliance, code quality, and test adequacy. May the Reviewer also RUN the test suite / lint itself as part of review (read-execute), or is it read-only with findings as markers?
+
+Q4 — Loop + disagreement handling: Plan: Reviewer writes `COMMENT(reviewer)` markers at `<file>:<line>` (or design-doc paragraphs); the Director routes them with today's path-pattern routing (test file -> Tester, source -> Programmer, design-doc -> Director resolves); loop with NO round cap until the Reviewer sends `approved (doc)`. If a member disputes a finding, the Director arbitrates like the existing test-defect protocol (3-round limit, then user escalation). OK?
+
+Q5 — Reviewer lifecycle after approval: If the admin requests changes during user approval, should the revised change go BACK through the Reviewer for re-approval before re-presenting to the admin [recommended — keeps the "Reviewer approves before admin sees it" invariant], or straight back to the admin? Either way the Reviewer stays alive until the Step 8 teardown — OK?
+
+[Dependencies / Backend overlay]
+Q6 — Concrete `{reviewer_model}` values (new overlay token beside `{monitor_model}`; each overlay + the documented-default table + the overlay-coverage guard get updated): propose claude -> `best` (resolves to Fable 5 if the org has access, else latest Opus — the self-adapting "most intelligent"; alternative: pin `fable`), codex -> `gpt-5.5` (newest frontier), opencode -> `opencode/gpt-5.5-pro` (alternative: `opencode/claude-opus-4-8`). Documented default when the overlay is silent / backend unknown: inherit the spawning Director's own model (same floor as `{monitor_model}`). Please pick per backend.
+
+Q7 — Monitoring-member delta: The execute monitor's "unconditional idle-nudge" extension exists ONLY to grant the Director turns while waiting on external Copilot (which never pushes into the pane). An in-fleet Reviewer's messages DO push into the Director's pane, so should we revert the execute monitor to the canonical conditional nudge (delta removed entirely) [recommended — simpler, delta's reason is gone], or keep the unconditional nudge as a safety net?

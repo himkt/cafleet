@@ -61,7 +61,8 @@ codebase. Some tips for new contributors:
    to absorb.
 3. Invoke the `cafleet-design-doc` skill (execute workflow) with the path
    `design-docs/NNNNNNN-<slug>` — TDD-cycle implementation pass (Director /
-   Programmer / Tester / optional Verifier).
+   Programmer / Tester / optional Verifier, plus a fresh Reviewer at review
+   time).
 
 See your coding-agent's skill documentation for the literal invocation syntax.
 Existing design documents under [`design-docs/`](https://github.com/himkt/cafleet/tree/main/design-docs)

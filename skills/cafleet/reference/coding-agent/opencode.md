@@ -6,6 +6,7 @@ Substitute these into the base `{…}` placeholders.
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
 | `{monitor_model}` | `anthropic/claude-haiku-4-5` |
+| `{reviewer_model}` | `opencode/gpt-5.5-pro` |
 | `{permission_flags}` | `--agent cafleet` |
 | `{bg_run}` | a backgrounded `!` shell command |
 | `{bg_stop}` | killing the recorded background process |

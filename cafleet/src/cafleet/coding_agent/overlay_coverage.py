@@ -20,11 +20,12 @@ import re
 import sys
 from pathlib import Path
 
-# The 8 resolvable tokens an overlay materializes (design 0000107 Part 5).
+# The 9 resolvable tokens an overlay materializes (design 0000107 Part 5).
 CANONICAL_TOKENS = frozenset(
     {
         "{decision_surface}",
         "{monitor_model}",
+        "{reviewer_model}",
         "{permission_flags}",
         "{bg_run}",
         "{bg_stop}",
@@ -354,7 +355,7 @@ def main() -> int:
             print(f"  - {violation}")
         return 1
     print(
-        "overlay coverage: OK — 8 canonical tokens covered across overlays + defaults"
+        "overlay coverage: OK — 9 canonical tokens covered across overlays + defaults"
     )
     return 0
 
