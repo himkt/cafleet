@@ -1,7 +1,7 @@
 # Simplify Director Spawn Prompts and Reconcile CLI-Name Drift (Issue #155)
 
 **Status**: Approved
-**Progress**: 8/35 tasks complete
+**Progress**: 10/35 tasks complete
 **Last Updated**: 2026-07-02
 
 ## Overview
@@ -64,12 +64,12 @@ Flag polarity notes: `member create` takes `--agent-id` for the acting **Directo
 
 Replace the "identity via injected `CAFLEET_*` env vars" model and every "delivered verbatim — no `{placeholder}` substitution" claim with the actual contract:
 
-- `cafleet member create` runs `str.format` over the resolved prompt (whether from `--prompt-file`, a positional argument, or the default template). It substitutes exactly four placeholders: `{fleet_id}`, `{agent_id}` (the member's own newly-allocated id), `{director_agent_id}`, `{coding_agent}`.
+- `cafleet member create` runs `str.format` over the resolved prompt (supplied via exactly one of `--text` / `--text-file`; post-0000112 there is no positional argument and no default template). It substitutes exactly four placeholders: `{fleet_id}`, `{agent_id}` (the member's own newly-allocated id), `{director_agent_id}`, `{coding_agent}`.
 - An author writes a spawn prompt using those brace placeholders; the CLI renders each to a literal at spawn. **Any literal brace in prompt text must be doubled** (`{{` / `}}`) to survive `.format()`.
-- An unknown placeholder raises a `UsageError` listing the four supported names (`_prompt.py:99-105`); a malformed brace raises the "double literal braces" `UsageError`.
+- An unknown placeholder raises a `UsageError` listing the four supported names; a malformed brace raises the "double literal braces" `UsageError` (both raised by `member.py`'s substitution step).
 - Two-stage rendering stays intact: the **Director** substitutes the values it already knows as literals before the call (`BASE`, the absolute role-file path, the cafleet-load purpose phrase), then the **CLI** substitutes the four identity placeholders. The Director must leave no stray single braces other than the four identity placeholders.
 
-The `--prompt-file` audit artifact at `<BASE>/prompts/<role>-<UTC>.md` therefore carries the four `{...}` placeholders pre-substitution — that is expected and is the authoritative record of what was spawned.
+The `--text-file` audit artifact at `<BASE>/prompts/<role>-<UTC>.md` therefore carries the four `{...}` placeholders pre-substitution — that is expected and is the authoritative record of what was spawned.
 
 ### S2 — Simplified spawn-prompt skeleton
 
@@ -103,7 +103,7 @@ Changes from the current skeleton:
 - **`COMMUNICATION PROTOCOL` block removed.** The member learns poll/send/ack command shapes from the `cafleet` skill and its role file — not from inline prompt examples. The prose that previously explained `$CAFLEET_*` runtime resolution is deleted.
 - **No `INSTALLED CLI NOTE` / translation table.** With the corpus reconciled onto `member *`, there is nothing to translate.
 
-The per-role delta table, the lossless rule (every `IMPORTANT:` line, hard role-constraint, and start cue survives verbatim), the `--prompt-file` audit-write protocol, the `${BASE} == <unset>` guarded-skip, the spawn-size limit, and the backtick caveat are all retained — only the identity/communication framing changes.
+The per-role delta table, the lossless rule (every `IMPORTANT:` line, hard role-constraint, and start cue survives verbatim), the `--text-file` audit-write protocol, the `${BASE} == <unset>` guarded-skip, the spawn-size limit, and the backtick caveat are all retained — only the identity/communication framing changes.
 
 ### S3 — CLI-name reconciliation
 
@@ -113,7 +113,7 @@ Sweep every occurrence of the old surface to the shipped surface across the repo
 - Rename the reference page `skills/cafleet/reference/director.md`'s title/framing from "`cafleet agent *` / `cafleet pane *`" to the `member` group; the file itself may keep its `director.md` filename.
 - Follow the removal rule (`~/.claude/rules/removal.md`): after the sweep the corpus reads as if the old names never existed. The only place the old names legitimately remain is this design doc and git history.
 - **Scope boundary (per user answer Q3b):** edit the **project-local** tree — the repo `skills/` tree, `docs/`, `SPEC.md`, `README.md`, the project-local `.claude/` (its `rules/` and the project-local `.claude/skills/skill-author/` skill), and `CLAUDE.md`. Do **not** edit the promoted `~/.claude/skills/` copies — those are re-synced by `cafleet setup` (design 0000109). The project-local files are the source of truth; the promoted copies are downstream.
-- **Source (per user answer Q3a):** prefer **no** source change — `_prompt.py` and `member.py` already use the correct placeholders and command names. Touch source only if a concrete drift strictly requires it (none is currently identified).
+- **Source (per user answer Q3a):** prefer **no** source change — `member.py` already uses the correct placeholders and command names (post-0000112 it also owns prompt resolution; `_prompt.py` was deleted by 0000112). Touch source only if a concrete drift strictly requires it (none is currently identified).
 - **Sibling design 0000112 (per user answer Q4):** 0000112 landed before this design was executed (merged PR #156); the installed CLI's `member` group no longer exposes `send-input`. Document the CLI as it now ships: the reconciled corpus describes `member create/delete/list/capture/exec/ping/nudge` and does **not** document `send-input`.
 
 ### S4 — Static drift-guard test
@@ -151,8 +151,8 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 
 ### Step 2: README and SPEC
 
-- [ ] Update `README.md`: `member *` command surface, monitoring-member spawn via `member create`, remove injected-env-var identity narrative <!-- completed: -->
-- [ ] Update `SPEC.md`: rewrite the spawn/pane contract sections to `member create/delete/list/capture/exec/ping/nudge`; replace the "delivered verbatim, no substitution" default-prompt text with the `str.format` contract (four placeholders, double-brace rule); fix `--agent-id`→`--member-id` polarity in lifecycle contexts <!-- completed: -->
+- [x] Update `README.md`: `member *` command surface, monitoring-member spawn via `member create`, remove injected-env-var identity narrative <!-- completed: 2026-07-03T11:52 -->
+- [x] Update `SPEC.md`: rewrite the spawn/pane contract sections to `member create/delete/list/capture/exec/ping/nudge`; replace the "delivered verbatim, no substitution" default-prompt text with the `str.format` contract (four placeholders, double-brace rule); fix `--agent-id`→`--member-id` polarity in lifecycle contexts <!-- completed: 2026-07-03T11:52 -->
 
 ### Step 3: cafleet skill (SKILL.md, reference, roles)
 
@@ -188,7 +188,7 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 
 ### Step 7: source (only if strictly required)
 
-- [ ] Verify `_prompt.py` default `MEMBER_PROMPT_TEMPLATE` and `member.py` user-facing strings need no change; make the minimal edit only if a concrete drift is found (expected: none) <!-- completed: -->
+- [ ] Verify `member.py` prompt substitution and user-facing strings need no change (post-0000112 `member.py` owns prompt resolution; `_prompt.py` and the default template no longer exist); make the minimal edit only if a concrete drift is found (expected: none) <!-- completed: -->
 
 ### Step 8: verification and finalize
 
@@ -205,3 +205,4 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 |------|---------|
 | 2026-07-02 | Initial draft |
 | 2026-07-03 | Director validation: sibling design 0000112 landed first (PR #156) — `member send-input` no longer ships; removed it from the target surface (Success Criteria, Background table, S3, Step 2) per the doc's own Q4 contingency |
+| 2026-07-03 | Director arbitration during Step 2 review: 0000112 also deleted `_prompt.py`, the positional prompt argument, and the default template — corrected S1/S2/S3/Step 7 to the `--text`/`--text-file`-only, `member.py`-owned prompt resolution |
