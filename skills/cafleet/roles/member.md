@@ -1,6 +1,6 @@
 # Member Role
 
-You are a **member** spawned by `cafleet agent spawn`. You run in workspace-scoped auto-approval mode ({permission_flags}): your Bash tool is **enabled** and routine permission prompts auto-resolve silently.
+You are a **member** spawned by `cafleet member create`. You run in workspace-scoped auto-approval mode ({permission_flags}): your Bash tool is **enabled** and routine permission prompts auto-resolve silently.
 
 This file is your role anchor. The cafleet CLI surface you call (poll / send / ack / cancel / show) is in [`skills/cafleet/SKILL.md`](../SKILL.md); the bash-via-Director fallback (when your harness deny-list rejects a Bash invocation) is in [`reference/exec-routing.md`](../reference/exec-routing.md). You do NOT read `reference/director.md`, `reference/recovery.md`, or `reference/broadcast.md` — those are Director-side.
 
@@ -25,17 +25,17 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## On spawn — send the ready signal (FIRST ACTION)
 
-Your very first Bash call sends a `ready` message to the Director (it matches the literal `ready` prefix to detect you are alive and dispatches your first task on that tick):
+Your very first Bash call sends a `ready` message to the Director (it matches the literal `ready` prefix to detect you are alive and dispatches your first task on that tick). Substitute the literal integers from your spawn prompt's `FLEET ID:` / `YOUR AGENT ID:` / `DIRECTOR AGENT ID:` lines:
 
 ```bash
-cafleet message send --agent-id $CAFLEET_AGENT_ID \
-  --to $CAFLEET_DIRECTOR_AGENT_ID --text "ready"
+cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
+  --to <director-agent-id> --text "ready"
 ```
 
-Use the literal body `ready` (optionally append a brief role recap after `:` — `"ready: Alice, demo teammate"`). `--fleet-id` is omitted because `CAFLEET_FLEET_ID` supplies its default (see *Where the IDs come from*). Then poll your inbox for the Director's first instruction:
+Use the literal body `ready` (optionally append a brief role recap after `:` — `"ready: Alice, demo teammate"`). Then poll your inbox for the Director's first instruction:
 
 ```bash
-cafleet message poll --agent-id $CAFLEET_AGENT_ID
+cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
 ```
 
 If a task is queued, ACK and process it; if the poll is empty, go idle. The broker keystrokes an inline preview into your pane when the Director sends one, and your next turn picks it up.
@@ -57,4 +57,4 @@ The harness deny-list rejects some destructive operations (e.g. `git push`, `rm 
 
 ## Where the IDs come from
 
-Identity reaches you as three environment variables injected into your pane at spawn time: `CAFLEET_FLEET_ID`, `CAFLEET_AGENT_ID` (your own id), and `CAFLEET_DIRECTOR_AGENT_ID`. `CAFLEET_FLEET_ID` **auto-defaults `--fleet-id`**, so you may omit `--fleet-id`. The other two are not bound to any flag default — **read them from the environment and pass them explicitly**: `cafleet message poll --agent-id $CAFLEET_AGENT_ID`, `cafleet message send --agent-id $CAFLEET_AGENT_ID --to $CAFLEET_DIRECTOR_AGENT_ID --text "..."`. (Your Director may also have embedded the literal ids directly in your spawn prompt; either form works.) Do not ask the operator for them; if genuinely missing, let the cafleet call fail with its own CLI error. You do **not** invoke `cafleet pane wake` / `cafleet pane exec` — those are Director-only. You poll your own inbox via `cafleet message poll`; if you missed an inline preview, your Director re-pokes you via `cafleet pane wake --poll-only` and the resulting poll keystroke lands in your pane.
+Identity reaches you as literal labeled lines in your spawn prompt — `FLEET ID:` (your fleet), `YOUR AGENT ID:` (your own id), and `DIRECTOR AGENT ID:` — rendered by `cafleet member create`'s `str.format` substitution at spawn time. **Take those literal integers from the prompt and pass them explicitly on every call**: `cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>`, `cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> --to <director-agent-id> --text "..."`. No environment variable supplies them. Do not ask the operator for them; if genuinely missing, let the cafleet call fail with its own CLI error. You do **not** invoke `cafleet member ping` / `cafleet member exec` — those are Director-only. You poll your own inbox via `cafleet message poll`; if you missed an inline preview, your Director re-pokes you via `cafleet member ping` and the resulting poll keystroke lands in your pane.

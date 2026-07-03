@@ -26,4 +26,4 @@ Every note names the base token/instruction it qualifies.
 
 The canonical monitor-spawn command, fully resolved for this backend:
 
-`cafleet agent spawn --role monitor --model haiku --text-file <rendered monitor prompt>` (members spawned `--permission-mode dontAsk`).
+`cafleet member create --role monitor --model haiku --text-file <rendered monitor prompt>` (members spawned `--permission-mode dontAsk`).

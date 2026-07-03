@@ -1,7 +1,7 @@
 # Simplify Director Spawn Prompts and Reconcile CLI-Name Drift (Issue #155)
 
 **Status**: Approved
-**Progress**: 10/35 tasks complete
+**Progress**: 21/35 tasks complete
 **Last Updated**: 2026-07-02
 
 ## Overview
@@ -156,17 +156,17 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 
 ### Step 3: cafleet skill (SKILL.md, reference, roles)
 
-- [ ] Rewrite `skills/cafleet/SKILL.md` § *Spawned-member identity*: retitle away from "via `CAFLEET_*` env vars", document the `str.format` mechanism (four placeholders, `{agent_id}` = the member's own id, double-brace rule), and correct the fleet-id/agent-id examples <!-- completed: -->
-- [ ] Rewrite `skills/cafleet/reference/director.md`: retitle to the `member *` group; replace `agent spawn`/`agent deregister`/`pane *` sections with `member create/delete/capture/exec/ping/nudge/list`; install the S2 simplified skeleton; delete every "verbatim / no `{placeholder}` substitution" statement; document the `str.format` + double-brace contract <!-- completed: -->
-- [ ] Reconcile `skills/cafleet/reference/supervision.md` (spawn protocol, monitor lifecycle, `member list --activity`, teardown verbs) <!-- completed: -->
-- [ ] Reconcile `skills/cafleet/reference/recovery.md` (teardown/shutdown → `member delete`) <!-- completed: -->
-- [ ] Reconcile `skills/cafleet/reference/exec-routing.md` (`pane exec`/`pane wake --poll-only` → `member exec`/`member ping`) <!-- completed: -->
-- [ ] Reconcile `skills/cafleet/reference/cli.md` (command catalog; keep the dollar-less `CAFLEET_*` CLI env-var catalog accurate, remove any injected-identity claim) <!-- completed: -->
-- [ ] Reconcile `skills/cafleet/reference/broadcast.md` and `reference/output-flags.md` if they name old commands <!-- completed: -->
-- [ ] Reconcile `skills/cafleet/roles/monitor.md`: identity block, spawn/teardown verbs, remove `$CAFLEET_*` references <!-- completed: -->
-- [ ] Reconcile `skills/cafleet/roles/member.md`: identity block, poll/send shapes read from skill (not `$CAFLEET_*`) <!-- completed: -->
-- [ ] Reconcile `skills/cafleet/roles/director.md` (if present) <!-- completed: -->
-- [ ] Reconcile the coding-agent overlays `reference/coding-agent/{claude,codex,opencode,_template}.md` if they name old commands or `$CAFLEET_*` identity vars <!-- completed: -->
+- [x] Rewrite `skills/cafleet/SKILL.md` § *Spawned-member identity*: retitle away from "via `CAFLEET_*` env vars", document the `str.format` mechanism (four placeholders, `{agent_id}` = the member's own id, double-brace rule), and correct the fleet-id/agent-id examples <!-- completed: 2026-07-03T11:58 -->
+- [x] Rewrite `skills/cafleet/reference/director.md`: retitle to the `member *` group; replace `agent spawn`/`agent deregister`/`pane *` sections with `member create/delete/capture/exec/ping/nudge/list`; install the S2 simplified skeleton; delete every "verbatim / no `{placeholder}` substitution" statement; document the `str.format` + double-brace contract <!-- completed: 2026-07-03T12:10 -->
+- [x] Reconcile `skills/cafleet/reference/supervision.md` (spawn protocol, monitor lifecycle, `member list --activity`, teardown verbs) <!-- completed: 2026-07-03T12:20 -->
+- [x] Reconcile `skills/cafleet/reference/recovery.md` (teardown/shutdown → `member delete`) <!-- completed: 2026-07-03T12:20 -->
+- [x] Reconcile `skills/cafleet/reference/exec-routing.md` (`pane exec`/`pane wake --poll-only` → `member exec`/`member ping`) <!-- completed: 2026-07-03T12:20 -->
+- [x] Reconcile `skills/cafleet/reference/cli.md` (command catalog; keep the dollar-less `CAFLEET_*` CLI env-var catalog accurate, remove any injected-identity claim) <!-- completed: 2026-07-03T12:26 -->
+- [x] Reconcile `skills/cafleet/reference/broadcast.md` and `reference/output-flags.md` if they name old commands <!-- completed: 2026-07-03T12:26 -->
+- [x] Reconcile `skills/cafleet/roles/monitor.md`: identity block, spawn/teardown verbs, remove `$CAFLEET_*` references <!-- completed: 2026-07-03T12:38 -->
+- [x] Reconcile `skills/cafleet/roles/member.md`: identity block, poll/send shapes read from skill (not `$CAFLEET_*`) <!-- completed: 2026-07-03T12:38 -->
+- [x] Reconcile `skills/cafleet/roles/director.md` (if present) <!-- completed: 2026-07-03T12:38 -->
+- [x] Reconcile the coding-agent overlays `reference/coding-agent/{claude,codex,opencode,_template}.md` if they name old commands or `$CAFLEET_*` identity vars <!-- completed: 2026-07-03T12:38 -->
 
 ### Step 4: cafleet-design-doc and cafleet-research skills
 
