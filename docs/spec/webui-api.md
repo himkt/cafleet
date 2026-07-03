@@ -89,7 +89,7 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
 **`monitor` field**: each agent carries its folded monitoring schedule —
 `{"interval_seconds": int, "last_ping_at": str|null, "enabled": bool}` — or
 `null` when the agent is not enrolled (the unenrolled watcher, the
-Administrator, deregistered agents, and card-only registrations all carry
+Administrator, deregistered agents, and agents without a placement all carry
 `monitor: null`). Folding the schedule into the list lets the SPA render every
 agent's schedule without an extra request per agent. Which agents are enrolled
 — the watched set — is defined in [Monitoring](../concepts/monitoring.md).
@@ -151,7 +151,7 @@ Returns one agent's monitoring schedule.
 
 **Errors**: 404 (`detail: "Agent not enrolled"`) when the agent is not in the
 fleet or not enrolled (the monitoring member, Administrator, deregistered,
-card-only). 400 for a missing or non-integer `X-Fleet-Id`; 404
+placementless). 400 for a missing or non-integer `X-Fleet-Id`; 404
 (`detail: "Fleet not found"`) for an unknown fleet. The SPA reads the folded
 `monitor` field on `GET /api/agents` instead of calling this endpoint per agent —
 it exists for CLI/API parity.

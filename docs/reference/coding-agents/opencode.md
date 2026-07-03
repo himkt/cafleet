@@ -113,7 +113,7 @@ cafleet member create --fleet-id 1 --agent-id 2 \
 # Expect: ~/.opencode/agents/cafleet.md is materialized with the
 # cafleet preset (cat it and verify the JSON frontmatter).
 
-cafleet agent list --fleet-id 1
+cafleet member list --fleet-id 1 --all
 # Expect: backend column shows 'opencode' for the smoke member.
 
 cafleet message send --fleet-id 1 --agent-id 2 \

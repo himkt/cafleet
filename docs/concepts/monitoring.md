@@ -60,7 +60,7 @@ set** — and flags the ones whose interval has elapsed. Enrollment covers the
 **720 s**), each carrying its own per-agent interval. The dedicated monitoring
 member is **not** enrolled: it is the *watcher*, not a watched agent (see
 [The monitoring member](#the-monitoring-member)). The write-only Administrator and
-card-only agents are never enrolled.
+placementless agents are never enrolled.
 
 When ≥ 1 watched agent is due, the loop wakes the monitoring member **once** and
 stamps `last_ping_at = now` on each due agent. That stamp advances each watched
@@ -222,8 +222,8 @@ Two tables back the monitor. Both reuse a parent id as a 1:1 INTEGER primary key
   added) and **every ordinary member** (720 s, enrolled in `register_agent` when
   it has a placement and is not the monitoring member). The dedicated monitoring
   member is **not** enrolled (it is the watcher, located by kind via
-  `find_monitoring_member`); neither are the write-only Administrator or card-only
-  agents. `is_director` is *derived* at scan time
+  `find_monitoring_member`); neither are the write-only Administrator or
+  placementless agents. `is_director` is *derived* at scan time
   (`agent_id == fleets.director_agent_id`) for `monitor status` role labeling; it
   is not denormalized.
 - **`monitor_runtime`** — one row per fleet, holding the running loop's `pid`,

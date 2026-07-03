@@ -1,7 +1,7 @@
 # Absorb the `agent` CLI group into `member`
 
 **Status**: Approved
-**Progress**: 0/31 tasks complete
+**Progress**: 6/31 tasks complete
 **Last Updated**: 2026-07-03
 
 ## Overview
@@ -197,12 +197,12 @@ Documentation is edited **first**, per `.claude/rules/documentation-maintenance.
 
 ### Step 1: docs/ (documentation first)
 
-- [ ] `docs/spec/cli-options.md`: subcommand summary, `--full` semantics, Fleet ID / Agent ID / Member ID sections, member-resolution rules <!-- completed: -->
-- [ ] `docs/spec/cli-options.md`: delete § `cafleet agent`; add § `member show`; extend § `member delete` and § `member list`; rewrite the Error Messages table rows per the spec <!-- completed: -->
-- [ ] `docs/concepts/member-lifecycle.md`: Director-bootstrap sentence, delete-ordering paragraph, Commands section <!-- completed: -->
-- [ ] `docs/spec/data-model.md` line 128 reword <!-- completed: -->
-- [ ] Replace the five roster examples: `docs/get-started/quickstart.md`, `docs/how-to/mixed-backend-team.md`, `docs/reference/coding-agents/{claude,codex,opencode}.md` <!-- completed: -->
-- [ ] Sweep the rest of `docs/` for legacy phrasing (`cafleet agent`, the four subcommands, "registry-only"/"paneless" teardown pointers) <!-- completed: -->
+- [x] `docs/spec/cli-options.md`: subcommand summary, `--full` semantics, Fleet ID / Agent ID / Member ID sections, member-resolution rules <!-- completed: 2026-07-03T17:16 -->
+- [x] `docs/spec/cli-options.md`: delete § `cafleet agent`; add § `member show`; extend § `member delete` and § `member list`; rewrite the Error Messages table rows per the spec <!-- completed: 2026-07-03T17:16 -->
+- [x] `docs/concepts/member-lifecycle.md`: Director-bootstrap sentence, delete-ordering paragraph, Commands section <!-- completed: 2026-07-03T17:20 -->
+- [x] `docs/spec/data-model.md` line 128 reword <!-- completed: 2026-07-03T17:20 -->
+- [x] Replace the five roster examples: `docs/get-started/quickstart.md`, `docs/how-to/mixed-backend-team.md`, `docs/reference/coding-agents/{claude,codex,opencode}.md` <!-- completed: 2026-07-03T17:20 -->
+- [x] Sweep the rest of `docs/` for legacy phrasing (`cafleet agent`, the four subcommands, "registry-only"/"paneless" teardown pointers) <!-- completed: 2026-07-03T17:24 -->
 
 ### Step 2: SPEC.md + README.md
 

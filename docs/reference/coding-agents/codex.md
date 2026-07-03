@@ -80,7 +80,7 @@ cafleet member create --fleet-id 1 --agent-id 2 \
   --name Codex-Smoke --description "codex smoke member" --coding-agent codex \
   --text "You are Codex-Smoke. Reply hello when polled."
 
-cafleet agent list --fleet-id 1
+cafleet member list --fleet-id 1 --all
 # Expect: two member rows, backend column shows 'claude' and 'codex' respectively.
 
 cafleet message send --fleet-id 1 --agent-id 2 \

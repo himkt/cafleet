@@ -50,19 +50,18 @@ flowchart LR
 ## CLI
 
 The `cafleet` CLI is organized as three top-level commands (`setup`, `doctor`,
-`server`) plus five command groups:
+`server`) plus four command groups:
 
 | Group | Scope | Subcommands |
 |---|---|---|
 | `fleet` | fleet lifecycle | `create`, `list`, `show`, `delete` |
-| `agent` | the agent registry | `register`, `list`, `show`, `deregister` |
-| `member` | pane-bound member lifecycle + keystroke interaction | `create`, `delete`, `list`, `capture`, `exec`, `ping`, `nudge` |
+| `member` | agent lifecycle + keystroke interaction | `create`, `delete`, `show`, `list`, `capture`, `exec`, `ping`, `nudge` |
 | `message` | the message broker | `send`, `broadcast`, `poll`, `ack`, `cancel`, `show` |
 | `monitor` | the supervision scheduler | `start`, `status`, `config` |
 
-`agent` is the registry (a "member" is just an agent with a placement);
-`member` is the single home for the pane-bound lifecycle — spawn, teardown, and
-keystroke interaction. The canonical CLI surface — every
+`member` is the single home for the agent lifecycle — spawn, teardown,
+introspection (`show`, `list --all`), and keystroke interaction (a "member" is
+just an agent with a placement). The canonical CLI surface — every
 subcommand, option, and option source — lives at
 [CLI options](../spec/cli-options.md).
 

@@ -95,17 +95,17 @@ List the fleet's agents — the new members' ids (`4` and `5`) appear
 alongside the Director and the Administrator:
 
 ```bash
-cafleet agent list --fleet-id 1
+cafleet member list --fleet-id 1 --all
 ```
 
 ```
-2 Director active
-
-3 Administrator active
-
-4 demo-member active
-
-5 reviewer active
+4 agents:
+  agent_id  name           status  kind           backend  session  window_id  pane_id  created_at
+  --------  -------------  ------  -------------  -------  -------  ---------  -------  --------------------
+  2         Director       active  director       claude   main     @3         %0       2026-04-15T10:00:00+00:00
+  3         Administrator  active  administrator  -        -        -          -        -
+  4         demo-member    active  member         claude   main     @3         %7       2026-04-15T10:01:00+00:00
+  5         reviewer       active  member         claude   main     @3         %8       2026-04-15T10:02:00+00:00
 ```
 
 Send a message between the members — `demo-member` (`4`) messages
