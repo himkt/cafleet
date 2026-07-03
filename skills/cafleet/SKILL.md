@@ -36,7 +36,7 @@ Before your first action other than these Reads, Read every file in the **Load-b
 
 | Read | When |
 |------|------|
-| [`reference/cli.md`](reference/cli.md) | you need a CLI subcommand beyond send/poll/ack — self-registration, global options, coding-agent backends, `message cancel` / `show`, `agent list` / `show`, `doctor`, `agent deregister`, `fleet delete`, the bootstrap workflow |
+| [`reference/cli.md`](reference/cli.md) | you need a CLI subcommand beyond send/poll/ack — global options, coding-agent backends, `message cancel` / `show`, `member show` / `member list --all`, `doctor`, `fleet delete`, the typical workflow |
 | [`reference/output-flags.md`](reference/output-flags.md) | you need `--full` / `--json` opt-back-in semantics or `CAFLEET_MAX_TEXT_LEN` |
 
 Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`member create` / `member delete` / `member list --activity` / `member capture` / `member exec` / `member ping` / `member nudge`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
@@ -71,11 +71,11 @@ Used only when your overlay omits a token or your backend is unknown. Each defau
 
 Every `cafleet` invocation that touches agents or messages is **fleet-scoped** — it carries `--fleet-id` — and most additionally carry an acting `--agent-id` or a target `--member-id`:
 
-- `--fleet-id <int>` — per-subcommand (placed **after** the subcommand name), required on every `agent *` / `member *` / `message *` / `monitor *` subcommand plus `fleet show` / `fleet delete`. There is **no environment default**; a missing value exits 1 with the shared callback error naming `cafleet fleet create`. Rejected with `No such option` on `setup` / `fleet create` / `fleet list` / `server` / `doctor`.
-- `--agent-id <int>` — the **requester** on `agent show` / `message *`, the **target** on `agent deregister` / `monitor config` (the agent whose schedule is shown/edited), the acting **Director** on `member create`, and the **sender** on `member nudge`. (`agent register`, `agent list`, `member list`, `monitor start` / `monitor status`, and the `fleet *` commands take **no** `--agent-id`; `register` instead returns the new `agent_id` to record and reuse.)
-- `--member-id <int>` — the **target member** on `member delete` / `member capture` / `member exec` / `member ping` / `member nudge`.
+- `--fleet-id <int>` — per-subcommand (placed **after** the subcommand name), required on every `member *` / `message *` / `monitor *` subcommand plus `fleet show` / `fleet delete`. There is **no environment default**; a missing value exits 1 with the shared callback error naming `cafleet fleet create`. Rejected with `No such option` on `setup` / `fleet create` / `fleet list` / `server` / `doctor`.
+- `--agent-id <int>` — the **requester** on every `message *` subcommand, the **target** on `monitor config` (the agent whose schedule is shown/edited), the acting **Director** on `member create`, and the **sender** on `member nudge`. (`member list`, `monitor start` / `monitor status`, and the `fleet *` commands take **no** `--agent-id`.)
+- `--member-id <int>` — the **target member** on `member delete` / `member show` / `member capture` / `member exec` / `member ping` / `member nudge`.
 
-In the Director's own commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet agent register` / `cafleet member create` — never your own exported shell variables. `permissions.allow` matches Bash invocations as fixed strings, so an ad-hoc `export FLEET_ID=…; --fleet-id $FLEET_ID` breaks the match and forces prompts. See [`cli-options.md`](../../docs/spec/cli-options.md#fleet-id) for the rationale and [`permissions.allow` coverage](../../docs/spec/cli-options.md#permissionsallow-coverage) for the pattern set.
+In the Director's own commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet member create` — never your own exported shell variables. `permissions.allow` matches Bash invocations as fixed strings, so an ad-hoc `export FLEET_ID=…; --fleet-id $FLEET_ID` breaks the match and forces prompts. See [`cli-options.md`](../../docs/spec/cli-options.md#fleet-id) for the rationale and [`permissions.allow` coverage](../../docs/spec/cli-options.md#permissionsallow-coverage) for the pattern set.
 
 ### Spawned-member identity via `str.format` substitution
 
@@ -100,15 +100,15 @@ For the monitoring member's own role definition (startup, on-wake routine, teard
 
 ## Placeholder convention
 
-In every example, substitute the literal integer ids printed by `cafleet fleet create` / `cafleet agent register`. Angle-bracket tokens are placeholders, **not** shell variables:
+In every example, substitute the literal integer ids printed by `cafleet fleet create` / `cafleet member create`. Angle-bracket tokens are placeholders, **not** shell variables:
 
 - `<fleet-id>` — the fleet id printed by `cafleet fleet create`
-- `<my-agent-id>` — the id returned by your own `cafleet agent register` call
+- `<my-agent-id>` — your own id, read from the literal `YOUR AGENT ID:` line in your spawn prompt
 - `<director-agent-id>` — the Director's id (in your spawn prompt if you are a member)
 - `<target-agent-id>` — the recipient of a unicast message
 - `<task-id>` — the task id printed by `message poll` / `message send`
 
-Every id input (`--fleet-id`, `--agent-id`, `--member-id`, `--to`, `--id`, `--task-id`) is a DB-assigned integer (typically 1–4 digits), passed in full — no prefix resolution. A non-integer fails with Click's standard not-a-valid-integer error (exit 2).
+Every id input (`--fleet-id`, `--agent-id`, `--member-id`, `--to`, `--task-id`) is a DB-assigned integer (typically 1–4 digits), passed in full — no prefix resolution. A non-integer fails with Click's standard not-a-valid-integer error (exit 2).
 
 ## Soliciting user reactions
 

@@ -1,7 +1,7 @@
 # Absorb the `agent` CLI group into `member`
 
 **Status**: Approved
-**Progress**: 10/31 tasks complete
+**Progress**: 16/31 tasks complete
 **Last Updated**: 2026-07-03
 
 ## Overview
@@ -213,12 +213,12 @@ Documentation is edited **first**, per `.claude/rules/documentation-maintenance.
 
 ### Step 3: skills/
 
-- [ ] `skills/cafleet/SKILL.md` <!-- completed: -->
-- [ ] `skills/cafleet/reference/cli.md` (delete the self-registration recipe; migrate List Agents / Deregister; relocate the Administrator reserved-name caution) <!-- completed: -->
-- [ ] `skills/cafleet/reference/output-flags.md` <!-- completed: -->
-- [ ] `skills/cafleet/reference/director.md` <!-- completed: -->
-- [ ] `skills/cafleet-design-doc` workflow bodies + Director role files (remove the dead-command remarks) <!-- completed: -->
-- [ ] Sweep all of `skills/` for the four subcommand names <!-- completed: -->
+- [x] `skills/cafleet/SKILL.md` <!-- completed: 2026-07-03T22:29 -->
+- [x] `skills/cafleet/reference/cli.md` (delete the self-registration recipe; migrate List Agents / Deregister; relocate the Administrator reserved-name caution) <!-- completed: 2026-07-03T22:29 -->
+- [x] `skills/cafleet/reference/output-flags.md` <!-- completed: 2026-07-03T22:29 -->
+- [x] `skills/cafleet/reference/director.md` <!-- completed: 2026-07-03T22:29 -->
+- [x] `skills/cafleet-design-doc` workflow bodies + Director role files (remove the dead-command remarks) <!-- completed: 2026-07-03T22:29 -->
+- [x] Sweep all of `skills/` for the four subcommand names <!-- completed: 2026-07-03T22:29 -->
 
 ### Step 4: project rules sweep
 

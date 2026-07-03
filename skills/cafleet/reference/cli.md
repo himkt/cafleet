@@ -1,6 +1,6 @@
 # CAFleet CLI — Fuller Command Catalog
 
-Read this file for the broker CLI surface beyond the core identity / poll / send / ack lifecycle in [`SKILL.md`](../SKILL.md): environment variables, global options, coding-agent backends, the self-registration recipe, cancel / show / list / doctor / deregister / fleet delete, the typical bootstrap workflow, the message lifecycle, and error handling. Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-options.md`](../../../docs/spec/cli-options.md).
+Read this file for the broker CLI surface beyond the core identity / poll / send / ack lifecycle in [`SKILL.md`](../SKILL.md): environment variables, global options, coding-agent backends, cancel / show / roster introspection / doctor / fleet delete, the typical workflow, the message lifecycle, and error handling. Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-options.md`](../../../docs/spec/cli-options.md).
 
 ## Environment variables
 
@@ -11,7 +11,7 @@ CLI env vars (all `CAFLEET_`-prefixed): `CAFLEET_DATABASE_URL` (SQLite URL; defa
 `--json` and `--version` are top-level options (precede the subcommand name); `--agent-id` and `--fleet-id` are per-subcommand options (after the subcommand name). Putting one in the wrong position fails with `No such option`.
 
 ```bash
-cafleet --json agent list --fleet-id <fleet-id>
+cafleet --json member list --fleet-id <fleet-id> --all
 cafleet --json message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
 ```
 
@@ -20,24 +20,6 @@ cafleet --json message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
 ## Coding-agent backends
 
 Three backends — `claude` (default), `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent`. `--model <m>` pins the LLM and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; both flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md) (and [`roles/monitor.md`](../roles/monitor.md) plus [`reference/supervision.md`](supervision.md) for the monitor). All three honor the leading-`!` input shortcut, so `member exec` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent/claude.md) / [`codex`](coding-agent/codex.md) / [`opencode`](coding-agent/opencode.md).
-
-## Self-registration recipe
-
-Use `--json` so the output is machine-parseable, and capture `agent_id` for every subsequent call:
-
-```bash
-cafleet --json agent register --fleet-id <fleet-id> \
-  --name "<short-label>" \
-  --description "<one-sentence purpose>"
-# → {"agent_id":<id>,"name":"<short-label>","registered_at":"<iso8601>"}
-```
-
-- **Name**: short, human-identifiable label (`Claude-A`, `reviewer-bot`, …) — not `test`, `foo`, etc.
-- **Description**: one sentence stating who the agent is and what it is for.
-- **Capture `agent_id` immediately** — it is required for every subsequent call; losing it forces re-registration. Non-`--json` output prints `Agent registered successfully!` then `  agent_id:  <id>` / `  name:      <name>` (parse the `agent_id:` line).
-- Call `cafleet agent deregister --fleet-id <fleet-id> --agent-id <my-agent-id>` at end of fleet so stale registrations do not accumulate.
-
-> **Reserved name — `Administrator`**: every fleet is auto-seeded with one built-in `Administrator` (marked `agent_card_json.cafleet.kind == "builtin-administrator"`, protected against deregister and Director placement). Do NOT register an agent under that name.
 
 ## Cancel (Retract)
 
@@ -57,14 +39,14 @@ cafleet message show --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <t
 
 ## List Agents
 
-`agent list` returns all registered agents; `agent show --id <target-agent-id>` fetches one.
+`member list --all` returns every active agent of the fleet (root Director, Administrator, monitoring member, ordinary members, placementless rows); `member show --member-id <target-agent-id>` fetches one. Both are registry reads — no tmux required.
 
 ```bash
-cafleet agent list --fleet-id <fleet-id>
-cafleet agent show --fleet-id <fleet-id> --agent-id <my-agent-id> --id <target-agent-id>
+cafleet member list --fleet-id <fleet-id> --all
+cafleet member show --fleet-id <fleet-id> --member-id <target-agent-id>
 ```
 
-Default output is one row per agent (`<id> <name> <status>`, `description` truncated to 60 codepoints); `--full` gives the four-line per-agent block (the agent surfaces never carry `agent_card_json`). See [`reference/output-flags.md`](output-flags.md).
+`member list --all` renders the `N agents:` table with a `kind` column (`director` / `administrator` / `monitor` / `member`) and `-` placement cells for placementless rows. `member show` default output is the one-line row `<id> <name> <status>`; `--full` gives the labeled block (`description` truncated to 60 codepoints, `kind`, `skills`, placement sub-block) — text mode only. See [`reference/output-flags.md`](output-flags.md).
 
 ## Doctor
 
@@ -77,8 +59,10 @@ cafleet --json doctor
 
 ## Deregister
 
+`cafleet member delete` is the single teardown for any agent: it closes the pane when one exists and soft-deletes the registration; a placementless or pending-placement target is a pure registry soft-delete (no tmux required).
+
 ```bash
-cafleet agent deregister --fleet-id <fleet-id> --agent-id <my-agent-id>
+cafleet member delete --fleet-id <fleet-id> --member-id <target-agent-id>
 ```
 
 The root Director and the built-in Administrator cannot be deregistered (both exit 1 — see [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages)). Use `cafleet fleet delete --fleet-id <fleet-id>` for fleet teardown.
@@ -103,7 +87,7 @@ Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters ever
    ```
    Must run inside a tmux session (else exits 1 with `Error: cafleet fleet create must be run inside a tmux session`, writes nothing).
 
-2. **Register, discover, send, poll, ack** per the command sections above; use `cafleet --json …` when parsing output. Director-side create/capture/exec/ping/nudge: [`reference/director.md`](director.md); shutdown ordering: [`reference/recovery.md`](recovery.md).
+2. **Discover, send, poll, ack** per the command sections above; use `cafleet --json …` when parsing output. Director-side create/capture/exec/ping/nudge: [`reference/director.md`](director.md); shutdown ordering: [`reference/recovery.md`](recovery.md).
 
 ## Message Lifecycle
 
