@@ -396,7 +396,7 @@ When a routed member disputes a finding, it counter-escalates with `escalating (
 
 ### Step 6: User Approval (Director)
 
-After the Reviewer sends `approved (doc)`, present the implementation to the user for approval. The Reviewer approves before the admin sees it — always.
+After the Reviewer sends `approved (doc)`, present the implementation to the user for approval.
 
 #### Change Presentation
 
