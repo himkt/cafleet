@@ -14,9 +14,9 @@ Remove the `cafleet agent` CLI group (`register | list | show | deregister`) and
 - [x] `cafleet member show --fleet-id <f> --member-id <id>` renders detail (description, status, kind, skills, placement block) for any active in-fleet agent, placed or placementless, without requiring tmux.
 - [x] `cafleet member list --fleet-id <f> --all` lists every active agent of the fleet — root Director, Administrator, monitoring member, ordinary members, placementless rows — with a `kind` column; the default (no `--all`) output is byte-identical to today's.
 - [x] `cafleet member delete` on an active placementless agent soft-deletes it and exits 0 (the `use \`cafleet agent deregister\` instead` error path is gone); the root-Director and Administrator guards still reject with the existing broker error strings.
-- [x] No `cafleet agent ` invocation and no two-word subcommand mention (`agent register` / `agent list` / `agent show` / `agent deregister`) remains in `docs/`, `SPEC.md`, `README.md`, `CLAUDE.md`, `skills/`, `.claude/`, `admin/src/`, or `cafleet/` — excluding `design-docs/`, the pre-existing `"cafleet agent spawn"` entry in `spawn_prompt_guard.py` `FORBIDDEN_PATTERNS` and its tests (a 0000113 guard string, deliberately retained), and the regression-guard test `cafleet/tests/cli/test_agent_group_removed.py` (an absence-test the removal rule permits; it embeds the legacy invocation it asserts is rejected).
-- [x] `FORBIDDEN_PATTERNS` in `spawn_prompt_guard.py` is unchanged — no new anti-`cafleet agent` pattern or assertion is added anywhere (user decision).
-- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:lint-overlay`, and `mise //cafleet:lint-spawn-guard` pass.
+- [x] No `cafleet agent ` invocation and no two-word subcommand mention (`agent register` / `agent list` / `agent show` / `agent deregister`) remains in `docs/`, `SPEC.md`, `README.md`, `CLAUDE.md`, `skills/`, `.claude/`, `admin/src/`, or `cafleet/` — excluding `design-docs/` and the regression-guard test `cafleet/tests/cli/test_agent_group_removed.py` (an absence-test the removal rule permits; it embeds the legacy invocation it asserts is rejected).
+- [x] No anti-`cafleet agent` guard pattern or assertion exists anywhere (user decision — Decision 4; the spawn-prompt guard tooling that carried the pre-existing `"cafleet agent spawn"` pattern was itself removed mid-execution per Decision 6).
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
 
@@ -35,6 +35,7 @@ Design 0000114 (splitting `member` into `agent` + `pane`) was rejected and abort
 | 3 | `member show` flag shape | Bare `--member-id <target>` only; the `agent show` requester flag (`--agent-id`) and its fleet-membership gate are dropped — consistent with the rest of the `member` group. |
 | 4 | Drift guard | **No new guard patterns.** A guard pattern string is itself a standing mention of the dead command. `FORBIDDEN_PATTERNS` is unchanged; no anti-`cafleet agent` assertion is added anywhere. One-time migration only. |
 | 5 | WebUI scope | Minimal: only the two empty-state strings naming `cafleet agent register` change (point at `cafleet member create`); the HTTP API and everything else is untouched. |
+| 6 | Guard tooling (mid-execution instruction) | **Removed entirely.** The `mise //cafleet:lint-overlay` / `mise //cafleet:lint-spawn-guard` tasks, their modules (`coding_agent/overlay_coverage.py`, `spawn_prompt_guard.py`), their tests, and every non-`design-docs/` mention are deleted (commit 7fd5d202). Design-doc-specific tooling does not stay in `mise.toml`. |
 
 ---
 
@@ -247,8 +248,8 @@ Documentation is edited **first**, per `.claude/rules/documentation-maintenance.
 
 ### Step 8: verification
 
-- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:lint-overlay`, `mise //cafleet:lint-spawn-guard` all pass <!-- completed: 2026-07-03T22:48 -->
-- [x] Full-corpus grep for the exact patterns `cafleet agent `, `agent register`, `agent list`, `agent show`, `agent deregister` over `docs/ SPEC.md README.md CLAUDE.md skills/ .claude/ admin/src/ cafleet/` (excluding `design-docs/`, the retained `"cafleet agent spawn"` guard string in `spawn_prompt_guard.py` + `tests/test_spawn_prompt_guard.py`, and `cafleet/tests/cli/test_agent_group_removed.py`) returns nothing <!-- completed: 2026-07-03T22:48 -->
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` all pass (the run at completion time also included the `lint-overlay` / `lint-spawn-guard` gates, removed later the same day per Decision 6) <!-- completed: 2026-07-03T22:48 -->
+- [x] Full-corpus grep for the exact patterns `cafleet agent `, `agent register`, `agent list`, `agent show`, `agent deregister` over `docs/ SPEC.md README.md CLAUDE.md skills/ .claude/ admin/src/ cafleet/` (excluding `design-docs/` and `cafleet/tests/cli/test_agent_group_removed.py`) returns nothing <!-- completed: 2026-07-03T22:48 -->
 
 ---
 
@@ -259,3 +260,4 @@ Documentation is edited **first**, per `.claude/rules/documentation-maintenance.
 | 2026-07-03 | Initial draft |
 | 2026-07-03 | Review round 1: named the regression-guard test (`test_agent_group_removed.py`) as a grep-gate carve-out; retired `render_agent` / `_render_agent_item` + exports; made the grep patterns exact |
 | 2026-07-03 | User approved — Status: Approved |
+| 2026-07-03 | Mid-execution user instruction (Decision 6): removed the `lint-overlay` / `lint-spawn-guard` tooling entirely — mise tasks, modules, tests, and all non-`design-docs/` mentions (commit 7fd5d202); reworded Success Criteria 5–7 and the Step 8 verification tasks to read true post-removal (Reviewer round 1) |
