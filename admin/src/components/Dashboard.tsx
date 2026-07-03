@@ -128,7 +128,7 @@ export default function Dashboard({
                 <p className="text-xs text-text-muted">
                   Use the{" "}
                   <code className="rounded bg-surface-hover px-1.5 py-0.5 font-mono text-text">
-                    cafleet agent register
+                    cafleet member create
                   </code>{" "}
                   CLI to add one.
                 </p>

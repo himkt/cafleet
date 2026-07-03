@@ -1,7 +1,7 @@
 # Absorb the `agent` CLI group into `member`
 
 **Status**: Approved
-**Progress**: 17/31 tasks complete
+**Progress**: 24/31 tasks complete
 **Last Updated**: 2026-07-03
 
 ## Overview
@@ -226,16 +226,16 @@ Documentation is edited **first**, per `.claude/rules/documentation-maintenance.
 
 ### Step 5: broker + CLI code
 
-- [ ] `broker/members.py`: `list_roster(fleet_id)` (active agents, LEFT OUTER placement join, SQL-derived 4-value `kind`) <!-- completed: -->
-- [ ] `broker/agents.py`: `get_agent` returns `skills` and the 4-value `kind`; verify WebUI `get_agent` consumers tolerate both <!-- completed: -->
-- [ ] `cli/member.py`: `member show` (`--member-id`, `--full`, no tmux, no requester gate) + formatter (`format_agent` extension: kind / skills / placement block) <!-- completed: -->
-- [ ] `cli/member.py`: `member list --all` (+ `--activity` exclusivity, `N agents:` table with `kind` column and `-` placement cells) <!-- completed: -->
-- [ ] `cli/member.py`: `member delete` placementless soft-delete, tmux-guard relaxation, `_load_authorized_member` simplification, rollback-warning re-point (lines 61 / 89 / 328) <!-- completed: -->
-- [ ] Delete `cli/agent.py`; unwire from `cli/main.py`; retire `renders_agent_card` + `render_agents_in_result` + `render_agent` / `_render_agent_item` (+ their `output/__init__.py` exports) + `format_register` <!-- completed: -->
+- [x] `broker/members.py`: `list_roster(fleet_id)` (active agents, LEFT OUTER placement join, SQL-derived 4-value `kind`) <!-- completed: 2026-07-03T22:44 -->
+- [x] `broker/agents.py`: `get_agent` returns `skills` and the 4-value `kind`; verify WebUI `get_agent` consumers tolerate both <!-- completed: 2026-07-03T22:44 -->
+- [x] `cli/member.py`: `member show` (`--member-id`, `--full`, no tmux, no requester gate) + formatter (`format_agent` extension: kind / skills / placement block) <!-- completed: 2026-07-03T22:44 -->
+- [x] `cli/member.py`: `member list --all` (+ `--activity` exclusivity, `N agents:` table with `kind` column and `-` placement cells) <!-- completed: 2026-07-03T22:44 -->
+- [x] `cli/member.py`: `member delete` placementless soft-delete, tmux-guard relaxation, `_load_authorized_member` simplification, rollback-warning re-point (lines 61 / 89 / 328) <!-- completed: 2026-07-03T22:44 -->
+- [x] Delete `cli/agent.py`; unwire from `cli/main.py`; retire `renders_agent_card` + `render_agents_in_result` + `render_agent` / `_render_agent_item` (+ their `output/__init__.py` exports) + `format_register` <!-- completed: 2026-07-03T22:44 -->
 
 ### Step 6: WebUI strings
 
-- [ ] `admin/src/components/Dashboard.tsx:131` and `Sidebar.tsx:115` → `cafleet member create` <!-- completed: -->
+- [x] `admin/src/components/Dashboard.tsx:131` and `Sidebar.tsx:115` → `cafleet member create` <!-- completed: 2026-07-03T22:44 -->
 
 ### Step 7: tests
 

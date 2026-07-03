@@ -12,7 +12,11 @@ from cafleet.broker.agents import (
     verify_agent_fleet,
 )
 from cafleet.broker.fleets import create_fleet, delete_fleet, get_fleet, list_fleets
-from cafleet.broker.members import list_members, list_members_with_activity
+from cafleet.broker.members import (
+    list_members,
+    list_members_with_activity,
+    list_roster,
+)
 from cafleet.broker.messaging import (
     ack_task,
     broadcast_message,
@@ -50,6 +54,7 @@ __all__ = [
     "update_placement_pane_id",
     "list_members",
     "list_members_with_activity",
+    "list_roster",
     "verify_agent_fleet",
     "list_fleet_agents",
     "get_agent_names",

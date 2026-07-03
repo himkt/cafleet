@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 
 from cafleet.broker import _shared
-from cafleet.db.models import Agent, AgentPlacement, Task
+from cafleet.db.models import Agent, AgentPlacement, Fleet, Task
 
 
 def _base_members_select(fleet_id: int):
@@ -61,6 +61,83 @@ def list_members(fleet_id: int) -> list[dict]:
         }
         for row in rows
     ]
+
+
+def list_roster(fleet_id: int) -> list[dict]:
+    """Return every active agent of the fleet, placed or placementless.
+
+    Unlike :func:`list_members`, the roster covers the root Director, the
+    Administrator, the monitoring member, ordinary members, and placementless
+    rows — active agents LEFT OUTER JOINed to their placements. The card
+    ``kind`` is extracted in SQL via ``json_extract`` (the
+    ``list_fleet_agents`` technique) and the ``director`` kind is derived
+    from the ``fleets`` join.
+
+    Args:
+        fleet_id: Fleet id to scope the query to.
+
+    Returns:
+        List of dicts each carrying the :func:`list_members` row shape
+        (``agent_id``, ``name``, ``description``, ``status``,
+        ``registered_at``, ``placement`` — ``None`` for placementless rows)
+        plus ``kind`` (``director`` / ``administrator`` / ``monitor`` /
+        ``member``).
+    """
+    card_kind_expr = func.coalesce(
+        func.json_extract(Agent.agent_card_json, "$.cafleet.kind"), ""
+    )
+    stmt = (
+        select(
+            Agent.agent_id,
+            Agent.name,
+            Agent.description,
+            Agent.status,
+            Agent.registered_at,
+            AgentPlacement.agent_id.label("placement_agent_id"),
+            AgentPlacement.director_agent_id,
+            AgentPlacement.tmux_session,
+            AgentPlacement.tmux_window_id,
+            AgentPlacement.tmux_pane_id,
+            AgentPlacement.coding_agent,
+            AgentPlacement.created_at,
+            Fleet.director_agent_id.label("root_director_id"),
+            card_kind_expr.label("card_kind"),
+        )
+        .join(Fleet, Fleet.fleet_id == Agent.fleet_id)
+        .outerjoin(AgentPlacement, Agent.agent_id == AgentPlacement.agent_id)
+        .where(
+            Agent.fleet_id == fleet_id,
+            Agent.status == "active",
+        )
+    )
+    with _shared.read_session() as session:
+        rows = session.execute(stmt).all()
+    return [
+        {
+            "agent_id": row.agent_id,
+            "name": row.name,
+            "description": row.description,
+            "status": row.status,
+            "registered_at": row.registered_at,
+            "placement": (
+                _shared.placement_dict(row)
+                if row.placement_agent_id is not None
+                else None
+            ),
+            "kind": _roster_kind(row),
+        }
+        for row in rows
+    ]
+
+
+def _roster_kind(row) -> str:
+    if row.agent_id == row.root_director_id:
+        return "director"
+    if row.card_kind == _shared.ADMINISTRATOR_KIND:
+        return "administrator"
+    if row.card_kind == _shared.MONITORING_MEMBER_KIND:
+        return "monitor"
+    return "member"
 
 
 def list_members_with_activity(fleet_id: int) -> list[dict]:
