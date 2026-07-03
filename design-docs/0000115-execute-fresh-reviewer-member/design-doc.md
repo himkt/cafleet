@@ -1,7 +1,7 @@
 # Fresh Reviewer Member Replaces the Copilot Review in the Execute Workflow
 
 **Status**: Approved
-**Progress**: 19/37 tasks complete
+**Progress**: 24/37 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -192,11 +192,11 @@ No other code changes: `cafleet member create --model` already passes any backen
 
 ### Step 4: Execute Director role file (`skills/cafleet-design-doc/execute/roles/director.md`)
 
-- [ ] Update the monitor accountability bullet (drop the extended-routine sentence) <!-- completed: -->
-- [ ] Replace the PR & Copilot loop accountability bullet with the Reviewer-loop + push/PR bullets <!-- completed: -->
-- [ ] Replace the three Copilot commit-message rows with the three Reviewer rows <!-- completed: -->
-- [ ] Replace the PR Review milestone row with the Reviewer Review row <!-- completed: -->
-- [ ] Strip director.md's residual Copilot mentions per the removal map: Required-reading row 3's "(and Copilot routing)", the Communication-Protocol paragraph's § *Copilot Routing* citation, the COMMENT-classification section's cross-reference to § *Copilot Routing*, and "Phase 7d (Copilot fix commits)" → "Step 5 (Reviewer fix commits)" in the per-file-detail-recovery paragraph <!-- completed: -->
+- [x] Update the monitor accountability bullet (drop the extended-routine sentence) <!-- completed: 2026-07-04T00:32 -->
+- [x] Replace the PR & Copilot loop accountability bullet with the Reviewer-loop + push/PR bullets <!-- completed: 2026-07-04T00:32 -->
+- [x] Replace the three Copilot commit-message rows with the three Reviewer rows <!-- completed: 2026-07-04T00:32 -->
+- [x] Replace the PR Review milestone row with the Reviewer Review row <!-- completed: 2026-07-04T00:32 -->
+- [x] Strip director.md's residual Copilot mentions per the removal map: Required-reading row 3's "(and Copilot routing)", the Communication-Protocol paragraph's § *Copilot Routing* citation, the COMMENT-classification section's cross-reference to § *Copilot Routing*, and "Phase 7d (Copilot fix commits)" → "Step 5 (Reviewer fix commits)" in the per-file-detail-recovery paragraph <!-- completed: 2026-07-04T00:32 -->
 
 ### Step 5: Coordination protocol and create workflow
 
