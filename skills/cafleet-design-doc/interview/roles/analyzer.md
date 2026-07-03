@@ -83,8 +83,8 @@ Rules:
 2. **Identify uncovered sections** by removing the already-reviewed sections list from the document's heading set.
 3. **Generate** a fine-grained question list for the uncovered sections, applying the categories and priority order above.
 4. **Send** the numbered list to the Director via `cafleet message send`. Terminate the message body with `Total: N questions`.
-5. **Idle** pending shutdown. The Director will tear you down via `cafleet agent deregister` once the list is acknowledged. If the Director sends a corrective request, reformat and resend the list, then idle again.
+5. **Idle** pending shutdown. The Director will tear you down via `cafleet member delete` once the list is acknowledged. If the Director sends a corrective request, reformat and resend the list, then idle again.
 
 ## Shutdown
 
-The Director terminates you via `cafleet agent deregister --fleet-id <fleet-id> --agent-id <my-agent-id>` (sends the backend exit keystroke, waits up to 15 s). When the exit keystroke arrives your `claude` process exits immediately — nothing is required of you.
+The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-agent-id>` (sends the backend exit keystroke, waits up to 15 s). When the exit keystroke arrives your `claude` process exits immediately — nothing is required of you.

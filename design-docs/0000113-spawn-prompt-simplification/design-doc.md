@@ -1,7 +1,7 @@
 # Simplify Director Spawn Prompts and Reconcile CLI-Name Drift (Issue #155)
 
 **Status**: Approved
-**Progress**: 21/35 tasks complete
+**Progress**: 25/35 tasks complete
 **Last Updated**: 2026-07-02
 
 ## Overview
@@ -170,10 +170,10 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 
 ### Step 4: cafleet-design-doc and cafleet-research skills
 
-- [ ] Reconcile `skills/cafleet-design-doc/SKILL.md` and the `create`/`execute`/`interview` workflow spawn sections + their `roles/director.md` (spawn verbs, skeleton reference, `$CAFLEET_*` removal) <!-- completed: -->
-- [ ] Reconcile the create-workflow role files under `skills/cafleet-design-doc/create/roles/` (drafter/reviewer identity blocks, COMMUNICATION PROTOCOL references) <!-- completed: -->
-- [ ] Reconcile `skills/cafleet-research/SKILL.md` and the `report`/`presentation` workflow spawn sections + their `roles/director.md` <!-- completed: -->
-- [ ] Reconcile `skills/cafleet-design-doc/reference/coordination.md` and any `cafleet-research` reference pages that name old commands <!-- completed: -->
+- [x] Reconcile `skills/cafleet-design-doc/SKILL.md` and the `create`/`execute`/`interview` workflow spawn sections + their `roles/director.md` (spawn verbs, skeleton reference, `$CAFLEET_*` removal) <!-- completed: 2026-07-03T13:12 -->
+- [x] Reconcile the create-workflow role files under `skills/cafleet-design-doc/create/roles/` (drafter/reviewer identity blocks, COMMUNICATION PROTOCOL references) <!-- completed: 2026-07-03T13:12 -->
+- [x] Reconcile `skills/cafleet-research/SKILL.md` and the `report`/`presentation` workflow spawn sections + their `roles/director.md` <!-- completed: 2026-07-03T13:12 -->
+- [x] Reconcile `skills/cafleet-design-doc/reference/coordination.md` and any `cafleet-research` reference pages that name old commands <!-- completed: 2026-07-03T13:12 -->
 
 ### Step 5: project rules
 
