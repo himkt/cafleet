@@ -67,8 +67,8 @@ def test_list_fleet_agents__deregistered_with_or_without_tasks():
 @pytest.mark.parametrize(
     ("scenario", "expected_kind"),
     [
-        ("administrator", ADMINISTRATOR_KIND),
-        ("user_agent", "user"),
+        ("administrator", "administrator"),
+        ("user_agent", "member"),
     ],
 )
 def test_get_agent__kind_field(scenario, expected_kind):
