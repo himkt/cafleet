@@ -20,7 +20,7 @@ After the demonstration, please shutdown the team.
 ```
 
 The coding agent will invoke the `cafleet` skill, which guides it through the
-fleet-create / agent-spawn / message-send loop and finally tears the team
+fleet-create / member-create / message-send loop and finally tears the team
 down.
 
 ## Design-doc-driven development
@@ -42,7 +42,7 @@ See your coding-agent's skill documentation for the literal invocation syntax
 
 If you would rather drive CAFleet from the shell directly, the commands below
 mirror what the skill does internally. Run them inside a tmux session — the
-`fleet create` and `agent spawn` commands require one.
+`fleet create` and `member create` commands require one.
 
 The walkthrough pastes literal integer ids: fleet `1`, root Director `2`,
 members `4` and `5`, task `10`. Your ids will differ — substitute the
@@ -68,11 +68,11 @@ Optional: add `--model <m>` (e.g. `--model sonnet`) to pin a member's LLM;
 omitted, the backend binary uses its own default model:
 
 ```bash
-cafleet agent spawn --fleet-id 1 \
+cafleet member create --fleet-id 1 \
   --agent-id 2 \
   --name "demo-member" \
   --description "Demo member" \
-  -- "You are demo-member. Reply hello when polled."
+  --text "You are demo-member. Reply hello when polled."
 ```
 
 ```
@@ -80,11 +80,11 @@ cafleet agent spawn --fleet-id 1 \
 ```
 
 ```bash
-cafleet agent spawn --fleet-id 1 \
+cafleet member create --fleet-id 1 \
   --agent-id 2 \
   --name "reviewer" \
   --description "Reviewer member" \
-  -- "You are reviewer. Reply hello when polled."
+  --text "You are reviewer. Reply hello when polled."
 ```
 
 ```
@@ -129,8 +129,8 @@ once it has consumed the message.
 When you are done, tear the fleet down:
 
 ```bash
-cafleet agent deregister --fleet-id 1 --agent-id 4
-cafleet agent deregister --fleet-id 1 --agent-id 5
+cafleet member delete --fleet-id 1 --member-id 4
+cafleet member delete --fleet-id 1 --member-id 5
 cafleet fleet delete --fleet-id 1
 ```
 

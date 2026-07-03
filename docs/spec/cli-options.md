@@ -8,7 +8,7 @@ How the unified CAFleet CLI (`cafleet`) accepts configuration parameters.
 
 ## Subcommand summary
 
-One row per subcommand. "Identity flag" is the per-subcommand option naming the acting agent (requester) or the target agent — both spelled `--agent-id`, with the polarity fixed per command (see [Agent ID](#agent-id)). In the `--fleet-id` column, **yes** means the flag is a required per-subcommand option (placed after the subcommand name); **no** means the subcommand rejects `--fleet-id` with `No such option`.
+One row per subcommand. "Identity flag" is the per-subcommand option naming the acting agent (requester or Director/sender, spelled `--agent-id`) or the target member (spelled `--member-id`), with the polarity fixed per command (see [Agent ID](#agent-id)). In the `--fleet-id` column, **yes** means the flag is a required per-subcommand option (placed after the subcommand name); **no** means the subcommand rejects `--fleet-id` with `No such option`.
 
 | Subcommand | Purpose | `--fleet-id` | Identity flag | Section |
 |---|---|---|---|---|
@@ -22,17 +22,20 @@ One row per subcommand. "Identity flag" is the per-subcommand option naming the 
 | `agent register` | Register a new agent | yes | none | [agent register](#agent-register) |
 | `agent list` | List the fleet's agents | yes | none | [agent list](#agent-list) |
 | `agent show` | Show one agent's detail | yes | `--agent-id` (requester) | [agent show](#agent-show) |
-| `agent deregister` | Tear down an agent's pane (if any) and deregister it | yes | `--agent-id` (target) | [agent deregister](#agent-deregister) |
-| `agent spawn` | Register an agent and spawn its coding-agent pane | yes | `--agent-id` (Director) | [agent spawn](#agent-spawn) |
+| `agent deregister` | Deregister a registry-only agent (no pane interaction) | yes | `--agent-id` (target) | [agent deregister](#agent-deregister) |
 | `message send` | Send a unicast message | yes | `--agent-id` (requester) | [message send](#message-send) |
 | `message broadcast` | Broadcast a message to all fleet agents | yes | `--agent-id` (requester) | [message broadcast](#message-broadcast) |
 | `message poll` | Fetch un-acked incoming messages | yes | `--agent-id` (requester) | [message poll](#message-poll) |
 | `message ack` | Acknowledge a received message | yes | `--agent-id` (requester) | [message ack](#message-ack) |
 | `message cancel` | Retract an un-acked sent message | yes | `--agent-id` (requester) | [message cancel](#message-cancel) |
 | `message show` | Show one task | yes | `--agent-id` (requester) | [message show](#message-show) |
-| `pane capture` | Capture the tail of an agent's pane | yes | `--agent-id` (target) | [pane capture](#pane-capture) |
-| `pane exec` | Dispatch a shell command into an agent's pane | yes | `--agent-id` (target) | [pane exec](#pane-exec) |
-| `pane wake` | Re-poll an agent's inbox (`--poll-only`) or deliver an ACKable task + preview (`--message`) | yes | `--agent-id` (target) | [pane wake](#pane-wake) |
+| `member create` | Register a member and spawn its coding-agent pane | yes | `--agent-id` (Director) | [member create](#member-create) |
+| `member delete` | Tear down a member's pane and deregister it | yes | `--member-id` (target) | [member delete](#member-delete) |
+| `member list` | List the fleet's members | yes | none | [member list](#member-list) |
+| `member capture` | Capture the tail of a member's pane | yes | `--member-id` (target) | [member capture](#member-capture) |
+| `member exec` | Dispatch a shell command into a member's pane | yes | `--member-id` (target) | [member exec](#member-exec) |
+| `member ping` | Inject an inbox-poll keystroke into a member's pane | yes | `--member-id` (target) | [member ping](#member-ping) |
+| `member nudge` | Deliver an ACKable task + inline preview to a member | yes | `--agent-id` (sender) + `--member-id` (target) | [member nudge](#member-nudge) |
 | `monitor start` | Run the per-fleet scheduler loop in-process (launch as a background task) | yes | none | [monitor start](#monitor-start) |
 | `monitor status` | Show monitor liveness and the per-agent schedule | yes | none | [monitor status](#monitor-status) |
 | `monitor config` | Show or edit an agent's monitor schedule | yes | `--agent-id` | [monitor config](#monitor-config) |
@@ -43,12 +46,13 @@ Each parameter has exactly one input source:
 
 | Parameter | Source |
 |---|---|
-| Fleet ID | `--fleet-id <int>` per-subcommand option (placed after the subcommand name), defaulting from `CAFLEET_FLEET_ID` when set |
+| Fleet ID | `--fleet-id <int>` per-subcommand option (placed after the subcommand name) |
 | Database URL | `CAFLEET_DATABASE_URL` env var (optional) — see [config](../api/config.md) for its default and the absolute-path requirement. |
 | Agent ID | `--agent-id <int>` subcommand option |
+| Member ID | `--member-id <int>` subcommand option (the target member on `member *` lifecycle verbs) |
 | JSON output | `--json` global flag |
 
-> **`--fleet-id` is a literal CLI flag** (with an optional `CAFLEET_FLEET_ID` env default) — see [Fleet ID](#fleet-id) for why agents pass it literally, and how `permissions.allow` matching depends on the canonical flag order.
+> **`--fleet-id` is a literal CLI flag** — see [Fleet ID](#fleet-id) for why agents pass it literally, and how `permissions.allow` matching depends on the canonical flag order.
 
 Create a fleet first if you don't have one:
 
@@ -57,7 +61,7 @@ cafleet fleet create --label "my-project"
 # → prints the fleet_id
 ```
 
-Then pass the printed id as `--fleet-id <id>` on every fleet-scoped command (or export `CAFLEET_FLEET_ID=<id>` to default it).
+Then pass the printed id as `--fleet-id <id>` on every fleet-scoped command.
 
 ## Global Options
 
@@ -77,39 +81,43 @@ Placed **before** the subcommand:
 | `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix (see [Message Body Truncation](#message-body-truncation)). Compact rendered envelope: `id`, `from`, `ts`, `text`, plus `kind`/`origin` only when present (ids are full integers). | Untruncated `text`. In `--json`, emits the full typed-column task dict (`task_id`, `context_id`, `from_agent_id`, `to_agent_id`, `type`, `status_state`, `status_timestamp`, `origin_task_id`, `text`); in text mode, switches to the verbose labeled block (see [Message envelope](./message-envelope.md#text-mode)). |
 | `message broadcast` | One-line summary (`broadcast id=<id> recipients=<N> delivered=<k>`). | Renders the single `broadcast_summary` task as the full verbose envelope (typed-column dict in `--json`) instead of the one-line summary. It never adds per-recipient envelopes or a `recipient_ids` list — the response is always that one summary task plus the `recipients` and `delivered` counts. |
 | `agent list` / `agent show` | One row per agent (`<id> <name> <status>`); `description` truncated to 60 codepoints. JSON projects each agent to `id` / `name` / `description` / `status`. `agent show` additionally emits `coding_agent` when the agent has a placement; `agent list` shows a placement/pane column for placed agents. | Four-line per-agent block: full `agent_id`, `name`, `description` (still truncated to 60 codepoints), `status`. JSON returns the broker agent dict unchanged. No `agent_card_json` — the agent surfaces never emit it. |
-| `pane capture` | Default `--lines 20`; ANSI escape sequences stripped in post-process unless `--ansi` is supplied. | No effect on `--lines` (use `--lines N` explicitly); no effect on ANSI stripping (use `--ansi` explicitly). `--full` is accepted on `pane capture` for surface consistency but is a no-op there. |
+| `member create` | One compact line: `<agent_id> <name> backend=<coding_agent> pane=<pane_id>`. | The 6-line `Member registered and spawned.` block — see [member create](#member-create). |
 
 ## Fleet ID (`--fleet-id`) {#fleet-id}
 
-`--fleet-id` is a **per-subcommand option** (not a top-level option). It names the fleet the command acts on and is placed immediately **after** the subcommand name (the canonical position), ahead of the other flags — e.g. `cafleet message poll --fleet-id <id> --agent-id <id>`. It is typed `int`; a non-integer fails with Click's standard `Error: Invalid value for '--fleet-id': '<x>' is not a valid integer.` (exit 2). Every `agent *`, `pane *`, `message *`, and `monitor *` command, plus `fleet show` and `fleet delete`, carries it; `setup`, `doctor`, `server`, `fleet create`, and `fleet list` do **not** accept it and reject it with `No such option: --fleet-id`. Which subcommand takes it is in the [Subcommand summary](#subcommand-summary).
+`--fleet-id` is a **per-subcommand option** (not a top-level option). It names the fleet the command acts on and is placed immediately **after** the subcommand name (the canonical position), ahead of the other flags — e.g. `cafleet message poll --fleet-id <id> --agent-id <id>`. It is typed `int`; a non-integer fails with Click's standard `Error: Invalid value for '--fleet-id': '<x>' is not a valid integer.` (exit 2). Every `agent *`, `member *`, `message *`, and `monitor *` command, plus `fleet show` and `fleet delete`, carries it; `setup`, `doctor`, `server`, `fleet create`, and `fleet list` do **not** accept it and reject it with `No such option: --fleet-id`. Which subcommand takes it is in the [Subcommand summary](#subcommand-summary).
 
-`--fleet-id` is a **plain required option**: a missing value is a parser-native missing-required-option error — `Error: Missing option '--fleet-id'.` (exit 2) — with no custom callback. When `CAFLEET_FLEET_ID` is set in the environment it supplies the **default** for `--fleet-id`, so the flag need not be retyped on every call; an explicit `--fleet-id` overrides it, and a non-integer `CAFLEET_FLEET_ID` fails at parse time (exit 2). A spawned member receives `CAFLEET_FLEET_ID` in its pane environment (see [Coding agents](../concepts/coding-agents.md)), so its fleet is unambiguous without repeating the flag.
+`--fleet-id` is a required option with no environment default. A spawned member reads its fleet id from the `FLEET ID:` line the CLI rendered into its spawn prompt (see [member create](#member-create)) and passes it as a literal flag on every command.
 
 Agents still pass `--fleet-id` as a literal flag because Claude Code's `permissions.allow` matches Bash invocations as literal command strings: a literal `--fleet-id <int>` keeps the invocation a fixed string an allow pattern can match, while a shell-expanded variable (`$FLEET_ID`) breaks the match and forces per-invocation permission prompts that interrupt agent work. Substitute the literal integer ids printed by `cafleet fleet create` and `cafleet agent register` — never shell variables to hold them. Matching also depends on the canonical flag order (`--fleet-id` first, immediately after the subcommand name); a different order does not match — see [`permissions.allow` coverage](#permissionsallow-coverage).
 
 ## Agent ID (`--agent-id`) {#agent-id}
 
-`--agent-id` is a **per-subcommand option** (not a global option). It is typed `int`; a non-integer fails with Click's standard `Error: Invalid value for '--agent-id': '<x>' is not a valid integer.` (exit 2). The same `type=int` applies to every id option — `--to`, `--id` (`agent show`), `--from` (`pane wake --message`), and `--task-id` — so each rejects a non-integer the same way. Ids are short by construction (DB-assigned integers, typically 1–4 digits), so they are pasted in full; there is no prefix resolution.
+`--agent-id` is a **per-subcommand option** (not a global option). It is typed `int`; a non-integer fails with Click's standard `Error: Invalid value for '--agent-id': '<x>' is not a valid integer.` (exit 2). The same `type=int` applies to every id option — `--to`, `--id` (`agent show`), `--member-id`, and `--task-id` — so each rejects a non-integer the same way. Ids are short by construction (DB-assigned integers, typically 1–4 digits), so they are pasted in full; there is no prefix resolution.
 
-**Polarity is per-command.** `--agent-id` names the **calling agent (requester)** on `agent show` and every `message *` command, but the **target agent** on `agent deregister` and every `pane *` command. This polarity is fixed by each command and is why only `--fleet-id` (never `--agent-id`) auto-defaults from the environment. Which subcommand takes which identity flag is in the [Subcommand summary](#subcommand-summary).
+**Polarity is per-command.** `--agent-id` names the **calling agent (requester)** on `agent show` and every `message *` command, the **target agent** on `agent deregister`, the **acting Director** on `member create`, and the **sender** on `member nudge`. Every other `member *` lifecycle verb targets its member with the separate `--member-id` option. Which subcommand takes which identity flag is in the [Subcommand summary](#subcommand-summary).
+
+## Member ID (`--member-id`) {#member-id}
+
+`--member-id` is the per-subcommand option naming the **target member** on `member delete`, `member capture`, `member exec`, `member ping`, and `member nudge`. It is typed `int` and rejects a non-integer with Click's standard invalid-integer error (exit 2). The target must be an active agent of `--fleet-id` with a placement row — see [Member targeting and key delivery](#member-targeting-and-key-delivery).
 
 ## `permissions.allow` coverage
 
 The allow set is generated mechanically, one `Bash(...)` pattern per allow-listed subcommand, by this rule:
 
 - **One pattern per subcommand**, each matching the canonical `--fleet-id`-first flag order (see [Fleet ID](#fleet-id)) — `Bash(cafleet <grp> <cmd> --fleet-id *)`. A different flag order does not match and prompts.
-- **`pane exec` is excluded** so it stays under `permissions.ask` — its positional command body is operator-controlled.
+- **`member exec` is excluded** so it stays under `permissions.ask` — its positional command body is operator-controlled.
 - **Each subcommand an agent runs with `--json` needs a companion pattern**, because `--json` is a top-level option that precedes the subcommand name and breaks the prefix: `Bash(cafleet --json <grp> <cmd> --fleet-id *)`.
 
 Three representative patterns:
 
 ```
 Bash(cafleet message poll --fleet-id *)
-Bash(cafleet agent spawn --fleet-id *)
+Bash(cafleet member create --fleet-id *)
 Bash(cafleet --json message poll --fleet-id *)
 ```
 
-Expanding the rule over every allow-listed subcommand (the fleet-scoped leaf subcommands minus `pane exec`, plus a `--json` companion per JSON-invoked subcommand) yields the full set mechanically. Apply the patterns to your user-level `~/.claude/settings.json` manually; the repo does **not** ship a committed `.claude/settings.json` permissions block.
+Expanding the rule over every allow-listed subcommand (the fleet-scoped leaf subcommands minus `member exec`, plus a `--json` companion per JSON-invoked subcommand) yields the full set mechanically. Apply the patterns to your user-level `~/.claude/settings.json` manually; the repo does **not** ship a committed `.claude/settings.json` permissions block.
 
 ## Message Body Truncation
 
@@ -145,7 +153,7 @@ cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>          # d
 cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id> --full   # full body
 ```
 
-This applies to CLI emit sites only. FastAPI `/api/*` responses (see [webui-api.md](./webui-api.md)) are unchanged — the WebUI is human-facing and renders full bodies. `agent.description`, `skills[].description`, `agent_card_json` sub-fields, and `pane capture` content are also untouched.
+This applies to CLI emit sites only. FastAPI `/api/*` responses (see [webui-api.md](./webui-api.md)) are unchanged — the WebUI is human-facing and renders full bodies. `agent.description`, `skills[].description`, `agent_card_json` sub-fields, and `member capture` content are also untouched.
 
 ## `cafleet setup` — One-Step Onboarding {#cafleet-setup}
 
@@ -294,7 +302,7 @@ Deleted fleet <fleet_id>. Deregistered N agents.
 
 There is no `--force` flag. Calling `fleet delete` on an unknown `fleet_id` exits 1 with `Error: fleet 'X' not found.`.
 
-Agent tmux panes spawned by `cafleet agent spawn` are **not** automatically closed by `fleet delete`. For a clean teardown, call `cafleet agent deregister` per agent first (which sends the backend exit keystroke to the pane). If a pane refuses to close (e.g. blocked on a confirmation prompt), rerun `cafleet agent deregister` with `--force`, which kill-panes the target, sweeps the placement, and rebalances the layout.
+Member tmux panes spawned by `cafleet member create` are **not** automatically closed by `fleet delete`. For a clean teardown, call `cafleet member delete` per member first (which sends the backend exit keystroke to the pane). If a pane refuses to close (e.g. blocked on a confirmation prompt), rerun `cafleet member delete` with `--force`, which kill-panes the target, sweeps the placement, and rebalances the layout.
 
 ## `cafleet doctor` — Placement Diagnostics {#cafleet-doctor}
 
@@ -306,7 +314,7 @@ Prints the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE
 
 Environment requirements:
 
-- `TMUX` env var must be set — the command rejects otherwise with `Error: cafleet tmux-pane commands must be run inside a tmux session` (the same message used by the `pane` / `agent spawn` tmux guard).
+- `TMUX` env var must be set — the command rejects otherwise with `Error: cafleet tmux-pane commands must be run inside a tmux session` (the same message used by the `member *` tmux guard).
 - `TMUX_PANE` env var must be set — already required for pane discovery.
 
 Text output:
@@ -385,9 +393,9 @@ CAFLEET_BROKER_HOST=0.0.0.0 CAFLEET_BROKER_PORT=9000 cafleet server
 cafleet server --fleet-id 1
 ```
 
-## `cafleet agent` — Agent Registry + Lifecycle
+## `cafleet agent` — Agent Registry
 
-The `agent` group is the single home for the agent registry and pane-bound lifecycle: `register | list | show | deregister | spawn`. A "member" is just an agent with a placement, so the registry CRUD and the spawn/teardown of pane-bound agents both live here. All five subcommands require the per-subcommand `--fleet-id`. The default-vs-`--full` output projection shared by `agent list` and `agent show` is documented in [`--full` semantics](#full-semantics) and is not restated per subcommand. `agent spawn` and `agent deregister` interact with tmux and must be run inside a tmux session.
+The `agent` group is the agent registry: `register | list | show | deregister`. It never touches tmux — the pane-bound member lifecycle (spawn, teardown, keystroke interaction) lives in the [`cafleet member` group](#cafleet-member). All four subcommands require the per-subcommand `--fleet-id`. The default-vs-`--full` output projection shared by `agent list` and `agent show` is documented in [`--full` semantics](#full-semantics) and is not restated per subcommand.
 
 ### `agent register`
 
@@ -412,7 +420,6 @@ Agent registered successfully!
 | Flag | Required | Notes |
 |---|---|---|
 | `--full` | no | See [`--full` semantics](#full-semantics). |
-| `--activity` | no | Aggregate per-agent activity timestamps from the `tasks` table and render `last_sent`, `last_recv`, `last_ack`, and `idle` columns; broadcast summary rows are excluded from `last_ack`. |
 
 No identity flag — the listing is scoped by the per-subcommand `--fleet-id` alone.
 Default text output is one `<agent_id> <name> <status>` line per active agent,
@@ -427,19 +434,8 @@ fleet prints `No agents found.`:
 4 demo-member active
 ```
 
-#### `agent list --activity` output {#agent-list-activity-output}
-
-```
-cafleet agent list --fleet-id 1 --activity
-3 members:
-  agent_id        name      status  last_sent  last_recv  last_ack   idle
-  --------------  --------  ------  ---------  ---------  ---------  -----
-  4               alice     active  -          12:20:00   12:20:00   14m
-  5               bob       active  12:30:11   12:33:02   12:33:02   2m
-  6               carol     active  12:34:56   12:34:50   12:34:50   6s
-```
-
-`last_sent` is the agent's most recent outgoing message; `last_recv` is its most recent delivery; `last_ack` is the most recent delivery it acknowledged (broadcast summaries excluded); `idle` is wall-time since the latest of `last_sent` / `last_recv`. An absent cell renders as a single ASCII `-`.
+Per-member activity aggregation lives on `member list --activity` — see
+[`member list --activity` output](#member-list-activity-output).
 
 ### `agent show`
 
@@ -460,98 +456,13 @@ with `Error: Agent <id> not found`.
 | Flag | Required | Notes |
 |---|---|---|
 | `--agent-id` | yes | The agent to deregister (target). |
-| `--force` / `-f` | no | When the target has a pane, skip the graceful close wait: immediately kill-pane the target, then deregister, then rebalance layout. Exit 0 even if the pane was already gone. |
 
-Tears down the target's pane (when one exists) and soft-deletes the agent. One unified error model — every failure path exits 1.
+Registry-only soft-delete — no tmux interaction and no `--force` flag. It is the correct teardown for a paneless registry-only agent; a member with a placement is torn down by [`cafleet member delete`](#member-delete), which handles the pane.
 
-- **No pane** (registry-only agent, or pending placement) — registry soft-delete. If nothing was deregistered, exit 1 with `Error: agent <agent_id> not found or already deregistered.`. Success text: `Agent deregistered successfully.`.
-- **Has a pane (default path)** — send the backend exit keystroke, then poll for the pane to disappear (every 500 ms, up to a 15.0 s timeout). Pane gone → deregister, header `Agent deregistered successfully.`. A typical coding-agent exit completes in 1–3 s; operators who need faster escalation pass `--force`. On timeout, the pane buffer tail (last 80 lines) is captured and printed on stderr with a recovery hint, and the command exits **1**.
-- **Has a pane (`--force`)** — kill-pane immediately, then deregister; header `Agent deregistered (--force).`.
-
-The only boundary is fleet isolation: an `--agent-id` that does not belong to `--fleet-id` resolves to `None` and exits 1 with `Error: Agent <agent-id> not found`. There is no caller-auth check. Targeting the root Director is rejected **early — before any tmux pane mutation** — with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 1); this prevents `agent deregister --agent-id <root-director-id>` from injecting the exit keystroke into (or killing) the Director's own pane. The Administrator is rejected with `Error: Administrator cannot be deregistered` (exit 1). Use `cafleet fleet delete` to tear down the whole fleet.
-
-JSON output: `{agent_id, pane_status}`, where `pane_status` is `(pending — no pane)`, `<pane_id> (closed)`, `<pane_id> (killed)`, or `<pane_id> (timeout)`.
-
-#### Timeout output shape
-
-```
-Error: pane %7 did not close within 15.0s after the exit keystroke.
---- pane %7 tail (last 80 lines) ---
-<captured terminal buffer>
----
-Recovery: inspect with `cafleet pane capture`, then re-run `cafleet agent deregister`. Or re-run with `--force` to skip the wait and kill the pane.
-```
-
-#### Exit codes
-
-| Exit | When |
-|---|---|
-| `0` | Success — default-path pane-gone confirmed, `--force` pane killed, or no-pane deregister. |
-| `1` | Any failure: missing fleet, unknown agent-id (including cross-fleet), nothing deregistered, the root-Director or Administrator guard, a tmux failure sending the exit keystroke (pre-poll), a tmux failure while waiting for the pane to disappear, or the 15.0 s default-path timeout. |
-
-### `agent spawn`
-
-The one genuinely distinct lifecycle op: register an agent **and** spawn its coding-agent pane.
-
-| Flag | Required | Notes |
-|---|---|---|
-| `--agent-id` | yes | Director's agent ID. |
-| `--name` | yes | Display name of the new agent — see [Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals) for pane-title behavior. |
-| `--description` | yes | One-sentence purpose. |
-| `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; an ordinary member defaults to `claude` and a `--role monitor` member inherits the spawning Director's backend (an explicit value always wins). Backend resolution and the per-backend spawn argv live in [Coding agents](../concepts/coding-agents.md). Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. |
-| `--model` | no | Model forwarded to the backend binary's `--model` flag; omitted by default — see [Model selection](../concepts/coding-agents.md#model-selection). |
-| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `agent_card_json.cafleet.kind == "monitoring-member"`, skips `monitor_config` enrollment, and inherits the Director's backend when `--coding-agent` is omitted); an ordinary `member` is enrolled as a watched agent. The LLM is still chosen by `--model` (the Director passes `--model haiku`). A second `--role monitor` spawn in the same fleet is rejected — see [Error Messages](#error-messages). See [Monitoring](../concepts/monitoring.md#the-monitoring-member). |
-| `--full` | no | Documented flag: switches the non-JSON output to the 6-line block below. |
-| `--text` | no | Inline spawn prompt text, delivered **verbatim**. All three backends receive the same prompt; the prompt template is backend-neutral. Mutually exclusive with `--text-file`; exactly one of the two is required. |
-| `--text-file` | no | Path to a UTF-8 file whose contents are the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Delivered **verbatim**. Mutually exclusive with `--text`; exactly one of the two is required. |
-
-#### Spawn command per backend
-
-The per-backend spawn argv and auto-approval flags live in the Backend-resolution table on [Coding agents](../concepts/coding-agents.md). In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve — see [Bash routing](../concepts/bash-routing.md) for the fallback protocol.
-
-#### Spawn-prompt input modes
-
-`cafleet agent spawn` requires the spawn prompt via exactly one of `--text` / `--text-file`, **delivered verbatim** (there is no brace `{placeholder}` substitution):
-
-| Inputs | Resulting spawn prompt |
-|---|---|
-| `--text "<prompt>"` only | The inline argument, verbatim. |
-| `--text-file PATH` only | The file contents, decoded as UTF-8 byte-for-byte (no newline translation). A relative PATH resolves against CWD. |
-| `--text-file -` only | The whole prompt read from stdin, decoded as UTF-8. |
-| Both `--text` and `--text-file` | Error (exit 2) — mutually exclusive; see [Error Messages](#error-messages). |
-| Neither `--text` nor `--text-file` | Error (exit 2) — exactly one is required; see [Error Messages](#error-messages). |
-
-Identity reaches the spawned agent as **environment variables** injected into its pane — `CAFLEET_FLEET_ID`, `CAFLEET_AGENT_ID` (the spawned agent's own id), and `CAFLEET_DIRECTOR_AGENT_ID` (its Director) — alongside the forwarded `CAFLEET_DATABASE_URL`. Only `CAFLEET_FLEET_ID` auto-defaults `--fleet-id`; the agent reads `$CAFLEET_AGENT_ID` / `$CAFLEET_DIRECTOR_AGENT_ID` and passes them explicitly (see [Coding agents](../concepts/coding-agents.md)). For `--text-file`, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all produce non-zero-exit errors — see the [Error Messages](#error-messages) table for the full surface. Inline `--text` prompts beyond a few KB exceed tmux's argv ceiling (`tmux command failed: command too long` rolls back the registration) — use `--text-file` for long prompts.
-
-#### Focus behavior
-
-The spawn always invokes `tmux split-window` with `-d` so the Director's pane and active window keep focus — the new pane is created in the Director's window but is not made active.
-
-#### Output format
-
-Text (default) — one compact line; `pane` renders `(pending)` when the pane
-id has not been patched onto the placement yet:
-
-```
-<agent_id> <name> backend=<coding_agent> pane=<pane_id>
-```
-
-Text (`--full`) — 6-line block:
-
-```
-Member registered and spawned.
-  agent_id:  <agent_id>
-  name:      <name>
-  backend:   <coding_agent>
-  pane_id:   <pane_id>
-  window_id: <window_id>
-```
-
-`--json` returns
-`{"agent_id":<id>,"name":"<name>","registered_at":"<iso8601>","placement":{...}}`
-where `placement` carries `director_agent_id`, `tmux_session`,
-`tmux_window_id`, `tmux_pane_id`, `coding_agent`, and `created_at` (the same
-shape as `fleet create`'s `director.placement`).
+- The fleet-membership gate runs first: an `--agent-id` that is not a member of `--fleet-id` (including an unknown id) exits 1 with `Error: agent <id> is not a member of fleet <fleet-id>.`.
+- Targeting the root Director is rejected with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 1); the Administrator with `Error: Administrator cannot be deregistered` (exit 1). Both guards are enforced in the broker deregister path.
+- If nothing was deregistered (already deregistered), exit 1 with `Error: agent <agent_id> not found or already deregistered.`.
+- Success text: `Agent deregistered successfully.`. JSON output: `{"status":"deregistered"}`.
 
 ## `cafleet message` — Message Broker
 
@@ -629,19 +540,19 @@ prints `No messages found.`.
 | `--task-id` | yes | Task to fetch. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
 
-## `cafleet pane` — Pane Interaction {#cafleet-pane}
+## `cafleet member` — Member Lifecycle + Pane Interaction {#cafleet-member}
 
-The `cafleet pane` subgroup keystrokes a pane-bound agent and must be run inside a tmux session. Every subcommand targets its agent by `--agent-id` (the **target**, scoped to the per-subcommand `--fleet-id`) and delivers keystrokes into that agent's tmux pane: `capture | input | exec | wake`. They share the resolution, key-delivery, and exit-code rules below; each subcommand's own section documents only its unique flags, key sequence, validation, and output.
+The `cafleet member` subgroup owns the tmux-pane-bound member lifecycle and must be run inside a tmux session: `create | delete | list | capture | exec | ping | nudge`. `member create` registers a member **and** spawns its coding-agent pane; `member delete` tears it down; `capture` / `exec` / `ping` / `nudge` inspect or keystroke an existing member's pane. `create` names the acting Director with `--agent-id`; every other lifecycle verb targets its member by `--member-id` (`nudge` additionally names its sender with `--agent-id`). The `--member-id` verbs share the resolution, key-delivery, and exit-code rules below; each subcommand's own section documents only its unique flags, key sequence, validation, and output.
 
-### Pane targeting and key delivery
+### Member targeting and key delivery
 
-#### Agent resolution
+#### Member resolution
 
-1. Load the active in-fleet target. A cross-fleet, unknown, or inactive (deregistered) `--agent-id` all resolve to "not found" and exit 1 with `Error: Agent <agent-id> not found`. There is no caller-auth check beyond fleet membership.
-2. If the agent has no placement row, exit 1 with ``Error: agent <agent-id> has no placement row; it was not spawned via `cafleet agent spawn`.``.
-3. If the placement's pane id is `None` (pending placement), exit 1 — each subcommand uses its own "nothing to …" wording (see its section).
+1. Load the active in-fleet target. A cross-fleet, unknown, or inactive (deregistered) `--member-id` all resolve to "not found" and exit 1 with `Error: Agent <member-id> not found`. There is no caller-auth check beyond fleet membership.
+2. If the agent has no placement row, exit 1 with ``Error: agent <member-id> has no placement row; it was not spawned via `cafleet member create`.`` — except `member delete`, whose no-placement wording points at the registry command instead (see its section).
+3. If the placement's pane id is `None` (pending placement), `capture` / `exec` / `ping` exit 1 with `Error: member <member-id> has no pane yet (pending placement) — nothing to <capture|exec|ping>.`; `delete` and `nudge` tolerate a pending placement (see their sections).
 
-The only boundary is fleet isolation: any **active** in-fleet agent **with a placement row** (the root Director included) is a valid `--agent-id`.
+The only boundary is fleet isolation: any **active** in-fleet agent **with a placement row** (the root Director included) is a valid `--member-id`.
 
 #### Literal key delivery
 
@@ -652,112 +563,257 @@ Each key sequence is delivered literally — shell meta (`$VAR`, backticks, `$(.
 | Exit | When |
 |---|---|
 | `0` | Dispatch success. |
-| `1` | tmux unavailable / `TMUX` env var missing; agent not found (including cross-fleet `--agent-id`); missing placement row; pending placement; `tmux send-keys` subprocess failure. |
+| `1` | tmux unavailable / `TMUX` env var missing; agent not found (including cross-fleet `--member-id`); missing placement row; pending placement; `tmux send-keys` subprocess failure. |
 | `2` | Per-subcommand argument/validation errors (see each subcommand). |
 
-### `pane capture`
+### `member create` {#member-create}
+
+Register a member agent **and** spawn its coding-agent pane.
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Target agent's ID |
-| `--lines` | no | Number of trailing lines to capture (default: **20**). The single spelling — there is no `--tail` alias. |
+| `--agent-id` | yes | The acting Director's agent ID. |
+| `--name` | yes | Display name of the new member — see [Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals) for pane-title behavior. |
+| `--description` | yes | One-sentence purpose. |
+| `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; an ordinary member defaults to `claude` and a `--role monitor` member inherits the spawning Director's backend (an explicit value always wins). Backend resolution and the per-backend spawn argv live in [Coding agents](../concepts/coding-agents.md). Exits 1 with `Error: binary <name> not found on PATH` when the chosen binary is not on `PATH`. |
+| `--model` | no | Model forwarded to the backend binary's `--model` flag; omitted by default — see [Model selection](../concepts/coding-agents.md#model-selection). |
+| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `agent_card_json.cafleet.kind == "monitoring-member"`, skips `monitor_config` enrollment, and inherits the Director's backend when `--coding-agent` is omitted); an ordinary `member` is enrolled as a watched agent. The LLM is still chosen by `--model` (the Director passes `--model haiku`). A second `--role monitor` spawn in the same fleet is rejected — see [Error Messages](#error-messages). See [Monitoring](../concepts/monitoring.md#the-monitoring-member). |
+| `--full` | no | Documented flag: switches the non-JSON output to the 6-line block below. |
+| `--text` | no | Inline spawn prompt text. All three backends receive the same prompt; the prompt template is backend-neutral. Mutually exclusive with `--text-file`; exactly one of the two is required. |
+| `--text-file` | no | Path to a UTF-8 file whose contents are the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Mutually exclusive with `--text`; exactly one of the two is required. |
+
+#### Spawn command per backend
+
+The per-backend spawn argv and auto-approval flags live in the Backend-resolution table on [Coding agents](../concepts/coding-agents.md). In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve — see [Bash routing](../concepts/bash-routing.md) for the fallback protocol.
+
+#### Spawn-prompt input modes
+
+`cafleet member create` requires the spawn prompt via exactly one of `--text` / `--text-file`:
+
+| Inputs | Resulting spawn prompt body |
+|---|---|
+| `--text "<prompt>"` only | The inline argument. |
+| `--text-file PATH` only | The file contents, decoded as UTF-8 byte-for-byte (no newline translation). A relative PATH resolves against CWD. |
+| `--text-file -` only | The whole prompt read from stdin, decoded as UTF-8. |
+| Both `--text` and `--text-file` | Error (exit 2) — mutually exclusive; see [Error Messages](#error-messages). |
+| Neither `--text` nor `--text-file` | Error (exit 2) — exactly one is required; see [Error Messages](#error-messages). |
+
+For `--text-file`, missing files, unreadable files, invalid UTF-8, and empty (zero-byte or whitespace-only) files all produce non-zero-exit errors — see the [Error Messages](#error-messages) table for the full surface. Inline `--text` prompts beyond a few KB exceed tmux's argv ceiling (`tmux command failed: command too long` rolls back the registration) — use `--text-file` for long prompts.
+
+#### Spawn-prompt substitution
+
+`cafleet member create` runs `str.format` over the resolved prompt body, substituting exactly four placeholders:
+
+| Placeholder | Rendered value |
+|---|---|
+| `{fleet_id}` | The `--fleet-id` value. |
+| `{agent_id}` | The member's **own** newly-allocated agent id. |
+| `{director_agent_id}` | The `--agent-id` value (the acting Director). |
+| `{coding_agent}` | The resolved backend name (`claude` / `codex` / `opencode`). |
+
+Identity reaches the spawned member as literals rendered into its prompt — the only environment variable forwarded into the pane is `CAFLEET_DATABASE_URL`. A literal brace in prompt text must be **doubled** (`{{` / `}}`) to survive `.format()`. An unknown placeholder or a malformed brace expression is a usage error (exit 2) — see [Error Messages](#error-messages); because substitution needs the freshly-allocated `{agent_id}`, it runs after registration, and the just-registered agent is rolled back before the error surfaces.
+
+#### Focus behavior
+
+The spawn always invokes `tmux split-window` with `-d` so the Director's pane and active window keep focus — the new pane is created in the Director's window but is not made active.
+
+#### Output format
+
+Text (default) — one compact line; `pane` renders `(pending)` when the pane
+id has not been patched onto the placement yet:
+
+```
+<agent_id> <name> backend=<coding_agent> pane=<pane_id>
+```
+
+Text (`--full`) — 6-line block:
+
+```
+Member registered and spawned.
+  agent_id:  <agent_id>
+  name:      <name>
+  backend:   <coding_agent>
+  pane_id:   <pane_id>
+  window_id: <window_id>
+```
+
+`--json` returns
+`{"agent_id":<id>,"name":"<name>","registered_at":"<iso8601>","placement":{...}}`
+where `placement` carries `director_agent_id`, `tmux_session`,
+`tmux_window_id`, `tmux_pane_id`, `coding_agent`, and `created_at` (the same
+shape as `fleet create`'s `director.placement`).
+
+### `member delete` {#member-delete}
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--member-id` | yes | The member to delete (target). |
+| `--force` / `-f` | no | When the target has a pane, skip the graceful close wait: immediately kill-pane the target, then deregister. Exit 0 even if the pane was already gone. |
+
+Tears down the target's pane (when one exists) and soft-deletes the agent.
+
+- **Root Director guard (early — before any tmux pane mutation):** targeting the root Director exits 1 with `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead`.
+- **No placement row** — exit 1 with ``Error: agent <member-id> has no placement; use `cafleet agent deregister` instead`` (a paneless registry-only agent is not a member).
+- **Pending placement (no pane yet)** — plain registry soft-delete; header `Member deleted.`, `pane_status` `(pending — no pane)`.
+- **Has a pane (default path)** — send the backend exit keystroke, then poll for the pane to disappear (every 500 ms, up to a 15.0 s timeout). Pane gone → deregister, header `Member deleted.`. A typical coding-agent exit completes in 1–3 s; operators who need faster escalation pass `--force`. On timeout, the pane buffer tail (last 80 lines) is captured and printed on stderr with a recovery hint, and the command exits **2**.
+- **Has a pane (`--force`)** — kill-pane immediately, then deregister; header `Member deleted (--force).`.
+
+Success text output is the header line followed by `agent_id:` / `pane_id:` lines. JSON output: `{agent_id, pane_status}`, where `pane_status` is `(pending — no pane)`, `<pane_id> (closed)`, `<pane_id> (killed)`, or `<pane_id> (timeout)`.
+
+#### Timeout output shape
+
+```
+Error: pane %7 did not close within 15.0s after /exit.
+--- pane %7 tail (last 80 lines) ---
+<captured terminal buffer>
+---
+Recovery: inspect with `cafleet member capture`, then re-run `cafleet member delete`. Or re-run with `--force` to skip the wait and kill the pane.
+```
+
+#### Exit codes
+
+| Exit | When |
+|---|---|
+| `0` | Success — default-path pane-gone confirmed, `--force` pane killed, or pending-placement deregister. |
+| `1` | Missing fleet, unknown member-id (including cross-fleet), no placement row, the root-Director guard, a tmux failure sending the exit keystroke or waiting for the pane, a kill-pane failure, or a deregister failure. |
+| `2` | The 15.0 s default-path timeout (pane tail printed on stderr). |
+
+### `member list` {#member-list}
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--activity` | no | Aggregate per-member activity timestamps from the `tasks` table and render `last_sent`, `last_recv`, `last_ack`, and `idle` columns; broadcast summary rows are excluded from `last_ack`. |
+
+No identity flag — the listing is scoped by the per-subcommand `--fleet-id` alone. Lists every **member** of the fleet (agents with a placement row); the root Director is excluded. An empty roster prints `0 members.`. Default text output is a placement table:
+
+```
+2 members:
+  agent_id        name      status  backend  session  window_id  pane_id  created_at
+  --------------  --------  ------  -------  -------  ---------  -------  --------------------
+  4               alice     active  claude   main     @3         %7       2026-06-11T09:00:00+00:00
+  5               bob       active  codex    main     @3         %8       2026-06-11T09:00:05+00:00
+```
+
+`pane_id` renders `(pending)` for a pending placement. `--json` returns the member rows unprojected.
+
+#### `member list --activity` output {#member-list-activity-output}
+
+```
+cafleet member list --fleet-id 1 --activity
+3 members:
+  agent_id        name      status  last_sent  last_recv  last_ack   idle
+  --------------  --------  ------  ---------  ---------  ---------  -----
+  4               alice     active  -          12:20:00   12:20:00   14m
+  5               bob       active  12:30:11   12:33:02   12:33:02   2m
+  6               carol     active  12:34:56   12:34:50   12:34:50   6s
+```
+
+`last_sent` is the member's most recent outgoing message; `last_recv` is its most recent delivery; `last_ack` is the most recent delivery it acknowledged (broadcast summaries excluded); `idle` is wall-time since the latest of `last_sent` / `last_recv`. An absent cell renders as a single ASCII `-`.
+
+### `member capture` {#member-capture}
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--member-id` | yes | Target member's ID |
+| `--lines` / `--tail` | no | Number of trailing lines to capture (default: **20**). `--tail` is an alias for `--lines`. |
 | `--ansi` / `--no-ansi` | no | Default `--no-ansi`: ANSI escape sequences are stripped and carriage-return redraw fragments cleaned up. Pass `--ansi` to disable post-processing and emit the raw tmux capture. |
 
-JSON: `{agent_id, pane_id, lines, content}`; text emits the content with no trailing newline.
+JSON: `{member_agent_id, pane_id, lines, content}`; text emits the content with no trailing newline.
 
-### `pane exec`
+### `member exec` {#member-exec}
 
-Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into an agent's pane so the coding agent's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). All three backends (`claude`, `codex`, and `opencode`) honor the leading-`!` shortcut on their input line, so `pane exec` works against any backend without modification. The fallback path for the bash-via-Director protocol — see [Bash routing](../concepts/bash-routing.md).
+Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter` into a member's pane so the coding agent's `!` shortcut runs the command natively (bypassing the member's Bash tool permission system). All three backends (`claude`, `codex`, and `opencode`) honor the leading-`!` shortcut on their input line, so `member exec` works against any backend without modification. The fallback path for the bash-via-Director protocol — see [Bash routing](../concepts/bash-routing.md).
 
 ```bash
-cafleet pane exec --fleet-id <fleet-id> \
-  --agent-id <agent-id> "git log -1 --oneline"
+cafleet member exec --fleet-id <fleet-id> \
+  --member-id <member-id> "git log -1 --oneline"
 ```
 
 | Flag / argument | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Target agent's ID |
+| `--member-id` | yes | Target member's ID |
 | *(positional `COMMAND`)* | yes | Single shell command. Leading and trailing whitespace are stripped before dispatch into the pane (the JSON `command` field and the text echo both reflect the trimmed form). Otherwise pipes, `&&`, `;`, `$(...)`, and backticks are not special-cased — the command is forwarded opaquely. |
 
 #### Key sequence sent to the pane
 
 | Invocation | tmux calls issued in order |
 |---|---|
-| `pane exec "X"` | `tmux send-keys -t <pane> -l "! X"` → `tmux send-keys -t <pane> Enter` |
+| `member exec "X"` | `tmux send-keys -t <pane> -l "! X"` → `tmux send-keys -t <pane> Enter` |
 
 #### Validation rules
 
 | Input | Result |
 |---|---|
 | Missing positional `COMMAND` | Rejected (exit 2). |
-| `command` empty after `.strip()` (`""` or whitespace-only) | Rejected (exit 2). |
 | `command` containing `\n` or `\r` | Rejected (exit 2). |
+| `command` empty after `.strip()` (`""` or whitespace-only) | Rejected (exit 2). |
 
 Error strings: see [Error Messages](#error-messages).
 
-(tmux-unavailable and binary-not-found errors are common — see [Pane targeting and key delivery](#pane-targeting-and-key-delivery).)
+(tmux-unavailable and binary-not-found errors are common — see [Member targeting and key delivery](#member-targeting-and-key-delivery).)
 
 #### Output format
 
 Text:
 
 ```
-Sent bash command 'git log -1 --oneline' to agent Claude-B (%7).
+Sent bash command 'git log -1 --oneline' to member Claude-B (%7).
 ```
 
-JSON (`cafleet --json ... pane exec ...`):
+JSON (`cafleet --json ... member exec ...`):
 
 ```json
 {
-  "agent_id": <id>,
+  "member_agent_id": <id>,
   "pane_id": "%7",
   "command": "<command as-sent>"
 }
 ```
 
-Three keys: `agent_id`, `pane_id`, `command`.
+Three keys: `member_agent_id`, `pane_id`, `command`.
 
-### `pane wake`
+### `member ping` {#member-ping}
 
-One command with two mutually-exclusive modes for waking a pane-bound agent: `--poll-only` re-pokes the agent's inbox; `--message` persists an ACKable broker task **and** fires an `Esc`-safeguarded inline preview into the target's pane. Exactly one of `--poll-only` / `--message` is required; supplying both, or `--message` without `--from` or without a body (`--text` / `--text-file`), is a usage error (exit 2). There is no `--quiet` flag.
+Re-pokes a member's inbox. Keystrokes `Esc` → `cafleet message poll --fleet-id <fleet-id> --agent-id <member-id>` → `Enter` into the target's pane so the member drains its inbox via a normal poll; the leading `Esc` is the permission-prompt safeguard (see [tmux push](../concepts/tmux-push.md)). This is the manual re-poke for a pane that missed the broker's automatic on-delivery notification. The action is wholly determined by the command — there is no operator-controlled keystroke body, which is why `member ping` sits in `permissions.allow` while `member exec` stays in `permissions.ask`.
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | The **target** agent (typically the Director for `--message`). |
-| `--poll-only` | one-of | Inject the `Esc`-safeguarded inbox-poll keystroke into the target's pane (no sender, no text). |
-| `--message` | one-of | Persist an ACKable task and fire the inline preview. Requires `--from` and exactly one of `--text` / `--text-file`. |
-| `--from` | with `--message` | The **sender** (typically the monitoring member). Persisted as the task's `from_agent_id` so the Director sees who woke it. |
-| `--text` | with `--message` | Inline re-engage summary (un-ACKed inbox items, stalled members). Persisted as the task body and keystroked as the inline preview. Mutually exclusive with `--text-file`; exactly one of the two is required. |
-| `--text-file` | with `--message` | Path to a UTF-8 file whose contents are the body — absolute, or relative to CWD; `-` reads the whole body from stdin. Mutually exclusive with `--text`; exactly one of the two is required. Use this for long or multi-line bodies that would exceed the shell's `ARG_MAX`. |
+| `--member-id` | yes | The target member. |
 
 ```bash
-# Re-poll a pane that missed the broker's automatic on-delivery notification:
-cafleet pane wake --fleet-id <fleet-id> --agent-id <agent-id> --poll-only
-
-# Re-engage an idle Director with an ACKable task + hardened preview:
-cafleet pane wake --fleet-id <fleet-id> --agent-id <director-agent-id> \
-  --message --from <monitoring-member-id> --text "<re-engage summary>"
+cafleet member ping --fleet-id <fleet-id> --member-id <member-id>
 ```
 
-#### `--poll-only` behavior
+A `tmux send-keys` non-delivery exits 1 with `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.`. JSON: `{member_agent_id, pane_id}`; text: `Pinged member <name> (<pane_id>) — poll keystroke dispatched.`.
 
-Keystrokes `Esc` → `cafleet message poll --fleet-id <fleet-id> --agent-id <agent-id>` → `Enter` into the target's pane so the agent drains its inbox via a normal poll; the leading `Esc` is the permission-prompt safeguard (see [tmux push](../concepts/tmux-push.md)). This is the manual re-poke for a pane that missed the broker's automatic on-delivery notification. The action is wholly determined by the mode flag — there is no operator-controlled keystroke body, which is why `pane wake` sits in `permissions.allow` while `pane exec` stays in `permissions.ask`. A `tmux send-keys` non-delivery exits 1 with `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.`. JSON: `{agent_id, pane_id}`; text: `Woke agent <name> (<pane_id>) — poll keystroke dispatched.`.
+### `member nudge` {#member-nudge}
 
-#### `--message` behavior
+Re-engages a member (typically the Director) by persisting an ACKable broker task **and** firing an `Esc`-safeguarded inline preview into the target's pane. Functionally equivalent to a monitoring-member `cafleet message send --to <director-id>` (both ride the same hardened send path): it resolves the target (fleet-isolation only — no caller-auth check), then calls the broker send path, which (1) persists a `unicast` / `input_required` task — the ACKable inbox item the Director's facilitation loop consumes — and (2) best-effort fires the `Esc`-safeguarded inline preview into the target's pane. A target with no live pane is tolerated: the task still persists and the keystroke best-effort no-ops, identical to `message send` semantics.
 
-Functionally equivalent to a monitoring-member `cafleet message send --to <director-id>` (both ride the same hardened send path). Resolves the target (fleet-isolation only — no caller-auth check), then calls the broker send path, which (1) persists a `unicast` / `input_required` task — the ACKable inbox item the Director's facilitation loop consumes — and (2) best-effort fires the `Esc`-safeguarded inline preview into the target's pane. A target with no live pane is tolerated: the task still persists and the keystroke best-effort no-ops, identical to `message send` semantics.
+| Flag | Required | Notes |
+|---|---|---|
+| `--agent-id` | yes | The **sender** (typically the monitoring member). Persisted as the task's `from_agent_id` so the Director sees who nudged it. |
+| `--member-id` | yes | The **target** member (typically the Director). |
+| `--text` | no | Inline re-engage summary (un-ACKed inbox items, stalled members). Persisted as the task body and keystroked as the inline preview. Mutually exclusive with `--text-file`; exactly one of the two is required. |
+| `--text-file` | no | Path to a UTF-8 file whose contents are the body — absolute, or relative to CWD; `-` reads the whole body from stdin. Mutually exclusive with `--text`; exactly one of the two is required. Use this for long or multi-line bodies that would exceed the shell's `ARG_MAX`. |
+
+```bash
+cafleet member nudge --fleet-id <fleet-id> \
+  --agent-id <monitoring-member-id> --member-id <director-agent-id> \
+  --text "<re-engage summary>"
+```
 
 Text:
 
 ```
-Woke <name> (<pane_id>) — task <task_id> queued, Esc-safeguarded preview dispatched.
+Nudged <name> (<pane_id>) — task <task_id> queued, Esc-safeguarded preview dispatched.
 ```
 
-A target with no placement pane prints the `no pane; task queued` variant. A target **with** a pane whose best-effort preview did not land (tmux binary missing, self-send, or a send failure) prints `Woke <name> (<pane_id>) — task <task_id> queued; inline preview not delivered.` — the task still persists in all three cases. JSON (`cafleet --json ... pane wake --message ...`):
+A target with a pending placement prints `Nudged <name> — no pane; task <task_id> queued.`. A target **with** a pane whose best-effort preview did not land (tmux binary missing, self-send, or a send failure) prints `Nudged <name> (<pane_id>) — task <task_id> queued; inline preview not delivered.` — the task still persists in all three cases. JSON (`cafleet --json ... member nudge ...`):
 
 ```json
 {
-  "agent_id": <id>,
+  "member_agent_id": <id>,
   "pane_id": "%7",
   "task_id": <task_id>,
   "notification_sent": true
@@ -768,9 +824,9 @@ A target with no placement pane prints the `no pane; task queued` variant. A tar
 
 | Exit | When |
 |---|---|
-| `0` | `--poll-only` keystroke dispatched, or `--message` task persisted (preview dispatched or best-effort no-op). |
-| `1` | Target not found (cross-fleet / unknown / inactive `--agent-id`), an in-fleet target with no placement row, a pending placement, a `--poll-only` non-delivery, or the `--message` sender (`--from`) not active in the fleet — see [Error Messages](#error-messages). |
-| `2` | Both/neither of `--poll-only` / `--message`; `--message` missing `--from` or a body; both/neither of `--text` / `--text-file`; empty / whitespace-only inline `--text`. |
+| `0` | Task persisted (preview dispatched or best-effort no-op). |
+| `1` | Target not found (cross-fleet / unknown / inactive `--member-id`), an in-fleet target with no placement row, or the sender (`--agent-id`) rejected by the broker send path — see [Error Messages](#error-messages). |
+| `2` | Both/neither of `--text` / `--text-file`; empty / whitespace-only inline `--text`. |
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 
@@ -784,11 +840,11 @@ There is no `monitor stop` command and no detached process: stop the loop by sto
 |---|---|---|
 | `--tick` | no | Scan-tick cadence in seconds (`click.IntRange(min=1)`, default **5**). Stored in `monitor_runtime.tick_seconds` so `status` can report it. The tick is the floor on per-agent interval precision — see [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision). |
 
-Runs the `scan → wake monitor when any watched agent is due → heartbeat → sleep` loop **in-process** via `run_monitor_loop` — the fleet's monitoring member launches it as a background task in its own pane (the loop blocks the task). On startup it runs the tmux precondition guard (the same `TMUX`-env check the `pane` / `agent spawn` commands use), then atomically claims the single-instance `monitor_runtime` row, installs `SIGTERM`/`SIGINT` handlers (a clean stop clears the row), and loops until signalled or the fleet is torn down (`monitor_tick` returns `STOP` once the fleet is soft-deleted). There is no detached subprocess, no PID file, and no log file — the loop writes to the launching task's own stdout.
+Runs the `scan → wake monitor when any watched agent is due → heartbeat → sleep` loop **in-process** via `run_monitor_loop` — the fleet's monitoring member launches it as a background task in its own pane (the loop blocks the task). On startup it runs the tmux precondition guard (the same `TMUX`-env check the `member *` commands use), then atomically claims the single-instance `monitor_runtime` row, installs `SIGTERM`/`SIGINT` handlers (a clean stop clears the row), and loops until signalled or the fleet is torn down (`monitor_tick` returns `STOP` once the fleet is soft-deleted). There is no detached subprocess, no PID file, and no log file — the loop writes to the launching task's own stdout.
 
 Each tick scans the watched set and, when any agent is due, wakes the monitoring member once with a single-line wake nudge naming each freshly-due agent and the Director, then advances each due agent's cadence so it is not re-flagged on the next tick. The loop **never** keystrokes a watched pane. The watched-set intervals, the wake-nudge contract, and the `Esc`-safeguard placement are canonical on [Monitoring](../concepts/monitoring.md). Each due agent is logged to stdout as `<iso-ts> due agent <id> (<name>) -> wake monitor`, so the launching background task's output shows live heartbeat activity.
 
-If the fleet has **no** monitoring member when `start` runs (`broker.find_monitoring_member(fleet_id) is None`), the command prints a warning to stderr (`Warning: fleet <id> has no monitoring member; the monitor heartbeat will wake no agent. Spawn one first with 'cafleet agent spawn --role monitor'.`) and then runs the loop anyway (warn-but-run). In the canonical flow the warning never fires — the monitoring member is spawned at `agent spawn`, before it launches `monitor start` in its own pane.
+If the fleet has **no** monitoring member when `start` runs (`broker.find_monitoring_member(fleet_id) is None`), the command prints a warning to stderr (`Warning: fleet <id> has no monitoring member; the monitor heartbeat will wake no agent. Spawn one first with 'cafleet member create --role monitor'.`) and then runs the loop anyway (warn-but-run). In the canonical flow the warning never fires — the monitoring member is spawned at `member create`, before it launches `monitor start` in its own pane.
 
 Exit codes: `0` clean exit (signalled, or the fleet was torn down); `1` already running (`monitor already running for fleet N`), unknown or soft-deleted fleet, or tmux unreachable; `2` click usage errors (e.g. `--tick 0`).
 
@@ -852,22 +908,21 @@ agent 5: interval 720s, enabled, last_ping 2026-06-13T04:51:00
 | `fleet create` run outside a tmux session | `Error: cafleet fleet create must be run inside a tmux session` (exit 1; no DB writes) |
 | `fleet delete` on unknown fleet_id | `Error: fleet 'X' not found.` (exit 1) |
 | `agent register` into a soft-deleted fleet | `Error: fleet X is deleted` (exit 1) |
-| `agent deregister` against the root Director's `agent_id` | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 1) |
+| `agent deregister` / `member delete` against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 1) |
 | `agent deregister` against the Administrator's `agent_id` | `Error: Administrator cannot be deregistered` (exit 1) |
 | `agent deregister` that deregisters nothing | `Error: agent <id> not found or already deregistered.` (exit 1) |
-| `agent deregister` default path when the pane does not close within 15.0 s | `Error: pane <pane> did not close within 15.0s after the exit keystroke.` (exit 1; pane tail printed on stderr) |
+| `member delete` on an agent with no placement row | ``Error: agent <member-id> has no placement; use `cafleet agent deregister` instead`` (exit 1) |
+| `member delete` default path when the pane does not close within 15.0 s | `Error: pane <pane> did not close within 15.0s after /exit.` (exit 2; pane tail printed on stderr) |
 | `agent show` / `agent deregister` / `message send` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--fleet-id` | `Error: agent <id> is not a member of fleet <fleet-id>.` (exit 1) — the fleet-membership gate runs before any read/write operation. Also fires for unknown `--agent-id` (the gate cannot tell "unknown" from "in a different fleet" apart and treats both as not-a-member). |
-| `pane exec` with missing positional `COMMAND` | `Error: Missing argument 'COMMAND'.` (exit 2) |
-| `pane exec ""` (empty / whitespace-only) | `Error: command may not be empty.` (exit 2) |
-| `pane exec` with `\n` or `\r` | `Error: command may not contain newlines.` (exit 2) |
-| `pane exec` on an agent with pending placement | `Error: agent <id> has no pane yet (pending placement) — nothing to exec.` (exit 1) |
-| `pane wake --poll-only` on an agent with pending placement | `Error: agent <id> has no pane yet (pending placement) — nothing to wake.` (exit 1) |
-| `pane wake --poll-only` when `tmux send-keys` fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
-| `pane wake` with neither or both of `--poll-only` / `--message` | usage error (exit 2) |
-| `pane wake --message` with a cross-fleet / unknown / inactive `--agent-id` | `Error: Agent <agent-id> not found` (exit 1) |
-| `pane wake --message` on an in-fleet `--agent-id` with no placement row | ``Error: agent <agent-id> has no placement row; it was not spawned via `cafleet agent spawn`.`` (exit 1) |
-| `pane wake --message` whose `--from` (sender) is not active in the fleet | `Error: <sender ValueError from the broker send path>` (exit 1) |
-| Any `--text` / `--text-file` command (`message send`, `message broadcast`, `pane wake --message`, `agent spawn`) with neither flag | `Error: Provide exactly one of --text or --text-file.` (exit 2) |
+| `member exec` with missing positional `COMMAND` | `Error: Missing argument 'COMMAND'.` (exit 2) |
+| `member exec ""` (empty / whitespace-only) | `Error: command may not be empty.` (exit 2) |
+| `member exec` with `\n` or `\r` | `Error: command may not contain newlines.` (exit 2) |
+| `member capture` / `member exec` / `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to <capture|exec|ping>.` (exit 1) |
+| `member ping` when `tmux send-keys` fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
+| `member capture` / `member exec` / `member ping` / `member nudge` with a cross-fleet / unknown / inactive `--member-id` | `Error: Agent <member-id> not found` (exit 1) |
+| `member capture` / `member exec` / `member ping` / `member nudge` on an in-fleet `--member-id` with no placement row | ``Error: agent <member-id> has no placement row; it was not spawned via `cafleet member create`.`` (exit 1) |
+| `member nudge` whose `--agent-id` (sender) is rejected by the broker send path | `Error: <sender ValueError from the broker send path>` (exit 1) |
+| Any `--text` / `--text-file` command (`message send`, `message broadcast`, `member nudge`, `member create`) with neither flag | `Error: Provide exactly one of --text or --text-file.` (exit 2) |
 | Any `--text` / `--text-file` command with both flags | `Error: --text and --text-file are mutually exclusive.` (exit 2) |
 | `--text` empty or whitespace-only | `Error: text may not be empty.` (exit 2) |
 | `--text-file <path>` to an empty (zero-byte or whitespace-only) file | `Error: --text-file <path>: file is empty.` (exit 1) |
@@ -875,10 +930,12 @@ agent 5: interval 720s, enabled, last_ping 2026-06-13T04:51:00
 | `--text-file <path>` to a non-existent path or non-regular file (e.g. a directory) | `Error: --text-file <path>: file does not exist or is not a regular file.` (exit 1) |
 | `--text-file <path>` to an unreadable file | `Error: --text-file <path>: file is not readable.` (exit 1) |
 | `--text-file <path>` to a file containing invalid UTF-8 | `Error: --text-file <path>: file is not valid UTF-8.` (exit 1) |
-| `agent spawn --coding-agent opencode --model` with a value violating the `<provider-id>/<model-id>` format | `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` (exit 2; fires before any agent registration or tmux side effect) |
-| `agent spawn --role monitor` when the fleet already has an active monitoring member | `Error: fleet <id> already has an active monitoring member (agent <existing-id>); only one is allowed.` (exit 1; enforced in `register_agent`) |
-| `agent spawn --role monitor` with `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the monitor's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
-| `agent spawn --role monitor` with `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the monitor's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
+| `member create --coding-agent opencode --model` with a value violating the `<provider-id>/<model-id>` format | `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` (exit 2; fires before any agent registration or tmux side effect) |
+| `member create` with an unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {agent_id}, {director_agent_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` (exit 2; the just-registered agent is rolled back) |
+| `member create` with a malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` (exit 2; the just-registered agent is rolled back) |
+| `member create --role monitor` when the fleet already has an active monitoring member | `Error: fleet <id> already has an active monitoring member (agent <existing-id>); only one is allowed.` (exit 1; enforced in `register_agent`) |
+| `member create --role monitor` with `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the monitor's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
+| `member create --role monitor` with `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the monitor's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
 | `monitor start` for a fleet that already has a live monitor | `Error: monitor already running for fleet <id>` (exit 1) |
 | `monitor start` / `monitor status` against an unknown or soft-deleted fleet | `Error: fleet <id> not found` (exit 1) |
 | `monitor config` with both `--enable` and `--disable` | `Error: --enable and --disable are mutually exclusive.` (exit 2) |

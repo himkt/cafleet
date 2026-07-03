@@ -1,6 +1,6 @@
 # Design Doc Interview (CAFleet Edition)
 
-Validate an existing design document through structured, fine-grained Q&A across multiple sessions. The Director (main Claude) drives the conversation and writes annotations; an Analyzer member spawned via `cafleet agent spawn` reads the document and returns the question list, then is torn down before the interview rounds begin. Discrepancies surface as inline `COMMENT(claude)` annotations in the design document. Multi-session splitting via `question.md` prevents context compaction for large interviews.
+Validate an existing design document through structured, fine-grained Q&A across multiple sessions. The Director (main Claude) drives the conversation and writes annotations; an Analyzer member spawned via `cafleet member create` reads the document and returns the question list, then is torn down before the interview rounds begin. Discrepancies surface as inline `COMMENT(claude)` annotations in the design document. Multi-session splitting via `question.md` prevents context compaction for large interviews.
 
 ## Required reading
 
@@ -20,7 +20,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
 | **Director (Interviewer)** | Main Claude | Resolve doc path, parse `question.md` progress, spawn Analyzer, drive decision-surface Q&A rounds, write answers + COMMENT annotations + progress marker | Read the document for question generation (delegated to Analyzer); conduct the Q&A rounds off {decision_surface} | (inline in this workflow body) |
-| **Analyzer** | CAFleet member spawned via `cafleet agent spawn` | Read the design doc, return a flat numbered question list covering uncovered sections, then idle pending shutdown | Talk to the user; edit any file; persist state across spawns | [roles/analyzer.md](roles/analyzer.md) |
+| **Analyzer** | CAFleet member spawned via `cafleet member create` | Read the design doc, return a flat numbered question list covering uncovered sections, then idle pending shutdown | Talk to the user; edit any file; persist state across spawns | [roles/analyzer.md](roles/analyzer.md) |
 
 ## Additional resources
 
@@ -36,17 +36,17 @@ Interview-specific: place each `COMMENT(claude)` marker on its own line immediat
 
 ## Architecture
 
-The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` (no separate `cafleet agent register` call) — and spawns one short-lived Analyzer via `cafleet agent spawn`. The Analyzer is torn down BEFORE the interview rounds begin; the Director then runs the rounds (and writes annotations) on its own. All Analyzer coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
+The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` (no separate `cafleet agent register` call) — and spawns one short-lived Analyzer via `cafleet member create`. The Analyzer is torn down BEFORE the interview rounds begin; the Director then runs the rounds (and writes annotations) on its own. All Analyzer coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
 
 ```
 User
- +-- Director (main Claude -- cafleet fleet create, cafleet agent spawn, drives Q&A, writes annotations)
+ +-- Director (main Claude -- cafleet fleet create, cafleet member create, drives Q&A, writes annotations)
       +-- Analyzer (member agent -- spawned in tmux pane; returns question list; terminated)
 ```
 
 ## Prerequisites
 
-The Director MUST be running inside a tmux session (required by `cafleet agent spawn`). Verify by running `cafleet doctor` before spawning the Analyzer — it reports the tmux session/window/pane identifiers and exits non-zero with a clear message when the environment is not ready. If `cafleet doctor` reports a problem, abort and surface its message to the user. Do NOT invoke `tmux display-message`, `printenv TMUX`, or any other raw tmux/env probe — `cafleet doctor` is the only supported environment check (see `skills/cafleet/SKILL.md` § *use cafleet primitives only*).
+The Director MUST be running inside a tmux session (required by `cafleet member create`). Verify by running `cafleet doctor` before spawning the Analyzer — it reports the tmux session/window/pane identifiers and exits non-zero with a clear message when the environment is not ready. If `cafleet doctor` reports a problem, abort and surface its message to the user. Do NOT invoke `tmux display-message`, `printenv TMUX`, or any other raw tmux/env probe — `cafleet doctor` is the only supported environment check (see `skills/cafleet/SKILL.md` § *use cafleet primitives only*).
 
 ## Context Management Strategy
 
@@ -110,12 +110,12 @@ Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute th
 
 #### 2b. Spawn the monitoring member (first-in)
 
-BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Then spawn the dedicated monitoring member as the **first** `cafleet agent spawn` in the fleet, with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Then spawn the dedicated monitoring member as the **first** `cafleet member create` in the fleet, with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet pane wake --message` only when un-acked inbox items or stalled members can be named) to a `--text-file` per the audit-file pattern in 2c, then spawn:
+Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--text-file` per the audit-file pattern in 2c, then spawn:
 
 ```bash
-cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
+cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name "monitor" \
   --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
   --role monitor --model {monitor_model} \
@@ -126,15 +126,15 @@ See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and 
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
-Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it with `Read` on its first turn. Do NOT inline the role content — cafleet `agent spawn` fails with `tmux command failed: command too long` once the shell-quoted prompt grows past a few KB. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up.
+Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it with `Read` on its first turn. Do NOT inline the role content — `cafleet member create` fails with `tmux command failed: command too long` once the shell-quoted prompt grows past a few KB. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up.
 
-> **Spawn-prompt audit file**: the spawn below writes the rendered prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` BEFORE invoking `cafleet agent spawn --text-file <abs path>`. The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Agent Spawn — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
+> **Spawn-prompt audit file**: the spawn below writes the rendered prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` BEFORE invoking `cafleet member create --text-file <abs path>`. The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write; it carries the four `{...}` identity placeholders pre-substitution, which is expected. See the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 #### 2d. Spawn the Analyzer
 
 **Gate**: do not spawn the Analyzer until the monitoring member's `ready: monitor live` handshake (2b) has arrived.
 
-Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (the skeleton's `$CAFLEET_*` identity references resolve from the member's injected env vars at runtime; `[INSERT …]` markers rendered by the Director first; the prompt is delivered verbatim):
+Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (the skeleton's identity lines carry the CLI's four `{fleet_id}` / `{director_agent_id}` / `{agent_id}` / `{coding_agent}` placeholders, rendered to literals by `cafleet member create` at spawn; `[INSERT …]` markers rendered by the Director first, leaving no stray single braces other than the four identity placeholders):
 
 | Slot | Analyzer |
 |---|---|
@@ -142,13 +142,12 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | role-file | `roles/analyzer.md` |
 | EXTRA SKILL LOADS | none (the `cafleet` skill only) |
 | CONTEXT LINES | `DESIGN DOCUMENT: [INSERT doc_path]` + `ALREADY-REVIEWED SECTIONS: [INSERT JSON array from interview-progress, or "none" on fresh start]` |
-| report-hint | `your numbered question list` |
 | start cue (verbatim) | `Read the design document, generate a numbered question list per the role definition, send it to the Director via cafleet message send, then idle pending shutdown.` |
 
-Render the prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` per the 2c audit-file pattern (delivered verbatim; identity comes via the injected `CAFLEET_*` env vars), then spawn with `--text-file`:
+Render the prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` per the 2c audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
 
    ```bash
-   cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Analyzer" \
      --description "Reads the design doc and generates a numbered question list" \
      --text-file ${BASE}/prompts/analyzer-<UTC-compact>.md
@@ -164,7 +163,7 @@ The reply must be a flat numbered list following the format specified in [roles/
 
 #### 2f. Tear down the monitoring member and the Analyzer
 
-The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping either alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet agent deregister` the monitoring member first, then the Analyzer (on the 15 s timeout (exit 1) use `pane capture` + your overlay's decision-prompt recovery or `--force`); `cafleet agent list` to verify the roster is empty; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
+The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping either alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then the Analyzer (on the 15 s timeout (exit 2) use `member capture` + your overlay's decision-prompt recovery or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
 
 #### 2g. Persist the question list to `question.md`
 

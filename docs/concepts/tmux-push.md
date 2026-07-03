@@ -11,7 +11,7 @@ recipient's tmux pane immediately after persisting a message, so the
 recipient's coding-agent process consumes the preview as a fresh user-turn
 input without invoking `cafleet message poll`. The poll-trigger keystroke
 (which DOES inject a literal `cafleet message poll` command) is reserved for
-the Director-issued `cafleet pane wake --poll-only` manual nudge — not the
+the Director-issued `cafleet member ping` manual nudge — not the
 broker's auto-fire path.
 
 ## Send + push notification
@@ -58,14 +58,14 @@ The keystroke **leads with `Esc`** (`tmux.send_inline_preview` is called with
 the payload and `Enter`, so a recipient parked on a pending permission-approval
 prompt has that prompt dismissed before the trailing `Enter` lands. The same
 `Esc`-safeguarded path serves `message send`, `message broadcast`, and
-`pane wake --message`; the monitor loop's wake nudge is the lone exception — see
+`member nudge`; the monitor loop's wake nudge is the lone exception — see
 [Monitoring](monitoring.md).
 
 If the recipient's TUI is in a non-input state, the keystroked preview lands
 wherever the cursor is (the same failure mode any pane keystroke has). The
-fallback is `cafleet agent list --activity` (the Director sees the recipient's
-`last_recv` go stale), then `cafleet pane wake --agent-id <recipient-id>
---poll-only` — the manual poll-nudge path: via the `send_poll_trigger` helper
+fallback is `cafleet member list --activity` (the Director sees the recipient's
+`last_recv` go stale), then `cafleet member ping --member-id <recipient-id>`
+— the manual poll-nudge path: via the `send_poll_trigger` helper
 (also `esc_first=True`) it injects `Esc` → the `cafleet message poll` command →
 `Enter` into the pane and converts a failure to exit 1, so the recipient drains
 whatever accumulated after a missed inline preview.

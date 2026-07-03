@@ -19,7 +19,7 @@ cafleet --json message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
 
 ## Coding-agent backends
 
-Three backends — `claude` (default), `codex`, `opencode` — chosen per member at `agent spawn` time via `--coding-agent`. `--model <m>` pins the LLM and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; both flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md) (and [`roles/monitor.md`](../roles/monitor.md) plus [`reference/supervision.md`](supervision.md) for the monitor). All three honor the leading-`!` input shortcut, so `pane exec` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent/claude.md) / [`codex`](coding-agent/codex.md) / [`opencode`](coding-agent/opencode.md).
+Three backends — `claude` (default), `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent`. `--model <m>` pins the LLM and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; both flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md) (and [`roles/monitor.md`](../roles/monitor.md) plus [`reference/supervision.md`](supervision.md) for the monitor). All three honor the leading-`!` input shortcut, so `member exec` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent/claude.md) / [`codex`](coding-agent/codex.md) / [`opencode`](coding-agent/opencode.md).
 
 ## Self-registration recipe
 
@@ -90,11 +90,11 @@ cafleet fleet delete --fleet-id <fleet-id>
 # → Deleted fleet <fleet-id>. Deregistered N agents.
 ```
 
-Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters every active agent, deletes placement rows; tasks preserved; idempotent). It does **not** close member panes — run `cafleet agent deregister` per member first, in the [`reference/recovery.md`](recovery.md) Shutdown order. Full behavior: [`cli-options.md`](../../../docs/spec/cli-options.md#fleet-delete).
+Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters every active agent, deletes placement rows; tasks preserved; idempotent). It does **not** close member panes — run `cafleet member delete` per member first, in the [`reference/recovery.md`](recovery.md) Shutdown order. Full behavior: [`cli-options.md`](../../../docs/spec/cli-options.md#fleet-delete).
 
 ## Typical Workflow
 
-0. **Verify pane env** (Director): run `cafleet doctor` to confirm `TMUX` / `TMUX_PANE` are set — the canonical pane-identity probe, before `cafleet fleet create` and any `cafleet agent spawn`.
+0. **Verify pane env** (Director): run `cafleet doctor` to confirm `TMUX` / `TMUX_PANE` are set — the canonical pane-identity probe, before `cafleet fleet create` and any `cafleet member create`.
 
 1. **Create a fleet** (if none exists):
    ```bash
@@ -103,7 +103,7 @@ Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters ever
    ```
    Must run inside a tmux session (else exits 1 with `Error: cafleet fleet create must be run inside a tmux session`, writes nothing).
 
-2. **Register, discover, send, poll, ack** per the command sections above; use `cafleet --json …` when parsing output. Director-side spawn/capture/exec/wake: [`reference/director.md`](director.md); shutdown ordering: [`reference/recovery.md`](recovery.md).
+2. **Register, discover, send, poll, ack** per the command sections above; use `cafleet --json …` when parsing output. Director-side create/capture/exec/ping/nudge: [`reference/director.md`](director.md); shutdown ordering: [`reference/recovery.md`](recovery.md).
 
 ## Message Lifecycle
 
@@ -111,4 +111,4 @@ Messages are tasks with three states: **input_required** (delivered, awaiting AC
 
 ## Error Handling
 
-Errors print to stderr and exit non-zero; `cafleet --json <cmd>` emits them machine-parseably. The most common: missing `--fleet-id` (`Error: Missing option '--fleet-id'.`, exit 2), missing `--agent-id` (`Error: Missing option '--agent-id'.`, exit 2), and `pane` / `agent spawn` commands outside a tmux session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages).
+Errors print to stderr and exit non-zero; `cafleet --json <cmd>` emits them machine-parseably. The most common: missing `--fleet-id` (`Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`, exit 1), missing `--agent-id` (`Error: Missing option '--agent-id'.`, exit 2), and `member *` commands outside a tmux session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages).

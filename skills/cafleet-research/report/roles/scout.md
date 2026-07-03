@@ -86,4 +86,4 @@ Structure your findings as markdown with the following sections:
 
 ## Shutdown
 
-You are terminated by the Director via `cafleet agent deregister`, which sends the backend exit keystroke to your pane and waits up to 15 s. When the exit keystroke arrives your `claude` process exits — no message-level handshake is required.
+You are terminated by the Director via `cafleet member delete`, which sends the backend exit keystroke to your pane and waits up to 15 s. When the exit keystroke arrives your `claude` process exits — no message-level handshake is required.

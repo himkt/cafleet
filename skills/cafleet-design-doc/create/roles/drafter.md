@@ -30,7 +30,7 @@ Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are 
 
 ## Communication Protocol
 
-You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each task — command shapes in the `cafleet` skill core and your spawn prompt's COMMUNICATION PROTOCOL block.
+You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each task — command shapes in the `cafleet` skill core; your ids are the literal `FLEET ID:` / `YOUR AGENT ID:` / `DIRECTOR AGENT ID:` lines in your spawn prompt.
 
 **Coordination Protocol**: From Step 3 onward (once the draft exists) every cafleet message follows the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md) — single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(role)` markers. Your Step-2 clarifying-question messages are exempt (free-form multi-line, per coordination.md § Scope).
 
@@ -82,4 +82,4 @@ When spawned with a resume mode prompt (the document already exists and contains
 
 ## Shutdown
 
-The Director terminates you via `cafleet agent deregister --fleet-id <fleet-id> --agent-id <my-agent-id>` (sends the backend exit keystroke, waits up to 15 s). When the exit keystroke arrives your `claude` process exits immediately — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.
+The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-agent-id>` (sends the backend exit keystroke, waits up to 15 s). When the exit keystroke arrives your `claude` process exits immediately — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.

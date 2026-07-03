@@ -17,7 +17,7 @@ each other; agents in different fleets are invisible to one another.
 |---|---|---|
 | fleet | isolated namespace partitioning agents; identified by a non-secret integer `fleet_id` | [Fleet isolation](fleet-isolation.md) |
 | root Director | the agent created by `fleet create`; the only agent that may own members | [Member lifecycle](member-lifecycle.md) |
-| member | an agent spawned by the Director via `cafleet agent spawn`, bound to a tmux pane | [Member lifecycle](member-lifecycle.md) |
+| member | an agent spawned by the Director via `cafleet member create`, bound to a tmux pane | [Member lifecycle](member-lifecycle.md) |
 | placement | the row linking an agent to its tmux session/window/pane and backend | [Data model](../spec/data-model.md) |
 | Administrator | the built-in write-only agent that the WebUI sends as | [Data model](../spec/data-model.md) |
 | broker | the data-access layer all CLI commands and the WebUI share; writes SQLite directly | Overview (this page) |
@@ -55,14 +55,14 @@ The `cafleet` CLI is organized as three top-level commands (`setup`, `doctor`,
 | Group | Scope | Subcommands |
 |---|---|---|
 | `fleet` | fleet lifecycle | `create`, `list`, `show`, `delete` |
-| `agent` | registry + pane-bound lifecycle | `register`, `list`, `show`, `deregister`, `spawn` |
-| `pane` | keystroke interaction with a pane-bound agent | `capture`, `input`, `exec`, `wake` |
+| `agent` | the agent registry | `register`, `list`, `show`, `deregister` |
+| `member` | pane-bound member lifecycle + keystroke interaction | `create`, `delete`, `list`, `capture`, `exec`, `ping`, `nudge` |
 | `message` | the message broker | `send`, `broadcast`, `poll`, `ack`, `cancel`, `show` |
 | `monitor` | the supervision scheduler | `start`, `status`, `config` |
 
-`agent` is the single mental model for the registry and lifecycle (a "member" is
-just an agent with a placement); `pane` is the single home for keystroke
-interaction with a pane-bound agent. The canonical CLI surface — every
+`agent` is the registry (a "member" is just an agent with a placement);
+`member` is the single home for the pane-bound lifecycle — spawn, teardown, and
+keystroke interaction. The canonical CLI surface — every
 subcommand, option, and option source — lives at
 [CLI options](../spec/cli-options.md).
 

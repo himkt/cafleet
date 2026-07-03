@@ -26,4 +26,4 @@ Every note names the base token/instruction it qualifies.
 
 The canonical monitor-spawn command, fully resolved for this backend:
 
-`cafleet agent spawn --role monitor --model anthropic/claude-haiku-4-5 --text-file <rendered monitor prompt>` (members spawned `--agent cafleet`).
+`cafleet member create --role monitor --model anthropic/claude-haiku-4-5 --text-file <rendered monitor prompt>` (members spawned `--agent cafleet`).
