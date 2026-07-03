@@ -1,7 +1,7 @@
 # Absorb the `agent` CLI group into `member`
 
 **Status**: Approved
-**Progress**: 6/31 tasks complete
+**Progress**: 10/31 tasks complete
 **Last Updated**: 2026-07-03
 
 ## Overview
@@ -206,10 +206,10 @@ Documentation is edited **first**, per `.claude/rules/documentation-maintenance.
 
 ### Step 2: SPEC.md + README.md
 
-- [ ] `SPEC.md` §6.3: shared flags / polarity / `client_command` wrapper contract <!-- completed: -->
-- [ ] `SPEC.md`: delete the `agent` group section; specify `member show`, `member list --all`, `member delete` no-placement success in the `member` group section <!-- completed: -->
-- [ ] `SPEC.md`: error-model cross-references (~595, ~1086) + §10 checklist <!-- completed: -->
-- [ ] `README.md` CLI-surface update + sweep (via `/update-readme`) <!-- completed: -->
+- [x] `SPEC.md` §6.3: shared flags / polarity / `client_command` wrapper contract <!-- completed: 2026-07-03T17:33 -->
+- [x] `SPEC.md`: delete the `agent` group section; specify `member show`, `member list --all`, `member delete` no-placement success in the `member` group section <!-- completed: 2026-07-03T17:33 -->
+- [x] `SPEC.md`: error-model cross-references (~595, ~1086) + §10 checklist <!-- completed: 2026-07-03T17:33 -->
+- [x] `README.md` CLI-surface update + sweep (via `/update-readme`) <!-- completed: 2026-07-03T17:42 -->
 
 ### Step 3: skills/
 
