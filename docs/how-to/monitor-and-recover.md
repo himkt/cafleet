@@ -27,7 +27,7 @@ skill's `roles/monitor.md`):
 cafleet agent spawn --fleet-id 1 --agent-id 2 \
   --name monitor --description "Monitoring member: owns the heartbeat" \
   --role monitor --model sonnet \
-  --prompt-file /abs/path/to/monitor-prompt.md   # spawned first; runs monitor start in its own pane
+  --text-file /abs/path/to/monitor-prompt.md   # spawned first; runs monitor start in its own pane
 cafleet monitor status --fleet-id 1              # confirm it is running + see the schedule
 ```
 
@@ -59,7 +59,7 @@ Your agent loads the `cafleet` skill and reads its Director-only
 
 The agent lists the roster with per-agent idle times, captures the pane of
 any member that has gone quiet, and climbs the recovery ladder from mildest
-to harshest: re-poke the inbox, answer a pending prompt, dispatch a shell
+to harshest: re-poke the inbox, dispatch a shell
 command ([Bash routing](../concepts/bash-routing.md)), and only as a last
 resort deregister the member. You see each intervention land as keystrokes in
 the member's pane ([tmux push](../concepts/tmux-push.md)).
@@ -117,18 +117,7 @@ cafleet pane wake --fleet-id 1 --agent-id 4 --poll-only
 Woke agent alice (%7) — poll keystroke dispatched.
 ```
 
-Ladder rung 2, `pane input` — `--choice 1..3` answers an AskUserQuestion
-option; `--freetext "<text>"` fills the "Type something" field:
-
-```bash
-cafleet pane input --fleet-id 1 --agent-id 4 --choice 1
-```
-
-```
-Sent choice 1 to agent alice (%7).
-```
-
-Ladder rung 3, `pane exec` — keystrokes `! git status` into the pane so
+Ladder rung 2, `pane exec` — keystrokes `! git status` into the pane so
 the coding agent runs it natively, the dispatch half of the
 bash-via-Director protocol ([Bash routing](../concepts/bash-routing.md)):
 
@@ -140,7 +129,7 @@ cafleet pane exec --fleet-id 1 --agent-id 4 "git status"
 Sent bash command 'git status' to agent alice (%7).
 ```
 
-Ladder rung 4, `agent deregister` (last resort) — sends the backend exit
+Ladder rung 3, `agent deregister` (last resort) — sends the backend exit
 keystroke and waits up to 15 s for the pane to close:
 
 ```bash
@@ -163,7 +152,7 @@ Error: pane %7 did not close within 15.0s after the exit keystroke.
 --- pane %7 tail (last 80 lines) ---
 <captured terminal buffer>
 ---
-Recovery: inspect with `cafleet pane capture`, answer any prompt with `cafleet pane input`, then re-run `cafleet agent deregister`. Or re-run with `--force` to skip the wait and kill the pane.
+Recovery: inspect with `cafleet pane capture`, then re-run `cafleet agent deregister`. Or re-run with `--force` to skip the wait and kill the pane.
 ```
 
 Every flag, validation rule, and exit code for the `agent` and `pane`

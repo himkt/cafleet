@@ -886,20 +886,12 @@ def test_send_wake_trigger__singular_noun_and_director_named_when_not_due(monkey
             "send_bash_command",
             lambda t: t.send_bash_command(target_pane_id="%7", command="git status"),
         ),
-        (
-            "send_freetext_and_submit",
-            lambda t: t.send_freetext_and_submit(
-                target_pane_id="%7", text="free text answer"
-            ),
-        ),
     ],
 )
 def test_esc_first_false_helpers__never_send_escape(monkeypatch, helper_name, invoke):
-    """The three opt-out helpers — `send_exit`, `send_bash_command`, and
-    `send_freetext_and_submit` — must NOT send an `Esc` first. An `Escape`
-    before `/exit` or `! <cmd>` would strip a literal the agent must keep, and
-    the freetext helper deliberately ANSWERS a live AskUserQuestion prompt that
-    an `Esc` would dismiss (design 0000092 §1 keystroke-helper inventory).
+    """The two opt-out helpers — `send_exit` and `send_bash_command` — must NOT
+    send an `Esc` first. An `Escape` before `/exit` or `! <cmd>` would strip a
+    literal the agent must keep (design 0000092 §1 keystroke-helper inventory).
 
     `send_inline_preview` is deliberately ABSENT here — after 0000092 §1 it now
     leads with `Esc` (asserted in test_tmux_send_inline_preview.py)."""

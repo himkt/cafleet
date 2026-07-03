@@ -112,14 +112,14 @@ Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute th
 
 BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Then spawn the dedicated monitoring member as the **first** `cafleet agent spawn` in the fleet, with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet pane wake --message` only when un-acked inbox items or stalled members can be named) to a `--prompt-file` per the audit-file pattern in 2c, then spawn:
+Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet pane wake --message` only when un-acked inbox items or stalled members can be named) to a `--text-file` per the audit-file pattern in 2c, then spawn:
 
 ```bash
 cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name "monitor" \
   --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
   --role monitor --model {monitor_model} \
-  --prompt-file ${BASE}/prompts/monitor-<UTC-compact>.md
+  --text-file ${BASE}/prompts/monitor-<UTC-compact>.md
 ```
 
 See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle. The monitoring member is stopped and deleted first in the 2f teardown (first-out).
@@ -128,7 +128,7 @@ See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and 
 
 Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it with `Read` on its first turn. Do NOT inline the role content — cafleet `agent spawn` fails with `tmux command failed: command too long` once the shell-quoted prompt grows past a few KB. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up.
 
-> **Spawn-prompt audit file**: the spawn below writes the rendered prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` BEFORE invoking `cafleet agent spawn --prompt-file <abs path>`. The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Agent Spawn — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
+> **Spawn-prompt audit file**: the spawn below writes the rendered prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` BEFORE invoking `cafleet agent spawn --text-file <abs path>`. The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write. See the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Agent Spawn — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
 
 #### 2d. Spawn the Analyzer
 
@@ -145,13 +145,13 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | report-hint | `your numbered question list` |
 | start cue (verbatim) | `Read the design document, generate a numbered question list per the role definition, send it to the Director via cafleet message send, then idle pending shutdown.` |
 
-Render the prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` per the 2c audit-file pattern (delivered verbatim; identity comes via the injected `CAFLEET_*` env vars), then spawn with `--prompt-file`:
+Render the prompt to `${BASE}/prompts/analyzer-<UTC-compact>.md` per the 2c audit-file pattern (delivered verbatim; identity comes via the injected `CAFLEET_*` env vars), then spawn with `--text-file`:
 
    ```bash
    cafleet --json agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
      --name "Analyzer" \
      --description "Reads the design doc and generates a numbered question list" \
-     --prompt-file ${BASE}/prompts/analyzer-<UTC-compact>.md
+     --text-file ${BASE}/prompts/analyzer-<UTC-compact>.md
    ```
 
    Parse `agent_id` from the JSON response and substitute it for `<analyzer-agent-id>` in every subsequent command.

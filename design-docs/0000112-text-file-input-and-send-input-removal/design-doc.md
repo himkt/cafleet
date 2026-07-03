@@ -1,8 +1,8 @@
 # Unified `--text` / `--text-file` Input and `send-input` Removal
 
-**Status**: Approved
-**Progress**: 0/35 tasks complete
-**Last Updated**: 2026-07-02
+**Status**: Complete
+**Progress**: 35/35 tasks complete
+**Last Updated**: 2026-07-03
 
 ## Overview
 
@@ -10,12 +10,12 @@ Give every text-body CLI command (`message send`, `message broadcast`, `member n
 
 ## Success Criteria
 
-- [ ] All four text-body commands accept exactly `--text <str>` and `--text-file <path>`, mutually exclusive, exactly one required.
-- [ ] `--text-file` accepts an absolute or CWD-relative path, reads UTF-8, and treats `-` as "read the whole body from stdin".
-- [ ] A single shared helper is the sole source of truth for mutual-exclusivity, path resolution, UTF-8 decoding, stdin handling, empty-body rejection, and the associated error strings.
-- [ ] `member create` exposes the same pair as the other three: `--prompt-file` is hard-renamed to `--text-file` (no alias), `--text` is added, and the positional prompt argument is removed.
-- [ ] `member send-input` and the `send_choice_key` / `send_freetext_and_submit` tmux helpers no longer exist anywhere in source, tests, docs, SPEC, or skills.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
+- [x] All four text-body commands accept exactly `--text <str>` and `--text-file <path>`, mutually exclusive, exactly one required.
+- [x] `--text-file` accepts an absolute or CWD-relative path, reads UTF-8, and treats `-` as "read the whole body from stdin".
+- [x] A single shared helper is the sole source of truth for mutual-exclusivity, path resolution, UTF-8 decoding, stdin handling, empty-body rejection, and the associated error strings.
+- [x] `member create` exposes the same pair as the other three: `--prompt-file` is hard-renamed to `--text-file` (no alias), `--text` is added, and the positional prompt argument is removed.
+- [x] `member send-input` and the `send_choice_key` / `send_freetext_and_submit` tmux helpers no longer exist anywhere in source, tests, docs, SPEC, or skills.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
 
@@ -144,59 +144,59 @@ Delete every occurrence — no deprecation notice anywhere (per `.claude/rules/r
 
 ### Step 1: Concepts & user docs
 
-- [ ] `docs/concepts/member-lifecycle.md` — change the spawn-prompt line ("supplied inline (`-- "<prompt>"`) or via `--prompt-file`") to `--text` (inline) / `--text-file` (file or `-` stdin). <!-- completed: -->
-- [ ] `docs/spec/cli-options.md` — replace the `### agent spawn` `--prompt-file` + positional rows (~lines 493–571) with `--text` / `--text-file`; document xor + exactly-one-required, absolute/CWD-relative paths, `-` stdin, and the empty-body rejection. This also removes the "Neither `--prompt-file` nor positional prompt | The built-in default prompt template, verbatim." state row (~line 519) — the neither-flag case is now a usage error, so that phrase and its "default template" wording go. <!-- completed: -->
-- [ ] `docs/spec/cli-options.md` — add `--text-file` to `message send`, `message broadcast`, and `member nudge`; add the shared text-input error-message rows (mutual-exclusivity, empty, file-not-found/unreadable/non-UTF-8, empty-stdin). <!-- completed: -->
-- [ ] `docs/spec/cli-options.md` — remove the `### `pane input`` section (~666–733), its error rows (~926–929), and its subcommand-summary line. <!-- completed: -->
-- [ ] `docs/how-to/monitor-and-recover.md` — remove the `pane input --choice/--freetext` recovery-ladder rung and renumber the ladder; update the monitor-spawn example from `--prompt-file` to `--text-file`. <!-- completed: -->
-- [ ] `docs/concepts/token-reduction.md` — the "Slim member spawn prompt" row cites "The default spawn-prompt template is ~60 tokens"; reword to drop the removed default-template reference (spawn prompts are now always explicitly supplied via `--text` / `--text-file`; the slim-identity-via-env-vars point stays). <!-- completed: -->
-- [ ] `docs/concepts/bash-routing.md` — the "The default spawn-prompt template tells the member … Bash tool" sentence references the removed default template; reword so it does not name a `member create` default that no longer exists. <!-- completed: -->
+- [x] `docs/concepts/member-lifecycle.md` — change the spawn-prompt line ("supplied inline (`-- "<prompt>"`) or via `--prompt-file`") to `--text` (inline) / `--text-file` (file or `-` stdin). <!-- completed: 2026-07-02T14:11 -->
+- [x] `docs/spec/cli-options.md` — replace the `### agent spawn` `--prompt-file` + positional rows (~lines 493–571) with `--text` / `--text-file`; document xor + exactly-one-required, absolute/CWD-relative paths, `-` stdin, and the empty-body rejection. This also removes the "Neither `--prompt-file` nor positional prompt | The built-in default prompt template, verbatim." state row (~line 519) — the neither-flag case is now a usage error, so that phrase and its "default template" wording go. <!-- completed: 2026-07-02T14:11 -->
+- [x] `docs/spec/cli-options.md` — add `--text-file` to `message send`, `message broadcast`, and `member nudge`; add the shared text-input error-message rows (mutual-exclusivity, empty, file-not-found/unreadable/non-UTF-8, empty-stdin). <!-- completed: 2026-07-02T14:11 -->
+- [x] `docs/spec/cli-options.md` — remove the `### `pane input`` section (~666–733), its error rows (~926–929), and its subcommand-summary line. <!-- completed: 2026-07-02T14:11 -->
+- [x] `docs/how-to/monitor-and-recover.md` — remove the `pane input --choice/--freetext` recovery-ladder rung and renumber the ladder; update the monitor-spawn example from `--prompt-file` to `--text-file`. <!-- completed: 2026-07-02T14:11 -->
+- [x] `docs/concepts/token-reduction.md` — the "Slim member spawn prompt" row cites "The default spawn-prompt template is ~60 tokens"; reword to drop the removed default-template reference (spawn prompts are now always explicitly supplied via `--text` / `--text-file`; the slim-identity-via-env-vars point stays). <!-- completed: 2026-07-02T14:11 -->
+- [x] `docs/concepts/bash-routing.md` — the "The default spawn-prompt template tells the member … Bash tool" sentence references the removed default template; reword so it does not name a `member create` default that no longer exists. <!-- completed: 2026-07-02T14:11 -->
 
 ### Step 2: README.md & SPEC.md
 
-- [ ] `README.md` — reflect the unified `--text` / `--text-file` pair on the four commands, the removal of `send-input`, and the removal of `--prompt-file` / the positional prompt argument. <!-- completed: -->
-- [ ] `SPEC.md` — update the spawn-prompt-resolution and `member create` surfaces to `--text` / `--text-file` (xor, required; no default template), including the placeholder-substitution note. <!-- completed: -->
-- [ ] `SPEC.md` — add `--text-file` and the xor/empty semantics to `message send`, `message broadcast`, and `member nudge`. <!-- completed: -->
-- [ ] `SPEC.md` — remove the `member send-input` option spec, the `send_choice_key` / `send_freetext_and_submit` protocol specs + method-list entries + Esc-first note, and the `pane input` future-note. <!-- completed: -->
+- [x] `README.md` — reflect the unified `--text` / `--text-file` pair on the four commands, the removal of `send-input`, and the removal of `--prompt-file` / the positional prompt argument. <!-- completed: 2026-07-02T14:28 -->
+- [x] `SPEC.md` — update the spawn-prompt-resolution and `member create` surfaces to `--text` / `--text-file` (xor, required; no default template), including the placeholder-substitution note. <!-- completed: 2026-07-02T14:28 -->
+- [x] `SPEC.md` — add `--text-file` and the xor/empty semantics to `message send`, `message broadcast`, and `member nudge`. <!-- completed: 2026-07-02T14:28 -->
+- [x] `SPEC.md` — remove the `member send-input` option spec, the `send_choice_key` / `send_freetext_and_submit` protocol specs + method-list entries + Esc-first note, and the `pane input` future-note. <!-- completed: 2026-07-02T14:28 -->
 
 ### Step 3: Skills
 
-- [ ] Rename `--prompt-file` → `--text-file` in every spawn recipe: `skills/cafleet-design-doc/create/create.md`, `execute/execute.md`, `interview/interview.md`, `skills/cafleet-research/report/report.md`, `presentation/presentation.md`. <!-- completed: -->
-- [ ] `skills/cafleet/reference/director.md` — § Member Create table (`--prompt-file`/positional rows → `--text`/`--text-file`; drop the default-template clause), the spawn-size-limit guidance (line ~100), and the audit-file `--prompt-file` references → `--text-file`. <!-- completed: -->
-- [ ] `skills/cafleet/reference/director.md` — § *Answering a member's relayed question*: strip the pane-keystroke-relay clause; state the answer returns via `cafleet message send`. <!-- completed: -->
-- [ ] `skills/cafleet/reference/supervision.md` — `--prompt-file` → `--text-file` (lines ~88, 121, 190, 191); remove the member-pane decision-relay references (lines ~154, 168–172), keeping the Director→user `{decision_surface}` escalation. <!-- completed: -->
-- [ ] `skills/cafleet/reference/coding-agent/claude.md` — remove the two `{decision_surface}` relay Note rows (pane-capture-for-frame; `pane input --choice/--freetext` relay); keep the question-shape row. <!-- completed: -->
-- [ ] `skills/cafleet/SKILL.md` — remove any `send-input` / "Answering a member's AskUserQuestion prompt" references; keep § *Soliciting user reactions*. <!-- completed: -->
-- [ ] `.claude/skills/skill-author/SKILL.md` — `--prompt-file` → `--text-file` in §2.4 / §3.5; replace the positional `prompt_argv` fallback discussion with `--text` (inline) / `--text-file` (file). <!-- completed: -->
-- [ ] Add explicit guidance in `skills/cafleet/reference/director.md` and `skills/cafleet/reference/supervision.md` that long or multi-line **message bodies** (`message send` / `broadcast` / `nudge`) must be passed via `--text-file` (or `-` stdin), not `--text`, to avoid `ARG_MAX`. <!-- completed: -->
+- [x] Rename `--prompt-file` → `--text-file` in every spawn recipe: `skills/cafleet-design-doc/create/create.md`, `execute/execute.md`, `interview/interview.md`, `skills/cafleet-research/report/report.md`, `presentation/presentation.md`. <!-- completed: 2026-07-02T14:45 -->
+- [x] `skills/cafleet/reference/director.md` — § Member Create table (`--prompt-file`/positional rows → `--text`/`--text-file`; drop the default-template clause), the spawn-size-limit guidance (line ~100), and the audit-file `--prompt-file` references → `--text-file`. <!-- completed: 2026-07-02T14:45 -->
+- [x] `skills/cafleet/reference/director.md` — § *Answering a member's relayed question*: strip the pane-keystroke-relay clause; state the answer returns via `cafleet message send`. <!-- completed: 2026-07-02T14:45 -->
+- [x] `skills/cafleet/reference/supervision.md` — `--prompt-file` → `--text-file` (lines ~88, 121, 190, 191); remove the member-pane decision-relay references (lines ~154, 168–172), keeping the Director→user `{decision_surface}` escalation. <!-- completed: 2026-07-02T14:45 -->
+- [x] `skills/cafleet/reference/coding-agent/claude.md` — remove the two `{decision_surface}` relay Note rows (pane-capture-for-frame; `pane input --choice/--freetext` relay); keep the question-shape row. <!-- completed: 2026-07-02T14:45 -->
+- [x] `skills/cafleet/SKILL.md` — remove any `send-input` / "Answering a member's AskUserQuestion prompt" references; keep § *Soliciting user reactions*. <!-- completed: 2026-07-02T14:45 -->
+- [x] `.claude/skills/skill-author/SKILL.md` — `--prompt-file` → `--text-file` in §2.4 / §3.5; replace the positional `prompt_argv` fallback discussion with `--text` (inline) / `--text-file` (file). <!-- completed: 2026-07-02T14:48 (Director — .claude/ deny-list) -->
+- [x] Add explicit guidance in `skills/cafleet/reference/director.md` and `skills/cafleet/reference/supervision.md` that long or multi-line **message bodies** (`message send` / `broadcast` / `nudge`) must be passed via `--text-file` (or `-` stdin), not `--text`, to avoid `ARG_MAX`. <!-- completed: 2026-07-02T14:45 -->
 
 ### Step 4: Shared helper (code)
 
-- [ ] Rename `cafleet/src/cafleet/cli/_prompt.py` → `_text_input.py`; implement `read_text_input(text, text_file)` per §1 (xor+required, abs/CWD-relative path, `-` stdin, UTF-8, uniform empty-body rejection, generic `--text-file` error strings). <!-- completed: -->
-- [ ] Add `substitute_spawn_placeholders(body, *, fleet_id, agent_id, director_agent_id, coding_agent)` per §2; delete `resolve_prompt`, `read_prompt_file`, and `MEMBER_PROMPT_TEMPLATE`. <!-- completed: -->
+- [x] Rename `cafleet/src/cafleet/cli/_prompt.py` → `_text_input.py`; implement `read_text_input(text, text_file)` per §1 (xor+required, abs/CWD-relative path, `-` stdin, UTF-8, uniform empty-body rejection, generic `--text-file` error strings). <!-- completed: 2026-07-02T15:30 -->
+- [x] Add `substitute_spawn_placeholders(body, *, fleet_id, agent_id, director_agent_id, coding_agent)` per §2; delete `resolve_prompt`, `read_prompt_file`, and `MEMBER_PROMPT_TEMPLATE`. <!-- completed: 2026-07-02T15:30 -->
 
 ### Step 5: Wire the four commands (code)
 
-- [ ] `message.py` `message_send` — drop `required=True` on `--text`, add `--text-file`, resolve via `read_text_input`. <!-- completed: -->
-- [ ] `message.py` `message_broadcast` — drop `required=True` on `--text`, add `--text-file`, resolve via `read_text_input`. <!-- completed: -->
-- [ ] `member.py` `member_nudge` — add `--text-file`, resolve via `read_text_input`, drop the now-redundant `if not text.strip()` check. <!-- completed: -->
-- [ ] `member.py` `member_create` — rename `--prompt-file` → `--text-file`, add `--text`, remove `@click.argument("prompt_argv")` and the prompt mutual-exclusion guard, resolve via `read_text_input` then `substitute_spawn_placeholders`; update the import from `_prompt` → `_text_input`. <!-- completed: -->
+- [x] `message.py` `message_send` — drop `required=True` on `--text`, add `--text-file`, resolve via `read_text_input`. <!-- completed: 2026-07-02T15:30 -->
+- [x] `message.py` `message_broadcast` — drop `required=True` on `--text`, add `--text-file`, resolve via `read_text_input`. <!-- completed: 2026-07-02T15:30 -->
+- [x] `member.py` `member_nudge` — add `--text-file`, resolve via `read_text_input`, drop the now-redundant `if not text.strip()` check. <!-- completed: 2026-07-02T15:30 -->
+- [x] `member.py` `member_create` — rename `--prompt-file` → `--text-file`, add `--text`, remove `@click.argument("prompt_argv")` and the prompt mutual-exclusion guard, resolve via `read_text_input` then `substitute_spawn_placeholders`; update the import from `_prompt` → `_text_input`. <!-- completed: 2026-07-02T15:30 -->
 
 ### Step 6: Remove `send-input` (code)
 
-- [ ] `member.py` — delete the `member_send_input` command and its `--choice` / `--freetext` options. <!-- completed: -->
-- [ ] `member.py` — update the `member delete` timeout recovery hint (~line 412) to drop the `answer any prompt with \`cafleet member send-input\`` clause (leaving `inspect with \`cafleet member capture\`, then re-run … or \`--force\``). <!-- completed: -->
-- [ ] `multiplexer/tmux.py` — delete `send_choice_key` and `send_freetext_and_submit`. <!-- completed: -->
-- [ ] `multiplexer/base.py` — delete the `send_choice_key` / `send_freetext_and_submit` protocol entries. <!-- completed: -->
+- [x] `member.py` — delete the `member_send_input` command and its `--choice` / `--freetext` options. <!-- completed: 2026-07-02T15:39 -->
+- [x] `member.py` — update the `member delete` timeout recovery hint (~line 412) to drop the `answer any prompt with \`cafleet member send-input\`` clause (leaving `inspect with \`cafleet member capture\`, then re-run … or \`--force\``). <!-- completed: 2026-07-02T15:39 -->
+- [x] `multiplexer/tmux.py` — delete `send_choice_key` and `send_freetext_and_submit`. <!-- completed: 2026-07-02T15:39 -->
+- [x] `multiplexer/base.py` — delete the `send_choice_key` / `send_freetext_and_submit` protocol entries. <!-- completed: 2026-07-02T15:39 -->
 
 ### Step 7: Tests
 
-- [ ] Delete `cafleet/tests/cli/test_member_send_input.py`, `cafleet/tests/multiplexer/test_tmux_send_helpers.py`, and `cafleet/tests/cli/test_member_prompt_template.py` (the three `MEMBER_PROMPT_TEMPLATE` tests fail at import once the constant is gone). <!-- completed: -->
-- [ ] Remove the `send_choice_key` / `send_freetext_and_submit` slices from `test_tmux.py` (incl. the Esc-first-safeguard assertions) and `test_help_budget.py`; in `test_member_delete.py` (`:297`, `:357`) update the recovery-hint output assertions to the new hint text (no `send-input`). <!-- completed: -->
-- [ ] Update `cafleet/tests/cli/test_member.py`: `--prompt-file` → `--text-file`; add `--text`; remove positional-prompt and default-template cases; add a regression that bare `member create` (neither flag) now errors, and that the positional argument no longer parses. <!-- completed: -->
-- [ ] Add shared-helper tests (new `test_text_input.py`): xor + required, absolute path, CWD-relative path, `-` stdin, UTF-8 decode, CRLF preservation, empty inline/file/stdin rejection, and each file error surface. <!-- completed: -->
-- [ ] Add `--text-file` / stdin / empty-body coverage to `message send`, `message broadcast`, and `member nudge` tests. <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:lint-overlay`; fix any fallout. <!-- completed: -->
+- [x] Delete `cafleet/tests/cli/test_member_send_input.py`, `cafleet/tests/multiplexer/test_tmux_send_helpers.py`, and `cafleet/tests/cli/test_member_prompt_template.py` (the three `MEMBER_PROMPT_TEMPLATE` tests fail at import once the constant is gone). <!-- completed: 2026-07-02T15:45 -->
+- [x] Remove the `send_choice_key` / `send_freetext_and_submit` slices from `test_tmux.py` (incl. the Esc-first-safeguard assertions) and `test_help_budget.py`; in `test_member_delete.py` (`:297`, `:357`) update the recovery-hint output assertions to the new hint text (no `send-input`). <!-- completed: 2026-07-02T15:45 -->
+- [x] Update `cafleet/tests/cli/test_member.py`: `--prompt-file` → `--text-file`; add `--text`; remove positional-prompt and default-template cases; add a regression that bare `member create` (neither flag) now errors, and that the positional argument no longer parses. <!-- completed: 2026-07-02T15:45 -->
+- [x] Add shared-helper tests (new `test_text_input.py`): xor + required, absolute path, CWD-relative path, `-` stdin, UTF-8 decode, CRLF preservation, empty inline/file/stdin rejection, and each file error surface. <!-- completed: 2026-07-02T15:45 -->
+- [x] Add `--text-file` / stdin / empty-body coverage to `message send`, `message broadcast`, and `member nudge` tests. <!-- completed: 2026-07-02T15:45 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:lint-overlay`; fix any fallout. <!-- completed: 2026-07-02T15:45 -->
 
 ---
 
@@ -205,3 +205,4 @@ Delete every occurrence — no deprecation notice anywhere (per `.claude/rules/r
 | Date | Changes |
 |------|---------|
 | 2026-07-02 | Initial draft |
+| 2026-07-03 | Implemented all 35 tasks (documentation-first, then code + tests via a CAFleet TDD team). 922 tests + lint + typecheck + lint-overlay green. Independently audited by a Fable 5 reviewer; 6 doc-accuracy / removal-residue findings fixed. Status → Complete (local finalize; no push/PR per user). |

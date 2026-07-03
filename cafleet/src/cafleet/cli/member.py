@@ -15,7 +15,7 @@ from cafleet.cli._helpers import (
     full_flag,
     quiet_flag,
 )
-from cafleet.cli._prompt import resolve_prompt
+from cafleet.cli._text_input import read_text_input, substitute_spawn_placeholders
 from cafleet.coding_agent import CODING_AGENTS
 from cafleet.multiplexer import MULTIPLEXERS, TmuxError
 
@@ -168,15 +168,15 @@ def _resolve_coding_agent(
     show_default=True,
     help="Member role. 'monitor' spawns the dedicated monitoring member.",
 )
+@click.option("--text", "text", type=str, default=None, help="Inline spawn prompt.")
 @click.option(
-    "--prompt-file",
-    "prompt_file",
+    "--text-file",
+    "text_file",
     type=str,
     default=None,
-    help="Read spawn prompt from FILE (abs path, UTF-8).",
+    help="File (UTF-8) or '-' for stdin.",
 )
 @full_flag
-@click.argument("prompt_argv", nargs=-1)
 @click.pass_context
 def member_create(
     ctx,
@@ -186,15 +186,11 @@ def member_create(
     coding_agent,
     model,
     role,
-    prompt_file,
+    text,
+    text_file,
     full,
-    prompt_argv,
 ):
     """Register a new member and spawn its pane."""
-    if prompt_file is not None and prompt_argv:
-        raise click.UsageError(
-            "--prompt-file and the positional prompt argument are mutually exclusive."
-        )
     fleet_id = ctx.obj["fleet_id"]
 
     coding_agent = _resolve_coding_agent(coding_agent, role, agent_id, fleet_id)
@@ -205,6 +201,11 @@ def member_create(
         agent.validate_model(model)
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
+
+    # Resolve the body up front (xor / required / empty / file surfaces raise
+    # before any registration or tmux side effect). Placeholder substitution is
+    # deferred until after register_agent, since {agent_id} needs the new id.
+    body = read_text_input(text, text_file)
 
     try:
         MULTIPLEXERS["tmux"].ensure_available()
@@ -236,21 +237,18 @@ def member_create(
     new_agent_id = result["agent_id"]
 
     try:
-        prompt = resolve_prompt(
-            ctx,
-            agent_id,
-            new_agent_id,
-            prompt_argv,
-            prompt_file,
+        prompt = substitute_spawn_placeholders(
+            body,
+            fleet_id=fleet_id,
+            agent_id=new_agent_id,
+            director_agent_id=agent_id,
             coding_agent=coding_agent,
         )
     except (click.UsageError, click.ClickException):
-        # Re-raise unwrapped so the exact message from docs/spec/cli-options.md
-        # § Error Messages reaches the operator. Wrapping via _rollback_register
-        # would prepend "prompt resolution failed:" and append "Rolled back
-        # registration of <id>." (with a stray ".." when the inner message
-        # already ends in a period), and would also downgrade UsageError exit
-        # code 2 → ClickException exit 1.
+        # Re-raise unwrapped so the exact substitution error (e.g. the
+        # unknown-placeholder UsageError) reaches the operator. Wrapping via
+        # _rollback_register would prepend "prompt resolution failed:" and
+        # downgrade UsageError exit 2 → ClickException exit 1.
         _deregister_with_warning(new_agent_id, fleet_id=fleet_id)
         raise
 
@@ -410,8 +408,8 @@ def member_delete(ctx, member_id, force):
     click.echo(tail, err=True)
     click.echo("---", err=True)
     click.echo(
-        "Recovery: inspect with `cafleet member capture`, answer any prompt with "
-        "`cafleet member send-input`, then re-run `cafleet member delete`. "
+        "Recovery: inspect with `cafleet member capture`, then re-run "
+        "`cafleet member delete`. "
         "Or re-run with `--force` to skip the wait and kill the pane.",
         err=True,
     )
@@ -532,78 +530,6 @@ def member_capture(ctx, member_id, lines, ansi):
         click.echo(content, nl=False, color=True if ansi else None)
 
 
-@member.command("send-input")
-@fleet_id_option
-@director_member_options
-@click.option(
-    "--choice",
-    type=click.IntRange(1, 3),
-    default=None,
-    help="Choice 1/2/3 (xor --freetext).",
-)
-@click.option(
-    "--freetext",
-    type=str,
-    default=None,
-    hidden=True,
-)
-@click.pass_context
-def member_send_input(ctx, member_id, choice, freetext):
-    """Safely forward a restricted keystroke to a member pane."""
-    fleet_id = ctx.obj["fleet_id"]
-
-    if freetext is not None and freetext.lstrip().startswith("!"):
-        raise click.UsageError(
-            "--freetext may not start with '!' — that triggers the coding agent's "
-            "shell-execution shortcut. Use 'cafleet member exec' for shell dispatch instead."
-        )
-
-    supplied = sum(1 for v in (choice, freetext) if v is not None)
-    if supplied != 1:
-        raise click.UsageError(
-            "--choice and --freetext are mutually exclusive; supply exactly one."
-        )
-
-    if freetext is not None and ("\n" in freetext or "\r" in freetext):
-        raise click.UsageError("free text may not contain newlines.")
-
-    ensure_tmux_or_die()
-
-    target, placement = _load_authorized_member(
-        fleet_id,
-        member_id,
-    )
-    member_id = target["agent_id"]
-    pane_id = _require_member_pane(placement, member_id, "send")
-
-    try:
-        if choice is not None:
-            MULTIPLEXERS["tmux"].send_choice_key(target_pane_id=pane_id, digit=choice)
-            action, value = "choice", str(choice)
-        else:
-            MULTIPLEXERS["tmux"].send_freetext_and_submit(
-                target_pane_id=pane_id, text=freetext
-            )
-            action, value = "freetext", freetext
-    except TmuxError as exc:
-        raise click.ClickException(f"send failed: {exc}") from exc
-
-    if ctx.obj["json_output"]:
-        click.echo(
-            output.format_json(
-                {
-                    "member_agent_id": member_id,
-                    "pane_id": pane_id,
-                    "action": action,
-                    "value": value,
-                },
-            )
-        )
-    else:
-        label = f"choice {value}" if action == "choice" else "free text"
-        click.echo(f"Sent {label} to member {target['name']} ({pane_id}).")
-
-
 @member.command("exec")
 @fleet_id_option
 @director_member_options
@@ -707,16 +633,23 @@ def member_ping(ctx, member_id, quiet):
     help="Sender's agent ID (the acting member, typically the monitoring member).",
 )
 @director_member_options
-@click.option("--text", required=True, help="Re-engage summary")
+@click.option("--text", "text", default=None, help="Re-engage summary (inline).")
+@click.option(
+    "--text-file",
+    "text_file",
+    default=None,
+    help="File (UTF-8) or '-' for stdin.",
+)
 @click.pass_context
-def member_nudge(ctx, agent_id, member_id, text):
+def member_nudge(ctx, agent_id, member_id, text, text_file):
     """Re-engage a member (typically the Director) with an ACKable task + preview."""
     fleet_id = ctx.obj["fleet_id"]
 
     ensure_tmux_or_die()
 
-    if not text.strip():
-        raise click.UsageError("text may not be empty.")
+    # The shared helper enforces xor + required + empty-body rejection (the old
+    # ``if not text.strip()`` check is subsumed) and reads --text-file / stdin.
+    body = read_text_input(text, text_file)
 
     # Resolve the target FIRST (fleet-isolation only): a cross-fleet / unknown /
     # inactive --member-id raises "Agent <id> not found" here, before the send
@@ -726,7 +659,7 @@ def member_nudge(ctx, agent_id, member_id, text):
     member_id = target["agent_id"]
 
     try:
-        result = broker.send_message(fleet_id, agent_id, to=member_id, text=text)
+        result = broker.send_message(fleet_id, agent_id, to=member_id, text=body)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 

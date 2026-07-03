@@ -294,7 +294,7 @@ def test_timeout__timeout_exits_two_with_tail_and_recovery_hint(
     assert f"pane {PANE_ID} did not close within 15.0s" in combined
     assert "STUCK_BUFFER_TAIL" in combined
     assert "cafleet member capture" in combined
-    assert "cafleet member send-input" in combined
+    assert "cafleet member delete" in combined
     assert "--force" in combined
 
     assert deregister_recorder == []
@@ -354,7 +354,7 @@ def test_timeout__capture_failure_still_exits_two(
     assert "timeout error and recovery hint still print" in combined
     assert f"pane {PANE_ID} did not close within 15.0s" in combined
     assert "cafleet member capture" in combined
-    assert "cafleet member send-input" in combined
+    assert "cafleet member delete" in combined
     assert "--force" in combined
 
     assert deregister_recorder == []

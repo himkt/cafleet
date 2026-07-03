@@ -211,9 +211,11 @@ Edges (who depends on whom):
    rolls back the persisted task on a failed keystroke. Truncation happens
    broker-side; the keystroke mechanics are multiplexer-side.
 2. **CLI ↔ multiplexer ↔ coding-agent agent-spawn.** `cafleet agent spawn`
-   (§6.3) sequences: resolve backend → `validate_model` → `ensure_available`
-   → broker `register_agent` (placement with `tmux_pane_id` unset) → take the
-   prompt **verbatim** (no brace substitution) → `build_spawn_argv` (§6.7) →
+   (§6.3) sequences: resolve backend → `validate_model` → resolve the prompt
+   body via the shared `--text` / `--text-file` reader → `ensure_available`
+   → broker `register_agent` (placement with `tmux_pane_id` unset) → substitute
+   `{fleet_id}` / `{agent_id}` / `{director_agent_id}` / `{coding_agent}`
+   placeholders (§6.3) → `build_spawn_argv` (§6.7) →
    multiplexer `split_window` (§6.5), injecting `CAFLEET_DATABASE_URL`,
    `CAFLEET_FLEET_ID`, `CAFLEET_AGENT_ID`, and `CAFLEET_DIRECTOR_AGENT_ID` into
    the new pane's environment (§7.1) → broker `update_placement_pane_id`. A
@@ -803,7 +805,7 @@ HTTP status); permission errors gate authorization. The exit-code policy is
 
 ### 6.3 CLI
 
-**Scope:** the entire `cafleet` command tree (25 commands across 5 groups + 3
+**Scope:** the entire `cafleet` command tree (24 commands across 5 groups + 3
 top-level commands — §1, §10), the shared option guards, and the `agent spawn`
 spawn orchestration + rollback ladder. Orchestration glue only — it wires
 broker/multiplexer/output/coding-agent. The command/option checklist is §10; this
@@ -853,6 +855,39 @@ unknown-option error (exit 2).
   subcommand; the **target agent** on `agent deregister` and every `pane *`
   subcommand. There is no `--member-id`; every pane-interaction subcommand
   targets its pane-bound agent via `--agent-id`.
+
+#### Shared `--text` / `--text-file` body input {#text-body-input}
+
+`message send`, `message broadcast`, `pane wake --message`, and `agent spawn`
+resolve their text body through **one shared reader** taking the `--text`
+(string) and `--text-file` (string path) pair. Both options are declared with
+**no** parser-level `required`; the reader enforces exactly-one-of. Resolution,
+in order:
+
+- Neither given → usage error (exit 2) `Provide exactly one of --text or
+  --text-file.`.
+- Both given → usage error (exit 2) `--text and --text-file are mutually
+  exclusive.`.
+- `--text <s>` → the body is `s` verbatim; empty or whitespace-only → usage
+  error (exit 2) `text may not be empty.`.
+- `--text-file -` → the whole body is read from stdin (read to EOF, decoded
+  UTF-8); empty or whitespace-only stdin → application error (exit 1)
+  `--text-file -: stdin is empty.`.
+- `--text-file <path>` → the file is read as **raw bytes and decoded UTF-8 with
+  no universal-newline translation** (CRLF/CR survive byte-for-byte); an
+  absolute path is used as-is, a relative path resolves against CWD. Error
+  surfaces (all application errors, exit 1, keyed on `--text-file`, riding the
+  read-bytes exception surface with **no** `is_file()` pre-check so a permission
+  failure lands correctly): missing / non-regular file → `--text-file <path>:
+  file does not exist or is not a regular file.`; unreadable → `--text-file
+  <path>: file is not readable.`; invalid UTF-8 → `--text-file <path>: file is
+  not valid UTF-8.`; empty or whitespace-only file → `--text-file <path>: file
+  is empty.`.
+
+The body is returned **verbatim** (no stripping). Empty-body rejection is
+**uniform** across all four commands and across inline / file / stdin. Long or
+multi-line bodies use `--text-file` (or `-` stdin) to bypass the shell's
+`ARG_MAX` limit.
 
 #### The `client_command` wrapper (agent + message groups)
 
@@ -944,10 +979,12 @@ All six route through `client_command`. Common: `--agent-id` (integer, required
 — the calling agent/requester) on all; `--task-id` (integer, required) on
 `ack`/`cancel`/`show`; `--full` (documented) on all. No `--quiet` flag.
 
-- **send** — also `--to` (integer, required), `--text` (string, required).
-  Fleet-gated; truncates task text. Prints `Message sent.\n` + the formatted
-  task.
-- **broadcast** — also `--text` (string, required). **Not** fleet-gated; the
+- **send** — also `--to` (integer, required) and the shared `--text` /
+  `--text-file` body pair (exactly one required; §6.3 [text-body
+  input](#text-body-input)). Fleet-gated; truncates task text. Prints `Message
+  sent.\n` + the formatted task.
+- **broadcast** — also the shared `--text` / `--text-file` body pair (exactly
+  one required; §6.3 [text-body input](#text-body-input)). **Not** fleet-gated; the
   result is a list; `--full` → the formatted first task envelope; else `broadcast
   id=<task_id> recipients=<N> delivered=<k>`, where `<N>` is the result's
   `recipients` (the real recipient count, matching `Broadcast sent to {N}
@@ -967,7 +1004,7 @@ These helpers back both `agent spawn`/`agent deregister` and every `pane`
 subcommand. The polarity of `--agent-id` here is the **target** agent (§1).
 
 - **Require-pane** — given a placement and an action label
-  (`capture`/`input`/`exec`/`wake`), no pane id → application error `agent
+  (`capture`/`exec`/`wake`), no pane id → application error `agent
   <agent_id> has no pane yet (pending placement) — nothing to <action>.`.
 - **Load-authorized-agent** — fetch the agent within the fleet: not found →
   `Agent <agent_id> not found`; other fetch failure → `failed to fetch agent:
@@ -991,16 +1028,19 @@ The one genuinely distinct lifecycle op: register **and** spawn a pane.
 Options: `--agent-id` (integer, required — the Director),
 `--name` (string, required), `--description` (string, required), `--coding-agent`
 (choice, optional — resolved when absent), `--model` (string, optional), `--role`
-(choice over `member`/`monitor`, default `member`, shown in help),
-`--prompt-file` (string, optional), `--full` (documented), and a **positional
-variadic** `prompt_argv` (zero-or-more strings). Sequence:
+(choice over `member`/`monitor`, default `member`, shown in help), the shared
+`--text` / `--text-file` body pair (exactly one required; §6.3 [text-body
+input](#text-body-input)), and `--full` (documented). Sequence:
 
-1. **Mutual-exclusion guard** — `--prompt-file` together with positional prompt
-   text → usage error (exit 2) `--prompt-file and the positional prompt argument
-   are mutually exclusive.`.
-2. Read `fleet_id`; resolve the coding agent; look up the backend.
-3. **Model validation** — validate `--model`; a failure → usage error (exit 2)
+1. Read `fleet_id`; resolve the coding agent; look up the backend.
+2. **Model validation** — validate `--model`; a failure → usage error (exit 2)
    with the backend's message, **before any registration or tmux side effect**.
+3. **Resolve the body** — via the shared `--text` / `--text-file` reader (§6.3
+   [text-body input](#text-body-input)): exactly-one-required, `-` stdin, abs /
+   CWD-relative path, UTF-8, uniform empty-body rejection. A mutual-exclusivity
+   or empty-inline error is a usage error (exit 2); a file / stdin surface is an
+   application error (exit 1). Resolved **before any registration or tmux side
+   effect**; substitution (step 6) is deferred until the new agent id exists.
 4. **Preconditions** — ensure tmux available, the backend binary on PATH, and
    discover the tmux context; any tmux/runtime error → application error (exit
    1).
@@ -1009,10 +1049,12 @@ variadic** `prompt_argv` (zero-or-more strings). Sequence:
    monitoring-member kind when role is `monitor`, else unset. Re-raise an
    application error verbatim (preserves the one-monitoring-member message); wrap
    any other exception as `register failed: <error>`. Capture the new agent id.
-6. **Take the prompt verbatim** (below) — file > positional > default, with **no
-   brace substitution**. A `--prompt-file` read error is a usage/application
-   error; on it, **deregister-with-warning, then re-raise the original error
-   unwrapped** — preserving both the exact message and its exit code.
+6. **Substitute placeholders** (below) — run `str.format` over the resolved body
+   (step 3), substituting `{fleet_id}` / `{agent_id}` (the new agent id from step
+   5) / `{director_agent_id}` / `{coding_agent}`. An unknown-placeholder or
+   malformed-brace error is a usage error (exit 2); on it,
+   **deregister-with-warning, then re-raise the original error unwrapped** —
+   preserving both the exact message and its exit code.
 7. **Build the spawn argv** from the backend (verbatim prompt, display name,
    model).
 8. **Split the pane** — forward identity into the new pane's environment, then
@@ -1084,7 +1126,7 @@ rows add the per-agent send/recv/ack/idle aggregates. JSON emits the raw rows.
 #### `pane` group
 
 The single home for keystroke interaction with a pane-bound agent: `capture |
-input | exec | wake`. Every subcommand targets its agent via **`--agent-id`**
+exec | wake`. Every subcommand targets its agent via **`--agent-id`**
 (the **target**, §1), uses the shared resolution helpers above, and is documented
 (no hidden interaction flags remain).
 
@@ -1098,27 +1140,6 @@ Ensure tmux, load the agent, require a pane (`capture`). Capture the last N line
 not set, strip ANSI. JSON: `{agent_id, pane_id, lines, content}`; text emits the
 content with no trailing newline, **preserving ANSI even on a non-TTY sink** when
 `--ansi` is set.
-
-#### `pane input`
-
-Options: `--agent-id` (integer, required), `--choice` (integer 1–3 inclusive,
-documented; out-of-range → usage error, exit 2), `--freetext` (string,
-documented). Exactly one of `--choice`/`--freetext`. Validation order:
-
-1. A `--freetext` whose leading non-whitespace char is `!` → usage error
-   `--freetext may not start with '!' — that triggers the coding agent's
-   shell-execution shortcut. Use 'cafleet pane exec' for shell dispatch
-   instead.` (runs **before** the exactly-one check).
-2. Exactly one of choice/freetext, else usage error `--choice and --freetext are
-   mutually exclusive; supply exactly one.`.
-3. A `--freetext` with a newline/carriage-return → usage error `free text may not
-   contain newlines.`.
-4. Ensure tmux, load the agent, require a pane (`input`).
-5. `--choice` forwards the digit (action `choice`, value = digit); else forward
-   the free text and submit (action `freetext`, value = text). A tmux error →
-   application error `send failed: <error>`.
-6. JSON: `{agent_id, pane_id, action, value}`; text: `Sent <label> to agent
-   <name> (<pane_id>).` where `<label>` is `choice <value>` or `free text`.
 
 #### `pane exec`
 
@@ -1136,9 +1157,11 @@ quoting/escaping — reproducing the quoted intent is sufficient).
 One command, two mutually-exclusive modes for waking a pane-bound agent.
 Options: `--agent-id` (integer, required — the **target**), `--poll-only`
 (boolean) and `--message` (boolean) selecting the mode, plus `--from` (integer)
-and `--text` (string) for `--message`. Exactly one of `--poll-only` / `--message`
-is required; supplying both, or `--message` without `--from` and `--text`, is a
-usage error (exit 2). There is no `--quiet`.
+and the shared `--text` / `--text-file` body pair (§6.3 [text-body
+input](#text-body-input)) for `--message`. Exactly one of `--poll-only` /
+`--message` is required; supplying both, or `--message` without `--from` or
+without a body (`--text` / `--text-file`), is a usage error (exit 2). There is no
+`--quiet`.
 
 - **`--poll-only`** — Ensure tmux, load the target, require a pane (`wake`).
   Inject the inbox-poll keystroke via the multiplexer's
@@ -1150,9 +1173,11 @@ usage error (exit 2). There is no `--quiet`.
   above. JSON: `{agent_id, pane_id}`; text: `Woke agent <name> (<pane_id>) — poll
   keystroke dispatched.`.
 - **`--message`** — requires `--from <sender-agent-id>` (the dispatching
-  Director) and `--text <text>`; the **target** is `--agent-id` and the
+  Director) and a body via the shared `--text` / `--text-file` pair (§6.3
+  [text-body input](#text-body-input)); the **target** is `--agent-id` and the
   **sender** is `--from` (the `--agent-id` target polarity of §1). Ensure tmux.
-  Empty/whitespace `--text` → usage error `text may not be empty.`. Resolve the
+  The body is resolved by the shared reader (empty/whitespace inline `--text` →
+  usage error `text may not be empty.`; file/stdin surfaces per §6.3). Resolve the
   target (fleet-isolation only; re-fetch the canonical id). Send the message from
   `--from` to the target; a sender-not-active value error → application error
   carrying that message. JSON: `{agent_id, pane_id, task_id, notification_sent}`
@@ -1235,36 +1260,32 @@ joined by ', '> (v<version>) -> <skills dir>`). Known skills dirs: `claude` →
 
 #### Spawn-prompt resolution (used by `agent spawn`)
 
-The prompt is delivered **verbatim** — there is no brace mini-language and no
-`{placeholder}` substitution. Identity reaches the spawned agent as the
-environment variables injected at `split_window` (§7.1): `CAFLEET_FLEET_ID`,
-`CAFLEET_AGENT_ID` (the spawned agent's own id), and `CAFLEET_DIRECTOR_AGENT_ID`
-(its Director). Only `CAFLEET_FLEET_ID` auto-defaults `--fleet-id` (§6.3); the
-agent reads `$CAFLEET_AGENT_ID` / `$CAFLEET_DIRECTOR_AGENT_ID` and passes them
-explicitly on its calls.
+The spawn prompt is supplied through the shared `--text` / `--text-file` body
+input (§6.3 [text-body input](#text-body-input)): exactly one is required, `-`
+reads stdin, a relative `--text-file` path resolves against CWD, decoded UTF-8
+with no newline translation. There is **no** built-in default template and **no**
+positional prompt argument — a bare `agent spawn` with neither flag is the shared
+usage error `Provide exactly one of --text or --text-file.` (exit 2).
 
-Default agent-prompt template (delivered verbatim; the pane's environment carries
-the values):
+**Placeholder substitution.** After the body is resolved, `agent spawn` runs
+`str.format` over it, substituting `{fleet_id}`, `{agent_id}` (the spawned
+agent's own id), `{director_agent_id}`, and `{coding_agent}` (the resolved
+backend). A custom prompt keeps a literal brace by doubling it (`{{` / `}}`).
+Error surfaces (both usage errors, exit 2): an unknown placeholder → `Unknown
+placeholder '<key>' in custom prompt. Supported placeholders: {fleet_id},
+{agent_id}, {director_agent_id}, {coding_agent}. Double literal braces ({{, }})
+to keep them as text.`; a malformed brace expression → `Malformed custom prompt:
+<detail>. Double literal braces ({{, }}) to keep them as text.`. Substitution is
+applied **only** by `agent spawn`; the three message-body commands
+(`message send`, `message broadcast`, `pane wake --message`) call the shared
+reader alone and never run `.format`.
 
-```
-Member of cafleet fleet $CAFLEET_FLEET_ID (agent=$CAFLEET_AGENT_ID, director=$CAFLEET_DIRECTOR_AGENT_ID).
-Load skill 'cafleet'. Bash auto-approves. Poll: cafleet message poll --agent-id $CAFLEET_AGENT_ID
-```
-
-**Selection precedence** is file > positional > default: a `--prompt-file` body
-wins, else the joined positional prompt text, else the built-in default. Whichever
-is selected is passed through unchanged — the unknown-placeholder and
-malformed-brace error surfaces no longer exist.
-
-**Reading a `--prompt-file`** enforces five conditions: a relative path → usage
-error (exit 2) ``--prompt-file requires an absolute path (got '<path>'). Resolve
-relative paths against your BASE first — see the `cafleet-base-dir` skill.``; the
-body is read as raw bytes and decoded as UTF-8 with **no universal-newline
-translation** (CRLF/CR survive); a missing path or directory → application error
-(exit 1) `--prompt-file <path>: file does not exist or is not a regular file.`;
-unreadable → `--prompt-file <path>: file is not readable.`; non-UTF-8 →
-`--prompt-file <path>: file is not valid UTF-8.`; empty or all-whitespace →
-`--prompt-file <path>: file is empty.`. The body is otherwise returned verbatim.
+Identity **also** reaches the spawned agent as the environment variables injected
+at `split_window` (§7.1): `CAFLEET_FLEET_ID`, `CAFLEET_AGENT_ID` (the spawned
+agent's own id), and `CAFLEET_DIRECTOR_AGENT_ID` (its Director). Only
+`CAFLEET_FLEET_ID` auto-defaults `--fleet-id` (§6.3); the agent reads
+`$CAFLEET_AGENT_ID` / `$CAFLEET_DIRECTOR_AGENT_ID` and passes them explicitly on
+its calls.
 
 ### 6.4 Output & Formatting
 
@@ -1561,15 +1582,6 @@ method builds is given verbatim; preserve subcommand, flags, and ordering.
   literal-then-Enter, `timeout=5`s, **Esc-first=YES**, any error → `false`. Under
   `send-keys -l` the `\n` is a soft line break inside one keystroke; the single
   trailing Enter submits the whole 2-line payload as one recipient turn.
-- **`send_choice_key(*, target_pane_id, digit)`** — fail-fast. `digit` not in
-  `{1,2,3}` → `send_choice_key: digit must be 1, 2, or 3 (got <digit>)`. Run
-  `tmux send-keys -t <target_pane_id> <digit>` — a single digit key, **no `-l`,
-  no submit delay, no Enter**, **no Esc-first** (the AskUserQuestion frame
-  commits on digit press; an Esc would dismiss the very prompt).
-- **`send_freetext_and_submit(*, target_pane_id, text)`** — fail-fast. `text`
-  with a newline → `send_freetext_and_submit: text may not contain newlines`. Run
-  `tmux send-keys -t <target_pane_id> 4` (the `4` selects "Type something"), then
-  literal-then-Enter with `payload=text`, **no Esc-first**.
 - **`send_bash_command(*, target_pane_id, command)`** — fail-fast. Strip
   surrounding whitespace; empty after strip → `send_bash_command: command may not
   be empty`; the **original** command with a newline → `send_bash_command:
@@ -1595,10 +1607,10 @@ method builds is given verbatim; preserve subcommand, flags, and ordering.
 #### Fail-fast vs. best-effort split
 
 - **Fail-fast** (surface failures): `ensure_available`, `context_discovery`,
-  `split_window`, `select_layout`, `send_exit`, `send_choice_key`,
-  `send_freetext_and_submit`, `send_bash_command`, `capture_pane`, `pane_exists`,
-  `list_pane_ids`, `kill_pane`, `wait_for_pane_gone` (modulo `ignore_missing`
-  pane-gone tolerance on `kill_pane` / `send_exit`).
+  `split_window`, `select_layout`, `send_exit`, `send_bash_command`,
+  `capture_pane`, `pane_exists`, `list_pane_ids`, `kill_pane`,
+  `wait_for_pane_gone` (modulo `ignore_missing` pane-gone tolerance on
+  `kill_pane` / `send_exit`).
 - **Best-effort boolean** (NEVER raise; `false` on any failure):
   `send_poll_trigger`, `send_wake_trigger`, `send_inline_preview`. Each guards
   "tmux missing → `false`" then wraps the keystroke so any error → `false`. The
@@ -1623,8 +1635,8 @@ pane returns `true`), then the deadline, then sleeps.
 #### Keystroke core, delays, and the Esc-first matrix
 
 The shared literal-then-Enter primitive (used by `send_exit`,
-`send_poll_trigger`, `send_wake_trigger`, `send_inline_preview`, and the text
-phase of `send_freetext_and_submit`) takes `target_pane_id`, `payload`, optional
+`send_poll_trigger`, `send_wake_trigger`, `send_inline_preview`, and
+`send_bash_command`) takes `target_pane_id`, `payload`, optional
 `timeout`, `ignore_missing` (default false), `esc_first` (default false):
 
 1. **If `esc_first`:** run `tmux send-keys -t <target_pane_id> Escape`, then
@@ -1639,9 +1651,7 @@ phase of `send_freetext_and_submit`) takes `target_pane_id`, `payload`, optional
 An embedded `\n` in `payload` is a **soft** newline within the single keystroke
 sequence — it does NOT fragment into a second submit. Esc-first matrix:
 `send_poll_trigger` **YES**, `send_inline_preview` **YES**, `send_wake_trigger`
-**NO**, `send_exit` **NO**, `send_bash_command` **NO**; `send_choice_key` /
-`send_freetext_and_submit` deliberately **NO** (they answer a live prompt an Esc
-would dismiss).
+**NO**, `send_exit` **NO**, `send_bash_command` **NO**.
 
 #### Subprocess core, timeout, and pane-gone tolerance
 
@@ -2197,9 +2207,10 @@ to the `Settings` singleton; they are read at parse time or by the spawned agent
 
 - All four of `CAFLEET_DATABASE_URL`, `CAFLEET_FLEET_ID`, `CAFLEET_AGENT_ID`, and
   `CAFLEET_DIRECTOR_AGENT_ID` are **forwarded into spawned panes** by `agent
-  spawn` (`split_window env={…}`; `CAFLEET_DATABASE_URL` only when set). This is
-  the identity-delivery mechanism for spawned agents (§6.3); the prompt is passed
-  verbatim, with no brace substitution.
+  spawn` (`split_window env={…}`; `CAFLEET_DATABASE_URL` only when set). These
+  env vars are the identity-delivery mechanism for spawned agents (§6.3),
+  complementing `agent spawn`'s `{fleet_id}` / `{agent_id}` /
+  `{director_agent_id}` / `{coding_agent}` placeholder substitution (§6.3).
 
 ### 7.2 Error handling & exit-code policy
 
@@ -2360,7 +2371,7 @@ initialized the cafleet schema.`.
 
 ## 10. CLI command checklist
 
-The full command surface — **25 commands across 5 groups + 3 top-level commands**.
+The full command surface — **24 commands across 5 groups + 3 top-level commands**.
 Each must be reproduced with identical option names, types, defaults,
 required-ness, documented-vs-hidden status, output shapes, and exit codes. Every
 interaction flag is now **documented** (there are no hidden flags). Per-command
@@ -2388,19 +2399,18 @@ exit 0, bypasses `--fleet-id`).
 - [ ] `cafleet agent list` (`--full`, `--activity`)
 - [ ] `cafleet agent show` (`--agent-id` requester, `--id` target, `--full`)
 - [ ] `cafleet agent deregister` (`--agent-id` target, `--force`/`-f`)
-- [ ] `cafleet agent spawn` (`--agent-id` Director, `--name`, `--description`, `--coding-agent`, `--model`, `--role`=member, `--prompt-file`, `--full`, positional `prompt_argv` nargs=-1)
+- [ ] `cafleet agent spawn` (`--agent-id` Director, `--name`, `--description`, `--coding-agent`, `--model`, `--role`=member, `--text` / `--text-file` xor-required, `--full`)
 
 **`pane`:**
 
 - [ ] `cafleet pane capture` (`--agent-id`, `--lines`=**20**, `--ansi`/`--no-ansi`)
-- [ ] `cafleet pane input` (`--agent-id`, `--choice` 1..=3, `--freetext`)
 - [ ] `cafleet pane exec` (`--agent-id`, positional `command`)
-- [ ] `cafleet pane wake` (`--agent-id` target, exactly one of `--poll-only` / `--message`; `--message` requires `--from` sender + `--text`)
+- [ ] `cafleet pane wake` (`--agent-id` target, exactly one of `--poll-only` / `--message`; `--message` requires `--from` sender + `--text` / `--text-file` xor-required)
 
 **`message`:**
 
-- [ ] `cafleet message send` (`--agent-id` requester, `--to`, `--text`, `--full`)
-- [ ] `cafleet message broadcast` (`--agent-id`, `--text`, `--full`)
+- [ ] `cafleet message send` (`--agent-id` requester, `--to`, `--text` / `--text-file` xor-required, `--full`)
+- [ ] `cafleet message broadcast` (`--agent-id`, `--text` / `--text-file` xor-required, `--full`)
 - [ ] `cafleet message poll` (`--agent-id`, `--full`)
 - [ ] `cafleet message ack` (`--agent-id`, `--task-id`, `--full`)
 - [ ] `cafleet message cancel` (`--agent-id`, `--task-id`, `--full`)
@@ -2442,7 +2452,7 @@ The decisions that shape this surface (full rationale in the design doc):
 
 - **`member` splits into `agent` + `pane`.** Registry + lifecycle live under
   `agent` (`register`/`list`/`show`/`deregister`/`spawn`); keystroke interaction
-  lives under `pane` (`capture`/`input`/`exec`/`wake`). `pane wake` carries the
+  lives under `pane` (`capture`/`exec`/`wake`). `pane wake` carries the
   `--poll-only` / `--message` modes.
 - **`--fleet-id` is a plain required option**, defaulting from `CAFLEET_FLEET_ID`
   (§6.3/§7.1); a missing value is a parser-native exit-2 error.
@@ -2453,8 +2463,9 @@ The decisions that shape this surface (full rationale in the design doc):
 - **Nullable `to_agent_id`** (§5.5): `NULL` on `broadcast_summary` rows; no `0`
   sentinel.
 - **Env-var context injection** (§6.3/§7.1): identity reaches a spawned pane via
-  `CAFLEET_FLEET_ID` / `CAFLEET_AGENT_ID` / `CAFLEET_DIRECTOR_AGENT_ID`; the
-  prompt mini-language is removed.
+  `CAFLEET_FLEET_ID` / `CAFLEET_AGENT_ID` / `CAFLEET_DIRECTOR_AGENT_ID`; the spawn
+  prompt additionally supports `{fleet_id}` / `{agent_id}` /
+  `{director_agent_id}` / `{coding_agent}` placeholder substitution (§6.3).
 - **Single absent glyph** (§6.4): ASCII `-` everywhere.
 - **`--json` dual path retained** (§7.3): the `agent`/`message` global path and
   the `fleet` local-flag path are not unified.

@@ -18,7 +18,7 @@ cafleet agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
 cafleet agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name monitor --description "Monitoring member: owns the heartbeat" \
   --role monitor --model {monitor_model} \
-  --prompt-file /abs/path/to/<BASE>/prompts/monitor-20260514T145000Z.md
+  --text-file /abs/path/to/<BASE>/prompts/monitor-20260514T145000Z.md
 ```
 
 | Flag | Required | Notes |
@@ -29,8 +29,8 @@ cafleet agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; also recorded as `placement.coding_agent`. When omitted, an ordinary member defaults to `claude`; a `--role monitor` member inherits **your** (the spawning Director's) backend from your placement row, so the monitoring member runs on the same backend it watches. An explicit value always wins. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent. The `opencode` backend materializes its agent preset on first spawn. |
 | `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend and lists a per-backend example; the *Available models per backend* tables below list the common models for each backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#agent-spawn). |
 | `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `agent_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop watches the Director and members on their own intervals and wakes the monitoring member when one is due — see [`reference/supervision.md`](supervision.md)). An ordinary `--role member` with a pane IS enrolled. The LLM is still set by `--model` (the Director passes the monitor model `{monitor_model}`); the backend is inherited from your placement row when `--coding-agent` is omitted (see the `--coding-agent` row). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see [`roles/monitor.md`](../roles/monitor.md) for the canonical prompt and first-in/first-out lifecycle. |
-| `--prompt-file` | no | Absolute path to a UTF-8 file used as the spawn prompt (mutually exclusive with the positional prompt; delivered **verbatim**). Path/file errors are catalogued in [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Agent Spawn — Scratch and audit files*. |
-| *(positional, after `--`)* | no | Prompt for the spawned process (mutually exclusive with `--prompt-file`; the default template is used if both are omitted). Delivered **verbatim** — there is no `{placeholder}` substitution; identity reaches the member via the injected `CAFLEET_*` env vars (below). |
+| `--text` | no | Inline spawn prompt. Mutually exclusive with `--text-file`; exactly one of the two is required. |
+| `--text-file` | no | Path to a UTF-8 file used as the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Mutually exclusive with `--text`; exactly one of the two is required. Path/file errors are catalogued in [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Agent Spawn — Scratch and audit files*. |
 
 The per-backend spawn argv is in [`cli-options.md`](../../../docs/spec/cli-options.md#agent-spawn) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the deny-list fallback is [`reference/exec-routing.md`](exec-routing.md). Per-backend deltas: [`claude`](coding-agent/claude.md) / [`codex`](coding-agent/codex.md) / [`opencode`](coding-agent/opencode.md).
 
@@ -97,7 +97,9 @@ The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode`
 
 **Verbatim prompt**: the spawn prompt is delivered to the new pane **unchanged** — there is no `str.format()` pass and no brace handling, so literal `{` / `}` in the prompt body need no escaping. Identity reaches the member via the injected `CAFLEET_*` env vars (below), not via prompt substitution.
 
-**Spawn prompt size limit**: cafleet passes the prompt to `tmux split-window` as one positional argument, so a large inline prompt fails with `tmux command failed: command too long` (and rolls back the registration) past a few KB. Use `--prompt-file` for every templated identity block + role-file-by-path prompt; inline `-- "<prompt>"` stays first-class for trivial one-line ad-hoc spawns.
+**Spawn prompt size limit**: cafleet passes the prompt to `tmux split-window` as one positional argument, so a large inline prompt fails with `tmux command failed: command too long` (and rolls back the registration) past a few KB. Use `--text-file` for every templated identity block + role-file-by-path prompt; inline `--text "<prompt>"` stays first-class for trivial one-line ad-hoc spawns.
+
+**Long or multi-line message bodies**: the same `ARG_MAX` cliff applies to `message send` / `message broadcast` / `pane wake --message` (the nudge). A long or multi-line body MUST be passed via `--text-file <path>` (or `--text-file -` to read from stdin), never inline `--text`, so it never lands on the command line. Short one-line bodies stay fine inline with `--text`.
 
 Keep the prompt body focused (the skeleton below): the member loads its role file via `Read` on its first turn, so path-by-reference to the stable in-skill role docs is safe.
 
@@ -155,12 +157,12 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 - All execute roles: `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` and `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`
 - Drafter (normal mode): `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.` and `Do NOT create any design document file until you have received answers.`; (resume mode) `Do NOT ask clarifying questions — the COMMENTs contain the needed information.`
 
-**Agent Spawn — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved per [`reference/base-dir.md`](base-dir.md)) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--prompt-file` write at `<BASE>/prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
+**Agent Spawn — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved per [`reference/base-dir.md`](base-dir.md)) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--text-file` write at `<BASE>/prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
 
 - `<role>` is the lowercased `--name`; `<UTC-compact>` is `YYYYMMDDTHHMMSSZ`. Create `<BASE>/prompts/` on first write; on a same-second collision append `_2`, `_3`, … (never overwrite).
-- The pre-spawn file IS the audit artifact — there is no post-spawn re-render. The `--prompt-file` path is the single source of truth for what was spawned, in perpetuity.
+- The pre-spawn file IS the audit artifact — there is no post-spawn re-render. The `--text-file` path is the single source of truth for what was spawned, in perpetuity.
 
-**`${BASE} == <unset>` fallback**: when startup-time `${BASE}` resolution returned the `<unset>` sentinel, follow the guarded-skip protocol in [`reference/base-dir.md`](base-dir.md) § *No-bypass write protocol* — skip the `<BASE>/prompts/<role>-<ts>.md` write, fall back to the inline positional form (keep it under ~2 KB, path-by-reference), and emit the anchorless status `audit-disabled no BASE in spawn prompt` once per spawn cycle. The spawn still proceeds.
+**`${BASE} == <unset>` fallback**: when startup-time `${BASE}` resolution returned the `<unset>` sentinel, follow the guarded-skip protocol in [`reference/base-dir.md`](base-dir.md) § *No-bypass write protocol* — skip the `<BASE>/prompts/<role>-<ts>.md` write, fall back to the inline `--text` form (keep it under ~2 KB, path-by-reference), and emit the anchorless status `audit-disabled no BASE in spawn prompt` once per spawn cycle. The spawn still proceeds.
 
 **Backtick caveat (harness-dependent)**: some environments (including this project) run a Bash-validator hook that rejects any backtick in a `Bash` invocation. When in play, strip backticks from spawn-prompt bodies (plain text instead of code spans); path-by-reference keeps the body short enough that this is easy.
 
@@ -197,7 +199,7 @@ cafleet pane capture --fleet-id <fleet-id> --agent-id <member-agent-id> --lines 
 
 ## Answering a member's relayed question
 
-A fleet member never talks to the user. When it needs a recorded user reaction (approve / choose / confirm / continue-or-abort), it relays the question to the Director via `cafleet message send`, and the Director answers it through {decision_surface}. The question-shape taxonomy and any pane-keystroke relay for forwarding the answer are backend deltas — see your overlay (`coding-agent/<name>.md`). The canonical user-reaction rule is the `cafleet` skill § *Soliciting user reactions*.
+A fleet member never talks to the user. When it needs a recorded user reaction (approve / choose / confirm / continue-or-abort), it relays the question to the Director via `cafleet message send`, and the Director asks the user through {decision_surface}. The Director forwards the user's answer back to the member as an ordinary `cafleet message send` (which the member consumes on its next poll) — not a pane keystroke. The question-shape taxonomy is a backend delta — see your overlay (`coding-agent/<name>.md`). The canonical user-reaction rule is the `cafleet` skill § *Soliciting user reactions*.
 
 ## Pane Exec
 

@@ -25,4 +25,4 @@ Required section. Convert every note (a constraint/caveat the inline value shoul
 
 Required section. Give the canonical monitor-spawn command fully resolved for this backend — every `{placeholder}` replaced by its concrete value — so the reader has a concrete string to match rather than a transformation to invent:
 
-`cafleet agent spawn --role monitor --model <this backend's monitor model>` (members spawned `<this backend's permission flags>`).
+`cafleet agent spawn --role monitor --model <this backend's monitor model> --text-file <rendered monitor prompt>` (members spawned `<this backend's permission flags>`).

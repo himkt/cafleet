@@ -89,7 +89,7 @@ CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFL
 
 ## Team supervision
 
-When a Director spawns a team, the **FIRST** member created is the dedicated monitoring member (`cafleet agent spawn --role monitor --model {monitor_model}`). It owns the heartbeat and gates every ordinary `agent spawn` behind its `ready: monitor live` handshake. The Director never runs `cafleet monitor start` itself.
+When a Director spawns a team, the **FIRST** member created is the dedicated monitoring member (`cafleet agent spawn --role monitor --model {monitor_model} --text-file <rendered monitor prompt>`). It owns the heartbeat and gates every ordinary `agent spawn` behind its `ready: monitor live` handshake. The Director never runs `cafleet monitor start` itself.
 
 For the full governance + heartbeat mechanism (Core Principle, Communication Model, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, Stall Response, Cleanup, the 5-step facilitation loop, Monitor Lifecycle), Read [`reference/supervision.md`](reference/supervision.md).
 
@@ -118,7 +118,7 @@ cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --to <target-agent-id> --text "Did the API schema change?"
 ```
 
-`--to` (recipient id) and `--text` (body, truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` by default) are required; `--full` per [`reference/output-flags.md`](reference/output-flags.md). After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast` / `pane wake --message`), caught on the next manual `message poll` or a Director `cafleet pane wake --poll-only` if missed; full mechanics in [`tmux-push.md`](../../docs/concepts/tmux-push.md).
+`--to` (recipient id) is required, plus exactly one of `--text` (inline body) or `--text-file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`); the delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview by default. `--full` per [`reference/output-flags.md`](reference/output-flags.md). After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast` / `pane wake --message`), caught on the next manual `message poll` or a Director `cafleet pane wake --poll-only` if missed; full mechanics in [`tmux-push.md`](../../docs/concepts/tmux-push.md).
 
 ## Poll (Check Inbox)
 

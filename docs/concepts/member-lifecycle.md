@@ -66,8 +66,9 @@ placement) is a plain registry soft-delete.
 
 ## Spawn-prompt input modes
 
-The spawn prompt is supplied inline (`-- "<prompt>"`) or via `--prompt-file`
-(an absolute UTF-8 path), delivered verbatim — see
+The spawn prompt is supplied inline via `--text "<prompt>"` or from a file via
+`--text-file <path>` (an absolute or CWD-relative UTF-8 path; `-` reads the
+whole prompt from stdin), delivered verbatim — see
 [CLI options](../spec/cli-options.md) `agent spawn`.
 
 ## Commands
@@ -75,7 +76,7 @@ The spawn prompt is supplied inline (`-- "<prompt>"`) or via `--prompt-file`
 The lifecycle ops live in the `agent` group: `agent spawn`, `agent deregister`
 (with `--force` for an atomic kill+deregister), and `agent list` (with
 `--activity` for per-agent activity aggregation). Keystroke interaction lives in
-the `pane` group: `pane capture`, `pane input`, `pane exec`, and `pane wake`.
+the `pane` group: `pane capture`, `pane exec`, and `pane wake`.
 `agent spawn` takes `--agent-id` (the spawning Director's ID, which must equal
 the fleet root); the `pane *` ops and `agent deregister` target by `--agent-id`
 (the target), scoped to the per-subcommand `--fleet-id`. See
