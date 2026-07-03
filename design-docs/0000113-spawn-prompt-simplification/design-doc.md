@@ -1,8 +1,8 @@
 # Simplify Director Spawn Prompts and Reconcile CLI-Name Drift (Issue #155)
 
-**Status**: Approved
-**Progress**: 34/35 tasks complete
-**Last Updated**: 2026-07-02
+**Status**: Complete
+**Progress**: 35/35 tasks complete
+**Last Updated**: 2026-07-03
 
 ## Overview
 
@@ -195,7 +195,7 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 - [x] Run repo-wide grep for `cafleet agent spawn`, `cafleet pane`, `$CAFLEET_FLEET_ID`/`$CAFLEET_AGENT_ID`/`$CAFLEET_DIRECTOR_AGENT_ID`, and "delivered verbatim" — zero hits outside `design-docs/` and git history (sole remaining matches: the guard's own pattern constants/fixtures in `spawn_prompt_guard.py` + `test_spawn_prompt_guard.py`, and an accurate `member nudge` no-substitution test comment — all outside the S4 scan scope) <!-- completed: 2026-07-03T14:33 -->
 - [x] `mise //cafleet:test` (includes the new guard + overlay coverage) passes <!-- completed: 2026-07-03T14:33 -->
 - [x] `mise //cafleet:lint` and `mise //cafleet:typecheck` pass <!-- completed: 2026-07-03T14:33 -->
-- [ ] Commit the design doc on the feature branch per `.claude/rules/git-workflow.md` <!-- completed: -->
+- [x] Commit the design doc on the feature branch per `.claude/rules/git-workflow.md` <!-- completed: 2026-07-03T21:40 -->
 
 ---
 
@@ -206,3 +206,4 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 | 2026-07-02 | Initial draft |
 | 2026-07-03 | Director validation: sibling design 0000112 landed first (PR #156) — `member send-input` no longer ships; removed it from the target surface (Success Criteria, Background table, S3, Step 2) per the doc's own Q4 contingency |
 | 2026-07-03 | Director arbitration during Step 2 review: 0000112 also deleted `_prompt.py`, the positional prompt argument, and the default template — corrected S1/S2/S3/Step 7 to the `--text`/`--text-file`-only, `member.py`-owned prompt resolution |
+| 2026-07-03 | Implementation complete. User-requested fable Reviewer round (completeness + simplicity): 2 findings, both fixed (61a8937), approved. PR #158 opened; Copilot review loop skipped on user instruction. Status → Complete |
