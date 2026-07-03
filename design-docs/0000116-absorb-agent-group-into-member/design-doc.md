@@ -1,7 +1,7 @@
 # Absorb the `agent` CLI group into `member`
 
 **Status**: Approved
-**Progress**: 16/31 tasks complete
+**Progress**: 17/31 tasks complete
 **Last Updated**: 2026-07-03
 
 ## Overview
@@ -222,7 +222,7 @@ Documentation is edited **first**, per `.claude/rules/documentation-maintenance.
 
 ### Step 4: project rules sweep
 
-- [ ] Confirm `.claude/rules/`, `.claude/skills/skill-author/`, and `CLAUDE.md` carry no `cafleet agent` mentions (none expected) <!-- completed: -->
+- [x] Confirm `.claude/rules/`, `.claude/skills/skill-author/`, and `CLAUDE.md` carry no `cafleet agent` mentions (none expected) <!-- completed: 2026-07-03T22:31 -->
 
 ### Step 5: broker + CLI code
 
