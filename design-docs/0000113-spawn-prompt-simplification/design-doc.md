@@ -1,7 +1,7 @@
 # Simplify Director Spawn Prompts and Reconcile CLI-Name Drift (Issue #155)
 
 **Status**: Approved
-**Progress**: 30/35 tasks complete
+**Progress**: 34/35 tasks complete
 **Last Updated**: 2026-07-02
 
 ## Overview
@@ -10,12 +10,12 @@ Rewrite the CAFleet spawn-prompt skeleton so a rendered prompt carries only lite
 
 ## Success Criteria
 
-- [ ] No rendered spawn prompt contains a dollar-sign `CAFLEET_*` identity reference; identity appears only as CLI-substituted literals (e.g. `FLEET ID: 24`, `YOUR AGENT ID: 88`).
-- [ ] The canonical spawn-prompt skeleton uses the CLI's four `str.format` placeholders (`{fleet_id}`, `{agent_id}`, `{director_agent_id}`, `{coding_agent}`) and documents that literal braces must be doubled (`{{`, `}}`).
-- [ ] The `COMMUNICATION PROTOCOL` command-example block and any `INSTALLED CLI NOTE` / translation table are removed from every spawn skeleton and per-role delta.
-- [ ] Every skill, role, reference, workflow, doc page, `SPEC.md`, and `README.md` describes the shipped `cafleet member create/delete/list/capture/exec/ping/nudge` surface (with `--member-id`), and the words "delivered verbatim, no placeholder substitution" and "identity via injected `CAFLEET_*` env vars" no longer appear.
-- [ ] A static guard test fails if any file in the project-local edit surface (skills, docs, `SPEC.md`, `README.md`, project-local `.claude/`, `CLAUDE.md`) reintroduces `cafleet agent spawn`, the `cafleet pane` group, or a dollar-sign `CAFLEET_*` identity reference; it runs inside `mise //cafleet:test`.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
+- [x] No rendered spawn prompt contains a dollar-sign `CAFLEET_*` identity reference; identity appears only as CLI-substituted literals (e.g. `FLEET ID: 24`, `YOUR AGENT ID: 88`).
+- [x] The canonical spawn-prompt skeleton uses the CLI's four `str.format` placeholders (`{fleet_id}`, `{agent_id}`, `{director_agent_id}`, `{coding_agent}`) and documents that literal braces must be doubled (`{{`, `}}`).
+- [x] The `COMMUNICATION PROTOCOL` command-example block and any `INSTALLED CLI NOTE` / translation table are removed from every spawn skeleton and per-role delta.
+- [x] Every skill, role, reference, workflow, doc page, `SPEC.md`, and `README.md` describes the shipped `cafleet member create/delete/list/capture/exec/ping/nudge` surface (with `--member-id`), and the words "delivered verbatim, no placeholder substitution" and "identity via injected `CAFLEET_*` env vars" no longer appear.
+- [x] A static guard test fails if any file in the project-local edit surface (skills, docs, `SPEC.md`, `README.md`, project-local `.claude/`, `CLAUDE.md`) reintroduces `cafleet agent spawn`, the `cafleet pane` group, or a dollar-sign `CAFLEET_*` identity reference; it runs inside `mise //cafleet:test`.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
 
@@ -188,13 +188,13 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 
 ### Step 7: source (only if strictly required)
 
-- [ ] Verify `member.py` prompt substitution and user-facing strings need no change (post-0000112 `member.py` owns prompt resolution; `_prompt.py` and the default template no longer exist); make the minimal edit only if a concrete drift is found (expected: none) <!-- completed: -->
+- [x] Verify `member.py` prompt substitution and user-facing strings need no change (post-0000112 `member.py` owns prompt resolution; `_prompt.py` and the default template no longer exist); make the minimal edit only if a concrete drift is found (expected: none) <!-- completed: 2026-07-03T14:26 -->
 
 ### Step 8: verification and finalize
 
-- [ ] Run repo-wide grep for `cafleet agent spawn`, `cafleet pane`, `$CAFLEET_FLEET_ID`/`$CAFLEET_AGENT_ID`/`$CAFLEET_DIRECTOR_AGENT_ID`, and "delivered verbatim" — zero hits outside `design-docs/` and git history <!-- completed: -->
-- [ ] `mise //cafleet:test` (includes the new guard + overlay coverage) passes <!-- completed: -->
-- [ ] `mise //cafleet:lint` and `mise //cafleet:typecheck` pass <!-- completed: -->
+- [x] Run repo-wide grep for `cafleet agent spawn`, `cafleet pane`, `$CAFLEET_FLEET_ID`/`$CAFLEET_AGENT_ID`/`$CAFLEET_DIRECTOR_AGENT_ID`, and "delivered verbatim" — zero hits outside `design-docs/` and git history (sole remaining matches: the guard's own pattern constants/fixtures in `spawn_prompt_guard.py` + `test_spawn_prompt_guard.py`, and an accurate `member nudge` no-substitution test comment — all outside the S4 scan scope) <!-- completed: 2026-07-03T14:33 -->
+- [x] `mise //cafleet:test` (includes the new guard + overlay coverage) passes <!-- completed: 2026-07-03T14:33 -->
+- [x] `mise //cafleet:lint` and `mise //cafleet:typecheck` pass <!-- completed: 2026-07-03T14:33 -->
 - [ ] Commit the design doc on the feature branch per `.claude/rules/git-workflow.md` <!-- completed: -->
 
 ---
