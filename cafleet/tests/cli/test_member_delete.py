@@ -2,6 +2,7 @@
 
 import json
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -486,16 +487,107 @@ def test_authorization_boundary__fetch_db_error_surfaces_failed_to_fetch_wording
     assert deregister_recorder == []
 
 
-def test_authorization_boundary__placement_none_exits_one_with_deregister_hint(
+def test_placementless__soft_delete_succeeds_without_pane_mutation(
+    runner,
+    fleet_id,
+    monkeypatch,
+    call_log,
+    deregister_recorder,
+    send_exit_recorder,
+    kill_pane_recorder,
+    wait_for_pane_gone_recorder,
+):
+    """A placementless target is a pure registry soft-delete: exit 0, no tmux
+    pane mutation, ``pane_status`` ``(no placement)``."""
+    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent(placement=None))
+    result = _invoke(runner, fleet_id)
+    assert result.exit_code == 0, result.output
+
+    assert deregister_recorder == [MEMBER_ID]
+    assert send_exit_recorder == []
+    assert kill_pane_recorder == []
+    assert wait_for_pane_gone_recorder.calls == []
+    names = [name for (name, *_) in call_log]
+    assert names == ["deregister_agent"]
+
+    out = result.output
+    assert "Member deleted." in out
+    assert str(MEMBER_ID) in out
+    assert "(no placement)" in out
+
+
+def test_placementless__json_pane_status_no_placement(
     runner, fleet_id, monkeypatch, deregister_recorder
 ):
     monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent(placement=None))
+    result = _invoke_json(runner, fleet_id)
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data == {
+        "agent_id": MEMBER_ID,
+        "pane_status": "(no placement)",
+    }
+
+
+def test_administrator_guard__broker_error_surfaces_verbatim(
+    runner, fleet_id, monkeypatch
+):
+    """The broker's Administrator guard reaches the operator verbatim (no
+    ``deregister failed:`` wrapping), exit 1."""
+    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent(placement=None))
+
+    def guard(_member_id):
+        raise click.ClickException("Administrator cannot be deregistered")
+
+    monkeypatch.setattr(broker, "deregister_agent", guard)
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
-    assert f"agent {MEMBER_ID}" in out
-    assert "has no placement" in out
-    assert "cafleet agent deregister" in out
+    assert "Error: Administrator cannot be deregistered" in out
+    assert "deregister failed" not in out
+
+
+def _tmux_unavailable(self):
+    raise TmuxError("tmux binary not found")
+
+
+def test_tmux_relaxation__placementless_delete_succeeds_without_tmux(
+    runner, fleet_id, monkeypatch, deregister_recorder
+):
+    """The tmux guard fires only on the pane-teardown paths — a placementless
+    delete is a pure registry operation and works outside tmux."""
+    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", _tmux_unavailable)
+    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent(placement=None))
+    result = _invoke(runner, fleet_id)
+    assert result.exit_code == 0, result.output
+    assert deregister_recorder == [MEMBER_ID]
+    assert "(no placement)" in result.output
+
+
+def test_tmux_relaxation__pending_placement_delete_succeeds_without_tmux(
+    runner, fleet_id, monkeypatch, deregister_recorder
+):
+    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", _tmux_unavailable)
+    monkeypatch.setattr(
+        broker,
+        "get_agent",
+        lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
+    )
+    result = _invoke(runner, fleet_id)
+    assert result.exit_code == 0, result.output
+    assert deregister_recorder == [MEMBER_ID]
+
+
+def test_tmux_relaxation__live_pane_delete_still_requires_tmux(
+    runner, fleet_id, monkeypatch, deregister_recorder
+):
+    """A live-pane teardown still needs tmux: unavailable tmux fails the
+    delete before any deregister."""
+    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", _tmux_unavailable)
+    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    result = _invoke(runner, fleet_id)
+    assert result.exit_code == 1, result.output
+    assert "tmux binary not found" in (result.output or "")
     assert deregister_recorder == []
 
 

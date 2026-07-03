@@ -43,15 +43,12 @@ _PER_SUBCOMMAND_BUDGETS: dict[tuple[str, ...], int] = {
     # [claude|codex|opencode] metavar) wraps the --fleet-id help to two lines,
     # so it gains 2 lines rather than 1. Added --text/--text-file increases this.
     ("member", "create"): 19,
-    ("member", "list"): 8,
+    ("member", "list"): 9,
+    ("member", "show"): 9,
     ("member", "capture"): 10,
     ("member", "ping"): 9,
     ("member", "exec"): 9,
     ("member", "delete"): 10,
-    ("agent", "register"): 10,
-    ("agent", "list"): 9,
-    ("agent", "show"): 9,
-    ("agent", "deregister"): 8,
 }
 
 
@@ -112,6 +109,7 @@ def test_message_group_help_does_not_regress_above_baseline():
 
 def test_member_group_help_does_not_regress_above_baseline():
     """``cafleet member --help`` is dominated by the per-leaf command
-    summary lines (one per leaf). Regression guard, NOT a trim driver."""
+    summary lines (one per leaf). Regression guard, NOT a trim driver;
+    the budget carries one line for the ``show`` leaf."""
     lines = _help_lines("member")
-    assert len(lines) <= 16
+    assert len(lines) <= 17

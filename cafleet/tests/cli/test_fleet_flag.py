@@ -44,13 +44,10 @@ def db_runner(tmp_path, monkeypatch):
     return runner
 
 
-def test_missing_fleet_id_fails_client_subcommands__register_without_fleet_id_shows_new_error_message(
+def test_missing_fleet_id_fails_client_subcommands__member_list_without_fleet_id_shows_new_error_message(
     db_runner,
 ):
-    result = db_runner.invoke(
-        cli,
-        ["agent", "register", "--name", "A", "--description", "a"],
-    )
+    result = db_runner.invoke(cli, ["member", "list"])
     out = result.output or ""
     assert "--fleet-id" in out
     assert "is required" in out
@@ -59,34 +56,26 @@ def test_missing_fleet_id_fails_client_subcommands__register_without_fleet_id_sh
     assert "environment variable" not in out.lower()
 
 
-def test_fleet_id_flag_flows_into_broker__register_passes_fleet_id_to_broker(
+def test_fleet_id_flag_flows_into_broker__member_list_passes_fleet_id_to_broker(
     db_runner, monkeypatch
 ):
     captured: dict = {}
 
-    def fake_register_agent(*args, **kwargs):
+    def fake_list_members(*args, **kwargs):
         captured["args"] = args
         captured["kwargs"] = kwargs
-        return {
-            "agent_id": 3000,
-            "name": "A",
-            "registered_at": "2026-01-01T00:00:00+00:00",
-        }
+        return []
 
-    monkeypatch.setattr(broker, "register_agent", fake_register_agent)
+    monkeypatch.setattr(broker, "list_members", fake_list_members)
 
     sid = 100
     result = db_runner.invoke(
         cli,
         [
-            "agent",
-            "register",
+            "member",
+            "list",
             "--fleet-id",
             str(sid),
-            "--name",
-            "A",
-            "--description",
-            "a",
         ],
     )
 
@@ -152,10 +141,7 @@ def test_fleet_id_flag_flows_into_broker__fleet_id_not_read_from_environment(
 ):
     """Fleet id is read only from the ``--fleet-id`` flag; the environment is never consulted."""
     monkeypatch.setenv("CAFLEET_FLEET_ID", "100")
-    result = db_runner.invoke(
-        cli,
-        ["agent", "register", "--name", "A", "--description", "a"],
-    )
+    result = db_runner.invoke(cli, ["member", "list"])
     assert result.exit_code == 1, result.output
 
 
@@ -270,11 +256,11 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_exits_nonzero(
     result = runner.invoke(
         cli,
         [
-            "agent",
-            "deregister",
+            "member",
+            "delete",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
+            "--member-id",
             str(admin_id),
         ],
     )
@@ -299,11 +285,11 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_message_is_use
     result = runner.invoke(
         cli,
         [
-            "agent",
-            "deregister",
+            "member",
+            "delete",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
+            "--member-id",
             str(admin_id),
         ],
     )
@@ -331,16 +317,16 @@ def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_
     result = runner.invoke(
         cli,
         [
-            "agent",
-            "deregister",
+            "member",
+            "delete",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
+            "--member-id",
             str(bogus_agent_id),
         ],
     )
     assert result.exit_code == 1, result.output
-    assert "is not a member of fleet" in (result.output or "")
+    assert f"Agent {bogus_agent_id} not found" in (result.output or "")
 
 
 def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_active(
@@ -361,11 +347,11 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_act
     runner.invoke(
         cli,
         [
-            "agent",
-            "deregister",
+            "member",
+            "delete",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
+            "--member-id",
             str(admin_id),
         ],
     )
@@ -391,6 +377,6 @@ def test_old_surface_removed__global_fleet_id_no_longer_parses(db_runner):
     """Regression guard: ``--fleet-id`` is no longer a global option, so the old
     surface (flag before the subcommand) is rejected by Click with its standard
     'no such option' error (exit 2)."""
-    result = db_runner.invoke(cli, ["--fleet-id", "100", "agent", "list"])
+    result = db_runner.invoke(cli, ["--fleet-id", "100", "member", "list"])
     assert result.exit_code == 2, result.output
     assert "no such option" in (result.output or "").lower()

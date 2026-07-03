@@ -1,8 +1,7 @@
 """Tests for ``cafleet message show``.
 
-``message show`` is gated by ``broker.verify_agent_fleet`` (the same
-membership check ``agent list`` / ``agent show`` use): a caller must prove it
-belongs to the fleet before it can fetch a task by ID.
+``message show`` is gated by ``broker.verify_agent_fleet``: a caller must
+prove it belongs to the fleet before it can fetch a task by ID.
 """
 
 import pytest
