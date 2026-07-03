@@ -51,6 +51,21 @@ def is_monitoring_member(agent_card_json: str | None) -> bool:
     return kind == MONITORING_MEMBER_KIND
 
 
+def derive_agent_kind(is_root_director: bool, card_kind: str | None) -> str:
+    """Collapse an agent to its 4-value ``kind``.
+
+    ``card_kind`` values that match neither builtin constant (including the
+    SQL-coalesced ``""``) fall through to ``member``.
+    """
+    if is_root_director:
+        return "director"
+    if card_kind == ADMINISTRATOR_KIND:
+        return "administrator"
+    if card_kind == MONITORING_MEMBER_KIND:
+        return "monitor"
+    return "member"
+
+
 def now_iso() -> str:
     return datetime.now(UTC).isoformat()
 

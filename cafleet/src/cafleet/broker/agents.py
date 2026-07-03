@@ -214,23 +214,15 @@ def get_agent(agent_id: int, fleet_id: int) -> dict | None:
         "description": agent.description,
         "status": agent.status,
         "registered_at": agent.registered_at,
-        "kind": _derive_kind(is_root_director, card.get("cafleet", {}).get("kind")),
+        "kind": _shared.derive_agent_kind(
+            is_root_director, card.get("cafleet", {}).get("kind")
+        ),
         "skills": card.get("skills", []),
         "placement": None,
     }
     if placement_row is not None:
         result["placement"] = _shared.placement_dict(placement_row)
     return result
-
-
-def _derive_kind(is_root_director: bool, card_kind: str | None) -> str:
-    if is_root_director:
-        return "director"
-    if card_kind == _shared.ADMINISTRATOR_KIND:
-        return "administrator"
-    if card_kind == _shared.MONITORING_MEMBER_KIND:
-        return "monitor"
-    return "member"
 
 
 def list_agents(fleet_id: int) -> list[dict]:

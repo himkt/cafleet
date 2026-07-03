@@ -500,7 +500,7 @@ def member_show(ctx, member_id, full):
 )
 @click.pass_context
 def member_list(ctx, activity, all_agents):
-    """List every member of the fleet (the root Director is excluded)."""
+    """List the fleet's members; --all lists every active agent of the fleet."""
     fleet_id = ctx.obj["fleet_id"]
     if all_agents and activity:
         raise click.UsageError("--all and --activity are mutually exclusive.")

@@ -124,20 +124,12 @@ def list_roster(fleet_id: int) -> list[dict]:
                 if row.placement_agent_id is not None
                 else None
             ),
-            "kind": _roster_kind(row),
+            "kind": _shared.derive_agent_kind(
+                row.agent_id == row.root_director_id, row.card_kind
+            ),
         }
         for row in rows
     ]
-
-
-def _roster_kind(row) -> str:
-    if row.agent_id == row.root_director_id:
-        return "director"
-    if row.card_kind == _shared.ADMINISTRATOR_KIND:
-        return "administrator"
-    if row.card_kind == _shared.MONITORING_MEMBER_KIND:
-        return "monitor"
-    return "member"
 
 
 def list_members_with_activity(fleet_id: int) -> list[dict]:
