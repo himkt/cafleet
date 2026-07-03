@@ -112,7 +112,7 @@ Indexes:
 
 Placement rows are hard-deleted (not soft-deleted) when the agent is deregistered through any path. They have no historical value and must not outlive the agent they describe.
 
-If a user kills a pane manually without going through `cafleet agent deregister`, the placement row stays until the next `agent deregister` resolves it; the "pane already gone" case is handled gracefully.
+If a user kills a pane manually without going through `cafleet member delete`, the placement row stays until the next `member delete` resolves it; the "pane already gone" case is handled gracefully.
 
 ### `monitor_config`
 
@@ -144,7 +144,7 @@ The dedicated monitoring member is identified the same way the built-in Administ
 }
 ```
 
-The marker is written by `register_agent` when `cafleet agent spawn --role monitor` passes `kind="monitoring-member"` through. It serves two purposes: `register_agent` **skips** the `monitor_config` enrollment for this kind (the monitoring member is the watcher, not a watched agent), and the monitor loop **locates** the watcher by this marker via `find_monitoring_member` — which selects the single active agent whose `json_extract(agent_card_json, '$.cafleet.kind') == "monitoring-member"`, inner-joined to `agent_placements` for its pane. At most one active monitoring member is allowed per fleet; `register_agent` rejects a second.
+The marker is written by `register_agent` when `cafleet member create --role monitor` passes `kind="monitoring-member"` through. It serves two purposes: `register_agent` **skips** the `monitor_config` enrollment for this kind (the monitoring member is the watcher, not a watched agent), and the monitor loop **locates** the watcher by this marker via `find_monitoring_member` — which selects the single active agent whose `json_extract(agent_card_json, '$.cafleet.kind') == "monitoring-member"`, inner-joined to `agent_placements` for its pane. At most one active monitoring member is allowed per fleet; `register_agent` rejects a second.
 
 ### `monitor_runtime`
 

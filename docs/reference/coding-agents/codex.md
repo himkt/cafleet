@@ -10,11 +10,12 @@ For the multi-backend overview and selection rules, see the [Coding agents](../.
 
 ## Overview
 
-A codex member is a cafleet member whose `agent_placements.coding_agent` value is `"codex"`. The Director selects the backend at `agent spawn` time:
+A codex member is a cafleet member whose `agent_placements.coding_agent` value is `"codex"`. The Director selects the backend at `member create` time:
 
 ```bash
-cafleet agent spawn --fleet-id <fleet-id> --agent-id <director-agent-id> \
-  --name Codex-A --description "<one-sentence purpose>" --coding-agent codex
+cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+  --name Codex-A --description "<one-sentence purpose>" --coding-agent codex \
+  --text "<spawn prompt>"
 ```
 
 The default backend, mixed-backend teams, and the shared spawn framing are covered on [Coding agents](../../concepts/coding-agents.md).
@@ -29,7 +30,7 @@ codex --ask-for-approval never --sandbox workspace-write <prompt>
 
 - `--ask-for-approval never` disables interactive approval prompts. Combined with `--sandbox workspace-write`, this is the codex equivalent of Claude Code's `--permission-mode dontAsk`: routine permission prompts auto-resolve, the Bash tool is enabled, and the member runs cafleet (and any other shell command) directly.
 - `--sandbox workspace-write` confines codex to writing files within the current workspace. See <https://developers.openai.com/codex/agent-approvals-security> for the upstream description of the approval / sandbox combo.
-- `--model <m>` is appended immediately before the prompt when `cafleet agent spawn --model <m>` is supplied (e.g. `codex --ask-for-approval never --sandbox workspace-write --model gpt-5.4-mini <prompt>`). Any string passes through verbatim — the codex binary itself rejects unknown models, so newly released models work without a cafleet release. Example models (not enforced by cafleet): `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`. When the flag is omitted, no model tokens are emitted and codex uses the model set in its configuration.
+- `--model <m>` is appended immediately before the prompt when `cafleet member create --model <m>` is supplied (e.g. `codex --ask-for-approval never --sandbox workspace-write --model gpt-5.4-mini <prompt>`). Any string passes through verbatim — the codex binary itself rejects unknown models, so newly released models work without a cafleet release. Example models (not enforced by cafleet): `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`. When the flag is omitted, no model tokens are emitted and codex uses the model set in its configuration.
 
 > [!IMPORTANT]
 > Codex's `--sandbox workspace-write` blocks writes outside the workspace, including cafleet's default SQLite DB at `~/.local/share/cafleet/cafleet.db`. Operators must add the cafleet DB directory to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads, such as `~/.codex/config.toml`:
@@ -49,7 +50,7 @@ cafleet has been validated against `codex-cli 0.128.0`. Earlier versions may not
 
 If `codex --version` reports an older version, upgrade per the upstream install instructions at <https://developers.openai.com/codex/>.
 
-If the `codex` binary is not on `PATH`, `cafleet agent spawn --coding-agent codex` exits 1 with `Error: binary codex not found on PATH`. Install `codex`, confirm with `codex --version`, and retry.
+If the `codex` binary is not on `PATH`, `cafleet member create --coding-agent codex` exits 1 with `Error: binary codex not found on PATH`. Install `codex`, confirm with `codex --version`, and retry.
 
 ## cafleet usage from inside a codex pane
 
@@ -57,11 +58,11 @@ The cafleet CLI works unchanged from a codex pane; the usage convention — incl
 
 ## The `!` shell-shortcut convention
 
-Codex honors the leading-`!` shell shortcut that `cafleet pane exec` uses — see [Coding agents](../../concepts/coding-agents.md).
+Codex honors the leading-`!` shell shortcut that `cafleet member exec` uses — see [Coding agents](../../concepts/coding-agents.md).
 
 ## Pane-title asymmetry
 
-Only `claude` sets the pane title to the member name; locate `codex` panes via `cafleet agent list` (the `pane_id` column is ground truth) — see [Coding agents](../../concepts/coding-agents.md).
+Only `claude` sets the pane title to the member name; locate `codex` panes via `cafleet member list` (the `pane_id` column is ground truth) — see [Coding agents](../../concepts/coding-agents.md).
 
 ## Verification recipe (manual smoke test)
 
@@ -72,10 +73,12 @@ cafleet fleet create --label codex-smoke --coding-agent claude
 # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
 # Note the fleet and Director ids — the steps below use 1 and 2.
 
-cafleet agent spawn --fleet-id 1 --agent-id 2 \
-  --name Claude-Smoke --description "claude smoke member" --coding-agent claude
-cafleet agent spawn --fleet-id 1 --agent-id 2 \
-  --name Codex-Smoke --description "codex smoke member" --coding-agent codex
+cafleet member create --fleet-id 1 --agent-id 2 \
+  --name Claude-Smoke --description "claude smoke member" --coding-agent claude \
+  --text "You are Claude-Smoke. Reply hello when polled."
+cafleet member create --fleet-id 1 --agent-id 2 \
+  --name Codex-Smoke --description "codex smoke member" --coding-agent codex \
+  --text "You are Codex-Smoke. Reply hello when polled."
 
 cafleet agent list --fleet-id 1
 # Expect: two member rows, backend column shows 'claude' and 'codex' respectively.
@@ -84,12 +87,12 @@ cafleet message send --fleet-id 1 --agent-id 2 \
   --to 5 --text "ping"
 # Expect: the codex pane receives the 2-line inline preview and the member ack-loops correctly.
 
-cafleet pane exec --fleet-id 1 \
-  --agent-id 5 "git status --short"
+cafleet member exec --fleet-id 1 \
+  --member-id 5 "git status --short"
 # Expect: '! git status --short' lands in the codex pane and the command runs.
 
-cafleet agent deregister --fleet-id 1 --agent-id 5
-cafleet agent deregister --fleet-id 1 --agent-id 4
+cafleet member delete --fleet-id 1 --member-id 5
+cafleet member delete --fleet-id 1 --member-id 4
 cafleet fleet delete --fleet-id 1
 ```
 

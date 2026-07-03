@@ -1,7 +1,7 @@
 # Simplify Director Spawn Prompts and Reconcile CLI-Name Drift (Issue #155)
 
 **Status**: Approved
-**Progress**: 1/35 tasks complete
+**Progress**: 8/35 tasks complete
 **Last Updated**: 2026-07-02
 
 ## Overview
@@ -141,13 +141,13 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 ### Step 1: Concept & how-to docs
 
 - [x] Reconcile `docs/concepts/member-lifecycle.md`, `monitoring.md`, `tmux-push.md`, `bash-routing.md`, `token-reduction.md`, `coding-agents.md` onto the `member *` surface <!-- completed: 2026-07-03T11:01 -->
-- [ ] Reconcile `docs/how-to/monitor-and-recover.md` (pane capture/exec/wake, agent deregister → member verbs) <!-- completed: -->
-- [ ] Reconcile `docs/get-started/quickstart.md` and `get-started/configure.md` examples <!-- completed: -->
-- [ ] Reconcile `docs/reference/coding-agents/{claude,codex,opencode}.md` (agent spawn / pane exec / agent deregister) <!-- completed: -->
-- [ ] Reconcile `docs/concepts/overview.md` (`cafleet agent spawn` → `member create`) <!-- completed: -->
-- [ ] Reconcile `docs/how-to/mixed-backend-team.md` (four `cafleet agent spawn` command examples → `member create`) <!-- completed: -->
-- [ ] Reconcile `docs/spec/data-model.md` (`cafleet agent spawn --role monitor` → `member create --role monitor`; any `pane *` / `--agent-id` lifecycle references) <!-- completed: -->
-- [ ] Reconcile `docs/spec/cli-options.md`: rename `agent spawn`/`pane *` sections to `member *`, fix `--agent-id`→`--member-id` in lifecycle contexts, remove the injected-`CAFLEET_*` identity paragraph, document `member create` `str.format` substitution + double-brace rule <!-- completed: -->
+- [x] Reconcile `docs/how-to/monitor-and-recover.md` (pane capture/exec/wake, agent deregister → member verbs) <!-- completed: 2026-07-03T11:04 -->
+- [x] Reconcile `docs/get-started/quickstart.md` and `get-started/configure.md` examples <!-- completed: 2026-07-03T11:07 -->
+- [x] Reconcile `docs/reference/coding-agents/{claude,codex,opencode}.md` (agent spawn / pane exec / agent deregister) <!-- completed: 2026-07-03T11:12 -->
+- [x] Reconcile `docs/concepts/overview.md` (`cafleet agent spawn` → `member create`) <!-- completed: 2026-07-03T11:15 -->
+- [x] Reconcile `docs/how-to/mixed-backend-team.md` (four `cafleet agent spawn` command examples → `member create`) <!-- completed: 2026-07-03T11:15 -->
+- [x] Reconcile `docs/spec/data-model.md` (`cafleet agent spawn --role monitor` → `member create --role monitor`; any `pane *` / `--agent-id` lifecycle references) <!-- completed: 2026-07-03T11:17 -->
+- [x] Reconcile `docs/spec/cli-options.md`: rename `agent spawn`/`pane *` sections to `member *`, fix `--agent-id`→`--member-id` in lifecycle contexts, remove the injected-`CAFLEET_*` identity paragraph, document `member create` `str.format` substitution + double-brace rule <!-- completed: 2026-07-03T11:33 -->
 
 ### Step 2: README and SPEC
 

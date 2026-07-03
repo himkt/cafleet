@@ -12,7 +12,7 @@ with one member per backend and messages each of them.
 ## Prerequisites
 
 - The backend binaries you want to mix (`claude`, `codex`, `opencode`) are on
-  `PATH` — `agent spawn` exits 1 with `Error: binary <name> not found on
+  `PATH` — `member create` exits 1 with `Error: binary <name> not found on
   PATH` otherwise.
 - You have followed [Install](../get-started/install.md) and
   [Configure](../get-started/configure.md), and you are inside a tmux
@@ -33,7 +33,7 @@ Your agent loads the `cafleet` skill and reads its Director-only
 The supervision tick is supplied by `cafleet monitor` — a per-fleet loop the
 fleet's dedicated monitoring member runs as a background task in its own pane —
 and works the same on **any** backend (`claude`, `codex`, or `opencode`). The
-monitoring member (the first `cafleet agent spawn`, `--role monitor`) is the
+monitoring member (the first `cafleet member create`, `--role monitor`) is the
 one process that runs `cafleet monitor start`; each tick the loop scans the
 watched set (the Director at 180 s and every ordinary member at 720 s) and wakes
 the monitoring member whenever a watched agent is due, which inspects it and
@@ -71,9 +71,9 @@ cafleet fleet create --label "demo" --coding-agent claude
 Spawn one member per backend:
 
 ```bash
-cafleet agent spawn --fleet-id 1 --agent-id 2 \
+cafleet member create --fleet-id 1 --agent-id 2 \
   --name "alice" --description "claude member" \
-  --coding-agent claude -- "You are alice. Wait for instructions."
+  --coding-agent claude --text "You are alice. Wait for instructions."
 ```
 
 ```
@@ -81,9 +81,9 @@ cafleet agent spawn --fleet-id 1 --agent-id 2 \
 ```
 
 ```bash
-cafleet agent spawn --fleet-id 1 --agent-id 2 \
+cafleet member create --fleet-id 1 --agent-id 2 \
   --name "bob" --description "codex member" \
-  --coding-agent codex -- "You are bob. Wait for instructions."
+  --coding-agent codex --text "You are bob. Wait for instructions."
 ```
 
 ```
@@ -91,9 +91,9 @@ cafleet agent spawn --fleet-id 1 --agent-id 2 \
 ```
 
 ```bash
-cafleet agent spawn --fleet-id 1 --agent-id 2 \
+cafleet member create --fleet-id 1 --agent-id 2 \
   --name "carol" --description "opencode member" \
-  --coding-agent opencode -- "You are carol. Wait for instructions."
+  --coding-agent opencode --text "You are carol. Wait for instructions."
 ```
 
 ```
@@ -132,15 +132,15 @@ Message sent.
 alice: report status
 ```
 
-Tear down — repeat `agent deregister` for members `5` and `6`, then delete the
+Tear down — repeat `member delete` for members `5` and `6`, then delete the
 fleet:
 
 ```bash
-cafleet agent deregister --fleet-id 1 --agent-id 4
+cafleet member delete --fleet-id 1 --member-id 4
 ```
 
 ```
-Agent deregistered successfully.
+Member deleted.
   agent_id:  4
   pane_id:   %7 (closed)
 ```
@@ -153,5 +153,5 @@ cafleet fleet delete --fleet-id 1
 Deleted fleet 1. Deregistered 2 agents.
 ```
 
-Every `agent spawn` / `agent deregister` flag and exit code is documented in
-[CLI options](../spec/cli-options.md#agent-spawn).
+Every `member create` / `member delete` flag and exit code is documented in
+[CLI options](../spec/cli-options.md#member-create).
