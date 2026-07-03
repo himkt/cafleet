@@ -1,7 +1,7 @@
 # Simplify Director Spawn Prompts and Reconcile CLI-Name Drift (Issue #155)
 
 **Status**: Approved
-**Progress**: 0/35 tasks complete
+**Progress**: 1/35 tasks complete
 **Last Updated**: 2026-07-02
 
 ## Overview
@@ -13,7 +13,7 @@ Rewrite the CAFleet spawn-prompt skeleton so a rendered prompt carries only lite
 - [ ] No rendered spawn prompt contains a dollar-sign `CAFLEET_*` identity reference; identity appears only as CLI-substituted literals (e.g. `FLEET ID: 24`, `YOUR AGENT ID: 88`).
 - [ ] The canonical spawn-prompt skeleton uses the CLI's four `str.format` placeholders (`{fleet_id}`, `{agent_id}`, `{director_agent_id}`, `{coding_agent}`) and documents that literal braces must be doubled (`{{`, `}}`).
 - [ ] The `COMMUNICATION PROTOCOL` command-example block and any `INSTALLED CLI NOTE` / translation table are removed from every spawn skeleton and per-role delta.
-- [ ] Every skill, role, reference, workflow, doc page, `SPEC.md`, and `README.md` describes the shipped `cafleet member create/delete/list/capture/send-input/exec/ping/nudge` surface (with `--member-id`), and the words "delivered verbatim, no placeholder substitution" and "identity via injected `CAFLEET_*` env vars" no longer appear.
+- [ ] Every skill, role, reference, workflow, doc page, `SPEC.md`, and `README.md` describes the shipped `cafleet member create/delete/list/capture/exec/ping/nudge` surface (with `--member-id`), and the words "delivered verbatim, no placeholder substitution" and "identity via injected `CAFLEET_*` env vars" no longer appear.
 - [ ] A static guard test fails if any file in the project-local edit surface (skills, docs, `SPEC.md`, `README.md`, project-local `.claude/`, `CLAUDE.md`) reintroduces `cafleet agent spawn`, the `cafleet pane` group, or a dollar-sign `CAFLEET_*` identity reference; it runs inside `mise //cafleet:test`.
 - [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
@@ -53,7 +53,6 @@ The shipped 0.14.0 binary (and the repo source under `cafleet/src/cafleet/cli/`,
 | `cafleet pane wake --poll-only` | `cafleet member ping` | `--member-id` |
 | `cafleet pane wake --message` | `cafleet member nudge` | `--agent-id` (sender) + `--member-id` (target) + `--text` |
 | `cafleet agent list --activity` (supervision) | `cafleet member list --activity` | fleet members with placement |
-| *(no old equivalent)* | `cafleet member send-input` | `--member-id` (`--choice` xor `--freetext`) |
 
 Flag polarity notes: `member create` takes `--agent-id` for the acting **Director** (not the target); every other lifecycle verb targets its member by `--member-id`; `member nudge` uniquely takes **both** `--agent-id` (sender) and `--member-id` (target). The registry-level `agent register/list/show/deregister` commands **remain** — `agent deregister` is still the correct call for a paneless registry-only agent (a member with a live pane is torn down by `cafleet member delete`).
 
@@ -115,7 +114,7 @@ Sweep every occurrence of the old surface to the shipped surface across the repo
 - Follow the removal rule (`~/.claude/rules/removal.md`): after the sweep the corpus reads as if the old names never existed. The only place the old names legitimately remain is this design doc and git history.
 - **Scope boundary (per user answer Q3b):** edit the **project-local** tree — the repo `skills/` tree, `docs/`, `SPEC.md`, `README.md`, the project-local `.claude/` (its `rules/` and the project-local `.claude/skills/skill-author/` skill), and `CLAUDE.md`. Do **not** edit the promoted `~/.claude/skills/` copies — those are re-synced by `cafleet setup` (design 0000109). The project-local files are the source of truth; the promoted copies are downstream.
 - **Source (per user answer Q3a):** prefer **no** source change — `_prompt.py` and `member.py` already use the correct placeholders and command names. Touch source only if a concrete drift strictly requires it (none is currently identified).
-- **Sibling design 0000112 (per user answer Q4):** document the CLI as it ships in 0.14.0, including `member send-input`. Note the dependency on 0000112 (which may remove `send-input`) but do **not** assume it lands first and do **not** pre-remove `send-input`. 0000113 imposes no ordering constraint.
+- **Sibling design 0000112 (per user answer Q4):** 0000112 landed before this design was executed (merged PR #156); the installed CLI's `member` group no longer exposes `send-input`. Document the CLI as it now ships: the reconciled corpus describes `member create/delete/list/capture/exec/ping/nudge` and does **not** document `send-input`.
 
 ### S4 — Static drift-guard test
 
@@ -141,7 +140,7 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 
 ### Step 1: Concept & how-to docs
 
-- [ ] Reconcile `docs/concepts/member-lifecycle.md`, `monitoring.md`, `tmux-push.md`, `bash-routing.md`, `token-reduction.md`, `coding-agents.md` onto the `member *` surface <!-- completed: -->
+- [x] Reconcile `docs/concepts/member-lifecycle.md`, `monitoring.md`, `tmux-push.md`, `bash-routing.md`, `token-reduction.md`, `coding-agents.md` onto the `member *` surface <!-- completed: 2026-07-03T11:01 -->
 - [ ] Reconcile `docs/how-to/monitor-and-recover.md` (pane capture/exec/wake, agent deregister → member verbs) <!-- completed: -->
 - [ ] Reconcile `docs/get-started/quickstart.md` and `get-started/configure.md` examples <!-- completed: -->
 - [ ] Reconcile `docs/reference/coding-agents/{claude,codex,opencode}.md` (agent spawn / pane exec / agent deregister) <!-- completed: -->
@@ -153,7 +152,7 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 ### Step 2: README and SPEC
 
 - [ ] Update `README.md`: `member *` command surface, monitoring-member spawn via `member create`, remove injected-env-var identity narrative <!-- completed: -->
-- [ ] Update `SPEC.md`: rewrite the spawn/pane contract sections to `member create/delete/list/capture/send-input/exec/ping/nudge`; replace the "delivered verbatim, no substitution" default-prompt text with the `str.format` contract (four placeholders, double-brace rule); fix `--agent-id`→`--member-id` polarity in lifecycle contexts <!-- completed: -->
+- [ ] Update `SPEC.md`: rewrite the spawn/pane contract sections to `member create/delete/list/capture/exec/ping/nudge`; replace the "delivered verbatim, no substitution" default-prompt text with the `str.format` contract (four placeholders, double-brace rule); fix `--agent-id`→`--member-id` polarity in lifecycle contexts <!-- completed: -->
 
 ### Step 3: cafleet skill (SKILL.md, reference, roles)
 
@@ -205,3 +204,4 @@ Each violation names the file, line, and matched pattern. The pytest module exer
 | Date | Changes |
 |------|---------|
 | 2026-07-02 | Initial draft |
+| 2026-07-03 | Director validation: sibling design 0000112 landed first (PR #156) — `member send-input` no longer ships; removed it from the target surface (Success Criteria, Background table, S3, Step 2) per the doc's own Q4 contingency |
