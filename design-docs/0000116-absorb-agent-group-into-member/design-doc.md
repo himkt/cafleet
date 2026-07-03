@@ -1,6 +1,6 @@
 # Absorb the `agent` CLI group into `member`
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 31/31 tasks complete
 **Last Updated**: 2026-07-03
 
@@ -261,3 +261,4 @@ Documentation is edited **first**, per `.claude/rules/documentation-maintenance.
 | 2026-07-03 | Review round 1: named the regression-guard test (`test_agent_group_removed.py`) as a grep-gate carve-out; retired `render_agent` / `_render_agent_item` + exports; made the grep patterns exact |
 | 2026-07-03 | User approved — Status: Approved |
 | 2026-07-03 | Mid-execution user instruction (Decision 6): removed the `lint-overlay` / `lint-spawn-guard` tooling entirely — mise tasks, modules, tests, and all non-`design-docs/` mentions (commit 7fd5d202); reworded Success Criteria 5–7 and the Step 8 verification tasks to read true post-removal (Reviewer round 1) |
+| 2026-07-03 | Fresh Fable Reviewer approved after 2 rounds (3 round-1 findings: kind-derivation dedup, `member list` docstring, design-doc SC consistency); PR #161 opened; Copilot review skipped per user instruction — Status: Complete |
