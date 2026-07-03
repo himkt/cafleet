@@ -31,11 +31,11 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Coordination Protocol
 
-This skill's Director, Drafter, and Reviewer coordinate via the verb + pointer schema and `COMMENT(role)` markers defined canonically in [../reference/coordination.md](../reference/coordination.md) — the single source of truth for the 6 verbs, the 3 pointer forms, the message format, the `COMMENT(role)` marker grammar, the issue/status split, Copilot routing, anchorless status, finalize-time cleanup, and Director per-file detail recovery.
+This skill's Director, Drafter, and Reviewer coordinate via the verb + pointer schema and `COMMENT(role)` markers defined canonically in [../reference/coordination.md](../reference/coordination.md) — the single source of truth for the 6 verbs, the 3 pointer forms, the message format, the `COMMENT(role)` marker grammar, the issue/status split, anchorless status, finalize-time cleanup, and Director per-file detail recovery.
 
 Two skill-specific notes layer on top of that canonical protocol:
 
-- **Roles in play**: this skill uses only the `director`, `drafter`, `reviewer`, `claude`, and `copilot` marker roles — never `programmer`, `tester`, or `verifier` (those belong to the execute workflow). Copilot review in this skill is design-doc-anchored only, routed through `COMMENT(director)`; finalize happens at `Status: Approved` (Step 6).
+- **Roles in play**: this skill uses only the `director`, `drafter`, `reviewer`, and `claude` marker roles — never `programmer`, `tester`, or `verifier` (those belong to the execute workflow). Finalize happens at `Status: Approved` (Step 6).
 - **Clarification Exemption**: Director-to-Drafter messages during the **Step 2 clarification phase** are exempt from the verb + pointer schema. At clarification time the design doc does not yet exist (the Drafter is forbidden from creating any file before clarifying), so the Director's "User answers: ..." relay rides as a free-form multi-line cafleet body. From Step 3 onward (once the initial draft exists) every message falls back under the schema.
 
 ## Architecture

@@ -1,7 +1,7 @@
 # Fresh Reviewer Member Replaces the Copilot Review in the Execute Workflow
 
 **Status**: Approved
-**Progress**: 24/37 tasks complete
+**Progress**: 26/37 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -200,8 +200,8 @@ No other code changes: `cafleet member create --model` already passes any backen
 
 ### Step 5: Coordination protocol and create workflow
 
-- [ ] Apply the coordination.md removal map (delete § Copilot Routing + `copilot` role row; reword intro/Core Principle/pointer rows; extend `reviewer` + `approved` rows; fix Finalize-Time Cleanup item 3 and Per-File Detail Recovery) <!-- completed: -->
-- [ ] Apply the create.md removal map (roles-in-play, canonical-contents list, design-doc-anchored sentence) <!-- completed: -->
+- [x] Apply the coordination.md removal map (delete § Copilot Routing + `copilot` role row; reword intro/Core Principle/pointer rows; extend `reviewer` + `approved` rows; fix Finalize-Time Cleanup item 3 and Per-File Detail Recovery) <!-- completed: 2026-07-04T00:35 -->
+- [x] Apply the create.md removal map (roles-in-play, canonical-contents list, design-doc-anchored sentence) <!-- completed: 2026-07-04T00:35 -->
 
 ### Step 6: Peripheral docs
 
