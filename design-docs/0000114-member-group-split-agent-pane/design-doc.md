@@ -1,8 +1,8 @@
 # Split the `member` CLI group into `agent` + `pane`
 
-**Status**: Draft
+**Status**: Aborted
 **Progress**: 0/27 tasks complete
-**Last Updated**: 2026-07-02
+**Last Updated**: 2026-07-03
 
 ## Overview
 
@@ -205,3 +205,4 @@ Verify with a repo-wide grep of `cafleet/src/` for `member create` / `member del
 | Date | Changes |
 |------|---------|
 | 2026-07-02 | Initial draft. |
+| 2026-07-03 | Interview round 4: user rejected the design premise — the shipped `member` surface stays; no `agent spawn` / `pane` group will be created. Status → Aborted. Rounds 1–3 answers preserved in `question.md`. |
