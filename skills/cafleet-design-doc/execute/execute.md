@@ -345,7 +345,21 @@ This verification is **mandatory** and must not be skipped. Only when every crit
 
 #### Spawn the fresh Reviewer
 
-This is the first and only time the Reviewer exists in the fleet (never in the Step 3 initial composition), so its context holds no memory of the implementation's compromises. Render the spawn prompt to `${BASE}/prompts/reviewer-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with your overlay's resolved `{reviewer_model}` value:
+This is the first and only time the Reviewer exists in the fleet (never in the Step 3 initial composition), so its context holds no memory of the implementation's compromises.
+
+**Reviewer spawn prompt** (built from the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton), like the 3e roles):
+
+| Slot | Reviewer |
+|---|---|
+| ROLE TITLE | `the Reviewer` |
+| role-file | `roles/reviewer.md` |
+| skill loads | the `cafleet` skill — for communication with the Director; the `cafleet-design-doc` skill — for the coordination protocol and the design-doc format (same pair as the other execute roles per §3e) |
+| CONTEXT LINES | `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` / `BASE BRANCH: [INSERT default branch name from Step 2]` |
+| poll-handling line (verbatim) | `When you see cafleet message poll output with a message from the Director, act on those instructions.` |
+| IMPORTANT (verbatim) | `IMPORTANT: You are a fresh reviewer with no implementation context — judge only what you can verify from the design document, the diff, and the checks you run.` / `IMPORTANT: Do NOT write or modify implementation or test code. Your only edits are COMMENT(reviewer) markers.` / `IMPORTANT: Do NOT commit. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` |
+| start cue | `Start by reading the design document and the branch diff. Then act on the Director's ready (doc) assignment.` |
+
+Render the spawn prompt to `${BASE}/prompts/reviewer-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with your overlay's resolved `{reviewer_model}` value:
 
    ```bash
    cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \

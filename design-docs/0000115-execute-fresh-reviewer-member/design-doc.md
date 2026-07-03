@@ -1,7 +1,7 @@
 # Fresh Reviewer Member Replaces the Copilot Review in the Execute Workflow
 
 **Status**: Approved
-**Progress**: 17/37 tasks complete
+**Progress**: 19/37 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -187,8 +187,8 @@ No other code changes: `cafleet member create --model` already passes any backen
 
 ### Step 3: New Reviewer role file
 
-- [ ] Create `skills/cafleet-design-doc/execute/roles/reviewer.md` per the Specification (Required-reading block, fresh-context accountability, read-execute scope, 5-tag code-review taxonomy, signals, communication protocol, shutdown) <!-- completed: -->
-- [ ] Add the Reviewer spawn-prompt delta table (skeleton slots) to execute.md §3e-style listing inside the new Step 5 <!-- completed: -->
+- [x] Create `skills/cafleet-design-doc/execute/roles/reviewer.md` per the Specification (Required-reading block, fresh-context accountability, read-execute scope, 5-tag code-review taxonomy, signals, communication protocol, shutdown) <!-- completed: 2026-07-04T00:30 -->
+- [x] Add the Reviewer spawn-prompt delta table (skeleton slots) to execute.md §3e-style listing inside the new Step 5 <!-- completed: 2026-07-04T00:30 -->
 
 ### Step 4: Execute Director role file (`skills/cafleet-design-doc/execute/roles/director.md`)
 
