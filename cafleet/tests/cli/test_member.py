@@ -1183,7 +1183,7 @@ def test_member_nudge__real_preview_keystroke_is_esc_first(
 
 def test_member_nudge__tmux_unavailable_exits_one(bootstrapped_fleet, monkeypatch):
     """`member nudge` enforces the same outside-a-tmux-session guard every other
-    `member` subcommand does (Copilot round-2): `ensure_tmux_or_die` raising
+    `member` subcommand does: `ensure_tmux_or_die` raising
     exits 1 with the member-subgroup tmux error. Mirrors the per-file
     `test_tmux_unavailable__tmux_not_available_exits_one` in test_member_ping.py
     / test_member_exec.py."""

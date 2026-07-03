@@ -10,7 +10,7 @@ Three checks (Part 5):
 
 1. **Token coverage** — every token in the base token universe (matches of
    ``\\{[a-z_]+\\}`` in base files, minus the meta-token ignore-set) is in the
-   canonical 8-token set, is defined in all three overlay value tables, and
+   canonical token set, is defined in all three overlay value tables, and
    has a row in the base default table.
 2. **No orphan tokens** — every token defined in an overlay value table or in
    the default table appears in at least one base file.
@@ -40,8 +40,8 @@ from cafleet.coding_agent.overlay_coverage import (
     token_coverage_violations,
 )
 
-# The canonical 8 resolvable tokens (Part 5), written with braces to match
-# the design's notation. These are the only tokens an overlay resolves.
+# The canonical resolvable tokens, written with braces to match the overlay
+# notation. These are the only tokens an overlay resolves.
 _EXPECTED_CANONICAL = frozenset(
     {
         "{decision_surface}",
@@ -52,6 +52,7 @@ _EXPECTED_CANONICAL = frozenset(
         "{task_coord}",
         "{pane_title}",
         "{skill_loader}",
+        "{reviewer_model}",
     }
 )
 
@@ -66,12 +67,12 @@ _EXPECTED_NOTE_ANCHORS = frozenset({"{decision_surface}", "{task_coord}"})
 _BACKENDS = ("claude", "codex", "opencode")
 
 
-def _all_eight() -> set[str]:
+def _all_canonical() -> set[str]:
     return set(_EXPECTED_CANONICAL)
 
 
-def _overlays_all_defining_eight() -> dict[str, set[str]]:
-    return {backend: _all_eight() for backend in _BACKENDS}
+def _overlays_all_defining_canonical() -> dict[str, set[str]]:
+    return {backend: _all_canonical() for backend in _BACKENDS}
 
 
 # --------------------------------------------------------------------------
@@ -79,8 +80,8 @@ def _overlays_all_defining_eight() -> dict[str, set[str]]:
 # --------------------------------------------------------------------------
 
 
-def test_canonical_token_set_is_the_eight_resolvable_tokens():
-    """The checker's canonical set is exactly the 8 resolvable tokens."""
+def test_canonical_token_set_matches_expected():
+    """The checker's canonical set is exactly the expected resolvable tokens."""
     assert set(CANONICAL_TOKENS) == set(_EXPECTED_CANONICAL)
 
 
@@ -131,24 +132,24 @@ def test_extract_tokens_empty_when_no_braces():
 
 def test_token_coverage_passes_when_every_token_defined_everywhere():
     violations = token_coverage_violations(
-        _all_eight(), _overlays_all_defining_eight(), _all_eight()
+        _all_canonical(), _overlays_all_defining_canonical(), _all_canonical()
     )
     assert violations == []
 
 
 def test_token_coverage_flags_token_missing_from_one_overlay():
-    overlays = _overlays_all_defining_eight()
+    overlays = _overlays_all_defining_canonical()
     overlays["codex"].discard("{monitor_model}")
-    violations = token_coverage_violations(_all_eight(), overlays, _all_eight())
+    violations = token_coverage_violations(_all_canonical(), overlays, _all_canonical())
     assert violations
     assert any("{monitor_model}" in v and "codex" in v for v in violations), violations
 
 
 def test_token_coverage_flags_token_missing_from_default_table():
-    default_tokens = _all_eight()
+    default_tokens = _all_canonical()
     default_tokens.discard("{pane_title}")
     violations = token_coverage_violations(
-        _all_eight(), _overlays_all_defining_eight(), default_tokens
+        _all_canonical(), _overlays_all_defining_canonical(), default_tokens
     )
     assert violations
     assert any("{pane_title}" in v for v in violations), violations
@@ -157,9 +158,9 @@ def test_token_coverage_flags_token_missing_from_default_table():
 def test_token_coverage_flags_unknown_resolvable_base_token():
     """A brace match in a base file outside both the canonical set and the
     ignore-set fails the check (a new resolvable token lacking coverage)."""
-    base_universe = _all_eight() | {"{rogue_token}"}
+    base_universe = _all_canonical() | {"{rogue_token}"}
     violations = token_coverage_violations(
-        base_universe, _overlays_all_defining_eight(), _all_eight()
+        base_universe, _overlays_all_defining_canonical(), _all_canonical()
     )
     assert violations
     assert any("{rogue_token}" in v for v in violations), violations
@@ -172,24 +173,24 @@ def test_token_coverage_flags_unknown_resolvable_base_token():
 
 def test_no_orphan_when_overlay_and_default_tokens_all_in_base():
     violations = orphan_token_violations(
-        _all_eight(), _overlays_all_defining_eight(), _all_eight()
+        _all_canonical(), _overlays_all_defining_canonical(), _all_canonical()
     )
     assert violations == []
 
 
 def test_orphan_flagged_when_overlay_defines_token_absent_from_base():
     """A token left in an overlay after removal from the base is an orphan."""
-    overlays = _overlays_all_defining_eight()
+    overlays = _overlays_all_defining_canonical()
     overlays["claude"].add("{ghost_token}")
-    violations = orphan_token_violations(_all_eight(), overlays, _all_eight())
+    violations = orphan_token_violations(_all_canonical(), overlays, _all_canonical())
     assert violations
     assert any("{ghost_token}" in v for v in violations), violations
 
 
 def test_orphan_flagged_when_default_table_defines_token_absent_from_base():
-    default_tokens = _all_eight() | {"{ghost_token}"}
+    default_tokens = _all_canonical() | {"{ghost_token}"}
     violations = orphan_token_violations(
-        _all_eight(), _overlays_all_defining_eight(), default_tokens
+        _all_canonical(), _overlays_all_defining_canonical(), default_tokens
     )
     assert violations
     assert any("{ghost_token}" in v for v in violations), violations
@@ -275,11 +276,11 @@ def test_note_path_passes_when_every_cited_path_exists(tmp_path):
 
 def test_template_tokens_pass_when_equal_to_canonical_set():
     """``_template.md``'s value table must define exactly the canonical set."""
-    assert template_token_violations(_all_eight()) == []
+    assert template_token_violations(_all_canonical()) == []
 
 
 def test_template_tokens_flag_a_missing_canonical_token():
-    template_tokens = _all_eight()
+    template_tokens = _all_canonical()
     template_tokens.discard("{pane_title}")
     violations = template_token_violations(template_tokens)
     assert violations
@@ -287,7 +288,7 @@ def test_template_tokens_flag_a_missing_canonical_token():
 
 
 def test_template_tokens_flag_an_extra_non_canonical_token():
-    template_tokens = _all_eight() | {"{extra_token}"}
+    template_tokens = _all_canonical() | {"{extra_token}"}
     violations = template_token_violations(template_tokens)
     assert violations
     assert any("{extra_token}" in v for v in violations), violations
