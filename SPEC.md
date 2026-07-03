@@ -144,11 +144,6 @@ no separate server binary; `cafleet server` constructs the WebUI app and serves
 it. The reference implementation's server target maps to "construct the WebUI
 application object and serve it".
 
-The overlay-coverage check (dev tooling invoked by
-`mise //cafleet:lint-overlay`) is **not** part of the runtime modules. It
-validates markdown skill files, not runtime behavior, and may be kept as a
-standalone lint in any language.
-
 ---
 
 ## 4. Architecture & module dependency graph
