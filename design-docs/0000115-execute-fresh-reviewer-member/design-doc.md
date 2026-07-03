@@ -1,7 +1,7 @@
 # Fresh Reviewer Member Replaces the Copilot Review in the Execute Workflow
 
 **Status**: Approved
-**Progress**: 5/37 tasks complete
+**Progress**: 17/37 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -172,18 +172,18 @@ No other code changes: `cafleet member create --model` already passes any backen
 
 ### Step 2: Execute workflow body (`skills/cafleet-design-doc/execute/execute.md`)
 
-- [ ] Rewrite the header paragraph to the new flow (TDD → Phase D → fresh Reviewer loop → admin approval → push + PR → finalize) <!-- completed: -->
-- [ ] Update Prerequisites: `gh` auth needed only for the Step 7 push/PR; failure falls back to Step 8 local-finalize <!-- completed: -->
-- [ ] Delete the §3b "Spawn-prompt delta (execute only)" paragraph and drop the Copilot turn-source rationale from the heartbeat sentence (canonical monitor prompt) <!-- completed: -->
-- [ ] Note in §3c that the Reviewer is never part of the initial team composition (spawned at Step 5 only) <!-- completed: -->
-- [ ] Insert the new Step 5 (Reviewer Review Loop) with the gate, spawn command (`--model {reviewer_model}`, audit-file pattern, `BASE BRANCH` context line), the route table, commit conventions, re-review loop, and dispute arbitration <!-- completed: -->
-- [ ] Renumber old Step 5 → Step 6 (User Approval): move the Success Criteria subsection into Step 5's gate, update the Approve option description, add the re-review invariant to the Revision Loop <!-- completed: -->
-- [ ] Renumber old Step 6 → Step 7 (Push & Create PR) with the `@copilot` request, `requested_reviewers` verification, and `last_push_ts` removed; trim the error-handling table accordingly <!-- completed: -->
-- [ ] Delete old Step 7 (Copilot Review Loop) including 7a–7e, loop state, and the interjection section; fold "stop means stop" into Step 5's loop intro <!-- completed: -->
-- [ ] Update Step 8: teardown roster includes the Reviewer; final report replaces the Copilot exit reason with the Reviewer outcome; delete item 4's "does NOT re-request Copilot review" sentence <!-- completed: -->
-- [ ] Sweep every step-number cross-reference in execute.md to the new numbering: the run-to-completion paragraph ("the Step 5 user-approval gate" / "'stop means stop' halt during Step 7"), Phase D's "Proceed directly to Step 5 (User Approval)", Step 8's intro ("Runs after Step 7 exits, or directly after Step 5 when Step 6 was skipped"), the Abort Flow, and every Error-Handling row naming Steps 5/6/7 <!-- completed: -->
-- [ ] Strip execute.md's residual Copilot mentions per the removal map: Required-reading rows 3–4 and the Coordination-Protocol intro's canonical-contents list <!-- completed: -->
-- [ ] Update the § Coordination Protocol roles-in-play note (add `reviewer`, drop `copilot`) and the role table at the top (add the Reviewer row: spawned at Step 5, reviews diff + runs checks, writes markers; does NOT write code/tests, commit, or talk to the user) <!-- completed: -->
+- [x] Rewrite the header paragraph to the new flow (TDD → Phase D → fresh Reviewer loop → admin approval → push + PR → finalize) <!-- completed: 2026-07-04T00:26 -->
+- [x] Update Prerequisites: `gh` auth needed only for the Step 7 push/PR; failure falls back to Step 8 local-finalize <!-- completed: 2026-07-04T00:26 -->
+- [x] Delete the §3b "Spawn-prompt delta (execute only)" paragraph and drop the Copilot turn-source rationale from the heartbeat sentence (canonical monitor prompt) <!-- completed: 2026-07-04T00:26 -->
+- [x] Note in §3c that the Reviewer is never part of the initial team composition (spawned at Step 5 only) <!-- completed: 2026-07-04T00:26 -->
+- [x] Insert the new Step 5 (Reviewer Review Loop) with the gate, spawn command (`--model {reviewer_model}`, audit-file pattern, `BASE BRANCH` context line), the route table, commit conventions, re-review loop, and dispute arbitration <!-- completed: 2026-07-04T00:26 -->
+- [x] Renumber old Step 5 → Step 6 (User Approval): move the Success Criteria subsection into Step 5's gate, update the Approve option description, add the re-review invariant to the Revision Loop <!-- completed: 2026-07-04T00:26 -->
+- [x] Renumber old Step 6 → Step 7 (Push & Create PR) with the `@copilot` request, `requested_reviewers` verification, and `last_push_ts` removed; trim the error-handling table accordingly <!-- completed: 2026-07-04T00:26 -->
+- [x] Delete old Step 7 (Copilot Review Loop) including 7a–7e, loop state, and the interjection section; fold "stop means stop" into Step 5's loop intro <!-- completed: 2026-07-04T00:26 -->
+- [x] Update Step 8: teardown roster includes the Reviewer; final report replaces the Copilot exit reason with the Reviewer outcome; delete item 4's "does NOT re-request Copilot review" sentence <!-- completed: 2026-07-04T00:26 -->
+- [x] Sweep every step-number cross-reference in execute.md to the new numbering: the run-to-completion paragraph ("the Step 5 user-approval gate" / "'stop means stop' halt during Step 7"), Phase D's "Proceed directly to Step 5 (User Approval)", Step 8's intro ("Runs after Step 7 exits, or directly after Step 5 when Step 6 was skipped"), the Abort Flow, and every Error-Handling row naming Steps 5/6/7 <!-- completed: 2026-07-04T00:26 -->
+- [x] Strip execute.md's residual Copilot mentions per the removal map: Required-reading rows 3–4 and the Coordination-Protocol intro's canonical-contents list <!-- completed: 2026-07-04T00:26 -->
+- [x] Update the § Coordination Protocol roles-in-play note (add `reviewer`, drop `copilot`) and the role table at the top (add the Reviewer row: spawned at Step 5, reviews diff + runs checks, writes markers; does NOT write code/tests, commit, or talk to the user) <!-- completed: 2026-07-04T00:26 -->
 
 ### Step 3: New Reviewer role file
 
