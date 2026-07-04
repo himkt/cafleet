@@ -1,6 +1,6 @@
 # SPEC.md / docs vs Implementation Consistency Reconciliation
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 44/44 tasks complete
 **Last Updated**: 2026-07-04
 
@@ -250,3 +250,4 @@ makes them first-class. Two reconciled surfaces can plausibly appear there and M
 |------|---------|
 | 2026-07-04 | Initial draft — 32 contradictions reconciled per user decisions Q1–Q4 |
 | 2026-07-04 | Approved — `--quiet` disposition finalized as UNHIDE; conditional REMOVE alternative removed |
+| 2026-07-04 | Complete — all 44 tasks landed; Reviewer-approved (1 round, 4 leftover-drift fixes); 990 tests + lint + typecheck + admin:lint green; PR #163 |
