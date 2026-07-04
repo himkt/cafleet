@@ -199,8 +199,6 @@ skills:
 
 ### Step 6: Tests
 
-COMMENT(programmer): Step 4's guard is live and its 25 step tests pass, but the full suite now fails in 8 pre-existing CLI test files (130 tests: `test_compact_echo`, `test_help_budget`, `test_member_delete`, `test_member_exec`, `test_member_ping`, `test_message`, `test_message_text_input`, `test_message_truncation`) with `no skills install is recorded`. Those files never use the seeded `sync_sessionmaker`/`broker_session` fixtures, so the conftest seed (Test plan: "seed one skill_installs row … so existing fleet-scoped CLI tests pass the guard") does not reach them — they invoke fleet-scoped commands against the unpatched engine, which also means they now read the operator's real registry DB. The seeding mechanism needs extending (e.g. an autouse fixture for `tests/cli/` that redirects `settings.database_url` at a seeded temp DB). Test files are Tester-owned; please route.
-
 - [ ] Replace `tests/db/test_init.py` + `tests/db/test_alembic_smoke.py` with `tests/db/test_schema.py` <!-- completed: -->
 - [ ] Rework `tests/cli/test_setup.py` to the group surface (incl. `--agent` rejection on bare `setup`, pre-flight, upsert) <!-- completed: -->
 - [ ] Add guard tests (incl. the help contract) + doctor skills-section tests; add `tests/cli/test_db_group_removed.py` <!-- completed: -->
