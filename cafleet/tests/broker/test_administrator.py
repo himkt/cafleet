@@ -9,15 +9,9 @@ from cafleet import broker
 from cafleet.broker import ADMINISTRATOR_KIND
 from cafleet.broker._shared import is_administrator
 from cafleet.db.models import Agent
-from cafleet.multiplexer import MultiplexerContext as DirectorContext
+from tests.broker._helpers import _create_fleet
 
-_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
-
-
-def _create_fleet_with_ctx():
-    return broker.create_fleet(
-        director_context=_FAKE_DIRECTOR_CTX, coding_agent="claude"
-    )
+_create_fleet_with_ctx = _create_fleet
 
 
 def test_administrator_kind_constant__value_and_type():
@@ -115,7 +109,7 @@ def test_deregister_administrator__protected_and_user_dereg_still_works(broker_s
     # Regular user agent can still be deregistered.
     user = broker.register_agent(fleet_id=sid, name="user", description="test user")
     assert broker.deregister_agent(user["agent_id"]) is True
-    names = {a["name"] for a in broker.list_agents(sid)}
+    names = {a["name"] for a in broker.list_roster(sid)}
     assert names == {"Director", "Administrator"}
 
 
@@ -140,7 +134,7 @@ def test_register_agent_placement__administrator_cannot_be_director(broker_sessi
     assert "Administrator cannot be a director" in str(exc_info.value)
 
     # The rejection MUST be transactional: no orphan member row remains.
-    names = {a["name"] for a in broker.list_agents(sid)}
+    names = {a["name"] for a in broker.list_roster(sid)}
     assert "rejected-member" not in names
     assert names == {"Director", "Administrator"}
 
@@ -169,5 +163,5 @@ def test_register_agent_placement__non_root_user_director_rejected(broker_sessio
         )
 
     # The rejection MUST be transactional: no orphan member row remains.
-    names = {a["name"] for a in broker.list_agents(sid)}
+    names = {a["name"] for a in broker.list_roster(sid)}
     assert "member" not in names

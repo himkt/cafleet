@@ -10,12 +10,6 @@ from tests.broker._helpers import (
     _setup_two_agents,
 )
 
-
-@pytest.fixture(autouse=True)
-def _autouse_broker(broker_session):
-    return broker_session
-
-
 # --- send_message --------------------------------------------------------
 
 

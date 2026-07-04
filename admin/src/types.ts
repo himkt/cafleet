@@ -6,11 +6,6 @@ export interface MonitorConfig {
 
 export interface MonitorRuntime {
   running: boolean;
-  pid: number | null;
-  tick_seconds: number | null;
-  last_tick_at: string | null;
-  last_tick_age_seconds: number | null;
-  started_at: string | null;
 }
 
 export interface Agent {
@@ -29,7 +24,6 @@ export interface TimelineMessage {
   from_agent_name: string;
   to_agent_id: number;
   to_agent_name: string;
-  type: string;
   status: "input_required" | "completed" | "canceled";
   created_at: string;
   origin_task_id: number | null;

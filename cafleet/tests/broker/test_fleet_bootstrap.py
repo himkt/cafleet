@@ -19,11 +19,6 @@ from cafleet.db.models import (
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 
-@pytest.fixture(autouse=True)
-def _autouse_broker(broker_session):
-    return broker_session
-
-
 @pytest.fixture
 def director_context():
     return DirectorContext(session="main", window_id="@1", pane_id="%0")

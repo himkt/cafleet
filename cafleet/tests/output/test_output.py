@@ -129,29 +129,31 @@ def test_truncate_text__matrix(scenario, value, kwargs, expected):
     ],
 )
 def test_truncate_task_text__single_envelope_shapes(
-    scenario, make_input, expected_text
+    monkeypatch, scenario, make_input, expected_text
 ):
+    monkeypatch.setattr("cafleet.config.settings.max_text_len", 10)
     data = make_input()
-    result = truncate_task_text(data, full=False, limit=10)
+    result = truncate_task_text(data, full=False)
     assert result is data
     task = data.get("task", data)
     assert task["text"] == expected_text
 
 
-def test_truncate_task_text__list_shapes_and_non_dict_skipped():
+def test_truncate_task_text__list_shapes_and_non_dict_skipped(monkeypatch):
+    monkeypatch.setattr("cafleet.config.settings.max_text_len", 10)
     tasks = [_task("abcdefghijklmnop"), _task("0123456789ABCDEF")]
-    truncate_task_text(tasks, full=False, limit=10)
+    truncate_task_text(tasks, full=False)
     assert tasks[0]["text"] == "abcdefghij…"
     assert tasks[1]["text"] == "0123456789…"
 
     envelopes = [{"task": _task("abcdefghijklmnop")}, {"task": _task("short")}]
-    truncate_task_text(envelopes, full=False, limit=10)
+    truncate_task_text(envelopes, full=False)
     assert envelopes[0]["task"]["text"] == "abcdefghij…"
     assert envelopes[1]["task"]["text"] == "short"
 
     # Non-dict items in a list are skipped silently.
     mixed: list = [None, _task("abcdefghijklmnop")]
-    truncate_task_text(mixed, full=False, limit=10)
+    truncate_task_text(mixed, full=False)
     assert mixed[0] is None
     assert mixed[1]["text"] == "abcdefghij…"
 
@@ -162,18 +164,21 @@ def test_truncate_task_text__full_true_does_not_mutate():
     assert task["text"] == "abcdefghijklmnop"
 
 
-def test_truncate_task_text__missing_text_key_is_noop_and_siblings_unchanged():
+def test_truncate_task_text__missing_text_key_is_noop_and_siblings_unchanged(
+    monkeypatch,
+):
+    monkeypatch.setattr("cafleet.config.settings.max_text_len", 10)
     no_text_task: dict = {
         "task_id": 1,
         "context_id": 20,
         "status_state": "input_required",
     }
-    result = truncate_task_text(no_text_task, full=False, limit=10)
+    result = truncate_task_text(no_text_task, full=False)
     assert result is no_text_task
     assert "text" not in no_text_task
 
     task = _task("abcdefghijklmnop")
-    truncate_task_text(task, full=False, limit=10)
+    truncate_task_text(task, full=False)
     assert task["task_id"] == 1
     assert task["status_state"] == "input_required"
     assert task["from_agent_id"] == 10

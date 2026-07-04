@@ -2,17 +2,11 @@
 
 from datetime import UTC, datetime
 
-import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from cafleet.broker import _shared
 from cafleet.db.models import Base, SkillInstall
-
-
-@pytest.fixture(autouse=True)
-def _autouse_broker(broker_session):
-    return broker_session
 
 
 def test_table_exists_true():

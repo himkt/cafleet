@@ -29,22 +29,12 @@ from sqlalchemy.orm import Session
 from cafleet import broker
 from cafleet.broker import _shared
 from cafleet.db.models import Agent, Fleet, MonitorConfig, MonitorRuntime, Task
-from tests.broker._helpers import _create_fleet, _register_agent
-
-
-@pytest.fixture(autouse=True)
-def _autouse_broker(broker_session):
-    return broker_session
-
-
-def _placement(fleet: dict, pane_id: str = "%5") -> dict:
-    return {
-        "director_agent_id": fleet["director"]["agent_id"],
-        "tmux_session": "main",
-        "tmux_window_id": "@3",
-        "tmux_pane_id": pane_id,
-        "coding_agent": "claude",
-    }
+from tests.broker._helpers import (
+    _create_fleet,
+    _member_placement,
+    _register_agent,
+    _register_monitoring_member,
+)
 
 
 def _register_ordinary_member(
@@ -52,20 +42,9 @@ def _register_ordinary_member(
 ) -> dict:
     """A pane-bound ordinary member — enrolled in monitoring @720 (this design)."""
     return _register_agent(
-        fleet["fleet_id"], name=name, placement=_placement(fleet, pane_id)
-    )
-
-
-def _register_monitoring_member(
-    fleet: dict, name: str = "watcher", pane_id: str = "%5"
-) -> dict:
-    """The dedicated monitoring member — the unenrolled watcher, located by kind."""
-    return broker.register_agent(
-        fleet_id=fleet["fleet_id"],
+        fleet["fleet_id"],
         name=name,
-        description="monitoring member",
-        placement=_placement(fleet, pane_id),
-        kind="monitoring-member",
+        placement=_member_placement(fleet["director"]["agent_id"], pane_id),
     )
 
 
@@ -126,28 +105,13 @@ def test_monitoring_member_kind_constant():
     assert _shared.MONITORING_MEMBER_KIND == "monitoring-member"
 
 
-@pytest.mark.parametrize(
-    ("card", "expected"),
-    [
-        (json.dumps({"cafleet": {"kind": "monitoring-member"}}), True),
-        (json.dumps({"cafleet": {"kind": "builtin-administrator"}}), False),
-        (json.dumps({"name": "x", "skills": []}), False),
-        (None, False),
-        ("", False),
-        ("not-json", False),
-    ],
-)
-def test_is_monitoring_member__kind_detection(card, expected):
-    assert _shared.is_monitoring_member(card) is expected
-
-
 def test_register_monitoring_member__writes_kind_marker(broker_session):
     fleet = _create_fleet()
     watcher = _register_monitoring_member(fleet, name="watcher")
 
     with broker_session() as s:
         card = s.get(Agent, watcher["agent_id"]).agent_card_json
-    assert _shared.is_monitoring_member(card) is True
+    assert json.loads(card)["cafleet"]["kind"] == _shared.MONITORING_MEMBER_KIND
 
 
 def test_register_second_monitoring_member__rejected():
@@ -318,10 +282,10 @@ def test_update_monitor_config__cross_fleet_raises():
         )
 
 
-# --- record_ping -----------------------------------------------------------
+# --- record_pings ----------------------------------------------------------
 
 
-def test_record_ping__sets_last_ping_at():
+def test_record_pings__sets_last_ping_at():
     # an ordinary member is enrolled @720 (this design)
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
@@ -329,7 +293,7 @@ def test_record_ping__sets_last_ping_at():
 
     assert broker.get_monitor_config(sid, aid)["last_ping_at"] is None
     when = _iso_now()
-    broker.record_ping(aid, when)
+    broker.record_pings([aid], when)
     assert broker.get_monitor_config(sid, aid)["last_ping_at"] == when
 
 

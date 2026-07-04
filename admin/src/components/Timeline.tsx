@@ -1,14 +1,9 @@
-import {
-  useState,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useCallback,
-} from "react";
+import { useState, useLayoutEffect, useRef, useCallback } from "react";
 import type { ReactNode } from "react";
 import { Inbox } from "lucide-react";
 import type { TimelineMessage, TimelineEntry, Agent } from "../types";
 import { fetchTimeline } from "../api";
+import { useRefreshKeyLoad } from "../hooks/useRefreshKeyLoad";
 import { entrySortKey } from "../timeline";
 import TimelineMessageComponent from "./TimelineMessage";
 import EmptyState from "./EmptyState";
@@ -98,16 +93,13 @@ export default function Timeline({ agents, refreshKey }: TimelineProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef<number | null>(null);
-  const inFlightRef = useRef(false);
 
   // Timeline is driven entirely by Dashboard's `refreshKey` bump, which Dashboard's
   // usePolling fires every POLL_INTERVAL_MS. Owning a second usePolling here would
-  // double the fetch rate without adding coverage. The local in-flight guard still
-  // matters because a refreshKey bump can land while a slow fetchTimeline() is
-  // pending.
+  // double the fetch rate without adding coverage. useRefreshKeyLoad owns the
+  // in-flight guard, which still matters because a refreshKey bump can land while a
+  // slow fetchTimeline() is pending.
   const loadTimeline = useCallback(async () => {
-    if (inFlightRef.current) return;
-    inFlightRef.current = true;
     try {
       const data = await fetchTimeline();
       setEntries(groupMessages(data.messages));
@@ -115,13 +107,10 @@ export default function Timeline({ agents, refreshKey }: TimelineProps) {
       /* swallow — preserve last-known entries; next bump re-attempts */
     } finally {
       setLoading(false);
-      inFlightRef.current = false;
     }
   }, []);
 
-  useEffect(() => {
-    void loadTimeline();
-  }, [refreshKey, loadTimeline]);
+  useRefreshKeyLoad(loadTimeline, refreshKey);
 
   useLayoutEffect(() => {
     const el = scrollerRef.current;

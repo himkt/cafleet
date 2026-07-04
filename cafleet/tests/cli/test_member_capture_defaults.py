@@ -5,33 +5,14 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from cafleet import broker, config
+from cafleet import broker
 from cafleet.cli import cli
-from cafleet.multiplexer import MultiplexerContext as DirectorContext
-from tests._helpers import _init_registry
-
-_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
+from tests.broker._helpers import _member_placement
 
 
 @pytest.fixture
-def bootstrapped_member(tmp_path, monkeypatch, _reset_engine_singletons):
-    db_file = tmp_path / "cafleet.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
-        lambda self: None,
-    )
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery",
-        lambda self: _FAKE_DIRECTOR_CTX,
-    )
-
+def bootstrapped_member(_mock_tmux_for_fleet_create):
     runner = CliRunner()
-    _init_registry()
     create = runner.invoke(cli, ["fleet", "create", "--json"])
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
@@ -43,13 +24,7 @@ def bootstrapped_member(tmp_path, monkeypatch, _reset_engine_singletons):
         fleet_id=sid,
         name="capture-target",
         description="member to capture from",
-        placement={
-            "director_agent_id": director_id,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": pane_id,
-            "coding_agent": "claude",
-        },
+        placement=_member_placement(director_id, pane_id),
     )
     # Stringify ids here: this module feeds them only into CLI argv (which must
     # be strings under ``--fleet-id``/``--agent-id`` ``type=int``) and never

@@ -12,39 +12,20 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from cafleet import broker, config
+from cafleet import broker
 from cafleet.cli import cli
-from cafleet.multiplexer import MultiplexerContext as DirectorContext
-from tests._helpers import _init_registry
-
-_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
+from tests.broker._helpers import _member_placement
 
 
 @pytest.fixture
-def bootstrapped_roster(tmp_path, monkeypatch, _reset_engine_singletons):
-    """Fresh DB + fleet + monitoring member + one ordinary member.
+def bootstrapped_roster(_mock_tmux_for_fleet_create):
+    """Fresh fleet + monitoring member + one ordinary member.
 
     The roster is exactly 4 active agents: root Director (placed),
     Administrator (placementless), monitor, and alice. Returns
     ``(sid, director_id, admin_id, monitor_id, alice_id, runner)``.
     """
-    db_file = tmp_path / "cafleet.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
-        lambda self: None,
-    )
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery",
-        lambda self: _FAKE_DIRECTOR_CTX,
-    )
-
     runner = CliRunner()
-    _init_registry()
     create = runner.invoke(cli, ["fleet", "create", "--json"])
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
@@ -56,26 +37,14 @@ def bootstrapped_roster(tmp_path, monkeypatch, _reset_engine_singletons):
         fleet_id=sid,
         name="monitor",
         description="Dedicated monitoring member",
-        placement={
-            "director_agent_id": director_id,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": "%5",
-            "coding_agent": "claude",
-        },
+        placement=_member_placement(director_id, "%5"),
         kind="monitoring-member",
     )
     alice = broker.register_agent(
         fleet_id=sid,
         name="alice",
         description="Ordinary member",
-        placement={
-            "director_agent_id": director_id,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": "%7",
-            "coding_agent": "claude",
-        },
+        placement=_member_placement(director_id, "%7"),
     )
     return sid, director_id, admin_id, monitor["agent_id"], alice["agent_id"], runner
 

@@ -1,6 +1,6 @@
 """Message send/broadcast/poll/ack/cancel and inline-preview notification."""
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from cafleet.broker import _shared
@@ -203,11 +203,7 @@ def broadcast_message(fleet_id: int, agent_id: int, text: str) -> list[dict]:
                     Agent.fleet_id == fleet_id,
                     Agent.status == "active",
                     Agent.agent_id != agent_id,
-                    func.coalesce(
-                        func.json_extract(Agent.agent_card_json, "$.cafleet.kind"),
-                        "",
-                    )
-                    != _shared.ADMINISTRATOR_KIND,
+                    _shared.CARD_KIND_SQL != _shared.ADMINISTRATOR_KIND,
                 )
             ).scalars()
         )

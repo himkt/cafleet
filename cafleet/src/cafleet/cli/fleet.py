@@ -7,6 +7,12 @@ from cafleet.cli._helpers import ensure_skills_current, fleet_id_option, full_fl
 from cafleet.coding_agent import CODING_AGENTS
 from cafleet.multiplexer import MULTIPLEXERS, TmuxError
 
+_json_flag = click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+
+
+def _wants_json(ctx: click.Context, as_json: bool) -> bool:
+    return as_json or ctx.obj["json_output"]
+
 
 @click.group()
 def fleet() -> None:
@@ -24,7 +30,7 @@ def fleet() -> None:
     show_default=True,
     help="Coding-agent binary to spawn / declare for the placement.",
 )
-@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@_json_flag
 @full_flag
 @click.pass_context
 def fleet_create(
@@ -49,20 +55,20 @@ def fleet_create(
         coding_agent=coding_agent,
     )
 
-    if as_json or ctx.obj["json_output"]:
+    if _wants_json(ctx, as_json):
         click.echo(output.format_json(result))
     else:
         click.echo(output.format_fleet_create(result, full=full))
 
 
 @fleet.command("list")
-@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@_json_flag
 @click.pass_context
 def fleet_list(ctx: click.Context, as_json: bool) -> None:
     """List all fleets."""
     rows = broker.list_fleets()
 
-    if as_json or ctx.obj["json_output"]:
+    if _wants_json(ctx, as_json):
         click.echo(output.format_json(rows))
     else:
         if not rows:
@@ -81,7 +87,7 @@ def fleet_list(ctx: click.Context, as_json: bool) -> None:
 
 @fleet.command("show")
 @fleet_id_option
-@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@_json_flag
 @click.pass_context
 def fleet_show(ctx: click.Context, as_json: bool) -> None:
     """Show details of a single fleet."""
@@ -90,7 +96,7 @@ def fleet_show(ctx: click.Context, as_json: bool) -> None:
     if result is None:
         raise click.ClickException(f"fleet '{fleet_id}' not found.")
 
-    if as_json or ctx.obj["json_output"]:
+    if _wants_json(ctx, as_json):
         click.echo(output.format_json(result))
     else:
         lines = [

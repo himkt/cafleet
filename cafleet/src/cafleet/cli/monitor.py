@@ -72,33 +72,8 @@ def monitor_status(ctx: click.Context) -> None:
     _require_live_fleet(fleet_id)
 
     now = datetime.now(UTC)
-    row = broker.read_monitor_runtime(fleet_id)
-    if row is None or not broker.monitor_is_live(fleet_id, now):
-        # Not live (no row, or a stale/cleared heartbeat): the process fields
-        # are null — a stale row never reports a lingering pid or start time
-        # (matches GET /api/monitor for WebUI/CLI parity).
-        runtime = {
-            "running": False,
-            "pid": None,
-            "tick_seconds": row["tick_seconds"] if row is not None else None,
-            "last_tick_at": None,
-            "last_tick_age_seconds": None,
-            "started_at": None,
-        }
-    else:
-        age = None
-        if row["last_tick_at"] is not None:
-            age = int(
-                (now - datetime.fromisoformat(row["last_tick_at"])).total_seconds()
-            )
-        runtime = {
-            "running": True,
-            "pid": row["pid"],
-            "tick_seconds": row["tick_seconds"],
-            "last_tick_at": row["last_tick_at"],
-            "last_tick_age_seconds": age,
-            "started_at": row["started_at"],
-        }
+    # matches GET /api/monitor for WebUI/CLI parity (one `now` for runtime + agents).
+    runtime = broker.monitor_runtime_payload(fleet_id, now)
 
     agents = []
     for t in broker.list_monitor_targets(fleet_id):

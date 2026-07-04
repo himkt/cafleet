@@ -87,10 +87,6 @@ class Multiplexer(Protocol):
         """
         ...
 
-    def pane_exists(self, *, target_pane_id: str) -> bool:
-        """Return True iff ``target_pane_id`` is currently alive."""
-        ...
-
     def list_pane_ids(self) -> set[str]:
         """Return the set of every live pane id across the multiplexer server.
 

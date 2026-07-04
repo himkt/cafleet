@@ -10,10 +10,8 @@ from click.testing import CliRunner
 
 from cafleet import config
 from cafleet.cli import cli
-from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
 
-_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 _TMUX_PANE_VALUE = "%0"
 
 RUNTIME_VERSION = importlib.metadata.version("cafleet")
@@ -28,11 +26,6 @@ def runner():
 
 
 @pytest.fixture(autouse=True)
-def _autouse_reset_engine(_reset_engine_singletons):
-    pass
-
-
-@pytest.fixture(autouse=True)
 def registry_db(tmp_path, monkeypatch):
     """Redirect the registry at a temp SQLite so no test touches the real DB."""
     db_path = tmp_path / "registry" / "cafleet.db"
@@ -43,13 +36,9 @@ def registry_db(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def mock_tmux_ok(monkeypatch):
+def mock_tmux_ok(monkeypatch, _mock_tmux_for_fleet_create):
     monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
     monkeypatch.setenv("TMUX_PANE", _TMUX_PANE_VALUE)
-    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", lambda self: None)
-    monkeypatch.setattr(
-        TmuxMultiplexer, "context_discovery", lambda self: _FAKE_DIRECTOR_CTX
-    )
 
 
 def _init_schema():

@@ -35,11 +35,6 @@ FLEET_SCOPED_INVOCATIONS = [
 
 
 @pytest.fixture(autouse=True)
-def _autouse_reset_engine(_reset_engine_singletons):
-    pass
-
-
-@pytest.fixture(autouse=True)
 def registry_db(tmp_path, monkeypatch):
     """Redirect the registry at a temp SQLite so no test touches the real DB."""
     db_path = tmp_path / "registry" / "cafleet.db"

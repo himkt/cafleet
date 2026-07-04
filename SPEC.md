@@ -364,13 +364,12 @@ unified:
   - `get_agent` returns a **four-value** `kind` — `director` (derived: the agent
     is the fleet's root Director), `administrator` (card marks an administrator),
     `monitor` (card marks a monitoring member), else `member`.
-  - `list_agents` surfaces **no** `kind` at all.
   - `list_fleet_agents` collapses to a **two-value** discriminator — the literal
     `ADMINISTRATOR_KIND` when the card marks an administrator, else the literal
     `"user"`; the `monitoring-member` kind is not surfaced here.
-- **Internal predicates:** `is_administrator(card)` / `is_monitoring_member(card)`
-  parse the JSON and compare `$.cafleet.kind`; both return false on
-  absent/empty/malformed-JSON (a deliberate non-match, not an error mask).
+- **Internal predicates:** `is_administrator(card)` parses the JSON and compares
+  `$.cafleet.kind`; it returns false on absent/empty/malformed-JSON (a deliberate
+  non-match, not an error mask).
 
 ### 5.5 Nullable `to_agent_id` (resolved)
 
@@ -512,13 +511,12 @@ during message delivery (§6.5) and one process-liveness probe (signal-0).
 
 #### Kind predicates, constants, and intervals
 
-`is_administrator(card)` and `is_monitoring_member(card)` parse
-`agent_card_json`, read `$.cafleet.kind`, and compare to their kind constant.
-Absent / null / empty / malformed-JSON / non-object `cafleet` value → non-match
-(`false`) — a deliberate, documented non-match, not an error mask. How the
-per-function broker projections surface the kind (`get_agent`'s four values,
-`list_agents`'s none, `list_fleet_agents`'s two-value `ADMINISTRATOR_KIND` vs
-`"user"` collapse) is detailed in §5.4.
+`is_administrator(card)` parses `agent_card_json`, reads `$.cafleet.kind`, and
+compares to its kind constant. Absent / null / empty / malformed-JSON /
+non-object `cafleet` value → non-match (`false`) — a deliberate, documented
+non-match, not an error mask. How the per-function broker projections surface
+the kind (`get_agent`'s four values, `list_fleet_agents`'s two-value
+`ADMINISTRATOR_KIND` vs `"user"` collapse) is detailed in §5.4.
 
 - `ADMINISTRATOR_KIND = "builtin-administrator"`,
   `MONITORING_MEMBER_KIND = "monitoring-member"`.
@@ -595,8 +593,6 @@ per-function broker projections surface the kind (`get_agent`'s four values,
   values: `director` (derived: `agent_id == fleets.director_agent_id`),
   `administrator` (the card marks an administrator), `monitor` (the card marks
   a monitoring member), else `member`; `placement` is None if absent.
-- **`list_agents(fleet_id)`** — `{agent_id, name, description, status,
-  registered_at}` per **active** agent; `status` is hardcoded `"active"`.
 - **`deregister_agent(agent_id)`** — soft-delete one agent + drop placement +
   monitor row. If the agent is the root Director of any fleet → **application
   error (exit 1)** `cannot deregister the root Director; use 'cafleet fleet
@@ -734,8 +730,7 @@ A "member" is an agent joined to its placement, excluding the root Director.
   the supplied (non-null) fields change (`enabled` stored as 0/1). Returns the
   updated config.
 - **`record_pings(agent_ids, when)`** — empty list → no-op (no transaction);
-  else set `last_ping_at = when` for all listed configs. **`record_ping`** is a
-  thin wrapper over `record_pings([agent_id], when)`.
+  else set `last_ping_at = when` for all listed configs.
 - **`list_monitor_targets(fleet_id)`** — one row per **active, enrolled** agent
   (the watched set; the monitoring member is excluded by the monitor_config
   join). Each row: `{agent_id, name, is_director, pane_id, interval_seconds,
@@ -758,11 +753,10 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
   claim the slot (the SQLite write lock serializes concurrent claims). No row →
   insert and return `true`; row exists and **live** → return `false`; row exists
   but **stale** → overwrite and return `true` (reclaim).
-- **`heartbeat_monitor_runtime(fleet_id, pid, when)`** — update `pid` and
-  `last_tick_at = when` **only where the current pid equals the caller's pid**;
-  returns `true` iff exactly one row matched. **Ownership-checked** — `false`
-  when the slot was reclaimed; that `false` is the displaced monitor's
-  self-terminate signal.
+- **`heartbeat_monitor_runtime(fleet_id, pid, when)`** — update `last_tick_at =
+  when` **only where the current pid equals the caller's pid**; returns `true`
+  iff exactly one row matched. **Ownership-checked** — `false` when the slot was
+  reclaimed; that `false` is the displaced monitor's self-terminate signal.
 - **`clear_monitor_runtime(fleet_id, pid)`** — null the slot's `pid` /
   `started_at` / `last_tick_at` **only where the current pid equals the
   caller's pid**. **Ownership-checked** → a non-owner clear is a no-op, so a
@@ -771,6 +765,11 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
   last_tick_at, tick_seconds}` or None.
 - **`monitor_is_live(fleet_id, now)`** — `false` if no row, else `_is_live`. An
   advisory pre-check for `monitor start`; the atomic claim is authoritative.
+- **`monitor_runtime_payload(fleet_id, now)`** — the runtime-liveness dict shared
+  by `cafleet monitor status` and `GET /api/monitor`: `{running, pid,
+  tick_seconds, last_tick_at, last_tick_age_seconds, started_at}`, with the
+  process fields null when the monitor is not live (no row, or a stale/cleared
+  heartbeat).
 - **`delete_fleet_monitor_rows(session, fleet_id)`** /
   **`delete_agent_monitor_row(session, agent_id)`** (in caller's transaction) —
   in-transaction cascade deletes: the fleet variant deletes the fleet's
@@ -786,8 +785,8 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
 - **Tasks are never deleted** — audit history is permanent.
 - Deregistered agents remain visible via `verify_agent_fleet`,
   `get_agent_names` (both status-agnostic), and `list_fleet_agents` (when they
-  still own tasks); they are hidden from `get_agent`, `list_agents`,
-  `list_members` (active-only).
+  still own tasks); they are hidden from `get_agent`, `list_members`
+  (active-only).
 
 #### Contract error strings → exception class → exit code
 
@@ -908,10 +907,9 @@ multi-line bodies use `--text-file` (or `-` stdin) to bypass the shell's
 #### The `client_command` wrapper (message group)
 
 The `message` group routes every leaf handler (which returns a
-broker result) through one shared wrapper, configured per command by three
-switches: `requires_agent_fleet`; a text renderer (optional);
-`truncates_task_text` (route through task truncation + task-list rendering, call
-the renderer with `full`). Per invocation, in order:
+broker result) through one shared wrapper, configured per command by a
+**required** text renderer and one switch, `requires_agent_fleet`. Per
+invocation, in order:
 
 1. **Fleet read** — read `fleet_id` from context (the required `--fleet-id`
    option populated it).
@@ -920,10 +918,10 @@ the renderer with `full`). Per invocation, in order:
    is not a fleet member → application error (exit 1) `agent <agent_id> is not a
    member of fleet <fleet_id>.`. **Runs before the handler body.**
 3. **Handler call.**
-4. **Render branch** — truncate-task / pass-through.
-5. **Emit branch** — if global `--json`, emit compact JSON; else if a text
-   renderer is configured, call it (`truncates_task_text` passes `full`); else
-   emit JSON.
+4. **Render** — route the result through task truncation + task-list rendering
+   (with `full`).
+5. **Emit branch** — if global `--json`, emit compact JSON; else call the text
+   renderer with `full`.
 6. **Exception wrap** — re-raise an application/usage error unchanged; wrap any
    other exception as an application error (exit 1) carrying its message.
 
@@ -1460,7 +1458,7 @@ The split is load-bearing: formatters call render functions internally (e.g.
 call formatters.
 
 **Render functions:** `strip_ansi(text)`; `format_json(data)`;
-`truncate_text(value, full, limit)`; `truncate_task_text(result, full, limit)`
+`truncate_text(value, full, limit)`; `truncate_task_text(result, full)`
 (in-place); `render_task(task, full)` → `{id, from, ts, text, kind?, origin?}`;
 `render_tasks_in_result(result, full)` (non-mutating, unwraps `{task: …}`
 envelopes and flat task dicts).
@@ -1469,8 +1467,8 @@ envelopes and flat task dicts).
 (joins formatted items with one blank line between, `empty_msg` when empty —
 not numbered); `format_agent`; `format_fleet_create`; `format_member`;
 `format_member_list`; `format_member_list_activity`; `format_monitor_status`;
-`format_monitor_config`. Private contract helpers: an agent-id stringifier; an
-ISO→`HH:MM:SS` extractor; an idle-seconds humanizer; a ping-age humanizer.
+`format_monitor_config`. Private contract helpers: an ISO→`HH:MM:SS` extractor;
+an idle-seconds humanizer; a ping-age humanizer.
 
 #### Truncation rules
 
@@ -1479,8 +1477,10 @@ ISO→`HH:MM:SS` extractor; an idle-seconds humanizer; a ping-age humanizer.
   one-codepoint `…` (U+2026) suffix — so the result is `limit + 1` codepoints.
 - `truncate_text` passes the value through unchanged when `full` is set, the
   value is null, or its codepoint length is `<= limit`. Null returns null.
-- The effective limit is the explicit `limit` argument when given, else
-  `max_text_len` (default `200`, from config) — the **only** config dependency.
+- The effective limit is `truncate_text`'s explicit `limit` argument when given,
+  else `max_text_len` (default `200`, from config) — the **only** config
+  dependency. `truncate_task_text` takes no `limit` and always uses
+  `max_text_len`.
 - The **agent-description limit is a hardcoded literal `60`**, independent of
   `max_text_len`; `format_agent` verbose applies it.
 
@@ -1735,22 +1735,21 @@ method builds is given verbatim; preserve subcommand, flags, and ordering.
   `"\n"` **only** (not a general line-splitter — must not also split on `\r`, to
   preserve the CLI's CR-defrag), return the last `lines + 1` elements joined with
   `"\n"` (tmux terminates output with `\n`, so this restores the final newline).
-- **`pane_exists(*, target_pane_id) -> bool`** — fail-fast. Whether
-  `target_pane_id` is in `list_pane_ids()`.
 - **`list_pane_ids() -> set`** — fail-fast. `tmux list-panes -a -F "#{pane_id}"`
   with `timeout=5`s; split on whitespace; return the pane-id set. One call
   resolves liveness for every agent in a monitor tick.
 - **`kill_pane(*, target_pane_id, ignore_missing=False)`** — fail-fast. `tmux
   kill-pane -t <target_pane_id>` through the pane-gone-tolerant runner.
 - **`wait_for_pane_gone(*, target_pane_id, timeout=15.0, interval=0.5) ->
-  bool`** — delegates to `poll_until_pane_gone` with a `pane_exists` closure;
-  `true` if the pane disappeared before timeout, `false` on timeout.
+  bool`** — delegates to `poll_until_pane_gone` with a pane-existence closure
+  (whether `target_pane_id` is in `list_pane_ids()`); `true` if the pane
+  disappeared before timeout, `false` on timeout.
 
 #### Fail-fast vs. best-effort split
 
 - **Fail-fast** (surface failures): `ensure_available`, `context_discovery`,
   `split_window`, `select_layout`, `send_exit`, `send_bash_command`,
-  `capture_pane`, `pane_exists`, `list_pane_ids`, `kill_pane`,
+  `capture_pane`, `list_pane_ids`, `kill_pane`,
   `wait_for_pane_gone` (modulo `ignore_missing` pane-gone tolerance on
   `kill_pane` / `send_exit`).
 - **Best-effort boolean** (NEVER raise; `false` on any failure):
@@ -2374,8 +2373,7 @@ diagnostic block (§6.3).
 - `client_command` fleet-gate runs **before** the handler body.
 - `doctor` reads the `TMUX_PANE` environment variable by direct access — an
   error if unset is intentional.
-- `is_administrator`/`is_monitoring_member` return false on malformed JSON (a
-  deliberate non-match).
+- `is_administrator` returns false on malformed JSON (a deliberate non-match).
 - `register_agent` monitoring-member-without-placement raises.
 - The opencode preset refuses to overwrite a non-regular-file target.
 - Broker "exactly one row" invariants raise if the assumption breaks — keep

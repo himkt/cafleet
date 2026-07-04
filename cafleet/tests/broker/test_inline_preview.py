@@ -3,14 +3,9 @@
 import pytest
 
 from cafleet import broker
-from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.multiplexer import tmux as multiplexer_tmux
 from cafleet.multiplexer.tmux import TmuxMultiplexer
-
-
-@pytest.fixture(autouse=True)
-def _autouse_broker(broker_session):
-    return broker_session
+from tests.broker._helpers import _create_fleet, _member_placement
 
 
 @pytest.fixture
@@ -37,26 +32,12 @@ def poll_trigger_call_count(monkeypatch):
     return counter
 
 
-def _create_fleet():
-    return broker.create_fleet(
-        label=None,
-        director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
-        coding_agent="claude",
-    )
-
-
 def _register_member(fleet_id, name, director_id, pane):
     return broker.register_agent(
         fleet_id=fleet_id,
         name=name,
         description=f"{name} description",
-        placement={
-            "director_agent_id": director_id,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": pane,
-            "coding_agent": "claude",
-        },
+        placement=_member_placement(director_id, pane),
     )
 
 

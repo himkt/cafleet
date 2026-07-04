@@ -94,6 +94,28 @@ def _send_literal_then_enter(
     )
 
 
+def _best_effort_send(
+    *, target_pane_id: str, payload: str, esc_first: bool = False
+) -> bool:
+    """Best-effort keystroke: skip when tmux is absent, map ``TmuxError`` to ``False``.
+
+    Shared by ``send_poll_trigger`` / ``send_wake_trigger`` / ``send_inline_preview``;
+    each supplies its own ``payload`` and ``esc_first`` and keeps the ``timeout=5``.
+    """
+    if shutil.which("tmux") is None:
+        return False
+    try:
+        _send_literal_then_enter(
+            target_pane_id=target_pane_id,
+            payload=payload,
+            timeout=5,
+            esc_first=esc_first,
+        )
+    except TmuxError:
+        return False
+    return True
+
+
 def _sanitize_wake_name(name: str) -> str:
     """Neutralize the sequences in a user-controlled agent name that would break
     the wake nudge's guarantees, before the name is interpolated into the payload:
@@ -210,19 +232,10 @@ class TmuxMultiplexer:
         the trailing ``Enter``. The Director's manual ``cafleet member ping``
         reuses this helper, inheriting the safeguard for free.
         """
-        if shutil.which("tmux") is None:
-            return False
         payload = f"cafleet message poll --fleet-id {fleet_id} --agent-id {agent_id}"
-        try:
-            _send_literal_then_enter(
-                target_pane_id=target_pane_id,
-                payload=payload,
-                timeout=5,
-                esc_first=True,
-            )
-        except TmuxError:
-            return False
-        return True
+        return _best_effort_send(
+            target_pane_id=target_pane_id, payload=payload, esc_first=True
+        )
 
     def send_wake_trigger(
         self, *, target_pane_id: str, due_agents: list[dict], director_agent_id: int
@@ -243,8 +256,6 @@ class TmuxMultiplexer:
         payload carries no backtick and no ``$(…)`` command substitution, so it
         is safe in the monitoring member's coding-agent input box.
         """
-        if shutil.which("tmux") is None:
-            return False
         noun = "agent" if len(due_agents) == 1 else "agents"
         due_list = ", ".join(
             f"{'director' if t['is_director'] else 'member'} {t['agent_id']} "
@@ -258,15 +269,7 @@ class TmuxMultiplexer:
             "progressing/stalled; re-engage the Director via cafleet member nudge "
             "when it is idle with un-acked work or any due agent looks stalled."
         )
-        try:
-            _send_literal_then_enter(
-                target_pane_id=target_pane_id,
-                payload=payload,
-                timeout=5,
-            )
-        except TmuxError:
-            return False
-        return True
+        return _best_effort_send(target_pane_id=target_pane_id, payload=payload)
 
     def send_inline_preview(
         self,
@@ -294,16 +297,9 @@ class TmuxMultiplexer:
         # cosmetic, not submit-safety.
         sanitized_text = text.replace("\r\n", "⏎").replace("\n", "⏎").replace("\r", "⏎")
         payload = f"[cafleet msg {task_id} from {sender_id} {ts}]\n{sanitized_text}"
-        try:
-            _send_literal_then_enter(
-                target_pane_id=target_pane_id,
-                payload=payload,
-                timeout=5,
-                esc_first=True,
-            )
-        except TmuxError:
-            return False
-        return True
+        return _best_effort_send(
+            target_pane_id=target_pane_id, payload=payload, esc_first=True
+        )
 
     def send_bash_command(self, *, target_pane_id: str, command: str) -> None:
         """Send ``! <command>`` + Enter, routing shell via the coding agent's ``!`` shortcut."""

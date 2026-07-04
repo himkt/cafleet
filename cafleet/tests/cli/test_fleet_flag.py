@@ -8,27 +8,7 @@ from click.testing import CliRunner
 
 from cafleet import broker, config
 from cafleet.cli import cli
-from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from tests._helpers import _init_registry
-
-
-@pytest.fixture(autouse=True)
-def _autouse_reset_engine(_reset_engine_singletons):
-    pass
-
-
-@pytest.fixture(autouse=True)
-def _mock_tmux_for_fleet_create(monkeypatch):
-    """Let CliRunner-driven ``fleet create`` succeed without a real tmux pane."""
-    ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
-        lambda self: None,
-    )
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery",
-        lambda self: ctx,
-    )
 
 
 @pytest.fixture
@@ -145,6 +125,7 @@ def test_fleet_id_flag_flows_into_broker__fleet_id_not_read_from_environment(
     assert result.exit_code == 1, result.output
 
 
+@pytest.mark.usefixtures("_mock_tmux_for_fleet_create")
 def test_subcommands_that_do_not_require_fleet_id__fleet_create_without_fleet_id(
     db_runner,
 ):
@@ -201,21 +182,13 @@ def _fetch_agent_status(db_file, agent_id: str) -> tuple[str, str | None]:
     return row[0], row[1]
 
 
+@pytest.mark.usefixtures("_mock_tmux_for_fleet_create")
 def test_deregister_administrator_cli_guard__cli_deregister_admin_exits_nonzero(
-    tmp_path, monkeypatch
+    db_runner,
 ):
-    db_file = tmp_path / "cafleet.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_registry()
+    fleet_id, admin_id = _create_fleet_via_cli(db_runner)
 
-    fleet_id, admin_id = _create_fleet_via_cli(runner)
-
-    result = runner.invoke(
+    result = db_runner.invoke(
         cli,
         [
             "member",
@@ -229,21 +202,13 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_exits_nonzero(
     assert result.exit_code == 1, result.output
 
 
+@pytest.mark.usefixtures("_mock_tmux_for_fleet_create")
 def test_deregister_administrator_cli_guard__cli_deregister_admin_message_is_user_friendly(
-    tmp_path, monkeypatch
+    db_runner,
 ):
-    db_file = tmp_path / "cafleet.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_registry()
+    fleet_id, admin_id = _create_fleet_via_cli(db_runner)
 
-    fleet_id, admin_id = _create_fleet_via_cli(runner)
-
-    result = runner.invoke(
+    result = db_runner.invoke(
         cli,
         [
             "member",
@@ -259,22 +224,14 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_message_is_use
     assert "Traceback" not in out
 
 
+@pytest.mark.usefixtures("_mock_tmux_for_fleet_create")
 def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_nonzero(
-    tmp_path, monkeypatch
+    db_runner,
 ):
-    db_file = tmp_path / "cafleet.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_registry()
-
-    fleet_id, _admin_id = _create_fleet_via_cli(runner)
+    fleet_id, _admin_id = _create_fleet_via_cli(db_runner)
     bogus_agent_id = 999999
 
-    result = runner.invoke(
+    result = db_runner.invoke(
         cli,
         [
             "member",
@@ -289,21 +246,14 @@ def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_
     assert f"Agent {bogus_agent_id} not found" in (result.output or "")
 
 
+@pytest.mark.usefixtures("_mock_tmux_for_fleet_create")
 def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_active(
-    tmp_path, monkeypatch
+    db_runner, tmp_path
 ):
     db_file = tmp_path / "cafleet.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    _init_registry()
+    fleet_id, admin_id = _create_fleet_via_cli(db_runner)
 
-    fleet_id, admin_id = _create_fleet_via_cli(runner)
-
-    runner.invoke(
+    db_runner.invoke(
         cli,
         [
             "member",

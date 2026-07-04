@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Activity, Inbox, X } from "lucide-react";
 import { Tabs } from "radix-ui";
 import type { Agent, TimelineMessage } from "../types";
 import { fetchInbox, fetchSent, updateAgentMonitor } from "../api";
+import { useRefreshKeyLoad } from "../hooks/useRefreshKeyLoad";
+import { formatDateTime } from "../format";
 import AgentAvatar from "./AgentAvatar";
 import EmptyState from "./EmptyState";
 import Skeleton from "./Skeleton";
@@ -27,12 +29,6 @@ function StatusChip({ status }: { status: TimelineMessage["status"] }) {
       {chip.label}
     </span>
   );
-}
-
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())} · ${d.toLocaleDateString()}`;
 }
 
 function MessageList({
@@ -228,7 +224,6 @@ export default function AgentDetail({
   const [inbox, setInbox] = useState<TimelineMessage[]>([]);
   const [sent, setSent] = useState<TimelineMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const inFlightRef = useRef(false);
 
   useEffect(() => {
     setInbox([]);
@@ -236,12 +231,11 @@ export default function AgentDetail({
     setLoading(true);
   }, [agent.agent_id]);
 
-  // Mirrors Timeline's pattern: refetches ride Dashboard's refreshKey bumps
-  // (5 s poll / manual Refresh / post-send) instead of a second polling loop;
-  // the in-flight guard absorbs bumps landing during a slow fetch.
+  // Refetches ride Dashboard's refreshKey bumps (5 s poll / manual Refresh /
+  // post-send) via useRefreshKeyLoad instead of a second polling loop; the
+  // hook's in-flight guard absorbs bumps landing during a slow fetch, and its
+  // `load` dep triggers the reload when the agent switches.
   const load = useCallback(async () => {
-    if (inFlightRef.current) return;
-    inFlightRef.current = true;
     try {
       const [inboxData, sentData] = await Promise.all([
         fetchInbox(agent.agent_id),
@@ -255,13 +249,10 @@ export default function AgentDetail({
       /* swallow — keep last-known lists; next bump re-attempts */
     } finally {
       setLoading(false);
-      inFlightRef.current = false;
     }
   }, [agent.agent_id]);
 
-  useEffect(() => {
-    void load();
-  }, [refreshKey, load]);
+  useRefreshKeyLoad(load, refreshKey);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

@@ -16,7 +16,7 @@ Supervision happens over the CAFleet message broker: the Director `cafleet messa
 
 **Long or multi-line bodies.** `message send` / `message broadcast` / `member nudge` accept a `--text-file <path>` (or `--text-file -` for stdin) alternative to inline `--text`. A long or multi-line body MUST be passed via `--text-file`, never inline `--text`, so it never lands on the command line and hits the shell's `ARG_MAX` limit. Short one-line bodies stay fine inline with `--text`.
 
-**Facilitation cue (load-bearing).** The monitor loop does **not** wake the Director (it wakes only the monitoring member — firing whenever a watched agent is due on its own interval; see § The monitor heartbeat). The Director is re-engaged on demand: by the monitoring member's idle nudge (`cafleet member nudge`, which persists an ACKable broker task **and** fires the hardened, `Esc`-safeguarded inline preview, when the monitoring member finds the Director idle), and by the broker's inline-preview keystroke on every inbound `cafleet message send`. **Treat each such re-engagement as the cue to run the entire 5-step facilitation loop** (poll → ACK → dispatch → health-check → escalate), NOT to read the inbox and stop.
+**Facilitation cue (load-bearing).** The monitor loop does **not** wake the Director (it wakes only the monitoring member — firing whenever a watched agent is due on its own interval; see § The monitor heartbeat). When the Director is re-engaged on demand (§ The monitor heartbeat defines the two channels), **treat each such re-engagement as the cue to run the entire 5-step facilitation loop** (poll → ACK → dispatch → health-check → escalate), NOT to read the inbox and stop.
 
 The Director never polls a member's pane via raw `tmux`. Inspection is via `cafleet member capture`; write is via `cafleet member exec` / `cafleet member ping`. See [`SKILL.md`](../SKILL.md) and [`reference/cli.md`](cli.md) for the canonical command surface.
 
@@ -43,7 +43,7 @@ A member that has gone quiet is surfaced to the Director by the monitoring membe
 
 ## The monitoring member
 
-The monitoring member is a single, dedicated coding-agent member — spawned **first** in the fleet with `cafleet member create --role monitor --model {monitor_model}` — that owns the heartbeat and applies LLM judgment to the watched agents' state (the Director **and** each freshly-due member). `--role monitor` sets `agent_card_json.cafleet.kind == "monitoring-member"`; the monitoring member is **not** enrolled in `monitor_config` — it is the watcher, located by that kind marker (`find_monitoring_member`), and carries no interval of its own. Only one is allowed per fleet (a second `--role monitor` spawn is rejected). It is the **one** process that runs `cafleet monitor start` — the Director no longer runs the monitor itself.
+The monitoring member is a single, dedicated coding-agent member — spawned **first** in the fleet with `cafleet member create --role monitor --model {monitor_model}` — that owns the heartbeat and applies LLM judgment to the watched agents' state (the Director **and** each freshly-due member). `--role monitor` sets `agent_card_json.cafleet.kind == "monitoring-member"`; the monitoring member is **not** enrolled in `monitor_config` — it is the watcher, located by that kind marker (`find_monitoring_member`), and carries no interval of its own. Only one is allowed per fleet (a second `--role monitor` spawn is rejected). It is the **one** process that runs `cafleet monitor start` (the Director never runs it — see § Spawn Protocol).
 
 The monitoring member's own first-person routine — its Startup (the `ready: monitor live` gate), the on-wake capture-classify-reengage steps, the wake-nudge it consumes, Teardown, and its canonical spawn prompt (the [`reference/director.md`](director.md) skeleton plus a per-role delta) — lives in [`roles/monitor.md`](../roles/monitor.md).
 
@@ -110,11 +110,11 @@ The active turn consumes inputs that have already arrived and dispatches what is
 
 On every supervision tick — whether fired by the monitoring member's on-demand idle nudge, by inbound work arriving via the broker's inline-preview keystroke, or executed inline within an active turn — the Director runs these five steps in order. The goal is to **facilitate the team in completing tasks**, not merely to detect stalls.
 
-1. **Poll inbox.** `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>` returns only the un-acked (`input_required`) deliveries; ACKing each one (step 2) consumes it, so the next tick's poll surfaces only what has arrived since.
+1. **Poll inbox.** `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>` returns only the un-acked (`input_required`) deliveries; ACKing each one (step 2) consumes it — the poll semantics are canonical at § Stall Response → Stage 1.
 2. **ACK every message** that requires no further action: `cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>`. Unacknowledged tasks accumulate in the Director's inbox and obscure new arrivals.
 3. **Dispatch queued work.** If a member is idle and inputs are available (review comments to route, the next implementation step in a design doc, reviewer feedback waiting at the Drafter, a teammate reply waiting to be acted on), send the instruction immediately via `cafleet message send`. **Do not wait for a fresh "go" from the user** — the user's original authorization persists across ticks; see § Authorization-Scope Guard.
 4. **Run the health-check sequence** for any member that has not reported recent progress — cheapest, least-intrusive check first: (a) `cafleet member list` (enumerate members + pane status); (b) `cafleet message poll` (progress reports / help requests); (c) for a member silent since the last check, `cafleet member capture` to inspect it (a decision-prompt frame → see Stall Response for the decision-relay escape hatch); (d) `cafleet message send` a specific instruction to any stalled/idle member; (e) once all members report completion, tell the user "All deliverables are ready for review."
-5. **Escalate** to the user via {decision_surface} after two nudges produce no progress, or whenever a queued action requires a *new* user decision (option choice, risky/remote-visible operation, ambiguous teammate question). Do **not** emit passive-hold messages like `Skipping. Holding for go.` — the tick is a health check, not a permission renewal.
+5. **Escalate** to the user via {decision_surface} whenever a queued action requires a *new* user decision (option choice, risky/remote-visible operation, ambiguous teammate question); for the stall path (two nudges with no progress) see § Stall Response → Escalation. Do **not** emit passive-hold messages like `Skipping. Holding for go.` — the tick is a health check, not a permission renewal.
 
 ## Monitor Lifecycle
 
@@ -178,7 +178,7 @@ CAFleet members never talk to the user directly — the Director relays. This is
 
 ## Cleanup Protocol
 
-Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol (first-out): stop the monitor's `monitor start` task FIRST → `cafleet member delete` the monitoring member → each ordinary member → verify the roster is empty → `cafleet fleet delete --fleet-id <fleet-id>` → `cafleet fleet list`. The full stop mechanism (no `cafleet monitor stop`; message the monitoring member to stop the task) and the race rationale are canonical there.
+Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol (first-out); the full ordering, the stop mechanism (no `cafleet monitor stop`; message the monitoring member to stop the task), and the race rationale are canonical there.
 
 ## Quick Reference
 

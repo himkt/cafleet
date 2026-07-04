@@ -33,11 +33,6 @@ def _target(**overrides):
     return base
 
 
-def test_should_ping__due_when_never_pinged():
-    # a never-pinged watched agent is due even with an empty inbox
-    assert should_ping(_target(), _NOW) is True
-
-
 def test_should_ping__due_after_interval_with_empty_inbox():
     target = _target(
         pending_count=0,

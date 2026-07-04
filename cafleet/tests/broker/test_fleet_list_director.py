@@ -15,11 +15,6 @@ from cafleet.cli import cli
 from tests.broker._helpers import _create_fleet
 
 
-@pytest.fixture(autouse=True)
-def _autouse_broker(broker_session):
-    return broker_session
-
-
 @pytest.fixture
 def runner():
     return CliRunner()

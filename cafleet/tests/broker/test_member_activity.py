@@ -7,11 +7,6 @@ from cafleet import broker
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 
-@pytest.fixture(autouse=True)
-def _autouse_broker(broker_session):
-    return broker_session
-
-
 def _bootstrap_fleet():
     info = broker.create_fleet(
         label="activity-test",

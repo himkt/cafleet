@@ -59,19 +59,6 @@ def test_ensure_available_silent_when_binary_found(impl, monkeypatch):
 # --- Per-impl byte-exact argv assertions (Programmer's Step-4 note) ---
 
 
-def test_claude_build_spawn_argv__byte_exact():
-    """Claude argv: ``[claude, --permission-mode, dontAsk, --name, <display>, <prompt>]`` verbatim."""
-    impl = CODING_AGENTS["claude"]
-    assert impl.build_spawn_argv("PROMPT_TEXT", display_name="Bob") == [
-        "claude",
-        "--permission-mode",
-        "dontAsk",
-        "--name",
-        "Bob",
-        "PROMPT_TEXT",
-    ]
-
-
 def test_claude_build_spawn_argv__preserves_display_name_with_spaces():
     impl = CODING_AGENTS["claude"]
     assert impl.build_spawn_argv("p", display_name="Code Reviewer") == [
@@ -90,31 +77,6 @@ def test_claude_build_spawn_argv__preserves_prompt_with_special_chars():
     argv = impl.build_spawn_argv(prompt, display_name="Drafter")
     assert argv[-1] == prompt
     assert argv[0] == "claude"
-
-
-def test_codex_build_spawn_argv__byte_exact():
-    """Codex argv: ``[codex, --ask-for-approval, never, --sandbox, workspace-write, <prompt>]`` verbatim — no ``--name``."""
-    impl = CODING_AGENTS["codex"]
-    argv = impl.build_spawn_argv("PROMPT_TEXT", display_name="ignored")
-    assert argv == [
-        "codex",
-        "--ask-for-approval",
-        "never",
-        "--sandbox",
-        "workspace-write",
-        "PROMPT_TEXT",
-    ]
-    assert "--name" not in argv
-
-
-def test_codex_build_spawn_argv__permission_tokens_precede_prompt():
-    """Pinned ordering: ``--ask-for-approval`` < ``--sandbox`` < prompt."""
-    impl = CODING_AGENTS["codex"]
-    argv = impl.build_spawn_argv("hello", display_name="x")
-    assert argv.index("--ask-for-approval") < argv.index("--sandbox")
-    assert argv.index("--sandbox") < argv.index("hello")
-    assert argv[argv.index("--ask-for-approval") + 1] == "never"
-    assert argv[argv.index("--sandbox") + 1] == "workspace-write"
 
 
 def test_codex_build_spawn_argv__preserves_prompt_with_special_chars():

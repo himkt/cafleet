@@ -30,6 +30,31 @@ def _register_agent(
     )
 
 
+def _member_placement(
+    director_agent_id: int, pane_id: str | None, coding_agent: str = "claude"
+) -> dict:
+    return {
+        "director_agent_id": director_agent_id,
+        "tmux_session": "main",
+        "tmux_window_id": "@3",
+        "tmux_pane_id": pane_id,
+        "coding_agent": coding_agent,
+    }
+
+
+def _register_monitoring_member(
+    fleet: dict, name: str = "watcher", pane_id: str = "%5"
+) -> dict:
+    """The dedicated monitoring member — the unenrolled watcher, located by kind."""
+    return broker.register_agent(
+        fleet_id=fleet["fleet_id"],
+        name=name,
+        description="monitoring member",
+        placement=_member_placement(fleet["director"]["agent_id"], pane_id),
+        kind="monitoring-member",
+    )
+
+
 def _setup_two_agents() -> tuple[int, int, int]:
     fleet = _create_fleet()
     sid = fleet["fleet_id"]

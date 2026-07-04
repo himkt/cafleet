@@ -3,9 +3,9 @@
 import pytest
 
 from cafleet import broker
-from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.webui import api
 from cafleet.webui.api import _format_messages
+from tests.broker._helpers import _create_fleet
 
 
 @pytest.fixture(autouse=True)
@@ -26,13 +26,6 @@ _EXPECTED_KEYS = {
     "origin_task_id",
     "body",
 }
-
-
-def _create_fleet():
-    return broker.create_fleet(
-        director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
-        coding_agent="claude",
-    )
 
 
 def _two_agents():

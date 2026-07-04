@@ -1,4 +1,4 @@
-from cafleet.coding_agent.base import CodingAgent, ensure_binary_on_path
+from cafleet.coding_agent.base import CodingAgent
 from cafleet.coding_agent.claude import ClaudeCodeAgent
 from cafleet.coding_agent.codex import CodexAgent
 from cafleet.coding_agent.opencode import OpencodeAgent
@@ -15,5 +15,4 @@ __all__ = [
     "CodexAgent",
     "CodingAgent",
     "OpencodeAgent",
-    "ensure_binary_on_path",
 ]
