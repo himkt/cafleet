@@ -183,14 +183,20 @@ def test_delete_fleet__unknown_fleet_raises_click_exception():
 
 
 @pytest.mark.parametrize(
-    ("scenario", "expected_substring", "must_not_contain"),
+    ("scenario", "expected_substring", "must_not_contain", "expected_exit_code"),
     [
-        ("soft_deleted_fleet", "is deleted", "not found"),
-        ("unknown_fleet", "not found", None),
+        # Soft-deleted fleet exits 1 (ClickException); unknown fleet stays exit 2
+        # (UsageError) — item 3.3 normalizes only the soft-deleted guard.
+        ("soft_deleted_fleet", "is deleted", "not found", 1),
+        ("unknown_fleet", "not found", None, 2),
     ],
 )
 def test_register_agent__rejects_dead_fleets(
-    director_context, scenario, expected_substring, must_not_contain
+    director_context,
+    scenario,
+    expected_substring,
+    must_not_contain,
+    expected_exit_code,
 ):
     if scenario == "soft_deleted_fleet":
         result = _bootstrap(ctx=director_context)
@@ -199,12 +205,13 @@ def test_register_agent__rejects_dead_fleets(
     else:
         sid = 999999
 
-    with pytest.raises(click.UsageError) as exc_info:
+    with pytest.raises(click.ClickException) as exc_info:
         broker.register_agent(
             fleet_id=sid,
             name="late-comer",
             description="too late",
         )
+    assert exc_info.value.exit_code == expected_exit_code
     msg = str(exc_info.value)
     assert (
         expected_substring in msg.lower()
@@ -240,8 +247,9 @@ def test_deregister_agent__root_director_protected_non_root_unaffected(
     sid = result["fleet_id"]
     director_id = result["director"]["agent_id"]
 
-    with pytest.raises(click.UsageError) as exc_info:
+    with pytest.raises(click.ClickException) as exc_info:
         broker.deregister_agent(director_id)
+    assert exc_info.value.exit_code == 1
     msg = str(exc_info.value)
     assert "cannot deregister the root Director" in msg
     assert "cafleet fleet delete" in msg
