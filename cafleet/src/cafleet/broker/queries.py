@@ -66,7 +66,7 @@ def get_task(fleet_id: int, task_id: int) -> dict:
 
         endpoint_ids = [task_dict["from_agent_id"]]
         to_id = task_dict["to_agent_id"]
-        if to_id:
+        if to_id is not None:
             endpoint_ids.append(to_id)
         in_fleet = session.execute(
             select(

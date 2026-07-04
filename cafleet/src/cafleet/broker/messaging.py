@@ -215,7 +215,7 @@ def broadcast_message(fleet_id: int, agent_id: int, text: str) -> list[dict]:
         summary_dict = {
             "context_id": agent_id,
             "from_agent_id": agent_id,
-            "to_agent_id": 0,
+            "to_agent_id": None,
             "type": "broadcast_summary",
             "created_at": now,
             "status_state": "completed",

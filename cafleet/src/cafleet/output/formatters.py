@@ -36,7 +36,7 @@ def format_task(task: dict, *, full: bool = False) -> str:
         f"  state: {task['status_state']}",
         f"  from:  {task['from_agent_id']}",
     ]
-    if task.get("to_agent_id"):
+    if task.get("to_agent_id") is not None:
         lines.append(f"  to:    {task['to_agent_id']}")
     lines.append(f"  type:  {task['type']}")
     if task.get("text"):

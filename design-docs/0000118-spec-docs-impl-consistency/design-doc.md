@@ -1,7 +1,7 @@
 # SPEC.md / docs vs Implementation Consistency Reconciliation
 
 **Status**: Approved
-**Progress**: 25/44 tasks complete
+**Progress**: 29/44 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -201,10 +201,10 @@ makes them first-class. Two reconciled surfaces can plausibly appear there and M
 
 ### Step 3: Code fix — `to_agent_id` nullable + NULL sentinel (1.1 + 1.2)
 
-- [ ] Test: broadcast-summary row persists `to_agent_id = NULL`; `--json` emits `null` <!-- completed: -->
-- [ ] Test: `to:` surfacing (`queries.py`, `formatters.py`) hides on `None`, shows on a real id <!-- completed: -->
-- [ ] `db/models.py:73` → `nullable=True`; new Alembic migration (next rev after head) <!-- completed: -->
-- [ ] `broker/messaging.py:218` → write `None`; `queries.py:68-70` + `formatters.py:39-40` → `is None`/`IS NULL` <!-- completed: -->
+- [x] Test: broadcast-summary row persists `to_agent_id = NULL`; `--json` emits `null` <!-- completed: 2026-07-04T07:34 -->
+- [x] Test: `to:` surfacing (`queries.py`, `formatters.py`) hides on `None`, shows on a real id <!-- completed: 2026-07-04T07:34 -->
+- [x] `db/models.py:73` → `nullable=True`; new Alembic migration (next rev after head) <!-- completed: 2026-07-04T07:34 -->
+- [x] `broker/messaging.py:218` → write `None`; `queries.py:68-70` + `formatters.py:39-40` → `is None`/`IS NULL` <!-- completed: 2026-07-04T07:34 -->
 
 ### Step 4: Code fix — broadcast `recipients` / `delivered` keys (2.1)
 
