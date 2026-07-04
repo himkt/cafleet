@@ -110,3 +110,11 @@ class MonitorRuntime(Base):
     tick_seconds: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="5"
     )
+
+
+class SkillInstall(Base):
+    __tablename__ = "skill_installs"
+
+    coding_agent: Mapped[str] = mapped_column(String, primary_key=True)
+    cafleet_version: Mapped[str] = mapped_column(String, nullable=False)
+    installed_at: Mapped[str] = mapped_column(String, nullable=False)

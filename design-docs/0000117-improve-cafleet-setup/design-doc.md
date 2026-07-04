@@ -1,7 +1,7 @@
 # Improve `cafleet setup` — version recording, `setup db` / `setup skill` subcommands, `db` group removal
 
 **Status**: Approved
-**Progress**: 7/22 tasks complete
+**Progress**: 11/22 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -33,7 +33,7 @@ Design 0000111 (Status: Complete) already rewrote SPEC.md §8/§11 and docs/ to 
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| 1 | Complete the 0000111 hard cut: delete Alembic entirely; `setup db` runs the single-baseline metadata create. | User-confirmed (Q1). SPEC/docs already describe this world; the code catches up. Existing DBs are not migrated (unchanged 0000111 stance): delete the DB file and re-run `cafleet setup`. |
+| 1 | Complete the 0000111 hard cut: delete Alembic entirely; `setup db` runs the single-baseline metadata create. | User-confirmed (Q1). SPEC/docs already describe this world; the code catches up. Existing data is preserved on upgrade (user-revised post-approval): the baseline create is additive — `CREATE TABLE IF NOT EXISTS` adds missing tables and never alters or drops existing ones — so a DB at the current released schema keeps all fleets, agents, and message history; `setup db` simply adds `skill_installs`. Only a DB whose existing tables predate the current baseline shape cannot be repaired additively; deleting the DB file and re-running `cafleet setup` is the last-resort fallback for those. |
 | 2 | New table `skill_installs`, one row per coding-agent home: `coding_agent` (PK), `cafleet_version`, `installed_at`. Minimal — no extra columns. | User-confirmed (Q2). `setup skill --agent codex` can run at a different time/version than the claude install, so per-home granularity is required to detect a partial-stale state. |
 | 3 | `--agent` is removed from bare `cafleet setup` and lives only on `cafleet setup skill`. Bare `setup` targets **every detected** coding-agent home (the existing auto-detect: each home whose parent dir exists); zero detected homes → the skills half fails as today. | User-requested surface change (Q2 addendum: bare setup = all coding agents, `--agent` = single-home targeting on `setup skill`). "All" is realized as all *detected* homes: unconditionally creating `~/.codex` / `~/.config/opencode` on a machine without those agents would fabricate homes the auto-detect contract deliberately avoids. |
 | 4 | Version mismatch is a **hard error** on every fleet-scoped command group (`fleet`, `member`, `message`, `monitor`); `doctor` reports the detail; `setup`, `doctor`, and `server` are exempt. | User-picked "error broadly + doctor detail" (Q3). Guarding the four fleet-scoped groups is the broadest surface that still leaves the repair commands (`setup`) and diagnostics (`doctor`) reachable. |
@@ -82,7 +82,7 @@ def create_schema() -> Path:
 ```
 
 - `Base.metadata.create_all` is already exercised against this exact metadata by `tests/conftest.py`, so the fleets↔agents FK cycle is known to create cleanly on SQLite.
-- Idempotent: re-running creates nothing new. Pre-existing tables are never altered or migrated; an old Alembic-era DB keeps its orphan `alembic_version` table untouched (harmless if it was at head `0005`; anything older is the documented delete-and-recreate case).
+- Idempotent and additive: re-running adds any missing tables and touches nothing else. Pre-existing tables are never altered or migrated; an old Alembic-era DB keeps its orphan `alembic_version` table untouched. A DB at head `0005` is upgraded additively — `create_schema()` adds the missing `skill_installs` table and preserves every existing row (fleets, agents, message history). Anything older cannot be repaired additively; deleting the DB file and re-running `cafleet setup` is the last-resort fallback for those.
 
 Deleted: `cafleet/src/cafleet/cli/db.py`, `cafleet/src/cafleet/db/alembic.ini`, `cafleet/src/cafleet/db/alembic/` (env.py, script.py.mako, versions `0001`–`0005`), the `alembic` dependency and the two `force-include` asset entries in `cafleet/pyproject.toml`, followed by `mise //:uv-sync`.
 
@@ -134,7 +134,7 @@ skills:
 | `cafleet/src/cafleet/db/alembic*` | Delete `alembic.ini` + `alembic/` tree. |
 | `cafleet/pyproject.toml` | Drop `alembic` dep + the two `force-include` alembic asset lines. |
 | `CLAUDE.md` | Rewrite the "Unified CLI command" bullet: `setup` (with `db` / `skill` subcommands) for onboarding and schema management — the stale "`db init` … `session` for session CRUD" text goes. |
-| `admin/src/components/Dashboard.tsx` | Rewrite the no-Administrator hint: drop both `db init` code spans and the "backfill migration" sentence; new guidance = if you just upgraded from an old schema, delete the database file and re-run `cafleet setup`; a manually deleted Administrator still needs the operator. |
+| `admin/src/components/Dashboard.tsx` | Rewrite the no-Administrator hint: drop both `db init` code spans and the "backfill migration" sentence; new guidance = a fleet from an older schema lacks the built-in Administrator — create a fresh fleet with `cafleet fleet create` (upgrades preserve existing data but never backfill rows); a manually deleted Administrator still needs the operator. |
 | `cafleet/tests/db/test_alembic_smoke.py`, `cafleet/tests/db/test_init.py`, `cafleet/tests/_helpers.py` (alembic cfg helper), alembic usage in `cafleet/tests/broker/test_monitor.py`, `alembic_version` / `alembic stamp head` assertions in `cafleet/tests/cli/test_setup.py` | Delete or rework (Step 6). |
 | `cafleet/tests/cli/test_fleet.py` (a `db init` comment), `cafleet/tests/cli/test_fleet_flag.py` (two `db init` tests: the without-`--fleet-id` success test at line 148 and the `--fleet-id`-rejection test at line 177) | Reword the comment; delete both tests — their subject command no longer exists, and the `cafleet db` no-such-command regression test covers the absence (Step 6). |
 
@@ -178,10 +178,10 @@ skills:
 
 ### Step 2: Schema and Alembic removal
 
-- [ ] Add `SkillInstall` to `cafleet/src/cafleet/db/models.py` <!-- completed: -->
-- [ ] Add `cafleet/src/cafleet/db/schema.py::create_schema()` <!-- completed: -->
-- [ ] Delete `cafleet/src/cafleet/db/alembic.ini` + `alembic/` tree; drop the `alembic` dep and force-include lines from `cafleet/pyproject.toml`; run `mise //:uv-sync` <!-- completed: -->
-- [ ] Add `cafleet/src/cafleet/broker/skill_installs.py` (exists/list/record helpers) <!-- completed: -->
+- [x] Add `SkillInstall` to `cafleet/src/cafleet/db/models.py` <!-- completed: 2026-07-04T01:06 -->
+- [x] Add `cafleet/src/cafleet/db/schema.py::create_schema()` <!-- completed: 2026-07-04T01:06 -->
+- [x] Delete `cafleet/src/cafleet/db/alembic.ini` + `alembic/` tree; drop the `alembic` dep and force-include lines from `cafleet/pyproject.toml`; run `mise //:uv-sync` <!-- completed: 2026-07-04T01:06 -->
+- [x] Add `cafleet/src/cafleet/broker/skill_installs.py` (exists/list/record helpers) <!-- completed: 2026-07-04T01:06 -->
 
 ### Step 3: CLI restructure
 
@@ -195,7 +195,7 @@ skills:
 
 ### Step 5: Admin WebUI
 
-- [ ] Reword the `Dashboard.tsx` no-Administrator hint (drop `db init`; delete-and-recreate guidance) <!-- completed: -->
+- [ ] Reword the `Dashboard.tsx` no-Administrator hint (drop `db init`; fresh-fleet guidance, existing data preserved) <!-- completed: -->
 
 ### Step 6: Tests
 
@@ -219,3 +219,4 @@ skills:
 | 2026-07-04 | Reviewer round 1: setup-group callback no-op condition; subcommand `--help` guard interaction specified as contract; deterministic stale-agent ordering; verbatim microsecond timestamps in doctor; test-sweep file list corrected (`db init` mentions vs `alembic_version` assertions); storage.md wording de-alembicized; regression test homed at `test_db_group_removed.py`. |
 | 2026-07-04 | Reviewer round 2: both `db init` tests in `test_fleet_flag.py` covered for deletion. User-approved; Status: Approved. |
 | 2026-07-04 | Post-approval user tweak: `setup skill` pre-flight error now suggests both repair commands (`run 'cafleet setup' or 'cafleet setup db' first`). |
+| 2026-07-04 | Post-approval user tweak (mid-execution): upgrade stance changed from blanket delete-and-recreate to data-preserving additive create — message history is preserved on upgrade; deleting the DB is the last-resort fallback for pre-baseline schemas only. Dashboard no-Administrator hint re-scoped to fresh-fleet guidance. |
