@@ -101,7 +101,7 @@ def test_create_schema_idempotent(tmp_path, monkeypatch):
 
 
 def test_create_schema_leaves_preexisting_tables_untouched(tmp_path, monkeypatch):
-    """An old Alembic-era DB keeps its orphan ``alembic_version`` table.
+    """A DB with a pre-existing legacy table keeps it, rows and all.
 
     Pre-existing tables are never altered or migrated (``checkfirst`` /
     ``CREATE TABLE IF NOT EXISTS`` semantics); missing baseline tables are
@@ -117,10 +117,9 @@ def test_create_schema_leaves_preexisting_tables_untouched(tmp_path, monkeypatch
     conn = sqlite3.connect(str(db_file))
     try:
         conn.execute(
-            "CREATE TABLE alembic_version"
-            " (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
+            "CREATE TABLE legacy_audit (entry VARCHAR(32) NOT NULL PRIMARY KEY)"
         )
-        conn.execute("INSERT INTO alembic_version (version_num) VALUES ('0005')")
+        conn.execute("INSERT INTO legacy_audit (entry) VALUES ('keep-me')")
         conn.commit()
     finally:
         conn.close()
@@ -129,11 +128,11 @@ def test_create_schema_leaves_preexisting_tables_untouched(tmp_path, monkeypatch
 
     create_schema()
 
-    assert _table_names(db_file) == BASELINE_TABLES | {"alembic_version"}
+    assert _table_names(db_file) == BASELINE_TABLES | {"legacy_audit"}
 
     conn = sqlite3.connect(str(db_file))
     try:
-        rows = conn.execute("SELECT version_num FROM alembic_version").fetchall()
+        rows = conn.execute("SELECT entry FROM legacy_audit").fetchall()
     finally:
         conn.close()
-    assert rows == [("0005",)]
+    assert rows == [("keep-me",)]

@@ -1,7 +1,7 @@
 # Improve `cafleet setup` — version recording, `setup db` / `setup skill` subcommands, `db` group removal
 
 **Status**: Approved
-**Progress**: 16/22 tasks complete
+**Progress**: 22/22 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -199,15 +199,15 @@ skills:
 
 ### Step 6: Tests
 
-- [ ] Replace `tests/db/test_init.py` + `tests/db/test_alembic_smoke.py` with `tests/db/test_schema.py` <!-- completed: -->
-- [ ] Rework `tests/cli/test_setup.py` to the group surface (incl. `--agent` rejection on bare `setup`, pre-flight, upsert) <!-- completed: -->
-- [ ] Add guard tests (incl. the help contract) + doctor skills-section tests; add `tests/cli/test_db_group_removed.py` <!-- completed: -->
-- [ ] Seed `skill_installs` in `tests/conftest.py`; purge alembic from `tests/_helpers.py` and `tests/broker/test_monitor.py`; reword the `db init` comment in `tests/cli/test_fleet.py` and delete both `db init` tests in `tests/cli/test_fleet_flag.py` <!-- completed: -->
+- [x] Replace `tests/db/test_init.py` + `tests/db/test_alembic_smoke.py` with `tests/db/test_schema.py` <!-- completed: 2026-07-04T01:26 -->
+- [x] Rework `tests/cli/test_setup.py` to the group surface (incl. `--agent` rejection on bare `setup`, pre-flight, upsert) <!-- completed: 2026-07-04T01:26 -->
+- [x] Add guard tests (incl. the help contract) + doctor skills-section tests; add `tests/cli/test_db_group_removed.py` <!-- completed: 2026-07-04T01:26 -->
+- [x] Seed `skill_installs` in `tests/conftest.py`; purge alembic from `tests/_helpers.py` and `tests/broker/test_monitor.py`; reword the `db init` comment in `tests/cli/test_fleet.py` and delete both `db init` tests in `tests/cli/test_fleet_flag.py` <!-- completed: 2026-07-04T01:26 -->
 
 ### Step 7: Verification and final sweep
 
-- [ ] Grep sweep: no `db init` / `alembic` / `db` -group mention remains outside `design-docs/` <!-- completed: -->
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` all pass <!-- completed: -->
+- [x] Grep sweep: no `db init` / `alembic` / `db` -group mention remains outside `design-docs/` <!-- completed: 2026-07-04T01:26 -->
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` all pass <!-- completed: 2026-07-04T01:26 -->
 
 ---
 
