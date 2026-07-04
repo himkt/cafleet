@@ -14,14 +14,14 @@ buggy side. The authoritative audit input is `audit-findings.md` in this directo
 
 ## Success Criteria
 
-- [ ] All 32 contradictions have a landed resolution (doc edit or code fix) — zero remaining drift.
-- [ ] Every code fix ships with a regression test that would fail against the pre-fix code.
-- [ ] `SPEC.md` and `docs/` describe only the current, true behavior (first-class targets, per
+- [x] All 32 contradictions have a landed resolution (doc edit or code fix) — zero remaining drift.
+- [x] Every code fix ships with a regression test that would fail against the pre-fix code.
+- [x] `SPEC.md` and `docs/` describe only the current, true behavior (first-class targets, per
       `documentation-maintenance.md`); `README.md` and every `skills/*/SKILL.md` are verified
       consistent with the reconciled CLI/API/schema surfaces.
-- [ ] `--json` broadcast output carries separate `recipients` / `delivered` keys; `tasks.to_agent_id`
+- [x] `--json` broadcast output carries separate `recipients` / `delivered` keys; `tasks.to_agent_id`
       is nullable and emits `null` (not `0`) for broadcast-summary rows.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` pass.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` pass.
 
 ---
 
