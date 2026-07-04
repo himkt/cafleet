@@ -1655,8 +1655,11 @@ then `pending_count` with no padding.
 - **ping-age humanizer** — null → ASCII `-`; else `<n>s ago`.
 
 All four absent-cell helpers above use the single ASCII `-` glyph (§6.4 *The
-single absent glyph*). All conditional fields (`kind`, `origin`, the verbose
-`to:`/`text:` lines) are gated on truthiness — omitted, never emitted empty.
+single absent glyph*). The conditional fields `kind`, `origin`, and the verbose
+`text:` line are gated on truthiness — omitted, never emitted empty. The verbose
+`to:` line is instead gated on **non-null** (`to_agent_id is not None`): a
+broadcast-summary row's NULL recipient omits it; a unicast's real id always
+shows.
 
 ### 6.5 Multiplexer & tmux
 
@@ -1753,8 +1756,8 @@ method builds is given verbatim; preserve subcommand, flags, and ordering.
 - **Best-effort boolean** (NEVER raise; `false` on any failure):
   `send_poll_trigger`, `send_wake_trigger`, `send_inline_preview`. Each guards
   "tmux missing → `false`" then wraps the keystroke so any error → `false`. The
-  boolean is consumed as the broker's `notification_sent` /
-  `notifications_sent_count` and the monitor's `woke`.
+  boolean is consumed as the broker's `notification_sent` (unicast) /
+  the broadcast `delivered` count and the monitor's `woke`.
 
 #### `MultiplexerContext` (frozen value type)
 

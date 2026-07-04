@@ -56,7 +56,7 @@ quiet_flag = click.option(
     "quiet",
     is_flag=True,
     default=False,
-    help="Print only the resulting task_id.",
+    help="Print only the resulting id.",
 )
 
 
