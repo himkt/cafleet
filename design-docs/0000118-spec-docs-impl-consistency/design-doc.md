@@ -1,7 +1,7 @@
 # SPEC.md / docs vs Implementation Consistency Reconciliation
 
 **Status**: Approved
-**Progress**: 42/44 tasks complete
+**Progress**: 44/44 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -239,8 +239,8 @@ makes them first-class. Two reconciled surfaces can plausibly appear there and M
 
 ### Step 10: Cross-surface verification + gates
 
-- [ ] Verify `README.md` and every `skills/*/SKILL.md` against the reconciled `fleet show`/`fleet delete` `--fleet-id` invocation and the newly-visible flags; align any drift <!-- completed: -->
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` all pass <!-- completed: -->
+- [x] Verify `README.md` and every `skills/*/SKILL.md` against the reconciled `fleet show`/`fleet delete` `--fleet-id` invocation and the newly-visible flags; align any drift <!-- completed: 2026-07-04T08:13 -->
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` all pass <!-- completed: 2026-07-04T08:13 -->
 
 ---
 
