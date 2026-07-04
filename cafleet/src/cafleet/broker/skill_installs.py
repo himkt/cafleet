@@ -1,14 +1,23 @@
 """Skills-install version recording; see ``docs/spec/data-model.md``."""
 
 from sqlalchemy import inspect, select
+from sqlalchemy.exc import OperationalError
 
 from cafleet.broker._shared import now_iso, read_session, write_session
 from cafleet.db.models import SkillInstall
 
 
 def skill_installs_table_exists() -> bool:
-    with read_session() as session:
-        return inspect(session.get_bind()).has_table("skill_installs")
+    """Report whether the ``skill_installs`` table is reachable.
+
+    An unopenable database (missing file or parent directory) means the
+    schema was never created, so it reports ``False`` rather than raising.
+    """
+    try:
+        with read_session() as session:
+            return inspect(session.get_bind()).has_table("skill_installs")
+    except OperationalError:
+        return False
 
 
 def list_skill_installs() -> list[dict]:

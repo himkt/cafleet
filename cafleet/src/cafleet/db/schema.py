@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import click
 from sqlalchemy import create_engine
 from sqlalchemy.engine.url import make_url
 
@@ -14,7 +15,7 @@ def create_schema() -> Path:
     sync_url = str(make_url(settings.database_url).set(drivername="sqlite"))
     db_file_str = make_url(sync_url).database
     if not db_file_str:
-        raise ValueError("database URL has no file path")
+        raise click.ClickException("database URL has no file path")
     db_file = Path(db_file_str)
 
     db_file.parent.mkdir(parents=True, exist_ok=True)

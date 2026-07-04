@@ -1,7 +1,7 @@
 # Improve `cafleet setup` — version recording, `setup db` / `setup skill` subcommands, `db` group removal
 
 **Status**: Approved
-**Progress**: 11/22 tasks complete
+**Progress**: 13/22 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -185,8 +185,8 @@ skills:
 
 ### Step 3: CLI restructure
 
-- [ ] Rewrite `cafleet/src/cafleet/cli/setup.py` as the `setup` group (bare invocation, `db`, `skill` with `--agent`, pre-flight, version recording) <!-- completed: -->
-- [ ] Delete `cafleet/src/cafleet/cli/db.py` and its registration in `cli/__init__.py` <!-- completed: -->
+- [x] Rewrite `cafleet/src/cafleet/cli/setup.py` as the `setup` group (bare invocation, `db`, `skill` with `--agent`, pre-flight, version recording) <!-- completed: 2026-07-04T01:13 -->
+- [x] Delete `cafleet/src/cafleet/cli/db.py` and its registration in `cli/__init__.py` <!-- completed: 2026-07-04T01:13 -->
 
 ### Step 4: Version guard and doctor
 

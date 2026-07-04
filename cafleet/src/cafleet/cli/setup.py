@@ -1,4 +1,4 @@
-"""``cafleet setup`` — one-step onboarding: install skills + migrate the DB."""
+"""``cafleet setup`` — onboarding: create the DB schema + install the skills."""
 
 import importlib.metadata
 import json
@@ -11,7 +11,11 @@ from pathlib import Path, PurePosixPath
 
 import click
 
-from cafleet.cli.db import run_db_init
+from cafleet.broker.skill_installs import (
+    record_skill_install,
+    skill_installs_table_exists,
+)
+from cafleet.db.schema import create_schema
 
 GITHUB_REPO = "himkt/cafleet"
 SKILL_DIRS = ("cafleet", "cafleet-design-doc", "cafleet-research")
@@ -22,6 +26,11 @@ AGENT_SKILLS_DIRS = {
     "codex": Path("~/.codex/skills"),
     "opencode": Path("~/.config/opencode/skills"),
 }
+
+SCHEMA_PREFLIGHT_ERROR = (
+    "the database schema is missing or outdated; "
+    "run 'cafleet setup' or 'cafleet setup db' first"
+)
 
 
 def _resolve_targets(agents: tuple[str, ...]) -> list[str]:
@@ -143,13 +152,55 @@ def _install_skills(targets: list[str], cli_version: str) -> None:
                 raise click.ClickException(
                     f"failed to install skills into {skills_dir}: {exc}"
                 ) from exc
+            record_skill_install(agent, cli_version)
             click.echo(
                 f"{agent}: installed {', '.join(SKILL_DIRS)} "
                 f"(v{cli_version}) -> {AGENT_SKILLS_DIRS[agent]}"
             )
 
 
-@click.command("setup")
+def _run_skills_half(agents: tuple[str, ...]) -> None:
+    """Pre-flight the schema, resolve targets, install, and record versions."""
+    if not skill_installs_table_exists():
+        raise click.ClickException(SCHEMA_PREFLIGHT_ERROR)
+    cli_version = importlib.metadata.version("cafleet")
+    targets = _resolve_targets(agents)
+    _install_skills(targets, cli_version)
+
+
+@click.group("setup", invoke_without_command=True)
+@click.pass_context
+def setup(ctx: click.Context) -> None:
+    """Create the database schema and install the coding-agent skills."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    failures: list[str] = []
+
+    try:
+        create_schema()
+    except click.ClickException as exc:
+        click.echo(f"db half failed: {exc.format_message()}")
+        failures.append("db")
+
+    try:
+        _run_skills_half(())
+    except click.ClickException as exc:
+        click.echo(f"skills half failed: {exc.format_message()}")
+        failures.append("skills")
+
+    if failures:
+        raise click.ClickException(f"{' and '.join(failures)} half failed")
+
+
+@setup.command("db")
+def setup_db() -> None:
+    """Create the database schema (idempotent); touches nothing else."""
+    db_file = create_schema()
+    click.echo(f"schema ready at {db_file}")
+
+
+@setup.command("skill")
 @click.option(
     "--agent",
     "agents",
@@ -158,24 +209,6 @@ def _install_skills(targets: list[str], cli_version: str) -> None:
     help="Scope the skills install to the named agent(s); repeatable. "
     "Omit to auto-detect every coding-agent home that exists.",
 )
-def setup(agents: tuple[str, ...]) -> None:
-    """Install the coding-agent skills and migrate the database in one step."""
-    cli_version = importlib.metadata.version("cafleet")
-
-    failures: list[str] = []
-
-    try:
-        targets = _resolve_targets(agents)
-        _install_skills(targets, cli_version)
-    except click.ClickException as exc:
-        click.echo(f"skills half failed: {exc.format_message()}")
-        failures.append("skills")
-
-    try:
-        run_db_init()
-    except click.ClickException as exc:
-        click.echo(f"db half failed: {exc.format_message()}")
-        failures.append("db")
-
-    if failures:
-        raise click.ClickException(f"{' and '.join(failures)} half failed")
+def setup_skill(agents: tuple[str, ...]) -> None:
+    """Install the coding-agent skills and record the installed version."""
+    _run_skills_half(agents)
