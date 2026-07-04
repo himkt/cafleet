@@ -2402,8 +2402,10 @@ for age math.
 ## 8. Database schema
 
 **Schema** = the seven tables of §5.2, created by **one baseline `CREATE`** that
-yields the final schema directly. There is no migration chain, no version table,
-and no in-place upgrade path; existing databases are not migrated (§11). Column
+yields the final schema directly. There is no migration chain and no
+schema-version table; the create is additive (`CREATE TABLE IF NOT EXISTS`) —
+re-running it adds missing tables and never alters existing tables or rows, so
+existing data is preserved (§11). Column
 types, defaults, FK rules, AUTOINCREMENT, and the create-order quirk are in §6.1.
 
 **Indexes (non-unique):**
@@ -2575,7 +2577,10 @@ The decisions that shape this surface (full rationale in the design doc):
   1; the `member delete` teardown timeout (exit 2) is the one deliberate
   exception.
 - **Single-baseline schema** (§8): one `CREATE`, no migration chain, no
-  schema-version table, no DB interoperability. Upgrade path: after `uv tool upgrade cafleet`, the
+  schema-version table, no DB interoperability. The create is additive:
+  re-running `cafleet setup` (or `setup db`) on an existing database adds
+  missing tables and preserves all existing rows, message history included.
+  Upgrade path: after `uv tool upgrade cafleet`, the
   first fleet-scoped command errors with the stale-skills message and instructs
   the operator to run `cafleet setup skill` to reinstall.
 - **Stale-skills guard** (§6.3): every fleet-scoped group callback validates

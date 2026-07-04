@@ -31,11 +31,15 @@ schema.
 
 The schema is a **single baseline** — one ordered `CREATE` sequence that yields
 the final schema directly, with no migration chain, no schema-version table,
-and no in-place upgrade path. Operators run `cafleet setup` (or its schema-only
-subcommand `cafleet setup db`) once before starting the server; the create uses
-`CREATE TABLE IF NOT EXISTS`, so it is idempotent and safe to re-run
-(re-running creates nothing new). Existing databases are not migrated. Without
-the schema, the first request fails with
+and no in-place migration machinery. Operators run `cafleet setup` (or its
+schema-only subcommand `cafleet setup db`) once before starting the server; the
+create uses `CREATE TABLE IF NOT EXISTS`, so it is idempotent and **additive**:
+re-running adds any missing tables and touches nothing else. Pre-existing
+tables and every row in them are left untouched, so upgrading preserves
+existing data (message history included). Tables whose shape predates the
+current baseline are not migrated — deleting the database file and re-running
+`cafleet setup` is the last resort for those, and it discards the history.
+Without the schema, the first request fails with
 `OperationalError: no such table: agents`.
 
 ## Skills-install recording

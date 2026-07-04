@@ -64,15 +64,17 @@ The default database lives at `~/.local/share/cafleet/cafleet.db`. Override
 with the `CAFLEET_DATABASE_URL` environment variable — use an absolute path,
 since SQLAlchemy does not expand `~` in SQLite URLs.
 
-!!! warning "No migration from an older schema"
+!!! note "Upgrading an existing database"
 
-    The schema is a single baseline, with **no migration path and no backward
-    compatibility** with any older schema. `cafleet setup` creates the tables
-    fresh (`CREATE TABLE IF NOT EXISTS`) but never migrates or alters
-    pre-existing tables, so an old-schema database is **not** upgraded. Delete
-    any pre-existing database and let `cafleet setup` recreate it. If you set
-    `CAFLEET_DATABASE_URL` to a custom path holding an old schema, delete that
-    file and re-run `cafleet setup`.
+    The schema create is **additive**: `CREATE TABLE IF NOT EXISTS` adds any
+    missing tables and never alters, migrates, or drops pre-existing tables —
+    re-running `cafleet setup` after an upgrade preserves all existing data,
+    including fleets, agents, and the full message history. There is no
+    migration path for tables whose *shape* predates the current baseline,
+    so if a database from a much older release fails with schema errors on
+    fleet-scoped commands, the last resort is to delete that file (this
+    discards its history) and re-run `cafleet setup`. The same applies to a
+    custom `CAFLEET_DATABASE_URL` path.
 
 ## Contributor / local-dev install
 

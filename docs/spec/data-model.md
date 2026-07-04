@@ -6,7 +6,7 @@ icon: lucide/table
 
 The `Task` payload is fully relational: every routing field plus the message body lives in its own typed column. The only JSON `TEXT` blob is `agents.agent_card_json`, which stores an `AgentCard`-shaped document.
 
-The runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver. The schema is a **single baseline** created in one pass; run `cafleet setup` to create it before starting the server — the create is idempotent (`CREATE TABLE IF NOT EXISTS`) and safe to re-run. There is no migration chain and no in-place upgrade path (see [Storage](../concepts/storage.md)).
+The runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver. The schema is a **single baseline** created in one pass; run `cafleet setup` to create it before starting the server — the create is idempotent and additive (`CREATE TABLE IF NOT EXISTS`): re-running adds missing tables and never alters existing tables or rows. There is no migration chain (see [Storage](../concepts/storage.md)).
 
 ## SQL Schema
 
