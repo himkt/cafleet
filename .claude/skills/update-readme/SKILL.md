@@ -44,7 +44,7 @@ The README must include these sections in order:
 3. **Architecture** -- Simplified ASCII diagram and key design decisions
 4. **Quick Start** -- Prerequisites, server start, client install, basic usage flow
 5. **CLI Usage** -- Table of all CLI commands with descriptions
-6. **API Overview** -- REST Registry API endpoints and message-broker operations
+6. **API Overview** -- REST Registry API endpoints (message-broker CLI operations are covered under CLI Usage, not a separate table)
 7. **Tech Stack** -- Languages, frameworks, and libraries
 8. **Project Structure** -- Monorepo layout
 9. **Development** -- Clone, sync, and test instructions

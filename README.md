@@ -173,7 +173,7 @@ The unified `cafleet` CLI is organized as three top-level commands (`setup`, `do
 | Subcommand | Description |
 |---|---|
 | `message send` | Send a unicast message (`--to`, `--text`/`--text-file`) |
-| `message broadcast` | Broadcast a message to all fleet agents |
+| `message broadcast` | Broadcast a message to all fleet agents (excluding the Administrator) |
 | `message poll` | Fetch un-acked incoming messages |
 | `message ack` | Acknowledge a received message (`--task-id`) |
 | `message cancel` | Retract an un-acked sent message (`--task-id`) |
@@ -210,16 +210,6 @@ The admin WebUI exposes a JSON API under `/api/`. All fleet-scoped routes requir
 | `POST` | `/api/messages/send` | Send a message (Administrator as implicit sender) |
 
 Full API reference: <https://himkt.github.io/cafleet/spec/webui-api/>
-
-### Message broker operations (CLI)
-
-| Operation | Description |
-|---|---|
-| `message send --to <id> --text <body>` | Send a unicast message; the broker keystrokes an inline preview into the recipient's pane |
-| `message broadcast --text <body>` | Fan out to all fleet agents (excluding Administrators) |
-| `message poll` | Fetch un-acked messages from the agent's inbox |
-| `message ack --task-id <id>` | Mark a message consumed |
-| `message cancel --task-id <id>` | Retract an un-acked message (sender only) |
 
 ## 6. Tech Stack
 

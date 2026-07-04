@@ -59,7 +59,7 @@ This trade-off favors respecting user customization over auto-applying upstream 
 
 ## Required opencode CLI version
 
-cafleet has been validated against `opencode 1.15.5` (the version installed at the time Step 0 empirical verification was completed on 2026-05-19); `1.15.5` is also the minimum supported version. The bare-`opencode` TUI entry, the `--agent` flag, the `--prompt` flag, and the leading-`!` shell shortcut were all verified against this binary.
+cafleet has been validated against `opencode 1.15.5`; `1.15.5` is also the minimum supported version. The bare-`opencode` TUI entry, the `--agent` flag, the `--prompt` flag, and the leading-`!` shell shortcut were all verified against this binary.
 
 If `opencode --version` reports an older version that lacks any of these affordances, upgrade per the upstream install instructions at <https://opencode.ai/docs/>.
 
@@ -128,8 +128,8 @@ cafleet member exec --fleet-id 1 \
 cafleet member exec --fleet-id 1 \
   --member-id 4 "curl https://example.com"
 # Expect: the deny-list blocks the curl command. If it does NOT, the
-# safety floor is broken — STOP and re-run the agent-load smoke from
-# the design doc's Step 0 GATE.
+# safety floor is broken — STOP and inspect ~/.opencode/agents/cafleet.md;
+# the preset's deny ruleset is not being applied.
 
 cafleet member delete --fleet-id 1 --member-id 4
 cafleet fleet delete --fleet-id 1

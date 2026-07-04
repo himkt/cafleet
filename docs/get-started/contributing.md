@@ -15,7 +15,7 @@ path.
 |---|---|
 | `cafleet/` | The `cafleet` Python package (FastAPI + SQLAlchemy + Alembic + click). |
 | `admin/` | Admin WebUI SPA (Vite + React + TypeScript + Tailwind CSS). |
-| `skills/` | Plugin skills shared by the Claude Code and Codex manifests. |
+| `skills/` | Coding-agent skill files (`cafleet`, `cafleet-design-doc`, `cafleet-research`), installed into the agent homes by `cafleet setup` / `mise //:skill-install`. |
 | `package.json` + `bun.lock` (repo root) | Bun toolchain manifests for the Slidev + agent-browser tools used in the repo. Driven via `mise //:bun-install` / `mise //:slidev <deck>`; `node_modules/` is gitignored. |
 | `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
 | `docs/` | CLI reference, message envelope, and other operator-facing docs. |

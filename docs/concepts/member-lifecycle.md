@@ -72,11 +72,8 @@ registry soft-delete, and so is a placementless agent (no placement row) —
 
 The spawn prompt is supplied inline via `--text "<prompt>"` or from a file via
 `--text-file <path>` (an absolute or CWD-relative UTF-8 path; `-` reads the
-whole prompt from stdin). `cafleet member create` then runs `str.format` over
-the resolved body, substituting the four identity placeholders (`{fleet_id}`,
-`{agent_id}`, `{director_agent_id}`, `{coding_agent}`); literal braces in
-prompt text must be doubled (`{{`, `}}`) — see
-[CLI options](../spec/cli-options.md) `member create`.
+whole prompt from stdin); literal braces in prompt text must be doubled (`{{`,
+`}}`) — see [CLI options](../spec/cli-options.md) `member create`.
 
 ## Commands
 
