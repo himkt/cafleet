@@ -50,9 +50,9 @@ def registry_db(tmp_path, monkeypatch):
 
 
 def _init_schema():
-    from cafleet.db.schema import create_schema
+    from cafleet.db.init import run_db_init
 
-    create_schema()
+    run_db_init()
 
 
 def _seed_install(

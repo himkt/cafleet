@@ -1,4 +1,4 @@
-"""``cafleet setup`` — onboarding: create the DB schema + install the skills."""
+"""``cafleet setup`` — onboarding: migrate the DB + install the skills."""
 
 import importlib.metadata
 import json
@@ -15,7 +15,7 @@ from cafleet.broker.skill_installs import (
     record_skill_install,
     skill_installs_table_exists,
 )
-from cafleet.db.schema import create_schema
+from cafleet.db.init import run_db_init
 
 GITHUB_REPO = "himkt/cafleet"
 SKILL_DIRS = ("cafleet", "cafleet-design-doc", "cafleet-research")
@@ -171,14 +171,14 @@ def _run_skills_half(agents: tuple[str, ...]) -> None:
 @click.group("setup", invoke_without_command=True)
 @click.pass_context
 def setup(ctx: click.Context) -> None:
-    """Create the database schema and install the coding-agent skills."""
+    """Migrate the database schema and install the coding-agent skills."""
     if ctx.invoked_subcommand is not None:
         return
 
     failures: list[str] = []
 
     try:
-        create_schema()
+        run_db_init()
     except click.ClickException as exc:
         click.echo(f"db half failed: {exc.format_message()}")
         failures.append("db")
@@ -195,9 +195,8 @@ def setup(ctx: click.Context) -> None:
 
 @setup.command("db")
 def setup_db() -> None:
-    """Create the database schema (idempotent); touches nothing else."""
-    db_file = create_schema()
-    click.echo(f"schema ready at {db_file}")
+    """Initialize or migrate the registry database to the head revision."""
+    run_db_init()
 
 
 @setup.command("skill")

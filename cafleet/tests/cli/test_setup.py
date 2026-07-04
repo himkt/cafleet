@@ -13,8 +13,8 @@ Contract notes for the implementation under test (``cafleet.cli.setup``):
   ``urllib.request.urlopen``.
 * ``shutil.copytree`` performs the per-skill install.
 * ``AGENT_SKILLS_DIRS`` is a module-level dict of ``{agent: Path}``.
-* The db half calls ``create_schema`` through the module attribute
-  ``cafleet.cli.setup.create_schema``.
+* The db half calls ``run_db_init`` through the module attribute
+  ``cafleet.cli.setup.run_db_init``.
 """
 
 import importlib.metadata
@@ -187,10 +187,10 @@ def _skill_install_rows(db_path):
 
 
 def _init_schema():
-    """Create the single-baseline schema the way ``cafleet setup db`` does."""
-    from cafleet.db.schema import create_schema
+    """Migrate the registry to head the way ``cafleet setup db`` does."""
+    from cafleet.db.init import run_db_init
 
-    create_schema()
+    run_db_init()
 
 
 def _run(args):
@@ -260,10 +260,10 @@ def test_bare_setup_db_failure_cascades_to_skills_preflight(
     _make_home(homes["claude"])
     _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
 
-    def broken_create_schema():
+    def broken_run_db_init():
         raise click.ClickException("disk full")
 
-    monkeypatch.setattr(setup_module, "create_schema", broken_create_schema)
+    monkeypatch.setattr(setup_module, "run_db_init", broken_run_db_init)
 
     result = _run_setup()
 
@@ -316,15 +316,15 @@ def test_bare_setup_zero_homes_detected(homes, registry_db, monkeypatch):
 
 
 def test_setup_db_creates_schema_only(homes, registry_db, monkeypatch):
-    """``setup db`` creates the schema, writes no rows, and never goes online."""
+    """``setup db`` migrates the schema, writes no rows, and never goes online."""
     _make_home(homes["claude"])
     _forbid_network(monkeypatch)
 
     result = _run_setup_db()
 
     assert result.exit_code == 0, result.output
-    assert f"schema ready at {registry_db}" in result.output
-    assert {"fleets", "skill_installs"} <= _table_names(registry_db)
+    assert f"Created {registry_db} and applied migrations to head" in result.output
+    assert {"fleets", "skill_installs", "alembic_version"} <= _table_names(registry_db)
     assert _skill_install_rows(registry_db) == []
     assert _installed_skill_dirs(homes["claude"]) == set()
 
@@ -341,7 +341,7 @@ def test_setup_db_idempotent_and_preserves_rows(homes, registry_db, monkeypatch)
     result = _run_setup_db()
 
     assert result.exit_code == 0, result.output
-    assert f"schema ready at {registry_db}" in result.output
+    assert "already at head" in result.output.lower()
     assert _skill_install_rows(registry_db) == [("claude", CLI_VERSION)]
 
 

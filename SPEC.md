@@ -20,7 +20,7 @@ choice, not a merge.
 
 | Module | Scope |
 |---|---|
-| Persistence & Schema | data models, connection factory, single-baseline SQLite schema |
+| Persistence & Schema | data models, connection factory, Alembic-migrated SQLite schema |
 | Broker | synchronous data-access layer |
 | CLI | the whole `cafleet` command tree |
 | Output | text/JSON formatting, truncation, ANSI strip |
@@ -58,9 +58,9 @@ What is part of the contract (must be reproduced):
   fixed by §6.3 and §10.
 - **Configuration surface:** every `CAFLEET_*` environment variable, its type,
   and its default (§9).
-- **Persistence surface:** the single-baseline SQLite schema — table names,
-  columns, types, nullability, defaults, foreign-key rules, indexes, and
-  status/enum string values.
+- **Persistence surface:** the SQLite schema at the migration head — table
+  names, columns, types, nullability, defaults, foreign-key rules, indexes,
+  and status/enum string values.
 - **HTTP surface:** every route, method, request/response shape, header
   contract, and status code of the WebUI API.
 - **Observable semantics:** the task status lifecycle, the soft-delete +
@@ -81,8 +81,8 @@ What is **not** required (the relaxation):
 **Non-goals:**
 
 - **Cross-implementation database interoperability is a non-goal.** The schema
-  is the single baseline defined in §8; databases are not migrated from, nor
-  expected to interoperate with, any earlier schema.
+  is the migration head defined in §8; databases produced by other
+  implementations are not expected to interoperate.
 - **Reference-parity is a non-goal.** The surface here is the contract; there is
   no separate "reference" surface to match.
 
@@ -129,7 +129,7 @@ structure** below is the contract.
 ```
 cafleet
 ├── config          config half: Settings singleton, CAFLEET_* env
-├── db              connection factory, single-baseline schema
+├── db              connection factory, Alembic migration chain
 ├── multiplexer     Multiplexer interface, tmux backend, keystrokes
 ├── coding-agent    coding-agent interface + claude/codex/opencode
 ├── output          render + formatter layers
@@ -175,7 +175,7 @@ Edges (who depends on whom):
 
 - **config** — leaf. No internal deps.
 - **db** — depends on `config` (reads `settings.database_url`). Owns the
-  connection factory and the single-baseline schema.
+  connection factory and the Alembic migration chain.
 - **output** — depends on `config` (reads `settings.max_text_len`). Pure
   string/structure transforms otherwise.
 - **multiplexer** — leaf (process invocation only). Truncation for inline
@@ -399,16 +399,16 @@ contract error string.
 ### 6.1 Persistence & Schema
 
 **Scope:** the seven data models (§5.2), the connection factory, and the
-single-baseline SQLite schema. This module owns **no** CRUD/query logic and no
-HTTP surface; all reads/writes/joins live in the broker (§6.2). The baseline
-schema is detailed in §8; this section covers the connection factory, the
+Alembic-migrated SQLite schema. This module owns **no** CRUD/query logic and no
+HTTP surface; all reads/writes/joins live in the broker (§6.2). Schema
+management is detailed in §8; this section covers the connection factory, the
 per-connection PRAGMAs, and the structural invariants.
 
 #### Connection factory & engine semantics
 
 A single lazily-constructed connection factory (a pool / session factory), built
 once on first use and cached as a process-wide singleton. There is no
-teardown/dispose path in normal operation; the `setup` schema-create driver
+teardown/dispose path in normal operation; the `setup` db-migration driver
 disposes its own short-lived engine when it finishes.
 
 - **Lazy singletons, fail-loud.** The factory builds once and caches. There is
@@ -419,7 +419,7 @@ disposes its own short-lived engine when it finishes.
   database URL has its drivername **force-set to `sqlite`** (e.g. an async
   `sqlite+aiosqlite://…` is rewritten to sync `sqlite://…`). The default URL is
   already `sqlite://…`, so this is a no-op in the common case. The same
-  normalization is applied independently by the `setup` schema-create driver. An
+  normalization is applied independently by the `setup` db-migration driver. An
   async-driver suffix is stripped to the sync driver, never rejected.
 - **Cross-thread sharing.** The connection is shared across threads (the
   reference disables SQLite's same-thread check). This is part of the contract.
@@ -429,7 +429,7 @@ disposes its own short-lived engine when it finishes.
 #### Per-connection PRAGMAs (mandatory)
 
 A connection-init hook runs on **every** new SQLite connection — including
-ad-hoc connections opened by tests or by the `setup` schema-create driver, not
+ad-hoc connections opened by tests or by the `setup` db-migration driver, not
 only those from the singleton pool. On each connection:
 
 1. If the underlying connection is not a SQLite connection, return immediately
@@ -453,14 +453,14 @@ not a no-op. Both must run on every connection the reimplementation opens.
   deliberately **do not** use it: each reuses its parent's id (`agent_id` /
   `fleet_id`) as both PK and FK.
 - **Create-order / forward-reference quirk.** `fleets.fleet_id` and
-  `agents.fleet_id` form a mutual reference. The baseline schema creates
+  `agents.fleet_id` form a mutual reference. The initial migration creates
   `agents` **first**, relying on SQLite tolerating a foreign key to a
   not-yet-created table at table-creation time (`agents.fleet_id` forward-
   references the still-uncreated `fleets`). The create order must be preserved;
   it is valid only because FK enforcement is per-connection and is engaged later
   by `foreign_keys=ON`, not at table-creation time. No FK declares an `ON
-  UPDATE` clause (all default to NO ACTION). §8 fixes the single ordered baseline
-  `CREATE` that establishes this.
+  UPDATE` clause (all default to NO ACTION). §8 fixes the migration chain
+  that establishes this.
 - **DDL-level (server-side) defaults**, applied by SQLite when the column is
   omitted from an INSERT (distinct from values the application writes
   explicitly): `agent_placements.coding_agent` → `"claude"`,
@@ -1279,10 +1279,10 @@ unknown-option error). The `setup` group is the single schema-management entry
 point. Bare invocation reads the CLI's own version and runs two independent
 halves, **in order** (db first, then skills):
 
-- **DB half** — create the single-baseline schema via the schema-create driver
+- **DB half** — initialize or migrate the registry via the db-migration driver
   (§8): force a sync SQLite URL, create the DB file's parent directory, and
-  create the baseline schema fresh (`CREATE TABLE IF NOT EXISTS`; idempotent).
-  On an application error, print `db half failed: <message>` and record the
+  apply the bundled migrations up to the head revision (idempotent). On an
+  application error, print `db half failed: <message>` and record the
   failure. If the db half failed, the skills half fails its schema pre-flight and
   both halves are reported failed.
 - **Skills half** — resolve install targets, then download and install the
@@ -1298,15 +1298,26 @@ subcommands never trigger the bare-setup sequence.
 
 ##### `setup db` subcommand
 
-No options. Runs the schema-create driver (§8) only: forces a sync SQLite URL,
-creates the DB file's parent directory, and runs the single-baseline create
-(`CREATE TABLE IF NOT EXISTS`; idempotent). Prints:
+No options. Runs the db-migration driver (§8) only: forces a sync SQLite URL,
+creates the DB file's parent directory, and applies the bundled migrations up
+to the head revision (idempotent). Success output, by prior DB state:
 
 ```
-schema ready at <db_file>
+Created <db_file> and applied migrations to head (<head>).   # fresh DB
+Upgraded from <old_rev> to <head>.                           # behind head
+Already at head (<head>); nothing to do.                     # at head
 ```
 
-Never touches `skill_installs` rows (creates the table as part of the baseline
+It refuses two states with an application error (exit 1): a DB with existing
+tables but no `alembic_version` table, and a DB whose recorded revision is
+unknown to the bundled migration chain:
+
+```
+Error: DB has existing tables but no alembic_version. Run `alembic stamp head` manually if you are sure the schema matches.
+Error: DB schema is at revision <rev> which is unknown to this version of cafleet. Refusing to downgrade automatically.
+```
+
+Never touches `skill_installs` rows (creates the table via migration `0006`
 but records nothing).
 
 ##### `setup skill` subcommand
@@ -2401,12 +2412,12 @@ for age math.
 
 ## 8. Database schema
 
-**Schema** = the seven tables of §5.2, created by **one baseline `CREATE`** that
-yields the final schema directly. There is no migration chain and no
-schema-version table; the create is additive (`CREATE TABLE IF NOT EXISTS`) —
-re-running it adds missing tables and never alters existing tables or rows, so
-existing data is preserved (§11). Column
-types, defaults, FK rules, AUTOINCREMENT, and the create-order quirk are in §6.1.
+**Schema** = the seven application tables of §5.2 plus Alembic's
+`alembic_version` bookkeeping table (a single-column `version_num` table holding
+one row: the current revision). The schema is created and evolved by a
+**chain of Alembic migrations** bundled inside the wheel; applying the chain in
+place preserves existing data (§11). Column types, defaults, FK rules,
+AUTOINCREMENT, and the create-order quirk are in §6.1.
 
 **Indexes (non-unique):**
 
@@ -2415,42 +2426,49 @@ types, defaults, FK rules, AUTOINCREMENT, and the create-order quirk are in §6.
 - `idx_tasks_context_status_ts` on `tasks(context_id, status_timestamp)`
 - `idx_tasks_from_agent_status_ts` on `tasks(from_agent_id, status_timestamp)`
 
-**The single baseline `CREATE`.** A fresh database is created empty, in one
-ordered sequence (using `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT
-EXISTS`, so re-running `setup` against an already-initialized DB creates nothing
-new). The order honors the forward-reference quirk (§6.1):
+**The migration chain.** Six linear revisions, `0001` → `0006` (each revision's
+`down_revision` is its predecessor; `0006` is head):
 
-1. `agents` (+ `idx_agents_fleet_status`) — **created first** because the others
-   FK into it; `agents.fleet_id` forward-references the still-uncreated `fleets`.
-   AUTOINCREMENT.
-2. `fleets` (AUTOINCREMENT).
-3. `tasks` (+ `idx_tasks_context_status_ts`, `idx_tasks_from_agent_status_ts`) —
-   AUTOINCREMENT; `to_agent_id` nullable, no FK (§5.5).
-4. `agent_placements` (+ `idx_placements_director`) — PK=FK `agent_id`, not
-   AUTOINCREMENT; `coding_agent` DDL default `"claude"`.
-5. `monitor_config` — PK=FK `agent_id` ON DELETE CASCADE, `interval_seconds`
-   default 60, `enabled` default 1; not AUTOINCREMENT.
-6. `monitor_runtime` — PK=FK `fleet_id` ON DELETE RESTRICT, `tick_seconds`
-   default 5; not AUTOINCREMENT.
-7. `skill_installs` — TEXT PK `coding_agent`, no AUTOINCREMENT, no FK constraint.
-   Columns: `coding_agent` TEXT PK, `cafleet_version` TEXT NOT NULL,
-   `installed_at` TEXT NOT NULL. Upsert semantics; rows written by the skills
-   half of `setup` and by `setup skill` after each home's install succeeds;
-   never written by `setup db`. Feeds the stale-skills guard and `doctor`.
+1. `0001` — initial schema: `fleets`, `agents` (+ `idx_agents_fleet_status`),
+   `tasks` (+ `idx_tasks_context_status_ts`, `idx_tasks_from_agent_status_ts`),
+   `agent_placements` (+ `idx_placements_director`). `agents` is **created
+   first** because the others FK into it; `agents.fleet_id` forward-references
+   the still-uncreated `fleets` (§6.1). `fleets`/`agents`/`tasks` are
+   AUTOINCREMENT; `agent_placements` is PK=FK `agent_id`, not AUTOINCREMENT,
+   `coding_agent` DDL default `"claude"`.
+2. `0002` — monitor tables: `monitor_config` (PK=FK `agent_id` ON DELETE
+   CASCADE, `interval_seconds` default 60, `enabled` default 1) and
+   `monitor_runtime` (PK=FK `fleet_id` ON DELETE RESTRICT, `tick_seconds`
+   default 5); neither is AUTOINCREMENT.
+3. `0003` — data migration: prunes non-Director `monitor_config` rows.
+4. `0004` — data migration: prunes the root-Director `monitor_config` rows.
+5. `0005` — data migration: prunes the monitoring member's `monitor_config`
+   row and backfills the root Director @180 and active pane-bound ordinary
+   members @720 (the per-member-interval inversion).
+6. `0006` — `skill_installs`: TEXT PK `coding_agent`, no AUTOINCREMENT, no FK
+   constraint. Columns: `coding_agent` TEXT PK, `cafleet_version` TEXT NOT
+   NULL, `installed_at` TEXT NOT NULL. Upsert semantics; rows written by the
+   skills half of `setup` and by `setup skill` after each home's install
+   succeeds; never written by `setup db`. Feeds the stale-skills guard and
+   `doctor`.
 
-A fresh DB starts with **no rows in any table**; monitor enrollment is written at
-runtime (the Director at 180s by `create_fleet`, pane-bound members at 720s by
-`register_agent`, §6.2), never seeded by the schema. `skill_installs` rows are
-written at install time, not by the schema.
+A fresh DB starts with **no rows in any application table** (only
+`alembic_version` holds its single revision row); monitor enrollment is written
+at runtime (the Director at 180s by `create_fleet`, pane-bound members at 720s
+by `register_agent`, §6.2), never seeded by the schema. `skill_installs` rows
+are written at install time, not by the schema.
 
-**`setup` schema-create driver** (the DB half of `setup`, §6.3). Procedure: (1)
-derive a sync SQLite URL by forcing the drivername to `sqlite`; (2) extract the
-DB file path — if empty → application error `database URL has no file path`; (3)
-create the file's parent directory; (4) create the baseline schema (the `IF NOT
-EXISTS` sequence above). The driver's engine is disposed when the command
-finishes (success or failure). The driver itself prints nothing: bare `setup`'s
-db half is silent on success; only the `setup db` subcommand prints
-`schema ready at <db_file>` (§6.3).
+**`setup` db-migration driver** (the DB half of `setup` and the whole of
+`setup db`, §6.3). Procedure: (1) derive a sync SQLite URL by forcing the
+drivername to `sqlite`; (2) extract the DB file path — if empty → application
+error `database URL has no file path`; (3) create the file's parent directory;
+(4) inspect the DB: existing tables but no `alembic_version` → the
+unversioned-DB refusal (§6.3); a recorded revision unknown to the bundled
+chain → the ahead-of-head refusal (§6.3); (5) already at head → print
+`Already at head (<head>); nothing to do.` and stop; (6) otherwise upgrade to
+head and print the created/upgraded line (§6.3). The driver's engine is
+disposed when the command finishes (success or failure). The same driver runs
+for bare `setup`'s db half and for `setup db` — both print the same lines.
 
 ---
 
@@ -2506,7 +2524,7 @@ exit 0, bypasses `--fleet-id`).
 **Top-level:**
 
 - [ ] `cafleet setup` (bare group invocation: no options; runs db half then skills half)
-- [ ] `cafleet setup db` (no options; schema create only; prints `schema ready at <db_file>`)
+- [ ] `cafleet setup db` (no options; db migration only; prints the created/upgraded/already-at-head line)
 - [ ] `cafleet setup skill` (`--agent` multiple: claude/codex/opencode; pre-flight requires `skill_installs` table)
 - [ ] `cafleet doctor` (global `--json` only; emits tmux block + skills-install report)
 - [ ] `cafleet server` (`--host`=settings.broker_host, `--port`=settings.broker_port)
@@ -2578,13 +2596,15 @@ The decisions that shape this surface (full rationale in the design doc):
 - **One error/exit model** (§7.2): usage → exit 2, application/runtime → exit
   1; the `member delete` teardown timeout (exit 2) is the one deliberate
   exception.
-- **Single-baseline schema** (§8): one `CREATE`, no migration chain, no
-  schema-version table, no DB interoperability. The create is additive:
-  re-running `cafleet setup` (or `setup db`) on an existing database adds
-  missing tables and preserves all existing rows, message history included.
-  Upgrade path: after `uv tool upgrade cafleet`, the
-  first fleet-scoped command errors with the stale-skills message and instructs
-  the operator to run `cafleet setup skill` to reinstall.
+- **Alembic-migrated schema** (§8): a linear chain of six revisions with the
+  current revision recorded in `alembic_version`; no cross-implementation DB
+  interoperability. Re-running `cafleet setup` (or `setup db`) on an existing
+  database applies any pending migrations in place and preserves all existing
+  rows, message history included; it refuses to auto-downgrade an
+  ahead-of-head database and refuses an unversioned database with existing
+  tables. Upgrade path: after `uv tool upgrade cafleet`, the first
+  fleet-scoped command errors with the stale-skills message and instructs the
+  operator to run `cafleet setup skill` to reinstall.
 - **Stale-skills guard** (§6.3): every fleet-scoped group callback validates
   recorded `skill_installs` versions against the runtime CLI version before any
   subcommand body runs; missing/stale → hard error (exit 1); exempt: `setup`,

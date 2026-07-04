@@ -13,7 +13,7 @@ One row per subcommand. "Identity flag" is the per-subcommand option naming the 
 | Subcommand | Purpose | `--fleet-id` | Identity flag | Section |
 |---|---|---|---|---|
 | `setup` | Create the database schema + install the skills (bare group invocation) | no | none | [setup](#cafleet-setup) |
-| `setup db` | Create the database schema only | no | none | [setup db](#setup-db) |
+| `setup db` | Migrate the database schema only | no | none | [setup db](#setup-db) |
 | `setup skill` | Install the skills + record the installed version | no | none | [setup skill](#setup-skill) |
 | `doctor` | Print the calling pane's tmux identifiers + the skills-install report | no | none | [doctor](#cafleet-doctor) |
 | `server` | Start the admin WebUI server | no | none | [server](#cafleet-server) |
@@ -173,10 +173,9 @@ with `No such option: --fleet-id`, matching the `fleet create` / `fleet list` /
 Bare `cafleet setup` takes no options and runs two independent halves, in
 order:
 
-1. **db half** — creates the single-baseline schema (`CREATE TABLE IF NOT
-   EXISTS`, so re-running against an already-initialized DB is a no-op); there
-   is no migration chain or in-place upgrade path (see
-   [Storage](../concepts/storage.md)).
+1. **db half** — initializes or migrates the registry database to the bundled
+   Alembic head revision (idempotent; a DB already at head is a no-op); see
+   [Storage](../concepts/storage.md).
 2. **skills half** — reads the installed `cafleet` CLI version, downloads the
    matching `cafleet-skills-v<version>.zip` asset from the corresponding
    GitHub Release of `himkt/cafleet`, extracts the three skill directories
@@ -204,16 +203,28 @@ unreachable, an unwritable target, or zero detected agent homes.
 
 ### `setup db` {#setup-db}
 
-Takes no options. Runs the schema create only: forces a sync SQLite URL from
-the configured database URL, creates the DB file's parent directory, and runs
-the single-baseline create (`CREATE TABLE IF NOT EXISTS`; idempotent). Prints:
+Takes no options. Runs the db half only: forces a sync SQLite URL from the
+configured database URL, creates the DB file's parent directory, and applies
+the bundled Alembic migrations up to the head revision (idempotent). Output,
+by prior DB state:
 
 ```
-schema ready at <db_file>
+Created <db_file> and applied migrations to head (<head>).   # fresh DB
+Upgraded from <old_rev> to <head>.                           # behind head
+Already at head (<head>); nothing to do.                     # at head
+```
+
+It refuses two states, exiting 1 — a DB with existing tables but no
+`alembic_version` table, and a DB whose recorded revision is unknown to the
+bundled script directory:
+
+```
+Error: DB has existing tables but no alembic_version. Run `alembic stamp head` manually if you are sure the schema matches.
+Error: DB schema is at revision <rev> which is unknown to this version of cafleet. Refusing to downgrade automatically.
 ```
 
 `setup db` never touches `skill_installs` **rows** — it creates the table (as
-part of the baseline) but records nothing.
+part of migration `0006`) but records nothing.
 
 ### `setup skill` {#setup-skill}
 

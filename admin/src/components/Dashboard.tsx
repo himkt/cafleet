@@ -113,8 +113,9 @@ export default function Dashboard({
                 <code className="mx-1 rounded bg-danger/15 px-1 font-mono">
                   cafleet fleet create
                 </code>
-                — upgrades preserve existing data but never backfill rows. If
-                the Administrator was manually deleted, contact the operator.
+                — schema migrations preserve existing data but never backfill
+                the Administrator. If the Administrator was manually deleted,
+                contact the operator.
               </p>
             </div>
           )}

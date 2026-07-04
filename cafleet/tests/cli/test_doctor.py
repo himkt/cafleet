@@ -53,9 +53,9 @@ def mock_tmux_ok(monkeypatch):
 
 
 def _init_schema():
-    from cafleet.db.schema import create_schema
+    from cafleet.db.init import run_db_init
 
-    create_schema()
+    run_db_init()
 
 
 def _seed_install(db_path, coding_agent, cafleet_version, installed_at):

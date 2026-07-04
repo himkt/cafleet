@@ -12,14 +12,15 @@ use. The recommended end-user path installs both in two commands.
 
 ```bash
 uv tool install cafleet     # or: pip install cafleet
-cafleet setup               # create the database schema + install the skills
+cafleet setup               # migrate the database schema + install the skills
 ```
 
 `cafleet setup` is the one-step onboarding command — a command group whose
 bare invocation runs two independent halves, in order:
 
-1. **Creates the database schema** — a single baseline (`CREATE TABLE IF NOT
-   EXISTS`), with no migration chain.
+1. **Migrates the database schema** — applies the bundled chain of Alembic
+   migrations up to the head revision (creating the database file on first
+   run).
 2. **Installs the skills** that match your installed `cafleet` version. It
    downloads the `cafleet-skills-v<version>.zip` asset from the matching GitHub
    Release and extracts the three skill directories (`cafleet`,
@@ -34,7 +35,7 @@ The halves fail independently — a failure in one does not abort the other —
 and the command exits non-zero if either half failed. Bare `cafleet setup`
 takes no options; each half is also available as its own subcommand:
 
-- `cafleet setup db` — creates the schema only (idempotent); touches nothing
+- `cafleet setup db` — migrates the schema only (idempotent); touches nothing
   else.
 - `cafleet setup skill [--agent claude|codex|opencode]...` — installs the
   skills only and records the version rows. `--agent` (repeatable) scopes the
@@ -45,8 +46,8 @@ takes no options; each half is also available as its own subcommand:
 
 Each skill directory is fully replaced on every run, so re-running
 `cafleet setup` (or `cafleet setup skill`) after upgrading the package
-refreshes the skills to the new version; the schema create is idempotent and
-a no-op when the tables already exist.
+refreshes the skills to the new version; the schema migration is idempotent
+and a no-op when the database is already at the head revision.
 
 ## Stale-skills detection
 
@@ -66,15 +67,14 @@ since SQLAlchemy does not expand `~` in SQLite URLs.
 
 !!! note "Upgrading an existing database"
 
-    The schema create is **additive**: `CREATE TABLE IF NOT EXISTS` adds any
-    missing tables and never alters, migrates, or drops pre-existing tables —
-    re-running `cafleet setup` after an upgrade preserves all existing data,
-    including fleets, agents, and the full message history. There is no
-    migration path for tables whose *shape* predates the current baseline,
-    so if a database from a much older release fails with schema errors on
-    fleet-scoped commands, the last resort is to delete that file (this
-    discards its history) and re-run `cafleet setup`. The same applies to a
-    custom `CAFLEET_DATABASE_URL` path.
+    The schema half migrates in place: re-running `cafleet setup` (or
+    `cafleet setup db`) after an upgrade applies any pending migrations and
+    preserves all existing data, including fleets, agents, and the full
+    message history. It refuses to auto-downgrade a database that is ahead
+    of the bundled head revision, and refuses an unversioned database that
+    already contains tables it does not recognize (the error suggests
+    `alembic stamp head` for operators who are certain the schema matches).
+    The same applies to a custom `CAFLEET_DATABASE_URL` path.
 
 ## Contributor / local-dev install
 

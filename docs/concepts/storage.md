@@ -7,9 +7,11 @@ icon: lucide/database
 ## Backend
 
 Everything is persisted in a single SQLite database accessed through
-SQLAlchemy 2.x with the sync `pysqlite` driver. The schema is a single baseline
-created in one pass by `cafleet setup`. There is no separate database daemon to
-operate, monitor, or back up — the database is a single file.
+SQLAlchemy 2.x with the sync `pysqlite` driver. Schema changes are managed
+by Alembic, bundled inside the `cafleet` wheel and applied via
+`cafleet setup` (or its schema-only subcommand `cafleet setup db`). There is
+no separate database daemon to operate, monitor, or back up — the database is
+a single file.
 
 The default database path is `~/.local/share/cafleet/cafleet.db` (XDG state
 directory), expanded once at config load time. Override with the
@@ -29,23 +31,21 @@ schema.
 
 ## Schema management
 
-The schema is a **single baseline** — one ordered `CREATE` sequence that yields
-the final schema directly, with no migration chain, no schema-version table,
-and no in-place migration machinery. Operators run `cafleet setup` (or its
-schema-only subcommand `cafleet setup db`) once before starting the server; the
-create uses `CREATE TABLE IF NOT EXISTS`, so it is idempotent and **additive**:
-re-running adds any missing tables and touches nothing else. Pre-existing
-tables and every row in them are left untouched, so upgrading preserves
-existing data (message history included). Tables whose shape predates the
-current baseline are not migrated — deleting the database file and re-running
-`cafleet setup` is the last resort for those, and it discards the history.
-Without the schema, the first request fails with
-`OperationalError: no such table: agents`.
+The schema is managed by a **chain of Alembic migrations**; the current
+revision is recorded in the `alembic_version` table. Operators run
+`cafleet setup` (or its schema-only subcommand `cafleet setup db`) once before
+starting the server; it migrates the database in place to the bundled head
+revision, preserving existing data (message history included), so it is
+idempotent and safe to re-run after every upgrade. It refuses to
+auto-downgrade a database that is ahead of the bundled head, and refuses an
+unversioned database with tables it does not recognize. Without the schema,
+the first request fails with `OperationalError: no such table: agents`.
 
 ## Skills-install recording
 
-The `skill_installs` table records, per coding-agent home, the CLI version
-that last installed the skills there — **not** a schema version. The skills
+The `skill_installs` table (added by migration `0006`) records, per
+coding-agent home, the CLI version that last installed the skills there —
+**not** a schema version. The skills
 half of `cafleet setup` (and `cafleet setup skill`) upserts one row per home
 after that home's install succeeds. Every fleet-scoped command (`fleet *`,
 `member *`, `message *`, `monitor *`) checks the recorded rows before running

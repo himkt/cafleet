@@ -7,19 +7,28 @@ monitoring member and the Administrator stay unenrolled), the
 cleanup-on-teardown, per-agent config edits, the per-tick scan
 (``list_monitor_targets`` over the watched Director + members, with no
 ``is_monitoring_member`` field), ping recording, the single-instance runtime
-claim/heartbeat/clear with the ownership-checked split-brain guard.
+claim/heartbeat/clear with the ownership-checked split-brain guard, and the
+Alembic data migrations that prune ``monitor_config`` rows (``0003`` prunes
+non-Director rows; ``0004`` then prunes the root-Director rows; ``0005`` —
+which inverts to per-member intervals — is covered by
+``test_alembic_smoke.py``).
 """
 
+import importlib.resources
 import json
 import os
 from datetime import UTC, datetime, timedelta
 
 import click
 import pytest
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from cafleet import broker
 from cafleet.broker import _shared
-from cafleet.db.models import Agent, MonitorConfig, MonitorRuntime, Task
+from cafleet.db.models import Agent, Fleet, MonitorConfig, MonitorRuntime, Task
 from tests.broker._helpers import _create_fleet, _register_agent
 
 
@@ -550,3 +559,171 @@ def test_read_monitor_runtime__round_trips_claim():
     assert row["tick_seconds"] == 7
     assert row["started_at"] == now
     assert row["last_tick_at"] == now
+
+
+# --- Alembic data migrations: prune monitor_config rows --------------------
+
+_SEED_TS = "2026-06-14T00:00:00+00:00"
+
+
+def _seed_legacy_monitor_config(url: str) -> None:
+    """Seed a fleet + Director (10) + ordinary member (20), each with a
+    ``monitor_config`` row.
+
+    FK-safe ordering (``PRAGMA foreign_keys=ON`` is global): fleet with a NULL
+    ``director_agent_id`` → agents → patch the Director FK → ``monitor_config``.
+    """
+    engine = create_engine(url)
+    try:
+        with Session(engine) as s:
+            s.add(Fleet(fleet_id=1, created_at=_SEED_TS))
+            s.flush()
+            s.add_all(
+                [
+                    Agent(
+                        agent_id=10,
+                        fleet_id=1,
+                        name="Director",
+                        description="director",
+                        status="active",
+                        registered_at=_SEED_TS,
+                        agent_card_json="{}",
+                    ),
+                    Agent(
+                        agent_id=20,
+                        fleet_id=1,
+                        name="legacy-member",
+                        description="member",
+                        status="active",
+                        registered_at=_SEED_TS,
+                        agent_card_json="{}",
+                    ),
+                ]
+            )
+            s.flush()
+            s.get(Fleet, 1).director_agent_id = 10
+            s.add_all(
+                [
+                    MonitorConfig(agent_id=10, interval_seconds=60, enabled=1),
+                    MonitorConfig(agent_id=20, interval_seconds=60, enabled=1),
+                ]
+            )
+            s.commit()
+    finally:
+        engine.dispose()
+
+
+def _monitor_config_agent_ids(url: str) -> set[int]:
+    engine = create_engine(url)
+    try:
+        with Session(engine) as s:
+            return {row.agent_id for row in s.query(MonitorConfig).all()}
+    finally:
+        engine.dispose()
+
+
+def test_prune_migration__deletes_non_director_rows_downgrade_noop(tmp_path):
+    db_file = tmp_path / "cafleet.db"
+    url = f"sqlite:///{db_file}"
+
+    # ``as_file`` materializes the bundled alembic.ini (mirrors cli/db.py); hold
+    # the context open across every command.* call so the file survives.
+    with importlib.resources.as_file(
+        importlib.resources.files("cafleet.db") / "alembic.ini"
+    ) as ini_path:
+        cfg = Config(str(ini_path))
+        cfg.set_main_option("sqlalchemy.url", url)
+
+        # 0002 introduced monitor_config; the prune (0003) is not yet applied.
+        command.upgrade(cfg, "0002")
+        _seed_legacy_monitor_config(url)
+        assert _monitor_config_agent_ids(url) == {10, 20}
+
+        # 0003 prunes the non-Director row (20) and keeps the root-Director row
+        # (10). Pin to 0003 (not head) so this exercises 0003 in isolation —
+        # 0004 (which deletes row 10) is covered by the 0004 test.
+        command.upgrade(cfg, "0003")
+        assert _monitor_config_agent_ids(url) == {10}
+
+        # the downgrade is a no-op — it does NOT resurrect the pruned row.
+        command.downgrade(cfg, "0002")
+        assert _monitor_config_agent_ids(url) == {10}
+
+
+def _seed_director_and_monitoring_member(url: str) -> None:
+    """Seed a fleet + Director (10) + monitoring member (30), each with a
+    ``monitor_config`` row, at the 0003 boundary (before 0004 prunes Director).
+
+    FK-safe ordering mirrors ``_seed_legacy_monitor_config``: fleet with a NULL
+    ``director_agent_id`` → agents → patch the Director FK → ``monitor_config``.
+    """
+    engine = create_engine(url)
+    try:
+        with Session(engine) as s:
+            s.add(Fleet(fleet_id=1, created_at=_SEED_TS))
+            s.flush()
+            s.add_all(
+                [
+                    Agent(
+                        agent_id=10,
+                        fleet_id=1,
+                        name="Director",
+                        description="director",
+                        status="active",
+                        registered_at=_SEED_TS,
+                        agent_card_json="{}",
+                    ),
+                    Agent(
+                        agent_id=30,
+                        fleet_id=1,
+                        name="watcher",
+                        description="monitoring member",
+                        status="active",
+                        registered_at=_SEED_TS,
+                        agent_card_json=json.dumps(
+                            {"cafleet": {"kind": "monitoring-member"}}
+                        ),
+                    ),
+                ]
+            )
+            s.flush()
+            s.get(Fleet, 1).director_agent_id = 10
+            s.add_all(
+                [
+                    MonitorConfig(agent_id=10, interval_seconds=60, enabled=1),
+                    MonitorConfig(agent_id=30, interval_seconds=60, enabled=1),
+                ]
+            )
+            s.commit()
+    finally:
+        engine.dispose()
+
+
+def test_prune_director_migration__deletes_director_row_keeps_monitoring_member(
+    tmp_path,
+):
+    db_file = tmp_path / "cafleet.db"
+    url = f"sqlite:///{db_file}"
+
+    with importlib.resources.as_file(
+        importlib.resources.files("cafleet.db") / "alembic.ini"
+    ) as ini_path:
+        cfg = Config(str(ini_path))
+        cfg.set_main_option("sqlalchemy.url", url)
+
+        # at the 0003 boundary, seed a Director (10) + monitoring member (30),
+        # both enrolled (this is the post-0003 / pre-0004 world).
+        command.upgrade(cfg, "0003")
+        _seed_director_and_monitoring_member(url)
+        assert _monitor_config_agent_ids(url) == {10, 30}
+
+        # 0004 prunes the root-Director row (10) and keeps the monitoring
+        # member's row (30). Pin to 0004 (not head) so this exercises 0004 in
+        # isolation — 0005 (the new head) prunes the monitoring member and
+        # backfills the Director, which the 0005 test covers.
+        command.upgrade(cfg, "0004")
+        assert _monitor_config_agent_ids(url) == {30}
+
+        # the downgrade is a no-op — it does NOT resurrect the Director row.
+        command.downgrade(cfg, "0003")
+        assert _monitor_config_agent_ids(url) == {30}

@@ -7,6 +7,7 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "sqlalchemy>=2.0",
+    "alembic",
     "click",
     "pydantic",
     "pydantic-settings",
@@ -22,6 +23,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/cafleet"]
 include = [
+  "src/cafleet/db/alembic.ini",
+  "src/cafleet/db/alembic/**/*",
   "src/cafleet/webui/dist/**/*",
 ]
 # The dist assets are gitignored, and hatchling skips VCS-ignored files in
