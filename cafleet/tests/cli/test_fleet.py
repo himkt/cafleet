@@ -230,7 +230,7 @@ def test_fleet_show__shape_and_branches(
             conn.close()
         target = sid
 
-    result = runner.invoke(cli, ["fleet", "show", str(target)])
+    result = runner.invoke(cli, ["fleet", "show", "--fleet-id", str(target)])
     assert result.exit_code == expected_exit, result.output
     out = result.output.lower() if scenario == "missing" else result.output
     for needle in expected_in:
@@ -247,7 +247,7 @@ def test_fleet_delete__soft_deletes_and_marks_row(fresh_db):
     _seed_agent(db_file, 2, sid, status="active")
     _seed_agent(db_file, 3, sid, status="active")
 
-    result = runner.invoke(cli, ["fleet", "delete", str(sid)])
+    result = runner.invoke(cli, ["fleet", "delete", "--fleet-id", str(sid)])
     assert result.exit_code == 0, result.output
     # Row persists, deleted_at set.
     assert sid in [r[0] for r in _fleet_rows(db_file)]
@@ -258,9 +258,46 @@ def test_fleet_delete__soft_deletes_and_marks_row(fresh_db):
 def test_fleet_delete__nonexistent_fleet_handles_gracefully(fresh_db):
     _db_file, runner = fresh_db
     fake_id = 999
-    result = runner.invoke(cli, ["fleet", "delete", str(fake_id)])
+    result = runner.invoke(cli, ["fleet", "delete", "--fleet-id", str(fake_id)])
     # Either exits non-zero or returns SystemExit — never crashes uncleanly.
     assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+# --- fleet show / delete take --fleet-id, not a positional (design 0000118, item 3.1) ---
+
+
+def test_fleet_show__accepts_fleet_id_option(fresh_db):
+    db_file, runner = fresh_db
+    sid = 1
+    _seed_fleet(db_file, sid, label="opt-show")
+
+    result = runner.invoke(cli, ["fleet", "show", "--fleet-id", str(sid)])
+    assert result.exit_code == 0, result.output
+    assert "opt-show" in result.output
+
+
+def test_fleet_delete__accepts_fleet_id_option(fresh_db):
+    db_file, runner = fresh_db
+    sid = 1
+    _seed_fleet(db_file, sid)
+
+    result = runner.invoke(cli, ["fleet", "delete", "--fleet-id", str(sid)])
+    assert result.exit_code == 0, result.output
+    assert _fleet_deleted_at(db_file, sid) is not None
+
+
+def test_fleet_show__rejects_positional_fleet_id(fresh_db):
+    _db_file, runner = fresh_db
+    result = runner.invoke(cli, ["fleet", "show", "1"])
+    assert result.exit_code == 2, result.output
+    assert "unexpected" in (result.output or "").lower()
+
+
+def test_fleet_delete__rejects_positional_fleet_id(fresh_db):
+    _db_file, runner = fresh_db
+    result = runner.invoke(cli, ["fleet", "delete", "1"])
+    assert result.exit_code == 2, result.output
+    assert "unexpected" in (result.output or "").lower()
 
 
 def test_fleet_group_structure__subcommands_under_fleet(fresh_db):
