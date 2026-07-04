@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from cafleet.broker import _shared
-from cafleet.db.models import Base
+from cafleet.db.models import Base, SkillInstall
 
 
 @pytest.fixture(autouse=True)
@@ -34,8 +34,12 @@ def test_table_exists_false_when_table_missing(monkeypatch):
     assert skill_installs_table_exists() is False
 
 
-def test_list_skill_installs_empty():
+def test_list_skill_installs_empty(broker_session):
     from cafleet.broker.skill_installs import list_skill_installs
+
+    # The shared fixture seeds one row (guard contract); build an empty state.
+    with broker_session() as session, session.begin():
+        session.query(SkillInstall).delete()
 
     assert list_skill_installs() == []
 
