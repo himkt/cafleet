@@ -1009,7 +1009,9 @@ fleet-scoped command (§6.3 `--fleet-id`).
 
 All six route through `client_command`. Common: `--agent-id` (integer, required
 — the calling agent/requester) on all; `--task-id` (integer, required) on
-`ack`/`cancel`/`show`; `--full` (documented) on all. No `--quiet` flag.
+`ack`/`cancel`/`show`; `--full` (documented) on all; `--quiet` (documented
+boolean, default `false` — success output is the bare `task_id`) on `send` and
+`ack`.
 
 - **send** — also `--to` (integer, required) and the shared `--text` /
   `--text-file` body pair (exactly one required; §6.3 [text-body
@@ -1171,7 +1173,7 @@ block (`kind`, `skills`, placement sub-block) with `--full`.
 
 #### `member list`
 
-`member list` takes `--activity` (hidden boolean, default `false`) and `--all`
+`member list` takes `--activity` (boolean, default `false`) and `--all`
 (boolean, default `false`); both together → usage error (exit 2) `--all and
 --activity are mutually exclusive.`. Default: lists the
 fleet's members — active agents with a placement row, the root Director
@@ -1192,7 +1194,7 @@ members-only listing above.
 
 Options: `--member-id` (integer, required), `--lines` (integer, default **20**,
 shown in help; `--tail` is an accepted alias spelling), `--ansi` /
-`--no-ansi` (hidden boolean pair, default `false`).
+`--no-ansi` (boolean pair, default `false`).
 Ensure tmux, load the member, require a pane (`capture`). Capture the last N lines
 (a tmux error → application error `capture failed: <error>`). When `--ansi` is
 not set, strip ANSI. JSON: `{member_agent_id, pane_id, lines, content}`; text
@@ -1213,7 +1215,7 @@ quoting/escaping — reproducing the quoted intent is sufficient).
 #### `member ping`
 
 Re-pokes a member's inbox. Options: `--member-id` (integer, required — the
-**target**), `--quiet` (hidden boolean, default `false` — success output is the
+**target**), `--quiet` (boolean, default `false` — success output is the
 bare member id). Ensure tmux, load the target, require a pane (`ping`).
 Inject the inbox-poll keystroke via the multiplexer's
 `send_poll_trigger`, which is **best-effort** (§6.5) — it returns a boolean and

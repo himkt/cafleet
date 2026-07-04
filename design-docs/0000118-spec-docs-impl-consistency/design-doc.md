@@ -1,7 +1,7 @@
 # SPEC.md / docs vs Implementation Consistency Reconciliation
 
 **Status**: Approved
-**Progress**: 39/44 tasks complete
+**Progress**: 42/44 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -233,9 +233,9 @@ makes them first-class. Two reconciled surfaces can plausibly appear there and M
 
 ### Step 9: Unhide the four flags (3.4 + 3.5)
 
-- [ ] Test: `--full`, `--quiet`, `--activity`, `--ansi/--no-ansi` appear in the relevant `--help` output with help text <!-- completed: -->
-- [ ] `_helpers.py:47,48` → drop `hidden=True`, add `help=` on `full_flag` + `quiet_flag`; `member.py:494,545` → drop `hidden=True`, add `help=` <!-- completed: -->
-- [ ] Doc: document `--quiet` at `cli-options.md:146,899-901` + `SPEC.md:1007`; add `--activity` / `--ansi` to `cli-options.md` + SPEC §6.3 <!-- completed: -->
+- [x] Test: `--full`, `--quiet`, `--activity`, `--ansi/--no-ansi` appear in the relevant `--help` output with help text <!-- completed: 2026-07-04T08:11 -->
+- [x] `_helpers.py:47,48` → drop `hidden=True`, add `help=` on `full_flag` + `quiet_flag`; `member.py:494,545` → drop `hidden=True`, add `help=` <!-- completed: 2026-07-04T08:11 -->
+- [x] Doc: document `--quiet` at `cli-options.md:146,899-901` + `SPEC.md:1007`; add `--activity` / `--ansi` to `cli-options.md` + SPEC §6.3 <!-- completed: 2026-07-04T08:11 -->
 
 ### Step 10: Cross-surface verification + gates
 

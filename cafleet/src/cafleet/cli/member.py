@@ -491,7 +491,7 @@ def member_show(ctx, member_id, full):
     "activity",
     is_flag=True,
     default=False,
-    hidden=True,
+    help="Show per-member activity columns.",
 )
 @click.option(
     "--all",
@@ -542,7 +542,7 @@ def member_list(ctx, activity, all_agents):
 @click.option(
     "--ansi/--no-ansi",
     default=False,
-    hidden=True,
+    help="Emit raw ANSI instead of stripping it.",
 )
 @click.pass_context
 def member_capture(ctx, member_id, lines, ansi):

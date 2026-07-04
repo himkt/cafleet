@@ -44,8 +44,20 @@ def ensure_skills_current() -> None:
         )
 
 
-full_flag = click.option("--full", "full", is_flag=True, default=False, hidden=True)
-quiet_flag = click.option("--quiet", "quiet", is_flag=True, default=False, hidden=True)
+full_flag = click.option(
+    "--full",
+    "full",
+    is_flag=True,
+    default=False,
+    help="Render the full, untruncated output.",
+)
+quiet_flag = click.option(
+    "--quiet",
+    "quiet",
+    is_flag=True,
+    default=False,
+    help="Print only the resulting task_id.",
+)
 
 
 def director_member_options(func):

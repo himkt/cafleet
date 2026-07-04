@@ -143,7 +143,7 @@ The table describes the resulting `text` value AFTER truncation. Text mode omits
 |---|---|---|
 | `--full` | no | Documented per-subcommand option (placed after the subcommand name, like `--agent-id` and `--task-id`). Disables truncation; emits the full message body and the full typed-column envelope. Composes orthogonally with `--json`. See [`--full` semantics](#full-semantics) for the cross-subcommand summary. |
 
-There is no `--quiet` flag on any subcommand.
+The `--quiet` flag is available on `cafleet message send`, `cafleet message ack`, and `cafleet member ping`: it suppresses the normal output and prints only the bare `task_id` (the target member id for `ping`), for shell capture.
 
 Length is measured in Python `str` codepoints, never bytes — multibyte characters are never split.
 
@@ -894,6 +894,7 @@ Re-pokes a member's inbox. Keystrokes `Esc` → `cafleet message poll --fleet-id
 | Flag | Required | Notes |
 |---|---|---|
 | `--member-id` | yes | The target member. |
+| `--quiet` | no | Suppress the normal `Pinged …` line and print only the bare member id, for shell capture. |
 
 ```bash
 cafleet member ping --fleet-id <fleet-id> --member-id <member-id>
