@@ -1,10 +1,9 @@
-"""Tests for the ``cafleet setup`` CLI command.
+"""Tests for the ``cafleet setup`` CLI group (bare, ``db``, ``skill``).
 
 The skills half is exercised entirely offline: ``importlib.metadata.version``,
 the ``GET /releases/tags/<version>`` lookup and the asset download are all
 monkeypatched, and ``AGENT_SKILLS_DIRS`` is redirected to ``tmp_path`` homes.
-Every ``cafleet setup`` run also drives the database half, so an autouse
-fixture redirects the registry at a temp SQLite file.
+An autouse fixture redirects the registry at a temp SQLite file.
 
 Contract notes for the implementation under test (``cafleet.cli.setup``):
 
@@ -14,16 +13,20 @@ Contract notes for the implementation under test (``cafleet.cli.setup``):
   ``urllib.request.urlopen``.
 * ``shutil.copytree`` performs the per-skill install.
 * ``AGENT_SKILLS_DIRS`` is a module-level dict of ``{agent: Path}``.
+* The db half calls ``create_schema`` through the module attribute
+  ``cafleet.cli.setup.create_schema``.
 """
 
 import importlib.metadata
 import io
 import json
+import shutil
 import sqlite3
 import urllib.error
 import urllib.request
 import zipfile
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -34,6 +37,11 @@ CLI_VERSION = "0.12.2"
 ASSET_NAME = f"cafleet-skills-v{CLI_VERSION}.zip"
 DOWNLOAD_URL = f"https://example.invalid/download/{ASSET_NAME}"
 _RELEASE_API_FRAGMENT = "/releases/tags/"
+
+PREFLIGHT_ERROR = (
+    "the database schema is missing or outdated; "
+    "run 'cafleet setup' or 'cafleet setup db' first"
+)
 
 
 def _make_skills_zip(
@@ -94,13 +102,27 @@ def _mock_release(
             if api_error is not None:
                 raise api_error
             return io.BytesIO(release_body)
-        if url == DOWNLOAD_URL:
+        if url.endswith(".zip"):
             if download_error is not None:
                 raise download_error
             return io.BytesIO(zip_bytes if zip_bytes is not None else b"")
         raise AssertionError(f"unexpected URL: {url}")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+
+def _forbid_network(monkeypatch):
+    """Fail loudly if the command under test touches the network at all."""
+
+    def _no_network(*args, **kwargs):
+        raise AssertionError("unexpected network access")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+
+
+@pytest.fixture(autouse=True)
+def _autouse_reset_engine(_reset_engine_singletons):
+    pass
 
 
 @pytest.fixture(autouse=True)
@@ -152,19 +174,50 @@ def _table_names(db_path):
         conn.close()
 
 
-def _run_setup(args=()):
+def _skill_install_rows(db_path):
+    """Return ``[(coding_agent, cafleet_version), ...]`` ordered by agent."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        return conn.execute(
+            "SELECT coding_agent, cafleet_version FROM skill_installs"
+            " ORDER BY coding_agent"
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def _init_schema():
+    """Create the single-baseline schema the way ``cafleet setup db`` does."""
+    from cafleet.db.schema import create_schema
+
+    create_schema()
+
+
+def _run(args):
     from cafleet.cli import cli
 
-    return CliRunner().invoke(cli, ["setup", *args])
+    return CliRunner().invoke(cli, args)
+
+
+def _run_setup(args=()):
+    return _run(["setup", *args])
+
+
+def _run_setup_db():
+    return _run(["setup", "db"])
+
+
+def _run_setup_skill(args=()):
+    return _run(["setup", "skill", *args])
 
 
 # --------------------------------------------------------------------------- #
-# Target resolution: auto-detect and --agent scoping                          #
+# Bare ``cafleet setup``: db half first, then skills half                      #
 # --------------------------------------------------------------------------- #
 
 
-def test_autodetect_installs_only_present_homes(homes, registry_db, monkeypatch):
-    """Auto-detect installs only where the agent home exists."""
+def test_bare_setup_runs_both_halves_and_records_rows(homes, registry_db, monkeypatch):
+    """Bare setup creates the schema, installs every detected home, records rows."""
     _make_home(homes["claude"])
     _make_home(homes["opencode"])
     # codex home intentionally absent
@@ -173,52 +226,74 @@ def test_autodetect_installs_only_present_homes(homes, registry_db, monkeypatch)
     result = _run_setup()
 
     assert result.exit_code == 0, result.output
+    assert {"fleets", "agents", "skill_installs"} <= _table_names(registry_db)
     assert _installed_skill_dirs(homes["claude"]) == set(SKILL_DIR_NAMES)
     assert _installed_skill_dirs(homes["opencode"]) == set(SKILL_DIR_NAMES)
     assert not homes["codex"].exists()
-    assert {"fleets", "agents", "tasks", "alembic_version"} <= _table_names(registry_db)
+    assert _skill_install_rows(registry_db) == [
+        ("claude", CLI_VERSION),
+        ("opencode", CLI_VERSION),
+    ]
 
 
-def test_agent_flag_scopes_targets_and_dedupes(homes, registry_db, monkeypatch):
-    """--agent limits the skills targets; repeated values are deduped silently."""
-    for skills_dir in homes.values():
-        _make_home(skills_dir)
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
-
-    result = _run_setup(["--agent", "claude", "--agent", "claude"])
-
-    assert result.exit_code == 0, result.output
-    assert _installed_skill_dirs(homes["claude"]) == set(SKILL_DIR_NAMES)
-    assert _installed_skill_dirs(homes["codex"]) == set()
-    assert _installed_skill_dirs(homes["opencode"]) == set()
-    # silent dedupe: claude is installed/reported exactly once
-    assert result.output.count("claude:") == 1
-
-
-def test_agent_flag_db_half_still_runs(homes, registry_db, monkeypatch):
-    """The database half runs even when --agent scopes the skills half."""
-    _make_home(homes["codex"])
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
-
-    result = _run_setup(["--agent", "codex"])
-
-    assert result.exit_code == 0, result.output
-    assert _installed_skill_dirs(homes["codex"]) == set(SKILL_DIR_NAMES)
-    assert {"alembic_version", "fleets"} <= _table_names(registry_db)
-
-
-def test_agent_flag_creates_missing_home(homes, registry_db, monkeypatch):
-    """An explicitly named agent whose home is absent gets its tree created."""
-    # no homes pre-created
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+def test_bare_setup_rejects_agent_option(homes, registry_db, monkeypatch):
+    """``--agent`` moved to ``setup skill``; bare setup rejects it with exit 2."""
+    _make_home(homes["claude"])
+    _forbid_network(monkeypatch)
 
     result = _run_setup(["--agent", "claude"])
 
-    assert result.exit_code == 0, result.output
-    assert _installed_skill_dirs(homes["claude"]) == set(SKILL_DIR_NAMES)
+    assert result.exit_code == 2, result.output
+    assert "no such option" in result.output.lower()
 
 
-def test_zero_homes_detected(homes, registry_db, monkeypatch):
+def test_bare_setup_db_failure_cascades_to_skills_preflight(
+    homes, registry_db, monkeypatch
+):
+    """A failed db half makes the skills half fail its schema pre-flight.
+
+    Both halves are reported failed, db first (matching the run order), and
+    the command exits 1 with the joined summary.
+    """
+    from cafleet.cli import setup as setup_module
+
+    _make_home(homes["claude"])
+    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+
+    def broken_create_schema():
+        raise click.ClickException("disk full")
+
+    monkeypatch.setattr(setup_module, "create_schema", broken_create_schema)
+
+    result = _run_setup()
+
+    assert result.exit_code == 1, result.output
+    assert "db half failed: disk full" in result.output
+    assert "skills half failed:" in result.output
+    assert PREFLIGHT_ERROR in result.output
+    assert "db and skills half failed" in result.output
+    assert result.output.index("db half failed") < result.output.index(
+        "skills half failed"
+    )
+
+
+def test_bare_setup_skills_fail_db_succeeds(homes, registry_db, monkeypatch):
+    """Skills half fails (malformed asset); the db half already succeeded."""
+    _make_home(homes["claude"])
+    _mock_release(monkeypatch, zip_bytes=b"not a zip")
+
+    result = _run_setup()
+
+    assert result.exit_code == 1, result.output
+    assert "skills half failed:" in result.output
+    assert "malformed" in result.output.lower()
+    assert "db half failed" not in result.output
+    assert "Error: skills half failed" in result.output
+    assert {"fleets", "skill_installs"} <= _table_names(registry_db)
+    assert _skill_install_rows(registry_db) == []
+
+
+def test_bare_setup_zero_homes_detected(homes, registry_db, monkeypatch):
     """Auto-detect with no homes fails the skills half listing the searched paths."""
     _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
 
@@ -230,40 +305,191 @@ def test_zero_homes_detected(homes, registry_db, monkeypatch):
     assert ".claude" in result.output
     assert ".codex" in result.output
     assert "opencode" in result.output
-    # the database half still ran despite the skills-half failure
-    assert "alembic_version" in _table_names(registry_db)
+    # the db half ran (and succeeded) despite the skills-half failure
+    assert "skill_installs" in _table_names(registry_db)
+    assert "Error: skills half failed" in result.output
 
 
 # --------------------------------------------------------------------------- #
-# Replace semantics / idempotency                                             #
+# ``cafleet setup db``: schema only                                            #
 # --------------------------------------------------------------------------- #
 
 
-def test_replace_idempotency_second_run_clean_tree(homes, registry_db, monkeypatch):
-    """Each run replaces the skill dirs; re-running yields the same clean tree."""
+def test_setup_db_creates_schema_only(homes, registry_db, monkeypatch):
+    """``setup db`` creates the schema, writes no rows, and never goes online."""
     _make_home(homes["claude"])
-    stale = homes["claude"] / "cafleet" / "STALE.md"
-    stale.parent.mkdir(parents=True)
-    stale.write_text("old")
+    _forbid_network(monkeypatch)
+
+    result = _run_setup_db()
+
+    assert result.exit_code == 0, result.output
+    assert f"schema ready at {registry_db}" in result.output
+    assert {"fleets", "skill_installs"} <= _table_names(registry_db)
+    assert _skill_install_rows(registry_db) == []
+    assert _installed_skill_dirs(homes["claude"]) == set()
+
+
+def test_setup_db_idempotent_and_preserves_rows(homes, registry_db, monkeypatch):
+    """A second ``setup db`` run succeeds and never touches recorded rows."""
+    _make_home(homes["claude"])
     _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
 
-    first = _run_setup(["--agent", "claude"])
-    assert first.exit_code == 0, first.output
-    assert not stale.exists()  # replaced, not merged
-    tree_after_first = sorted(
-        p.relative_to(homes["claude"]).as_posix() for p in homes["claude"].rglob("*")
-    )
+    assert _run_setup_db().exit_code == 0
+    assert _run_setup_skill(["--agent", "claude"]).exit_code == 0
+    assert _skill_install_rows(registry_db) == [("claude", CLI_VERSION)]
 
-    second = _run_setup(["--agent", "claude"])
-    assert second.exit_code == 0, second.output
-    tree_after_second = sorted(
-        p.relative_to(homes["claude"]).as_posix() for p in homes["claude"].rglob("*")
-    )
-    assert tree_after_second == tree_after_first
+    result = _run_setup_db()
+
+    assert result.exit_code == 0, result.output
+    assert f"schema ready at {registry_db}" in result.output
+    assert _skill_install_rows(registry_db) == [("claude", CLI_VERSION)]
 
 
 # --------------------------------------------------------------------------- #
-# Archive integrity                                                           #
+# ``cafleet setup skill``: pre-flight, recording, upsert                       #
+# --------------------------------------------------------------------------- #
+
+
+def test_setup_skill_preflight_error_when_schema_missing(
+    homes, registry_db, monkeypatch
+):
+    """Without the ``skill_installs`` table the pre-flight fails before any
+    network access or install."""
+    _make_home(homes["claude"])
+    _forbid_network(monkeypatch)
+
+    result = _run_setup_skill()
+
+    assert result.exit_code == 1, result.output
+    assert PREFLIGHT_ERROR in result.output
+    assert _installed_skill_dirs(homes["claude"]) == set()
+
+
+def test_setup_skill_agent_records_one_row(homes, registry_db, monkeypatch):
+    """``setup skill --agent claude`` installs one home and records one row."""
+    _init_schema()
+    _make_home(homes["claude"])
+    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+
+    result = _run_setup_skill(["--agent", "claude"])
+
+    assert result.exit_code == 0, result.output
+    assert _installed_skill_dirs(homes["claude"]) == set(SKILL_DIR_NAMES)
+    assert _skill_install_rows(registry_db) == [("claude", CLI_VERSION)]
+    # the per-home success line is unchanged from the pre-group surface
+    expected_line = (
+        f"claude: installed {', '.join(SKILL_DIR_NAMES)} "
+        f"(v{CLI_VERSION}) -> {homes['claude']}"
+    )
+    assert expected_line in result.output
+
+
+def test_setup_skill_reinstall_upserts_row(homes, registry_db, monkeypatch):
+    """Re-installing replaces the home's row instead of adding a second one."""
+    _init_schema()
+    _make_home(homes["claude"])
+    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+
+    assert _run_setup_skill(["--agent", "claude"]).exit_code == 0
+    assert _skill_install_rows(registry_db) == [("claude", CLI_VERSION)]
+
+    _mock_release(
+        monkeypatch,
+        version="0.12.3",
+        zip_bytes=_make_skills_zip(),
+        assets=[
+            {
+                "name": "cafleet-skills-v0.12.3.zip",
+                "browser_download_url": "https://example.invalid/download/cafleet-skills-v0.12.3.zip",
+            }
+        ],
+    )
+
+    result = _run_setup_skill(["--agent", "claude"])
+
+    assert result.exit_code == 0, result.output
+    assert _skill_install_rows(registry_db) == [("claude", "0.12.3")]
+
+
+def test_setup_skill_autodetect_installs_only_present_homes(
+    homes, registry_db, monkeypatch
+):
+    """Without ``--agent`` the targets are the detected homes, one row each."""
+    _init_schema()
+    _make_home(homes["claude"])
+    _make_home(homes["opencode"])
+    # codex home intentionally absent
+    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+
+    result = _run_setup_skill()
+
+    assert result.exit_code == 0, result.output
+    assert _installed_skill_dirs(homes["claude"]) == set(SKILL_DIR_NAMES)
+    assert _installed_skill_dirs(homes["opencode"]) == set(SKILL_DIR_NAMES)
+    assert not homes["codex"].exists()
+    assert _skill_install_rows(registry_db) == [
+        ("claude", CLI_VERSION),
+        ("opencode", CLI_VERSION),
+    ]
+
+
+def test_setup_skill_agent_flag_scopes_and_dedupes(homes, registry_db, monkeypatch):
+    """``--agent`` limits the targets; repeated values are deduped silently."""
+    _init_schema()
+    for skills_dir in homes.values():
+        _make_home(skills_dir)
+    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+
+    result = _run_setup_skill(["--agent", "claude", "--agent", "claude"])
+
+    assert result.exit_code == 0, result.output
+    assert _installed_skill_dirs(homes["claude"]) == set(SKILL_DIR_NAMES)
+    assert _installed_skill_dirs(homes["codex"]) == set()
+    assert _installed_skill_dirs(homes["opencode"]) == set()
+    assert result.output.count("claude:") == 1
+    assert _skill_install_rows(registry_db) == [("claude", CLI_VERSION)]
+
+
+def test_setup_skill_agent_flag_creates_missing_home(homes, registry_db, monkeypatch):
+    """An explicitly named agent whose home is absent gets its tree created."""
+    _init_schema()
+    # no homes pre-created
+    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+
+    result = _run_setup_skill(["--agent", "claude"])
+
+    assert result.exit_code == 0, result.output
+    assert _installed_skill_dirs(homes["claude"]) == set(SKILL_DIR_NAMES)
+    assert _skill_install_rows(registry_db) == [("claude", CLI_VERSION)]
+
+
+def test_setup_skill_install_failure_keeps_prior_rows(homes, registry_db, monkeypatch):
+    """An install failure aborts the loop; rows for completed homes remain."""
+    from cafleet.cli import setup as setup_module
+
+    _init_schema()
+    _make_home(homes["claude"])
+    _make_home(homes["codex"])
+    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+
+    real_copytree = shutil.copytree
+
+    def failing_copytree(src, dst, *args, **kwargs):
+        if "h_codex" in str(dst):
+            raise OSError("disk full")
+        return real_copytree(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(setup_module.shutil, "copytree", failing_copytree)
+
+    result = _run_setup_skill(["--agent", "claude", "--agent", "codex"])
+
+    assert result.exit_code == 1, result.output
+    assert "failed to install skills into" in result.output
+    assert _skill_install_rows(registry_db) == [("claude", CLI_VERSION)]
+
+
+# --------------------------------------------------------------------------- #
+# Archive integrity (via ``setup skill``)                                      #
 # --------------------------------------------------------------------------- #
 
 
@@ -272,6 +498,7 @@ def test_zip_slip_member_rejected_nothing_extracted(
     homes, registry_db, monkeypatch, evil_member
 ):
     """A ``..``/absolute member is rejected before extraction; targets untouched."""
+    _init_schema()
     _make_home(homes["claude"])
     sentinel = homes["claude"] / "cafleet" / "SENTINEL.md"
     sentinel.parent.mkdir(parents=True)
@@ -279,11 +506,12 @@ def test_zip_slip_member_rejected_nothing_extracted(
     members = [f"skills/{name}/SKILL.md" for name in SKILL_DIR_NAMES] + [evil_member]
     _mock_release(monkeypatch, zip_bytes=_make_skills_zip(raw_members=members))
 
-    result = _run_setup(["--agent", "claude"])
+    result = _run_setup_skill(["--agent", "claude"])
 
     assert result.exit_code == 1, result.output
     assert sentinel.exists()  # nothing extracted, nothing removed
     assert sentinel.read_text() == "keep"
+    assert _skill_install_rows(registry_db) == []
 
 
 @pytest.mark.parametrize(
@@ -298,10 +526,11 @@ def test_extra_entry_under_skills_is_malformed(
     homes, registry_db, monkeypatch, zip_bytes
 ):
     """Any entry under ``skills/`` beyond the three skill dirs is malformed."""
+    _init_schema()
     _make_home(homes["claude"])
     _mock_release(monkeypatch, zip_bytes=zip_bytes)
 
-    result = _run_setup(["--agent", "claude"])
+    result = _run_setup_skill(["--agent", "claude"])
 
     assert result.exit_code == 1, result.output
     assert "malformed" in result.output.lower()
@@ -309,13 +538,14 @@ def test_extra_entry_under_skills_is_malformed(
 
 def test_missing_skill_dir_is_malformed(homes, registry_db, monkeypatch):
     """A ``skills/`` holding only two of the three skill dirs is malformed."""
+    _init_schema()
     _make_home(homes["claude"])
     _mock_release(
         monkeypatch,
         zip_bytes=_make_skills_zip(skill_dirs=("cafleet", "cafleet-design-doc")),
     )
 
-    result = _run_setup(["--agent", "claude"])
+    result = _run_setup_skill(["--agent", "claude"])
 
     assert result.exit_code == 1, result.output
     assert "malformed" in result.output.lower()
@@ -323,10 +553,11 @@ def test_missing_skill_dir_is_malformed(homes, registry_db, monkeypatch):
 
 def test_bad_zip_is_malformed(homes, registry_db, monkeypatch):
     """A non-zip / truncated download surfaces as the malformed-asset error."""
+    _init_schema()
     _make_home(homes["claude"])
     _mock_release(monkeypatch, zip_bytes=b"this is not a zip archive")
 
-    result = _run_setup(["--agent", "claude"])
+    result = _run_setup_skill(["--agent", "claude"])
 
     assert result.exit_code == 1, result.output
     assert "malformed" in result.output.lower()
@@ -338,6 +569,7 @@ def test_extractall_oserror_is_malformed(homes, registry_db, monkeypatch):
     The archive passes the zip-slip and bad-zip pre-checks; the failure happens
     inside ``ZipFile.extractall`` (e.g. a filesystem error during extraction).
     """
+    _init_schema()
     _make_home(homes["claude"])
     _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
 
@@ -346,26 +578,27 @@ def test_extractall_oserror_is_malformed(homes, registry_db, monkeypatch):
 
     monkeypatch.setattr(zipfile.ZipFile, "extractall", boom)
 
-    result = _run_setup(["--agent", "claude"])
+    result = _run_setup_skill(["--agent", "claude"])
 
     assert result.exit_code == 1, result.output
     assert "malformed" in result.output.lower()
 
 
 # --------------------------------------------------------------------------- #
-# Release / network resolution                                               #
+# Release / network resolution (via ``setup skill``)                           #
 # --------------------------------------------------------------------------- #
 
 
 def test_missing_asset_message(homes, registry_db, monkeypatch):
     """An asset absent from the release surfaces the specific not-found message."""
+    _init_schema()
     _make_home(homes["claude"])
     _mock_release(
         monkeypatch,
-        assets=[{"name": "something-else.zip", "browser_download_url": DOWNLOAD_URL}],
+        assets=[{"name": "something-else.txt", "browser_download_url": DOWNLOAD_URL}],
     )
 
-    result = _run_setup(["--agent", "claude"])
+    result = _run_setup_skill(["--agent", "claude"])
 
     assert result.exit_code == 1, result.output
     assert ASSET_NAME in result.output
@@ -379,10 +612,11 @@ def test_missing_asset_message(homes, registry_db, monkeypatch):
 )
 def test_unparseable_api_response(homes, registry_db, monkeypatch, release_body):
     """A 200 body that is not JSON, or lacks the ``assets`` array, is rejected."""
+    _init_schema()
     _make_home(homes["claude"])
     _mock_release(monkeypatch, release_body=release_body)
 
-    result = _run_setup(["--agent", "claude"])
+    result = _run_setup_skill(["--agent", "claude"])
 
     assert result.exit_code == 1, result.output
     assert "could not parse the github api response" in result.output.lower()
@@ -390,6 +624,7 @@ def test_unparseable_api_response(homes, registry_db, monkeypatch, release_body)
 
 def test_no_release_for_version(homes, registry_db, monkeypatch):
     """A 404 from ``/releases/tags/<version>`` is the no-release-for-version error."""
+    _init_schema()
     _make_home(homes["claude"])
     err = urllib.error.HTTPError(
         url="https://api.github.com/repos/himkt/cafleet/releases/tags/0.12.2",
@@ -400,7 +635,7 @@ def test_no_release_for_version(homes, registry_db, monkeypatch):
     )
     _mock_release(monkeypatch, api_error=err)
 
-    result = _run_setup(["--agent", "claude"])
+    result = _run_setup_skill(["--agent", "claude"])
 
     assert result.exit_code == 1, result.output
     assert CLI_VERSION in result.output
@@ -423,10 +658,11 @@ def test_no_release_for_version(homes, registry_db, monkeypatch):
 )
 def test_network_error_folded(homes, registry_db, monkeypatch, api_error):
     """URLError, timeout, 403 rate-limit and non-404 5xx fold into one message."""
+    _init_schema()
     _make_home(homes["claude"])
     _mock_release(monkeypatch, api_error=api_error)
 
-    result = _run_setup(["--agent", "claude"])
+    result = _run_setup_skill(["--agent", "claude"])
 
     assert result.exit_code == 1, result.output
     assert "could not reach the github api" in result.output.lower()
@@ -449,22 +685,23 @@ def test_download_network_error_folded(homes, registry_db, monkeypatch, download
     """A network failure on the asset download folds into the same message.
 
     The release lookup succeeds; the failure happens while streaming the asset,
-    so this exercises the second ``urlopen`` call (step 4), distinct from the
+    so this exercises the second ``urlopen`` call, distinct from the
     release-lookup path covered by ``test_network_error_folded``.
     """
+    _init_schema()
     _make_home(homes["claude"])
     _mock_release(
         monkeypatch, zip_bytes=_make_skills_zip(), download_error=download_error
     )
 
-    result = _run_setup(["--agent", "claude"])
+    result = _run_setup_skill(["--agent", "claude"])
 
     assert result.exit_code == 1, result.output
     assert "could not reach the github api" in result.output.lower()
 
 
 # --------------------------------------------------------------------------- #
-# Install-time filesystem errors                                             #
+# Install-time filesystem errors (via ``setup skill``)                         #
 # --------------------------------------------------------------------------- #
 
 
@@ -472,6 +709,7 @@ def test_unwritable_target_permission_error(homes, registry_db, monkeypatch):
     """A ``PermissionError`` during install surfaces as a ClickException."""
     from cafleet.cli import setup as setup_module
 
+    _init_schema()
     _make_home(homes["claude"])
     _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
 
@@ -480,54 +718,9 @@ def test_unwritable_target_permission_error(homes, registry_db, monkeypatch):
 
     monkeypatch.setattr(setup_module.shutil, "copytree", deny_copytree)
 
-    result = _run_setup(["--agent", "claude"])
+    result = _run_setup_skill(["--agent", "claude"])
 
     assert result.exit_code == 1, result.output
     out = result.output.lower()
     assert "permission" in out or "denied" in out
-
-
-# --------------------------------------------------------------------------- #
-# Independence of the two halves (Step 4 task 2)                              #
-# --------------------------------------------------------------------------- #
-
-
-def test_independence_skills_fail_db_succeeds(homes, registry_db, monkeypatch):
-    """Skills half fails (malformed asset); the DB half still runs to head."""
-    _make_home(homes["claude"])
-    _mock_release(monkeypatch, zip_bytes=b"not a zip")
-
-    result = _run_setup()
-
-    assert result.exit_code == 1, result.output
-    out = result.output.lower()
-    # skills-half failure reported
-    assert "malformed" in out
-    assert "skills" in out
-    # db-half success: schema created at head and its status line printed
-    assert {"alembic_version", "fleets"} <= _table_names(registry_db)
-    assert "applied" in out or "head" in out
-
-
-def test_independence_db_fail_skills_succeed(homes, registry_db, monkeypatch):
-    """DB half fails (orphan-tables DB); the skills half still installs."""
-    _make_home(homes["claude"])
-    registry_db.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(registry_db))
-    try:
-        conn.execute("CREATE TABLE legacy_squat (id INTEGER PRIMARY KEY)")
-        conn.commit()
-    finally:
-        conn.close()
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
-
-    result = _run_setup(["--agent", "claude"])
-
-    assert result.exit_code == 1, result.output
-    out = result.output
-    # skills-half success: installed and its report line printed
-    assert _installed_skill_dirs(homes["claude"]) == set(SKILL_DIR_NAMES)
-    assert "installed" in out.lower()
-    # db-half failure reported
-    assert "alembic stamp head" in out
-    assert "db" in out.lower()
+    assert _skill_install_rows(registry_db) == []
