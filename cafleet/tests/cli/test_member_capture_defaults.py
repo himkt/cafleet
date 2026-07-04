@@ -8,6 +8,7 @@ from click.testing import CliRunner
 from cafleet import broker, config
 from cafleet.cli import cli
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
+from tests._helpers import _init_registry
 
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
@@ -30,8 +31,7 @@ def bootstrapped_member(tmp_path, monkeypatch, _reset_engine_singletons):
     )
 
     runner = CliRunner()
-    init = runner.invoke(cli, ["db", "init"])
-    assert init.exit_code == 0, init.output
+    _init_registry()
     create = runner.invoke(cli, ["fleet", "create", "--json"])
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)

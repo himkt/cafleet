@@ -10,6 +10,7 @@ from cafleet import config
 from cafleet.cli import cli
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.multiplexer.tmux import TmuxError
+from tests._helpers import _init_registry
 
 _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
@@ -27,9 +28,7 @@ def db_file(tmp_path, monkeypatch):
         "database_url",
         f"sqlite+aiosqlite:///{path}",
     )
-    runner = CliRunner()
-    init = runner.invoke(cli, ["db", "init"])
-    assert init.exit_code == 0, init.output
+    _init_registry()
     return path
 
 

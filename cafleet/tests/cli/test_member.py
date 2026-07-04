@@ -24,6 +24,7 @@ from cafleet.cli import cli
 from cafleet.db.models import Agent
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.multiplexer import tmux as multiplexer_tmux
+from tests._helpers import _init_registry
 
 _CLI_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
@@ -46,8 +47,7 @@ def bootstrapped_fleet(tmp_path, monkeypatch, _reset_engine_singletons):
     )
 
     runner = CliRunner()
-    init = runner.invoke(cli, ["db", "init"])
-    assert init.exit_code == 0, init.output
+    _init_registry()
     create = runner.invoke(cli, ["fleet", "create", "--json"])
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
@@ -1236,8 +1236,7 @@ def make_bootstrapped_fleet(tmp_path, monkeypatch, _reset_engine_singletons):
 
     def _make(coding_agent: str = "claude"):
         runner = CliRunner()
-        init = runner.invoke(cli, ["db", "init"])
-        assert init.exit_code == 0, init.output
+        _init_registry()
         args = ["fleet", "create", "--json"]
         if coding_agent != "claude":
             args += ["--coding-agent", coding_agent]

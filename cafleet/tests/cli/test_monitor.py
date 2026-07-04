@@ -26,6 +26,7 @@ from cafleet import broker, config
 from cafleet.cli import cli
 from cafleet.monitor import DEFAULT_TICK_SECONDS, loop
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
+from tests._helpers import _init_registry
 
 
 @pytest.fixture(autouse=True)
@@ -51,8 +52,7 @@ def fresh_db(tmp_path, monkeypatch):
         config.settings, "database_url", f"sqlite+aiosqlite:///{db_file}"
     )
     runner = CliRunner()
-    result = runner.invoke(cli, ["db", "init"])
-    assert result.exit_code == 0, result.output
+    _init_registry()
     return db_file, runner
 
 
