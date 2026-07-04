@@ -1,7 +1,7 @@
 # Improve `cafleet setup` — version recording, `setup db` / `setup skill` subcommands, `db` group removal
 
 **Status**: Approved
-**Progress**: 0/22 tasks complete
+**Progress**: 7/22 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -168,13 +168,13 @@ skills:
 
 ### Step 1: Documentation (first, per documentation-maintenance.md)
 
-- [ ] Update `docs/get-started/install.md` to the `setup` group surface, version recording, and the stale-skills guard <!-- completed: -->
-- [ ] Update `docs/get-started/contributing.md` (`setup db` for contributors) <!-- completed: -->
-- [ ] Update `docs/concepts/storage.md` (schema management wording, `skill_installs`, guard) <!-- completed: -->
-- [ ] Update `docs/spec/data-model.md` (add `skill_installs`, table count) <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md` (setup group + subcommands, guard errors, doctor) <!-- completed: -->
-- [ ] Update `README.md` and `SPEC.md` via the `/update-readme` skill <!-- completed: -->
-- [ ] Update `CLAUDE.md` project bullet (drop `db init` / `session` text) <!-- completed: -->
+- [x] Update `docs/get-started/install.md` to the `setup` group surface, version recording, and the stale-skills guard <!-- completed: 2026-07-04T00:45 -->
+- [x] Update `docs/get-started/contributing.md` (`setup db` for contributors) <!-- completed: 2026-07-04T00:46 -->
+- [x] Update `docs/concepts/storage.md` (schema management wording, `skill_installs`, guard) <!-- completed: 2026-07-04T00:47 -->
+- [x] Update `docs/spec/data-model.md` (add `skill_installs`, table count) <!-- completed: 2026-07-04T00:49 -->
+- [x] Update `docs/spec/cli-options.md` (setup group + subcommands, guard errors, doctor) <!-- completed: 2026-07-04T00:53 -->
+- [x] Update `README.md` and `SPEC.md` via the `/update-readme` skill <!-- completed: 2026-07-04T01:02 -->
+- [x] Update `CLAUDE.md` project bullet (drop `db init` / `session` text) <!-- completed: 2026-07-04T01:03 -->
 
 ### Step 2: Schema and Alembic removal
 

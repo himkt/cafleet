@@ -10,7 +10,7 @@ The runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver. The
 
 ## SQL Schema
 
-All tables key on `INTEGER` columns. The three minted-id tables (`fleets`, `agents`, `tasks`) use `INTEGER PRIMARY KEY AUTOINCREMENT`. AUTOINCREMENT creates a per-table `sqlite_sequence` row that tracks the high-water mark, so **ids are never reused** — even after the highest row is deleted. The first AUTOINCREMENT value is `1`, so real ids are always `>= 1`. The other tables — `agent_placements`, `monitor_config`, and `monitor_runtime` — are the integer PKs **without** AUTOINCREMENT: each reuses a parent id (`agents.agent_id` for the first two, `fleets.fleet_id` for `monitor_runtime`) as a 1:1 PK rather than minting a fresh sequence.
+The baseline holds seven tables. All key on `INTEGER` columns except `skill_installs`, which keys on a `TEXT` name. The three minted-id tables (`fleets`, `agents`, `tasks`) use `INTEGER PRIMARY KEY AUTOINCREMENT`. AUTOINCREMENT creates a per-table `sqlite_sequence` row that tracks the high-water mark, so **ids are never reused** — even after the highest row is deleted. The first AUTOINCREMENT value is `1`, so real ids are always `>= 1`. Three more tables — `agent_placements`, `monitor_config`, and `monitor_runtime` — are integer PKs **without** AUTOINCREMENT: each reuses a parent id (`agents.agent_id` for the first two, `fleets.fleet_id` for `monitor_runtime`) as a 1:1 PK rather than minting a fresh sequence. The seventh table, `skill_installs`, keys on the coding-agent name (`TEXT`, no AUTOINCREMENT, not FK-linked).
 
 ### `fleets`
 
@@ -159,6 +159,18 @@ Per-fleet process and heartbeat state, one row per fleet. A dedicated single-row
 | `tick_seconds` | `INTEGER` | `NOT NULL`, `DEFAULT 5` | Scan-tick cadence the running monitor uses, so `status` can report it. |
 
 The `monitor_runtime` row is deleted explicitly inside the `fleet delete` transaction (along with the fleet's `monitor_config` rows). Because agents are soft-deregistered and fleets soft-deleted, neither the CASCADE off `agents` nor the RESTRICT off `fleets` fires on the normal delete paths — the rows are cleaned explicitly, mirroring how `agent_placements` is explicitly deleted today.
+
+### `skill_installs`
+
+One row per coding-agent home, recording the CLI version whose skills install last landed in that home — **not** a schema version (see [Storage](../concepts/storage.md)).
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `coding_agent` | `TEXT` | `PRIMARY KEY` (no AUTOINCREMENT) | One of `claude` / `codex` / `opencode` — the known coding-agent homes. Not a foreign key. |
+| `cafleet_version` | `TEXT` | `NOT NULL` | The exact `importlib.metadata.version("cafleet")` string at install time. |
+| `installed_at` | `TEXT` | `NOT NULL` | UTC ISO-8601 timestamp (microsecond precision), written at install time. |
+
+Writes are **upserts**: re-installing into a home replaces that home's row. Rows are written by the skills half of `cafleet setup` and by `cafleet setup skill` after each home's install succeeds; `cafleet setup db` never touches the rows (schema only). The rows feed the stale-skills guard on every fleet-scoped command and the `cafleet doctor` skills report — see [cli-options.md](./cli-options.md).
 
 ### Foreign key enforcement
 

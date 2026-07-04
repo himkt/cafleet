@@ -323,6 +323,16 @@ The unified shapes:
 | `last_tick_at` | optional string | |
 | `tick_seconds` | integer | DDL default 5 |
 
+**SkillInstalls** (`coding_agent` TEXT PK, not autoincrement, not FK-linked)
+
+| Field | Type | Notes |
+|---|---|---|
+| `coding_agent` | string | PK; one of `"claude"` / `"codex"` / `"opencode"` |
+| `cafleet_version` | string | the `importlib.metadata.version("cafleet")` string at install time |
+| `installed_at` | string | UTC ISO-8601 with microsecond precision |
+
+Writes are upserts. Rows are written by the skills half of `cafleet setup` and by `cafleet setup skill` after each home's install succeeds; `cafleet setup db` never touches the rows. The rows feed the stale-skills guard on every fleet-scoped command group and the `cafleet doctor` skills report.
+
 ### 5.3 Enums (literal string contracts)
 
 All values are persisted/compared as exact lowercase strings.
@@ -388,7 +398,7 @@ contract error string.
 
 ### 6.1 Persistence & Schema
 
-**Scope:** the six data models (§5.2), the connection factory, and the
+**Scope:** the seven data models (§5.2), the connection factory, and the
 single-baseline SQLite schema. This module owns **no** CRUD/query logic and no
 HTTP surface; all reads/writes/joins live in the broker (§6.2). The baseline
 schema is detailed in §8; this section covers the connection factory, the
@@ -921,7 +931,49 @@ error, exit 1), and reads the `TMUX_PANE` environment variable by **direct
 access** — an unset variable is an intentional loud failure, not a default.
 Emits the four pane identifiers (session name, window id, pane id, raw
 `TMUX_PANE`) as a JSON object under a `tmux` key (`session_name`, `window_id`,
-`pane_id`, `tmux_pane_env`) or a four-line text block.
+`pane_id`, `tmux_pane_env`) or a four-line text block, followed by the
+skills-install report.
+
+**Skills-install report.** Read all `skill_installs` rows (or detect a missing
+table). In text mode, append a `skills:` block after the `tmux:` block:
+
+```
+skills:
+  cli_version: 0.6.0
+  claude:      0.6.0 (2026-07-04T00:12:09.123456+00:00) ok
+  codex:       0.5.0 (2026-06-20T10:00:00.987654+00:00) STALE
+```
+
+One line per recorded `skill_installs` row, format `<agent>:  <version>
+(<installed_at verbatim>) ok|STALE` where `ok` means the recorded version equals
+the runtime CLI version, `STALE` means it differs. `installed_at` is printed
+**verbatim** (microsecond precision, exactly as stored). When no rows exist (or
+the table is missing):
+
+```
+skills:
+  (no skills install recorded; run 'cafleet setup')
+```
+
+In JSON mode, a `"skills"` key sibling to `"tmux"`:
+
+```json
+{
+  "tmux": { "session_name": "...", "window_id": "...", "pane_id": "...", "tmux_pane_env": "..." },
+  "skills": {
+    "cli_version": "0.6.0",
+    "installs": [
+      {"coding_agent": "claude", "cafleet_version": "0.6.0", "installed_at": "2026-07-04T00:12:09.123456+00:00", "current": true},
+      {"coding_agent": "codex", "cafleet_version": "0.5.0", "installed_at": "2026-06-20T10:00:00.987654+00:00", "current": false}
+    ]
+  }
+}
+```
+
+`installs` is an empty array when no rows exist. `current` is `true` when the
+recorded `cafleet_version` equals the runtime CLI version, else `false`. Rows
+in `installs` are ordered by ascending `coding_agent`. `doctor` is exempt from
+the stale-skills guard — it reports instead of blocking.
 
 #### `fleet` group
 
@@ -1221,23 +1273,68 @@ errors propagate unwrapped.
 
 #### `setup`
 
-Options: `--agent` (choice over `claude`/`codex`/`opencode`, repeatable, default
-empty). Reads the CLI's own version. `setup` is the single schema-management
-entry point; there is no separate `db init` command. **Both halves always run
-independently** (a skills-half failure does not
-abort the DB half):
+`setup` is a Click **group** with `invoke_without_command=True`. Bare `cafleet
+setup` takes **no** options (supplying `--agent` exits 2 with the parser's
+unknown-option error). The `setup` group is the single schema-management entry
+point. Bare invocation reads the CLI's own version and runs two independent
+halves, **in order** (db first, then skills):
 
+- **DB half** — create the single-baseline schema via the schema-create driver
+  (§8): force a sync SQLite URL, create the DB file's parent directory, and
+  create the baseline schema fresh (`CREATE TABLE IF NOT EXISTS`; idempotent).
+  On an application error, print `db half failed: <message>` and record the
+  failure. If the db half failed, the skills half fails its schema pre-flight and
+  both halves are reported failed.
 - **Skills half** — resolve install targets, then download and install the
-  skills release. On an application error, print `skills half failed: <message>`
+  skills release and upsert one `skill_installs` row per home after that home's
+  install succeeds. On an application error, print `skills half failed: <message>`
   and record the failure.
-- **DB half** — create the single-baseline schema to head via the schema-create
-  driver (§8): force a sync SQLite URL, create the DB file's parent directory,
-  and create the baseline schema fresh. On an application error, print `db half
-  failed: <message>` and record the failure.
 - If anything failed → application error `<failed halves joined by ' and '> half
-  failed` (exit 1).
+  failed` (exit 1; db listed first, matching run order — e.g. `db and skills
+  half failed`).
 
-Helpers: **resolve-targets** (given `--agent`, dedupe preserving order; else
+The group callback no-ops unless `ctx.invoked_subcommand is None`, so the
+subcommands never trigger the bare-setup sequence.
+
+##### `setup db` subcommand
+
+No options. Runs the schema-create driver (§8) only: forces a sync SQLite URL,
+creates the DB file's parent directory, and runs the single-baseline create
+(`CREATE TABLE IF NOT EXISTS`; idempotent). Prints:
+
+```
+schema ready at <db_file>
+```
+
+Never touches `skill_installs` rows (creates the table as part of the baseline
+but records nothing).
+
+##### `setup skill` subcommand
+
+Options: `--agent` (choice over `claude`/`codex`/`opencode`, repeatable,
+`multiple=True`, duplicate values deduped silently, default empty). Reads the
+CLI's own version. Pre-flight: the `skill_installs` table must exist, else exit
+1 with:
+
+```
+Error: the database schema is missing or outdated; run 'cafleet setup' or 'cafleet setup db' first
+```
+
+After the pre-flight, resolves targets (`--agent` values when given, else
+auto-detect), downloads and installs exactly as the bare skills half, and after
+each home's install succeeds upserts that home's `skill_installs` row with the
+runtime CLI version. Per-home success output:
+
+```
+<agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>) -> <skills dir>
+```
+
+An install failure aborts the loop; rows recorded for homes completed before
+the failure remain.
+
+##### Shared helpers (bare `setup` and `setup skill`)
+
+**resolve-targets** (given `--agent`, dedupe preserving order; else
 auto-detect each known coding-agent home whose parent dir exists; none →
 application error `no coding-agent homes detected (looked for ~/.claude,
 ~/.codex, ~/.config/opencode); install a coding agent first, or pass --agent`);
@@ -1258,6 +1355,37 @@ into <skills_dir>: <error>`; success prints `<agent>: installed <skill dirs
 joined by ', '> (v<version>) -> <skills dir>`). Known skills dirs: `claude` →
 `~/.claude/skills`, `codex` → `~/.codex/skills`, `opencode` →
 `~/.config/opencode/skills`.
+
+#### Stale-skills guard
+
+Every fleet-scoped command group — `fleet`, `member`, `message`, and `monitor`
+— validates the recorded skills installs at the top of its group callback,
+before any subcommand body runs:
+
+1. If the DB file, the `skill_installs` table, or all rows are missing, exit 1
+   with:
+   ```
+   Error: no skills install is recorded; run 'cafleet setup' first
+   ```
+
+2. If any recorded `cafleet_version` differs from the runtime CLI version
+   (simple string inequality — a downgrade also triggers), exit 1 with the
+   stale agents listed in ascending `coding_agent` order:
+   ```
+   Error: stale skills detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup skill' to reinstall
+   ```
+
+3. Otherwise proceed silently.
+
+Homes with no recorded row (an agent that was never installed) are not checked.
+Exempt surfaces: `setup` (must remain runnable to repair), `doctor` (reports
+instead of blocking), and `server` (human-facing WebUI, not fleet-scoped).
+
+**Help interaction.** Group-level help (`cafleet fleet --help`) is parsed
+eagerly before the callback runs and always works — even under a missing or
+stale install. Subcommand help (`cafleet fleet create --help`) runs the group
+callback first, so under a missing/stale install the guard **errors instead of
+printing help**.
 
 #### Spawn-prompt resolution (used by `member create`)
 
@@ -2273,7 +2401,7 @@ for age math.
 
 ## 8. Database schema
 
-**Schema** = the six tables of §5.2, created by **one baseline `CREATE`** that
+**Schema** = the seven tables of §5.2, created by **one baseline `CREATE`** that
 yields the final schema directly. There is no migration chain, no version table,
 and no in-place upgrade path; existing databases are not migrated (§11). Column
 types, defaults, FK rules, AUTOINCREMENT, and the create-order quirk are in §6.1.
@@ -2302,18 +2430,23 @@ new). The order honors the forward-reference quirk (§6.1):
    default 60, `enabled` default 1; not AUTOINCREMENT.
 6. `monitor_runtime` — PK=FK `fleet_id` ON DELETE RESTRICT, `tick_seconds`
    default 5; not AUTOINCREMENT.
+7. `skill_installs` — TEXT PK `coding_agent`, no AUTOINCREMENT, no FK constraint.
+   Columns: `coding_agent` TEXT PK, `cafleet_version` TEXT NOT NULL,
+   `installed_at` TEXT NOT NULL. Upsert semantics; rows written by the skills
+   half of `setup` and by `setup skill` after each home's install succeeds;
+   never written by `setup db`. Feeds the stale-skills guard and `doctor`.
 
 A fresh DB starts with **no rows in any table**; monitor enrollment is written at
 runtime (the Director at 180s by `create_fleet`, pane-bound members at 720s by
-`register_agent`, §6.2), never seeded by the schema.
+`register_agent`, §6.2), never seeded by the schema. `skill_installs` rows are
+written at install time, not by the schema.
 
 **`setup` schema-create driver** (the DB half of `setup`, §6.3). Procedure: (1)
 derive a sync SQLite URL by forcing the drivername to `sqlite`; (2) extract the
 DB file path — if empty → application error `database URL has no file path`; (3)
 create the file's parent directory; (4) create the baseline schema (the `IF NOT
 EXISTS` sequence above). The driver's engine is disposed when the command
-finishes (success or failure). On success it prints `Created {db_file} and
-initialized the cafleet schema.`.
+finishes (success or failure). On success it prints `schema ready at <db_file>`.
 
 ---
 
@@ -2368,8 +2501,10 @@ exit 0, bypasses `--fleet-id`).
 
 **Top-level:**
 
-- [ ] `cafleet setup` (`--agent` multiple: claude/codex/opencode)
-- [ ] `cafleet doctor` (global `--json` only)
+- [ ] `cafleet setup` (bare group invocation: no options; runs db half then skills half)
+- [ ] `cafleet setup db` (no options; schema create only; prints `schema ready at <db_file>`)
+- [ ] `cafleet setup skill` (`--agent` multiple: claude/codex/opencode; pre-flight requires `skill_installs` table)
+- [ ] `cafleet doctor` (global `--json` only; emits tmux block + skills-install report)
 - [ ] `cafleet server` (`--host`=settings.broker_host, `--port`=settings.broker_port)
 
 **`fleet`:**
@@ -2439,8 +2574,14 @@ The decisions that shape this surface (full rationale in the design doc):
 - **One error/exit model** (§7.2): usage → exit 2, application/runtime → exit
   1; the `member delete` teardown timeout (exit 2) is the one deliberate
   exception.
-- **Single-baseline schema** (§8): one `CREATE`, no migration chain, no `db init`,
-  no DB interoperability.
+- **Single-baseline schema** (§8): one `CREATE`, no migration chain, no
+  schema-version table, no DB interoperability. Upgrade path: after `uv tool upgrade cafleet`, the
+  first fleet-scoped command errors with the stale-skills message and instructs
+  the operator to run `cafleet setup skill` to reinstall.
+- **Stale-skills guard** (§6.3): every fleet-scoped group callback validates
+  recorded `skill_installs` versions against the runtime CLI version before any
+  subcommand body runs; missing/stale → hard error (exit 1); exempt: `setup`,
+  `doctor`, `server`.
 - **Nullable `to_agent_id`** (§5.5): `NULL` on `broadcast_summary` rows; no `0`
   sentinel.
 - **Prompt-substitution identity delivery** (§6.3/§7.1): identity reaches a

@@ -30,12 +30,26 @@ schema.
 ## Schema management
 
 The schema is a **single baseline** — one ordered `CREATE` sequence that yields
-the final schema directly, with no migration chain, no version table, and no
-in-place upgrade path. Operators run `cafleet setup` once before starting the
-server; the create uses `CREATE TABLE IF NOT EXISTS`, so it is idempotent and
-safe to re-run (re-running creates nothing new). Existing databases are not
-migrated. Without `cafleet setup`, the first request fails with
+the final schema directly, with no migration chain, no schema-version table,
+and no in-place upgrade path. Operators run `cafleet setup` (or its schema-only
+subcommand `cafleet setup db`) once before starting the server; the create uses
+`CREATE TABLE IF NOT EXISTS`, so it is idempotent and safe to re-run
+(re-running creates nothing new). Existing databases are not migrated. Without
+the schema, the first request fails with
 `OperationalError: no such table: agents`.
+
+## Skills-install recording
+
+The `skill_installs` table records, per coding-agent home, the CLI version
+that last installed the skills there — **not** a schema version. The skills
+half of `cafleet setup` (and `cafleet setup skill`) upserts one row per home
+after that home's install succeeds. Every fleet-scoped command (`fleet *`,
+`member *`, `message *`, `monitor *`) checks the recorded rows before running
+and hard-errors when no install is recorded or when any recorded version
+differs from the running CLI version — so skills can never silently go stale
+after a CLI upgrade. `cafleet doctor` reports the per-home detail. See
+[data model](../spec/data-model.md) for the table schema and
+[CLI options](../spec/cli-options.md) for the guard's error strings.
 
 ## No physical cleanup
 
