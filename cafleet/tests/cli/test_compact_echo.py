@@ -66,7 +66,10 @@ def _broadcast_summary_result(*, summary_id=7000, recipient_count=3):
         origin_task_id=summary_id,
         status_state="completed",
     )
-    return [{"task": summary, "notifications_sent_count": recipient_count}]
+    summary["to_agent_id"] = None
+    return [
+        {"task": summary, "recipients": recipient_count, "delivered": recipient_count}
+    ]
 
 
 def _ping_setup(monkeypatch):

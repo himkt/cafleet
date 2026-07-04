@@ -65,7 +65,7 @@ def _broadcast_summary_payload(task_id, *, sender, count):
                 "task_id": task_id,
                 "context_id": sender,
                 "from_agent_id": sender,
-                "to_agent_id": 0,
+                "to_agent_id": None,
                 "type": "broadcast_summary",
                 "created_at": "2026-05-01T00:00:00+00:00",
                 "status_state": "completed",
@@ -73,7 +73,8 @@ def _broadcast_summary_payload(task_id, *, sender, count):
                 "origin_task_id": task_id,
                 "text": SUMMARY_TEXT,
             },
-            "notifications_sent_count": count,
+            "recipients": count,
+            "delivered": count,
         }
     ]
 
@@ -234,8 +235,9 @@ def test_truncation__broadcast_summary_emitted_verbatim(
         assert len(payload) == 1
         # Summary text fits inside default 200-codepoint limit → identical for both.
         assert payload[0]["task"]["text"] == SUMMARY_TEXT
-        # notifications_sent_count preserved in JSON.
-        assert payload[0]["notifications_sent_count"] == 3
+        # Split recipient/delivery counts preserved in JSON.
+        assert payload[0]["recipients"] == 3
+        assert payload[0]["delivered"] == 3
         if full:
             assert "task_id" in payload[0]["task"]
         else:

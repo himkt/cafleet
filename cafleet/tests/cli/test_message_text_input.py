@@ -66,7 +66,7 @@ def broadcast_recorder(monkeypatch):
 
     def fake_broadcast(*args, **kwargs):
         calls.append((args, kwargs))
-        return [{"task": _task_payload("stored"), "notifications_sent_count": 1}]
+        return [{"task": _task_payload("stored"), "recipients": 1, "delivered": 1}]
 
     monkeypatch.setattr(broker, "broadcast_message", fake_broadcast)
     return calls

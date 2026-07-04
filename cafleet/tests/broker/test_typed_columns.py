@@ -93,8 +93,8 @@ def test_broadcast_message__summary_envelope_shape():
     assert summary["to_agent_id"] is None
     assert summary["status_state"] == "completed"
     assert "Broadcast sent" in summary["text"]
-    assert "notifications_sent_count" in result
-    assert isinstance(result["notifications_sent_count"], int)
+    assert isinstance(result["recipients"], int)
+    assert isinstance(result["delivered"], int)
 
 
 def test_broadcast_message__delivery_task_shape_and_origin_link():
