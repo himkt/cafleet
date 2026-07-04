@@ -1,11 +1,16 @@
 """Shared decorators and guards for CLI subcommands."""
 
 import functools
+import importlib.metadata
 from collections.abc import Callable
 
 import click
 
 from cafleet import broker, output
+from cafleet.broker.skill_installs import (
+    list_skill_installs,
+    skill_installs_table_exists,
+)
 from cafleet.multiplexer import MULTIPLEXERS, TmuxError
 
 
@@ -14,6 +19,29 @@ def ensure_tmux_or_die() -> None:
         MULTIPLEXERS["tmux"].ensure_available()
     except TmuxError as exc:
         raise click.ClickException(str(exc)) from exc
+
+
+def ensure_skills_current() -> None:
+    """Hard-error when no skills install is recorded or any recorded one is stale."""
+    if not skill_installs_table_exists():
+        raise click.ClickException(
+            "no skills install is recorded; run 'cafleet setup' first"
+        )
+    rows = list_skill_installs()
+    if not rows:
+        raise click.ClickException(
+            "no skills install is recorded; run 'cafleet setup' first"
+        )
+    runtime_version = importlib.metadata.version("cafleet")
+    stale = [row for row in rows if row["cafleet_version"] != runtime_version]
+    if stale:
+        listed = ", ".join(
+            f"{row['coding_agent']}={row['cafleet_version']}" for row in stale
+        )
+        raise click.ClickException(
+            f"stale skills detected ({listed}; CLI {runtime_version}); "
+            "run 'cafleet setup skill' to reinstall"
+        )
 
 
 full_flag = click.option("--full", "full", is_flag=True, default=False, hidden=True)

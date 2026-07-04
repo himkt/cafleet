@@ -13,13 +13,18 @@ from datetime import UTC, datetime
 import click
 
 from cafleet import broker, output
-from cafleet.cli._helpers import ensure_tmux_or_die, fleet_id_option
+from cafleet.cli._helpers import (
+    ensure_skills_current,
+    ensure_tmux_or_die,
+    fleet_id_option,
+)
 from cafleet.monitor import DEFAULT_TICK_SECONDS, loop
 
 
 @click.group()
 def monitor() -> None:
     """Supervision scheduler (heartbeat) commands."""
+    ensure_skills_current()
 
 
 def _require_live_fleet(fleet_id: int) -> None:
