@@ -52,18 +52,19 @@ def register_agent(
         Dict with ``agent_id``, ``name``, and ``registered_at``.
 
     Raises:
-        click.UsageError: If the fleet does not exist, is soft-deleted, the
-            named Director is not active in the same fleet, or the placement
+        click.UsageError: If the fleet does not exist, the named Director is
+            not active in the same fleet, or the placement
             ``director_agent_id`` is not the fleet's root Director.
-        click.ClickException: If the named Director is the built-in
-            Administrator, the fleet already has an active monitoring member,
-            or a monitoring member is registered without a placement.
+        click.ClickException: If the fleet is soft-deleted, the named Director
+            is the built-in Administrator, the fleet already has an active
+            monitoring member, or a monitoring member is registered without a
+            placement.
     """
     sess = get_fleet(fleet_id)
     if sess is None:
         raise click.UsageError(f"Fleet '{fleet_id}' not found.")
     if sess["deleted_at"] is not None:
-        raise click.UsageError(f"fleet {fleet_id} is deleted")
+        raise click.ClickException(f"fleet {fleet_id} is deleted")
 
     registered_at = _shared.now_iso()
     agent_card: dict[str, object] = {
@@ -261,16 +262,16 @@ def deregister_agent(agent_id: int) -> bool:
         ``False`` if no matching active agent existed.
 
     Raises:
-        click.UsageError: If ``agent_id`` is the root Director of any
-            fleet — torn down via ``cafleet fleet delete`` instead.
-        click.ClickException: If ``agent_id`` is the built-in Administrator.
+        click.ClickException: If ``agent_id`` is the root Director of any
+            fleet (torn down via ``cafleet fleet delete`` instead), or the
+            built-in Administrator.
     """
     with _shared.write_session() as session:
         is_root_director = session.execute(
             select(exists().where(Fleet.director_agent_id == agent_id))
         ).scalar_one()
         if is_root_director:
-            raise click.UsageError(
+            raise click.ClickException(
                 "cannot deregister the root Director; "
                 "use 'cafleet fleet delete' instead"
             )

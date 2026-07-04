@@ -177,7 +177,7 @@ pinging and without wiping the winner's row.
 %%{init: {'theme': 'default', 'themeVariables': {'fontSize': '16px'}}}%%
 flowchart LR
     Start["monitor start<br/>(monitoring member's background task)"] --> Claim["claim runtime row"]
-    Claim --> Tick["every tick:<br/>scan watched set → wake monitor if any due → heartbeat"]
+    Claim --> Tick["every tick:<br/>heartbeat (STOP if slot lost) → scan watched set → wake monitor if any due"]
     Tick --> Tick
     Tick --> Stop["stop the task /<br/>delete the monitoring member /<br/>fleet delete"]
     Stop --> Clear["clear runtime row"]
@@ -191,9 +191,11 @@ flowchart LR
   `monitor start` in the fleet; the Director no longer runs it. The loop inherits
   the monitoring member's pane environment (`$TMUX`, `$CAFLEET_DATABASE_URL`) and
   fails fast on startup if it cannot reach a tmux session.
-- **Run**: each tick scans the watched set (Director + members), wakes the
-  monitoring member with the wake nudge when ≥ 1 watched agent is due, stamps the
-  due agents' `last_ping_at`, and rewrites the heartbeat.
+- **Run**: each tick first writes the ownership-checked heartbeat (a zero-row
+  update means the slot was reclaimed → the loop self-terminates with `STOP`),
+  then scans the watched set (Director + members), wakes the monitoring member
+  with the wake nudge when ≥ 1 watched agent is due, and stamps the due agents'
+  `last_ping_at`.
 - **Stop (first-out).** Teardown stops the monitor **before** the monitoring
   member's pane is killed: the Director messages the monitoring member to stop
   its `monitor start` background task (the task-stop delivers SIGTERM/SIGINT, so

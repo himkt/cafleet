@@ -33,7 +33,7 @@ mise //cafleet:install    # editable uv tool install of the cafleet CLI
 cafleet setup db          # migrate the database schema (idempotent)
 
 mise //cafleet:lint       # ruff check + ruff format --check
-mise //cafleet:format     # ruff format
+mise //cafleet:format     # ruff check --fix + ruff format
 mise //cafleet:typecheck  # ty
 mise //cafleet:test       # pytest
 

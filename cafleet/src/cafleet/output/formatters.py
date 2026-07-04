@@ -36,7 +36,7 @@ def format_task(task: dict, *, full: bool = False) -> str:
         f"  state: {task['status_state']}",
         f"  from:  {task['from_agent_id']}",
     ]
-    if task.get("to_agent_id"):
+    if task.get("to_agent_id") is not None:
         lines.append(f"  to:    {task['to_agent_id']}")
     lines.append(f"  type:  {task['type']}")
     if task.get("text"):
@@ -216,7 +216,7 @@ def _format_idle(seconds: int | None) -> str:
 def _format_ping_age(age_seconds: int | None) -> str:
     """Render a watched agent's last-ping age for the status table."""
     if age_seconds is None:
-        return "—"
+        return "-"
     return f"{age_seconds}s ago"
 
 

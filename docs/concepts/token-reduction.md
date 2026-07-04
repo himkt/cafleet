@@ -22,7 +22,7 @@ per-message, per-spawn, per-tick, and per-context-load cost down.
 | `cafleet member list --activity` | Aggregates per-member message timestamps into `last_sent` / `last_recv` / `last_ack` / `idle` columns; broadcast summary rows are excluded from `last_ack`. |
 | Persisted-shape simplification | Every `Task` field is a flat typed column; the message body lives in `Task.text` and there is no opaque per-task JSON blob. WebUI consumers use the same typed-column flat shape. |
 | Inline message preview | The broker keystrokes a 2-line preview into the recipient's pane instead of requiring a poll round-trip — see [tmux push notifications](tmux-push.md). |
-| Agent render slim | Each agent renders to the minimum-required fields by default (`id`, `name`, `description` truncated, `status`, and `coding_agent` from placement); `--full` returns the agent dict unchanged. The agent surfaces never emit `agent_card_json` in either mode. |
+| Agent render slim | The default text render is slim — `<agent_id> <name> <status>`, three space-separated fields with no labels. `--full` expands to a labeled multi-line block that adds `description` (truncated to 60), `kind`, `skills`, and the placement block (`director_agent_id`, `backend`, `session`, `window_id`, `pane_id`, `created_at`). The agent surfaces never emit `agent_card_json` in either mode. |
 
 ## Required-reading convention
 

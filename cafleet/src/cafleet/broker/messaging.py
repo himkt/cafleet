@@ -184,8 +184,9 @@ def broadcast_message(fleet_id: int, agent_id: int, text: str) -> list[dict]:
 
     Returns:
         Single-element list containing a dict with ``task`` (the summary row
-        owned by the broadcaster) and ``notifications_sent_count`` — the
-        number of inline-preview keystrokes that landed successfully.
+        owned by the broadcaster), ``recipients`` (the real fan-out count N),
+        and ``delivered`` (the number of inline-preview keystrokes that landed
+        successfully, k ≤ N).
 
     Raises:
         ValueError: If the sender is not active in ``fleet_id``.
@@ -215,7 +216,7 @@ def broadcast_message(fleet_id: int, agent_id: int, text: str) -> list[dict]:
         summary_dict = {
             "context_id": agent_id,
             "from_agent_id": agent_id,
-            "to_agent_id": 0,
+            "to_agent_id": None,
             "type": "broadcast_summary",
             "created_at": now,
             "status_state": "completed",
@@ -251,7 +252,11 @@ def broadcast_message(fleet_id: int, agent_id: int, text: str) -> list[dict]:
         )
 
     return [
-        {"task": summary_dict, "notifications_sent_count": notifications_sent_count}
+        {
+            "task": summary_dict,
+            "recipients": len(recipient_ids),
+            "delivered": notifications_sent_count,
+        }
     ]
 
 

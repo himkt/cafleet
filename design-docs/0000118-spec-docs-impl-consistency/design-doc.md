@@ -1,7 +1,7 @@
 # SPEC.md / docs vs Implementation Consistency Reconciliation
 
-**Status**: Approved
-**Progress**: 0/44 tasks complete
+**Status**: Complete
+**Progress**: 44/44 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -14,14 +14,14 @@ buggy side. The authoritative audit input is `audit-findings.md` in this directo
 
 ## Success Criteria
 
-- [ ] All 32 contradictions have a landed resolution (doc edit or code fix) — zero remaining drift.
-- [ ] Every code fix ships with a regression test that would fail against the pre-fix code.
-- [ ] `SPEC.md` and `docs/` describe only the current, true behavior (first-class targets, per
+- [x] All 32 contradictions have a landed resolution (doc edit or code fix) — zero remaining drift.
+- [x] Every code fix ships with a regression test that would fail against the pre-fix code.
+- [x] `SPEC.md` and `docs/` describe only the current, true behavior (first-class targets, per
       `documentation-maintenance.md`); `README.md` and every `skills/*/SKILL.md` are verified
       consistent with the reconciled CLI/API/schema surfaces.
-- [ ] `--json` broadcast output carries separate `recipients` / `delivered` keys; `tasks.to_agent_id`
+- [x] `--json` broadcast output carries separate `recipients` / `delivered` keys; `tasks.to_agent_id`
       is nullable and emits `null` (not `0`) for broadcast-summary rows.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` pass.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` pass.
 
 ---
 
@@ -170,77 +170,77 @@ makes them first-class. Two reconciled surfaces can plausibly appear there and M
 
 ### Step 1: SPEC.md doc-alignment edits (docs-first)
 
-- [ ] 2.3 — rewrite §5.4 kind-projection summary at `SPEC.md:362-366`, `514-517` <!-- completed: -->
-- [ ] 3.6 — `fleet list` is 5 columns (`40/40/20/8` padded + CREATED_AT trailing unpadded) at `SPEC.md:992-994` <!-- completed: -->
-- [ ] 4.4 — remove `coding_agent` from conditional-fields list at `SPEC.md:1652` <!-- completed: -->
-- [ ] 5.1 — "tmux-pane commands…" → "member commands…" at `SPEC.md:1668-1670`, `2379-2381` <!-- completed: -->
-- [ ] 5.2 — newline-only → newline/CR at `SPEC.md:1718-1721` <!-- completed: -->
-- [ ] 6.2 — `Continue`/`Stop` → `CONTINUE`/`STOP` at `SPEC.md:1829,1833-1834` (+1870,1873,1899,1917,1924) <!-- completed: -->
-- [ ] 6.3 — "four functions" → three at `SPEC.md:1841-1843` <!-- completed: -->
-- [ ] 7.3 — `/api/timeline` "all" → capped at 200 at `SPEC.md:2254-2255` <!-- completed: -->
-- [ ] 7.4 — send path also requires `status=="active"` at `SPEC.md:2259-2263` <!-- completed: -->
+- [x] 2.3 — rewrite §5.4 kind-projection summary at `SPEC.md:362-366`, `514-517` <!-- completed: 2026-07-04T07:18 -->
+- [x] 3.6 — `fleet list` is 5 columns (`40/40/20/8` padded + CREATED_AT trailing unpadded) at `SPEC.md:992-994` <!-- completed: 2026-07-04T07:18 -->
+- [x] 4.4 — remove `coding_agent` from conditional-fields list at `SPEC.md:1652` <!-- completed: 2026-07-04T07:18 -->
+- [x] 5.1 — "tmux-pane commands…" → "member commands…" at `SPEC.md:1668-1670`, `2379-2381` <!-- completed: 2026-07-04T07:18 -->
+- [x] 5.2 — newline-only → newline/CR at `SPEC.md:1718-1721` <!-- completed: 2026-07-04T07:18 -->
+- [x] 6.2 — `Continue`/`Stop` → `CONTINUE`/`STOP` at `SPEC.md:1829,1833-1834` (+1870,1873,1899,1917,1924) <!-- completed: 2026-07-04T07:18 -->
+- [x] 6.3 — "four functions" → three at `SPEC.md:1841-1843` <!-- completed: 2026-07-04T07:18 -->
+- [x] 7.3 — `/api/timeline` "all" → capped at 200 at `SPEC.md:2254-2255` <!-- completed: 2026-07-04T07:18 -->
+- [x] 7.4 — send path also requires `status=="active"` at `SPEC.md:2259-2263` <!-- completed: 2026-07-04T07:18 -->
 
 ### Step 2: docs/ doc-alignment edits (docs-first)
 
-- [ ] 1.3 — index order ascending at `docs/spec/data-model.md:92-93` <!-- completed: -->
-- [ ] 2.5 — two-string not-found behavior at `docs/concepts/fleet-isolation.md:16-17` <!-- completed: -->
-- [ ] 2.6 — module layout + re-exports + `list_roster` at `docs/api/broker.md:15-22,26-30` <!-- completed: -->
-- [ ] 3.1(doc) — narrow blanket sentence at `docs/get-started/configure.md:110-111` <!-- completed: -->
-- [ ] 3.2 — missing `--fleet-id` is exit-1 `ClickException` at `docs/spec/cli-options.md:1029` <!-- completed: -->
-- [ ] 3.6(doc) — fix sample spacing at `docs/spec/cli-options.md:367-370` <!-- completed: -->
-- [ ] 4.2 — `status_state` unconditionally omitted at `docs/spec/message-envelope.md:31` <!-- completed: -->
-- [ ] 4.3 — default + `--full` agent render at `docs/concepts/token-reduction.md:25` <!-- completed: -->
-- [ ] 5.1(doc) — error string at `docs/spec/cli-options.md:420` <!-- completed: -->
-- [ ] 6.1 — heartbeat runs first at `docs/concepts/monitoring.md:180,194-196` <!-- completed: -->
-- [ ] 7.1 — timeline scoped by sender at `docs/spec/webui-api.md:232` <!-- completed: -->
-- [ ] 7.2 — `/api/fleets` shape incl `director_agent_id`, excludes soft-deleted at `docs/spec/webui-api.md:23-36` <!-- completed: -->
-- [ ] 8.1 — add `--fleet-id` to `member capture` example at `docs/reference/coding-agents/opencode.md:84` <!-- completed: -->
-- [ ] 8.2 — Codex allowlist: drop `cafleet agent`, add `member show` at `docs/get-started/configure.md:59,76-80` <!-- completed: -->
-- [ ] 8.3 — full skill-install command at `docs/get-started/install.md:89` <!-- completed: -->
-- [ ] 8.4 — `cafleet:format` runs `ruff check --fix` first at `docs/get-started/contributing.md:36` <!-- completed: -->
+- [x] 1.3 — index order ascending at `docs/spec/data-model.md:92-93` <!-- completed: 2026-07-04T07:26 -->
+- [x] 2.5 — two-string not-found behavior at `docs/concepts/fleet-isolation.md:16-17` <!-- completed: 2026-07-04T07:26 -->
+- [x] 2.6 — module layout + re-exports + `list_roster` at `docs/api/broker.md:15-22,26-30` <!-- completed: 2026-07-04T07:26 -->
+- [x] 3.1(doc) — narrow blanket sentence at `docs/get-started/configure.md:110-111` <!-- completed: 2026-07-04T07:26 -->
+- [x] 3.2 — missing `--fleet-id` is exit-1 `ClickException` at `docs/spec/cli-options.md:1029` <!-- completed: 2026-07-04T07:26 -->
+- [x] 3.6(doc) — fix sample spacing at `docs/spec/cli-options.md:367-370` <!-- completed: 2026-07-04T07:26 -->
+- [x] 4.2 — `status_state` unconditionally omitted at `docs/spec/message-envelope.md:31` <!-- completed: 2026-07-04T07:26 -->
+- [x] 4.3 — default + `--full` agent render at `docs/concepts/token-reduction.md:25` <!-- completed: 2026-07-04T07:26 -->
+- [x] 5.1(doc) — error string at `docs/spec/cli-options.md:420` <!-- completed: 2026-07-04T07:26 -->
+- [x] 6.1 — heartbeat runs first at `docs/concepts/monitoring.md:180,194-196` <!-- completed: 2026-07-04T07:26 -->
+- [x] 7.1 — timeline scoped by sender at `docs/spec/webui-api.md:232` <!-- completed: 2026-07-04T07:26 -->
+- [x] 7.2 — `/api/fleets` shape incl `director_agent_id`, excludes soft-deleted at `docs/spec/webui-api.md:23-36` <!-- completed: 2026-07-04T07:26 -->
+- [x] 8.1 — add `--fleet-id` to `member capture` example at `docs/reference/coding-agents/opencode.md:84` <!-- completed: 2026-07-04T07:26 -->
+- [x] 8.2 — Codex allowlist: drop `cafleet agent`, add `member show` at `docs/get-started/configure.md:59,76-80` <!-- completed: 2026-07-04T07:26 -->
+- [x] 8.3 — full skill-install command at `docs/get-started/install.md:89` <!-- completed: 2026-07-04T07:26 -->
+- [x] 8.4 — `cafleet:format` runs `ruff check --fix` first at `docs/get-started/contributing.md:36` <!-- completed: 2026-07-04T07:26 -->
 
 ### Step 3: Code fix — `to_agent_id` nullable + NULL sentinel (1.1 + 1.2)
 
-- [ ] Test: broadcast-summary row persists `to_agent_id = NULL`; `--json` emits `null` <!-- completed: -->
-- [ ] Test: `to:` surfacing (`queries.py`, `formatters.py`) hides on `None`, shows on a real id <!-- completed: -->
-- [ ] `db/models.py:73` → `nullable=True`; new Alembic migration (next rev after head) <!-- completed: -->
-- [ ] `broker/messaging.py:218` → write `None`; `queries.py:68-70` + `formatters.py:39-40` → `is None`/`IS NULL` <!-- completed: -->
+- [x] Test: broadcast-summary row persists `to_agent_id = NULL`; `--json` emits `null` <!-- completed: 2026-07-04T07:34 -->
+- [x] Test: `to:` surfacing (`queries.py`, `formatters.py`) hides on `None`, shows on a real id <!-- completed: 2026-07-04T07:34 -->
+- [x] `db/models.py:73` → `nullable=True`; new Alembic migration (next rev after head) <!-- completed: 2026-07-04T07:34 -->
+- [x] `broker/messaging.py:218` → write `None`; `queries.py:68-70` + `formatters.py:39-40` → `is None`/`IS NULL` <!-- completed: 2026-07-04T07:34 -->
 
 ### Step 4: Code fix — broadcast `recipients` / `delivered` keys (2.1)
 
-- [ ] Test: broker result carries separate `recipients` (N) and `delivered` (k); CLI prints `recipients=N delivered=k` <!-- completed: -->
-- [ ] `broker/messaging.py:253-255` return both keys; `cli/message.py:70-75` print both <!-- completed: -->
+- [x] Test: broker result carries separate `recipients` (N) and `delivered` (k); CLI prints `recipients=N delivered=k` <!-- completed: 2026-07-04T07:46 -->
+- [x] `broker/messaging.py:253-255` return both keys; `cli/message.py:70-75` print both <!-- completed: 2026-07-04T07:46 -->
 
 ### Step 5: Code fix — normalize broker guards to exit 1 (2.2 + 3.3)
 
-- [ ] Test: root-Director deregistration guard and `member create` into soft-deleted fleet both exit 1 <!-- completed: -->
-- [ ] `broker/agents.py:272-276` and `broker/agents.py:65-66` → `click.ClickException` <!-- completed: -->
+- [x] Test: root-Director deregistration guard and `member create` into soft-deleted fleet both exit 1 <!-- completed: 2026-07-04T07:48 -->
+- [x] `broker/agents.py:272-276` and `broker/agents.py:65-66` → `click.ClickException` <!-- completed: 2026-07-04T07:48 -->
 
 ### Step 6: Code fix — kind-predicate null/non-object safety (2.4)
 
-- [ ] Test: kind predicates return `False` (no raise) on `{"cafleet": null}` and `{"cafleet":"x"}` <!-- completed: -->
-- [ ] `broker/_shared.py:34-51` → guard null / non-object `cafleet` card <!-- completed: -->
+- [x] Test: kind predicates return `False` (no raise) on `{"cafleet": null}` and `{"cafleet":"x"}` <!-- completed: 2026-07-04T07:50 -->
+- [x] `broker/_shared.py:34-51` → guard null / non-object `cafleet` card <!-- completed: 2026-07-04T07:50 -->
 
 ### Step 7: Code fix — `fleet show` / `fleet delete` take `--fleet-id` (3.1 code)
 
-- [ ] Test: `cafleet fleet show --fleet-id N` and `cafleet fleet delete --fleet-id N` succeed; positional form no longer accepted <!-- completed: -->
-- [ ] `cli/fleet.py:82-86` + `105-107` → `@fleet_id_option`, read from `ctx.obj` <!-- completed: -->
+- [x] Test: `cafleet fleet show --fleet-id N` and `cafleet fleet delete --fleet-id N` succeed; positional form no longer accepted <!-- completed: 2026-07-04T07:58 -->
+- [x] `cli/fleet.py:82-86` + `105-107` → `@fleet_id_option`, read from `ctx.obj` <!-- completed: 2026-07-04T07:58 -->
 
 ### Step 8: Code fix — ping-age ASCII hyphen (4.1)
 
-- [ ] Test: `_format_ping_age(None)` returns `"-"` (ASCII), no U+2014 anywhere in monitor-status render <!-- completed: -->
-- [ ] `output/formatters.py:216-220` → return `"-"` <!-- completed: -->
+- [x] Test: `_format_ping_age(None)` returns `"-"` (ASCII), no U+2014 anywhere in monitor-status render <!-- completed: 2026-07-04T07:57 -->
+- [x] `output/formatters.py:216-220` → return `"-"` <!-- completed: 2026-07-04T07:57 -->
 
 ### Step 9: Unhide the four flags (3.4 + 3.5)
 
-- [ ] Test: `--full`, `--quiet`, `--activity`, `--ansi/--no-ansi` appear in the relevant `--help` output with help text <!-- completed: -->
-- [ ] `_helpers.py:47,48` → drop `hidden=True`, add `help=` on `full_flag` + `quiet_flag`; `member.py:494,545` → drop `hidden=True`, add `help=` <!-- completed: -->
-- [ ] Doc: document `--quiet` at `cli-options.md:146,899-901` + `SPEC.md:1007`; add `--activity` / `--ansi` to `cli-options.md` + SPEC §6.3 <!-- completed: -->
+- [x] Test: `--full`, `--quiet`, `--activity`, `--ansi/--no-ansi` appear in the relevant `--help` output with help text <!-- completed: 2026-07-04T08:11 -->
+- [x] `_helpers.py:47,48` → drop `hidden=True`, add `help=` on `full_flag` + `quiet_flag`; `member.py:494,545` → drop `hidden=True`, add `help=` <!-- completed: 2026-07-04T08:11 -->
+- [x] Doc: document `--quiet` at `cli-options.md:146,899-901` + `SPEC.md:1007`; add `--activity` / `--ansi` to `cli-options.md` + SPEC §6.3 <!-- completed: 2026-07-04T08:11 -->
 
 ### Step 10: Cross-surface verification + gates
 
-- [ ] Verify `README.md` and every `skills/*/SKILL.md` against the reconciled `fleet show`/`fleet delete` `--fleet-id` invocation and the newly-visible flags; align any drift <!-- completed: -->
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` all pass <!-- completed: -->
+- [x] Verify `README.md` and every `skills/*/SKILL.md` against the reconciled `fleet show`/`fleet delete` `--fleet-id` invocation and the newly-visible flags; align any drift <!-- completed: 2026-07-04T08:13 -->
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` all pass <!-- completed: 2026-07-04T08:13 -->
 
 ---
 
@@ -250,3 +250,4 @@ makes them first-class. Two reconciled surfaces can plausibly appear there and M
 |------|---------|
 | 2026-07-04 | Initial draft — 32 contradictions reconciled per user decisions Q1–Q4 |
 | 2026-07-04 | Approved — `--quiet` disposition finalized as UNHIDE; conditional REMOVE alternative removed |
+| 2026-07-04 | Complete — all 44 tasks landed; Reviewer-approved (1 round, 4 leftover-drift fixes); 990 tests + lint + typecheck + admin:lint green; PR #163 |

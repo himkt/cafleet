@@ -33,16 +33,17 @@ def _help_lines(*subcommand_path: str) -> list[str]:
 # Per-subcommand line budgets. Each command's --help output must stay at or
 # below its budget; option helps are kept to a single concise sentence.
 _PER_SUBCOMMAND_BUDGETS: dict[tuple[str, ...], int] = {
-    ("message", "send"): 11,
-    ("message", "broadcast"): 10,
+    ("message", "send"): 13,
+    ("message", "broadcast"): 11,
     ("message", "poll"): 9,
-    ("message", "ack"): 10,
+    ("message", "ack"): 11,
     ("message", "cancel"): 10,
-    ("message", "show"): 9,
+    ("message", "show"): 10,
     # member create's wide option column (the --coding-agent
     # [claude|codex|opencode] metavar) wraps the --fleet-id help to two lines,
-    # so it gains 2 lines rather than 1. Added --text/--text-file increases this.
-    ("member", "create"): 19,
+    # so it gains 2 lines rather than 1. Added --text/--text-file and the
+    # now-visible --full increase this.
+    ("member", "create"): 20,
     ("member", "list"): 9,
     ("member", "show"): 9,
     ("member", "capture"): 10,

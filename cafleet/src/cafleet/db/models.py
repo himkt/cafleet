@@ -70,7 +70,7 @@ class Task(Base):
         Integer, ForeignKey("agents.agent_id", ondelete="RESTRICT"), nullable=False
     )
     from_agent_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    to_agent_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    to_agent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     type: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     status_state: Mapped[str] = mapped_column(String, nullable=False)

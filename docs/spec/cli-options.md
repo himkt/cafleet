@@ -143,7 +143,7 @@ The table describes the resulting `text` value AFTER truncation. Text mode omits
 |---|---|---|
 | `--full` | no | Documented per-subcommand option (placed after the subcommand name, like `--agent-id` and `--task-id`). Disables truncation; emits the full message body and the full typed-column envelope. Composes orthogonally with `--json`. See [`--full` semantics](#full-semantics) for the cross-subcommand summary. |
 
-There is no `--quiet` flag on any subcommand.
+The `--quiet` flag is available on `cafleet message send`, `cafleet message ack`, and `cafleet member ping`: it suppresses the normal output and prints only the bare `task_id` (the target member id for `ping`), for shell capture.
 
 Length is measured in Python `str` codepoints, never bytes — multibyte characters are never split.
 
@@ -362,12 +362,7 @@ Both the root Director and the built-in Administrator are protected from `member
 
 Lists all **non-soft-deleted** fleets with their `director_agent_id`, label, created_at, and active agent count. Soft-deleted fleets (`fleets.deleted_at IS NOT NULL`) are hidden.
 
-Each row exposes the fleet's root `director_agent_id` so the Director's ID can be recovered from a list after `fleet create` output scrolls away. The `--json` output carries it as a `director_agent_id` field (integer). Text output renders it as a `DIRECTOR` column placed immediately after `FLEET_ID`:
-
-```
-FLEET_ID  DIRECTOR  LABEL       AGENTS  CREATED_AT
-1         2         my-project  3       2026-04-15T10:00:00+00:00
-```
+Each row exposes the fleet's root `director_agent_id` so the Director's ID can be recovered from a list after `fleet create` output scrolls away. The `--json` output carries it as a `director_agent_id` field (integer). Text output renders five columns: `FLEET_ID`, `DIRECTOR`, `LABEL`, and `AGENTS` are each left-padded to widths 40 / 40 / 20 / 8 (one space between columns), followed by an unpadded trailing `CREATED_AT`. The wide left-padding means the real gaps between columns are far larger than a compact sample can depict; the column order is `FLEET_ID`, `DIRECTOR` (immediately after `FLEET_ID`), `LABEL`, `AGENTS`, `CREATED_AT`. Nullable `DIRECTOR` / `LABEL` cells fall back to empty strings.
 
 ### `fleet show`
 
@@ -417,7 +412,7 @@ Prints the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE
 
 Environment requirements:
 
-- `TMUX` env var must be set — the command rejects otherwise with `Error: cafleet tmux-pane commands must be run inside a tmux session` (the same message used by the `member *` tmux guard).
+- `TMUX` env var must be set — the command rejects otherwise with `Error: cafleet member commands must be run inside a tmux session` (the same message used by the `member *` tmux guard).
 - `TMUX_PANE` env var must be set — already required for pane discovery.
 
 Text output:
@@ -899,6 +894,7 @@ Re-pokes a member's inbox. Keystrokes `Esc` → `cafleet message poll --fleet-id
 | Flag | Required | Notes |
 |---|---|---|
 | `--member-id` | yes | The target member. |
+| `--quiet` | no | Suppress the normal `Pinged …` line and print only the bare member id, for shell capture. |
 
 ```bash
 cafleet member ping --fleet-id <fleet-id> --member-id <member-id>
@@ -1026,7 +1022,7 @@ agent 5: interval 720s, enabled, last_ping 2026-06-13T04:51:00
 | Any `fleet` / `member` / `message` / `monitor` command with no skills install recorded (missing DB file, missing `skill_installs` table, or zero rows) | `Error: no skills install is recorded; run 'cafleet setup' first` (exit 1; see [Stale-skills guard](#stale-skills-guard)) |
 | Any `fleet` / `member` / `message` / `monitor` command with a recorded `skill_installs` version differing from the runtime CLI version | `Error: stale skills detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup skill' to reinstall` (exit 1; see [Stale-skills guard](#stale-skills-guard)) |
 | `setup skill` when the `skill_installs` table is missing | `Error: the database schema is missing or outdated; run 'cafleet setup' or 'cafleet setup db' first` (exit 1) |
-| Missing `--fleet-id` on a fleet-scoped subcommand | `Error: Missing option '--fleet-id'.` (exit 2) |
+| Missing `--fleet-id` on a fleet-scoped subcommand | `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` (exit 1) |
 | Missing `--agent-id` | `Error: Missing option '--agent-id'.` (exit 2) |
 | `fleet create` run outside a tmux session | `Error: cafleet fleet create must be run inside a tmux session` (exit 1; no DB writes) |
 | `fleet delete` on unknown fleet_id | `Error: fleet 'X' not found.` (exit 1) |

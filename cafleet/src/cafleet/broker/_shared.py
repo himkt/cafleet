@@ -31,24 +31,33 @@ def write_session():
         yield session
 
 
-def is_administrator(agent_card_json: str | None) -> bool:
+def _card_kind(agent_card_json: str | None) -> str | None:
+    """Extract ``$.cafleet.kind`` from a card, or None on any malformation.
+
+    Guards against invalid JSON, a non-object top level, and a null / non-object
+    ``cafleet`` value — every malformed shape resolves to a non-match (None)
+    rather than raising ``AttributeError``.
+    """
     if not agent_card_json:
-        return False
+        return None
     try:
-        kind = json.loads(agent_card_json).get("cafleet", {}).get("kind")
+        card = json.loads(agent_card_json)
     except ValueError:
-        return False
-    return kind == ADMINISTRATOR_KIND
+        return None
+    if not isinstance(card, dict):
+        return None
+    cafleet = card.get("cafleet")
+    if not isinstance(cafleet, dict):
+        return None
+    return cafleet.get("kind")
+
+
+def is_administrator(agent_card_json: str | None) -> bool:
+    return _card_kind(agent_card_json) == ADMINISTRATOR_KIND
 
 
 def is_monitoring_member(agent_card_json: str | None) -> bool:
-    if not agent_card_json:
-        return False
-    try:
-        kind = json.loads(agent_card_json).get("cafleet", {}).get("kind")
-    except ValueError:
-        return False
-    return kind == MONITORING_MEMBER_KIND
+    return _card_kind(agent_card_json) == MONITORING_MEMBER_KIND
 
 
 def derive_agent_kind(is_root_director: bool, card_kind: str | None) -> str:

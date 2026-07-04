@@ -50,23 +50,25 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         engine.dispose()
 
 
-def test_alembic_version_table_records_head_0006(alembic_upgraded_db):
+def test_alembic_version_table_records_head_0007(alembic_upgraded_db):
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version_num FROM alembic_version"))
             rows = result.fetchall()
-        assert rows == [("0006",)]
+        assert rows == [("0007",)]
     finally:
         engine.dispose()
 
 
-def test_six_migration_revisions_exist():
-    """The migration history is six revisions: 0001 (base) → 0002 (monitor
+def test_seven_migration_revisions_exist():
+    """The migration history is seven revisions: 0001 (base) → 0002 (monitor
     tables) → 0003 (prune non-Director monitor_config rows) → 0004 (prune the
     root-Director monitor_config rows) → 0005 (per-member intervals: prune the
     monitoring member, backfill the root Director @180 + ordinary members @720)
-    → 0006 (skill_installs: the per-home record of the installing CLI version)."""
+    → 0006 (skill_installs: the per-home record of the installing CLI version)
+    → 0007 (tasks.to_agent_id → nullable so broadcast-summary rows persist
+    NULL)."""
     with importlib.resources.as_file(
         importlib.resources.files("cafleet.db") / "alembic.ini"
     ) as ini_path:
@@ -74,16 +76,25 @@ def test_six_migration_revisions_exist():
         script = ScriptDirectory.from_config(cfg)
         revisions = list(script.walk_revisions())
 
-    assert len(revisions) == 6
+    assert len(revisions) == 7
     by_revision = {rev.revision: rev for rev in revisions}
-    assert set(by_revision) == {"0001", "0002", "0003", "0004", "0005", "0006"}
+    assert set(by_revision) == {
+        "0001",
+        "0002",
+        "0003",
+        "0004",
+        "0005",
+        "0006",
+        "0007",
+    }
     assert by_revision["0001"].down_revision is None
     assert by_revision["0002"].down_revision == "0001"
     assert by_revision["0003"].down_revision == "0002"
     assert by_revision["0004"].down_revision == "0003"
     assert by_revision["0005"].down_revision == "0004"
     assert by_revision["0006"].down_revision == "0005"
-    assert script.get_current_head() == "0006"
+    assert by_revision["0007"].down_revision == "0006"
+    assert script.get_current_head() == "0007"
 
 
 def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
@@ -195,6 +206,19 @@ def test_tasks_table_has_origin_task_id_column(alembic_upgraded_db):
 
         # Must be nullable because unicast + historical rows store NULL
         assert cols["origin_task_id"]["nullable"] is True
+    finally:
+        engine.dispose()
+
+
+def test_tasks_to_agent_id_is_nullable_after_migration(alembic_upgraded_db):
+    """0007 alters ``tasks.to_agent_id`` to nullable so broadcast-summary rows
+    persist NULL instead of the ``0`` sentinel (design 0000118, item 1.1)."""
+    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
+    try:
+        insp = inspect(engine)
+        cols = {col["name"]: col for col in insp.get_columns("tasks")}
+
+        assert cols["to_agent_id"]["nullable"] is True
     finally:
         engine.dispose()
 

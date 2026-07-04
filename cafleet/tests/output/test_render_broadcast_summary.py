@@ -45,8 +45,8 @@ def test_broadcast_summary__wrapper_count_and_text_describes_recipient_count():
     _register_agent(sid, "recipient-b")
 
     [result] = broker.broadcast_message(sid, sender["agent_id"], "hi all")
-    assert "notifications_sent_count" in result
-    assert isinstance(result["notifications_sent_count"], int)
+    assert isinstance(result["recipients"], int)
+    assert isinstance(result["delivered"], int)
     summary_text = result["task"]["text"]
     assert summary_text.startswith("Broadcast sent to ")
     assert "recipients" in summary_text
