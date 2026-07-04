@@ -288,16 +288,19 @@ def test_fleet_delete__accepts_fleet_id_option(fresh_db):
 
 def test_fleet_show__rejects_positional_fleet_id(fresh_db):
     _db_file, runner = fresh_db
+    # The positional form is gone; the required --fleet-id callback preempts the
+    # extra-arg check, so a bare positional yields the exit-1 "required" error
+    # (item 3.2), matching every sibling fleet-scoped command.
     result = runner.invoke(cli, ["fleet", "show", "1"])
-    assert result.exit_code == 2, result.output
-    assert "unexpected" in (result.output or "").lower()
+    assert result.exit_code == 1, result.output
+    assert "required" in (result.output or "").lower()
 
 
 def test_fleet_delete__rejects_positional_fleet_id(fresh_db):
     _db_file, runner = fresh_db
     result = runner.invoke(cli, ["fleet", "delete", "1"])
-    assert result.exit_code == 2, result.output
-    assert "unexpected" in (result.output or "").lower()
+    assert result.exit_code == 1, result.output
+    assert "required" in (result.output or "").lower()
 
 
 def test_fleet_group_structure__subcommands_under_fleet(fresh_db):

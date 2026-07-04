@@ -3,7 +3,7 @@
 import click
 
 from cafleet import broker, output
-from cafleet.cli._helpers import ensure_skills_current, full_flag
+from cafleet.cli._helpers import ensure_skills_current, fleet_id_option, full_flag
 from cafleet.coding_agent import CODING_AGENTS
 from cafleet.multiplexer import MULTIPLEXERS, TmuxError
 
@@ -80,11 +80,12 @@ def fleet_list(ctx: click.Context, as_json: bool) -> None:
 
 
 @fleet.command("show")
-@click.argument("fleet_id", type=int)
+@fleet_id_option
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @click.pass_context
-def fleet_show(ctx: click.Context, fleet_id: int, as_json: bool) -> None:
+def fleet_show(ctx: click.Context, as_json: bool) -> None:
     """Show details of a single fleet."""
+    fleet_id = ctx.obj["fleet_id"]
     result = broker.get_fleet(fleet_id)
     if result is None:
         raise click.ClickException(f"fleet '{fleet_id}' not found.")
@@ -103,12 +104,14 @@ def fleet_show(ctx: click.Context, fleet_id: int, as_json: bool) -> None:
 
 
 @fleet.command("delete")
-@click.argument("fleet_id", type=int)
-def fleet_delete(fleet_id: int) -> None:
+@fleet_id_option
+@click.pass_context
+def fleet_delete(ctx: click.Context) -> None:
     """Soft-delete a fleet and deregister every active agent (idempotent)."""
     # No monitor-stop step: a running monitor loop self-terminates on its next
     # tick once the fleet is soft-deleted (monitor_tick → STOP), and
     # broker.delete_fleet removes the monitor_config + monitor_runtime rows.
+    fleet_id = ctx.obj["fleet_id"]
     result = broker.delete_fleet(fleet_id)
     n = result["deregistered_count"]
     click.echo(f"Deleted fleet {fleet_id}. Deregistered {n} agents.")

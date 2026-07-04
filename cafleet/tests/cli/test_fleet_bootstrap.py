@@ -298,7 +298,7 @@ def test_fleet_list_hides_soft_deleted__deleted_fleet_is_hidden_from_text_list(
     keep_sid = json.loads(r1.output)["fleet_id"]
     drop_sid = json.loads(r2.output)["fleet_id"]
 
-    del_result = runner.invoke(cli, ["fleet", "delete", str(drop_sid)])
+    del_result = runner.invoke(cli, ["fleet", "delete", "--fleet-id", str(drop_sid)])
     assert del_result.exit_code == 0, del_result.output
 
     list_result = runner.invoke(cli, ["fleet", "list"])
@@ -317,7 +317,7 @@ def test_fleet_list_hides_soft_deleted__deleted_fleet_is_hidden_from_json_list(
     r2 = runner.invoke(cli, ["fleet", "create", "--json"])
     keep_sid = json.loads(r1.output)["fleet_id"]
     drop_sid = json.loads(r2.output)["fleet_id"]
-    runner.invoke(cli, ["fleet", "delete", str(drop_sid)])
+    runner.invoke(cli, ["fleet", "delete", "--fleet-id", str(drop_sid)])
 
     list_result = runner.invoke(cli, ["fleet", "list", "--json"])
     assert list_result.exit_code == 0
@@ -332,7 +332,7 @@ def test_fleet_delete_unknown_and_idempotent__unknown_fleet_id_exits_1_with_not_
 ):
     runner = CliRunner()
     fake = 999
-    result = runner.invoke(cli, ["fleet", "delete", str(fake)])
+    result = runner.invoke(cli, ["fleet", "delete", "--fleet-id", str(fake)])
     assert result.exit_code == 1, result.output
     combined = ((result.output or "") + (result.stderr or "")).lower()
     assert "not found" in combined
@@ -347,8 +347,8 @@ def test_fleet_delete_unknown_and_idempotent__second_delete_is_idempotent_and_re
     assert r.exit_code == 0
     sid = json.loads(r.output)["fleet_id"]
 
-    first = runner.invoke(cli, ["fleet", "delete", str(sid)])
-    second = runner.invoke(cli, ["fleet", "delete", str(sid)])
+    first = runner.invoke(cli, ["fleet", "delete", "--fleet-id", str(sid)])
+    second = runner.invoke(cli, ["fleet", "delete", "--fleet-id", str(sid)])
 
     assert first.exit_code == 0, first.output
     assert second.exit_code == 0, second.output
