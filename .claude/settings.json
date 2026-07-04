@@ -35,8 +35,6 @@
       "Bash(bun run agent-browser --session vr-batch-* set *)",
       "Bash(bun run agent-browser --session * wait --load networkidle)",
       "Bash(bun run agent-browser --session * wait --load networkidle *)",
-      "Bash(bun run agent-browser wait --load networkidle)",
-      "Bash(bun run agent-browser wait --load networkidle *)",
       "Bash(bun run agent-browser --session vr-batch-* eval)",
       "Bash(bun run agent-browser --session vr-batch-* eval *)",
       "Bash(bun run agent-browser eval)",
