@@ -71,7 +71,7 @@ def message_send(ctx, agent_id, to, text, text_file, full, quiet):
         output.format_task(r[0]["task"], full=True)
         if full
         else f"broadcast id={r[0]['task']['task_id']} "
-        f"recipients={r[0]['notifications_sent_count']}"
+        f"recipients={r[0]['recipients']} delivered={r[0]['delivered']}"
     ),
     truncates_task_text=True,
 )

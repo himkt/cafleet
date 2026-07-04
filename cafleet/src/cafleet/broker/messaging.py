@@ -251,7 +251,11 @@ def broadcast_message(fleet_id: int, agent_id: int, text: str) -> list[dict]:
         )
 
     return [
-        {"task": summary_dict, "notifications_sent_count": notifications_sent_count}
+        {
+            "task": summary_dict,
+            "recipients": len(recipient_ids),
+            "delivered": notifications_sent_count,
+        }
     ]
 
 

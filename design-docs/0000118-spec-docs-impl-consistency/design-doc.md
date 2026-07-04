@@ -1,7 +1,7 @@
 # SPEC.md / docs vs Implementation Consistency Reconciliation
 
 **Status**: Approved
-**Progress**: 29/44 tasks complete
+**Progress**: 31/44 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -208,8 +208,8 @@ makes them first-class. Two reconciled surfaces can plausibly appear there and M
 
 ### Step 4: Code fix — broadcast `recipients` / `delivered` keys (2.1)
 
-- [ ] Test: broker result carries separate `recipients` (N) and `delivered` (k); CLI prints `recipients=N delivered=k` <!-- completed: -->
-- [ ] `broker/messaging.py:253-255` return both keys; `cli/message.py:70-75` print both <!-- completed: -->
+- [x] Test: broker result carries separate `recipients` (N) and `delivered` (k); CLI prints `recipients=N delivered=k` <!-- completed: 2026-07-04T07:46 -->
+- [x] `broker/messaging.py:253-255` return both keys; `cli/message.py:70-75` print both <!-- completed: 2026-07-04T07:46 -->
 
 ### Step 5: Code fix — normalize broker guards to exit 1 (2.2 + 3.3)
 

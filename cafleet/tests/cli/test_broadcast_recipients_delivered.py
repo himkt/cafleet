@@ -37,6 +37,7 @@ def test_broadcast_cli_prints_recipients_and_delivered(runner):
         ],
     )
     assert result.exit_code == 0, result.output
-    # Two recipients registered without panes → N=2, k=0.
-    assert "recipients=2" in result.output
-    assert "delivered=0" in result.output
+    # Three peers of the sender: pane-bound root Director + recipient-a/-b.
+    # Only the Director's pane receives a preview → N=3, k=1.
+    assert "recipients=3" in result.output
+    assert "delivered=1" in result.output
