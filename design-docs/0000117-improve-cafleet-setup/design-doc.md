@@ -1,6 +1,6 @@
 # Improve `cafleet setup` — version recording, `setup db` / `setup skill` subcommands, `db` group removal
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 22/22 tasks complete
 **Last Updated**: 2026-07-04
 
@@ -220,3 +220,4 @@ skills:
 | 2026-07-04 | Reviewer round 2: both `db init` tests in `test_fleet_flag.py` covered for deletion. User-approved; Status: Approved. |
 | 2026-07-04 | Post-approval user tweak: `setup skill` pre-flight error now suggests both repair commands (`run 'cafleet setup' or 'cafleet setup db' first`). |
 | 2026-07-04 | Post-approval user tweak (mid-execution): upgrade stance changed from blanket delete-and-recreate to data-preserving additive create — message history is preserved on upgrade; deleting the DB is the last-resort fallback for pre-baseline schemas only. Dashboard no-Administrator hint re-scoped to fresh-fleet guidance. |
+| 2026-07-04 | Execution complete: all 22 tasks + 6 success criteria done, Phase D live E2E 17/17 pass, post-implementation Reviewer approved in 2 rounds (3 findings fixed: SPEC print attribution, AUTOINCREMENT DDL coverage, default-URL coverage). PR #162 opened. Status: Complete. |
