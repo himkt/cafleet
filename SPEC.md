@@ -2448,7 +2448,9 @@ derive a sync SQLite URL by forcing the drivername to `sqlite`; (2) extract the
 DB file path — if empty → application error `database URL has no file path`; (3)
 create the file's parent directory; (4) create the baseline schema (the `IF NOT
 EXISTS` sequence above). The driver's engine is disposed when the command
-finishes (success or failure). On success it prints `schema ready at <db_file>`.
+finishes (success or failure). The driver itself prints nothing: bare `setup`'s
+db half is silent on success; only the `setup db` subcommand prints
+`schema ready at <db_file>` (§6.3).
 
 ---
 

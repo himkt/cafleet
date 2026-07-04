@@ -22,6 +22,14 @@ BASELINE_INDEXES = {
     "idx_tasks_from_agent_status_ts",
 }
 
+MINTED_ID_TABLES = ("fleets", "agents", "tasks")
+NON_MINTED_TABLES = (
+    "agent_placements",
+    "monitor_config",
+    "monitor_runtime",
+    "skill_installs",
+)
+
 
 def _table_names(db_path) -> set[str]:
     """Return the set of user-visible table names in a SQLite file."""
@@ -47,6 +55,20 @@ def _index_names(db_path) -> set[str]:
         return {row[0] for row in rows}
     finally:
         conn.close()
+
+
+def _table_sql(db_path, table: str) -> str:
+    """Return the CREATE TABLE DDL recorded in ``sqlite_master``."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?",
+            (table,),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, f"table {table} not found"
+    return row[0]
 
 
 def test_create_schema_creates_exactly_the_seven_baseline_tables(tmp_path, monkeypatch):
@@ -136,3 +158,30 @@ def test_create_schema_leaves_preexisting_tables_untouched(tmp_path, monkeypatch
     finally:
         conn.close()
     assert rows == [("keep-me",)]
+
+
+def test_create_schema_autoincrement_contract(tmp_path, monkeypatch):
+    """Minted-id tables declare INTEGER PRIMARY KEY AUTOINCREMENT (never-reused
+    ids); the 1:1-PK tables and ``skill_installs`` do not."""
+    db_file = tmp_path / "cafleet.db"
+    monkeypatch.setattr(
+        config.settings,
+        "database_url",
+        f"sqlite+aiosqlite:///{db_file}",
+    )
+
+    from cafleet.db.schema import create_schema
+
+    create_schema()
+
+    for table in MINTED_ID_TABLES:
+        assert "AUTOINCREMENT" in _table_sql(db_file, table), table
+    for table in NON_MINTED_TABLES:
+        assert "AUTOINCREMENT" not in _table_sql(db_file, table), table
+
+
+def test_default_database_url_points_at_cafleet_db():
+    """The default registry file is ``~/.local/share/cafleet/cafleet.db``."""
+    url = config._default_database_url()
+    expected = Path("~/.local/share/cafleet/cafleet.db").expanduser()
+    assert url == f"sqlite:///{expected}"
