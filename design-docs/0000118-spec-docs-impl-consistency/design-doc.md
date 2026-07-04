@@ -1,7 +1,7 @@
 # SPEC.md / docs vs Implementation Consistency Reconciliation
 
 **Status**: Approved
-**Progress**: 35/44 tasks complete
+**Progress**: 39/44 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -223,13 +223,13 @@ makes them first-class. Two reconciled surfaces can plausibly appear there and M
 
 ### Step 7: Code fix — `fleet show` / `fleet delete` take `--fleet-id` (3.1 code)
 
-- [ ] Test: `cafleet fleet show --fleet-id N` and `cafleet fleet delete --fleet-id N` succeed; positional form no longer accepted <!-- completed: -->
-- [ ] `cli/fleet.py:82-86` + `105-107` → `@fleet_id_option`, read from `ctx.obj` <!-- completed: -->
+- [x] Test: `cafleet fleet show --fleet-id N` and `cafleet fleet delete --fleet-id N` succeed; positional form no longer accepted <!-- completed: 2026-07-04T07:58 -->
+- [x] `cli/fleet.py:82-86` + `105-107` → `@fleet_id_option`, read from `ctx.obj` <!-- completed: 2026-07-04T07:58 -->
 
 ### Step 8: Code fix — ping-age ASCII hyphen (4.1)
 
-- [ ] Test: `_format_ping_age(None)` returns `"-"` (ASCII), no U+2014 anywhere in monitor-status render <!-- completed: -->
-- [ ] `output/formatters.py:216-220` → return `"-"` <!-- completed: -->
+- [x] Test: `_format_ping_age(None)` returns `"-"` (ASCII), no U+2014 anywhere in monitor-status render <!-- completed: 2026-07-04T07:57 -->
+- [x] `output/formatters.py:216-220` → return `"-"` <!-- completed: 2026-07-04T07:57 -->
 
 ### Step 9: Unhide the four flags (3.4 + 3.5)
 

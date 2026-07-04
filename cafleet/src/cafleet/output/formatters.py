@@ -216,7 +216,7 @@ def _format_idle(seconds: int | None) -> str:
 def _format_ping_age(age_seconds: int | None) -> str:
     """Render a watched agent's last-ping age for the status table."""
     if age_seconds is None:
-        return "—"
+        return "-"
     return f"{age_seconds}s ago"
 
 
