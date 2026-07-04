@@ -13,7 +13,7 @@ path.
 
 | Top-level entry | Purpose |
 |---|---|
-| `cafleet/` | The `cafleet` Python package (FastAPI + SQLAlchemy + click). |
+| `cafleet/` | The `cafleet` Python package (FastAPI + SQLAlchemy + Alembic + click). |
 | `admin/` | Admin WebUI SPA (Vite + React + TypeScript + Tailwind CSS). |
 | `skills/` | Plugin skills shared by the Claude Code and Codex manifests. |
 | `package.json` + `bun.lock` (repo root) | Bun toolchain manifests for the Slidev + agent-browser tools used in the repo. Driven via `mise //:bun-install` / `mise //:slidev <deck>`; `node_modules/` is gitignored. |
