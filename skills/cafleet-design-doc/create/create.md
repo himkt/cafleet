@@ -101,17 +101,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--text-file` per the two-step audit-file pattern in Step 1c, then spawn:
-
-```bash
-cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
-  --name "monitor" \
-  --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
-  --role monitor --model {monitor_model} \
-  --text-file ${BASE}/prompts/monitor-<UTC-compact>.md
-```
-
-See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The heartbeat runs unchanged through the quality loop; its `monitor start` background task is stopped first in Step 6's teardown (first-out).
+See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the conditional idle-nudge routine) and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The heartbeat runs unchanged through the quality loop; its `monitor start` background task is stopped first in Step 6's teardown (first-out).
 
 #### 1c. Locate role definitions (path-by-reference)
 
@@ -122,7 +112,7 @@ The Director references each role definition by **absolute path** in the spawn p
 
 Substitute these absolute paths into the spawn prompts below.
 
-> **Spawn-prompt audit file (two-step pattern)**: every spawn in this skill follows the same two steps — (1) **render** the prompt (substitute the `[INSERT …]` markers, keeping the four `{...}` identity placeholders for the CLI to render at spawn); (2) **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` (`<UTC-compact>` = `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`; create `${BASE}/prompts/` on first write; same-second collision → append `_2`, `_3`, … — never overwrite), then invoke `cafleet member create --text-file <abs path>` (see Step 1d / 1e for the per-role spawn templates and commands). The pre-spawn file IS both the CLI input AND the permanent audit artifact — there is no second post-spawn re-render write; it carries the identity placeholders pre-substitution, which is expected. See the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files* for the contract, including the `${BASE} == <unset>` guarded-skip + inline-fallback branch.
+> **Spawn-prompt audit file (two-step pattern)**: render each spawn prompt and **write** it to `${BASE}/prompts/<role>-<UTC-compact>.md` before invoking `cafleet member create --text-file <abs path>` — the pre-spawn file is both the CLI input and the permanent audit artifact. The `<UTC-compact>` format, the same-second collision rule, the identity-placeholders-pre-substitution note, and the `${BASE} == <unset>` guarded-skip + inline-fallback branch are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files*.
 
 #### 1d. Spawn the Drafter
 

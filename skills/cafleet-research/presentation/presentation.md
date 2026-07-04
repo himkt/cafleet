@@ -101,17 +101,7 @@ cafleet --json fleet create --label "present-[topic-slug]"
 
 The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Presentation/Transcript spawns** (1d) — do not spawn an ordinary member until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--text-file` per the audit-file pattern in 1c, then spawn:
-
-```bash
-cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
-  --name "monitor" \
-  --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
-  --role monitor --model {monitor_model} \
-  --text-file ${BASE}/prompts/monitor-<UTC-compact>.md
-```
-
-See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle. The monitoring member is stopped and deleted first in the Step 5 teardown (first-out). Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
+See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the conditional idle-nudge routine) and lifecycle. The monitoring member is stopped and deleted first in the Step 5 teardown (first-out). Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 
@@ -121,7 +111,7 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 - `roles/transcript.md`
 - `roles/visual-reviewer.md`
 
-> **Spawn mechanics**: path-by-reference is required because `cafleet member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The CLI runs `str.format` over the prompt, rendering the four `{fleet_id}` / `{director_agent_id}` / `{agent_id}` / `{coding_agent}` identity placeholders to literals at spawn — double any literal brace as `{{` / `}}` and leave no other stray single braces. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE `cafleet member create --text-file <abs path>` (the pre-spawn file IS both the CLI input and the permanent audit artifact; it carries the identity placeholders pre-substitution, which is expected); see the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files* for the contract incl. the `${BASE} == <unset>` guarded-skip + inline fallback.
+> **Spawn mechanics**: path-by-reference is required because `cafleet member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The CLI runs `str.format` over the prompt, rendering the four `{fleet_id}` / `{director_agent_id}` / `{agent_id}` / `{coding_agent}` identity placeholders to literals at spawn — double any literal brace as `{{` / `}}` and leave no other stray single braces. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` before `cafleet member create --text-file <abs path>` — the pre-spawn file is both the CLI input and the permanent audit artifact. The placeholders-pre-substitution note and the `${BASE} == <unset>` guarded-skip + inline fallback are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files*.
 
 #### 1d. Spawn Presentation + Transcript in parallel
 
@@ -301,5 +291,3 @@ Then the presentation-specific teardown:
    ```
 2. **Stop the Slidev dev server** via {bg_stop} (using the handle recorded in Step 3, Server Startup substep 2) — never the broad `pkill -f slidev`, which matches too widely and leaks stdout until the process is stopped through its recorded handle.
 3. `cafleet fleet delete --fleet-id [fleet-id]`; `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.
-
-$ARGUMENTS

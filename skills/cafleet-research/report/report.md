@@ -84,17 +84,7 @@ Capture `fleet_id` and `director.agent_id` from the response. Treat `fleet_id` a
 
 Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-Render the canonical monitoring-member spawn prompt (the **conditional** idle-nudge routine — re-engage the Director via `cafleet member nudge` only when un-acked inbox items or stalled members can be named) to a `--text-file` per the audit-file pattern this skill uses for every spawn, then spawn:
-
-```bash
-cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
-  --name "monitor" \
-  --description "Monitoring member — runs the heartbeat and re-engages the idle Director" \
-  --role monitor --model {monitor_model} \
-  --text-file ${BASE}/prompts/monitor-<UTC-compact>.md
-```
-
-See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle. The monitoring member is stopped and deleted first in the Step 8 teardown (first-out).
+See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the conditional idle-nudge routine) and lifecycle. The monitoring member is stopped and deleted first in the Step 8 teardown (first-out).
 
 On each active turn, check `${OUTPUT_DIR}` for these expected deliverables:
 
@@ -126,7 +116,7 @@ The Director references each role definition by its **absolute path** in the spa
 
 Substitute these absolute paths into the spawn prompts below.
 
-> **Spawn mechanics**: path-by-reference is required because `cafleet member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The CLI runs `str.format` over the prompt, rendering the four `{fleet_id}` / `{director_agent_id}` / `{agent_id}` / `{coding_agent}` identity placeholders to literals at spawn — double any literal brace as `{{` / `}}` and leave no other stray single braces. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` BEFORE `cafleet member create --text-file <abs path>` (the pre-spawn file IS both the CLI input and the permanent audit artifact; it carries the identity placeholders pre-substitution, which is expected); see the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files* for the contract incl. the `${BASE} == <unset>` guarded-skip + inline fallback.
+> **Spawn mechanics**: path-by-reference is required because `cafleet member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The CLI runs `str.format` over the prompt, rendering the four `{fleet_id}` / `{director_agent_id}` / `{agent_id}` / `{coding_agent}` identity placeholders to literals at spawn — double any literal brace as `{{` / `}}` and leave no other stray single braces. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` before `cafleet member create --text-file <abs path>` — the pre-spawn file is both the CLI input and the permanent audit artifact. The placeholders-pre-substitution note and the `${BASE} == <unset>` guarded-skip + inline fallback are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files*.
 
 #### 2c. Spawn the Manager
 
@@ -280,5 +270,3 @@ Context: <why this information is needed>
 ```
 
 Dispatch this prompt via your backend's sub-agent primitive if it has one (see your overlay). If your backend has no sub-agent primitive, either **inline-follow** the spec (read [`roles/web-researcher.md`](roles/web-researcher.md) and follow it in your own turn — no new agent spawned) or **member-spawn** a dedicated member via `cafleet member create` with the spec body pasted into its spawn prompt.
-
-$ARGUMENTS
