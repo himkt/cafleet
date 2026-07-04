@@ -10,12 +10,12 @@ Restructure `cafleet setup` into a Click group — bare `cafleet setup` does eve
 
 ## Success Criteria
 
-- [ ] `cafleet setup` (bare, no options) runs the db half first, then installs skills into every detected coding-agent home and records one `skill_installs` row per home; halves fail independently and the command exits non-zero if either failed.
-- [ ] `cafleet setup db` creates the single-baseline schema (idempotent) and touches nothing else; `cafleet setup skill [--agent <name>]...` installs only the skills, fails with guidance when the `skill_installs` table is missing, and records the version rows on success.
-- [ ] `cafleet db` no longer exists: `cafleet db init` fails with Click's standard no-such-command error, and no mention of the `db` group or Alembic remains anywhere in the repository outside `design-docs/` (per the removal rule).
-- [ ] The Alembic chain (`0001`–`0005`), `alembic.ini`, `env.py`, the upgrade-guard machinery, and the `alembic` dependency are deleted; the schema is created by `Base.metadata.create_all` semantics (`CREATE TABLE IF NOT EXISTS`).
-- [ ] Every fleet-scoped command (`fleet *`, `member *`, `message *`, `monitor *`) hard-errors with an actionable message when no skills install is recorded or when any recorded version differs from the runtime CLI version; `cafleet doctor` reports the per-home detail.
-- [ ] README.md, SPEC.md, docs/, CLAUDE.md, and the admin Dashboard hint are updated in this cycle (documentation-first); `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass.
+- [x] `cafleet setup` (bare, no options) runs the db half first, then installs skills into every detected coding-agent home and records one `skill_installs` row per home; halves fail independently and the command exits non-zero if either failed.
+- [x] `cafleet setup db` creates the single-baseline schema (idempotent) and touches nothing else; `cafleet setup skill [--agent <name>]...` installs only the skills, fails with guidance when the `skill_installs` table is missing, and records the version rows on success.
+- [x] `cafleet db` no longer exists: `cafleet db init` fails with Click's standard no-such-command error, and no mention of the `db` group or Alembic remains anywhere in the repository outside `design-docs/` (per the removal rule).
+- [x] The Alembic chain (`0001`–`0005`), `alembic.ini`, `env.py`, the upgrade-guard machinery, and the `alembic` dependency are deleted; the schema is created by `Base.metadata.create_all` semantics (`CREATE TABLE IF NOT EXISTS`).
+- [x] Every fleet-scoped command (`fleet *`, `member *`, `message *`, `monitor *`) hard-errors with an actionable message when no skills install is recorded or when any recorded version differs from the runtime CLI version; `cafleet doctor` reports the per-home detail.
+- [x] README.md, SPEC.md, docs/, CLAUDE.md, and the admin Dashboard hint are updated in this cycle (documentation-first); `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass.
 
 ---
 
