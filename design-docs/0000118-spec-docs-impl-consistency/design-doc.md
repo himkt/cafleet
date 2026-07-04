@@ -1,7 +1,7 @@
 # SPEC.md / docs vs Implementation Consistency Reconciliation
 
 **Status**: Approved
-**Progress**: 31/44 tasks complete
+**Progress**: 33/44 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -213,8 +213,8 @@ makes them first-class. Two reconciled surfaces can plausibly appear there and M
 
 ### Step 5: Code fix — normalize broker guards to exit 1 (2.2 + 3.3)
 
-- [ ] Test: root-Director deregistration guard and `member create` into soft-deleted fleet both exit 1 <!-- completed: -->
-- [ ] `broker/agents.py:272-276` and `broker/agents.py:65-66` → `click.ClickException` <!-- completed: -->
+- [x] Test: root-Director deregistration guard and `member create` into soft-deleted fleet both exit 1 <!-- completed: 2026-07-04T07:48 -->
+- [x] `broker/agents.py:272-276` and `broker/agents.py:65-66` → `click.ClickException` <!-- completed: 2026-07-04T07:48 -->
 
 ### Step 6: Code fix — kind-predicate null/non-object safety (2.4)
 
