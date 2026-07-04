@@ -12,15 +12,8 @@ that lands (k=1) while the pane-less recipients receive none — a scenario wher
 N and k diverge.
 """
 
-import pytest
-
 from cafleet import broker
 from tests.broker._helpers import _create_fleet, _register_agent
-
-
-@pytest.fixture(autouse=True)
-def _autouse_broker(broker_session):
-    return broker_session
 
 
 def test_broadcast_result_carries_separate_recipients_and_delivered():

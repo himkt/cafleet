@@ -51,21 +51,18 @@ def _resolve_targets(agents: tuple[str, ...]) -> list[str]:
     return detected
 
 
-def _resolve_download_url(cli_version: str) -> str:
-    """Look up the release for ``cli_version`` and return its skills asset URL."""
-    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{cli_version}"
-    req = urllib.request.Request(
-        api_url,
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "cafleet"},
-    )
+def _http_get(req: urllib.request.Request, *, on_404: str | None = None) -> bytes:
+    """Fetch ``req`` with the shared timeout and GitHub-API error mapping.
+
+    ``HTTPError`` is caught before its ``URLError`` parent; when ``on_404`` is
+    given, a 404 raises it instead of the generic unreachable message.
+    """
     try:
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
-            body = resp.read()
+            return resp.read()
     except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            raise click.ClickException(
-                f"no release found for version {cli_version}"
-            ) from exc
+        if on_404 is not None and exc.code == 404:
+            raise click.ClickException(on_404) from exc
         raise click.ClickException(
             f"could not reach the GitHub API ({exc.reason})"
         ) from exc
@@ -74,6 +71,16 @@ def _resolve_download_url(cli_version: str) -> str:
         raise click.ClickException(
             f"could not reach the GitHub API ({reason})"
         ) from exc
+
+
+def _resolve_download_url(cli_version: str) -> str:
+    """Look up the release for ``cli_version`` and return its skills asset URL."""
+    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{cli_version}"
+    req = urllib.request.Request(
+        api_url,
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "cafleet"},
+    )
+    body = _http_get(req, on_404=f"no release found for version {cli_version}")
 
     asset_name = f"cafleet-skills-v{cli_version}.zip"
     try:
@@ -94,18 +101,7 @@ def _download_and_extract(download_url: str, dest_root: Path) -> Path:
     """
     archive_path = dest_root / "skills.zip"
     req = urllib.request.Request(download_url, headers={"User-Agent": "cafleet"})
-    try:
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
-            archive_path.write_bytes(resp.read())
-    except urllib.error.HTTPError as exc:
-        raise click.ClickException(
-            f"could not reach the GitHub API ({exc.reason})"
-        ) from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        reason = getattr(exc, "reason", exc)
-        raise click.ClickException(
-            f"could not reach the GitHub API ({reason})"
-        ) from exc
+    archive_path.write_bytes(_http_get(req))
 
     extract_root = dest_root / "extracted"
     try:
@@ -203,7 +199,7 @@ def setup_db() -> None:
 @click.option(
     "--agent",
     "agents",
-    type=click.Choice(["claude", "codex", "opencode"]),
+    type=click.Choice(list(AGENT_SKILLS_DIRS)),
     multiple=True,
     help="Scope the skills install to the named agent(s); repeatable. "
     "Omit to auto-detect every coding-agent home that exists.",

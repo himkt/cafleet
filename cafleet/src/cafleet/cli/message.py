@@ -4,11 +4,13 @@ import click
 
 from cafleet import broker, output
 from cafleet.cli._helpers import (
+    agent_id_option,
     client_command,
     ensure_skills_current,
     fleet_id_option,
     full_flag,
     quiet_flag,
+    text_body_options,
 )
 from cafleet.cli._text_input import read_text_input
 
@@ -21,15 +23,9 @@ def message() -> None:
 
 @message.command("send")
 @fleet_id_option
-@click.option("--agent-id", type=int, required=True, help="Agent ID")
+@agent_id_option
 @click.option("--to", type=int, required=True, help="Recipient agent ID")
-@click.option("--text", "text", default=None, help="Message body (inline).")
-@click.option(
-    "--text-file",
-    "text_file",
-    default=None,
-    help="File (UTF-8) or '-' for stdin.",
-)
+@text_body_options("Message body (inline).")
 @full_flag
 @quiet_flag
 @click.pass_context
@@ -40,7 +36,6 @@ def message() -> None:
         if quiet
         else "Message sent.\n" + output.format_task(r, full=full)
     ),
-    truncates_task_text=True,
 )
 def message_send(ctx, agent_id, to, text, text_file, full, quiet):
     """Send a unicast message to another agent."""
@@ -56,14 +51,8 @@ def message_send(ctx, agent_id, to, text, text_file, full, quiet):
 
 @message.command("broadcast")
 @fleet_id_option
-@click.option("--agent-id", type=int, required=True, help="Agent ID")
-@click.option("--text", "text", default=None, help="Message body (inline).")
-@click.option(
-    "--text-file",
-    "text_file",
-    default=None,
-    help="File (UTF-8) or '-' for stdin.",
-)
+@agent_id_option
+@text_body_options("Message body (inline).")
 @full_flag
 @click.pass_context
 @client_command(
@@ -73,7 +62,6 @@ def message_send(ctx, agent_id, to, text, text_file, full, quiet):
         else f"broadcast id={r[0]['task']['task_id']} "
         f"recipients={r[0]['recipients']} delivered={r[0]['delivered']}"
     ),
-    truncates_task_text=True,
 )
 def message_broadcast(ctx, agent_id, text, text_file, full):
     """Broadcast a message to all agents."""
@@ -87,7 +75,7 @@ def message_broadcast(ctx, agent_id, text, text_file, full):
 
 @message.command("poll")
 @fleet_id_option
-@click.option("--agent-id", type=int, required=True, help="Agent ID")
+@agent_id_option
 @full_flag
 @click.pass_context
 @client_command(
@@ -95,7 +83,6 @@ def message_broadcast(ctx, agent_id, text, text_file, full):
     text_formatter=lambda r, *, full: output.format_indexed_list(
         r, lambda t: output.format_task(t, full=full), "No messages found."
     ),
-    truncates_task_text=True,
 )
 def message_poll(ctx, agent_id, full):
     """Poll inbox for un-acked messages."""
@@ -104,7 +91,7 @@ def message_poll(ctx, agent_id, full):
 
 @message.command("ack")
 @fleet_id_option
-@click.option("--agent-id", type=int, required=True, help="Agent ID")
+@agent_id_option
 @click.option("--task-id", type=int, required=True, help="Task ID to acknowledge")
 @full_flag
 @quiet_flag
@@ -116,7 +103,6 @@ def message_poll(ctx, agent_id, full):
         if quiet
         else "Message acknowledged.\n" + output.format_task(r, full=full)
     ),
-    truncates_task_text=True,
 )
 def message_ack(ctx, agent_id, task_id, full, quiet):
     """Acknowledge receipt of a message."""
@@ -125,7 +111,7 @@ def message_ack(ctx, agent_id, task_id, full, quiet):
 
 @message.command("cancel")
 @fleet_id_option
-@click.option("--agent-id", type=int, required=True, help="Agent ID")
+@agent_id_option
 @click.option("--task-id", type=int, required=True, help="Task ID to cancel")
 @full_flag
 @click.pass_context
@@ -134,7 +120,6 @@ def message_ack(ctx, agent_id, task_id, full, quiet):
     text_formatter=lambda r, *, full: (
         "Task canceled.\n" + output.format_task(r, full=full)
     ),
-    truncates_task_text=True,
 )
 def message_cancel(ctx, agent_id, task_id, full):
     """Cancel (retract) a sent message."""
@@ -143,14 +128,13 @@ def message_cancel(ctx, agent_id, task_id, full):
 
 @message.command("show")
 @fleet_id_option
-@click.option("--agent-id", type=int, required=True, help="Agent ID")
+@agent_id_option
 @click.option("--task-id", type=int, required=True, help="Task ID to retrieve")
 @full_flag
 @click.pass_context
 @client_command(
     requires_agent_fleet=True,
     text_formatter=lambda r, *, full: output.format_task(r, full=full),
-    truncates_task_text=True,
 )
 def message_show(ctx, agent_id, task_id, full):
     """Get details of a specific task."""

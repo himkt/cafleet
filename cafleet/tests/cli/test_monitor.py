@@ -22,42 +22,19 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from cafleet import broker, config
+from cafleet import broker
 from cafleet.cli import cli
 from cafleet.monitor import DEFAULT_TICK_SECONDS, loop
-from cafleet.multiplexer import MultiplexerContext as DirectorContext
-from tests._helpers import _init_registry
-
-
-@pytest.fixture(autouse=True)
-def _autouse_reset_engine(_reset_engine_singletons):
-    pass
-
-
-@pytest.fixture(autouse=True)
-def _mock_tmux_for_fleet_create(monkeypatch):
-    ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available", lambda self: None
-    )
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery", lambda self: ctx
-    )
 
 
 @pytest.fixture
-def fresh_db(tmp_path, monkeypatch):
-    db_file = tmp_path / "cafleet.db"
-    monkeypatch.setattr(
-        config.settings, "database_url", f"sqlite+aiosqlite:///{db_file}"
-    )
-    runner = CliRunner()
-    _init_registry()
-    return db_file, runner
+def fresh_db(_cli_registry):
+    """The autouse ``_cli_registry`` seeds a fresh temp DB; expose its path + a runner."""
+    return _cli_registry, CliRunner()
 
 
 @pytest.fixture
-def fleet(fresh_db):
+def fleet(fresh_db, _mock_tmux_for_fleet_create):
     db_file, runner = fresh_db
     result = runner.invoke(cli, ["fleet", "create", "--json"])
     assert result.exit_code == 0, result.output
@@ -358,7 +335,7 @@ def test_monitor_status__last_ping_age_rendered(fleet):
     _seed_runtime(db_file, sid, os.getpid())
     # stamp the member's last_ping_at ~120 s in the past
     pinged = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
-    broker.record_ping(member_id, pinged)
+    broker.record_pings([member_id], pinged)
 
     result = runner.invoke(cli, ["--json", "monitor", "status", "--fleet-id", str(sid)])
     assert result.exit_code == 0, result.output
@@ -376,7 +353,7 @@ def test_monitor_status__text_renders_last_ping_as_age_not_iso(fleet):
     member_id = _register_ordinary_member(sid, director_id)["agent_id"]
     _seed_runtime(db_file, sid, os.getpid())
     pinged = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
-    broker.record_ping(member_id, pinged)
+    broker.record_pings([member_id], pinged)
 
     result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid)])
     assert result.exit_code == 0, result.output

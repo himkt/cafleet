@@ -23,11 +23,7 @@ def ensure_tmux_or_die() -> None:
 
 def ensure_skills_current() -> None:
     """Hard-error when no skills install is recorded or any recorded one is stale."""
-    if not skill_installs_table_exists():
-        raise click.ClickException(
-            "no skills install is recorded; run 'cafleet setup' first"
-        )
-    rows = list_skill_installs()
+    rows = list_skill_installs() if skill_installs_table_exists() else []
     if not rows:
         raise click.ClickException(
             "no skills install is recorded; run 'cafleet setup' first"
@@ -58,6 +54,29 @@ quiet_flag = click.option(
     default=False,
     help="Print only the resulting id.",
 )
+
+
+agent_id_option = click.option("--agent-id", type=int, required=True, help="Agent ID")
+
+
+def text_body_options(text_help: str):
+    """Apply the shared ``--text`` / ``--text-file`` option pair.
+
+    ``--text`` carries the per-command ``text_help``; ``--text-file`` is uniform.
+    ``--text`` is applied last (outermost) so it precedes ``--text-file`` in
+    ``--help``.
+    """
+
+    def decorator(func):
+        func = click.option(
+            "--text-file",
+            "text_file",
+            default=None,
+            help="File (UTF-8) or '-' for stdin.",
+        )(func)
+        return click.option("--text", "text", default=None, help=text_help)(func)
+
+    return decorator
 
 
 def director_member_options(func):
@@ -93,17 +112,12 @@ fleet_id_option = click.option(
 def client_command(
     *,
     requires_agent_fleet: bool = False,
-    text_formatter: Callable[..., str] | None = None,
-    truncates_task_text: bool = False,
+    text_formatter: Callable[..., str],
 ):
     """Subsume the boilerplate blocks shared by the ``message`` subcommands.
 
-    Branches:
-    - ``truncates_task_text=True`` → JSON output goes through
-      ``render_tasks_in_result`` + ``truncate_task_text``; text formatter is
-      called as ``text_formatter(result, full=, quiet=)``.
-    - Otherwise → JSON output is the raw broker result; text formatter is
-      called as ``text_formatter(result)``.
+    JSON output goes through ``render_tasks_in_result`` + ``truncate_task_text``;
+    the text formatter is called as ``text_formatter(result, full=, quiet=)``.
     """
 
     def decorator(func):
@@ -124,22 +138,14 @@ def client_command(
                             f"agent {agent_id} is not a member of fleet {fleet_id}."
                         )
                 result = func(ctx, *args, **kwargs)
-                full = kwargs.get("full", False)
-                if truncates_task_text:
-                    output.truncate_task_text(result, full=full)
-                    rendered = output.render_tasks_in_result(result, full=full)
-                else:
-                    rendered = result
+                full = kwargs["full"]
+                output.truncate_task_text(result, full=full)
+                rendered = output.render_tasks_in_result(result, full=full)
                 if ctx.obj["json_output"]:
                     click.echo(output.format_json(rendered))
-                elif text_formatter is not None:
-                    if truncates_task_text:
-                        extra = {"quiet": kwargs["quiet"]} if "quiet" in kwargs else {}
-                        click.echo(text_formatter(result, full=full, **extra))
-                    else:
-                        click.echo(text_formatter(result))
                 else:
-                    click.echo(output.format_json(rendered))
+                    extra = {"quiet": kwargs["quiet"]} if "quiet" in kwargs else {}
+                    click.echo(text_formatter(result, full=full, **extra))
             except click.ClickException:
                 raise
             except Exception as exc:

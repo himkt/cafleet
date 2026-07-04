@@ -7,16 +7,9 @@ and the persisted row reads back as ``None``. A real unicast still retains its
 recipient id (the "shows on a real id" half of the surfacing contract).
 """
 
-import pytest
-
 from cafleet import broker
 from cafleet.db.models import Task
 from tests.broker._helpers import _create_fleet, _register_agent, _setup_two_agents
-
-
-@pytest.fixture(autouse=True)
-def _autouse_broker(broker_session):
-    return broker_session
 
 
 def test_task_model_to_agent_id_column_is_nullable():

@@ -49,6 +49,14 @@ def _config_dict(row) -> dict:
     }
 
 
+_CONFIG_COLS = (
+    MonitorConfig.agent_id,
+    MonitorConfig.interval_seconds,
+    MonitorConfig.last_ping_at,
+    MonitorConfig.enabled,
+)
+
+
 def enroll_agent(session, agent_id: int, interval: int) -> None:
     """Insert a ``monitor_config`` row for a watched agent at ``interval``.
 
@@ -82,8 +90,7 @@ def find_monitoring_member(fleet_id: int) -> dict | None:
             Agent.fleet_id == fleet_id,
             Agent.status == "active",
             AgentPlacement.tmux_pane_id.is_not(None),
-            func.json_extract(Agent.agent_card_json, "$.cafleet.kind")
-            == _shared.MONITORING_MEMBER_KIND,
+            _shared.CARD_KIND_SQL == _shared.MONITORING_MEMBER_KIND,
         )
     )
     with _shared.read_session() as session:
@@ -100,12 +107,7 @@ def find_monitoring_member(fleet_id: int) -> dict | None:
 def get_monitor_config(fleet_id: int, agent_id: int) -> dict | None:
     """Return the agent's schedule, or ``None`` if not enrolled / not in fleet."""
     stmt = (
-        select(
-            MonitorConfig.agent_id,
-            MonitorConfig.interval_seconds,
-            MonitorConfig.last_ping_at,
-            MonitorConfig.enabled,
-        )
+        select(*_CONFIG_COLS)
         .join(Agent, Agent.agent_id == MonitorConfig.agent_id)
         .where(MonitorConfig.agent_id == agent_id, Agent.fleet_id == fleet_id)
     )
@@ -117,12 +119,7 @@ def get_monitor_config(fleet_id: int, agent_id: int) -> dict | None:
 def list_monitor_configs(fleet_id: int) -> list[dict]:
     """Return every enrolled agent's schedule in the fleet (``enabled`` as bool)."""
     stmt = (
-        select(
-            MonitorConfig.agent_id,
-            MonitorConfig.interval_seconds,
-            MonitorConfig.last_ping_at,
-            MonitorConfig.enabled,
-        )
+        select(*_CONFIG_COLS)
         .join(Agent, Agent.agent_id == MonitorConfig.agent_id)
         .where(Agent.fleet_id == fleet_id)
     )
@@ -170,12 +167,7 @@ def update_monitor_config(
             )
 
         row = session.execute(
-            select(
-                MonitorConfig.agent_id,
-                MonitorConfig.interval_seconds,
-                MonitorConfig.last_ping_at,
-                MonitorConfig.enabled,
-            ).where(MonitorConfig.agent_id == agent_id)
+            select(*_CONFIG_COLS).where(MonitorConfig.agent_id == agent_id)
         ).first()
         return _config_dict(row)
 
@@ -196,11 +188,6 @@ def record_pings(agent_ids: list[int], when: str) -> None:
             .where(MonitorConfig.agent_id.in_(agent_ids))
             .values(last_ping_at=when)
         )
-
-
-def record_ping(agent_id: int, when: str) -> None:
-    """Stamp ``last_ping_at`` for a single agent (thin wrapper over ``record_pings``)."""
-    record_pings([agent_id], when)
 
 
 def list_monitor_targets(fleet_id: int) -> list[dict]:
@@ -330,7 +317,7 @@ def heartbeat_monitor_runtime(fleet_id: int, pid: int, when: str) -> bool:
         result = session.execute(
             update(MonitorRuntime)
             .where(MonitorRuntime.fleet_id == fleet_id, MonitorRuntime.pid == pid)
-            .values(pid=pid, last_tick_at=when)
+            .values(last_tick_at=when)
         )
         return result.rowcount == 1
 
@@ -377,6 +364,37 @@ def monitor_is_live(fleet_id: int, now: datetime) -> bool:
         if row is None:
             return False
         return _is_live(row, now)
+
+
+def monitor_runtime_payload(fleet_id: int, now: datetime) -> dict:
+    """Build the runtime-liveness dict shared by ``monitor status`` and GET /api/monitor.
+
+    When the monitor is not live (no row, or a stale/cleared heartbeat), the
+    process fields (``pid`` / ``started_at`` / ``last_tick_at`` /
+    ``last_tick_age_seconds``) are ``null`` — a stale row never reports a
+    lingering pid or start time.
+    """
+    row = read_monitor_runtime(fleet_id)
+    if row is None or not monitor_is_live(fleet_id, now):
+        return {
+            "running": False,
+            "pid": None,
+            "tick_seconds": row["tick_seconds"] if row is not None else None,
+            "last_tick_at": None,
+            "last_tick_age_seconds": None,
+            "started_at": None,
+        }
+    age = None
+    if row["last_tick_at"] is not None:
+        age = int((now - datetime.fromisoformat(row["last_tick_at"])).total_seconds())
+    return {
+        "running": True,
+        "pid": row["pid"],
+        "tick_seconds": row["tick_seconds"],
+        "last_tick_at": row["last_tick_at"],
+        "last_tick_age_seconds": age,
+        "started_at": row["started_at"],
+    }
 
 
 def delete_fleet_monitor_rows(session, fleet_id: int) -> None:

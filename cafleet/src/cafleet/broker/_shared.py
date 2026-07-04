@@ -4,7 +4,7 @@ import json
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 
 from cafleet.db.engine import get_sync_sessionmaker
 from cafleet.db.models import Agent, Task
@@ -15,6 +15,12 @@ MONITORING_MEMBER_KIND = "monitoring-member"
 TASK_COLUMNS = tuple(Task.__table__.columns.keys())
 
 NOT_BROADCAST_SUMMARY = Task.type != "broadcast_summary"
+
+# Shared SQL expression extracting an agent card's ``$.cafleet.kind`` (NULL → "")
+# so a comparison against a non-empty kind constant selects identical rows.
+CARD_KIND_SQL = func.coalesce(
+    func.json_extract(Agent.agent_card_json, "$.cafleet.kind"), ""
+)
 
 
 @contextmanager
@@ -54,10 +60,6 @@ def _card_kind(agent_card_json: str | None) -> str | None:
 
 def is_administrator(agent_card_json: str | None) -> bool:
     return _card_kind(agent_card_json) == ADMINISTRATOR_KIND
-
-
-def is_monitoring_member(agent_card_json: str | None) -> bool:
-    return _card_kind(agent_card_json) == MONITORING_MEMBER_KIND
 
 
 def derive_agent_kind(is_root_director: bool, card_kind: str | None) -> str:

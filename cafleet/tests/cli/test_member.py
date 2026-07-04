@@ -18,36 +18,17 @@ import sys
 import pytest
 from click.testing import CliRunner
 
-from cafleet import broker, config
+from cafleet import broker
 from cafleet.broker import _shared
 from cafleet.cli import cli
 from cafleet.db.models import Agent
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.multiplexer import tmux as multiplexer_tmux
-from tests._helpers import _init_registry
-
-_CLI_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
 
 
 @pytest.fixture
-def bootstrapped_fleet(tmp_path, monkeypatch, _reset_engine_singletons):
-    db_file = tmp_path / "cafleet.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
-        lambda self: None,
-    )
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery",
-        lambda self: _CLI_FAKE_DIRECTOR_CTX,
-    )
-
+def bootstrapped_fleet(_mock_tmux_for_fleet_create):
     runner = CliRunner()
-    _init_registry()
     create = runner.invoke(cli, ["fleet", "create", "--json"])
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
@@ -595,7 +576,7 @@ def test_member_create__opencode_invalid_model_exits_2_with_no_side_effects(
     )
     # Validation precedes registration and any tmux call: nothing to roll back.
     assert split_window_recorder == []
-    names = [agent["name"] for agent in broker.list_agents(fleet_id)]
+    names = [agent["name"] for agent in broker.list_roster(fleet_id)]
     assert "Rejected-Member" not in names
 
 
@@ -1210,33 +1191,19 @@ def test_member_nudge__tmux_unavailable_exits_one(bootstrapped_fleet, monkeypatc
 
 
 @pytest.fixture
-def make_bootstrapped_fleet(tmp_path, monkeypatch, _reset_engine_singletons):
+def make_bootstrapped_fleet(tmp_path, monkeypatch, _mock_tmux_for_fleet_create):
     """Bootstrap a fleet whose root Director runs on a chosen backend.
 
     Returns a factory ``make(coding_agent="claude") -> (fleet_id, director_id,
     runner)`` so monitor-inheritance tests can stand up a non-claude Director
     whose placement row records ``codex`` / ``opencode``.
     """
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{tmp_path / 'cafleet.db'}",
-    )
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
-        lambda self: None,
-    )
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery",
-        lambda self: _CLI_FAKE_DIRECTOR_CTX,
-    )
     # An inherited-opencode spawn's ensure_available materializes
     # ~/.opencode/agents/cafleet.md; redirect HOME so it stays in tmp_path.
     monkeypatch.setenv("HOME", str(tmp_path))
 
     def _make(coding_agent: str = "claude"):
         runner = CliRunner()
-        _init_registry()
         args = ["fleet", "create", "--json"]
         if coding_agent != "claude":
             args += ["--coding-agent", coding_agent]

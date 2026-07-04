@@ -53,7 +53,7 @@ def truncate_text(
     return value[:effective_limit] + _TRUNCATION_SUFFIX
 
 
-def truncate_task_text(result: Any, *, full: bool, limit: int | None = None) -> Any:
+def truncate_task_text(result: Any, *, full: bool) -> Any:
     if full:
         return result
     items = result if isinstance(result, list) else [result]
@@ -62,7 +62,7 @@ def truncate_task_text(result: Any, *, full: bool, limit: int | None = None) -> 
         if not isinstance(task, dict):
             continue
         if "text" in task:
-            task["text"] = truncate_text(task["text"], full=full, limit=limit)
+            task["text"] = truncate_text(task["text"], full=full)
     return result
 
 

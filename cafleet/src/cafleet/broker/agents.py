@@ -3,7 +3,7 @@
 import json
 
 import click
-from sqlalchemy import and_, delete, exists, func, or_, select, update
+from sqlalchemy import and_, delete, exists, or_, select, update
 
 from cafleet.broker import _shared, monitor
 from cafleet.broker.fleets import get_fleet
@@ -92,8 +92,7 @@ def register_agent(
                 select(Agent.agent_id).where(
                     Agent.fleet_id == fleet_id,
                     Agent.status == "active",
-                    func.json_extract(Agent.agent_card_json, "$.cafleet.kind")
-                    == _shared.MONITORING_MEMBER_KIND,
+                    _shared.CARD_KIND_SQL == _shared.MONITORING_MEMBER_KIND,
                 )
             ).first()
             if existing is not None:
@@ -226,31 +225,6 @@ def get_agent(agent_id: int, fleet_id: int) -> dict | None:
     return result
 
 
-def list_agents(fleet_id: int) -> list[dict]:
-    """Return all active agents in the fleet."""
-    stmt = select(
-        Agent.agent_id,
-        Agent.name,
-        Agent.description,
-        Agent.registered_at,
-    ).where(
-        Agent.fleet_id == fleet_id,
-        Agent.status == "active",
-    )
-    with _shared.read_session() as session:
-        rows = session.execute(stmt).all()
-    return [
-        {
-            "agent_id": row.agent_id,
-            "name": row.name,
-            "description": row.description,
-            "status": "active",
-            "registered_at": row.registered_at,
-        }
-        for row in rows
-    ]
-
-
 def deregister_agent(agent_id: int) -> bool:
     """Soft-delete the agent and drop its placement.
 
@@ -369,16 +343,13 @@ def list_fleet_agents(fleet_id: int) -> list[dict]:
             Task.from_agent_id == Agent.agent_id,
         )
     )
-    kind_expr = func.coalesce(
-        func.json_extract(Agent.agent_card_json, "$.cafleet.kind"), ""
-    )
     stmt = select(
         Agent.agent_id,
         Agent.name,
         Agent.description,
         Agent.status,
         Agent.registered_at,
-        kind_expr.label("kind_raw"),
+        _shared.CARD_KIND_SQL.label("kind_raw"),
     ).where(
         Agent.fleet_id == fleet_id,
         or_(

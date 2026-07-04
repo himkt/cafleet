@@ -8,16 +8,9 @@ from click.testing import CliRunner
 
 from cafleet import config
 from cafleet.cli import cli
-from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.multiplexer.tmux import TmuxError
 from tests._helpers import _init_registry
-
-_FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0")
-
-
-@pytest.fixture(autouse=True)
-def _autouse_reset_engine(_reset_engine_singletons):
-    pass
+from tests.cli.conftest import _FAKE_DIRECTOR_CTX
 
 
 @pytest.fixture
@@ -33,15 +26,8 @@ def db_file(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def mock_tmux_ok(monkeypatch):
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.ensure_available",
-        lambda self: None,
-    )
-    monkeypatch.setattr(
-        "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery",
-        lambda self: _FAKE_DIRECTOR_CTX,
-    )
+def mock_tmux_ok(_mock_tmux_for_fleet_create):
+    """Alias for the conftest tmux stub."""
 
 
 @pytest.fixture

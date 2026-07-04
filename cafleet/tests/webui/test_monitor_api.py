@@ -28,8 +28,12 @@ from sqlalchemy.pool import StaticPool
 from cafleet import broker
 from cafleet.broker import _shared
 from cafleet.db.models import Base
-from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.webui.app import create_app
+from tests.broker._helpers import (
+    _create_fleet,
+    _member_placement,
+    _register_monitoring_member,
+)
 
 
 @pytest.fixture
@@ -48,44 +52,12 @@ def client(tmp_path):
     return TestClient(create_app(str(tmp_path / "nodist")))
 
 
-def _create_fleet() -> dict:
-    return broker.create_fleet(
-        director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
-        coding_agent="claude",
-    )
-
-
 def _register_member(fleet: dict, name: str = "member", pane_id: str = "%5") -> int:
     return broker.register_agent(
         fleet_id=fleet["fleet_id"],
         name=name,
         description="m",
-        placement={
-            "director_agent_id": fleet["director"]["agent_id"],
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": pane_id,
-            "coding_agent": "claude",
-        },
-    )["agent_id"]
-
-
-def _register_monitoring_member(
-    fleet: dict, name: str = "watcher", pane_id: str = "%7"
-) -> int:
-    """The dedicated monitoring member — the unenrolled watcher located by kind."""
-    return broker.register_agent(
-        fleet_id=fleet["fleet_id"],
-        name=name,
-        description="monitoring member",
-        placement={
-            "director_agent_id": fleet["director"]["agent_id"],
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": pane_id,
-            "coding_agent": "claude",
-        },
-        kind="monitoring-member",
+        placement=_member_placement(fleet["director"]["agent_id"], pane_id),
     )["agent_id"]
 
 
@@ -143,7 +115,7 @@ def test_get_agents__monitor_field_folded(api_db, client):
     director_id = fleet["director"]["agent_id"]
     admin_id = fleet["administrator_agent_id"]
     member_id = _register_member(fleet, name="alice")
-    watcher_id = _register_monitoring_member(fleet)
+    watcher_id = _register_monitoring_member(fleet, pane_id="%7")["agent_id"]
 
     resp = client.get("/api/agents", headers=_headers(sid))
     assert resp.status_code == 200, resp.text
@@ -197,7 +169,7 @@ def test_get_agent_monitor__404_for_monitoring_member_not_enrolled(api_db, clien
     # the monitoring member is the unenrolled watcher → its monitor endpoint 404s
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    watcher_id = _register_monitoring_member(fleet)
+    watcher_id = _register_monitoring_member(fleet, pane_id="%7")["agent_id"]
 
     resp = client.get(f"/api/agents/{watcher_id}/monitor", headers=_headers(sid))
     assert resp.status_code == 404, resp.text

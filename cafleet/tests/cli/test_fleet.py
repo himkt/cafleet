@@ -13,11 +13,6 @@ from tests._helpers import _init_registry
 
 
 @pytest.fixture(autouse=True)
-def _autouse_reset_engine(_reset_engine_singletons):
-    pass
-
-
-@pytest.fixture(autouse=True)
 def _mock_tmux_for_fleet_create(monkeypatch):
     ctx = DirectorContext(session="main", window_id="@3", pane_id="%0")
     monkeypatch.setattr(

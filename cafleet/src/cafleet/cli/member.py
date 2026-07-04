@@ -15,6 +15,7 @@ from cafleet.cli._helpers import (
     fleet_id_option,
     full_flag,
     quiet_flag,
+    text_body_options,
 )
 from cafleet.cli._text_input import read_text_input, substitute_spawn_placeholders
 from cafleet.coding_agent import CODING_AGENTS
@@ -179,14 +180,7 @@ def _resolve_coding_agent(
     show_default=True,
     help="Member role. 'monitor' spawns the dedicated monitoring member.",
 )
-@click.option("--text", "text", type=str, default=None, help="Inline spawn prompt.")
-@click.option(
-    "--text-file",
-    "text_file",
-    type=str,
-    default=None,
-    help="File (UTF-8) or '-' for stdin.",
-)
+@text_body_options("Inline spawn prompt.")
 @full_flag
 @click.pass_context
 def member_create(
@@ -416,12 +410,7 @@ def member_delete(ctx, member_id, force):
     )
 
     pane_status = f"{pane_id} (timeout)"
-    if ctx.obj["json_output"]:
-        click.echo(
-            output.format_json(
-                {"agent_id": member_id, "pane_status": pane_status},
-            )
-        )
+    _emit_member_delete_output(ctx, member_id, pane_status, header=None)
     ctx.exit(2)
 
 
@@ -445,7 +434,7 @@ def _emit_member_delete_output(
     member_id: int,
     pane_status: str,
     *,
-    header: str,
+    header: str | None,
 ) -> None:
     if ctx.obj["json_output"]:
         click.echo(
@@ -453,7 +442,7 @@ def _emit_member_delete_output(
                 {"agent_id": member_id, "pane_status": pane_status},
             )
         )
-    else:
+    elif header is not None:
         click.echo(header)
         click.echo(f"  agent_id:  {member_id}")
         click.echo(f"  pane_id:   {pane_status}")
@@ -687,13 +676,7 @@ def member_ping(ctx, member_id, quiet):
     help="Sender's agent ID (the acting member, typically the monitoring member).",
 )
 @director_member_options
-@click.option("--text", "text", default=None, help="Re-engage summary (inline).")
-@click.option(
-    "--text-file",
-    "text_file",
-    default=None,
-    help="File (UTF-8) or '-' for stdin.",
-)
+@text_body_options("Re-engage summary (inline).")
 @click.pass_context
 def member_nudge(ctx, agent_id, member_id, text, text_file):
     """Re-engage a member (typically the Director) with an ACKable task + preview."""

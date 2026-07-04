@@ -11,12 +11,6 @@ from cafleet.db.models import Agent
 from cafleet.db.models import Fleet as FleetModel
 from tests.broker._helpers import _create_fleet, _register_agent
 
-
-@pytest.fixture(autouse=True)
-def _autouse_broker(broker_session):
-    return broker_session
-
-
 # --- create_fleet ------------------------------------------------------
 
 
@@ -288,10 +282,10 @@ def test_get_agent__returns_none_for_missing(scenario):
         assert broker.get_agent(agent["agent_id"], other["fleet_id"]) is None
 
 
-# --- list_agents ---------------------------------------------------------
+# --- list_roster ---------------------------------------------------------
 
 
-def test_list_agents__active_only_with_required_keys():
+def test_list_roster__active_only_with_required_keys():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     _register_agent(sid, name="active-1")
@@ -299,7 +293,7 @@ def test_list_agents__active_only_with_required_keys():
     dead = _register_agent(sid, name="dead-agent")
     broker.deregister_agent(dead["agent_id"])
 
-    result = broker.list_agents(sid)
+    result = broker.list_roster(sid)
     assert len(result) == 4  # 2 user + Director + Administrator
     names = {a["name"] for a in result}
     assert names == {"active-1", "active-2", "Director", "Administrator"}
@@ -310,18 +304,18 @@ def test_list_agents__active_only_with_required_keys():
     assert agent["status"] == "active"
 
 
-def test_list_agents__bootstrap_only_lists_director_and_admin():
+def test_list_roster__bootstrap_only_lists_director_and_admin():
     fleet = _create_fleet()
-    result = broker.list_agents(fleet["fleet_id"])
+    result = broker.list_roster(fleet["fleet_id"])
     assert {a["name"] for a in result} == {"Director", "Administrator"}
 
 
-def test_list_agents__scoped_per_fleet():
+def test_list_roster__scoped_per_fleet():
     fleet_a = _create_fleet()
     fleet_b = _create_fleet()
     _register_agent(fleet_a["fleet_id"], name="agent-a")
     _register_agent(fleet_b["fleet_id"], name="agent-b")
-    result_a = broker.list_agents(fleet_a["fleet_id"])
+    result_a = broker.list_roster(fleet_a["fleet_id"])
     names_a = {a["name"] for a in result_a}
     assert "agent-a" in names_a
     assert "agent-b" not in names_a
@@ -362,7 +356,7 @@ def test_deregister_agent__active_agent_returns_true():
     sid = fleet["fleet_id"]
     agent = _register_agent(sid, name="retiring")
     assert broker.deregister_agent(agent["agent_id"]) is True
-    names = {a["name"] for a in broker.list_agents(sid)}
+    names = {a["name"] for a in broker.list_roster(sid)}
     assert names == {"Director", "Administrator"}
     # The deregistered agent still belongs to the fleet (verify_agent_fleet).
     assert broker.verify_agent_fleet(agent["agent_id"], sid) is True

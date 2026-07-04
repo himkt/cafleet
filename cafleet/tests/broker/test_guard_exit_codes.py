@@ -14,11 +14,6 @@ from cafleet import broker
 from tests.broker._helpers import _create_fleet
 
 
-@pytest.fixture(autouse=True)
-def _autouse_broker(broker_session):
-    return broker_session
-
-
 def test_deregister_root_director_guard_exits_1():
     fleet = _create_fleet()
     director_id = fleet["director"]["agent_id"]

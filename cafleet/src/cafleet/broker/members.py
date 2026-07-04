@@ -83,9 +83,7 @@ def list_roster(fleet_id: int) -> list[dict]:
         plus ``kind`` (``director`` / ``administrator`` / ``monitor`` /
         ``member``).
     """
-    card_kind_expr = func.coalesce(
-        func.json_extract(Agent.agent_card_json, "$.cafleet.kind"), ""
-    )
+    card_kind_expr = _shared.CARD_KIND_SQL
     stmt = (
         select(
             Agent.agent_id,

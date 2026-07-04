@@ -22,35 +22,8 @@ def _monitor_config_response(cfg: dict) -> dict:
 
 
 def _monitor_runtime_payload(fleet_id: int) -> dict:
-    """Build the ``GET /api/monitor`` liveness dict from the DB heartbeat.
-
-    When the monitor is not live (no row, or a stale/cleared heartbeat), the
-    process fields (``pid`` / ``started_at`` / ``last_tick_at`` /
-    ``last_tick_age_seconds``) are ``null`` — a stale row never reports a
-    lingering pid or start time.
-    """
-    now = datetime.now(UTC)
-    row = broker.read_monitor_runtime(fleet_id)
-    if row is None or not broker.monitor_is_live(fleet_id, now):
-        return {
-            "running": False,
-            "pid": None,
-            "tick_seconds": row["tick_seconds"] if row is not None else None,
-            "last_tick_at": None,
-            "last_tick_age_seconds": None,
-            "started_at": None,
-        }
-    age = None
-    if row["last_tick_at"] is not None:
-        age = int((now - datetime.fromisoformat(row["last_tick_at"])).total_seconds())
-    return {
-        "running": True,
-        "pid": row["pid"],
-        "tick_seconds": row["tick_seconds"],
-        "last_tick_at": row["last_tick_at"],
-        "last_tick_age_seconds": age,
-        "started_at": row["started_at"],
-    }
+    """Build the ``GET /api/monitor`` liveness dict from the DB heartbeat."""
+    return broker.monitor_runtime_payload(fleet_id, datetime.now(UTC))
 
 
 def get_webui_fleet(request: Request) -> int:

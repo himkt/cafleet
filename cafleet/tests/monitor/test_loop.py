@@ -19,7 +19,12 @@ import pytest
 from cafleet import broker
 from cafleet.db.models import Fleet
 from cafleet.monitor.loop import CONTINUE, STOP, monitor_tick
-from tests.broker._helpers import _create_fleet, _register_agent
+from tests.broker._helpers import (
+    _create_fleet,
+    _member_placement,
+    _register_agent,
+    _register_monitoring_member,
+)
 
 _NOW = datetime(2026, 6, 13, 12, 0, 0, tzinfo=UTC)
 
@@ -29,31 +34,12 @@ def _autouse_broker(broker_session):
     return broker_session
 
 
-def _placement(fleet: dict, pane_id: str) -> dict:
-    return {
-        "director_agent_id": fleet["director"]["agent_id"],
-        "tmux_session": "main",
-        "tmux_window_id": "@3",
-        "tmux_pane_id": pane_id,
-        "coding_agent": "claude",
-    }
-
-
 def _register_member(fleet: dict, name: str, pane_id: str) -> int:
     """Register an ordinary member — a watched agent enrolled @720."""
     return _register_agent(
-        fleet["fleet_id"], name=name, placement=_placement(fleet, pane_id)
-    )["agent_id"]
-
-
-def _register_monitoring_member(fleet: dict, name: str, pane_id: str) -> int:
-    """Register the dedicated monitoring member — the unenrolled watcher."""
-    return broker.register_agent(
-        fleet_id=fleet["fleet_id"],
+        fleet["fleet_id"],
         name=name,
-        description="monitoring member",
-        placement=_placement(fleet, pane_id),
-        kind="monitoring-member",
+        placement=_member_placement(fleet["director"]["agent_id"], pane_id),
     )["agent_id"]
 
 
@@ -135,7 +121,7 @@ def test_monitor_tick__due_member_wakes_watcher(capsys, monkeypatch):
     member = _register_member(fleet, "alice", "%9")
 
     # make the Director not-due so the member is the only due watched agent
-    broker.record_ping(director_id, _NOW.isoformat())
+    broker.record_pings([director_id], _NOW.isoformat())
     broker.claim_monitor_runtime(
         sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
     )
@@ -200,7 +186,7 @@ def test_monitor_tick__nothing_due_no_wake_no_record(monkeypatch):
 
     # the Director was pinged 30 s ago (< 180 s interval) → not due
     recent = (_NOW - timedelta(seconds=30)).isoformat()
-    broker.record_ping(director_id, recent)
+    broker.record_pings([director_id], recent)
     broker.claim_monitor_runtime(sid, os.getpid(), 5, recent)
     polls, wakes = _stub_tmux(monkeypatch, {"%0", "%7"})
 

@@ -31,28 +31,30 @@ def _test_cli(ctx, json_output):
 
 @_test_cli.command("simple")
 @fleet_id_option
+@click.option("--full", is_flag=True, default=False)
 @click.pass_context
-@client_command(text_formatter=lambda r: f"TEXT:{r}")
-def _simple(ctx):
+@client_command(text_formatter=lambda r, *, full=False: f"TEXT:{r}")
+def _simple(ctx, full):
     return {"hello": "world"}
 
 
 @_test_cli.command("agent-bound")
 @fleet_id_option
 @click.option("--agent-id", required=True)
+@click.option("--full", is_flag=True, default=False)
 @click.pass_context
 @client_command(
     requires_agent_fleet=True,
-    text_formatter=lambda r: f"TEXT:{r}",
+    text_formatter=lambda r, *, full=False: f"TEXT:{r}",
 )
-def _agent_bound(ctx, agent_id):
+def _agent_bound(ctx, agent_id, full):
     return {"ok": True, "agent_id": agent_id}
 
 
 @_test_cli.command("raises")
 @fleet_id_option
 @click.pass_context
-@client_command()
+@client_command(text_formatter=lambda r, *, full=False: f"TEXT:{r}")
 def _raises(ctx):
     raise RuntimeError("boom!")
 
