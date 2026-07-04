@@ -1,7 +1,7 @@
 # Repo-wide behavior-preserving simplification
 
-**Status**: Approved
-**Progress**: 56/62 tasks complete
+**Status**: Complete
+**Progress**: 62/62 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -14,9 +14,9 @@ Apply a repository-wide sweep of strictly behavior-preserving simplifications �
 - [x] `mise //cafleet:test` passes with no newly-failing test; the only pass-set delta is the intentionally pruned tests (the removals in tests-1..8, broker-db-1, broker-db-3, output-webui-5, runtime-3), and every retained test preserves its production-behavior coverage.
 - [x] `mise //cafleet:lint` and `mise //cafleet:typecheck` are clean.
 - [x] `mise //admin:lint` and `mise //admin:build` succeed (for the admin/TypeScript changes).
-- [ ] No CLI flag, `--help` text, output byte, HTTP response, JSON key/order, SQLite schema, or documented error string changes.
-- [ ] SPEC.md, README.md, docs/, and skills/ remain mutually consistent after the paired doc edits (manual spot-check; no broken cross-references).
-- [ ] The whole sweep lands as a single PR referencing design 0000119.
+- [x] No CLI flag, `--help` text, output byte, HTTP response, JSON key/order, SQLite schema, or documented error string changes.
+- [x] SPEC.md, README.md, docs/, and skills/ remain mutually consistent after the paired doc edits (manual spot-check; no broken cross-references).
+- [x] The whole sweep lands as a single PR referencing design 0000119.
 
 ---
 
@@ -194,12 +194,12 @@ The whole sweep lands as **one PR** referencing design 0000119. Steps below are 
 
 ### Step 11: Final verification & delivery
 
-- [ ] Run `mise //cafleet:test` — no newly-failing test; the only pass-set delta is the intentionally pruned tests. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` and `mise //cafleet:typecheck` — clean. <!-- completed: -->
-- [ ] Run `mise //admin:lint` and `mise //admin:build` — succeed. <!-- completed: -->
-- [ ] Run `mise //:docs-build` — succeeds (no broken internal links / mkdocstrings render failures). <!-- completed: -->
-- [ ] Manual spot-check: no broken cross-references; SPEC.md / README.md / docs/ / skills/ mutually consistent after the paired edits. <!-- completed: -->
-- [ ] Open a single PR referencing design 0000119 with the whole sweep. <!-- completed: -->
+- [x] Run `mise //cafleet:test` — no newly-failing test; the only pass-set delta is the intentionally pruned tests. <!-- completed: 2026-07-04T12:44 -->
+- [x] Run `mise //cafleet:lint` and `mise //cafleet:typecheck` — clean. <!-- completed: 2026-07-04T12:44 -->
+- [x] Run `mise //admin:lint` and `mise //admin:build` — succeed. <!-- completed: 2026-07-04T12:44 -->
+- [x] Run `mise //:docs-build` — succeeds (no broken internal links / mkdocstrings render failures). <!-- completed: 2026-07-04T12:44 -->
+- [x] Manual spot-check: no broken cross-references; SPEC.md / README.md / docs/ / skills/ mutually consistent after the paired edits. <!-- completed: 2026-07-04T12:44 -->
+- [x] Open a single PR referencing design 0000119 with the whole sweep. <!-- completed: 2026-07-04T12:44 -->
 
 ---
 
@@ -208,3 +208,4 @@ The whole sweep lands as **one PR** referencing design 0000119. Steps below are 
 | Date | Changes |
 |------|---------|
 | 2026-07-04 | Initial draft — 56 in-scope findings (49 confirmed + 7 rescoped-includable), 10 excluded, grouped by area, single-PR delivery. |
+| 2026-07-04 | Implemented — all 56 findings applied across 7 commits; fresh Reviewer approved (behavior-preserving, no markers); gates green (cafleet:test 968 passed, lint/typecheck/admin:lint/admin:build/docs-build clean); PR #164. Status → Complete. |
