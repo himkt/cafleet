@@ -1,7 +1,7 @@
 # SPEC.md / docs vs Implementation Consistency Reconciliation
 
 **Status**: Approved
-**Progress**: 33/44 tasks complete
+**Progress**: 35/44 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -218,8 +218,8 @@ makes them first-class. Two reconciled surfaces can plausibly appear there and M
 
 ### Step 6: Code fix — kind-predicate null/non-object safety (2.4)
 
-- [ ] Test: kind predicates return `False` (no raise) on `{"cafleet": null}` and `{"cafleet":"x"}` <!-- completed: -->
-- [ ] `broker/_shared.py:34-51` → guard null / non-object `cafleet` card <!-- completed: -->
+- [x] Test: kind predicates return `False` (no raise) on `{"cafleet": null}` and `{"cafleet":"x"}` <!-- completed: 2026-07-04T07:50 -->
+- [x] `broker/_shared.py:34-51` → guard null / non-object `cafleet` card <!-- completed: 2026-07-04T07:50 -->
 
 ### Step 7: Code fix — `fleet show` / `fleet delete` take `--fleet-id` (3.1 code)
 
