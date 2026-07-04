@@ -3,23 +3,6 @@
 from cafleet.output import format_agent, format_indexed_list, format_task
 
 
-def test_format_indexed_list__empty_and_non_empty_join_behaviour():
-    formatter_calls: list = []
-
-    def formatter(item):
-        formatter_calls.append(item)
-        return f"FMT-{item}"
-
-    assert (
-        format_indexed_list([], formatter, "No widgets found.") == "No widgets found."
-    )
-    assert formatter_calls == []
-
-    result = format_indexed_list(["a", "b", "c"], formatter, "unused empty msg")
-    assert formatter_calls == ["a", "b", "c"]
-    assert result == "FMT-a\n\nFMT-b\n\nFMT-c"
-
-
 def test_format_indexed_list__byte_identical_for_task_and_agent_shapes():
     task = {
         "task_id": 1,

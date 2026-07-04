@@ -143,18 +143,28 @@ def test_format_member__full_layout_has_labels_and_more_lines():
 
 
 def test_format_indexed_list__drops_index_and_blank_line_separated():
+    formatter_calls: list = []
+
+    def formatter(item):
+        formatter_calls.append(item)
+        return item
+
     items = ["alpha", "beta", "gamma"]
-    rendered = output.format_indexed_list(items, lambda x: x, "empty")
+    rendered = output.format_indexed_list(items, formatter, "empty")
     for index_marker in ("[1]", "[2]", "[3]"):
         assert index_marker not in rendered
     assert rendered == "alpha\n\nbeta\n\ngamma"
+    # The formatter is invoked exactly once per item, in order.
+    assert formatter_calls == ["alpha", "beta", "gamma"]
     # Single item: no blank separator.
     assert output.format_indexed_list(["alpha"], lambda x: x, "empty") == "alpha"
-    # Empty list: empty message verbatim.
+    # Empty list: empty message verbatim; the formatter is not invoked.
+    formatter_calls.clear()
     assert (
-        output.format_indexed_list([], lambda x: x, "No items found.")
+        output.format_indexed_list([], formatter, "No items found.")
         == "No items found."
     )
+    assert formatter_calls == []
 
 
 def test_format_indexed_list__multiline_formatter_output_preserved():

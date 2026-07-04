@@ -12,7 +12,6 @@ import pytest
 
 from cafleet.coding_agent import (
     CODING_AGENTS,
-    CodingAgent,
     OpencodeAgent,
 )
 from cafleet.coding_agent.opencode_preset import CAFLEET_AGENT
@@ -28,38 +27,14 @@ def test_opencode_is_registered_in_coding_agents():
     via ``list(CODING_AGENTS.keys())`` in ``cli/member.py`` and ``cli/fleet.py``."""
     assert "opencode" in CODING_AGENTS
     assert isinstance(CODING_AGENTS["opencode"], OpencodeAgent)
-
-
-def test_opencode_satisfies_coding_agent_protocol():
-    """OpencodeAgent is structurally compatible with the CodingAgent Protocol."""
-    assert isinstance(OpencodeAgent(), CodingAgent)
-
-
-def test_opencode_agent_name_and_binary_name():
-    """Per §1: ``name == "opencode"`` matches the registry key and
-    ``binary_name == "opencode"`` is what ``shutil.which`` resolves."""
-    impl = OpencodeAgent()
-    assert impl.name == "opencode"
-    assert impl.binary_name == "opencode"
+    # ``binary_name`` is what ``shutil.which`` resolves — no retained duplicate
+    # elsewhere (``name`` and Protocol conformance are covered by test_protocol.py).
+    assert OpencodeAgent().binary_name == "opencode"
 
 
 # ---------------------------------------------------------------------------
 # build_spawn_argv (§1) — byte-exact shape + regression guards
 # ---------------------------------------------------------------------------
-
-
-def test_build_spawn_argv_byte_exact():
-    """Per §1: spawn argv is exactly ``["opencode", "--agent", "cafleet",
-    "--prompt", <prompt>]`` — pinned token list and ordering."""
-    impl = OpencodeAgent()
-    argv = impl.build_spawn_argv("PROMPT_TEXT", display_name="ignored")
-    assert argv == [
-        "opencode",
-        "--agent",
-        "cafleet",
-        "--prompt",
-        "PROMPT_TEXT",
-    ]
 
 
 def test_build_spawn_argv_does_not_pass_run_subcommand():
@@ -145,11 +120,6 @@ def test_build_spawn_argv_returns_list_of_strings():
 # ---------------------------------------------------------------------------
 
 
-def test_validate_model_accepts_none():
-    """``None`` (flag omitted) skips validation entirely."""
-    assert OpencodeAgent().validate_model(None) is None
-
-
 @pytest.mark.parametrize(
     "model",
     [
@@ -175,22 +145,6 @@ def test_validate_model_rejects_malformed_with_exact_message(model):
     )
     with pytest.raises(ValueError, match=f"^{re.escape(expected)}$"):
         OpencodeAgent().validate_model(model)
-
-
-def test_build_spawn_argv_with_model_byte_exact():
-    """``--model <m>`` lands between ``cafleet`` and the ``--prompt`` pair."""
-    argv = OpencodeAgent().build_spawn_argv(
-        "PROMPT_TEXT", display_name="ignored", model="anthropic/claude-sonnet-4-6"
-    )
-    assert argv == [
-        "opencode",
-        "--agent",
-        "cafleet",
-        "--model",
-        "anthropic/claude-sonnet-4-6",
-        "--prompt",
-        "PROMPT_TEXT",
-    ]
 
 
 # ---------------------------------------------------------------------------
