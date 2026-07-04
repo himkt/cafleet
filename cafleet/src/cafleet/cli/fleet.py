@@ -3,7 +3,7 @@
 import click
 
 from cafleet import broker, output
-from cafleet.cli._helpers import full_flag
+from cafleet.cli._helpers import ensure_skills_current, full_flag
 from cafleet.coding_agent import CODING_AGENTS
 from cafleet.multiplexer import MULTIPLEXERS, TmuxError
 
@@ -11,6 +11,7 @@ from cafleet.multiplexer import MULTIPLEXERS, TmuxError
 @click.group()
 def fleet() -> None:
     """Fleet management commands."""
+    ensure_skills_current()
 
 
 @fleet.command("create")

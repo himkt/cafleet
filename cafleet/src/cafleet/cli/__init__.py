@@ -2,7 +2,6 @@
 
 import click
 
-from cafleet.cli.db import db as db_group
 from cafleet.cli.doctor import doctor
 from cafleet.cli.fleet import fleet
 from cafleet.cli.member import member
@@ -24,7 +23,6 @@ def cli(ctx, json_output):
     ctx.obj["json_output"] = json_output
 
 
-cli.add_command(db_group)
 cli.add_command(fleet)
 cli.add_command(message)
 cli.add_command(member)

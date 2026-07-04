@@ -26,7 +26,8 @@ monitor loop ──────────────────────�
                                          ▼
                               SQLite (fleets / agents / tasks /
                                 agent_placements /
-                                monitor_config / monitor_runtime)
+                                monitor_config / monitor_runtime /
+                                skill_installs)
                                          │
                              ┌──── tmux pane ◄──── inline-preview keystroke
                              │
@@ -55,10 +56,12 @@ Full architecture documentation: <https://himkt.github.io/cafleet/concepts/overv
 
 ```bash
 uv tool install cafleet     # or: pip install cafleet
-cafleet setup               # install the skills + create the database schema
+cafleet setup               # migrate the database schema + install the skills
 ```
 
-`cafleet setup` installs the skills matching your installed `cafleet` version into every detected coding-agent home (`~/.claude`, `~/.codex`, `~/.config/opencode`) and creates the database schema. Scope the skills install to specific agents with `--agent claude|codex|opencode` (repeatable). Re-run after upgrading to refresh the skills.
+`cafleet setup` is the one-step onboarding command — bare `cafleet setup` runs two independent halves in order: first migrates the database schema (applies the bundled Alembic migrations up to the head revision, creating the database file on first run), then installs the skills matching your installed `cafleet` version into every detected coding-agent home (`~/.claude`, `~/.codex`, `~/.config/opencode`). Each half fails independently; the command exits non-zero if either fails. Bare `cafleet setup` takes no options.
+
+Each half is also available as its own subcommand: `cafleet setup db` (schema only) and `cafleet setup skill [--agent claude|codex|opencode]...` (skills only; `--agent` is repeatable and scopes the install). Re-run `cafleet setup` or `cafleet setup skill` after upgrading to refresh the skills.
 
 The default database is `~/.local/share/cafleet/cafleet.db`. Override with `CAFLEET_DATABASE_URL` (use an absolute path — SQLAlchemy does not expand `~` in SQLite URLs).
 
@@ -137,8 +140,10 @@ The unified `cafleet` CLI is organized as three top-level commands (`setup`, `do
 
 | Command | Description |
 |---|---|
-| `cafleet setup` | Install the coding-agent skills and create the database schema in one step |
-| `cafleet doctor` | Print the calling pane's tmux session/window/pane identifiers |
+| `cafleet setup` | Migrate the database schema and install the coding-agent skills in one step (two independent halves, run in order) |
+| `cafleet setup db` | Migrate the database schema only (idempotent) |
+| `cafleet setup skill` | Install the coding-agent skills only and record the installed version (`--agent claude\|codex\|opencode`, repeatable) |
+| `cafleet doctor` | Print the calling pane's tmux session/window/pane identifiers and the skills-install report (recorded version per home, stale/ok status) |
 | `cafleet server` | Start the admin WebUI server (default `127.0.0.1:8000`) |
 
 ### `fleet` group — fleet lifecycle

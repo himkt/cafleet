@@ -1,6 +1,7 @@
-"""Tests for the ``cafleet db init`` CLI command."""
+"""Tests for ``run_db_init`` and the ``cafleet setup db`` CLI command."""
 
 import sqlite3
+from pathlib import Path
 
 from click.testing import CliRunner
 
@@ -22,11 +23,12 @@ def _table_names(db_path) -> set[str]:
 def test_default_database_url_points_at_cafleet_db():
     """The default registry file is ``~/.local/share/cafleet/cafleet.db``."""
     url = config._default_database_url()
-    assert url.endswith("cafleet/cafleet.db")
+    expected = Path("~/.local/share/cafleet/cafleet.db").expanduser()
+    assert url == f"sqlite:///{expected}"
 
 
-def test_db_init_creates_schema(tmp_path, monkeypatch):
-    """Verifies design-doc state #1: DB file does not exist.
+def test_setup_db_creates_schema(tmp_path, monkeypatch):
+    """A fresh ``setup db`` creates the DB file and migrates it to head.
 
     DB path is placed under a not-yet-existing ``data/`` subdir so the
     ``Path.parent.mkdir(parents=True, exist_ok=True)`` path is exercised.
@@ -43,21 +45,28 @@ def test_db_init_creates_schema(tmp_path, monkeypatch):
     from cafleet.cli import cli
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["db", "init"])
+    result = runner.invoke(cli, ["setup", "db"])
 
     assert result.exit_code == 0, result.output
     assert db_file.parent.exists()
     assert db_file.exists()
 
     tables = _table_names(db_file)
-    expected = {"fleets", "agents", "tasks", "agent_placements", "alembic_version"}
+    expected = {
+        "fleets",
+        "agents",
+        "tasks",
+        "agent_placements",
+        "skill_installs",
+        "alembic_version",
+    }
     assert expected <= tables
 
     assert "applied" in result.output.lower()
 
 
-def test_db_init_idempotent(tmp_path, monkeypatch):
-    """Verifies design-doc idempotency: second run is a no-op at state #3."""
+def test_setup_db_idempotent(tmp_path, monkeypatch):
+    """A second ``setup db`` run is a no-op reporting ``Already at head``."""
     db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
@@ -69,7 +78,7 @@ def test_db_init_idempotent(tmp_path, monkeypatch):
 
     runner = CliRunner()
 
-    first = runner.invoke(cli, ["db", "init"])
+    first = runner.invoke(cli, ["setup", "db"])
     assert first.exit_code == 0, first.output
 
     tables_after_first = _table_names(db_file)
@@ -84,7 +93,7 @@ def test_db_init_idempotent(tmp_path, monkeypatch):
     finally:
         conn.close()
 
-    second = runner.invoke(cli, ["db", "init"])
+    second = runner.invoke(cli, ["setup", "db"])
     assert second.exit_code == 0, second.output
     assert "already at head" in second.output.lower()
 
@@ -101,7 +110,7 @@ def test_db_init_idempotent(tmp_path, monkeypatch):
     assert version_after_second == version_after_first
 
 
-def test_db_init_errors_on_unversioned_db(tmp_path, monkeypatch):
+def test_setup_db_errors_on_unversioned_db(tmp_path, monkeypatch):
     """A database with tables but no ``alembic_version`` is rejected, not
     auto-stamped -- silently stamping would lie about the revision and could
     mask schema mismatches at runtime.
@@ -123,7 +132,7 @@ def test_db_init_errors_on_unversioned_db(tmp_path, monkeypatch):
     from cafleet.cli import cli
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["db", "init"])
+    result = runner.invoke(cli, ["setup", "db"])
 
     assert result.exit_code == 1, result.output
     assert "alembic stamp head" in result.output
@@ -133,8 +142,8 @@ def test_db_init_errors_on_unversioned_db(tmp_path, monkeypatch):
     assert "alembic_version" not in tables
 
 
-def test_db_init_ahead_errors(tmp_path, monkeypatch):
-    """Verifies design-doc state #5: ahead-of-head revision is refused.
+def test_setup_db_ahead_errors(tmp_path, monkeypatch):
+    """An ahead-of-head revision unknown to the local script directory is refused.
 
     Uses a fictional ``9999_future_revision`` that is unknown to the
     local Alembic script directory, triggering the ahead-of-head branch.
@@ -162,7 +171,7 @@ def test_db_init_ahead_errors(tmp_path, monkeypatch):
     from cafleet.cli import cli
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["db", "init"])
+    result = runner.invoke(cli, ["setup", "db"])
 
     assert result.exit_code == 1, result.output
     output_lower = result.output.lower()
@@ -195,7 +204,7 @@ def test_run_db_init_creates_schema_at_head(tmp_path, monkeypatch, capsys):
 
     assert not db_file.parent.exists()
 
-    from cafleet.cli.db import run_db_init
+    from cafleet.db.init import run_db_init
 
     run_db_init()
 
@@ -203,7 +212,14 @@ def test_run_db_init_creates_schema_at_head(tmp_path, monkeypatch, capsys):
     assert db_file.exists()
 
     tables = _table_names(db_file)
-    expected = {"fleets", "agents", "tasks", "agent_placements", "alembic_version"}
+    expected = {
+        "fleets",
+        "agents",
+        "tasks",
+        "agent_placements",
+        "skill_installs",
+        "alembic_version",
+    }
     assert expected <= tables
 
     assert "applied" in capsys.readouterr().out.lower()
@@ -218,7 +234,7 @@ def test_run_db_init_idempotent_reports_already_at_head(tmp_path, monkeypatch, c
         f"sqlite+aiosqlite:///{db_file}",
     )
 
-    from cafleet.cli.db import run_db_init
+    from cafleet.db.init import run_db_init
 
     run_db_init()
     capsys.readouterr()
@@ -245,18 +261,18 @@ def test_run_db_init_idempotent_reports_already_at_head(tmp_path, monkeypatch, c
     assert version_after_second == version_after_first
 
 
-def test_db_init_delegates_to_run_db_init(monkeypatch):
-    """``cafleet db init`` is a thin wrapper that calls ``run_db_init()``."""
+def test_setup_db_delegates_to_run_db_init(monkeypatch):
+    """``cafleet setup db`` is a thin wrapper that calls ``run_db_init()``."""
     calls = []
 
-    from cafleet.cli import db as db_module
+    from cafleet.cli import setup as setup_module
 
-    monkeypatch.setattr(db_module, "run_db_init", lambda: calls.append(True))
+    monkeypatch.setattr(setup_module, "run_db_init", lambda: calls.append(True))
 
     from cafleet.cli import cli
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["db", "init"])
+    result = runner.invoke(cli, ["setup", "db"])
 
     assert result.exit_code == 0, result.output
     assert calls == [True]

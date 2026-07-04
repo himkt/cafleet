@@ -1,4 +1,4 @@
-"""``cafleet db`` — database schema management commands."""
+"""Registry schema initialization — Alembic upgrade to the head revision."""
 
 import importlib.resources
 from pathlib import Path
@@ -16,11 +16,6 @@ from cafleet.config import settings
 
 def _sync_db_url() -> str:
     return str(make_url(settings.database_url).set(drivername="sqlite"))
-
-
-@click.group()
-def db() -> None:
-    """Database schema management commands."""
 
 
 def run_db_init() -> None:
@@ -89,9 +84,3 @@ def run_db_init() -> None:
                 click.echo(f"Upgraded from {old_rev} to {head_rev}.")
         finally:
             engine.dispose()
-
-
-@db.command("init")
-def init() -> None:
-    """Initialize or migrate the registry database to the head revision."""
-    run_db_init()

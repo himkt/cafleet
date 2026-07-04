@@ -9,8 +9,8 @@ cleanup-on-teardown, per-agent config edits, the per-tick scan
 ``is_monitoring_member`` field), ping recording, the single-instance runtime
 claim/heartbeat/clear with the ownership-checked split-brain guard, and the
 Alembic data migrations that prune ``monitor_config`` rows (``0003`` prunes
-non-Director rows; ``0004`` then prunes the root-Director rows; ``0005`` — the
-current head, which inverts to per-member intervals — is covered by
+non-Director rows; ``0004`` then prunes the root-Director rows; ``0005`` —
+which inverts to per-member intervals — is covered by
 ``test_alembic_smoke.py``).
 """
 

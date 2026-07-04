@@ -9,6 +9,7 @@ from click.testing import CliRunner
 from cafleet import config
 from cafleet.cli import cli
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
+from tests._helpers import _init_registry
 
 
 @pytest.fixture(autouse=True)
@@ -27,11 +28,6 @@ def _mock_tmux_for_fleet_create(monkeypatch):
         "cafleet.multiplexer.tmux.TmuxMultiplexer.context_discovery",
         lambda self: ctx,
     )
-
-
-def _init_db(runner: CliRunner) -> None:
-    result = runner.invoke(cli, ["db", "init"])
-    assert result.exit_code == 0, result.output
 
 
 def _seed_fleet(db_path, fleet_id: int, label: str | None = None) -> None:
@@ -99,7 +95,7 @@ def fresh_db(tmp_path, monkeypatch):
         f"sqlite+aiosqlite:///{db_file}",
     )
     runner = CliRunner()
-    _init_db(runner)
+    _init_registry()
     return db_file, runner
 
 
@@ -267,7 +263,7 @@ def test_fleet_delete__nonexistent_fleet_handles_gracefully(fresh_db):
     assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
-def test_fleet_group_structure__subcommands_under_fleet_not_db(fresh_db):
+def test_fleet_group_structure__subcommands_under_fleet(fresh_db):
     _db_file, runner = fresh_db
     help_result = runner.invoke(cli, ["fleet", "--help"])
     assert help_result.exit_code == 0
@@ -275,10 +271,6 @@ def test_fleet_group_structure__subcommands_under_fleet_not_db(fresh_db):
     for verb in ("create", "list", "show", "delete"):
         assert verb in out
 
-    # fleet is NOT exposed under db.
-    not_under_db = runner.invoke(cli, ["db", "fleet", "create"])
-    assert not_under_db.exit_code == 2, not_under_db.output
-
-    # db init creates no fleets (regression guard).
+    # schema creation seeds no fleets (regression guard).
     rows = _fleet_rows(_db_file)
     assert len(rows) == 0

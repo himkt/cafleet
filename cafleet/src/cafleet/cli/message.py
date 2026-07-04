@@ -3,13 +3,20 @@
 import click
 
 from cafleet import broker, output
-from cafleet.cli._helpers import client_command, fleet_id_option, full_flag, quiet_flag
+from cafleet.cli._helpers import (
+    client_command,
+    ensure_skills_current,
+    fleet_id_option,
+    full_flag,
+    quiet_flag,
+)
 from cafleet.cli._text_input import read_text_input
 
 
 @click.group()
 def message() -> None:
     """Message broker commands."""
+    ensure_skills_current()
 
 
 @message.command("send")

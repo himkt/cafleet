@@ -10,6 +10,7 @@ from cafleet import broker, output
 from cafleet.broker import _shared
 from cafleet.cli._helpers import (
     director_member_options,
+    ensure_skills_current,
     ensure_tmux_or_die,
     fleet_id_option,
     full_flag,
@@ -23,6 +24,7 @@ from cafleet.multiplexer import MULTIPLEXERS, TmuxError
 @click.group()
 def member():
     """Manage tmux-backed member agents (Director only)."""
+    ensure_skills_current()
 
 
 def _require_member_pane(placement: dict, member_id: int, action: str) -> str:

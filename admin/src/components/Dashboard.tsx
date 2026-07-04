@@ -108,14 +108,14 @@ export default function Dashboard({
               <TriangleAlert size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
               <p>
                 This fleet has no Administrator agent. Send is disabled.
-                If you just upgraded, run
+                Fleets created under an older schema lack the built-in
+                Administrator; create a fresh fleet with
                 <code className="mx-1 rounded bg-danger/15 px-1 font-mono">
-                  cafleet db init
+                  cafleet fleet create
                 </code>
-                to apply the backfill migration. If the Administrator was manually
-                deleted, contact the operator —
-                <code className="mx-1 rounded bg-danger/15 px-1 font-mono">db init</code>
-                will not re-seed it.
+                — schema migrations preserve existing data but never backfill
+                the Administrator. If the Administrator was manually deleted,
+                contact the operator.
               </p>
             </div>
           )}

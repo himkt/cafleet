@@ -1,10 +1,12 @@
+import importlib.metadata
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet.broker import _shared
-from cafleet.db.models import Base
+from cafleet.db.models import Base, SkillInstall
 from cafleet.multiplexer import tmux as multiplexer_tmux
 
 
@@ -19,7 +21,17 @@ def sync_sessionmaker():
     """Per-test in-memory SQLite + sessionmaker with the full broker schema."""
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
-    return sessionmaker(engine, expire_on_commit=False)
+    sm = sessionmaker(engine, expire_on_commit=False)
+    # Seed a current skills install so fleet-scoped CLI tests pass the guard.
+    with sm() as session, session.begin():
+        session.add(
+            SkillInstall(
+                coding_agent="claude",
+                cafleet_version=importlib.metadata.version("cafleet"),
+                installed_at=_shared.now_iso(),
+            )
+        )
+    return sm
 
 
 @pytest.fixture

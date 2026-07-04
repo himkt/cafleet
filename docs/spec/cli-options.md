@@ -12,8 +12,10 @@ One row per subcommand. "Identity flag" is the per-subcommand option naming the 
 
 | Subcommand | Purpose | `--fleet-id` | Identity flag | Section |
 |---|---|---|---|---|
-| `setup` | Install the skills + create the database schema | no | none | [setup](#cafleet-setup) |
-| `doctor` | Print the calling pane's tmux identifiers | no | none | [doctor](#cafleet-doctor) |
+| `setup` | Create the database schema + install the skills (bare group invocation) | no | none | [setup](#cafleet-setup) |
+| `setup db` | Migrate the database schema only | no | none | [setup db](#setup-db) |
+| `setup skill` | Install the skills + record the installed version | no | none | [setup skill](#setup-skill) |
+| `doctor` | Print the calling pane's tmux identifiers + the skills-install report | no | none | [doctor](#cafleet-doctor) |
 | `server` | Start the admin WebUI server | no | none | [server](#cafleet-server) |
 | `fleet create` | Create a fleet with its root Director and Administrator | no | none | [fleet create](#fleet-create) |
 | `fleet list` | List non-deleted fleets | no | none | [fleet list](#fleet-list) |
@@ -152,41 +154,145 @@ cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id> --full   # f
 
 This applies to CLI emit sites only. FastAPI `/api/*` responses (see [webui-api.md](./webui-api.md)) are unchanged — the WebUI is human-facing and renders full bodies. `agent.description`, `skills[].description`, `agent_card_json` sub-fields, and `member capture` content are also untouched.
 
-## `cafleet setup` — One-Step Onboarding {#cafleet-setup}
+## `cafleet setup` — Onboarding and Schema Management {#cafleet-setup}
 
-Installs the coding-agent skills **and** creates the database schema in one command —
-the recommended end-user onboarding path (see
-[Install](../get-started/install.md)). It always runs both halves; they are
-independent, so a failure in one does not abort the other, and the command
-exits non-zero if either half fails. `setup` is the single schema-management
-entry point; there is no separate `db init` command.
+`cafleet setup` is a Click **group** with `invoke_without_command=True`: bare
+`cafleet setup` runs the full onboarding sequence — the recommended end-user
+path (see [Install](../get-started/install.md)) — while `cafleet setup db` and
+`cafleet setup skill` run one half each. The group callback no-ops unless
+`ctx.invoked_subcommand is None`, so the subcommands never trigger the
+bare-setup sequence. The `setup` group is the single schema-management entry
+point.
 
-The skills installed always match the **installed `cafleet` CLI version**:
-setup reads that version, downloads the matching
-`cafleet-skills-v<version>.zip` asset from the corresponding GitHub Release of
-`himkt/cafleet`, and extracts the three skill directories (`cafleet`,
-`cafleet-design-doc`, `cafleet-research`) into each target agent home,
-replacing any existing copy. The database half creates the single-baseline
-schema fresh (`CREATE TABLE IF NOT EXISTS`, so re-running against an
-already-initialized DB is a no-op); there is no migration chain or in-place
-upgrade path (see [Storage](../concepts/storage.md)).
-
-`cafleet setup` does NOT accept `--fleet-id`. Supplying it exits 2 with
-`No such option: --fleet-id`, matching the `fleet create` / `fleet list` /
+No command in the `setup` group accepts `--fleet-id`. Supplying it exits 2
+with `No such option: --fleet-id`, matching the `fleet create` / `fleet list` /
 `server` / `doctor` pattern.
+
+### `setup` (bare invocation)
+
+Bare `cafleet setup` takes no options and runs two independent halves, in
+order:
+
+1. **db half** — initializes or migrates the registry database to the bundled
+   Alembic head revision (idempotent; a DB already at head is a no-op); see
+   [Storage](../concepts/storage.md).
+2. **skills half** — reads the installed `cafleet` CLI version, downloads the
+   matching `cafleet-skills-v<version>.zip` asset from the corresponding
+   GitHub Release of `himkt/cafleet`, extracts the three skill directories
+   (`cafleet`, `cafleet-design-doc`, `cafleet-research`) into **every
+   detected** coding-agent home (each home whose parent directory exists),
+   replacing any existing copy, and records one `skill_installs` row per home
+   after that home's install succeeds (see
+   [data-model.md](./data-model.md)). Zero detected homes fail the half with
+   the same no-homes-detected error as `setup skill`.
+
+The halves fail independently — each catches its own error and prints
+`db half failed: <msg>` or `skills half failed: <msg>` — and if anything
+failed the command exits 1 with `<failed halves joined by ' and '> half failed`
+(db listed first, matching the run order; e.g. `db and skills half failed`).
+If the db half failed, the skills half fails its schema pre-flight and both
+halves are reported failed.
+
+Bare `setup` accepts **no** `--agent` — supplying it exits 2 with Click's
+standard `No such option` error. Per-agent targeting lives on
+[`setup skill`](#setup-skill).
+
+Skills-half failures surface as runtime error messages — no release for the
+installed version, a missing or malformed skills asset, the GitHub API
+unreachable, an unwritable target, or zero detected agent homes.
+
+### `setup db` {#setup-db}
+
+Takes no options. Runs the db half only: forces a sync SQLite URL from the
+configured database URL, creates the DB file's parent directory, and applies
+the bundled Alembic migrations up to the head revision (idempotent). Output,
+by prior DB state:
+
+```
+Created <db_file> and applied migrations to head (<head>).   # fresh DB
+Upgraded from <old_rev> to <head>.                           # behind head
+Already at head (<head>); nothing to do.                     # at head
+```
+
+It refuses two states, exiting 1 — a DB with existing tables but no
+`alembic_version` table, and a DB whose recorded revision is unknown to the
+bundled script directory:
+
+```
+Error: DB has existing tables but no alembic_version. Run `alembic stamp head` manually if you are sure the schema matches.
+Error: DB schema is at revision <rev> which is unknown to this version of cafleet. Refusing to downgrade automatically.
+```
+
+`setup db` never touches `skill_installs` **rows** — it creates the table (as
+part of migration `0006`) but records nothing.
+
+### `setup skill` {#setup-skill}
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent` | no | One of `claude`, `codex`, or `opencode`; repeatable (`multiple=True`), duplicate values deduped silently. Scopes the **skills** targets to exactly the named agents; the database half runs regardless. Omitted → auto-detect every agent whose home directory exists (`~/.claude`, `~/.codex`, `~/.config/opencode`). An explicitly named agent's home/skills tree is created if missing; auto-detect installs only where the home already exists. An unknown value fails Click's choice check (exit 2). |
+| `--agent` | no | One of `claude`, `codex`, or `opencode`; repeatable (`multiple=True`), duplicate values deduped silently. Scopes the skills targets to exactly the named agents — an explicitly named agent's home/skills tree is created if missing. Omitted → auto-detect every agent whose home directory exists (`~/.claude`, `~/.codex`, `~/.config/opencode`). An unknown value fails Click's choice check (exit 2). |
 
-`setup` has no skills-only / db-only toggle. Failures surface as runtime error
-messages — no release for the installed version, a missing or malformed skills
-asset, the GitHub API unreachable, an unwritable target, or zero detected agent
-homes — so there is no exit-codes table.
+Pre-flight: the `skill_installs` table must exist, else the command exits 1
+with:
+
+```
+Error: the database schema is missing or outdated; run 'cafleet setup' or 'cafleet setup db' first
+```
+
+`setup skill` does **not** auto-create the schema. After the pre-flight it
+resolves the targets (`--agent` values, else auto-detect), downloads and
+installs exactly as the bare skills half, and after each home's install
+succeeds upserts that home's `skill_installs` row with the runtime CLI
+version. Per-home success output:
+
+```
+<agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>) -> <skills dir>
+```
+
+An install failure aborts the loop; rows recorded for homes completed before
+the failure remain.
+
+## Stale-skills guard {#stale-skills-guard}
+
+Every fleet-scoped command group — `fleet`, `member`, `message`, and
+`monitor` — validates the recorded skills installs at the top of its group
+callback, before any subcommand body runs:
+
+1. If the DB file, the `skill_installs` table, or all rows are missing, the
+   command exits 1 with:
+
+    ```
+    Error: no skills install is recorded; run 'cafleet setup' first
+    ```
+
+2. If any recorded `cafleet_version` differs from the runtime CLI version
+   (simple string inequality — a downgrade also triggers), the command exits 1
+   with the stale agents listed in ascending `coding_agent` order:
+
+    ```
+    Error: stale skills detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup skill' to reinstall
+    ```
+
+    e.g. `stale skills detected (claude=0.5.0, codex=0.5.0; CLI 0.6.0); run 'cafleet setup skill' to reinstall`.
+
+3. Otherwise the command proceeds silently.
+
+Homes with no recorded row (an agent that was never installed) are not
+checked. Exempt surfaces: the `setup` group (must remain runnable to repair),
+`doctor` (reports instead of blocking — see
+[doctor](#cafleet-doctor)), and `server` (the WebUI is human-facing and not
+fleet-scoped).
+
+**Help interaction (contract).** Group-level help (`cafleet fleet --help`) is
+parsed eagerly during the group's own context and prints help before the
+callback runs, so it always works — even under a missing or stale install.
+Subcommand help (`cafleet fleet create --help`) runs the group callback first,
+so under a missing/stale install the guard **errors instead of printing
+help**.
 
 ## `cafleet fleet` — Fleet Management
 
-The `cafleet fleet` subgroup manages fleets. These commands write directly to SQLite — the broker server does not need to be running. `fleet show` and `fleet delete` take the required `--fleet-id`; `fleet create` and `fleet list` do not.
+The `cafleet fleet` subgroup manages fleets. These commands write directly to SQLite — the broker server does not need to be running. `fleet show` and `fleet delete` take the required `--fleet-id`; `fleet create` and `fleet list` do not. Every `fleet` command runs behind the [stale-skills guard](#stale-skills-guard).
 
 ### `fleet create`
 
@@ -303,7 +409,7 @@ Member tmux panes spawned by `cafleet member create` are **not** automatically c
 
 ## `cafleet doctor` — Placement Diagnostics {#cafleet-doctor}
 
-Prints the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE`) for operators diagnosing placement issues without reaching for raw tmux commands.
+Prints the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE`) for operators diagnosing placement issues without reaching for raw tmux commands, followed by the skills-install report: the runtime CLI version and every recorded `skill_installs` row. `doctor` is exempt from the [stale-skills guard](#stale-skills-guard) — it reports staleness instead of blocking on it.
 
 | Flag | Required | Notes |
 |---|---|---|
@@ -322,9 +428,25 @@ tmux:
   window_id:     @3
   pane_id:       %0
   TMUX_PANE:     %0
+skills:
+  cli_version: 0.6.0
+  claude:      0.6.0 (2026-07-04T00:12:09.123456+00:00) ok
+  codex:       0.5.0 (2026-06-20T10:00:00.987654+00:00) STALE
 ```
 
-JSON output:
+One line per recorded `skill_installs` row: the recorded version, the stored
+`installed_at` string printed **verbatim** (microsecond precision, exactly as
+stored), and `ok` when the recorded version equals the runtime CLI version,
+`STALE` otherwise. When no rows exist (or the table is missing), the `skills:`
+block is instead:
+
+```
+skills:
+  (no skills install recorded; run 'cafleet setup')
+```
+
+JSON output — a `"skills"` key sibling to `"tmux"`, with `installs` an empty
+list when no rows exist:
 
 ```json
 {
@@ -333,6 +455,13 @@ JSON output:
     "window_id": "@3",
     "pane_id": "%0",
     "tmux_pane_env": "%0"
+  },
+  "skills": {
+    "cli_version": "0.6.0",
+    "installs": [
+      {"coding_agent": "claude", "cafleet_version": "0.6.0", "installed_at": "2026-07-04T00:12:09.123456+00:00", "current": true},
+      {"coding_agent": "codex", "cafleet_version": "0.5.0", "installed_at": "2026-06-20T10:00:00.987654+00:00", "current": false}
+    ]
   }
 }
 ```
@@ -341,7 +470,7 @@ Exit codes:
 
 | Exit | When |
 |---|---|
-| `0` | Success — all four fields printed. |
+| `0` | Success — the tmux fields and the skills report printed. A stale or missing skills install does **not** fail `doctor`. |
 | `1` | Any tmux or environment failure: `TMUX` env var unset, `tmux` binary not on PATH, `TMUX_PANE` env var unset, or a tmux subprocess (e.g. `display-message`) failure. |
 
 ## `cafleet server` — Admin WebUI Server {#cafleet-server}
@@ -392,7 +521,7 @@ cafleet server --fleet-id 1
 
 ## `cafleet message` — Message Broker
 
-All six subcommands require the per-subcommand `--fleet-id` and name the requester with `--agent-id`.
+All six subcommands require the per-subcommand `--fleet-id` and name the requester with `--agent-id`, and run behind the [stale-skills guard](#stale-skills-guard).
 The task envelope schema is canonical in
 [Message envelope](./message-envelope.md); body truncation and the
 `--full` flag are canonical in
@@ -468,7 +597,7 @@ prints `No messages found.`.
 
 ## `cafleet member` — Member Lifecycle + Pane Interaction {#cafleet-member}
 
-The `cafleet member` subgroup owns the agent lifecycle: `create | delete | show | list | capture | exec | ping | nudge`. `member create` registers a member **and** spawns its coding-agent pane; `member delete` tears it down; `capture` / `exec` / `ping` / `nudge` inspect or keystroke an existing member's pane; `show` and `list` are registry reads. The tmux-session requirement is scoped to the pane-touching verbs — `create`, `capture`, `exec`, `ping`, `nudge`, and `member delete`'s pane-teardown paths; `show`, `list`, and a placementless or pending-placement `delete` run without tmux. `create` names the acting Director with `--agent-id`; every other lifecycle verb targets its member by `--member-id` (`nudge` additionally names its sender with `--agent-id`). The `--member-id` verbs share the resolution, key-delivery, and exit-code rules below; each subcommand's own section documents only its unique flags, key sequence, validation, and output.
+The `cafleet member` subgroup owns the agent lifecycle: `create | delete | show | list | capture | exec | ping | nudge`. `member create` registers a member **and** spawns its coding-agent pane; `member delete` tears it down; `capture` / `exec` / `ping` / `nudge` inspect or keystroke an existing member's pane; `show` and `list` are registry reads. The tmux-session requirement is scoped to the pane-touching verbs — `create`, `capture`, `exec`, `ping`, `nudge`, and `member delete`'s pane-teardown paths; `show`, `list`, and a placementless or pending-placement `delete` run without tmux. `create` names the acting Director with `--agent-id`; every other lifecycle verb targets its member by `--member-id` (`nudge` additionally names its sender with `--agent-id`). The `--member-id` verbs share the resolution, key-delivery, and exit-code rules below; each subcommand's own section documents only its unique flags, key sequence, validation, and output. Every `member` command runs behind the [stale-skills guard](#stale-skills-guard).
 
 ### Member targeting and key delivery
 
@@ -821,7 +950,7 @@ A target with a pending placement prints `Nudged <name> — no pane; task <task_
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 
-The `cafleet monitor` subgroup is the per-fleet scheduler that wakes the monitoring member whenever a watched agent is due. All three subcommands require the per-subcommand `--fleet-id`. `start` runs the loop in-process (the fleet's dedicated **monitoring member** launches it as a **background task** in its own pane and owns its lifetime); `status` and `config` view and edit the schedule. The conceptual model is canonical on the [Monitoring](../concepts/monitoring.md) concepts page; this page documents the CLI surface.
+The `cafleet monitor` subgroup is the per-fleet scheduler that wakes the monitoring member whenever a watched agent is due. All three subcommands require the per-subcommand `--fleet-id` and run behind the [stale-skills guard](#stale-skills-guard). `start` runs the loop in-process (the fleet's dedicated **monitoring member** launches it as a **background task** in its own pane and owns its lifetime); `status` and `config` view and edit the schedule. The conceptual model is canonical on the [Monitoring](../concepts/monitoring.md) concepts page; this page documents the CLI surface.
 
 There is no `monitor stop` command and no detached process: stop the loop by stopping the monitoring member's background task (or deleting the monitoring member), and the loop also self-terminates when the fleet is torn down. Launching/stopping the loop is **CLI-only** by nature; the schedule-view and schedule-edit surfaces are at WebUI/CLI parity ([WebUI API](./webui-api.md)).
 
@@ -894,6 +1023,9 @@ agent 5: interval 720s, enabled, last_ping 2026-06-13T04:51:00
 
 | Situation | Error Message |
 |---|---|
+| Any `fleet` / `member` / `message` / `monitor` command with no skills install recorded (missing DB file, missing `skill_installs` table, or zero rows) | `Error: no skills install is recorded; run 'cafleet setup' first` (exit 1; see [Stale-skills guard](#stale-skills-guard)) |
+| Any `fleet` / `member` / `message` / `monitor` command with a recorded `skill_installs` version differing from the runtime CLI version | `Error: stale skills detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup skill' to reinstall` (exit 1; see [Stale-skills guard](#stale-skills-guard)) |
+| `setup skill` when the `skill_installs` table is missing | `Error: the database schema is missing or outdated; run 'cafleet setup' or 'cafleet setup db' first` (exit 1) |
 | Missing `--fleet-id` on a fleet-scoped subcommand | `Error: Missing option '--fleet-id'.` (exit 2) |
 | Missing `--agent-id` | `Error: Missing option '--agent-id'.` (exit 2) |
 | `fleet create` run outside a tmux session | `Error: cafleet fleet create must be run inside a tmux session` (exit 1; no DB writes) |

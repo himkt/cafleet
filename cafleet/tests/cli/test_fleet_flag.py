@@ -9,6 +9,7 @@ from click.testing import CliRunner
 from cafleet import broker, config
 from cafleet.cli import cli
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
+from tests._helpers import _init_registry
 
 
 @pytest.fixture(autouse=True)
@@ -39,8 +40,7 @@ def db_runner(tmp_path, monkeypatch):
         f"sqlite+aiosqlite:///{db_file}",
     )
     runner = CliRunner()
-    init = runner.invoke(cli, ["db", "init"])
-    assert init.exit_code == 0, init.output
+    _init_registry()
     return runner
 
 
@@ -145,20 +145,6 @@ def test_fleet_id_flag_flows_into_broker__fleet_id_not_read_from_environment(
     assert result.exit_code == 1, result.output
 
 
-def test_subcommands_that_do_not_require_fleet_id__db_init_without_fleet_id(
-    tmp_path, monkeypatch
-):
-    db_file = tmp_path / "cafleet.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    result = runner.invoke(cli, ["db", "init"])
-    assert result.exit_code == 0, result.output
-
-
 def test_subcommands_that_do_not_require_fleet_id__fleet_create_without_fleet_id(
     db_runner,
 ):
@@ -172,29 +158,6 @@ def test_subcommands_that_do_not_require_fleet_id__fleet_list_without_fleet_id(
 ):
     result = db_runner.invoke(cli, ["fleet", "list"])
     assert result.exit_code == 0, result.output
-
-
-def test_fleet_id_rejected_where_not_required__db_init_rejects_in_both_positions(
-    tmp_path, monkeypatch
-):
-    """``db init`` rejects ``--fleet-id`` in both the old global position and the
-    per-subcommand position (exit 2, 'no such option'); the previous
-    silent-accept behavior is gone."""
-    db_file = tmp_path / "cafleet.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-    runner = CliRunner()
-    sid = "100"
-    global_pos = runner.invoke(cli, ["--fleet-id", sid, "db", "init"])
-    assert global_pos.exit_code == 2, global_pos.output
-    assert "no such option" in (global_pos.output or "").lower()
-
-    per_subcommand = runner.invoke(cli, ["db", "init", "--fleet-id", sid])
-    assert per_subcommand.exit_code == 2, per_subcommand.output
-    assert "no such option" in (per_subcommand.output or "").lower()
 
 
 def test_fleet_id_rejected_where_not_required__fleet_create_rejects_in_both_positions(
@@ -248,8 +211,7 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_exits_nonzero(
         f"sqlite+aiosqlite:///{db_file}",
     )
     runner = CliRunner()
-    init = runner.invoke(cli, ["db", "init"])
-    assert init.exit_code == 0
+    _init_registry()
 
     fleet_id, admin_id = _create_fleet_via_cli(runner)
 
@@ -277,8 +239,7 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_message_is_use
         f"sqlite+aiosqlite:///{db_file}",
     )
     runner = CliRunner()
-    init = runner.invoke(cli, ["db", "init"])
-    assert init.exit_code == 0
+    _init_registry()
 
     fleet_id, admin_id = _create_fleet_via_cli(runner)
 
@@ -308,8 +269,7 @@ def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_
         f"sqlite+aiosqlite:///{db_file}",
     )
     runner = CliRunner()
-    init = runner.invoke(cli, ["db", "init"])
-    assert init.exit_code == 0
+    _init_registry()
 
     fleet_id, _admin_id = _create_fleet_via_cli(runner)
     bogus_agent_id = 999999
@@ -339,8 +299,7 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_act
         f"sqlite+aiosqlite:///{db_file}",
     )
     runner = CliRunner()
-    init = runner.invoke(cli, ["db", "init"])
-    assert init.exit_code == 0
+    _init_registry()
 
     fleet_id, admin_id = _create_fleet_via_cli(runner)
 

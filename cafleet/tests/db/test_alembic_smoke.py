@@ -40,6 +40,7 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
             "agent_placements",
             "monitor_config",
             "monitor_runtime",
+            "skill_installs",
             "alembic_version",
         }
         missing = expected - tables
@@ -49,22 +50,23 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         engine.dispose()
 
 
-def test_alembic_version_table_records_head_0005(alembic_upgraded_db):
+def test_alembic_version_table_records_head_0006(alembic_upgraded_db):
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version_num FROM alembic_version"))
             rows = result.fetchall()
-        assert rows == [("0005",)]
+        assert rows == [("0006",)]
     finally:
         engine.dispose()
 
 
-def test_five_migration_revisions_exist():
-    """The migration history is five revisions: 0001 (base) → 0002 (monitor
+def test_six_migration_revisions_exist():
+    """The migration history is six revisions: 0001 (base) → 0002 (monitor
     tables) → 0003 (prune non-Director monitor_config rows) → 0004 (prune the
     root-Director monitor_config rows) → 0005 (per-member intervals: prune the
-    monitoring member, backfill the root Director @180 + ordinary members @720)."""
+    monitoring member, backfill the root Director @180 + ordinary members @720)
+    → 0006 (skill_installs: the per-home record of the installing CLI version)."""
     with importlib.resources.as_file(
         importlib.resources.files("cafleet.db") / "alembic.ini"
     ) as ini_path:
@@ -72,15 +74,16 @@ def test_five_migration_revisions_exist():
         script = ScriptDirectory.from_config(cfg)
         revisions = list(script.walk_revisions())
 
-    assert len(revisions) == 5
+    assert len(revisions) == 6
     by_revision = {rev.revision: rev for rev in revisions}
-    assert set(by_revision) == {"0001", "0002", "0003", "0004", "0005"}
+    assert set(by_revision) == {"0001", "0002", "0003", "0004", "0005", "0006"}
     assert by_revision["0001"].down_revision is None
     assert by_revision["0002"].down_revision == "0001"
     assert by_revision["0003"].down_revision == "0002"
     assert by_revision["0004"].down_revision == "0003"
     assert by_revision["0005"].down_revision == "0004"
-    assert script.get_current_head() == "0005"
+    assert by_revision["0006"].down_revision == "0005"
+    assert script.get_current_head() == "0006"
 
 
 def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
@@ -290,6 +293,37 @@ def test_monitor_tables_do_not_declare_autoincrement(alembic_upgraded_db):
                 ).scalar()
                 assert ddl is not None
                 assert "AUTOINCREMENT" not in ddl.upper()
+    finally:
+        engine.dispose()
+
+
+def test_skill_installs_table_created_by_migration(alembic_upgraded_db):
+    """0006 creates ``skill_installs``: three NOT NULL string columns with
+    ``coding_agent`` (a known home key, not a minted id) as the PK."""
+    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
+    try:
+        insp = inspect(engine)
+
+        tables = set(insp.get_table_names())
+        assert "skill_installs" in tables
+
+        cols = {col["name"]: col for col in insp.get_columns("skill_installs")}
+        assert set(cols) == {"coding_agent", "cafleet_version", "installed_at"}
+        for name in ("coding_agent", "cafleet_version", "installed_at"):
+            assert cols[name]["nullable"] is False
+
+        pk = insp.get_pk_constraint("skill_installs")
+        assert pk["constrained_columns"] == ["coding_agent"]
+
+        with engine.connect() as conn:
+            ddl = conn.execute(
+                text(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type='table' AND name='skill_installs'"
+                )
+            ).scalar()
+        assert ddl is not None
+        assert "AUTOINCREMENT" not in ddl.upper()
     finally:
         engine.dispose()
 
