@@ -1,7 +1,7 @@
 # SPEC.md / docs vs Implementation Consistency Reconciliation
 
 **Status**: Approved
-**Progress**: 0/44 tasks complete
+**Progress**: 9/44 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -170,15 +170,15 @@ makes them first-class. Two reconciled surfaces can plausibly appear there and M
 
 ### Step 1: SPEC.md doc-alignment edits (docs-first)
 
-- [ ] 2.3 — rewrite §5.4 kind-projection summary at `SPEC.md:362-366`, `514-517` <!-- completed: -->
-- [ ] 3.6 — `fleet list` is 5 columns (`40/40/20/8` padded + CREATED_AT trailing unpadded) at `SPEC.md:992-994` <!-- completed: -->
-- [ ] 4.4 — remove `coding_agent` from conditional-fields list at `SPEC.md:1652` <!-- completed: -->
-- [ ] 5.1 — "tmux-pane commands…" → "member commands…" at `SPEC.md:1668-1670`, `2379-2381` <!-- completed: -->
-- [ ] 5.2 — newline-only → newline/CR at `SPEC.md:1718-1721` <!-- completed: -->
-- [ ] 6.2 — `Continue`/`Stop` → `CONTINUE`/`STOP` at `SPEC.md:1829,1833-1834` (+1870,1873,1899,1917,1924) <!-- completed: -->
-- [ ] 6.3 — "four functions" → three at `SPEC.md:1841-1843` <!-- completed: -->
-- [ ] 7.3 — `/api/timeline` "all" → capped at 200 at `SPEC.md:2254-2255` <!-- completed: -->
-- [ ] 7.4 — send path also requires `status=="active"` at `SPEC.md:2259-2263` <!-- completed: -->
+- [x] 2.3 — rewrite §5.4 kind-projection summary at `SPEC.md:362-366`, `514-517` <!-- completed: 2026-07-04T07:18 -->
+- [x] 3.6 — `fleet list` is 5 columns (`40/40/20/8` padded + CREATED_AT trailing unpadded) at `SPEC.md:992-994` <!-- completed: 2026-07-04T07:18 -->
+- [x] 4.4 — remove `coding_agent` from conditional-fields list at `SPEC.md:1652` <!-- completed: 2026-07-04T07:18 -->
+- [x] 5.1 — "tmux-pane commands…" → "member commands…" at `SPEC.md:1668-1670`, `2379-2381` <!-- completed: 2026-07-04T07:18 -->
+- [x] 5.2 — newline-only → newline/CR at `SPEC.md:1718-1721` <!-- completed: 2026-07-04T07:18 -->
+- [x] 6.2 — `Continue`/`Stop` → `CONTINUE`/`STOP` at `SPEC.md:1829,1833-1834` (+1870,1873,1899,1917,1924) <!-- completed: 2026-07-04T07:18 -->
+- [x] 6.3 — "four functions" → three at `SPEC.md:1841-1843` <!-- completed: 2026-07-04T07:18 -->
+- [x] 7.3 — `/api/timeline` "all" → capped at 200 at `SPEC.md:2254-2255` <!-- completed: 2026-07-04T07:18 -->
+- [x] 7.4 — send path also requires `status=="active"` at `SPEC.md:2259-2263` <!-- completed: 2026-07-04T07:18 -->
 
 ### Step 2: docs/ doc-alignment edits (docs-first)
 

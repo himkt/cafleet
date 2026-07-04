@@ -359,11 +359,15 @@ unified:
   `"monitoring-member"`, or **absent** (ordinary user/Director). Constants:
   `ADMINISTRATOR_KIND = "builtin-administrator"`,
   `MONITORING_MEMBER_KIND = "monitoring-member"`.
-- **Broker projection** (§6.2 `get_agent`/`list_agents`/`list_fleet_agents`):
-  collapses to a **two-value** discriminator — the literal `ADMINISTRATOR_KIND`
-  when the card marks an administrator, else the literal `"user"`. The richer
-  `monitoring-member` kind is **not** surfaced by these projections; it is only
-  consulted internally via `is_monitoring_member` / JSON-path guards.
+- **Broker projections** (§6.2) surface the kind differently per function and
+  are **not** unified:
+  - `get_agent` returns a **four-value** `kind` — `director` (derived: the agent
+    is the fleet's root Director), `administrator` (card marks an administrator),
+    `monitor` (card marks a monitoring member), else `member`.
+  - `list_agents` surfaces **no** `kind` at all.
+  - `list_fleet_agents` collapses to a **two-value** discriminator — the literal
+    `ADMINISTRATOR_KIND` when the card marks an administrator, else the literal
+    `"user"`; the `monitoring-member` kind is not surfaced here.
 - **Internal predicates:** `is_administrator(card)` / `is_monitoring_member(card)`
   parse the JSON and compare `$.cafleet.kind`; both return false on
   absent/empty/malformed-JSON (a deliberate non-match, not an error mask).
@@ -511,10 +515,10 @@ during message delivery (§6.5) and one process-liveness probe (signal-0).
 `is_administrator(card)` and `is_monitoring_member(card)` parse
 `agent_card_json`, read `$.cafleet.kind`, and compare to their kind constant.
 Absent / null / empty / malformed-JSON / non-object `cafleet` value → non-match
-(`false`) — a deliberate, documented non-match, not an error mask. These
-collapse to the two-value broker projection (`ADMINISTRATOR_KIND` vs `"user"`)
-in `get_agent` / `list_agents` / `list_fleet_agents` per §5.4;
-`monitoring-member` is never surfaced by those projections.
+(`false`) — a deliberate, documented non-match, not an error mask. How the
+per-function broker projections surface the kind (`get_agent`'s four values,
+`list_agents`'s none, `list_fleet_agents`'s two-value `ADMINISTRATOR_KIND` vs
+`"user"` collapse) is detailed in §5.4.
 
 - `ADMINISTRATOR_KIND = "builtin-administrator"`,
   `MONITORING_MEMBER_KIND = "monitoring-member"`.
@@ -990,8 +994,9 @@ fleet-scoped command (§6.3 `--fleet-id`).
   `cafleet fleet create must be run inside a tmux session` (exit 1, no DB
   writes).
 - **list** — `--json` (local). Empty → `No fleets found.`; else a header plus
-  one formatted row per fleet (column widths 40 / 20 / 8; nullable cells fall
-  back to empty strings).
+  one formatted row per fleet (five columns: FLEET_ID / DIRECTOR / LABEL / AGENTS
+  left-padded 40 / 40 / 20 / 8, then a trailing unpadded CREATED_AT; nullable
+  cells fall back to empty strings).
 - **show** — `--fleet-id` (integer, required) + local `--json`. Not found →
   application error `fleet '<fleet_id>' not found.`. Text: `fleet_id`, `label`,
   `created_at`, plus a `deleted_at:` line when soft-deleted (soft-deleted rows
@@ -1649,8 +1654,7 @@ then `pending_count` with no padding.
 
 All four absent-cell helpers above use the single ASCII `-` glyph (§6.4 *The
 single absent glyph*). All conditional fields (`kind`, `origin`, the verbose
-`to:`/`text:` lines, the `coding_agent` key) are gated on truthiness — omitted,
-never emitted empty.
+`to:`/`text:` lines) are gated on truthiness — omitted, never emitted empty.
 
 ### 6.5 Multiplexer & tmux
 
@@ -1667,7 +1671,7 @@ method builds is given verbatim; preserve subcommand, flags, and ordering.
 - **`name`** — the registry key literal `"tmux"`.
 - **`ensure_available()`** — fail-fast. Raises if `tmux` is not on `PATH` →
   `tmux binary not found on PATH`; or if `TMUX` is unset/empty → `cafleet
-  tmux-pane commands must be run inside a tmux session`.
+  member commands must be run inside a tmux session`.
 - **`context_discovery() -> MultiplexerContext`** — resolves the **calling
   shell's** pane via `$TMUX_PANE` (not the active window). Read `TMUX_PANE`;
   missing/empty → `TMUX_PANE is not set; not running inside a tmux pane`. Invoke
@@ -1717,7 +1721,7 @@ method builds is given verbatim; preserve subcommand, flags, and ordering.
   trailing Enter submits the whole 2-line payload as one recipient turn.
 - **`send_bash_command(*, target_pane_id, command)`** — fail-fast. Strip
   surrounding whitespace; empty after strip → `send_bash_command: command may not
-  be empty`; the **original** command with a newline → `send_bash_command:
+  be empty`; the **original** command with a newline or CR → `send_bash_command:
   command may not contain newlines`. literal-then-Enter with `payload = "! " +
   normalized_command`, **no Esc-first** (honors the coding-agent `!` shortcut).
 - **`capture_pane(*, target_pane_id, lines=20) -> str`** — fail-fast. `lines <=
@@ -1826,11 +1830,11 @@ internals; it orchestrates calls into both.
 
 - **`should_ping(target, now) -> bool`** — pure due-check for one watched agent;
   no DB/multiplexer access.
-- **`monitor_tick(fleet_id, now) -> Continue | Stop`** — one scan pass.
+- **`monitor_tick(fleet_id, now) -> CONTINUE | STOP`** — one scan pass.
 - **`run_monitor_loop(fleet_id, tick_seconds)`** — foreground driver: claim slot
   → install signal handlers → `tick → sleep` until signalled → clear slot on
   exit.
-- **`Continue` / `Stop`** — tick-result markers distinguishing "keep looping"
+- **`CONTINUE` / `STOP`** — tick-result markers distinguishing "keep looping"
   from "self-terminate".
 - **`DEFAULT_TICK_SECONDS = 5`** — default scan cadence (seconds).
 - Re-exports `DIRECTOR_PING_INTERVAL_SECONDS` (180),
@@ -1839,7 +1843,7 @@ internals; it orchestrates calls into both.
   broker, re-exported so the loop imports policy from one place.
 
 The stop flag, the sleep helper, the signal handler, and the marker type are
-implementation-private; only the four functions, the markers, and the five
+implementation-private; only the three functions, the markers, and the five
 constants are public.
 
 #### `should_ping(target, now)`
@@ -1867,10 +1871,10 @@ One scan pass, steps in order:
 
 1. **Ownership-checked heartbeat.** Call the broker's heartbeat with `(fleet_id,
    this-pid, now-as-ISO)`. Returns false (zero-row update — this process was
-   displaced and another reclaimed the slot) → return `Stop`. This is the
+   displaced and another reclaimed the slot) → return `STOP`. This is the
    split-brain loser's exit.
 2. **Fleet liveness.** Fetch the fleet; absent **or** `deleted_at` set → return
-   `Stop`.
+   `STOP`.
 3. **Locate the watcher.** Ask the broker for the fleet's monitoring member (may
    be absent); shape `{agent_id, name, pane_id}`.
 4. **Fetch pane liveness once.** A **single** `list_pane_ids` call resolves
@@ -1896,7 +1900,7 @@ One scan pass, steps in order:
      agents stay flagged, so the next tick retries (no wake-storm, no silent
      skip).
    - No live watcher to wake: nothing is recorded.
-7. Return `Continue`.
+7. Return `CONTINUE`.
 
 **Critical ordering invariant:** `record_pings` and the heartbeat echo are gated
 behind `woke == true`. Preserve this gating exactly.
@@ -1914,14 +1918,14 @@ artifact (no PID file); identity throughout is the OS process id.
 3. **Install signal handlers** for SIGTERM and SIGINT; each flips the shared stop
    flag to true (the handler is minimal — just a flag flip).
 4. **Loop** while the stop flag is false: if `monitor_tick(fleet_id, now)` (each
-   pass stamps `now` fresh as tz-aware UTC) returns `Stop` → break; else call
+   pass stamps `now` fresh as tz-aware UTC) returns `STOP` → break; else call
    `interruptible_sleep(tick_seconds)`.
 5. **Cleanup (always, in a finally block):** the broker's ownership-checked clear
    `(fleet_id, pid)` — nulls the slot's process fields only if this pid still
    owns the slot, so a displaced loser's clear is a no-op.
 
 **Stop paths:** (a) a signal sets the stop flag → loop exits → finally clears;
-(b) `monitor_tick` returns `Stop` → break → finally clears; (c) a hard kill runs
+(b) `monitor_tick` returns `STOP` → break → finally clears; (c) a hard kill runs
 no cleanup — the row's heartbeat goes stale and the broker's later liveness check
 reports it dead.
 
@@ -2252,15 +2256,17 @@ array**; every other list endpoint wraps in an object (agent rows under
 - **`GET /api/agents/{agent_id}/sent`** — fleet-scoped. Same as inbox over sent
   messages; same `404` detail `Agent not found`.
 - **`GET /api/timeline`** — fleet-scoped, no per-agent check. `{"messages": […]}`
-  over all of the fleet's messages.
+  over the fleet's messages, hard-capped at the **200** most recent
+  (`status_timestamp DESC`).
 - **`POST /api/messages/send`** — fleet-scoped. Body `{from_agent_id: int,
   to_agent_id: int | "*", text: string}`. `to_agent_id` deserializes as **either
   a JSON integer or the exact JSON string `"*"`** (broadcast); anything else
   (e.g. a stringified integer `"5"`) is rejected, not coerced. If `from_agent_id`
   is not in the fleet → `400`, detail `from_agent not in fleet`. If `"*"`:
   broadcast, return `{task_id: <summary task_id>, status: <summary
-  status_state>}`. Else: recipient not in fleet → `404`, detail `Agent not
-  found`; otherwise send and return `{task_id, status}`. Both branches:
+  status_state>}`. Else: recipient not an **active** agent in the fleet →
+  `404`, detail `Agent not found`; otherwise send and return `{task_id,
+  status}`. Both branches:
   `{task_id: int, status: string}` (`status` = the broker task's `status_state`).
 
 **`FormattedMessage`** (one element of any `messages` array): `{task_id,
@@ -2377,13 +2383,13 @@ cross-module string — the "must be run inside a tmux session" text exists in t
 distinct forms with **two different provenances**:
 
 - **Tmux-pane-command path** — the multiplexer's `ensure_available` raises
-  `cafleet tmux-pane commands must be run inside a tmux session` (§6.5); the CLI
+  `cafleet member commands must be run inside a tmux session` (§6.5); the CLI
   surfaces that text as-is (it does not hardcode it).
 - **`fleet create` path** — the CLI **catches** the multiplexer's `TmuxError`,
   **discards** its message, and raises its own hardcoded command-specific string
   `cafleet fleet create must be run inside a tmux session` (§6.3, exit 1). This
   one is genuinely CLI-hardcoded; do not expect it to echo the multiplexer's
-  `tmux-pane commands` wording.
+  `member commands` wording.
 
 ### 7.3 Output / JSON / truncation
 
