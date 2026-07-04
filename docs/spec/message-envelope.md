@@ -28,7 +28,7 @@ Field decisions:
 | `text` | included, truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix | included, untruncated |
 | `type` | omitted when `"unicast"` (the default); rendered as `kind` when `"broadcast_summary"` | rendered as `type` |
 | `created_at` | omitted | included |
-| `status_state` | omitted when `"input_required"` (the default for fresh deliveries) | included |
+| `status_state` | omitted (unconditional) | included |
 | `origin_task_id` | rendered as `origin` (full integer) when non-NULL; omitted on unicast deliveries | included |
 
 ### JSON output

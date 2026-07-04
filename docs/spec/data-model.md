@@ -89,8 +89,8 @@ Indexes:
 
 | Name | Columns | Purpose |
 |---|---|---|
-| `idx_tasks_context_status_ts` | `(context_id, status_timestamp DESC)` | Inbox listing: `WHERE context_id = ? ORDER BY status_timestamp DESC`. |
-| `idx_tasks_from_agent_status_ts` | `(from_agent_id, status_timestamp DESC)` | WebUI sender outbox: `WHERE from_agent_id = ? ORDER BY status_timestamp DESC`. |
+| `idx_tasks_context_status_ts` | `(context_id, status_timestamp)` | Inbox listing: `WHERE context_id = ? ORDER BY status_timestamp DESC`. |
+| `idx_tasks_from_agent_status_ts` | `(from_agent_id, status_timestamp)` | WebUI sender outbox: `WHERE from_agent_id = ? ORDER BY status_timestamp DESC`. |
 
 ### `agent_placements`
 

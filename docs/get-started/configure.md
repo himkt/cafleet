@@ -56,11 +56,11 @@ prefix_rule(pattern = ["cafleet", "setup"],      decision = "allow")
 prefix_rule(pattern = ["cafleet", "doctor"],     decision = "allow")
 prefix_rule(pattern = ["cafleet", "server"],     decision = "allow")
 prefix_rule(pattern = ["cafleet", "fleet"],      decision = "allow")
-prefix_rule(pattern = ["cafleet", "agent"],      decision = "allow")
 prefix_rule(pattern = ["cafleet", "message"],    decision = "allow")
 prefix_rule(pattern = ["cafleet", "monitor"],    decision = "allow")
 prefix_rule(pattern = ["cafleet", "member", "create"],  decision = "allow")
 prefix_rule(pattern = ["cafleet", "member", "delete"],  decision = "allow")
+prefix_rule(pattern = ["cafleet", "member", "show"],    decision = "allow")
 prefix_rule(pattern = ["cafleet", "member", "list"],    decision = "allow")
 prefix_rule(pattern = ["cafleet", "member", "capture"], decision = "allow")
 prefix_rule(pattern = ["cafleet", "member", "ping"],    decision = "allow")
@@ -107,9 +107,9 @@ MCP servers (MCP-contributed tools bypass the deny-list).
 
 ## Passing the fleet id
 
-Every fleet-scoped command takes a required `--fleet-id`, passed as a literal
-integer flag on each invocation (a member reads its fleet id from the
-`FLEET ID:` line of its spawn prompt). Agents driving cafleet under
+Every fleet-scoped command except `fleet create` and `fleet list` takes a
+required `--fleet-id`, passed as a literal integer flag on each invocation (a
+member reads its fleet id from the `FLEET ID:` line of its spawn prompt). Agents driving cafleet under
 `permissions.allow` pass `--fleet-id` as a literal flag — the allow patterns
 match the literal command string, so a shell-expanded variable would break the
 match and prompt.

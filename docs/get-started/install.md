@@ -86,8 +86,10 @@ the skills from the working tree instead:
 mise //:skill-install
 ```
 
-This runs `gh skill install ./ --from-local` for each backend, placing the
-skills from your checkout (not a Release) into the three agent homes.
+This runs `gh skill install ./ --from-local --agent <backend> --force --scope
+user` for each of the three backends (`claude-code`, `codex`, `opencode`),
+placing the skills from your checkout (not a Release) into the three agent
+homes.
 
 Once the CLI and at least one coding-agent skill set are installed, continue to
 the [Configure](configure.md) page for the recommended per-agent settings.

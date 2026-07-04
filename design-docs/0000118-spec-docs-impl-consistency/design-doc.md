@@ -1,7 +1,7 @@
 # SPEC.md / docs vs Implementation Consistency Reconciliation
 
 **Status**: Approved
-**Progress**: 9/44 tasks complete
+**Progress**: 25/44 tasks complete
 **Last Updated**: 2026-07-04
 
 ## Overview
@@ -182,22 +182,22 @@ makes them first-class. Two reconciled surfaces can plausibly appear there and M
 
 ### Step 2: docs/ doc-alignment edits (docs-first)
 
-- [ ] 1.3 — index order ascending at `docs/spec/data-model.md:92-93` <!-- completed: -->
-- [ ] 2.5 — two-string not-found behavior at `docs/concepts/fleet-isolation.md:16-17` <!-- completed: -->
-- [ ] 2.6 — module layout + re-exports + `list_roster` at `docs/api/broker.md:15-22,26-30` <!-- completed: -->
-- [ ] 3.1(doc) — narrow blanket sentence at `docs/get-started/configure.md:110-111` <!-- completed: -->
-- [ ] 3.2 — missing `--fleet-id` is exit-1 `ClickException` at `docs/spec/cli-options.md:1029` <!-- completed: -->
-- [ ] 3.6(doc) — fix sample spacing at `docs/spec/cli-options.md:367-370` <!-- completed: -->
-- [ ] 4.2 — `status_state` unconditionally omitted at `docs/spec/message-envelope.md:31` <!-- completed: -->
-- [ ] 4.3 — default + `--full` agent render at `docs/concepts/token-reduction.md:25` <!-- completed: -->
-- [ ] 5.1(doc) — error string at `docs/spec/cli-options.md:420` <!-- completed: -->
-- [ ] 6.1 — heartbeat runs first at `docs/concepts/monitoring.md:180,194-196` <!-- completed: -->
-- [ ] 7.1 — timeline scoped by sender at `docs/spec/webui-api.md:232` <!-- completed: -->
-- [ ] 7.2 — `/api/fleets` shape incl `director_agent_id`, excludes soft-deleted at `docs/spec/webui-api.md:23-36` <!-- completed: -->
-- [ ] 8.1 — add `--fleet-id` to `member capture` example at `docs/reference/coding-agents/opencode.md:84` <!-- completed: -->
-- [ ] 8.2 — Codex allowlist: drop `cafleet agent`, add `member show` at `docs/get-started/configure.md:59,76-80` <!-- completed: -->
-- [ ] 8.3 — full skill-install command at `docs/get-started/install.md:89` <!-- completed: -->
-- [ ] 8.4 — `cafleet:format` runs `ruff check --fix` first at `docs/get-started/contributing.md:36` <!-- completed: -->
+- [x] 1.3 — index order ascending at `docs/spec/data-model.md:92-93` <!-- completed: 2026-07-04T07:26 -->
+- [x] 2.5 — two-string not-found behavior at `docs/concepts/fleet-isolation.md:16-17` <!-- completed: 2026-07-04T07:26 -->
+- [x] 2.6 — module layout + re-exports + `list_roster` at `docs/api/broker.md:15-22,26-30` <!-- completed: 2026-07-04T07:26 -->
+- [x] 3.1(doc) — narrow blanket sentence at `docs/get-started/configure.md:110-111` <!-- completed: 2026-07-04T07:26 -->
+- [x] 3.2 — missing `--fleet-id` is exit-1 `ClickException` at `docs/spec/cli-options.md:1029` <!-- completed: 2026-07-04T07:26 -->
+- [x] 3.6(doc) — fix sample spacing at `docs/spec/cli-options.md:367-370` <!-- completed: 2026-07-04T07:26 -->
+- [x] 4.2 — `status_state` unconditionally omitted at `docs/spec/message-envelope.md:31` <!-- completed: 2026-07-04T07:26 -->
+- [x] 4.3 — default + `--full` agent render at `docs/concepts/token-reduction.md:25` <!-- completed: 2026-07-04T07:26 -->
+- [x] 5.1(doc) — error string at `docs/spec/cli-options.md:420` <!-- completed: 2026-07-04T07:26 -->
+- [x] 6.1 — heartbeat runs first at `docs/concepts/monitoring.md:180,194-196` <!-- completed: 2026-07-04T07:26 -->
+- [x] 7.1 — timeline scoped by sender at `docs/spec/webui-api.md:232` <!-- completed: 2026-07-04T07:26 -->
+- [x] 7.2 — `/api/fleets` shape incl `director_agent_id`, excludes soft-deleted at `docs/spec/webui-api.md:23-36` <!-- completed: 2026-07-04T07:26 -->
+- [x] 8.1 — add `--fleet-id` to `member capture` example at `docs/reference/coding-agents/opencode.md:84` <!-- completed: 2026-07-04T07:26 -->
+- [x] 8.2 — Codex allowlist: drop `cafleet agent`, add `member show` at `docs/get-started/configure.md:59,76-80` <!-- completed: 2026-07-04T07:26 -->
+- [x] 8.3 — full skill-install command at `docs/get-started/install.md:89` <!-- completed: 2026-07-04T07:26 -->
+- [x] 8.4 — `cafleet:format` runs `ruff check --fix` first at `docs/get-started/contributing.md:36` <!-- completed: 2026-07-04T07:26 -->
 
 ### Step 3: Code fix — `to_agent_id` nullable + NULL sentinel (1.1 + 1.2)
 

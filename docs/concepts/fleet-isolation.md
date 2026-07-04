@@ -13,8 +13,10 @@ partitions for tidiness, not security boundaries.
 
 Every operation that reads or writes agent / task data enforces fleet
 boundaries; registration additionally requires a valid, non-soft-deleted
-`fleet_id`. Cross-fleet requests always produce "not found" errors
-indistinguishable from the resource not existing.
+`fleet_id`. A cross-fleet request produces a **distinct** error:
+`send_message` raises `Destination agent not in fleet: {to_id}` when the target
+exists in another fleet, versus `Destination agent not found: {to_id}` when it
+does not exist at all.
 
 ## Lifecycle
 

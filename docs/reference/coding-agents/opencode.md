@@ -81,7 +81,7 @@ Only `claude` sets the pane title to the member name; locate `opencode` panes vi
 
 ## Permission-popup recovery posture
 
-In normal operation the TUI never shows a permission popup — every check resolves to `allow` or `deny` without `ask`. If a popup ever appears, it is a regression escape from the safety floor, not a runtime decision-point: the Director MUST escalate to the user and capture pane state via `cafleet member capture --member-id <opencode-member>` for diagnosis, then extend the deny-list (a source change + new release + preset refresh). The Director MUST NOT answer the popup as an ad-hoc workaround — that defeats the safety-floor invariant.
+In normal operation the TUI never shows a permission popup — every check resolves to `allow` or `deny` without `ask`. If a popup ever appears, it is a regression escape from the safety floor, not a runtime decision-point: the Director MUST escalate to the user and capture pane state via `cafleet member capture --fleet-id <fleet-id> --member-id <opencode-member>` for diagnosis, then extend the deny-list (a source change + new release + preset refresh). The Director MUST NOT answer the popup as an ad-hoc workaround — that defeats the safety-floor invariant.
 
 ## Safety floor caveats
 

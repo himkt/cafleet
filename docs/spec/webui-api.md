@@ -20,7 +20,7 @@ No server-side session cookies. The SPA stores the active fleet_id client-side v
 
 ### GET /api/fleets — List Fleets
 
-Returns all fleets with agent counts, ordered newest-first by `created_at DESC, fleet_id ASC`. No headers required.
+Returns non-soft-deleted fleets (`deleted_at IS NULL`) with agent counts, ordered newest-first by `created_at DESC, fleet_id ASC`. No headers required.
 
 **Response** (200 OK):
 
@@ -28,6 +28,7 @@ Returns all fleets with agent counts, ordered newest-first by `created_at DESC, 
 [
   {
     "fleet_id": 1,
+    "director_agent_id": 2,
     "label": "PR-42 review",
     "created_at": "2026-04-12T10:00:00+00:00",
     "agent_count": 3
@@ -229,7 +230,7 @@ Returns up to 200 most-recent non-`broadcast_summary` tasks for the selected fle
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
-Fleet scoping is reached through the `tasks.context_id → agents.agent_id → agents.fleet_id` join. Only tasks whose recipient belongs to the header fleet are returned; cross-fleet tasks are invisible.
+Fleet scoping is reached through the `tasks.from_agent_id → agents.agent_id → agents.fleet_id` join. Only tasks whose **sender** belongs to the header fleet are returned; cross-fleet tasks are invisible.
 
 **Response** (200 OK):
 
