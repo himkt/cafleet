@@ -1,5 +1,6 @@
 import type { TimelineEntry, Agent } from "../types";
 import { entrySortKey } from "../timeline";
+import { formatTime } from "../format";
 import AgentAvatar from "./AgentAvatar";
 import ReactionBar from "./ReactionBar";
 
@@ -34,12 +35,6 @@ function recipientNames(entry: TimelineEntry): string[] {
     return [entry.message.to_agent_name];
   }
   return entry.rows.map((r) => r.to_agent_name);
-}
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export default function TimelineMessageComponent({
