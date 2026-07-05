@@ -10,12 +10,12 @@ Rename the coding-agent-only scratch/audit folders documented across the cafleet
 
 ## Success Criteria
 
-- [ ] The general hidden-vs-visible folder convention is codified in `skills/cafleet/reference/base-dir.md` as a new subsection (single home, no duplication elsewhere).
-- [ ] `prompts/` is renamed to `.prompts/` in every skill file that documents it, with no aliases and no deprecation notices.
-- [ ] `figures/src` becomes `.figures/code` and `figures/data` becomes `.figures/data` (both hidden), while `figures/output` stays visible as `figures/output`; the `SRC_DIR` placeholder is renamed to `CODE_DIR`.
-- [ ] `screenshots/` is renamed to `.screenshots/` in every presentation-workflow file, including the `.keep` write and the per-batch review-log markdown.
-- [ ] `.gitignore` is updated: `/prompts/` becomes `/.prompts/` with a refreshed comment, and hidden-scratch stray-catch entries are added.
-- [ ] No `prompts/`, `figures/src`, `figures/data`, or `screenshots/` path reference remains anywhere under `skills/` or in `.gitignore` (the three content-category false positives are explicitly left untouched); `figures/output` remains present and visible.
+- [x] The general hidden-vs-visible folder convention is codified in `skills/cafleet/reference/base-dir.md` as a new subsection (single home, no duplication elsewhere).
+- [x] `prompts/` is renamed to `.prompts/` in every skill file that documents it, with no aliases and no deprecation notices.
+- [x] `figures/src` becomes `.figures/code` and `figures/data` becomes `.figures/data` (both hidden), while `figures/output` stays visible as `figures/output`; the `SRC_DIR` placeholder is renamed to `CODE_DIR`.
+- [x] `screenshots/` is renamed to `.screenshots/` in every presentation-workflow file, including the `.keep` write and the per-batch review-log markdown.
+- [x] `.gitignore` is updated: `/prompts/` becomes `/.prompts/` with a refreshed comment, and hidden-scratch stray-catch entries are added.
+- [x] No `prompts/`, `figures/src`, `figures/data`, or `screenshots/` path reference remains anywhere under `skills/` or in `.gitignore` (the three content-category false positives are explicitly left untouched); `figures/output` remains present and visible.
 
 ---
 
