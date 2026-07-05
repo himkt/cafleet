@@ -43,7 +43,7 @@ Pick the chart/format per the `../../reference/visualization.md` Chart Type Sele
 
 ## Figures
 
-- Treat the Director-provided research folder as the figure base directory. Read `../../reference/visualization.md` and follow its Chart Type Selection and Color Rules strictly. Wherever it references its template placeholders — FIGURE_BASE, BASE, SRC_DIR, OUTPUT_DIR, DATA_DIR — substitute the concrete absolute paths literally into the Python script. These are **template placeholders**, NOT shell variables — do NOT run `export FIGURE_BASE=...` or any shell variable assignment. Bash calls are ephemeral and the values won't persist anyway.
+- Treat the Director-provided research folder as the figure base directory. Read `../../reference/visualization.md` and follow its Chart Type Selection and Color Rules strictly. Wherever it references its template placeholders — FIGURE_BASE, BASE, CODE_DIR, OUTPUT_DIR, DATA_DIR — substitute the concrete absolute paths literally into the Python script. These are **template placeholders**, NOT shell variables — do NOT run `export FIGURE_BASE=...` or any shell variable assignment. Bash calls are ephemeral and the values won't persist anyway.
 - Embed with `![description](./figures/output/filename.png)` (relative from slide.md).
 - **No `ax.set_title()`** — slide heading is the chart title.
 - **Use `.figure-caption`** for source attribution.

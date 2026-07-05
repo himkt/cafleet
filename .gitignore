@@ -33,9 +33,16 @@ __pycache__/
 
 # ==== CAFleet runtime artifacts at the repo root ====
 # Stray spawn-prompt audit writes at the repo root; the canonical location is
-# per-task `prompts/` folders (`researches/<slug>/prompts/`,
-# `design-docs/<NNNNNNN>-<slug>/prompts/`).
-/prompts/
+# per-task hidden `.prompts/` folders (`researches/<slug>/.prompts/`,
+# `design-docs/<NNNNNNN>-<slug>/.prompts/`).
+/.prompts/
+
+# Other hidden coding-agent scratch dirs that can land at the repo root when
+# ${BASE} resolves to the repo root: matplotlib scripts/data (`.figures/`) and
+# Visual Reviewer captures (`.screenshots/`). The visible `figures/output`
+# deliverable stays tracked — only the hidden siblings are ignored.
+/.figures/
+/.screenshots/
 
 # Spawn-prompt audit re-renders written by the Director when ${BASE} = repo root
 # (${BASE}/<role>.md — one per spawned member-role per invocation).

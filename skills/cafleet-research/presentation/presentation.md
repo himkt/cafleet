@@ -80,7 +80,7 @@ Step 5 (cleanup) is autonomous — no user prompt.
 
    Branch on Step 0's outcome: when it **resolves**, set both `${FOLDER}` and `${BASE}` to the resolved task folder (the task folder IS the report folder; no further `${BASE}/researches/...` concatenation). When it yields **`<unset>`** (absolute `$ARGUMENTS` outside the repo root), set `${FOLDER}` to the **canonicalized** absolute path (the same trailing-`/report.md`-stripped path you passed to Step 0) so the report-folder check in step 4 still runs against a folder rather than a file, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet` skill's `reference/base-dir.md` § *The `<unset>` sentinel*.
 4. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Run the report workflow (`../report/report.md`) first to generate a report."
-5. Pass `${FOLDER}` as the resolved absolute path to all members in spawn prompts. The audit-file path `${BASE}/prompts/<role>-<UTC-compact>.md` is naturally task-scoped — it lives under `<topic-folder>/prompts/`, not under the repo root.
+5. Pass `${FOLDER}` as the resolved absolute path to all members in spawn prompts. The audit-file path `${BASE}/.prompts/<role>-<UTC-compact>.md` is naturally task-scoped — it lives under `<topic-folder>/.prompts/`, not under the repo root.
 
 ### Step 1: Bootstrap CAFleet Fleet & Spawn Presentation + Transcript (Director)
 
@@ -111,7 +111,7 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 - `roles/transcript.md`
 - `roles/visual-reviewer.md`
 
-> **Spawn mechanics**: path-by-reference is required because `cafleet member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The CLI runs `str.format` over the prompt, rendering the four `{fleet_id}` / `{director_agent_id}` / `{agent_id}` / `{coding_agent}` identity placeholders to literals at spawn — double any literal brace as `{{` / `}}` and leave no other stray single braces. **Two-step audit file**: write the rendered prompt to `${BASE}/prompts/<role>-<UTC-compact>.md` before `cafleet member create --text-file <abs path>` — the pre-spawn file is both the CLI input and the permanent audit artifact. The placeholders-pre-substitution note and the `${BASE} == <unset>` guarded-skip + inline fallback are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files*.
+> **Spawn mechanics**: path-by-reference is required because `cafleet member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The CLI runs `str.format` over the prompt, rendering the four `{fleet_id}` / `{director_agent_id}` / `{agent_id}` / `{coding_agent}` identity placeholders to literals at spawn — double any literal brace as `{{` / `}}` and leave no other stray single braces. **Two-step audit file**: write the rendered prompt to `${BASE}/.prompts/<role>-<UTC-compact>.md` before `cafleet member create --text-file <abs path>` — the pre-spawn file is both the CLI input and the permanent audit artifact. The placeholders-pre-substitution note and the `${BASE} == <unset>` guarded-skip + inline fallback are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files*.
 
 #### 1d. Spawn Presentation + Transcript in parallel
 
@@ -132,13 +132,13 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `<task-id>` and `cafleet message ack … --task-id <task-id>`, then act) |
 | start cue (verbatim) | `When complete, send the file path to the Director via cafleet message send.` |
 
-Render the prompt to `${BASE}/prompts/presentation-<UTC-compact>.md` per the 1c two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
+Render the prompt to `${BASE}/.prompts/presentation-<UTC-compact>.md` per the 1c two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
 
    ```bash
    cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "presentation" \
      --description "Authors slide.md" \
-     --text-file ${BASE}/prompts/presentation-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/presentation-<UTC-compact>.md
    ```
 
    Capture the printed `agent_id` and substitute it for `[presentation-agent-id]` in subsequent `cafleet message send` calls.
@@ -156,13 +156,13 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form |
 | start cue (verbatim) | `When complete, send the file path to the Director via cafleet message send.` |
 
-Render the prompt to `${BASE}/prompts/transcript-<UTC-compact>.md` per the 1c two-step audit-file pattern, then spawn with `--text-file`:
+Render the prompt to `${BASE}/.prompts/transcript-<UTC-compact>.md` per the 1c two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
    cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "transcript" \
      --description "Authors transcript.md" \
-     --text-file ${BASE}/prompts/transcript-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/transcript-<UTC-compact>.md
    ```
 
    Capture the printed `agent_id` and substitute it for `[transcript-agent-id]` in subsequent `cafleet message send` calls.
@@ -196,7 +196,7 @@ Once Step 2 converges on an approved slide deck and transcript, the Director run
 1. Install bun dependencies — refer to your host project's `.claude/rules/` for the canonical command (it typically wraps `bun install --frozen-lockfile`).
 2. Start the Slidev dev server **as a backgrounded process** — refer to your host project's `.claude/rules/` for the canonical launcher. The underlying invocation is `bun run slidev --open false <folder>/slide.md` (the `--open false` flag is required for headless review) and the launcher MUST PTY-wrap stdout (e.g., via `script -qfc`) so Slidev does not exit on detecting a non-TTY. **Record the background process handle** your coding agent returns when it backgrounds the process — the overall Step 5 of this skill (*Finalize & Clean Up*, further down the page) needs it to stop the server cleanly without falling back on `pkill`. Run the backgrounded process via {bg_run}; stop it at teardown via {bg_stop}.
 3. Set `<server_url>` to the Slidev dev server URL (default: `http://localhost:3030`). Use this value when spawning Visual Reviewers.
-4. Create the persistent screenshots directory: write `<folder>/screenshots/.keep` (empty file) using the Write tool. This is a one-time operation per presentation-workflow run; do NOT delete or wipe it on subsequent batches. agent-browser does not auto-create parent directories when given an explicit `screenshot <path>`, so this step is required for VR's per-slide capture to succeed.
+4. Create the persistent screenshots directory: write `<folder>/.screenshots/.keep` (empty file) using the Write tool. This is a one-time operation per presentation-workflow run; do NOT delete or wipe it on subsequent batches. agent-browser does not auto-create parent directories when given an explicit `screenshot <path>`, so this step is required for VR's per-slide capture to succeed.
 5. The Director MUST NOT run `bun run agent-browser --session vr-batch-* open|snapshot|screenshot|wait|close` (or the equivalent `bun run agent-browser ...`) directly — agent-browser's browser-operation commands are exclusively for Visual Reviewers (the only exception is the `close --all` safety net in Step 5 *Finalize & Clean Up*). The Director MAY run `console` and `errors` for diagnostics if needed (e.g., investigating a stuck VR), but should prefer letting the VR do it.
 
 **Batched Review Loop** (batch_size=10, fresh Visual Reviewer per batch to avoid context overflow):
@@ -249,15 +249,15 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | cafleet-load purpose | `for the broker primitives and bash-via-Director routing` (no extra skills) |
 | CONTEXT LINES | `TASK: Visually verify the rendered Slidev presentation.` / `SLIDE FILE: [INSERT <folder>/slide.md]` / `RESEARCH FOLDER: [INSERT <folder>]` / `SERVER URL: [INSERT <server_url>]` / `SESSION NAME: [INSERT vr-batch-<start>]` / `CHECK SLIDES: [INSERT <start> to <end>]` / `ROUND: [INSERT <round>]` |
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form |
-| start cue (verbatim) | `When complete, persist the report to <folder>/screenshots/vr<start>-r<round>.md and send it to the Director via cafleet message send.` |
+| start cue (verbatim) | `When complete, persist the report to <folder>/.screenshots/vr<start>-r<round>.md and send it to the Director via cafleet message send.` |
 
-Render the prompt to `${BASE}/prompts/vr-batch-<start>-<UTC-compact>.md` per the 1c two-step audit-file pattern (`<start>` matches the batch's first-slide index used in `--name`; each VR batch gets its own timestamped file — no overwriting), then spawn with `--text-file`:
+Render the prompt to `${BASE}/.prompts/vr-batch-<start>-<UTC-compact>.md` per the 1c two-step audit-file pattern (`<start>` matches the batch's first-slide index used in `--name`; each VR batch gets its own timestamped file — no overwriting), then spawn with `--text-file`:
 
    ```bash
    cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
      --name "vr-batch-<start>" \
      --description "Visual Reviewer for slides <start>..<end>" \
-     --text-file ${BASE}/prompts/vr-batch-<start>-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/vr-batch-<start>-<UTC-compact>.md
    ```
 
    Capture the printed `agent_id` as `[vr-batch-agent-id]` for subsequent `cafleet message send` / `member delete` calls.
