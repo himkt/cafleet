@@ -1,7 +1,7 @@
 # Hide coding-agent-only scratch/audit folders behind a dot-prefix
 
 **Status**: Approved
-**Progress**: 14/16 tasks complete
+**Progress**: 16/16 tasks complete
 **Last Updated**: 2026-07-05
 
 ## Overview
@@ -118,8 +118,8 @@ The visualization placeholder `SRC_DIR` is renamed to `CODE_DIR` (resolving to `
 
 ### Step 7: Update `.gitignore`
 
-- [ ] `.gitignore` — rename `/prompts/` → `/.prompts/` (line ~38) and refresh the surrounding comment (lines ~34–38) to name the hidden per-task folders (`researches/<slug>/.prompts/`, `design-docs/<NNNNNNN>-<slug>/.prompts/`). <!-- completed: -->
-- [ ] `.gitignore` — add repo-root stray-catch entries `/.figures/` and `/.screenshots/`, mirroring the `/.prompts/` rationale (hidden coding-agent scratch dirs that can land at the repo root when `${BASE}` resolves to the repo root). Do NOT add `figures/` — its `output/` is a visible deliverable. <!-- completed: -->
+- [x] `.gitignore` — rename `/prompts/` → `/.prompts/` (line ~38) and refresh the surrounding comment (lines ~34–38) to name the hidden per-task folders (`researches/<slug>/.prompts/`, `design-docs/<NNNNNNN>-<slug>/.prompts/`). <!-- completed: 2026-07-05T02:52 -->
+- [x] `.gitignore` — add repo-root stray-catch entries `/.figures/` and `/.screenshots/`, mirroring the `/.prompts/` rationale (hidden coding-agent scratch dirs that can land at the repo root when `${BASE}` resolves to the repo root). Do NOT add `figures/` — its `output/` is a visible deliverable. <!-- completed: 2026-07-05T02:52 -->
 
 ---
 
