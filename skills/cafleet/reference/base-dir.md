@@ -17,7 +17,7 @@ When the consuming skill operates on a per-task folder, it picks the task-folder
 3. **Guard the task-folder path.** Reject one that escapes or degenerates to the repo root:
    - **Relative task-folder path**: join it under the repo root and resolve. If the result equals the repo root → STOP ("the repo root is not a task folder"). If the result is not under the repo root (a `..` escape) → STOP ("refusing to create a task folder outside the repo").
    - **Absolute task-folder path**: resolve it. If it equals the repo root OR is not strictly under it → `${BASE} = <unset>` (the absolute-path-arg branch); create nothing.
-4. `${BASE}` = the absolute task folder. The folder is created lazily on the first consumer write (the `Write` tool auto-creates parent directories), so there is no resolution-time write. Audit files such as `${BASE}/prompts/<role>-<UTC-compact>.md` land under the task folder rather than at the repo root.
+4. `${BASE}` = the absolute task folder. The folder is created lazily on the first consumer write (the `Write` tool auto-creates parent directories), so there is no resolution-time write. Audit files such as `${BASE}/.prompts/<role>-<UTC-compact>.md` land under the task folder rather than at the repo root.
 
 **The consuming skill is responsible for passing a task-folder path that is the actual task folder**, not a child file path — this procedure does no slug-folding or filename-stripping.
 
@@ -52,7 +52,7 @@ The chosen value is `${BASE}`. Nothing is persisted; if the procedure reloads in
 
 Every CAFleet member, every consumer skill, and every Director MUST follow this protocol for scratch / audit / figure / spawn-prompt-render writes:
 
-1. **Every write under `${BASE}` or an explicit consumer-supplied absolute target.** Scratch (pre-spawn renders of spawn prompts at `${BASE}/prompts/<role>-<UTC-compact>.md`, working notes), audit files, figure artifacts, and any other ephemeral output MUST land under `${BASE}` or under a consumer-supplied absolute path — e.g., the design-doc directory delivered to spawned members via `[INSERT abs design-doc directory]`, or the research folder delivered via `[INSERT abs research folder]`. Never `/tmp` unless `${BASE}` itself is `/tmp/claude-code` (which is a legitimate base-dir choice).
+1. **Every write under `${BASE}` or an explicit consumer-supplied absolute target.** Scratch (pre-spawn renders of spawn prompts at `${BASE}/.prompts/<role>-<UTC-compact>.md`, working notes), audit files, figure artifacts, and any other ephemeral output MUST land under `${BASE}` or under a consumer-supplied absolute path — e.g., the design-doc directory delivered to spawned members via `[INSERT abs design-doc directory]`, or the research folder delivered via `[INSERT abs research folder]`. Never `/tmp` unless `${BASE}` itself is `/tmp/claude-code` (which is a legitimate base-dir choice).
 
 2. **`${BASE} == <unset>` is a hard stop, not a fallback.** If `${BASE}` is the literal sentinel `<unset>` (absolute-path argument branch), any code that tries to compute a path from `${BASE}` MUST abort with `Error: BASE is <unset>; refusing to fall back to /tmp`. The loud failure is the safety net for sites that forgot to guard explicitly.
 
@@ -65,6 +65,12 @@ Every CAFleet member, every consumer skill, and every Director MUST follow this 
    ```
 
    The phrasing deliberately omits parentheses so a Director reading the broker log does not misinterpret it as a malformed `<verb> (<pointer>)` hop. The member MUST NOT fall back to `/tmp`.
+
+### Hidden agent-only folders vs visible deliverables
+
+Assets a coding agent creates only for its own workflow — scratch, audit trails, and intermediate build inputs — live in **dot-prefixed hidden folders** under `${BASE}` (e.g. `${BASE}/.prompts/`, `${BASE}/.figures/code`, `${BASE}/.figures/data`, `${BASE}/.screenshots/`). Assets that are **user-facing deliverables** — the artifacts the user opens, embeds, or ships — live in **visible, unprefixed folders** (e.g. `${BASE}/figures/output/` for the rendered charts embedded into slides and reports).
+
+When a skill adds a new output folder under `${BASE}`, classify it first: coding-agent-only → dot-prefix it; user-facing deliverable → leave it visible/unprefixed.
 
 ## The `<unset>` sentinel
 

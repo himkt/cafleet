@@ -1,7 +1,7 @@
 # Hide coding-agent-only scratch/audit folders behind a dot-prefix
 
 **Status**: Approved
-**Progress**: 0/16 tasks complete
+**Progress**: 2/16 tasks complete
 **Last Updated**: 2026-07-05
 
 ## Overview
@@ -78,8 +78,8 @@ The visualization placeholder `SRC_DIR` is renamed to `CODE_DIR` (resolving to `
 
 ### Step 1: Codify the general convention and rename `prompts/` in `base-dir.md`
 
-- [ ] Add the new "Hidden agent-only folders vs visible deliverables" subsection (text in Specification above) to `skills/cafleet/reference/base-dir.md`, in the § *No-bypass write protocol* area. <!-- completed: -->
-- [ ] In `skills/cafleet/reference/base-dir.md`, rename `${BASE}/prompts/<role>-<UTC-compact>.md` → `${BASE}/.prompts/<role>-<UTC-compact>.md` at both occurrences (the Step-0 audit-file example and the no-bypass protocol item 1). <!-- completed: -->
+- [x] Add the new "Hidden agent-only folders vs visible deliverables" subsection (text in Specification above) to `skills/cafleet/reference/base-dir.md`, in the § *No-bypass write protocol* area. <!-- completed: 2026-07-05T02:41 -->
+- [x] In `skills/cafleet/reference/base-dir.md`, rename `${BASE}/prompts/<role>-<UTC-compact>.md` → `${BASE}/.prompts/<role>-<UTC-compact>.md` at both occurrences (the Step-0 audit-file example and the no-bypass protocol item 1). <!-- completed: 2026-07-05T02:41 -->
 
 ### Step 2: Rename `prompts/` → `.prompts/` across the `cafleet` skill
 
