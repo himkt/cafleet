@@ -68,7 +68,7 @@ All Director-to-member messages use `cafleet message send` (members addressed by
 
 **The Director is the final visual-quality gate, not the VR.** A VR "Pass" verdict is one input; the Director must personally inspect every screenshot before approving the deck. Spot-checking is not enough: defects cluster on data-dense slides (stats-grid, tables, references, dense bullets with citations), and a single un-read screenshot may hide the one orphan or overflow that embarrasses the whole deck.
 
-Read every screenshot in `<folder>/screenshots/vr<start>-r<round>-p<N>.png` (or the Director's own captures) before calling Step 4. For each slide, check against all of the following:
+Read every screenshot in `<folder>/.screenshots/vr<start>-r<round>-p<N>.png` (or the Director's own captures) before calling Step 4. For each slide, check against all of the following:
 
 | Check | Fail condition |
 |---|---|

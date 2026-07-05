@@ -1,7 +1,7 @@
 # Hide coding-agent-only scratch/audit folders behind a dot-prefix
 
 **Status**: Approved
-**Progress**: 11/16 tasks complete
+**Progress**: 14/16 tasks complete
 **Last Updated**: 2026-07-05
 
 ## Overview
@@ -112,9 +112,9 @@ The visualization placeholder `SRC_DIR` is renamed to `CODE_DIR` (resolving to `
 
 ### Step 6: Rename `screenshots/` → `.screenshots/` across the presentation workflow
 
-- [ ] `skills/cafleet-research/presentation/presentation.md` — rename `screenshots/` → `.screenshots/` at its two real path occurrences: the `<folder>/screenshots/.keep` persistent-directory creation step and the `<folder>/screenshots/vr<start>-r<round>.md` start-cue. Do NOT touch the Visual Reviewer role-table prose `Capture screenshots/snapshots of assigned slides` (see § Out of scope — a false positive). <!-- completed: -->
-- [ ] `skills/cafleet-research/presentation/roles/director.md` — rename `screenshots/` → `.screenshots/` in the `<folder>/screenshots/vr<start>-r<round>-p<N>.png` review-read instruction. <!-- completed: -->
-- [ ] `skills/cafleet-research/presentation/roles/visual-reviewer.md` — rename `screenshots/` → `.screenshots/` at its four real path occurrences: the per-slide capture-path prose (:23), the review-log persist prose (:26), the `agent-browser ... screenshot` command (:102), and the Write-tool review-log persist step (:140). The parent-directory prose (:144, "the parent directory exists") holds no `screenshots/` path token and needs no edit. <!-- completed: -->
+- [x] `skills/cafleet-research/presentation/presentation.md` — rename `screenshots/` → `.screenshots/` at its two real path occurrences: the `<folder>/screenshots/.keep` persistent-directory creation step and the `<folder>/screenshots/vr<start>-r<round>.md` start-cue. Do NOT touch the Visual Reviewer role-table prose `Capture screenshots/snapshots of assigned slides` (see § Out of scope — a false positive). <!-- completed: 2026-07-05T02:50 -->
+- [x] `skills/cafleet-research/presentation/roles/director.md` — rename `screenshots/` → `.screenshots/` in the `<folder>/screenshots/vr<start>-r<round>-p<N>.png` review-read instruction. <!-- completed: 2026-07-05T02:50 -->
+- [x] `skills/cafleet-research/presentation/roles/visual-reviewer.md` — rename `screenshots/` → `.screenshots/` at its four real path occurrences: the per-slide capture-path prose (:23), the review-log persist prose (:26), the `agent-browser ... screenshot` command (:102), and the Write-tool review-log persist step (:140). The parent-directory prose (:144, "the parent directory exists") holds no `screenshots/` path token and needs no edit. <!-- completed: 2026-07-05T02:50 -->
 
 ### Step 7: Update `.gitignore`
 
