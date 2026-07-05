@@ -1,7 +1,7 @@
 # Hide coding-agent-only scratch/audit folders behind a dot-prefix
 
 **Status**: Approved
-**Progress**: 4/16 tasks complete
+**Progress**: 7/16 tasks complete
 **Last Updated**: 2026-07-05
 
 ## Overview
@@ -88,9 +88,9 @@ The visualization placeholder `SRC_DIR` is renamed to `CODE_DIR` (resolving to `
 
 ### Step 3: Rename `prompts/` → `.prompts/` across the `cafleet-design-doc` workflows
 
-- [ ] `skills/cafleet-design-doc/create/create.md` — rename `prompts/` → `.prompts/` at all occurrences (the task-scoped audit-path note, the two-step audit-file callout, and the Drafter/Reviewer `--text-file ${BASE}/prompts/...` render+spawn blocks), including the `<task-folder>/prompts/` prose. <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/execute.md` — rename `prompts/` → `.prompts/` at all occurrences (the two-step audit-file callout and the Programmer/Tester/Verifier/Reviewer render+spawn blocks). <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/interview/interview.md` — rename `prompts/` → `.prompts/` at all occurrences (the audit-file callout and the Analyzer render+spawn block). <!-- completed: -->
+- [x] `skills/cafleet-design-doc/create/create.md` — rename `prompts/` → `.prompts/` at all occurrences (the task-scoped audit-path note, the two-step audit-file callout, and the Drafter/Reviewer `--text-file ${BASE}/prompts/...` render+spawn blocks), including the `<task-folder>/prompts/` prose. <!-- completed: 2026-07-05T02:45 -->
+- [x] `skills/cafleet-design-doc/execute/execute.md` — rename `prompts/` → `.prompts/` at all occurrences (the two-step audit-file callout and the Programmer/Tester/Verifier/Reviewer render+spawn blocks). <!-- completed: 2026-07-05T02:45 -->
+- [x] `skills/cafleet-design-doc/interview/interview.md` — rename `prompts/` → `.prompts/` at all occurrences (the audit-file callout and the Analyzer render+spawn block). <!-- completed: 2026-07-05T02:45 -->
 
 ### Step 4: Rename `prompts/` → `.prompts/` across the `cafleet-research` skill
 
