@@ -1,6 +1,6 @@
 # Create Figure
 
-Generate matplotlib charts. Scripts, outputs, and data go in separate subdirectories under `figures/`.
+Generate matplotlib charts. Scripts and data go under the hidden `.figures/` directory; rendered outputs stay visible under `figures/output`.
 The skill writes a self-contained Python script that imports matplotlib. The run command is host-project-specific — refer to your project's `.claude/rules/` for the canonical Python invocation. Any environment that provides matplotlib will run the script.
 
 **Before writing any script, read the Chart Type Selection and Color Rules sections.** All charts in a deck share the same `C_BAR` / `C_BAR_SEC` palette regardless of data topic.
@@ -9,28 +9,28 @@ The skill writes a self-contained Python script that imports matplotlib. The run
 
 ### 0. Resolve directories
 
-**CRITICAL — placeholder convention.** `${FIGURE_BASE}`, `${BASE}`, `${SRC_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` are **template placeholders, NOT shell environment variables** — resolve each to a concrete absolute path in your head and write that literal path into the script via the Write tool. Do NOT use `export FIGURE_BASE=...` or any shell variable assignment (Bash calls in Claude Code are ephemeral, so values do not persist between calls).
+**CRITICAL — placeholder convention.** `${FIGURE_BASE}`, `${BASE}`, `${CODE_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` are **template placeholders, NOT shell environment variables** — resolve each to a concrete absolute path in your head and write that literal path into the script via the Write tool. Do NOT use `export FIGURE_BASE=...` or any shell variable assignment (Bash calls in Claude Code are ephemeral, so values do not persist between calls).
 
 **Resolve `${BASE}` in this order:**
 
 1. **Calling-context override**: If a parent skill's spawn prompt told you the figure base directory (e.g., the presentation workflow passes its research folder as the figure base), use that path literally as `${BASE}`. Skip base-dir resolution.
-2. **Otherwise**: Read the `cafleet` skill's `reference/base-dir.md` and follow its procedure (no path argument; CWD-based inference applies). Use the resolved `${BASE}` verbatim — figures/scripts/data land under `${BASE}/figures/{src,output,data}` whatever `${BASE}` resolved to (repo root, `/tmp/claude-code`, etc.).
+2. **Otherwise**: Read the `cafleet` skill's `reference/base-dir.md` and follow its procedure (no path argument; CWD-based inference applies). Use the resolved `${BASE}` verbatim — scripts and data land under `${BASE}/.figures/{code,data}` while rendered charts land under `${BASE}/figures/output`, whatever `${BASE}` resolved to (repo root, `/tmp/claude-code`, etc.).
 
 **Derive the subdirectories** (each is a literal path string you will embed in the script):
 
-- `${SRC_DIR} = ${BASE}/figures/src`
+- `${CODE_DIR} = ${BASE}/.figures/code`
 - `${OUTPUT_DIR} = ${BASE}/figures/output`
-- `${DATA_DIR} = ${BASE}/figures/data`
+- `${DATA_DIR} = ${BASE}/.figures/data`
 
 If the directories do not exist yet, the Write tool auto-creates parent directories when you write the script file — do NOT call `mkdir`.
 
-All subsequent steps use `${SRC_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` as literal resolved paths. Figure artifacts always live under `${BASE}/figures/`; never directly at `${BASE}` and never at `/tmp` unless `${BASE}` itself is `/tmp/claude-code`.
+All subsequent steps use `${CODE_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` as literal resolved paths. Rendered charts live under the visible `${BASE}/figures/output`, while scripts and data live under the hidden `${BASE}/.figures/{code,data}`; never directly at `${BASE}` and never at `/tmp` unless `${BASE}` itself is `/tmp/claude-code`.
 
 **Font:** No setup needed. The theme font `Noto Sans` is available as a system font. Scripts set `plt.rcParams['font.family'] = 'Noto Sans'` (see template below).
 
 ### 1. Create the script
 
-Use the Write tool to create a `.py` file in `${SRC_DIR}`.
+Use the Write tool to create a `.py` file in `${CODE_DIR}`.
 
 The script must follow this pattern. **Replace `${OUTPUT_DIR}` and `${DATA_DIR}` below with the literal concrete paths you resolved in Step 0** — the Python source you write must contain real path strings, not `${...}` syntax:
 
@@ -72,7 +72,7 @@ Key points:
 Run the script with the Python invocation documented in your host project's `.claude/rules/` (typical patterns: `uv run`, `python`, or a `mise` task wrapper). This skill is invocation-agnostic — it only requires that the chosen environment provide matplotlib:
 
 ```
-<project-python-runner> ${SRC_DIR}/script_name.py
+<project-python-runner> ${CODE_DIR}/script_name.py
 ```
 
 ### 3. Verify the result

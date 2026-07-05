@@ -1,7 +1,7 @@
 # Hide coding-agent-only scratch/audit folders behind a dot-prefix
 
 **Status**: Approved
-**Progress**: 9/16 tasks complete
+**Progress**: 11/16 tasks complete
 **Last Updated**: 2026-07-05
 
 ## Overview
@@ -99,7 +99,7 @@ The visualization placeholder `SRC_DIR` is renamed to `CODE_DIR` (resolving to `
 
 ### Step 5: Split `figures/` in `visualization.md` (hidden `.figures/code` + `.figures/data`, visible `figures/output`)
 
-- [ ] `skills/cafleet-research/reference/visualization.md` — apply the figures split:
+- [x] `skills/cafleet-research/reference/visualization.md` — apply the figures split:
   - Intro sentence and Step-0 prose: scripts and data go under `.figures/` (hidden); rendered outputs stay under `figures/output` (visible).
   - **Compound brace-list token (Step-0, ~line 17):** the single token `${BASE}/figures/{src,output,data}` straddles the visible/hidden boundary and must NOT be dot-prefixed as a whole. Split it across both destinations: `src` → hidden `.figures/code`, `data` → hidden `.figures/data`, `output` → visible `figures/output`. Rewrite the prose so it reads as, e.g., "scripts and data land under `${BASE}/.figures/{code,data}` while rendered charts land under `${BASE}/figures/output`".
   - `${SRC_DIR} = ${BASE}/figures/src` → `${CODE_DIR} = ${BASE}/.figures/code` (rename the placeholder to `CODE_DIR` and update every downstream use of `${SRC_DIR}`).
@@ -107,8 +107,8 @@ The visualization placeholder `SRC_DIR` is renamed to `CODE_DIR` (resolving to `
   - `${OUTPUT_DIR} = ${BASE}/figures/output` — unchanged.
   - Step-1 "Create the script" — write the `.py` into `${CODE_DIR}`.
   - The example comment path (`/tmp/claude-code/researches/foo/figures/output`) — unchanged (it is an `output` path).
-  - The "Figure artifacts always live under `${BASE}/figures/`" invariant sentence — reword to reflect the visible-`figures/output` / hidden-`.figures/{code,data}` split. <!-- completed: -->
-- [ ] Verify `skills/cafleet-research/presentation/roles/presentation.md` line embedding `./figures/output/filename.png` is left unchanged, and its `blank for tables/figures/diagrams` content-category hint is NOT touched. <!-- completed: -->
+  - The "Figure artifacts always live under `${BASE}/figures/`" invariant sentence — reword to reflect the visible-`figures/output` / hidden-`.figures/{code,data}` split. <!-- completed: 2026-07-05T02:48 -->
+- [x] Verify `skills/cafleet-research/presentation/roles/presentation.md` line embedding `./figures/output/filename.png` is left unchanged, and its `blank for tables/figures/diagrams` content-category hint is NOT touched. <!-- completed: 2026-07-05T02:48 -->
 
 ### Step 6: Rename `screenshots/` → `.screenshots/` across the presentation workflow
 
