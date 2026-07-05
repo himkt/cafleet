@@ -1,7 +1,7 @@
 # Hide coding-agent-only scratch/audit folders behind a dot-prefix
 
 **Status**: Approved
-**Progress**: 7/16 tasks complete
+**Progress**: 9/16 tasks complete
 **Last Updated**: 2026-07-05
 
 ## Overview
@@ -94,8 +94,8 @@ The visualization placeholder `SRC_DIR` is renamed to `CODE_DIR` (resolving to `
 
 ### Step 4: Rename `prompts/` → `.prompts/` across the `cafleet-research` skill
 
-- [ ] `skills/cafleet-research/report/report.md` — rename `prompts/` → `.prompts/` at all occurrences (the Step-0 resolution note, the task-scoped `<topic-folder>/prompts/` prose, the two-step audit-file callout, and the Manager/Scout/Researcher render+spawn blocks). <!-- completed: -->
-- [ ] `skills/cafleet-research/presentation/presentation.md` — rename `prompts/` → `.prompts/` at all `prompts/` occurrences (the task-scoped audit-path note, the two-step audit-file callout, and the Presentation/Transcript/VR-batch render+spawn blocks). <!-- completed: -->
+- [x] `skills/cafleet-research/report/report.md` — rename `prompts/` → `.prompts/` at all occurrences (the Step-0 resolution note, the task-scoped `<topic-folder>/prompts/` prose, the two-step audit-file callout, and the Manager/Scout/Researcher render+spawn blocks). <!-- completed: 2026-07-05T02:46 -->
+- [x] `skills/cafleet-research/presentation/presentation.md` — rename `prompts/` → `.prompts/` at all `prompts/` occurrences (the task-scoped audit-path note, the two-step audit-file callout, and the Presentation/Transcript/VR-batch render+spawn blocks). <!-- completed: 2026-07-05T02:46 -->
 
 ### Step 5: Split `figures/` in `visualization.md` (hidden `.figures/code` + `.figures/data`, visible `figures/output`)
 
