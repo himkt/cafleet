@@ -11,16 +11,16 @@ Register a new member agent and spawn a coding-agent pane in the Director's own 
 ```bash
 cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Claude-B --description "Reviewer for PR #42" \
-  --text-file /abs/path/to/<BASE>/prompts/claude-b-20260514T145000Z.md
+  --text-file /abs/path/to/<BASE>/.prompts/claude-b-20260514T145000Z.md
 
 cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name Codex-A --description "Reviewer for PR #42" --coding-agent codex \
-  --text-file /abs/path/to/<BASE>/prompts/codex-a-20260514T145000Z.md
+  --text-file /abs/path/to/<BASE>/.prompts/codex-a-20260514T145000Z.md
 
 cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
   --name monitor --description "Monitoring member: owns the heartbeat" \
   --role monitor --model {monitor_model} \
-  --text-file /abs/path/to/<BASE>/prompts/monitor-20260514T145000Z.md
+  --text-file /abs/path/to/<BASE>/.prompts/monitor-20260514T145000Z.md
 ```
 
 | Flag | Required | Notes |
@@ -155,12 +155,12 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 - All execute roles: `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` and `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`
 - Drafter (normal mode): `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.` and `Do NOT create any design document file until you have received answers.`; (resume mode) `Do NOT ask clarifying questions — the COMMENTs contain the needed information.`
 
-**Member Create — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved per [`reference/base-dir.md`](base-dir.md)) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--text-file` write at `<BASE>/prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
+**Member Create — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved per [`reference/base-dir.md`](base-dir.md)) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--text-file` write at `<BASE>/.prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
 
-- `<role>` is the lowercased `--name`; `<UTC-compact>` is `YYYYMMDDTHHMMSSZ`. Create `<BASE>/prompts/` on first write; on a same-second collision append `_2`, `_3`, … (never overwrite).
+- `<role>` is the lowercased `--name`; `<UTC-compact>` is `YYYYMMDDTHHMMSSZ`. Create `<BASE>/.prompts/` on first write; on a same-second collision append `_2`, `_3`, … (never overwrite).
 - The pre-spawn file IS the audit artifact — there is no post-spawn re-render. The `--text-file` path is the single source of truth for what was spawned, in perpetuity. It carries the four `{...}` identity placeholders **pre-substitution** — that is expected; the CLI renders them at spawn.
 
-**`${BASE} == <unset>` fallback**: when startup-time `${BASE}` resolution returned the `<unset>` sentinel, follow the guarded-skip protocol in [`reference/base-dir.md`](base-dir.md) § *No-bypass write protocol* — skip the `<BASE>/prompts/<role>-<ts>.md` write, fall back to the inline `--text` form (keep it under ~2 KB, path-by-reference), and emit the anchorless status `audit-disabled no BASE in spawn prompt` once per spawn cycle. The spawn still proceeds.
+**`${BASE} == <unset>` fallback**: when startup-time `${BASE}` resolution returned the `<unset>` sentinel, follow the guarded-skip protocol in [`reference/base-dir.md`](base-dir.md) § *No-bypass write protocol* — skip the `<BASE>/.prompts/<role>-<ts>.md` write, fall back to the inline `--text` form (keep it under ~2 KB, path-by-reference), and emit the anchorless status `audit-disabled no BASE in spawn prompt` once per spawn cycle. The spawn still proceeds.
 
 **Backtick caveat (harness-dependent)**: some environments (including this project) run a Bash-validator hook that rejects any backtick in a `Bash` invocation. When in play, strip backticks from spawn-prompt bodies (plain text instead of code spans); path-by-reference keeps the body short enough that this is easy.
 

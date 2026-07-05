@@ -1,7 +1,7 @@
 # Hide coding-agent-only scratch/audit folders behind a dot-prefix
 
 **Status**: Approved
-**Progress**: 2/16 tasks complete
+**Progress**: 4/16 tasks complete
 **Last Updated**: 2026-07-05
 
 ## Overview
@@ -83,8 +83,8 @@ The visualization placeholder `SRC_DIR` is renamed to `CODE_DIR` (resolving to `
 
 ### Step 2: Rename `prompts/` → `.prompts/` across the `cafleet` skill
 
-- [ ] `skills/cafleet/reference/director.md` — rename `prompts/` → `.prompts/` in the three `--text-file /abs/path/to/<BASE>/prompts/...` examples and in § *Member Create — Scratch and audit files* (the `<BASE>/prompts/<role>-<UTC-compact>.md` canonical-path text, the "Create `<BASE>/prompts/` on first write" instruction, and the `${BASE} == <unset>` fallback path). <!-- completed: -->
-- [ ] `skills/cafleet/reference/supervision.md` — rename `prompts/` → `.prompts/` in the two `${BASE}/prompts/<role>-<UTC-compact>.md` references (the Spawn-the-member step and the Spawn-member table row). <!-- completed: -->
+- [x] `skills/cafleet/reference/director.md` — rename `prompts/` → `.prompts/` in the three `--text-file /abs/path/to/<BASE>/prompts/...` examples and in § *Member Create — Scratch and audit files* (the `<BASE>/prompts/<role>-<UTC-compact>.md` canonical-path text, the "Create `<BASE>/prompts/` on first write" instruction, and the `${BASE} == <unset>` fallback path). <!-- completed: 2026-07-05T02:43 -->
+- [x] `skills/cafleet/reference/supervision.md` — rename `prompts/` → `.prompts/` in the two `${BASE}/prompts/<role>-<UTC-compact>.md` references (the Spawn-the-member step and the Spawn-member table row). <!-- completed: 2026-07-05T02:43 -->
 
 ### Step 3: Rename `prompts/` → `.prompts/` across the `cafleet-design-doc` workflows
 
