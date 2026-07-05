@@ -1,6 +1,6 @@
 # Hide coding-agent-only scratch/audit folders behind a dot-prefix
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 16/16 tasks complete
 **Last Updated**: 2026-07-05
 
@@ -128,3 +128,4 @@ The visualization placeholder `SRC_DIR` is renamed to `CODE_DIR` (resolving to `
 | Date | Changes |
 |------|---------|
 | 2026-07-05 | Initial draft |
+| 2026-07-05 | Implemented all 7 steps (16 tasks); fresh Reviewer approved; PR #167 opened. Status → Complete. |
