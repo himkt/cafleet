@@ -1,7 +1,7 @@
 # Herdr Multiplexer Backend
 
 **Status**: Approved
-**Progress**: 11/31 tasks complete
+**Progress**: 13/31 tasks complete
 **Last Updated**: 2026-07-06
 
 ## Overview
@@ -203,8 +203,10 @@ class AgentStateAware(Protocol):
 
 ### Step 3: Protocol generalization
 
-- [ ] Change `Multiplexer.split_window` signature to `split_window(*, reference: MultiplexerContext, env, command) -> str` in `base.py`; update `TmuxMultiplexer.split_window` to use `reference.window_id` and update its `cli/member.py` call site to pass the Director's context. <!-- completed: -->
-- [ ] Add the `AgentStateAware` `@runtime_checkable` Protocol to `base.py`. <!-- completed: -->
+- [x] Change `Multiplexer.split_window` signature to `split_window(*, reference: MultiplexerContext, env, command) -> str` in `base.py`; update `TmuxMultiplexer.split_window` to use `reference.window_id` and update its `cli/member.py` call site to pass the Director's context. <!-- completed: 2026-07-06T10:26 -->
+- [x] Add the `AgentStateAware` `@runtime_checkable` Protocol to `base.py`. <!-- completed: 2026-07-06T10:26 -->
+
+COMMENT(programmer): The `split_window(reference=…)` signature change breaks `tests/multiplexer/test_tmux.py::test_split_window__argv_construction` (calls `_tmux.split_window(target_window_id="@3"/"@5", …)`). Impl is correct per spec; the test needs the Tester to switch to `reference=MultiplexerContext(...)` in Step 7. CLI tests are unaffected (their `fake_split_window(self, **kwargs)` monkeypatch absorbs the kwarg rename).
 
 ### Step 4: HerdrMultiplexer
 

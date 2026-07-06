@@ -70,19 +70,23 @@ class Multiplexer(Protocol):
     def split_window(
         self,
         *,
-        target_window_id: str,
+        reference: MultiplexerContext,
         env: dict[str, str],
         command: list[str],
     ) -> str:
-        """Spawn a new pane inside ``target_window_id`` running ``command``.
+        """Spawn a new pane from ``reference`` running ``command``.
+
+        Takes the full reference context because backends split different
+        primitives: tmux splits ``reference.window_id`` (a window); herdr splits
+        ``reference.pane_id`` (a pane).
 
         Args:
-            target_window_id: Multiplexer window id to split.
+            reference: Resolved pane identity to split from.
             env: Extra environment variables exported into the new pane.
             command: argv list executed in the new pane.
 
         Returns:
-            The new pane's id (e.g. tmux ``%N``).
+            The new pane's id (e.g. tmux ``%N``, herdr ``w1:p1``).
         """
         ...
 

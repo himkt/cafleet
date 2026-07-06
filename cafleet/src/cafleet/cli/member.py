@@ -263,7 +263,7 @@ def member_create(
         db_url = os.environ.get("CAFLEET_DATABASE_URL")
         fwd_env = {"CAFLEET_DATABASE_URL": db_url} if db_url else {}
         pane_id = MULTIPLEXERS["tmux"].split_window(
-            target_window_id=director_ctx.window_id,
+            reference=director_ctx,
             env=fwd_env,
             command=spawn_command,
         )
