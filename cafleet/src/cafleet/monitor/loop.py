@@ -94,8 +94,9 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
         if should_ping(target, now):
             due.append(target)
 
+    pending_status: dict[int, str | None] = {}
     if isinstance(mux, AgentStateAware):
-        _flag_native_status_due(mux, targets, due)
+        pending_status = _flag_native_status_due(mux, targets, due)
 
     if due and watcher is not None and watcher["pane_id"] in live_panes:
         # The loop's only keystroke: a single best-effort wake nudge into the
@@ -113,8 +114,10 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
             # just-flagged agent is not due again next tick (no wake-storm while
             # the watcher works). A failed best-effort keystroke leaves the due
             # agents flagged, so the next tick retries instead of silently
-            # skipping a check for a full interval.
+            # skipping a check for a full interval. The native last-seen statuses
+            # commit on the same gate, so a wake failure re-flags the episode.
             broker.record_pings([t["agent_id"] for t in due], now.isoformat())
+            _last_agent_status.update(pending_status)
             # Visible heartbeat: one line per due agent on the launching task's stdout.
             # Native-due agents carry a ``[status:<state>]`` suffix; interval-due
             # agents keep the bare line unchanged.
@@ -130,26 +133,35 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
 
 def _flag_native_status_due(
     mux: AgentStateAware, targets: list[dict], due: list[dict]
-) -> None:
+) -> dict[int, str | None]:
     """Union native ``blocked``/``done`` transitions into the interval-due set.
 
-    Point-reads each watched live agent's native status and flags any whose
-    status just transitioned into an attention state, tagging it with a
+    Point-reads each **enabled** watched live agent's native status and flags any
+    whose status just transitioned into an attention state, tagging it with a
     ``status:<state>`` wake reason. Herdr-only: the caller guards on
     ``isinstance(mux, AgentStateAware)``.
+
+    Returns the read statuses keyed by agent_id; the caller commits them to
+    ``_last_agent_status`` **only after a successful wake**, so a wake failure
+    leaves the episode un-consumed and the next tick re-flags it (mirrors the
+    interval branch's ``record_pings`` gating).
     """
     due_ids = {t["agent_id"] for t in due}
+    read: dict[int, str | None] = {}
     for target in targets:
+        if not target["enabled"]:
+            continue
         if target["pane_id"] is None or not target["pane_alive"]:
             continue
         agent_id = target["agent_id"]
         status = mux.agent_status(target_pane_id=target["pane_id"])
+        read[agent_id] = status
         prev = _last_agent_status.get(agent_id)
-        _last_agent_status[agent_id] = status
         if status in _ATTENTION_STATES and status != prev and agent_id not in due_ids:
             target["wake_reason"] = f"status:{status}"
             due.append(target)
             due_ids.add(agent_id)
+    return read
 
 
 _stop_requested = False

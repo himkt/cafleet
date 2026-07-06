@@ -636,6 +636,29 @@ def test_tmux_error_on_send_exit__send_exit_failure_now_exits_one_with_recovery_
     assert deregister_recorder == []
 
 
+def test_tmux_error_on_wait_for_pane_gone__exits_one_with_backend_name(
+    runner, fleet_id, monkeypatch, deregister_recorder
+):
+    """A MultiplexerError while waiting for the pane to close is a hard exit-1,
+    surfaced with the resolved backend name (``{mux.name}`` = tmux in the test
+    env) and the target pane id. The member is not deregistered."""
+    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(TmuxMultiplexer, "send_exit", lambda self, **_kw: None)
+
+    def fake_wait(self, **_kw):
+        raise TmuxError("list-panes failed: server exited unexpectedly")
+
+    monkeypatch.setattr(TmuxMultiplexer, "wait_for_pane_gone", fake_wait, raising=False)
+    result = _invoke(runner, fleet_id)
+
+    assert result.exit_code == 1, (result.output, getattr(result, "stderr", ""))
+    combined = (result.output or "") + (getattr(result, "stderr", "") or "")
+    assert "tmux call failed while waiting" in combined
+    assert f"pane {PANE_ID}" in combined
+
+    assert deregister_recorder == []
+
+
 @pytest.mark.parametrize("extra_args", [[], ["--force"]])
 def test_root_director__rejected_before_any_tmux_pane_mutation(
     runner,

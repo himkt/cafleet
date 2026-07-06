@@ -352,8 +352,8 @@ def member_delete(ctx, member_id, force):
         except MultiplexerError as exc:
             raise click.ClickException(
                 f"kill_pane failed for pane {pane_id}: {exc}. "
-                f"The tmux server may be unreachable. Verify with 'cafleet doctor', "
-                f"then re-run the command."
+                f"The {mux.name} server may be unreachable. Verify with "
+                f"'cafleet doctor', then re-run the command."
             ) from exc
         _deregister_or_die(member_id)
         pane_status = f"{pane_id} (killed)"
@@ -367,9 +367,9 @@ def member_delete(ctx, member_id, force):
     except MultiplexerError as exc:
         raise click.ClickException(
             f"send_exit failed for pane {pane_id}: {exc}. "
-            f"The tmux server may be unreachable. Verify with 'cafleet doctor', "
-            f"then re-run 'cafleet member delete', or use '--force' to kill the "
-            f"pane directly."
+            f"The {mux.name} server may be unreachable. Verify with "
+            f"'cafleet doctor', then re-run 'cafleet member delete', or use "
+            f"'--force' to kill the pane directly."
         ) from exc
 
     try:
@@ -378,7 +378,7 @@ def member_delete(ctx, member_id, force):
         )
     except MultiplexerError as exc:
         raise click.ClickException(
-            f"tmux call failed while waiting for pane {pane_id} to close: {exc}"
+            f"{mux.name} call failed while waiting for pane {pane_id} to close: {exc}"
         ) from exc
 
     if gone:

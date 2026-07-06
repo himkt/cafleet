@@ -1128,25 +1128,25 @@ operation and succeeds outside tmux.
    pending).
 3. **No placement row** — registry soft-delete via the broker (a failure →
    application error `deregister failed: <error>`). Success: header `Member
-   deleted.`, pane status `(no placement)`, exit 0. No tmux requirement.
+   deleted.`, pane status `(no placement)`, exit 0. No multiplexer requirement.
 4. **Pending placement** (no pane yet) — registry soft-delete via
    the broker (a failure → application error `deregister failed: <error>`).
    Success: header `Member deleted.`, pane status `(pending — no pane)`, exit 0.
-   No tmux requirement.
-5. **`--force`** (has pane) — ensure tmux available, then kill the pane
-   immediately, skipping the graceful
-   wait (tolerating a missing pane); a tmux error → application error `kill_pane
-   failed for pane <pane_id>: <error>. The tmux server may be unreachable. Verify
+   No multiplexer requirement.
+5. **`--force`** (has pane) — ensure the resolved multiplexer available, then kill
+   the pane immediately, skipping the graceful
+   wait (tolerating a missing pane); a multiplexer error → application error `kill_pane
+   failed for pane <pane_id>: <error>. The <backend> server may be unreachable. Verify
    with 'cafleet doctor', then re-run the command.`. Then deregister; header
    `Member deleted (--force).`, pane status `<pane_id> (killed)`, exit 0.
-6. **Default path** (has pane) — ensure tmux available, then send the backend
-   exit keystroke (tolerating a
-   missing pane; a tmux error → application error `send_exit failed for pane
-   <pane_id>: <error>. The tmux server may be unreachable. Verify with 'cafleet
+6. **Default path** (has pane) — ensure the resolved multiplexer available, then
+   send the backend exit keystroke (tolerating a
+   missing pane; a multiplexer error → application error `send_exit failed for pane
+   <pane_id>: <error>. The <backend> server may be unreachable. Verify with 'cafleet
    doctor', then re-run 'cafleet member delete', or use '--force' to kill the
    pane directly.`), then wait up to 15 s for the pane to disappear, polling
-   every 0.5 s (a tmux error during the wait → application error `tmux call failed
-   while waiting for pane <pane_id> to close: <error>`).
+   every 0.5 s (a multiplexer error during the wait → application error `<backend> call failed
+   while waiting for pane <pane_id> to close: <error>`). `<backend>` is the resolved `mux.name` (`tmux`/`herdr`).
    - **Pane gone** — deregister; header `Member deleted.`, pane
      status `<pane_id> (closed)`, exit 0.
    - **Timeout** — capture the pane's last 80 lines (a capture error prints a
@@ -1880,16 +1880,40 @@ Each method's herdr realization:
 - **`name`** — the registry key literal `"herdr"`.
 - **`ensure_available()`** — fail-fast (`HerdrError`): the `herdr` binary is
   missing from `PATH`, or `HERDR_ENV` is unset.
-- **`context_discovery() -> MultiplexerContext`** — `HERDR_ENV` present +
-  `herdr pane current` → current pane id; `herdr pane get <id>` → owning
-  tab/session. Returns the context (`session`, `window_id`, `pane_id`).
-- **`split_window(*, reference, env, command) -> str`** — `herdr pane split
-  <reference.pane_id> --direction down --no-focus [--cwd P] [--env K=V …]` → new
-  pane id, then `herdr pane run <new_id> "<shlex.join(command)>"`. The argv
-  `command` is rendered to a single properly-quoted string with `shlex.join`
-  before the `pane run` because `pane run` submits one text line into the pane's
-  shell (a genuine semantic difference from the tmux exec-argv path — otherwise
-  an argument containing spaces would be re-split).
+- **`context_discovery() -> MultiplexerContext`** — `HERDR_ENV` present + a
+  **single** `herdr pane current` call whose `result.pane` object already carries
+  `workspace_id` / `tab_id` / `pane_id` (no follow-up `pane get`). Returns the
+  context (`session ← workspace_id`, `window_id ← tab_id`, `pane_id`).
+
+- **`split_window(*, reference, env, command) -> str`** — layout-aware (emulates
+  tmux `select-layout main-vertical`): reads `herdr pane list` and computes the
+  right column as the panes in the Director's tab
+  (`tab_id == reference.window_id`) minus the Director's own `pane_id`. If empty →
+  `herdr pane split <reference.pane_id> --direction right --no-focus [--env K=V …]`
+  (first member); else `herdr pane split <max(column)> --direction down
+  --no-focus [--env K=V …]` followed by the column-equalization step below.
+  `--cwd` is never passed. Then `herdr pane run <new_id> "<shlex.join(command)>"`.
+  The argv `command` is rendered to a single properly-quoted string with
+  `shlex.join` before the `pane run` because `pane run` submits one text line into
+  the pane's shell (a genuine semantic difference from the tmux exec-argv path —
+  otherwise an argument containing spaces would be re-split).
+- **`_equalize_focused_tab_column()`** — herdr has no single reflow command, so
+  after appending a member `split_window` rebalances the right column to equal
+  heights arithmetically. It reads the focused tab id (`herdr pane current` →
+  `result.pane.tab_id`) and the tab geometry (`herdr pane layout` →
+  `result.layout` with `tab_id`, `panes[].rect{x,y,width,height}`, and
+  `splits[].{direction,rect,ratio}`); if the layout's `tab_id` no longer matches
+  (focus moved), it returns. The right column is every pane whose `rect.x` is not
+  the minimum x (the Director column); its `down` splits form a right-leaning
+  chain where split *k* (top→bottom) separates member *k* from the members below.
+  Equal heights ⇔ split *k* has ratio `1/(N-k)` (top → `1/N`, …, bottom pair →
+  `1/2`). Because `herdr pane resize --amount` is a signed delta on a split's
+  ratio, each split is driven to target by one resize: `delta = 1/(N-k) - ratio`
+  (rounded to 4 dp; skipped if `|delta| < 1e-3`); `delta > 0` → `herdr pane resize
+  --pane <member k> --direction down --amount <delta>`, else `--pane <member k+1>
+  --direction up --amount <|delta|>`. Best-effort: any `HerdrError` is swallowed
+  so a resize failure never fails a spawn. tmux is unaffected (still
+  `select-layout main-vertical`).
 - **`kill_pane(*, target_pane_id, ignore_missing=False)`** — `herdr pane close
   <pane_id>` through the `not_found`-tolerant runner.
 - **`list_pane_ids() -> set`** — `herdr pane list` → the set of pane ids.
@@ -2007,7 +2031,7 @@ One scan pass, steps in order:
    members; never the monitoring member): set `target.pane_alive = (target.pane_id
    ∈ live_panes)`, then if `should_ping(target, now)` add it to the interval-due
    list. **On an `AgentStateAware` backend (herdr only):** additionally point-read
-   each watched live agent's `agent_status`, and union into the due set any agent
+   each **enabled** watched live agent's `agent_status`, and union into the due set any agent
    whose status **transitioned into** an attention state (`blocked`/`done`) since
    the loop's last-seen status for it (see *Native agent-state due trigger*
    below); each such agent carries a `status:<state>` wake-reason label. On a
@@ -2044,15 +2068,19 @@ process owns an **in-memory** `dict[agent_id, last_status]` that persists across
 ticks (no DB column). Each tick, when the resolved backend passes
 `isinstance(mux, AgentStateAware)`:
 
-1. Point-read `agent_status(target_pane_id=…)` for each watched agent whose pane
-   is live.
+1. Point-read `agent_status(target_pane_id=…)` for each **enabled** watched agent
+   whose pane is live (a monitor-disabled agent is skipped, matching `should_ping`).
 2. A **transition into** an attention state (`blocked` or `done`) — i.e. the new
    status is an attention state and differs from the loop's last-seen status for
    that agent — flags the agent due. Comparing against the last-seen status means
    a single `blocked`/`done` episode wakes the watcher **only once**.
-3. Update the `last_status` map with each read status.
-4. Union the native-due agents with the interval-due set; each native one is
+3. Union the native-due agents with the interval-due set; each native one is
    tagged with a `status:<state>` wake-reason label.
+4. Return the read statuses to the caller, which commits them to the
+   `last_status` map **only after a successful wake** (`woke == True`, alongside
+   `record_pings`). On a failed/no-wake tick the statuses are **not** committed,
+   so the `blocked`/`done` episode stays un-consumed and re-flags next tick (no
+   silent skip) — mirroring the interval branch's `record_pings` gating.
 
 On the tmux backend the `isinstance` guard is false, so this branch never runs
 and the interval-only behavior is byte-for-byte unchanged. `should_ping` and the
@@ -2526,8 +2554,10 @@ diagnostic block (§6.3).
   exit 1, §6.3); it has **no environment default** and **must not** default to
   an arbitrary fleet.
 - `client_command` fleet-gate runs **before** the handler body.
-- `doctor` reads the `TMUX_PANE` environment variable by direct access — an
-  error if unset is intentional.
+- `doctor` reads the resolved backend's presence env var (`TMUX` / `HERDR_ENV`)
+  via `os.environ.get(presence_var, "")`; an empty value is legitimate under an
+  explicit `CAFLEET_MULTIPLEXER` override, so the fail-fast lives upstream in
+  `resolve_multiplexer()` + `ensure_available()`, not in this read.
 - `is_administrator` returns false on malformed JSON (a deliberate non-match).
 - `register_agent` monitoring-member-without-placement raises.
 - The opencode preset refuses to overwrite a non-regular-file target.

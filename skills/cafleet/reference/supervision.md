@@ -184,7 +184,7 @@ Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol (fir
 
 | Action | Primitive | Notes |
 |---|---|---|
-| Verify Director pane env | `cafleet doctor` | Pre-spawn precondition; gating. Aborts the spawn protocol when `TMUX` / `TMUX_PANE` are missing. Replaces raw `tmux display-message` and `TMUX` env-var expansion. |
+| Verify Director pane env | `cafleet doctor` | Pre-spawn precondition; gating. Aborts the spawn protocol when no supported multiplexer (tmux or herdr) resolves. Replaces raw `tmux display-message` and `TMUX` env-var expansion. |
 | Start the supervision tick | Spawn the monitoring member first: `cafleet member create --fleet-id <s> --agent-id <director> --name monitor --description <…> --role monitor --model {monitor_model} --text-file <…>`; it runs `cafleet monitor start` in its own pane — see [`roles/monitor.md`](../roles/monitor.md) | Its `ready: monitor live` handshake gates the first ordinary `member create`. |
 | Spawn member | `cafleet member create --fleet-id <s> --agent-id <director> --name <n> --description <d> --text-file <abs path to ${BASE}/.prompts/<role>-<UTC-compact>.md>` | Pre-spawn file IS the audit artifact (see [`reference/director.md`](director.md) § *Member Create — Scratch and audit files*). Verify with `cafleet member list`. Inline `--text "<prompt>"` is still permitted for trivial one-line spawns. |
 | Message member | `cafleet message send --fleet-id <s> --agent-id <director> --to <member> --text "..."` | Broker keystrokes an inline preview into the member's pane |

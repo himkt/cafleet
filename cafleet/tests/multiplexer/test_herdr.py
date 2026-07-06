@@ -114,14 +114,13 @@ def test_context_discovery__missing_field_raises(herdr_run):
 
 # --- split_window (layout parity) ------------------------------------------
 #
-# split_window emulates tmux main-vertical without a herdr reflow command: it
-# reads `herdr pane list`, derives the Director's right column as every pane in
+# split_window emulates tmux main-vertical without a single herdr reflow command:
+# it reads `herdr pane list`, derives the Director's right column as every pane in
 # the Director's tab except the Director's own, and either starts the column
 # (first member → split the Director --direction right) or appends to it
-# (subsequent → split max(column) --direction down). herdr has no CLI to
-# equalize pane heights, so the split leaves them at herdr's assignment. The
-# max()-based stack order is validation-pending against a real herdr binary; the
-# argv shapes below pin the current implementation.
+# (subsequent → split max(column) --direction down, then equalizes the column via
+# _equalize_focused_tab_column). The max()-based stack order is validation-pending
+# against a real herdr binary; the argv shapes below pin the current implementation.
 
 _REFERENCE = MultiplexerContext(session="wG", window_id="wG:t1", pane_id="wG:p1")
 
@@ -187,10 +186,41 @@ def test_split_window__first_member_no_env_omits_env_flags(herdr_run):
     assert "--env" not in split_argv
 
 
-def test_split_window__subsequent_member_splits_max_of_column(herdr_run):
-    """A non-empty column → the member splits ``max(column)`` downward, then runs
-    the command; no equalization step exists. The column is listed [p3, p2] to
-    pin that the split targets ``max`` (p3), not the last-listed pane (p2)."""
+def _balanced_layout(tab_id: str, col_x: int) -> dict:
+    """A two-member right column already at equal heights (down split ratio 0.5),
+    so ``_equalize_focused_tab_column`` computes a zero delta and emits no resize.
+    The Director pane sits at ``x=0`` (the leftmost column, excluded)."""
+    return {
+        "layout": {
+            "tab_id": tab_id,
+            "panes": [
+                {
+                    "pane_id": "wG:p1",
+                    "rect": {"x": 0, "y": 1, "width": 50, "height": 80},
+                },
+                {
+                    "pane_id": "wG:p3",
+                    "rect": {"x": col_x, "y": 1, "width": 50, "height": 40},
+                },
+                {
+                    "pane_id": "wG:p4",
+                    "rect": {"x": col_x, "y": 41, "width": 50, "height": 40},
+                },
+            ],
+            "splits": [
+                {"direction": "right", "rect": {"x": 0, "y": 1}, "ratio": 0.5},
+                {"direction": "down", "rect": {"x": col_x, "y": 1}, "ratio": 0.5},
+            ],
+        }
+    }
+
+
+def test_split_window__subsequent_member_splits_max_then_equalizes(herdr_run):
+    """A non-empty column → the member splits ``max(column)`` downward, then
+    ``_equalize_focused_tab_column`` reads the focused tab (``pane current`` +
+    ``pane layout``) before the command runs. The column is listed [p3, p2] to
+    pin that the split targets ``max`` (p3), not the last-listed pane (p2); the
+    layout is already balanced (0.5), so no resize is emitted."""
     captured, set_returns = herdr_run
     set_returns(
         _envelope(
@@ -204,6 +234,8 @@ def test_split_window__subsequent_member_splits_max_of_column(herdr_run):
             }
         ),
         _envelope({"pane": {"pane_id": "wG:p4"}}),  # split(max=p3, down) → new pane
+        _envelope({"pane": {"tab_id": "wG:t1"}}),  # pane current → focused tab
+        _envelope(_balanced_layout("wG:t1", col_x=100)["layout"]),  # pane layout
     )
     new_pane = _herdr.split_window(
         reference=_REFERENCE, env={}, command=["claude", "second"]
@@ -213,6 +245,8 @@ def test_split_window__subsequent_member_splits_max_of_column(herdr_run):
         ["herdr", "pane", "list"],
         # max(["wG:p3", "wG:p2"]) == "wG:p3" — the deterministic column anchor.
         ["herdr", "pane", "split", "wG:p3", "--direction", "down", "--no-focus"],
+        ["herdr", "pane", "current"],
+        ["herdr", "pane", "layout"],
         ["herdr", "pane", "run", "wG:p4", "claude second"],
     ]
 
@@ -223,6 +257,100 @@ def test_split_window__pane_list_missing_field_raises(herdr_run):
     set_returns(_envelope({"panes": [{"tab_id": "wG:t1"}]}))
     with pytest.raises(HerdrError, match="missing"):
         _herdr.split_window(reference=_REFERENCE, env={}, command=["claude"])
+
+
+# --- _equalize_focused_tab_column (deterministic ratio math) ---------------
+#
+# The right column is a right-leaning chain of `down` splits; equal heights ⇔
+# split_k has ratio 1/(N-k). `pane resize --amount` is a signed delta on the
+# split ratio, so each split is driven to target by one arithmetic resize. The
+# layout fixture below is the real `herdr pane layout` shape captured from a live
+# 3-member column (heights 43/22/21, both splits at ratio 0.5).
+
+
+def _column_layout(splits_ratios: list[float]) -> str:
+    """A `pane layout` envelope for a right column of ``len(splits_ratios)+1``
+    members (x=195) beside a Director pane (x=26). Only the split ratios and the
+    per-pane x/y (used for ordering + column detection) drive the math."""
+    n = len(splits_ratios) + 1
+    panes = [
+        {"pane_id": "wT:p3", "rect": {"x": 26, "y": 1, "width": 169, "height": 86}}
+    ]
+    y = 1
+    for k in range(n):
+        panes.append(
+            {
+                "pane_id": f"wT:m{k}",
+                "rect": {"x": 195, "y": y, "width": 169, "height": 20},
+            }
+        )
+        y += 20
+    splits = [{"direction": "right", "rect": {"x": 26, "y": 1}, "ratio": 0.5}]
+    y = 1
+    for ratio in splits_ratios:
+        splits.append({"direction": "down", "rect": {"x": 195, "y": y}, "ratio": ratio})
+        y += 20
+    return _envelope({"layout": {"tab_id": "wT:t3", "panes": panes, "splits": splits}})
+
+
+def test_equalize__three_member_column_drives_top_split_to_one_third(herdr_run):
+    """Real captured state: a 3-member column with both splits at 0.5 (heights
+    43/22/21). Equal thirds ⇒ top split → 1/3, bottom pair split stays 1/2. Only
+    the top split moves: resize member1 up by 1/3-1/2 = 0.1667 (deterministic)."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _envelope({"pane": {"tab_id": "wT:t3"}}),  # pane current → focused tab
+        _column_layout([0.5, 0.5]),  # pane layout: two down splits at 0.5
+    )
+    _herdr._equalize_focused_tab_column()
+    assert captured == [
+        ["herdr", "pane", "current"],
+        ["herdr", "pane", "layout"],
+        # top split 0.5 → 1/3: negative delta grows the pane below (m1) upward.
+        [
+            "herdr",
+            "pane",
+            "resize",
+            "--pane",
+            "wT:m1",
+            "--direction",
+            "up",
+            "--amount",
+            "0.1667",
+        ],
+    ]
+
+
+def test_equalize__already_balanced_column_emits_no_resize(herdr_run):
+    """A 3-member column already at 1/3 and 1/2 is balanced — every delta rounds
+    below the 1e-3 threshold, so no resize is emitted."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _envelope({"pane": {"tab_id": "wT:t3"}}),
+        _column_layout([0.3333, 0.5]),
+    )
+    _herdr._equalize_focused_tab_column()
+    assert captured == [["herdr", "pane", "current"], ["herdr", "pane", "layout"]]
+
+
+def test_equalize__focus_moved_between_reads_skips(herdr_run):
+    """The layout's tab_id differs from the focused tab (focus moved between the
+    two reads) → no resize, to avoid rebalancing the wrong tab."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _envelope({"pane": {"tab_id": "wT:t3"}}),
+        _envelope({"layout": {"tab_id": "wT:t9", "panes": [], "splits": []}}),
+    )
+    _herdr._equalize_focused_tab_column()
+    assert captured == [["herdr", "pane", "current"], ["herdr", "pane", "layout"]]
+
+
+def test_equalize__best_effort_swallows_herdr_error(herdr_run):
+    """A resize failure (or any HerdrError) never propagates — equalization is
+    cosmetic and must not fail a spawn."""
+    _captured, set_returns = herdr_run
+    set_returns(HerdrError("herdr command failed: server unreachable"))
+    assert _herdr._equalize_focused_tab_column() is None
 
 
 # --- list_pane_ids ---------------------------------------------------------
@@ -532,6 +660,21 @@ def test_agent_status__missing_pane_raises(herdr_run):
     _captured, set_returns = herdr_run
     set_returns(_envelope({"not_pane": {}}))
     with pytest.raises(HerdrError, match="missing"):
+        _herdr.agent_status(target_pane_id="wG:p1")
+
+
+def test_agent_status__pane_not_found_returns_none(herdr_run):
+    """A pane closing between the tick's ``list_pane_ids`` and this read is a
+    teardown race, not an error: ``pane_not_found`` → None (no agent)."""
+    _captured, set_returns = herdr_run
+    set_returns(HerdrError("herdr command failed", code="pane_not_found"))
+    assert _herdr.agent_status(target_pane_id="wG:p1") is None
+
+
+def test_agent_status__other_error_propagates(herdr_run):
+    _captured, set_returns = herdr_run
+    set_returns(HerdrError("herdr command failed: server unreachable"))
+    with pytest.raises(HerdrError, match="server unreachable"):
         _herdr.agent_status(target_pane_id="wG:p1")
 
 

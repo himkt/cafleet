@@ -97,8 +97,10 @@ herdr natively tracks each agent's lifecycle state
 (`working`/`blocked`/`done`/`idle`/`unknown`) — a capability the tmux backend
 does not have (see [Multiplexer backends](multiplexer-backends.md)). When the
 resolved backend implements the optional `AgentStateAware` capability, each tick
-the loop point-reads the native status of every watched agent whose pane is
-alive, comparing it against an in-memory `dict[agent_id, last_status]` it owns.
+the loop point-reads the native status of every **enabled** watched agent whose
+pane is alive, comparing it against an in-memory `dict[agent_id, last_status]` it
+owns (a monitor-disabled agent is skipped on the native path too, matching the
+interval path).
 A **transition into** an attention state flags that agent due — and because the
 comparison is against the last-seen status, a single `blocked`/`done` episode
 wakes the watcher only once. Each natively-due agent is tagged with a

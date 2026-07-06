@@ -78,7 +78,7 @@ Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters ever
 
 ## Typical Workflow
 
-0. **Verify pane env** (Director): run `cafleet doctor` to confirm `TMUX` / `TMUX_PANE` are set — the canonical pane-identity probe, before `cafleet fleet create` and any `cafleet member create`.
+0. **Verify pane env** (Director): run `cafleet doctor` to confirm a supported multiplexer (tmux or herdr) is detected — the canonical pane-identity probe, before `cafleet fleet create` and any `cafleet member create`.
 
 1. **Create a fleet** (if none exists):
    ```bash

@@ -160,11 +160,12 @@ class HerdrMultiplexer:
         command: list[str],
     ) -> str:
         # Emulate tmux main-vertical (Director keeps the left column, members
-        # stack in a right column) — herdr has no reflow command. The right
-        # column is every pane in the Director's tab except the Director's own;
-        # the first member splits the Director pane rightward, later members
-        # split a deterministic column pane downward. Pane heights are whatever
-        # herdr assigns at split time — herdr has no CLI to equalize them.
+        # stack in a right column) — herdr has no single reflow command. The
+        # right column is every pane in the Director's tab except the Director's
+        # own; the first member splits the Director pane rightward, later members
+        # split a deterministic column pane downward. After appending a member,
+        # the column is rebalanced to equal heights (see
+        # _equalize_focused_tab_column) so the result matches tmux main-vertical.
         env_args = [arg for k, v in env.items() for arg in ("--env", f"{k}={v}")]
         result = _run_json(["herdr", "pane", "list"])
         try:
@@ -180,9 +181,81 @@ class HerdrMultiplexer:
             new_pane_id = self._split_pane(reference.pane_id, "right", env_args)
         else:
             new_pane_id = self._split_pane(max(column), "down", env_args)
+            self._equalize_focused_tab_column()
         # pane run feeds one shell line, so the argv is quoted to preserve boundaries.
         _run(["herdr", "pane", "run", new_pane_id, shlex.join(command)])
         return new_pane_id
+
+    def _equalize_focused_tab_column(self) -> None:
+        """Rebalance the members' right column on the focused tab to equal
+        heights — the tmux ``select-layout main-vertical`` reflow that herdr has
+        no single command for.
+
+        Best-effort: any :class:`HerdrError` is swallowed so a resize failure
+        never fails a spawn over cosmetics.
+        """
+        try:
+            self._resize_focused_tab_column()
+        except HerdrError:
+            return
+
+    def _resize_focused_tab_column(self) -> None:
+        # A right column of N stacked members is a right-leaning chain of `down`
+        # splits: split_k separates member_k from the {member_{k+1}…} subtree
+        # below it. Equal heights ⇔ split_k has ratio 1/(N-k) (top → 1/N, …,
+        # bottom pair → 1/2). `herdr pane resize --amount` is a signed delta on a
+        # split's ratio (1:1), so each split is driven to its target by a single
+        # resize whose amount is computed arithmetically — no inference.
+        current = _run_json(["herdr", "pane", "current"])
+        try:
+            tab_id = current["pane"]["tab_id"]
+        except KeyError as exc:
+            raise HerdrError(f"herdr pane current missing {exc} field") from exc
+        try:
+            layout = _run_json(["herdr", "pane", "layout"])["layout"]
+            if layout["tab_id"] != tab_id:
+                return  # focus moved between the two reads — leave the layout alone
+            panes = layout["panes"]
+            splits = layout["splits"]
+        except KeyError as exc:
+            raise HerdrError(f"herdr pane layout missing {exc} field") from exc
+        # The right column is every pane outside the leftmost (Director) column.
+        min_x = min(p["rect"]["x"] for p in panes)
+        column = sorted(
+            (p for p in panes if p["rect"]["x"] != min_x),
+            key=lambda p: p["rect"]["y"],
+        )
+        n = len(column)
+        if n < 2:
+            return
+        col_x = column[0]["rect"]["x"]
+        down_splits = sorted(
+            (s for s in splits if s["direction"] == "down" and s["rect"]["x"] == col_x),
+            key=lambda s: s["rect"]["y"],
+        )
+        if len(down_splits) != n - 1:
+            return  # not the expected right-leaning chain — leave it untouched
+        for i, split in enumerate(down_splits):
+            delta = round(1 / (n - i) - split["ratio"], 4)
+            if abs(delta) < 1e-3:
+                continue
+            if delta > 0:
+                pane_id, direction, amount = column[i]["pane_id"], "down", delta
+            else:
+                pane_id, direction, amount = column[i + 1]["pane_id"], "up", -delta
+            _run(
+                [
+                    "herdr",
+                    "pane",
+                    "resize",
+                    "--pane",
+                    pane_id,
+                    "--direction",
+                    direction,
+                    "--amount",
+                    str(amount),
+                ]
+            )
 
     def _split_pane(self, pane_id: str, direction: str, env_args: list[str]) -> str:
         result = _run_json(
@@ -317,7 +390,14 @@ class HerdrMultiplexer:
         )
 
     def agent_status(self, *, target_pane_id: str) -> str | None:
-        result = _run_json(["herdr", "pane", "get", target_pane_id])
+        # A pane closing between the tick's list_pane_ids and this read is a
+        # teardown race, not an error: treat pane_not_found as "no agent".
+        try:
+            result = _run_json(["herdr", "pane", "get", target_pane_id])
+        except HerdrError as exc:
+            if exc.code == _PANE_NOT_FOUND:
+                return None
+            raise
         try:
             pane = result["pane"]
         except KeyError as exc:
