@@ -5,7 +5,7 @@ import click
 from cafleet import broker, output
 from cafleet.cli._helpers import ensure_skills_current, fleet_id_option, full_flag
 from cafleet.coding_agent import CODING_AGENTS
-from cafleet.multiplexer import MULTIPLEXERS, TmuxError
+from cafleet.multiplexer import MultiplexerError, resolve_multiplexer
 
 _json_flag = click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 
@@ -40,19 +40,21 @@ def fleet_create(
     as_json: bool,
     full: bool,
 ) -> None:
-    """Create a new fleet (must be run inside a tmux session)."""
+    """Create a new fleet (must be run inside a tmux or herdr session)."""
     try:
-        MULTIPLEXERS["tmux"].ensure_available()
-        director_ctx = MULTIPLEXERS["tmux"].context_discovery()
-    except TmuxError as exc:
+        mux = resolve_multiplexer()
+        mux.ensure_available()
+        director_ctx = mux.context_discovery()
+    except MultiplexerError as exc:
         raise click.ClickException(
-            "cafleet fleet create must be run inside a tmux session"
+            "cafleet fleet create must be run inside a tmux or herdr session"
         ) from exc
 
     result = broker.create_fleet(
         label=label,
         director_context=director_ctx,
         coding_agent=coding_agent,
+        backend=mux.name,
     )
 
     if _wants_json(ctx, as_json):

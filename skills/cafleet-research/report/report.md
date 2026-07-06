@@ -68,7 +68,7 @@ Before creating the team, resolve the task-scoped base directory for this run.
 
 ### Step 0a: Environment Precheck (Director — MANDATORY)
 
-Run `cafleet doctor` to confirm the Director is inside a tmux session with valid pane identifiers (a hard requirement of `cafleet member create`). On non-zero exit, abort and surface the error to the user — do NOT attempt raw `tmux` probes as a workaround.
+Run `cafleet doctor` to confirm the Director is inside a tmux or herdr session with valid pane identifiers (a hard requirement of `cafleet member create`). On non-zero exit, abort and surface the error to the user — do NOT attempt raw `tmux` probes as a workaround.
 
 ### Step 0b: Bootstrap CAFleet Fleet (Director — MANDATORY)
 

@@ -18,7 +18,14 @@ from datetime import UTC, datetime
 import click
 
 from cafleet import broker
-from cafleet.multiplexer.tmux import TmuxMultiplexer
+from cafleet.multiplexer import AgentStateAware, resolve_multiplexer
+
+_ATTENTION_STATES = ("blocked", "done")
+
+# Per-process last-seen native agent status, keyed by agent_id. Only transitions
+# INTO an attention state flag an agent due, so one blocked/done episode wakes the
+# watcher once. Reset per run in ``run_monitor_loop``.
+_last_agent_status: dict[int, str | None] = {}
 
 
 class _Sentinel:
@@ -77,14 +84,19 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
         return STOP
 
     watcher = broker.find_monitoring_member(fleet_id)
-    mux = TmuxMultiplexer()
+    mux = resolve_multiplexer()
     live_panes = mux.list_pane_ids()
 
+    targets = broker.list_monitor_targets(fleet_id)
     due: list[dict] = []
-    for target in broker.list_monitor_targets(fleet_id):
+    for target in targets:
         target["pane_alive"] = target["pane_id"] in live_panes
         if should_ping(target, now):
             due.append(target)
+
+    pending_status: dict[int, str | None] = {}
+    if isinstance(mux, AgentStateAware):
+        pending_status = _flag_native_status_due(mux, targets, due)
 
     if due and watcher is not None and watcher["pane_id"] in live_panes:
         # The loop's only keystroke: a single best-effort wake nudge into the
@@ -102,15 +114,60 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
             # just-flagged agent is not due again next tick (no wake-storm while
             # the watcher works). A failed best-effort keystroke leaves the due
             # agents flagged, so the next tick retries instead of silently
-            # skipping a check for a full interval.
+            # skipping a check for a full interval. pending_status holds only the
+            # natively-flagged agents' reads, committed on this same wake gate so
+            # a wake failure re-flags the episode (non-flagged reads were already
+            # committed in _flag_native_status_due).
             broker.record_pings([t["agent_id"] for t in due], now.isoformat())
+            _last_agent_status.update(pending_status)
             # Visible heartbeat: one line per due agent on the launching task's stdout.
+            # Native-due agents carry a ``[status:<state>]`` suffix; interval-due
+            # agents keep the bare line unchanged.
             for target in due:
+                reason = target.get("wake_reason")
+                suffix = f" [{reason}]" if reason else ""
                 click.echo(
                     f"{now.isoformat()} due agent {target['agent_id']} "
-                    f"({target['name']}) -> wake monitor"
+                    f"({target['name']}){suffix} -> wake monitor"
                 )
     return CONTINUE
+
+
+def _flag_native_status_due(
+    mux: AgentStateAware, targets: list[dict], due: list[dict]
+) -> dict[int, str | None]:
+    """Union native ``blocked``/``done`` transitions into the interval-due set.
+
+    Point-reads each **enabled** watched live agent's native status and flags any
+    whose status just transitioned into an attention state, tagging it with a
+    ``status:<state>`` wake reason. Herdr-only: the caller guards on
+    ``isinstance(mux, AgentStateAware)``.
+
+    Non-flagged reads (recovery / idle / steady-state) are committed to
+    ``_last_agent_status`` **immediately**, so a recovery (e.g. blocked→working)
+    is recorded even on a no-wake tick and the next episode is detected. Only the
+    natively-**flagged** agents' reads are returned as pending; the caller commits
+    those **only after a successful wake**, so a wake failure re-flags that
+    episode next tick (mirrors the interval branch's ``record_pings`` gating).
+    """
+    due_ids = {t["agent_id"] for t in due}
+    pending: dict[int, str | None] = {}
+    for target in targets:
+        if not target["enabled"]:
+            continue
+        if target["pane_id"] is None or not target["pane_alive"]:
+            continue
+        agent_id = target["agent_id"]
+        status = mux.agent_status(target_pane_id=target["pane_id"])
+        prev = _last_agent_status.get(agent_id)
+        if status in _ATTENTION_STATES and status != prev and agent_id not in due_ids:
+            target["wake_reason"] = f"status:{status}"
+            due.append(target)
+            due_ids.add(agent_id)
+            pending[agent_id] = status
+        else:
+            _last_agent_status[agent_id] = status
+    return pending
 
 
 _stop_requested = False
@@ -144,6 +201,7 @@ def run_monitor_loop(fleet_id: int, tick_seconds: int) -> None:
     """
     global _stop_requested
     _stop_requested = False
+    _last_agent_status.clear()
     pid = os.getpid()
     if not broker.claim_monitor_runtime(
         fleet_id, pid, tick_seconds, datetime.now(UTC).isoformat()

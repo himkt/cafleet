@@ -51,9 +51,10 @@ class AgentPlacement(Base):
     director_agent_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("agents.agent_id", ondelete="RESTRICT"), nullable=True
     )
-    tmux_session: Mapped[str] = mapped_column(String, nullable=False)
-    tmux_window_id: Mapped[str] = mapped_column(String, nullable=False)
-    tmux_pane_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    mux_session: Mapped[str] = mapped_column(String, nullable=False)
+    mux_window_id: Mapped[str] = mapped_column(String, nullable=False)
+    mux_pane_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    backend: Mapped[str] = mapped_column(String, nullable=False, server_default="tmux")
     coding_agent: Mapped[str] = mapped_column(
         String, nullable=False, server_default="claude"
     )

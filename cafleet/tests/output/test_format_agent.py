@@ -22,9 +22,9 @@ def _agent(**overrides) -> dict:
         "skills": [],
         "placement": {
             "director_agent_id": None,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": "%0",
+            "mux_session": "main",
+            "mux_window_id": "@3",
+            "mux_pane_id": "%0",
             "coding_agent": "claude",
             "created_at": "2026-04-15T10:00:00+00:00",
         },
@@ -90,9 +90,9 @@ def test_format_agent_full__member_kind_and_populated_director_id():
             kind="member",
             placement={
                 "director_agent_id": 2,
-                "tmux_session": "main",
-                "tmux_window_id": "@3",
-                "tmux_pane_id": "%7",
+                "mux_session": "main",
+                "mux_window_id": "@3",
+                "mux_pane_id": "%7",
                 "coding_agent": "claude",
                 "created_at": "2026-04-15T10:02:00+00:00",
             },
@@ -106,7 +106,7 @@ def test_format_agent_full__member_kind_and_populated_director_id():
 
 def test_format_agent_full__pending_pane_id_renders_dash():
     placement = _agent()["placement"]
-    placement["tmux_pane_id"] = None
+    placement["mux_pane_id"] = None
     rendered = output.format_agent(_agent(placement=placement), full=True)
     assert "    pane_id:           -" in rendered
 

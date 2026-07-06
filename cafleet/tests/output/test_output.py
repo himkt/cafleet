@@ -12,8 +12,8 @@ from cafleet.output import (
 
 def _member(**placement_overrides) -> dict:
     placement = {
-        "tmux_pane_id": "%7",
-        "tmux_window_id": "@3",
+        "mux_pane_id": "%7",
+        "mux_window_id": "@3",
         "coding_agent": "claude",
     }
     placement.update(placement_overrides)
@@ -32,9 +32,9 @@ def _list_entry(*, agent_id, name, coding_agent, pane_id):
         "registered_at": "2026-04-12T10:15:00Z",
         "placement": {
             "director_agent_id": 9,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": pane_id,
+            "mux_session": "main",
+            "mux_window_id": "@3",
+            "mux_pane_id": pane_id,
             "coding_agent": coding_agent,
             "created_at": "2026-04-12T10:15:00Z",
         },

@@ -22,16 +22,12 @@ def _try_notify_recipient(
     if recipient_id == sender_id:
         return False
     pane_id = session.execute(
-        select(AgentPlacement.tmux_pane_id).where(
+        select(AgentPlacement.mux_pane_id).where(
             AgentPlacement.agent_id == recipient_id
         )
     ).scalar_one_or_none()
     if pane_id is None:
         return False
-    # Local import so tests that monkeypatch
-    # ``cafleet.multiplexer.tmux.TmuxMultiplexer.send_inline_preview``
-    # get picked up on every call rather than bound once at broker import.
-    from cafleet.multiplexer.tmux import TmuxMultiplexer
 
     # Truncate before keystroking so a multi-KB body cannot dump itself into
     # the recipient's pane. Mirrors output.truncate_text's contract: same
@@ -41,7 +37,16 @@ def _try_notify_recipient(
     if len(preview_text) > settings.max_text_len:
         preview_text = preview_text[: settings.max_text_len] + "…"
 
-    return TmuxMultiplexer().send_inline_preview(
+    # Local import mirrors the broker's other multiplexer touchpoints and keeps
+    # method-level monkeypatches live per call. Best-effort: an unresolvable
+    # backend (broker not inside a pane) skips the preview rather than raising.
+    from cafleet.multiplexer import MultiplexerError, resolve_multiplexer
+
+    try:
+        mux = resolve_multiplexer()
+    except MultiplexerError:
+        return False
+    return mux.send_inline_preview(
         target_pane_id=pane_id,
         task_id=task_dict["task_id"],
         sender_id=sender_id,

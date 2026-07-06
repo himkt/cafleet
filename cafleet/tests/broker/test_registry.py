@@ -169,9 +169,10 @@ def test_register_agent__validation_failures(scenario, expected_match):
     if scenario == "director_not_found":
         placement = {
             "director_agent_id": 999999,
-            "tmux_session": "main",
-            "tmux_window_id": "@1",
-            "tmux_pane_id": None,
+            "backend": "tmux",
+            "mux_session": "main",
+            "mux_window_id": "@1",
+            "mux_pane_id": None,
             "coding_agent": "claude",
         }
         with pytest.raises(click.UsageError, match=expected_match):
@@ -181,9 +182,10 @@ def test_register_agent__validation_failures(scenario, expected_match):
         fleet2 = _create_fleet()
         placement = {
             "director_agent_id": director["agent_id"],
-            "tmux_session": "main",
-            "tmux_window_id": "@1",
-            "tmux_pane_id": None,
+            "backend": "tmux",
+            "mux_session": "main",
+            "mux_window_id": "@1",
+            "mux_pane_id": None,
             "coding_agent": "claude",
         }
         with pytest.raises(click.UsageError, match=expected_match):
@@ -197,9 +199,10 @@ def test_register_agent__validation_failures(scenario, expected_match):
         broker.deregister_agent(director["agent_id"])
         placement = {
             "director_agent_id": director["agent_id"],
-            "tmux_session": "main",
-            "tmux_window_id": "@1",
-            "tmux_pane_id": None,
+            "backend": "tmux",
+            "mux_session": "main",
+            "mux_window_id": "@1",
+            "mux_pane_id": None,
             "coding_agent": "claude",
         }
         with pytest.raises(click.UsageError, match=expected_match):
@@ -215,9 +218,10 @@ def test_register_agent__member_under_non_root_director_rejected():
     non_root = _register_agent(sid, name="not-the-root")
     placement = {
         "director_agent_id": non_root["agent_id"],
-        "tmux_session": "main",
-        "tmux_window_id": "@1",
-        "tmux_pane_id": None,
+        "backend": "tmux",
+        "mux_session": "main",
+        "mux_window_id": "@1",
+        "mux_pane_id": None,
         "coding_agent": "claude",
     }
     with pytest.raises(click.UsageError):
@@ -232,16 +236,17 @@ def test_register_agent__placement_stored_or_absent(with_placement):
     if with_placement:
         placement = {
             "director_agent_id": director_id,
-            "tmux_session": "main",
-            "tmux_window_id": "@1",
-            "tmux_pane_id": None,
+            "backend": "tmux",
+            "mux_session": "main",
+            "mux_window_id": "@1",
+            "mux_pane_id": None,
             "coding_agent": "claude",
         }
         member = _register_agent(sid, name="member", placement=placement)
         fetched = broker.get_agent(member["agent_id"], sid)
         assert fetched["placement"] is not None
         assert fetched["placement"]["director_agent_id"] == director_id
-        assert fetched["placement"]["tmux_session"] == "main"
+        assert fetched["placement"]["mux_session"] == "main"
     else:
         agent = _register_agent(sid, name="standalone")
         fetched = broker.get_agent(agent["agent_id"], sid)
@@ -382,9 +387,10 @@ def test_deregister_agent__deletes_placement():
     director_id = fleet["director"]["agent_id"]
     placement = {
         "director_agent_id": director_id,
-        "tmux_session": "main",
-        "tmux_window_id": "@1",
-        "tmux_pane_id": None,
+        "backend": "tmux",
+        "mux_session": "main",
+        "mux_window_id": "@1",
+        "mux_pane_id": None,
         "coding_agent": "claude",
     }
     member = _register_agent(sid, name="member", placement=placement)
@@ -401,16 +407,17 @@ def test_update_placement_pane_id__updates_and_persists():
     director_id = fleet["director"]["agent_id"]
     placement = {
         "director_agent_id": director_id,
-        "tmux_session": "main",
-        "tmux_window_id": "@1",
-        "tmux_pane_id": None,
+        "backend": "tmux",
+        "mux_session": "main",
+        "mux_window_id": "@1",
+        "mux_pane_id": None,
         "coding_agent": "claude",
     }
     member = _register_agent(sid, name="member", placement=placement)
     result = broker.update_placement_pane_id(member["agent_id"], "%42")
-    assert result["tmux_pane_id"] == "%42"
+    assert result["mux_pane_id"] == "%42"
     fetched = broker.get_agent(member["agent_id"], sid)
-    assert fetched["placement"]["tmux_pane_id"] == "%42"
+    assert fetched["placement"]["mux_pane_id"] == "%42"
 
 
 @pytest.mark.parametrize("scenario", ["no_placement", "nonexistent_agent"])
@@ -432,9 +439,10 @@ def test_list_members__returns_members_with_placement_info():
     did = fleet["director"]["agent_id"]
     placement = {
         "director_agent_id": did,
-        "tmux_session": "main",
-        "tmux_window_id": "@1",
-        "tmux_pane_id": None,
+        "backend": "tmux",
+        "mux_session": "main",
+        "mux_window_id": "@1",
+        "mux_pane_id": None,
         "coding_agent": "claude",
     }
     _register_agent(sid, name="member-1", placement=placement)
@@ -445,7 +453,7 @@ def test_list_members__returns_members_with_placement_info():
     assert {m["name"] for m in result} == {"member-1", "member-2"}
     member = result[0]
     assert "placement" in member
-    assert member["placement"]["tmux_session"] == "main"
+    assert member["placement"]["mux_session"] == "main"
     assert member["placement"]["director_agent_id"] == did
     assert member["status"] == "active"
 
@@ -458,9 +466,10 @@ def test_list_members__flat_listing_excludes_root_and_empty_case():
     did = fleet["director"]["agent_id"]
     placement = {
         "director_agent_id": did,
-        "tmux_session": "main",
-        "tmux_window_id": "@1",
-        "tmux_pane_id": None,
+        "backend": "tmux",
+        "mux_session": "main",
+        "mux_window_id": "@1",
+        "mux_pane_id": None,
         "coding_agent": "claude",
     }
     _register_agent(sid, name="member-1", placement=placement)

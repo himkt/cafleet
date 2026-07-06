@@ -84,9 +84,10 @@ def now_iso() -> str:
 def placement_dict(row) -> dict:
     return {
         "director_agent_id": row.director_agent_id,
-        "tmux_session": row.tmux_session,
-        "tmux_window_id": row.tmux_window_id,
-        "tmux_pane_id": row.tmux_pane_id,
+        "backend": row.backend,
+        "mux_session": row.mux_session,
+        "mux_window_id": row.mux_window_id,
+        "mux_pane_id": row.mux_pane_id,
         "coding_agent": row.coding_agent,
         "created_at": row.created_at,
     }

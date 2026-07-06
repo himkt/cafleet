@@ -85,6 +85,32 @@ background task, that task's output shows live heartbeat activity. If there is
 **no** monitoring member (or its pane is dead), the loop records nothing and
 simply continues — there is no one to wake.
 
+### Native agent-state due trigger (herdr only)
+
+On the **herdr** backend, a watched agent is due when its interval elapsed **or**
+its native agent status enters an **attention state** — `blocked` or `done`. This
+native trigger **augments, never replaces**, the interval trigger, and it is
+isolated to the monitor loop: `monitor_tick` keeps computing interval-due-ness
+only, with no knowledge of native status.
+
+herdr natively tracks each agent's lifecycle state
+(`working`/`blocked`/`done`/`idle`/`unknown`) — a capability the tmux backend
+does not have (see [Multiplexer backends](multiplexer-backends.md)). When the
+resolved backend implements the optional `AgentStateAware` capability, each tick
+the loop point-reads the native status of every **enabled** watched agent whose
+pane is alive, comparing it against an in-memory `dict[agent_id, last_status]` it
+owns (a monitor-disabled agent is skipped on the native path too, matching the
+interval path).
+A **transition into** an attention state flags that agent due — and because the
+comparison is against the last-seen status, a single `blocked`/`done` episode
+wakes the watcher only once. Each natively-due agent is tagged with a
+`status:<state>` wake-reason label, and its set is unioned with the interval-due
+set to decide the wake.
+
+On the **tmux** backend the capability is absent, so this branch never runs and
+the interval-only behavior is byte-for-byte unchanged. No DB column backs the
+native status; the last-seen state lives only in the running loop's memory.
+
 ## The monitoring member
 
 The monitoring member is a single, dedicated coding-agent member — spawned with

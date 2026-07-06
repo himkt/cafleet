@@ -78,18 +78,18 @@ def find_monitoring_member(fleet_id: int) -> dict | None:
     ``agent_card_json.cafleet.kind == MONITORING_MEMBER_KIND`` and inner-joined to
     ``agent_placements`` for its pane. There is at most one active per fleet (the
     ``register_agent`` guard), so the loop locates it by kind rather than by a
-    ``monitor_config`` row. The pane must be bound (non-NULL ``tmux_pane_id``): a
+    ``monitor_config`` row. The pane must be bound (non-NULL ``mux_pane_id``): a
     monitoring member whose placement is still pending has no wakeable pane, so it
     is treated as absent. Returns ``None`` when the fleet has no active,
     pane-bound monitoring member.
     """
     stmt = (
-        select(Agent.agent_id, Agent.name, AgentPlacement.tmux_pane_id)
+        select(Agent.agent_id, Agent.name, AgentPlacement.mux_pane_id)
         .join(AgentPlacement, AgentPlacement.agent_id == Agent.agent_id)
         .where(
             Agent.fleet_id == fleet_id,
             Agent.status == "active",
-            AgentPlacement.tmux_pane_id.is_not(None),
+            AgentPlacement.mux_pane_id.is_not(None),
             _shared.CARD_KIND_SQL == _shared.MONITORING_MEMBER_KIND,
         )
     )
@@ -100,7 +100,7 @@ def find_monitoring_member(fleet_id: int) -> dict | None:
     return {
         "agent_id": row.agent_id,
         "name": row.name,
-        "pane_id": row.tmux_pane_id,
+        "pane_id": row.mux_pane_id,
     }
 
 
@@ -217,7 +217,7 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
         select(
             Agent.agent_id,
             Agent.name,
-            AgentPlacement.tmux_pane_id,
+            AgentPlacement.mux_pane_id,
             Fleet.director_agent_id,
             MonitorConfig.interval_seconds,
             MonitorConfig.last_ping_at,
@@ -236,7 +236,7 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
             "agent_id": row.agent_id,
             "name": row.name,
             "is_director": row.agent_id == row.director_agent_id,
-            "pane_id": row.tmux_pane_id,
+            "pane_id": row.mux_pane_id,
             "interval_seconds": row.interval_seconds,
             "last_ping_at": row.last_ping_at,
             "enabled": bool(row.enabled),

@@ -119,9 +119,10 @@ def test_register_agent_placement__administrator_cannot_be_director(broker_sessi
     admin_id = fleet["administrator_agent_id"]
     placement = {
         "director_agent_id": admin_id,
-        "tmux_session": "main",
-        "tmux_window_id": "@1",
-        "tmux_pane_id": None,
+        "backend": "tmux",
+        "mux_session": "main",
+        "mux_window_id": "@1",
+        "mux_pane_id": None,
         "coding_agent": "claude",
     }
     with pytest.raises(click.ClickException) as exc_info:
@@ -149,9 +150,10 @@ def test_register_agent_placement__non_root_user_director_rejected(broker_sessio
     )
     placement = {
         "director_agent_id": director["agent_id"],
-        "tmux_session": "main",
-        "tmux_window_id": "@1",
-        "tmux_pane_id": None,
+        "backend": "tmux",
+        "mux_session": "main",
+        "mux_window_id": "@1",
+        "mux_pane_id": None,
         "coding_agent": "claude",
     }
     with pytest.raises(click.UsageError):

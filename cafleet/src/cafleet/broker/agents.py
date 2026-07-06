@@ -35,8 +35,8 @@ def register_agent(
         description: One-sentence purpose statement.
         skills: Optional list of skill dicts persisted into the agent's
             ``agent_card_json`` blob.
-        placement: Optional dict carrying ``director_agent_id``,
-            ``tmux_session``, ``tmux_window_id``, ``tmux_pane_id``, and
+        placement: Optional dict carrying ``director_agent_id``, ``backend``,
+            ``mux_session``, ``mux_window_id``, ``mux_pane_id``, and
             ``coding_agent``. When present, an ``AgentPlacement`` row is
             created alongside the agent.
         kind: Optional ``agent_card_json.cafleet.kind`` marker. When set to
@@ -141,9 +141,10 @@ def register_agent(
                 AgentPlacement(
                     agent_id=agent_id,
                     director_agent_id=placement["director_agent_id"],
-                    tmux_session=placement["tmux_session"],
-                    tmux_window_id=placement["tmux_window_id"],
-                    tmux_pane_id=placement["tmux_pane_id"],
+                    backend=placement["backend"],
+                    mux_session=placement["mux_session"],
+                    mux_window_id=placement["mux_window_id"],
+                    mux_pane_id=placement["mux_pane_id"],
                     coding_agent=placement["coding_agent"],
                     created_at=registered_at,
                 )
@@ -286,7 +287,7 @@ def update_placement_pane_id(agent_id: int, pane_id: str) -> dict | None:
 
     Args:
         agent_id: Agent id whose placement should be updated.
-        pane_id: New ``tmux_pane_id`` value.
+        pane_id: New ``mux_pane_id`` value.
 
     Returns:
         The refreshed placement dict, or ``None`` if no placement row was
@@ -296,7 +297,7 @@ def update_placement_pane_id(agent_id: int, pane_id: str) -> dict | None:
         updated = session.execute(
             update(AgentPlacement)
             .where(AgentPlacement.agent_id == agent_id)
-            .values(tmux_pane_id=pane_id)
+            .values(mux_pane_id=pane_id)
             .returning(AgentPlacement.agent_id)
         ).first()
         if updated is None:

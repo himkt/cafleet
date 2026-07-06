@@ -66,7 +66,7 @@ Only `claude` sets the pane title to the member name; locate `codex` panes via `
 
 ## Verification recipe (manual smoke test)
 
-Gated on local install of both `claude` and `codex` binaries. Run from inside a tmux session. The recipe pastes literal ids: fleet `1`, Director `2`, members `4` (claude) / `5` (codex) — your ids will differ.
+Gated on local install of both `claude` and `codex` binaries. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, members `4` (claude) / `5` (codex) — your ids will differ.
 
 ```bash
 cafleet fleet create --label codex-smoke --coding-agent claude

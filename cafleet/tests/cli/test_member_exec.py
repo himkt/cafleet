@@ -210,7 +210,7 @@ def test_authorization_boundary__pending_pane_exits_one_with_exact_message(
     monkeypatch.setattr(
         broker,
         "get_agent",
-        lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
+        lambda *_a, **_kw: _agent(placement=_placement(mux_pane_id=None)),
     )
     result = _invoke(runner, fleet_id, "git log -1")
     assert result.exit_code == 1, result.output

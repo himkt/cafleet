@@ -10,9 +10,9 @@ from click.testing import CliRunner
 
 from cafleet import config
 from cafleet.cli import cli
-from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
 
 _TMUX_PANE_VALUE = "%0"
+_TMUX_ENV_VALUE = "/tmp/tmux-1000/default,12345,0"
 
 RUNTIME_VERSION = importlib.metadata.version("cafleet")
 TS_CURRENT = "2026-07-04T00:12:09.123456+00:00"
@@ -37,7 +37,8 @@ def registry_db(tmp_path, monkeypatch):
 
 @pytest.fixture
 def mock_tmux_ok(monkeypatch, _mock_tmux_for_fleet_create):
-    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
+    monkeypatch.delenv("HERDR_ENV", raising=False)
+    monkeypatch.setenv("TMUX", _TMUX_ENV_VALUE)
     monkeypatch.setenv("TMUX_PANE", _TMUX_PANE_VALUE)
 
 
@@ -61,35 +62,37 @@ def _seed_install(db_path, coding_agent, cafleet_version, installed_at):
 
 
 # --------------------------------------------------------------------------- #
-# tmux block (unchanged surface)                                               #
+# multiplexer block (backend-neutral surface)                                  #
 # --------------------------------------------------------------------------- #
 
 
-def test_doctor_text_output__text_output_has_all_four_fields(runner, mock_tmux_ok):
+def test_doctor_text_output__text_output_has_all_fields(runner, mock_tmux_ok):
     result = runner.invoke(cli, ["doctor"])
     assert result.exit_code == 0, result.output
     out = result.output
-    assert "session_name:" in out
+    assert "multiplexer:" in out
+    assert "backend:" in out
+    assert "tmux" in out
+    assert "session:" in out
     assert "main" in out
     assert "window_id:" in out
     assert "@3" in out
     assert "pane_id:" in out
     assert "%0" in out
-    assert "TMUX_PANE:" in out
-    assert _TMUX_PANE_VALUE in out
+    assert "presence:" in out
+    assert f"TMUX={_TMUX_ENV_VALUE}" in out
 
 
-def test_doctor_outside_tmux__outside_tmux_exits_one(runner, monkeypatch):
+def test_doctor_outside_multiplexer__exits_one(runner, monkeypatch):
+    # Un-pin the autouse tmux override so the resolver auto-detects; with neither
+    # TMUX nor HERDR_ENV present it fails loudly and doctor exits 1.
+    monkeypatch.setattr(config.settings, "multiplexer", None)
     monkeypatch.delenv("TMUX", raising=False)
-
-    def _raise(self):
-        raise TmuxError("cafleet member commands must be run inside a tmux session")
-
-    monkeypatch.setattr(TmuxMultiplexer, "ensure_available", _raise)
+    monkeypatch.delenv("HERDR_ENV", raising=False)
     result = runner.invoke(cli, ["doctor"])
     assert result.exit_code == 1, result.output
     combined = (result.output or "") + (result.stderr or "")
-    assert "cafleet member commands must be run inside a tmux session" in combined
+    assert "no supported multiplexer detected" in combined
 
 
 def test_doctor_rejects_fleet_id__rejected_in_both_positions(runner):
@@ -132,15 +135,15 @@ def test_doctor_text_skills_section_ok_and_stale(runner, mock_tmux_ok, registry_
     ), out
 
 
-def test_doctor_text_skills_after_tmux_block(runner, mock_tmux_ok, registry_db):
-    """The skills block is printed after the existing tmux block."""
+def test_doctor_text_skills_after_multiplexer_block(runner, mock_tmux_ok, registry_db):
+    """The skills block is printed after the multiplexer block."""
     _init_schema()
     _seed_install(registry_db, "claude", RUNTIME_VERSION, TS_CURRENT)
 
     result = runner.invoke(cli, ["doctor"])
 
     assert result.exit_code == 0, result.output
-    assert result.output.index("tmux:") < result.output.index("skills:")
+    assert result.output.index("multiplexer:") < result.output.index("skills:")
 
 
 @pytest.mark.parametrize("state", ["no-db-file", "empty-table"])
@@ -165,11 +168,13 @@ def test_doctor_json_output__json_output_shape(runner, mock_tmux_ok):
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data == {
-        "tmux": {
-            "session_name": "main",
+        "multiplexer": {
+            "backend": "tmux",
+            "session": "main",
             "window_id": "@3",
             "pane_id": "%0",
-            "tmux_pane_env": _TMUX_PANE_VALUE,
+            "presence_var": "TMUX",
+            "presence_value": _TMUX_ENV_VALUE,
         },
         "skills": {
             "cli_version": RUNTIME_VERSION,

@@ -3,6 +3,7 @@
 import pytest
 
 from cafleet.multiplexer import tmux as multiplexer_tmux
+from cafleet.multiplexer.base import MultiplexerContext
 from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
 
 # Stateless class — one shared instance for all tests is safe.
@@ -75,7 +76,7 @@ def test_split_window__argv_construction(monkeypatch, run_recorder):
         lambda args, **_kw: run_recorder.append(list(args)) or "%7\n",
     )
     pane_id = _tmux.split_window(
-        target_window_id="@3",
+        reference=MultiplexerContext(session="main", window_id="@3", pane_id="%0"),
         env={"CAFLEET_DATABASE_URL": "sqlite+aiosqlite:////tmp/cafleet.db"},
         command=["claude", "Hello world"],
     )
@@ -110,7 +111,7 @@ def test_split_window__argv_construction(monkeypatch, run_recorder):
         lambda args, **_kw: run_recorder.append(list(args)) or "%8\n",
     )
     _tmux.split_window(
-        target_window_id="@5",
+        reference=MultiplexerContext(session="main", window_id="@5", pane_id="%0"),
         env={},
         command=["my-binary", "--flag", "value", "prompt text"],
     )

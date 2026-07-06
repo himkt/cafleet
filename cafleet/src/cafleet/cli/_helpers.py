@@ -11,14 +11,16 @@ from cafleet.broker.skill_installs import (
     list_skill_installs,
     skill_installs_table_exists,
 )
-from cafleet.multiplexer import MULTIPLEXERS, TmuxError
+from cafleet.multiplexer import Multiplexer, MultiplexerError, resolve_multiplexer
 
 
-def ensure_tmux_or_die() -> None:
+def ensure_multiplexer_or_die() -> Multiplexer:
     try:
-        MULTIPLEXERS["tmux"].ensure_available()
-    except TmuxError as exc:
+        mux = resolve_multiplexer()
+        mux.ensure_available()
+    except MultiplexerError as exc:
         raise click.ClickException(str(exc)) from exc
+    return mux
 
 
 def ensure_skills_current() -> None:

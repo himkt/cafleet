@@ -50,7 +50,7 @@ cafleet member show --fleet-id <fleet-id> --member-id <target-agent-id>
 
 ## Doctor
 
-Print the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE`) for diagnosing placement without raw tmux. Does NOT require `--fleet-id`; requires `TMUX` and `TMUX_PANE` to be set.
+Print the resolved multiplexer backend and the calling pane's session/window/pane identifiers for diagnosing placement without raw multiplexer commands. Does NOT require `--fleet-id`; requires a supported multiplexer to be detected (tmux or herdr).
 
 ```bash
 cafleet doctor
@@ -78,14 +78,14 @@ Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters ever
 
 ## Typical Workflow
 
-0. **Verify pane env** (Director): run `cafleet doctor` to confirm `TMUX` / `TMUX_PANE` are set — the canonical pane-identity probe, before `cafleet fleet create` and any `cafleet member create`.
+0. **Verify pane env** (Director): run `cafleet doctor` to confirm a supported multiplexer (tmux or herdr) is detected — the canonical pane-identity probe, before `cafleet fleet create` and any `cafleet member create`.
 
 1. **Create a fleet** (if none exists):
    ```bash
    cafleet fleet create --label "my-project"
    # text: line 1 <fleet-id>, line 2 <root-director-agent-id>; --json for the nested shape
    ```
-   Must run inside a tmux session (else exits 1 with `Error: cafleet fleet create must be run inside a tmux session`, writes nothing).
+   Must run inside a tmux or herdr session (else exits 1 with `Error: cafleet fleet create must be run inside a tmux or herdr session`, writes nothing).
 
 2. **Discover, send, poll, ack** per the command sections above; use `cafleet --json …` when parsing output. Director-side create/capture/exec/ping/nudge: [`reference/director.md`](director.md); shutdown ordering: [`reference/recovery.md`](recovery.md).
 
@@ -95,4 +95,4 @@ Messages are tasks with three states: **input_required** (delivered, awaiting AC
 
 ## Error Handling
 
-Errors print to stderr and exit non-zero; `cafleet --json <cmd>` emits them machine-parseably. The most common: missing `--fleet-id` (`Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`, exit 1), missing `--agent-id` (`Error: Missing option '--agent-id'.`, exit 2), and `member *` commands outside a tmux session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages).
+Errors print to stderr and exit non-zero; `cafleet --json <cmd>` emits them machine-parseably. The most common: missing `--fleet-id` (`Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`, exit 1), missing `--agent-id` (`Error: Missing option '--agent-id'.`, exit 2), and `member *` commands outside a supported multiplexer session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages).

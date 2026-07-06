@@ -25,10 +25,10 @@ Once you have a capture, classify the shape:
 
 ## Recovering from a tmux disconnect
 
-If `cafleet member capture` exits with a tmux subprocess error (the tmux server is unreachable):
+If `cafleet member capture` exits with a multiplexer subprocess error (the multiplexer server is unreachable):
 
-1. Run `cafleet doctor` to confirm your own pane's tmux state. If it reports `TMUX` unset, you are no longer attached to a tmux session and recovery is impossible from this shell — re-attach (`tmux attach -t <session>`) and re-run.
-2. If `cafleet doctor` succeeds but `cafleet member capture` still fails, the target pane is gone (the tmux server killed it, or the user closed it manually). Treat as "Pane crashed" above — `cafleet member delete --force` then re-spawn.
+1. Run `cafleet doctor` to confirm your own pane's multiplexer state. If it fails to resolve a backend, you are no longer attached to a supported multiplexer session and recovery is impossible from this shell — re-attach (on tmux, `tmux attach -t <session>`) and re-run.
+2. If `cafleet doctor` succeeds but `cafleet member capture` still fails, the target pane is gone (the multiplexer server killed it, or the user closed it manually). Treat as "Pane crashed" above — `cafleet member delete --force` then re-spawn.
 3. Never invoke raw tmux directly — cafleet's primitives encapsulate the fleet-isolation boundary that raw tmux bypasses.
 
 ## Recovering from a wedged exit keystroke

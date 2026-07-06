@@ -7,12 +7,19 @@ icon: lucide/bell
 CAFleet uses a pull-based delivery model by default: recipients discover
 messages via `cafleet message poll`. To reduce latency, the broker keystrokes
 a 2-line inline preview (`[cafleet msg …]` header + truncated body) into the
-recipient's tmux pane immediately after persisting a message, so the
+recipient's multiplexer pane immediately after persisting a message, so the
 recipient's coding-agent process consumes the preview as a fresh user-turn
 input without invoking `cafleet message poll`. The poll-trigger keystroke
 (which DOES inject a literal `cafleet message poll` command) is reserved for
 the Director-issued `cafleet member ping` manual nudge — not the
 broker's auto-fire path.
+
+The keystroke is dispatched through the resolved multiplexer backend's
+`send_inline_preview` helper (see [Multiplexer backends](multiplexer-backends.md)),
+so the same push path works on both **tmux** and **herdr** — tmux realizes it
+with `send-keys`, herdr with `pane send-text` + `pane send-keys`. The mechanics
+below describe the tmux realization; the herdr backend keeps the same contract
+(one Esc-safeguarded submit of the whole 2-line payload).
 
 ## Send + push notification
 
@@ -28,7 +35,7 @@ sequenceDiagram
 
     Sender->>Broker: cafleet message send --to <recipient-id> --text <body>
     Broker->>DB: INSERT tasks (status=input_required)
-    Broker->>DB: SELECT placement.tmux_pane_id
+    Broker->>DB: SELECT placement.mux_pane_id
     DB-->>Broker: pane_id
     Broker->>Pane: keystroke inline preview
     Pane-->>Recipient: text appears as user-turn input
@@ -39,9 +46,9 @@ After saving a delivery task, the broker looks up the recipient's
 `agent_placements` row (the root Director's placement carries
 `director_agent_id=NULL` for "no parent"). The recipient pane is resolved by
 `agent_id` alone, so Member → Director notifications work automatically. If the
-recipient has a non-null `tmux_pane_id` and is not the sender, the broker
-keystrokes an inline preview into the recipient's pane via the
-`tmux.send_inline_preview` helper:
+recipient has a non-null `mux_pane_id` and is not the sender, the broker
+keystrokes an inline preview into the recipient's pane via the resolved
+multiplexer's `send_inline_preview` helper:
 
 ```text
 [cafleet msg <task_id> from <sender_id> <ts>]
@@ -53,7 +60,7 @@ user-turn input — no `cafleet message poll` invocation is in the auto-fire
 path. The recipient acks via `cafleet message ack --task-id <task_id>` once
 it has consumed the message.
 
-The keystroke **leads with `Esc`** (`tmux.send_inline_preview` is called with
+The keystroke **leads with `Esc`** (`send_inline_preview` is called with
 `esc_first=True`): it presses `Escape`, lets the pane settle ~0.1 s, then types
 the payload and `Enter`, so a recipient parked on a pending permission-approval
 prompt has that prompt dismissed before the trailing `Enter` lands. The same
@@ -77,11 +84,12 @@ whatever accumulated after a missed inline preview.
   available for normal polling.
 - **Self-send skip**: When sender == recipient, the notification is
   suppressed.
-- **Silent failure**: Missing placements, null `tmux_pane_id`, dead panes,
-  and absent `tmux` binary all result in no notification — no exceptions
+- **Silent failure**: Missing placements, null `mux_pane_id`, dead panes,
+  and an absent multiplexer binary all result in no notification — no exceptions
   propagate to the caller.
-- **No `TMUX` env var required**: `tmux send-keys -t <pane>` works from any
-  process on the same host as long as the tmux server socket is accessible.
+- **No multiplexer env var required**: the keystroke targets the pane by id
+  (tmux `send-keys -t <pane>`, herdr `pane send-*`), which works from any process
+  on the same host as long as the multiplexer's server/socket is reachable.
 
 **Response annotations**: Unicast responses include a top-level
 `notification_sent` boolean. Broadcast responses expose `recipients` (the real

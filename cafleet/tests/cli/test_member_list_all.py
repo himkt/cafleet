@@ -99,7 +99,7 @@ def test_member_list_all__json_row_shape_and_null_placement(bootstrapped_roster)
     # Placementless row → placement: null.
     assert rows[admin_id]["placement"] is None
     # Placed rows keep the placement sub-dict.
-    assert rows[alice_id]["placement"]["tmux_pane_id"] == "%7"
+    assert rows[alice_id]["placement"]["mux_pane_id"] == "%7"
     assert rows[director_id]["placement"]["director_agent_id"] is None
 
 

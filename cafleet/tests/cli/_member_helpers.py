@@ -15,14 +15,15 @@ _UNSET: object = object()
 def _placement(
     *,
     director_agent_id: int = DIRECTOR_ID,
-    tmux_pane_id: str | None = PANE_ID,
+    mux_pane_id: str | None = PANE_ID,
     coding_agent: str = "claude",
 ) -> dict:
     return {
         "director_agent_id": director_agent_id,
-        "tmux_session": "main",
-        "tmux_window_id": "@3",
-        "tmux_pane_id": tmux_pane_id,
+        "backend": "tmux",
+        "mux_session": "main",
+        "mux_window_id": "@3",
+        "mux_pane_id": mux_pane_id,
         "coding_agent": coding_agent,
         "created_at": "2026-04-16T08:00:00+00:00",
     }

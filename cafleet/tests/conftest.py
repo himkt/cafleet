@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet.broker import _shared
+from cafleet.config import settings
 from cafleet.db.models import Base, SkillInstall
 from cafleet.multiplexer import tmux as multiplexer_tmux
 
@@ -14,6 +15,16 @@ from cafleet.multiplexer import tmux as multiplexer_tmux
 def _silence_real_tmux_subprocess(monkeypatch):
     """Stub ``cafleet.multiplexer.tmux._run`` so tests never send-keys into a real pane."""
     monkeypatch.setattr(multiplexer_tmux, "_run", lambda *args, **kwargs: "")
+
+
+@pytest.fixture(autouse=True)
+def _pin_multiplexer_tmux(monkeypatch):
+    """Pin the multiplexer to tmux via the documented ``CAFLEET_MULTIPLEXER``
+    override, so every ``resolve_multiplexer()`` call is deterministic regardless
+    of the host's ``TMUX`` / ``HERDR_ENV``. Tests that exercise the resolver's
+    auto-detect / override behavior set ``settings.multiplexer`` themselves, which
+    (running after this autouse fixture) wins for that test."""
+    monkeypatch.setattr(settings, "multiplexer", "tmux")
 
 
 @pytest.fixture

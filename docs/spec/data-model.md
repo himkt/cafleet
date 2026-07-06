@@ -98,9 +98,10 @@ Indexes:
 |---|---|---|---|
 | `agent_id` | `INTEGER` | `PRIMARY KEY` (no AUTOINCREMENT), `REFERENCES agents(agent_id) ON DELETE CASCADE` | The member agent. This is the parent `agents.agent_id` value reused as a 1:1 PK — it is **not** a freshly minted sequence, so AUTOINCREMENT is deliberately excluded. CASCADE ensures hard-delete of an agent (if any future path adds one) also removes the placement. |
 | `director_agent_id` | `INTEGER` | nullable, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The fleet's root Director — the single Director that owns every member. RESTRICT prevents hard-deleting a Director with live placements. For every member placement this always equals `fleets.director_agent_id` (the fleet root); it is **NULL** only for the root Director's own placement (it has no parent), set at bootstrap time. Nested teams are forbidden — member registration rejects any placement whose `director_agent_id` is not the fleet root. |
-| `tmux_session` | `TEXT` | `NOT NULL` | e.g. `'main'`, from `tmux display-message '#{session_name}'`. |
-| `tmux_window_id` | `TEXT` | `NOT NULL` | e.g. `'@3'`, from `#{window_id}`. |
-| `tmux_pane_id` | `TEXT` | nullable | e.g. `'%7'`. `NULL` = pending (row inserted at register time, pane not yet spawned). Set after the pane is spawned. |
+| `mux_session` | `TEXT` | `NOT NULL` | Backend-neutral multiplexer session, e.g. tmux `'main'` (from `display-message '#{session_name}'`) or the herdr session id. |
+| `mux_window_id` | `TEXT` | `NOT NULL` | Backend-neutral window/tab id, e.g. tmux `'@3'` (from `#{window_id}`) or the herdr tab id. |
+| `mux_pane_id` | `TEXT` | nullable | Opaque backend pane id, stored verbatim — e.g. tmux `'%7'` or herdr `'w1:p1'`. `NULL` = pending (row inserted at register time, pane not yet spawned). Set after the pane is spawned. |
+| `backend` | `TEXT` | `NOT NULL`, `DEFAULT 'tmux'` | The multiplexer that produced the pane ids, set to the resolved `mux.name` (`"tmux"` or `"herdr"`) at placement-insert time. The `DEFAULT 'tmux'` backfills pre-existing rows to their real provenance (all placements were tmux before this column existed). |
 | `coding_agent` | `TEXT` | `NOT NULL`, `DEFAULT 'claude'` | Free-form coding-agent identifier. Current known values are `"claude"` (the default for normal registrations) and `"codex"` / `"opencode"` when chosen at create time. The default `'claude'` applies when a placement is inserted without an explicit value. |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp, set server-side to match `agents.registered_at`. |
 

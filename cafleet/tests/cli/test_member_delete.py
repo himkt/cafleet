@@ -441,7 +441,7 @@ def test_pending_placement_force__force_with_pending_placement_skips_all_tmux(
     monkeypatch.setattr(
         broker,
         "get_agent",
-        lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
+        lambda *_a, **_kw: _agent(placement=_placement(mux_pane_id=None)),
     )
 
     result = _invoke(runner, fleet_id, "--force")
@@ -571,7 +571,7 @@ def test_tmux_relaxation__pending_placement_delete_succeeds_without_tmux(
     monkeypatch.setattr(
         broker,
         "get_agent",
-        lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
+        lambda *_a, **_kw: _agent(placement=_placement(mux_pane_id=None)),
     )
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 0, result.output
@@ -598,7 +598,7 @@ def test_pending_placement__pending_pane_id_skips_send_exit(
     monkeypatch.setattr(
         broker,
         "get_agent",
-        lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
+        lambda *_a, **_kw: _agent(placement=_placement(mux_pane_id=None)),
     )
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 0, result.output
@@ -632,6 +632,29 @@ def test_tmux_error_on_send_exit__send_exit_failure_now_exits_one_with_recovery_
     assert "cafleet doctor" in combined
     assert "--force" in combined
     assert "tmux kill-pane" not in combined
+
+    assert deregister_recorder == []
+
+
+def test_tmux_error_on_wait_for_pane_gone__exits_one_with_backend_name(
+    runner, fleet_id, monkeypatch, deregister_recorder
+):
+    """A MultiplexerError while waiting for the pane to close is a hard exit-1,
+    surfaced with the resolved backend name (``{mux.name}`` = tmux in the test
+    env) and the target pane id. The member is not deregistered."""
+    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(TmuxMultiplexer, "send_exit", lambda self, **_kw: None)
+
+    def fake_wait(self, **_kw):
+        raise TmuxError("list-panes failed: server exited unexpectedly")
+
+    monkeypatch.setattr(TmuxMultiplexer, "wait_for_pane_gone", fake_wait, raising=False)
+    result = _invoke(runner, fleet_id)
+
+    assert result.exit_code == 1, (result.output, getattr(result, "stderr", ""))
+    combined = (result.output or "") + (getattr(result, "stderr", "") or "")
+    assert "tmux call failed while waiting" in combined
+    assert f"pane {PANE_ID}" in combined
 
     assert deregister_recorder == []
 

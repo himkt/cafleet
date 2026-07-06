@@ -41,8 +41,8 @@ See your coding-agent's skill documentation for the literal invocation syntax
 ## Raw CLI walkthrough
 
 If you would rather drive CAFleet from the shell directly, the commands below
-mirror what the skill does internally. Run them inside a tmux session — the
-`fleet create` and `member create` commands require one.
+mirror what the skill does internally. Run them inside a tmux or herdr session —
+the `fleet create` and `member create` commands require one.
 
 The walkthrough pastes literal integer ids: fleet `1`, root Director `2`,
 members `4` and `5`, task `10`. Your ids will differ — substitute the

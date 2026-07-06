@@ -9,7 +9,13 @@ parametrizing over both impls.
 
 import pytest
 
-from cafleet.multiplexer import MULTIPLEXERS, Multiplexer, MultiplexerContext
+from cafleet.multiplexer import (
+    MULTIPLEXERS,
+    AgentStateAware,
+    Multiplexer,
+    MultiplexerContext,
+)
+from cafleet.multiplexer.herdr import HerdrMultiplexer
 from cafleet.multiplexer.tmux import TmuxMultiplexer
 
 
@@ -43,6 +49,30 @@ def test_protocol_declares_list_pane_ids():
 def test_protocol_declares_send_wake_trigger():
     """The monitoring-member wake keystroke is part of the Multiplexer contract."""
     assert hasattr(Multiplexer, "send_wake_trigger")
+
+
+def test_herdr_satisfies_multiplexer_and_agent_state_aware():
+    """herdr implements the base Multiplexer Protocol AND the optional
+    AgentStateAware capability (native lifecycle-state reads)."""
+    herdr = HerdrMultiplexer()
+    assert isinstance(herdr, Multiplexer)
+    assert isinstance(herdr, AgentStateAware)
+    assert herdr.name == "herdr"
+
+
+def test_tmux_satisfies_multiplexer_but_not_agent_state_aware():
+    """tmux has no native agent state, so it satisfies the base Protocol but NOT
+    AgentStateAware — the `isinstance(mux, AgentStateAware)` guard is false and
+    the monitor's native-status branch never runs on the tmux path."""
+    tmux = TmuxMultiplexer()
+    assert isinstance(tmux, Multiplexer)
+    assert not isinstance(tmux, AgentStateAware)
+
+
+def test_registered_multiplexers_include_tmux_and_herdr():
+    """The registry exposes both backends under their canonical keys."""
+    assert set(MULTIPLEXERS) == {"tmux", "herdr"}
+    assert isinstance(MULTIPLEXERS["herdr"], HerdrMultiplexer)
 
 
 def test_tmux_list_pane_ids_returns_set_of_pane_ids(monkeypatch):

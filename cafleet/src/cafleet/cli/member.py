@@ -1,4 +1,4 @@
-"""``cafleet member`` — tmux-backed member agent commands (Director only)."""
+"""``cafleet member`` — multiplexer-backed member agent commands (Director only)."""
 
 import contextlib
 import os
@@ -10,8 +10,8 @@ from cafleet import broker, output
 from cafleet.broker import _shared
 from cafleet.cli._helpers import (
     director_member_options,
+    ensure_multiplexer_or_die,
     ensure_skills_current,
-    ensure_tmux_or_die,
     fleet_id_option,
     full_flag,
     quiet_flag,
@@ -19,17 +19,17 @@ from cafleet.cli._helpers import (
 )
 from cafleet.cli._text_input import read_text_input, substitute_spawn_placeholders
 from cafleet.coding_agent import CODING_AGENTS
-from cafleet.multiplexer import MULTIPLEXERS, TmuxError
+from cafleet.multiplexer import MultiplexerError, resolve_multiplexer
 
 
 @click.group()
 def member():
-    """Manage tmux-backed member agents (Director only)."""
+    """Manage multiplexer-backed member agents (Director only)."""
     ensure_skills_current()
 
 
 def _require_member_pane(placement: dict, member_id: int, action: str) -> str:
-    pane_id = placement["tmux_pane_id"]
+    pane_id = placement["mux_pane_id"]
     if pane_id is None:
         raise click.ClickException(
             f"member {member_id} has no pane yet (pending placement) "
@@ -208,15 +208,17 @@ def member_create(
         raise click.UsageError(str(exc)) from exc
 
     # Resolve the body up front (xor / required / empty / file surfaces raise
-    # before any registration or tmux side effect). Placeholder substitution is
-    # deferred until after register_agent, since {agent_id} needs the new id.
+    # before any registration or multiplexer side effect). Placeholder
+    # substitution is deferred until after register_agent, since {agent_id} needs
+    # the new id.
     body = read_text_input(text, text_file)
 
     try:
-        MULTIPLEXERS["tmux"].ensure_available()
+        mux = resolve_multiplexer()
+        mux.ensure_available()
         agent.ensure_available()
-        director_ctx = MULTIPLEXERS["tmux"].context_discovery()
-    except (TmuxError, RuntimeError) as exc:
+        director_ctx = mux.context_discovery()
+    except (MultiplexerError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     try:
@@ -226,9 +228,10 @@ def member_create(
             description,
             placement={
                 "director_agent_id": agent_id,
-                "tmux_session": director_ctx.session,
-                "tmux_window_id": director_ctx.window_id,
-                "tmux_pane_id": None,
+                "backend": mux.name,
+                "mux_session": director_ctx.session,
+                "mux_window_id": director_ctx.window_id,
+                "mux_pane_id": None,
                 "coding_agent": coding_agent,
             },
             kind=_shared.MONITORING_MEMBER_KIND if role == "monitor" else None,
@@ -262,16 +265,16 @@ def member_create(
     try:
         db_url = os.environ.get("CAFLEET_DATABASE_URL")
         fwd_env = {"CAFLEET_DATABASE_URL": db_url} if db_url else {}
-        pane_id = MULTIPLEXERS["tmux"].split_window(
-            target_window_id=director_ctx.window_id,
+        pane_id = mux.split_window(
+            reference=director_ctx,
             env=fwd_env,
             command=spawn_command,
         )
-    except TmuxError as exc:
+    except MultiplexerError as exc:
         _rollback_register(
             new_agent_id,
             fleet_id=fleet_id,
-            reason=f"tmux split-window failed: {exc}",
+            reason=f"split_window failed: {exc}",
         )
 
     try:
@@ -279,16 +282,16 @@ def member_create(
     except Exception as exc:
         # Pane is alive but the registration row is dangling; /exit the pane
         # and roll back the agent so the caller can retry cleanly.
-        with contextlib.suppress(TmuxError):
-            MULTIPLEXERS["tmux"].send_exit(target_pane_id=pane_id, ignore_missing=True)
+        with contextlib.suppress(MultiplexerError):
+            mux.send_exit(target_pane_id=pane_id, ignore_missing=True)
         _rollback_register(
             new_agent_id,
             fleet_id=fleet_id,
             reason=f"placement update failed: {exc}",
         )
     if placement_view is None:
-        with contextlib.suppress(TmuxError):
-            MULTIPLEXERS["tmux"].send_exit(target_pane_id=pane_id, ignore_missing=True)
+        with contextlib.suppress(MultiplexerError):
+            mux.send_exit(target_pane_id=pane_id, ignore_missing=True)
         _rollback_register(
             new_agent_id,
             fleet_id=fleet_id,
@@ -330,10 +333,10 @@ def member_delete(ctx, member_id, force):
         allow_missing_placement=True,
     )
     member_id = target["agent_id"]
-    pane_id = placement["tmux_pane_id"] if placement is not None else None
+    pane_id = placement["mux_pane_id"] if placement is not None else None
 
     if pane_id is None:
-        # Pure registry soft-delete — no tmux requirement off the pane paths.
+        # Pure registry soft-delete — no multiplexer requirement off the pane paths.
         _deregister_or_die(member_id)
         pane_status = "(no placement)" if placement is None else "(pending — no pane)"
         _emit_member_delete_output(
@@ -341,16 +344,16 @@ def member_delete(ctx, member_id, force):
         )
         return
 
-    ensure_tmux_or_die()
+    mux = ensure_multiplexer_or_die()
 
     if force:
         try:
-            MULTIPLEXERS["tmux"].kill_pane(target_pane_id=pane_id, ignore_missing=True)
-        except TmuxError as exc:
+            mux.kill_pane(target_pane_id=pane_id, ignore_missing=True)
+        except MultiplexerError as exc:
             raise click.ClickException(
                 f"kill_pane failed for pane {pane_id}: {exc}. "
-                f"The tmux server may be unreachable. Verify with 'cafleet doctor', "
-                f"then re-run the command."
+                f"The {mux.name} server may be unreachable. Verify with "
+                f"'cafleet doctor', then re-run the command."
             ) from exc
         _deregister_or_die(member_id)
         pane_status = f"{pane_id} (killed)"
@@ -360,22 +363,22 @@ def member_delete(ctx, member_id, force):
         return
 
     try:
-        MULTIPLEXERS["tmux"].send_exit(target_pane_id=pane_id, ignore_missing=True)
-    except TmuxError as exc:
+        mux.send_exit(target_pane_id=pane_id, ignore_missing=True)
+    except MultiplexerError as exc:
         raise click.ClickException(
             f"send_exit failed for pane {pane_id}: {exc}. "
-            f"The tmux server may be unreachable. Verify with 'cafleet doctor', "
-            f"then re-run 'cafleet member delete', or use '--force' to kill the "
-            f"pane directly."
+            f"The {mux.name} server may be unreachable. Verify with "
+            f"'cafleet doctor', then re-run 'cafleet member delete', or use "
+            f"'--force' to kill the pane directly."
         ) from exc
 
     try:
-        gone = MULTIPLEXERS["tmux"].wait_for_pane_gone(
+        gone = mux.wait_for_pane_gone(
             target_pane_id=pane_id, timeout=15.0, interval=0.5
         )
-    except TmuxError as exc:
+    except MultiplexerError as exc:
         raise click.ClickException(
-            f"tmux call failed while waiting for pane {pane_id} to close: {exc}"
+            f"{mux.name} call failed while waiting for pane {pane_id} to close: {exc}"
         ) from exc
 
     if gone:
@@ -387,8 +390,8 @@ def member_delete(ctx, member_id, force):
         return
 
     try:
-        tail = MULTIPLEXERS["tmux"].capture_pane(target_pane_id=pane_id, lines=80)
-    except TmuxError as exc:
+        tail = mux.capture_pane(target_pane_id=pane_id, lines=80)
+    except MultiplexerError as exc:
         click.echo(
             f"Warning: capture_pane failed during timeout handling: {exc}. "
             f"The timeout error and recovery hint still print.",
@@ -538,7 +541,7 @@ def member_capture(ctx, member_id, lines, ansi):
     """Capture the last N lines of a member pane's terminal buffer."""
     fleet_id = ctx.obj["fleet_id"]
 
-    ensure_tmux_or_die()
+    mux = ensure_multiplexer_or_die()
 
     target, placement = _load_authorized_member(
         fleet_id,
@@ -548,8 +551,8 @@ def member_capture(ctx, member_id, lines, ansi):
     pane_id = _require_member_pane(placement, member_id, "capture")
 
     try:
-        content = MULTIPLEXERS["tmux"].capture_pane(target_pane_id=pane_id, lines=lines)
-    except TmuxError as exc:
+        content = mux.capture_pane(target_pane_id=pane_id, lines=lines)
+    except MultiplexerError as exc:
         raise click.ClickException(f"capture failed: {exc}") from exc
 
     if not ansi:
@@ -588,7 +591,7 @@ def member_exec(ctx, member_id, command):
         raise click.UsageError("command may not be empty.")
     command = command.strip()
 
-    ensure_tmux_or_die()
+    mux = ensure_multiplexer_or_die()
 
     target, placement = _load_authorized_member(
         fleet_id,
@@ -598,8 +601,8 @@ def member_exec(ctx, member_id, command):
     pane_id = _require_member_pane(placement, member_id, "exec")
 
     try:
-        MULTIPLEXERS["tmux"].send_bash_command(target_pane_id=pane_id, command=command)
-    except TmuxError as exc:
+        mux.send_bash_command(target_pane_id=pane_id, command=command)
+    except MultiplexerError as exc:
         raise click.ClickException(f"send failed: {exc}") from exc
 
     if ctx.obj["json_output"]:
@@ -627,7 +630,7 @@ def member_ping(ctx, member_id, quiet):
     """Inject an inbox-poll keystroke into a member's pane (Director-only)."""
     fleet_id = ctx.obj["fleet_id"]
 
-    ensure_tmux_or_die()
+    mux = ensure_multiplexer_or_die()
 
     target, placement = _load_authorized_member(
         fleet_id,
@@ -637,12 +640,12 @@ def member_ping(ctx, member_id, quiet):
     pane_id = _require_member_pane(placement, member_id, "ping")
 
     try:
-        ok = MULTIPLEXERS["tmux"].send_poll_trigger(
+        ok = mux.send_poll_trigger(
             target_pane_id=pane_id,
             fleet_id=fleet_id,
             agent_id=member_id,
         )
-    except TmuxError as exc:
+    except MultiplexerError as exc:
         raise click.ClickException(f"send failed: {exc}") from exc
     if not ok:
         raise click.ClickException(
@@ -682,7 +685,7 @@ def member_nudge(ctx, agent_id, member_id, text, text_file):
     """Re-engage a member (typically the Director) with an ACKable task + preview."""
     fleet_id = ctx.obj["fleet_id"]
 
-    ensure_tmux_or_die()
+    ensure_multiplexer_or_die()
 
     # The shared helper enforces xor + required + empty-body rejection (the old
     # ``if not text.strip()`` check is subsumed) and reads --text-file / stdin.
@@ -702,7 +705,7 @@ def member_nudge(ctx, agent_id, member_id, text, text_file):
 
     task_id = result["task"]["task_id"]
     notification_sent = result["notification_sent"]
-    pane_id = placement["tmux_pane_id"]
+    pane_id = placement["mux_pane_id"]
 
     if ctx.obj["json_output"]:
         click.echo(

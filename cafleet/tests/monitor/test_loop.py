@@ -18,7 +18,13 @@ import pytest
 
 from cafleet import broker
 from cafleet.db.models import Fleet
-from cafleet.monitor.loop import CONTINUE, STOP, monitor_tick
+from cafleet.monitor.loop import (
+    CONTINUE,
+    STOP,
+    _flag_native_status_due,
+    _last_agent_status,
+    monitor_tick,
+)
 from tests.broker._helpers import (
     _create_fleet,
     _member_placement,
@@ -32,6 +38,57 @@ _NOW = datetime(2026, 6, 13, 12, 0, 0, tzinfo=UTC)
 @pytest.fixture(autouse=True)
 def _autouse_broker(broker_session):
     return broker_session
+
+
+@pytest.fixture(autouse=True)
+def _clear_native_status():
+    """Reset the per-process ``last_status`` map around each test so native-state
+    transition detection starts from a clean slate (mirrors ``run_monitor_loop``)."""
+    _last_agent_status.clear()
+    yield
+    _last_agent_status.clear()
+
+
+class _FakeStateMux:
+    """A minimal ``AgentStateAware`` multiplexer for the native-status branch:
+    reports per-pane native states and records wake keystrokes. Recognized by
+    ``isinstance(mux, AgentStateAware)`` because it defines both capability
+    methods."""
+
+    name = "herdr"
+
+    def __init__(self, live_panes, statuses, *, wake_ok=True):
+        self._live = set(live_panes)
+        self._statuses = statuses
+        self._wake_ok = wake_ok
+        self.wakes: list[tuple] = []
+
+    def list_pane_ids(self):
+        return set(self._live)
+
+    def agent_status(self, *, target_pane_id):
+        return self._statuses.get(target_pane_id)
+
+    def wait_agent_status(self, *, target_pane_id, status, timeout_ms):
+        return False
+
+    def send_wake_trigger(self, *, target_pane_id, due_agents, director_agent_id):
+        self.wakes.append(
+            (target_pane_id, [t["agent_id"] for t in due_agents], director_agent_id)
+        )
+        return self._wake_ok
+
+
+def _native_target(
+    agent_id, pane_id="%9", *, pane_alive=True, name="alice", enabled=True
+):
+    return {
+        "agent_id": agent_id,
+        "pane_id": pane_id,
+        "pane_alive": pane_alive,
+        "name": name,
+        "enabled": enabled,
+    }
 
 
 def _register_member(fleet: dict, name: str, pane_id: str) -> int:
@@ -312,3 +369,266 @@ def test_monitor_tick__stop_when_ownership_lost(monkeypatch):
     assert monitor_tick(sid, _NOW) is STOP
     assert polls == []
     assert wakes == []
+
+
+# --- native agent-state due trigger (§5, herdr-only) -----------------------
+
+
+def test_flag_native_status_due__blocked_transition_flags_with_reason():
+    """A transition into ``blocked`` flags the agent due and tags it with the
+    ``status:blocked`` wake reason (unioned onto the interval-due set). The read
+    statuses are RETURNED (not committed here) — the caller commits them only
+    after a successful wake."""
+    mux = _FakeStateMux({"%9"}, {"%9": "blocked"})
+    targets = [_native_target(5)]
+    due: list[dict] = []
+    read = _flag_native_status_due(mux, targets, due)
+    assert [t["agent_id"] for t in due] == [5]
+    assert due[0]["wake_reason"] == "status:blocked"
+    # returns the read status; does NOT mutate the module-level last-seen map.
+    assert read == {5: "blocked"}
+    assert 5 not in _last_agent_status
+
+
+def test_flag_native_status_due__done_transition_flags_with_reason():
+    mux = _FakeStateMux({"%9"}, {"%9": "done"})
+    targets = [_native_target(5)]
+    due: list[dict] = []
+    _flag_native_status_due(mux, targets, due)
+    assert due[0]["wake_reason"] == "status:done"
+
+
+@pytest.mark.parametrize("status", ["working", "idle", "unknown", None])
+def test_flag_native_status_due__non_attention_status_not_flagged(status):
+    """Only ``blocked``/``done`` are attention states; every other native state
+    (and no-agent ``None``) leaves the agent unflagged."""
+    mux = _FakeStateMux({"%9"}, {"%9": status})
+    targets = [_native_target(5)]
+    due: list[dict] = []
+    _flag_native_status_due(mux, targets, due)
+    assert due == []
+
+
+def test_flag_native_status_due__same_attention_status_wakes_only_once():
+    """One ``blocked`` episode wakes once: once the caller commits the read status
+    to ``_last_agent_status`` (as ``monitor_tick`` does after a successful wake), a
+    second tick with the same status is a non-transition (prev == current) and
+    does not re-flag."""
+    mux = _FakeStateMux({"%9"}, {"%9": "blocked"})
+    targets = [_native_target(5)]
+    first: list[dict] = []
+    read = _flag_native_status_due(mux, targets, first)
+    assert [t["agent_id"] for t in first] == [5]
+    # the caller commits the read statuses only after a successful wake
+    _last_agent_status.update(read)
+    second: list[dict] = []
+    _flag_native_status_due(mux, targets, second)
+    assert second == []
+
+
+def test_flag_native_status_due__uncommitted_status_re_flags_next_call():
+    """If the caller does NOT commit (a failed/absent wake), the same ``blocked``
+    status re-flags on the next call — the episode is not consumed."""
+    mux = _FakeStateMux({"%9"}, {"%9": "blocked"})
+    targets = [_native_target(5)]
+    first: list[dict] = []
+    _flag_native_status_due(mux, targets, first)
+    assert [t["agent_id"] for t in first] == [5]
+    # no commit → prev stays None → still a transition
+    second: list[dict] = []
+    _flag_native_status_due(mux, targets, second)
+    assert [t["agent_id"] for t in second] == [5]
+
+
+def test_flag_native_status_due__disabled_target_not_read_or_flagged():
+    """A monitor-disabled target is skipped entirely (mirrors ``should_ping``):
+    it is never point-read and never flagged, even when its native status is an
+    attention state."""
+    mux = _FakeStateMux({"%9"}, {"%9": "blocked"})
+    targets = [_native_target(5, enabled=False)]
+    due: list[dict] = []
+    read = _flag_native_status_due(mux, targets, due)
+    assert due == []
+    assert read == {}
+
+
+def test_flag_native_status_due__recovery_read_committed_immediately_rearms_episode():
+    """blocked → working → blocked across three no-wake ticks. The flagged
+    ``blocked`` read is RETURNED (pending a wake, uncommitted), but the
+    NON-flagged ``working`` recovery read is committed to ``_last_agent_status``
+    IMMEDIATELY — even on a no-wake tick — so the second ``blocked`` is a real
+    transition (prev == ``working``) and natively flags again.
+
+    Contrast ``..._uncommitted_status_re_flags_next_call`` (a *flagged* episode
+    that a wake failure leaves un-consumed): there ``blocked`` stays ``blocked``
+    with no commit, and prev stays ``None``. Here the *recovery* commits on its
+    own, which is what re-arms detection of the next distinct episode."""
+    targets = [_native_target(5)]
+
+    # Tick 1: blocked → flagged, returned as pending, NOT committed (awaits a wake).
+    due1: list[dict] = []
+    pending1 = _flag_native_status_due(
+        _FakeStateMux({"%9"}, {"%9": "blocked"}), targets, due1
+    )
+    assert [t["agent_id"] for t in due1] == [5]
+    assert pending1 == {5: "blocked"}
+    assert 5 not in _last_agent_status  # a flagged read is not self-committed
+
+    # No live watcher → woke=False → the caller does NOT commit pending1.
+
+    # Tick 2: working recovery → NON-attention → committed IMMEDIATELY, not flagged.
+    due2: list[dict] = []
+    pending2 = _flag_native_status_due(
+        _FakeStateMux({"%9"}, {"%9": "working"}), targets, due2
+    )
+    assert due2 == []
+    assert pending2 == {}
+    assert _last_agent_status[5] == "working"  # recovery recorded on a no-wake tick
+
+    # Tick 3: blocked again → prev == "working" → transition → flags again.
+    due3: list[dict] = []
+    pending3 = _flag_native_status_due(
+        _FakeStateMux({"%9"}, {"%9": "blocked"}), targets, due3
+    )
+    assert [t["agent_id"] for t in due3] == [5]
+    assert pending3 == {5: "blocked"}
+
+
+def test_flag_native_status_due__already_interval_due_not_duplicated():
+    """An agent already in the interval-due set is not appended twice, and keeps
+    no native wake reason (the interval trigger owns it)."""
+    mux = _FakeStateMux({"%9"}, {"%9": "blocked"})
+    target = _native_target(5)
+    due = [target]
+    _flag_native_status_due(mux, [target], due)
+    assert [t["agent_id"] for t in due] == [5]
+    assert "wake_reason" not in target
+
+
+def test_flag_native_status_due__dead_or_pending_pane_skipped():
+    """Agents with no pane (pending) or a dead pane are never point-read."""
+    mux = _FakeStateMux(set(), {})
+    targets = [
+        _native_target(5, pane_id=None),
+        _native_target(6, pane_alive=False),
+    ]
+    due: list[dict] = []
+    _flag_native_status_due(mux, targets, due)
+    assert due == []
+
+
+def test_monitor_tick__native_blocked_transition_wakes_watcher(capsys, monkeypatch):
+    """End-to-end on an AgentStateAware backend: a member that is NOT interval-due
+    but whose native status just entered ``blocked`` is unioned into the due set,
+    wakes the watcher, and logs the ``[status:blocked]`` wake-reason suffix."""
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["agent_id"]
+    _register_monitoring_member(fleet, "watcher", "%7")
+    member = _register_member(fleet, "alice", "%9")
+
+    # Make BOTH watched agents interval-not-due so only the native transition can
+    # flag the member.
+    broker.record_pings([director_id, member], _NOW.isoformat())
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+    fake = _FakeStateMux({"%0", "%7", "%9"}, {"%0": "idle", "%9": "blocked"})
+    monkeypatch.setattr("cafleet.monitor.loop.resolve_multiplexer", lambda: fake)
+
+    result = monitor_tick(sid, _NOW)
+
+    assert result is CONTINUE
+    # the member's native blocked transition flags it due → one wake naming alice
+    assert fake.wakes == [("%7", [member], director_id)]
+    # native-due agents carry the status wake-reason suffix on the stdout line
+    out = capsys.readouterr().out
+    assert f"due agent {member} (" in out
+    assert "[status:blocked]" in out
+    assert "-> wake monitor" in out
+    # the successful wake advanced the member's cadence
+    assert broker.get_monitor_config(sid, member)["last_ping_at"] == _NOW.isoformat()
+
+
+def test_monitor_tick__native_branch_inert_on_tmux_backend(monkeypatch):
+    """On the tmux backend (not AgentStateAware), the native-status branch never
+    runs: with nobody interval-due there is no wake, so a would-be ``blocked``
+    member cannot be flagged natively — the interval-only behavior is preserved."""
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["agent_id"]
+    _register_monitoring_member(fleet, "watcher", "%7")
+    member = _register_member(fleet, "alice", "%9")
+
+    broker.record_pings([director_id, member], _NOW.isoformat())
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+    # resolve_multiplexer returns the tmux singleton (autouse-pinned); _stub_tmux
+    # patches its class methods. tmux is not AgentStateAware → branch skipped.
+    polls, wakes = _stub_tmux(monkeypatch, {"%0", "%7", "%9"})
+
+    result = monitor_tick(sid, _NOW)
+
+    assert result is CONTINUE
+    assert wakes == []
+    assert polls == []
+
+
+def test_monitor_tick__native_transition_not_consumed_when_no_wake(monkeypatch):
+    """When there is no live watcher to wake, the native ``blocked`` transition is
+    NOT consumed: ``_last_agent_status`` is left uncommitted, so the SAME
+    transition re-flags and wakes on the next tick once a watcher is live."""
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["agent_id"]
+    _register_monitoring_member(fleet, "watcher", "%7")
+    member = _register_member(fleet, "alice", "%9")
+    broker.record_pings([director_id, member], _NOW.isoformat())
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+
+    # Tick 1: the watcher's pane "%7" is NOT live, so the wake block is skipped and
+    # nothing is committed — the blocked episode stays un-consumed.
+    fake1 = _FakeStateMux({"%0", "%9"}, {"%0": "idle", "%9": "blocked"})
+    monkeypatch.setattr("cafleet.monitor.loop.resolve_multiplexer", lambda: fake1)
+    assert monitor_tick(sid, _NOW) is CONTINUE
+    assert fake1.wakes == []
+    assert member not in _last_agent_status
+
+    # Tick 2: same blocked status, watcher now live → the un-consumed transition
+    # re-flags and wakes.
+    fake2 = _FakeStateMux({"%0", "%7", "%9"}, {"%0": "idle", "%9": "blocked"})
+    monkeypatch.setattr("cafleet.monitor.loop.resolve_multiplexer", lambda: fake2)
+    assert monitor_tick(sid, _NOW) is CONTINUE
+    assert fake2.wakes == [("%7", [member], director_id)]
+
+
+def test_monitor_tick__native_transition_consumed_on_successful_wake(monkeypatch):
+    """A successful wake commits the read statuses, so the SAME ``blocked`` status
+    does not re-wake on the next tick — the episode wakes exactly once."""
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["agent_id"]
+    _register_monitoring_member(fleet, "watcher", "%7")
+    member = _register_member(fleet, "alice", "%9")
+    broker.record_pings([director_id, member], _NOW.isoformat())
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+
+    # Tick 1: blocked transition wakes the live watcher and commits the status.
+    fake1 = _FakeStateMux({"%0", "%7", "%9"}, {"%0": "idle", "%9": "blocked"})
+    monkeypatch.setattr("cafleet.monitor.loop.resolve_multiplexer", lambda: fake1)
+    assert monitor_tick(sid, _NOW) is CONTINUE
+    assert fake1.wakes == [("%7", [member], director_id)]
+    assert _last_agent_status[member] == "blocked"
+
+    # Tick 2 (1 s later, still interval-not-due): same blocked status is a
+    # non-transition → no native flag → no wake.
+    later = _NOW + timedelta(seconds=1)
+    fake2 = _FakeStateMux({"%0", "%7", "%9"}, {"%0": "idle", "%9": "blocked"})
+    monkeypatch.setattr("cafleet.monitor.loop.resolve_multiplexer", lambda: fake2)
+    assert monitor_tick(sid, later) is CONTINUE
+    assert fake2.wakes == []
