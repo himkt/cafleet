@@ -235,7 +235,11 @@ def test_split_window__subsequent_member_splits_max_then_equalizes(herdr_run):
         ),
         _envelope({"pane": {"pane_id": "wG:p4"}}),  # split(max=p3, down) → new pane
         _envelope({"pane": {"tab_id": "wG:t1"}}),  # pane current → focused tab
-        _envelope(_balanced_layout("wG:t1", col_x=100)["layout"]),  # pane layout
+        # _run_json returns the `result` object; _resize_focused_tab_column then
+        # indexes ["layout"], so the result must carry the `layout` wrapper (do
+        # NOT pre-index it here, or the equalizer KeyErrors and swallows,
+        # bypassing the real balanced path).
+        _envelope(_balanced_layout("wG:t1", col_x=100)),  # pane layout
     )
     new_pane = _herdr.split_window(
         reference=_REFERENCE, env={}, command=["claude", "second"]

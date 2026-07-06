@@ -452,6 +452,48 @@ def test_flag_native_status_due__disabled_target_not_read_or_flagged():
     assert read == {}
 
 
+def test_flag_native_status_due__recovery_read_committed_immediately_rearms_episode():
+    """blocked → working → blocked across three no-wake ticks. The flagged
+    ``blocked`` read is RETURNED (pending a wake, uncommitted), but the
+    NON-flagged ``working`` recovery read is committed to ``_last_agent_status``
+    IMMEDIATELY — even on a no-wake tick — so the second ``blocked`` is a real
+    transition (prev == ``working``) and natively flags again.
+
+    Contrast ``..._uncommitted_status_re_flags_next_call`` (a *flagged* episode
+    that a wake failure leaves un-consumed): there ``blocked`` stays ``blocked``
+    with no commit, and prev stays ``None``. Here the *recovery* commits on its
+    own, which is what re-arms detection of the next distinct episode."""
+    targets = [_native_target(5)]
+
+    # Tick 1: blocked → flagged, returned as pending, NOT committed (awaits a wake).
+    due1: list[dict] = []
+    pending1 = _flag_native_status_due(
+        _FakeStateMux({"%9"}, {"%9": "blocked"}), targets, due1
+    )
+    assert [t["agent_id"] for t in due1] == [5]
+    assert pending1 == {5: "blocked"}
+    assert 5 not in _last_agent_status  # a flagged read is not self-committed
+
+    # No live watcher → woke=False → the caller does NOT commit pending1.
+
+    # Tick 2: working recovery → NON-attention → committed IMMEDIATELY, not flagged.
+    due2: list[dict] = []
+    pending2 = _flag_native_status_due(
+        _FakeStateMux({"%9"}, {"%9": "working"}), targets, due2
+    )
+    assert due2 == []
+    assert pending2 == {}
+    assert _last_agent_status[5] == "working"  # recovery recorded on a no-wake tick
+
+    # Tick 3: blocked again → prev == "working" → transition → flags again.
+    due3: list[dict] = []
+    pending3 = _flag_native_status_due(
+        _FakeStateMux({"%9"}, {"%9": "blocked"}), targets, due3
+    )
+    assert [t["agent_id"] for t in due3] == [5]
+    assert pending3 == {5: "blocked"}
+
+
 def test_flag_native_status_due__already_interval_due_not_duplicated():
     """An agent already in the interval-due set is not appended twice, and keeps
     no native wake reason (the interval trigger owns it)."""

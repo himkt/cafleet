@@ -114,8 +114,10 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
             # just-flagged agent is not due again next tick (no wake-storm while
             # the watcher works). A failed best-effort keystroke leaves the due
             # agents flagged, so the next tick retries instead of silently
-            # skipping a check for a full interval. The native last-seen statuses
-            # commit on the same gate, so a wake failure re-flags the episode.
+            # skipping a check for a full interval. pending_status holds only the
+            # natively-flagged agents' reads, committed on this same wake gate so
+            # a wake failure re-flags the episode (non-flagged reads were already
+            # committed in _flag_native_status_due).
             broker.record_pings([t["agent_id"] for t in due], now.isoformat())
             _last_agent_status.update(pending_status)
             # Visible heartbeat: one line per due agent on the launching task's stdout.
@@ -141,13 +143,15 @@ def _flag_native_status_due(
     ``status:<state>`` wake reason. Herdr-only: the caller guards on
     ``isinstance(mux, AgentStateAware)``.
 
-    Returns the read statuses keyed by agent_id; the caller commits them to
-    ``_last_agent_status`` **only after a successful wake**, so a wake failure
-    leaves the episode un-consumed and the next tick re-flags it (mirrors the
-    interval branch's ``record_pings`` gating).
+    Non-flagged reads (recovery / idle / steady-state) are committed to
+    ``_last_agent_status`` **immediately**, so a recovery (e.g. blocked→working)
+    is recorded even on a no-wake tick and the next episode is detected. Only the
+    natively-**flagged** agents' reads are returned as pending; the caller commits
+    those **only after a successful wake**, so a wake failure re-flags that
+    episode next tick (mirrors the interval branch's ``record_pings`` gating).
     """
     due_ids = {t["agent_id"] for t in due}
-    read: dict[int, str | None] = {}
+    pending: dict[int, str | None] = {}
     for target in targets:
         if not target["enabled"]:
             continue
@@ -155,13 +159,15 @@ def _flag_native_status_due(
             continue
         agent_id = target["agent_id"]
         status = mux.agent_status(target_pane_id=target["pane_id"])
-        read[agent_id] = status
         prev = _last_agent_status.get(agent_id)
         if status in _ATTENTION_STATES and status != prev and agent_id not in due_ids:
             target["wake_reason"] = f"status:{status}"
             due.append(target)
             due_ids.add(agent_id)
-    return read
+            pending[agent_id] = status
+        else:
+            _last_agent_status[agent_id] = status
+    return pending
 
 
 _stop_requested = False

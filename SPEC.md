@@ -2076,11 +2076,14 @@ ticks (no DB column). Each tick, when the resolved backend passes
    a single `blocked`/`done` episode wakes the watcher **only once**.
 3. Union the native-due agents with the interval-due set; each native one is
    tagged with a `status:<state>` wake-reason label.
-4. Return the read statuses to the caller, which commits them to the
-   `last_status` map **only after a successful wake** (`woke == True`, alongside
-   `record_pings`). On a failed/no-wake tick the statuses are **not** committed,
-   so the `blocked`/`done` episode stays un-consumed and re-flags next tick (no
-   silent skip) — mirroring the interval branch's `record_pings` gating.
+4. Commit each **non-flagged** agent's read to the `last_status` map
+   **immediately** (so a recovery read like `blocked → working` is always
+   recorded and a later `blocked` is still detected as a transition). Return only
+   the **natively-flagged** agents' reads to the caller, which commits them to
+   `last_status` **only after a successful wake** (`woke == True`, alongside
+   `record_pings`). On a failed/no-wake tick a flagged agent's status is **not**
+   committed, so its `blocked`/`done` episode stays un-consumed and re-flags next
+   tick (no silent skip) — mirroring the interval branch's `record_pings` gating.
 
 On the tmux backend the `isinstance` guard is false, so this branch never runs
 and the interval-only behavior is byte-for-byte unchanged. `should_ping` and the
