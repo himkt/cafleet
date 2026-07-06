@@ -2025,7 +2025,9 @@ One scan pass, steps in order:
      {now.isoformat()} due agent {agent_id} ({name}) -> wake monitor
      ```
      `name` is emitted **raw** (sanitization applies only to the keystroke
-     payload).
+     payload). A **native-due** agent (herdr only) inserts a ` [status:<state>]`
+     suffix before ` -> wake monitor`; an interval-due agent's line is unchanged
+     (so the tmux path is byte-for-byte identical).
    - If `woke` is false: do **not** record pings and do **not** echo — the due
      agents stay flagged, so the next tick retries (no wake-storm, no silent
      skip).

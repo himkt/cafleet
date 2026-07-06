@@ -1,7 +1,7 @@
 # Herdr Multiplexer Backend
 
 **Status**: Approved
-**Progress**: 16/31 tasks complete
+**Progress**: 22/31 tasks complete
 **Last Updated**: 2026-07-06
 
 ## Overview
@@ -218,12 +218,14 @@ COMMENT(programmer): The herdr *argv* per §1 is implemented exactly (Step 7's `
 
 ### Step 5: Route every call site through the resolver
 
-- [ ] `cli/member.py` — replace all `MULTIPLEXERS["tmux"]` uses (create/delete/capture/exec/ping) with `resolve_multiplexer()`; pass the Director context to `split_window`; catch `MultiplexerError`. <!-- completed: -->
-- [ ] `cli/fleet.py` — `resolve_multiplexer()` for `ensure_available`/`context_discovery`; catch `MultiplexerError`; generalize the precondition string. <!-- completed: -->
-- [ ] `cli/_helpers.py` — rename `ensure_tmux_or_die` → `ensure_multiplexer_or_die` via the resolver; swap its `TmuxError` import/catch to `MultiplexerError`; update callers. <!-- completed: -->
-- [ ] `cli/doctor.py` — resolve backend; emit the backend-neutral `multiplexer` block (§6); swap its `TmuxError` import/catch to `MultiplexerError`. <!-- completed: -->
-- [ ] `broker/messaging.py:44` — replace `TmuxMultiplexer()` with `resolve_multiplexer()`. <!-- completed: -->
-- [ ] `monitor/loop.py:80` — replace `TmuxMultiplexer()` with `resolve_multiplexer()`; add the herdr-only `AgentStateAware` native-status branch (§5), with `loop.py` owning the in-memory `dict[agent_id, last_status]` and the `status:<state>` wake-reason label (`monitor_tick` stays interval-only). <!-- completed: -->
+- [x] `cli/member.py` — replace all `MULTIPLEXERS["tmux"]` uses (create/delete/capture/exec/ping) with `resolve_multiplexer()`; pass the Director context to `split_window`; catch `MultiplexerError`. <!-- completed: 2026-07-06T10:54 -->
+- [x] `cli/fleet.py` — `resolve_multiplexer()` for `ensure_available`/`context_discovery`; catch `MultiplexerError`; generalize the precondition string. <!-- completed: 2026-07-06T10:54 -->
+- [x] `cli/_helpers.py` — rename `ensure_tmux_or_die` → `ensure_multiplexer_or_die` via the resolver; swap its `TmuxError` import/catch to `MultiplexerError`; update callers. <!-- completed: 2026-07-06T10:54 -->
+- [x] `cli/doctor.py` — resolve backend; emit the backend-neutral `multiplexer` block (§6); swap its `TmuxError` import/catch to `MultiplexerError`. <!-- completed: 2026-07-06T10:54 -->
+- [x] `broker/messaging.py:44` — replace `TmuxMultiplexer()` with `resolve_multiplexer()`. <!-- completed: 2026-07-06T10:54 -->
+- [x] `monitor/loop.py:80` — replace `TmuxMultiplexer()` with `resolve_multiplexer()`; add the herdr-only `AgentStateAware` native-status branch (§5), with `loop.py` owning the in-memory `dict[agent_id, last_status]` and the `status:<state>` wake-reason label (`monitor_tick` stays interval-only). <!-- completed: 2026-07-06T10:54 -->
+
+COMMENT(programmer): Step 5 introduces 5 expected test breakages from the documented contract changes (Tester to fix in Step 7): `test_doctor.py` (×4, old tmux-block output → new `multiplexer` block) and `test_fleet_bootstrap.py::test_fleet_create_outside_tmux…` (old precondition string → "tmux or herdr session"). Also: routing `broker/messaging.py` and `monitor/loop.py` through `resolve_multiplexer()` makes those paths env-dependent — `test_inline_preview.py` and `test_loop.py` currently PASS only because this run's shell has `TMUX` set (so resolve returns tmux and the existing `TmuxMultiplexer` class-method monkeypatches apply). In a no-`TMUX` CI they would fail; Step 7 should make them env-independent (monkeypatch `resolve_multiplexer` or set `CAFLEET_MULTIPLEXER`/`TMUX` in the broker/monitor fixtures). Native-status branch is inert on tmux (interval echo byte-for-byte unchanged).
 
 ### Step 6: Persistence rename + migration
 

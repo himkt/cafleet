@@ -14,8 +14,8 @@ import click
 
 from cafleet import broker, output
 from cafleet.cli._helpers import (
+    ensure_multiplexer_or_die,
     ensure_skills_current,
-    ensure_tmux_or_die,
     fleet_id_option,
 )
 from cafleet.monitor import DEFAULT_TICK_SECONDS, loop
@@ -52,7 +52,7 @@ def monitor_start(ctx: click.Context, tick: int) -> None:
     """
     fleet_id = ctx.obj["fleet_id"]
     _require_live_fleet(fleet_id)
-    ensure_tmux_or_die()
+    ensure_multiplexer_or_die()
     if broker.find_monitoring_member(fleet_id) is None:
         click.echo(
             f"Warning: fleet {fleet_id} has no monitoring member; the "
