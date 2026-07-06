@@ -24,7 +24,7 @@ choice, not a merge.
 | Broker | synchronous data-access layer |
 | CLI | the whole `cafleet` command tree |
 | Output | text/JSON formatting, truncation, ANSI strip |
-| Multiplexer | tmux integration, keystroke injection |
+| Multiplexer | tmux + herdr integration, keystroke injection |
 | Monitor | heartbeat supervision loop |
 | Coding agents | claude/codex/opencode backends |
 | WebUI + Config | HTTP API + `CAFLEET_*` settings |
@@ -130,7 +130,7 @@ structure** below is the contract.
 cafleet
 ├── config          config half: Settings singleton, CAFLEET_* env
 ├── db              connection factory, Alembic migration chain
-├── multiplexer     Multiplexer interface, tmux backend, keystrokes
+├── multiplexer     Multiplexer interface, tmux + herdr backends, resolver, keystrokes
 ├── coding-agent    coding-agent interface + claude/codex/opencode
 ├── output          render + formatter layers
 ├── broker          data-access layer
@@ -197,7 +197,7 @@ Edges (who depends on whom):
 **Reconciled overlap points** (specced once, here, then referenced):
 
 1. **Broker ↔ multiplexer inline preview.** The broker's `_try_notify_recipient`
-   (§6.2) looks up the recipient's `tmux_pane_id`, skips self-sends and
+   (§6.2) looks up the recipient's `mux_pane_id`, skips self-sends and
    paneless recipients, **truncates** `text` to `settings.max_text_len` with a
    `…` suffix, then calls `send_inline_preview` (§6.5) which keystrokes the
    2-line `[cafleet msg …]` payload Esc-first. The multiplexer call is
@@ -207,7 +207,7 @@ Edges (who depends on whom):
 2. **CLI ↔ multiplexer ↔ coding-agent member-create.** `cafleet member create`
    (§6.3) sequences: resolve backend → `validate_model` → resolve the prompt
    body via the shared `--text` / `--text-file` reader → `ensure_available`
-   → broker `register_agent` (placement with `tmux_pane_id` unset) → substitute
+   → broker `register_agent` (placement with `mux_pane_id` unset) → substitute
    `{fleet_id}` / `{agent_id}` / `{director_agent_id}` / `{coding_agent}`
    placeholders (§6.3) → `build_spawn_argv` (§6.7) →
    multiplexer `split_window` (§6.5), forwarding `CAFLEET_DATABASE_URL` (when
@@ -283,9 +283,10 @@ The unified shapes:
 |---|---|---|
 | `agent_id` | integer | FK→agents, ON DELETE CASCADE |
 | `director_agent_id` | optional integer | FK→agents, ON DELETE RESTRICT; null ⇒ root Director's own placement |
-| `tmux_session` | string | |
-| `tmux_window_id` | string | |
-| `tmux_pane_id` | optional string | unset until `split_window` resolves it |
+| `mux_session` | string | backend-neutral multiplexer session |
+| `mux_window_id` | string | backend-neutral window/tab id |
+| `mux_pane_id` | optional string | opaque backend pane id (tmux `%N`, herdr `w1:p1`); unset until `split_window` resolves it |
+| `backend` | string | DDL default `"tmux"`; the resolved `mux.name` (`"tmux"`/`"herdr"`) that produced the pane ids |
 | `coding_agent` | string | DDL default `"claude"` |
 | `created_at` | string | ISO timestamp |
 
@@ -539,7 +540,9 @@ the kind (`get_agent`'s four values, `list_fleet_agents`'s two-value
   `description="Root Director for this fleet"`, `status="active"`, card
   `{name, description, skills:[]}` with **no** `cafleet.kind`); insert the
   Director's placement with **`director_agent_id = NULL`** (the sentinel marking
-  the root Director's own placement) plus the tmux identity and `coding_agent`;
+  the root Director's own placement) plus the multiplexer identity (`mux_session`
+  / `mux_window_id` / `mux_pane_id`), the `backend` (the resolved `mux.name`),
+  and `coding_agent`;
   enroll the Director at 180s; back-fill the fleet's `director_agent_id`; insert
   the Administrator agent (`status="active"`, card with
   `cafleet:{kind:"builtin-administrator"}`, description `Built-in administrator
@@ -603,7 +606,7 @@ the kind (`get_agent`'s four values, `list_fleet_agents`'s two-value
   string and condition. Flip `active → deregistered` (stamp `deregistered_at`);
   if a row was flipped, hard-delete its placement and monitor_config row. Returns
   `true` iff a row was flipped.
-- **`update_placement_pane_id(agent_id, pane_id)`** — set `tmux_pane_id` for the
+- **`update_placement_pane_id(agent_id, pane_id)`** — set `mux_pane_id` for the
   agent's placement; None if no placement row; else returns the placement
   projection. Called after the multiplexer resolves a spawned pane's real id.
 - **`verify_agent_fleet(agent_id, fleet_id)`** — EXISTS check; **status-
@@ -927,17 +930,17 @@ invocation, in order:
 
 #### `doctor`
 
-Only global `--json`. Ensures tmux is available (wrapping a tmux error as an
-application error), discovers the tmux context (re-wrapping as an application
-error, exit 1), and reads the `TMUX_PANE` environment variable by **direct
-access** — an unset variable is an intentional loud failure, not a default.
-Emits the four pane identifiers (session name, window id, pane id, raw
-`TMUX_PANE`) as a JSON object under a `tmux` key (`session_name`, `window_id`,
-`pane_id`, `tmux_pane_env`) or a four-line text block, followed by the
-skills-install report.
+Only global `--json`. Resolves the active backend via `resolve_multiplexer()`
+(re-wrapping a `MultiplexerError` as an application error, exit 1), ensures it is
+available (`ensure_available()`), discovers the pane context
+(`context_discovery()`), and reads the backend's presence env var (`TMUX` for
+tmux, `HERDR_ENV` for herdr). Emits a JSON object under a `multiplexer` key
+carrying `backend`, `session`, `window_id`, `pane_id`, `presence_var`, and
+`presence_value` (or the equivalent text block), followed by the skills-install
+report.
 
 **Skills-install report.** Read all `skill_installs` rows (or detect a missing
-table). In text mode, append a `skills:` block after the `tmux:` block:
+table). In text mode, append a `skills:` block after the `multiplexer:` block:
 
 ```
 skills:
@@ -957,11 +960,11 @@ skills:
   (no skills install recorded; run 'cafleet setup')
 ```
 
-In JSON mode, a `"skills"` key sibling to `"tmux"`:
+In JSON mode, a `"skills"` key sibling to `"multiplexer"`:
 
 ```json
 {
-  "tmux": { "session_name": "...", "window_id": "...", "pane_id": "...", "tmux_pane_env": "..." },
+  "multiplexer": { "backend": "tmux", "session": "...", "window_id": "...", "pane_id": "...", "presence_var": "TMUX", "presence_value": "..." },
   "skills": {
     "cli_version": "0.6.0",
     "installs": [
@@ -988,9 +991,9 @@ fleet-scoped command (§6.3 `--fleet-id`).
 
 - **create** — `--label` (string, optional), `--coding-agent` (choice over the
   coding-agent names, default `claude`, shown in help), `--json` (local),
-  `--full` (documented). Requires tmux: on a tmux error → application error
-  `cafleet fleet create must be run inside a tmux session` (exit 1, no DB
-  writes).
+  `--full` (documented). Requires a supported multiplexer: on a `MultiplexerError`
+  → application error `cafleet fleet create must be run inside a tmux or herdr
+  session` (exit 1, no DB writes).
 - **list** — `--json` (local). Empty → `No fleets found.`; else a header plus
   one formatted row per fleet (five columns: FLEET_ID / DIRECTOR / LABEL / AGENTS
   left-padded 40 / 40 / 20 / 8, then a trailing unpadded CREATED_AT; nullable
@@ -1551,14 +1554,14 @@ Every field is read with required access unless marked optional; required access
   every placement cell renders `-` for a placementless row.
 - **Fleet-create** (`format_fleet_create`): `fleet_id` (req), `director` (req
   nested) → `agent_id` (req), `name`/`placement` (req, verbose);
-  `director.placement` (verbose) → `tmux_session`/`tmux_window_id`/`tmux_pane_id`
+  `director.placement` (verbose) → `mux_session`/`mux_window_id`/`mux_pane_id`
   (req); `administrator_agent_id` (req); `label` (req key, verbose, empty string
   when falsy); `created_at` (req, verbose).
 - **Member-create** (`format_member`): `agent_id` (req), `name` (req),
-  `placement` (req) → `coding_agent` (req), `tmux_pane_id` (req key; `(pending)`
-  when falsy in compact), `tmux_window_id` (req, verbose).
+  `placement` (req) → `coding_agent` (req), `mux_pane_id` (req key; `(pending)`
+  when falsy in compact), `mux_window_id` (req, verbose).
 - **Member-list row**: `agent_id`, `name`, `status`, `placement` →
-  `{coding_agent, tmux_session, tmux_window_id, tmux_pane_id (→ "(pending)"),
+  `{coding_agent, mux_session, mux_window_id, mux_pane_id (→ "(pending)"),
   created_at}`.
 - **Member-list-activity row**: `agent_id`, `name`, `status`, `last_sent`,
   `last_recv`, `last_ack` (ISO str | null), `idle` (int seconds | null).
@@ -1569,8 +1572,16 @@ Every field is read with required access unless marked optional; required access
 - **Monitor-config** (`format_monitor_config`): `agent_id`, `interval_seconds`,
   `enabled` (bool), `last_ping_at` (str | null; `-` when null).
 
-The `(pending)` fallback for `tmux_pane_id` appears in the compact member render
+The `(pending)` fallback for `mux_pane_id` appears in the compact member render
 and both list rows, but **not** in the verbose `format_member` block.
+
+The `backend:` display label (in `format_agent`'s verbose placement block, the
+`format_member` renders, and the roster/list column headers) maps to the
+placement's **`coding_agent`** value (`claude`/`codex`/`opencode`) — it names the
+coding-agent backend, a distinct axis from the placement's `backend` column
+(the multiplexer, `tmux`/`herdr`). The placement projection carries the new
+`backend` column, but these formatters do not render it; only `cafleet doctor`
+surfaces the resolved multiplexer backend (§6.3).
 
 #### Exact text layouts
 
@@ -1602,21 +1613,21 @@ with `:`:
 label:            <label or "">
 created_at:       <created_at>
 director_name:    <director.name>
-pane:             <tmux_session>:<tmux_window_id>:<tmux_pane_id>
+pane:             <mux_session>:<mux_window_id>:<mux_pane_id>
 administrator:    <administrator_agent_id>
 ```
 
-`format_member` — **compact** (`pane` = `tmux_pane_id` or `(pending)`):
+`format_member` — **compact** (`pane` = `mux_pane_id` or `(pending)`):
 `<agent_id> <name> backend=<coding_agent> pane=<pane>`. **Verbose** — 6 lines
-(verbose `pane_id` is the raw `tmux_pane_id`, no `(pending)`):
+(verbose `pane_id` is the raw `mux_pane_id`, no `(pending)`):
 
 ```
 Member registered and spawned.
   agent_id:  <agent_id>
   name:      <name>
   backend:   <coding_agent>
-  pane_id:   <tmux_pane_id>
-  window_id: <tmux_window_id>
+  pane_id:   <mux_pane_id>
+  window_id: <mux_window_id>
 ```
 
 `format_member_list` — empty → `0 members.`; else a header `<count> member<s>:`
@@ -1624,7 +1635,7 @@ Member registered and spawned.
 separator, then one row per member. Each row begins with a two-space indent and
 columns separated by two spaces, left-justified to fixed widths (longer values
 are **not** truncated): `agent_id` 14, `name` 8, `status` 6, `coding_agent` 7,
-`tmux_session` 7, `tmux_window_id` 9, `tmux_pane_id` (→`(pending)`) 7, then
+`mux_session` 7, `mux_window_id` 9, `mux_pane_id` (→`(pending)`) 7, then
 `created_at` with no padding (last column). `agent_id` is stringified.
 
 `format_member_list_activity` — empty → `0 members.`; same pluralized header.
@@ -1661,17 +1672,56 @@ single absent glyph*). The conditional fields `kind`, `origin`, and the verbose
 broadcast-summary row's NULL recipient omits it; a unicast's real id always
 shows.
 
-### 6.5 Multiplexer & tmux
+### 6.5 Multiplexer (tmux + herdr)
 
 **Scope:** the `Multiplexer` interface, the frozen `MultiplexerContext`, the
-`poll_until_pane_gone` helper, and the single `TmuxMultiplexer` backend that owns
-all `tmux` subprocess invocation and keystroke injection. A `MULTIPLEXERS`
-registry maps `"tmux"` to a single shared stateless backend instance. Every
-method invokes tmux as an **argv list without a shell** (no shell interpolation
-— load-bearing for the literal `send-keys -l` payloads). The exact tmux argv each
-method builds is given verbatim; preserve subcommand, flags, and ordering.
+optional `AgentStateAware` capability, the `poll_until_pane_gone` helper, the
+`MultiplexerError` exception taxonomy, the `MULTIPLEXERS` registry with the
+`resolve_multiplexer()` resolver, and the two shipped backends `TmuxMultiplexer`
+and `HerdrMultiplexer`. Each backend owns all subprocess invocation and
+keystroke injection for its multiplexer. The `MULTIPLEXERS` registry maps
+`"tmux"` and `"herdr"` each to a single shared stateless backend instance. Every
+method invokes its multiplexer binary as an **argv list without a shell** (no
+shell interpolation — load-bearing for the literal `send-keys -l` payloads on
+tmux). The exact argv each method builds is given verbatim; preserve subcommand,
+flags, and ordering.
 
-#### Method surface
+**Error taxonomy.** A shared base `MultiplexerError(Exception)` in `base.py`;
+`TmuxError(MultiplexerError)` and `HerdrError(MultiplexerError)` are the
+backend-specific subclasses. Every CLI boundary that converts a backend failure
+to an application error catches `MultiplexerError`, so both backends' failures
+are handled uniformly while each backend keeps its own message text.
+
+**Backend resolution — `resolve_multiplexer() -> Multiplexer`.** Every call site
+resolves its backend through this function rather than a hardcoded
+`MULTIPLEXERS["tmux"]`. Precedence:
+
+1. **Explicit override.** `settings.multiplexer` (from `CAFLEET_MULTIPLEXER`)
+   non-`None` must be a registry key; otherwise raise `MultiplexerError` with
+   `CAFLEET_MULTIPLEXER=<value!r> is not a supported multiplexer (expected one
+   of: <sorted keys>)`.
+2. **Auto-detect.** `HERDR_ENV` truthy ⇒ herdr present; `TMUX` set ⇒ tmux
+   present.
+3. **Ambiguity is a hard error.** Both present ⇒ raise `MultiplexerError`
+   `ambiguous multiplexer environment: both HERDR_ENV and TMUX are set; set
+   CAFLEET_MULTIPLEXER to 'tmux' or 'herdr' to disambiguate`. Neither present ⇒
+   raise `MultiplexerError` `no supported multiplexer detected: neither HERDR_ENV
+   nor TMUX is set; run cafleet inside a tmux or herdr session, or set
+   CAFLEET_MULTIPLEXER`. Exactly one present ⇒ that backend.
+
+An unset `CAFLEET_MULTIPLEXER` (auto-detect) is a legitimate default — absence is
+a valid, well-defined state, not a fallback for a missing value; the override is
+the deterministic escape hatch.
+
+#### Interface signature note — `split_window`
+
+`Multiplexer.split_window(*, reference: MultiplexerContext, env, command) -> str`
+takes the full reference context rather than a bare window id: tmux splits a
+*window* and uses `reference.window_id`; herdr splits a *pane* and uses
+`reference.pane_id`. The sole call site (`cli/member.py`) already holds the
+Director's `MultiplexerContext` and passes it directly.
+
+#### `TmuxMultiplexer` method surface
 
 - **`name`** — the registry key literal `"tmux"`.
 - **`ensure_available()`** — fail-fast. Raises if `tmux` is not on `PATH` →
@@ -1683,15 +1733,15 @@ method builds is given verbatim; preserve subcommand, flags, and ordering.
   `tmux display-message -p -t <TMUX_PANE> "#{session_name}|#{window_id}|#{pane_id}"`,
   strip, split on `|` into **exactly 3** parts (max-split 2); wrong count →
   `unexpected tmux display-message output: <quoted-output>`. Return the context.
-- **`split_window(*, target_window_id, env, command) -> str`** — spawns a new
-  **detached** pane and returns its id. Base argv `tmux split-window -t
-  <target_window_id> -P -F "#{pane_id}" -d` (the `-d` detach is unconditional;
-  `-P -F "#{pane_id}"` prints the new pane id); for each `(k, v)` in `env` append
-  `-e <k>=<v>`; append the `command` argv elements. Run, take the printed pane
-  id, then call `select_layout(target_window_id)` (default layout
-  `main-vertical`, **swallowing** any error from it), and return the pane id.
-  `select_layout` runs `tmux select-layout -t <target_window_id> <layout>` and is
-  internal to the tmux backend (not on the interface).
+- **`split_window(*, reference, env, command) -> str`** — spawns a new
+  **detached** pane and returns its id, splitting `reference.window_id`. Base
+  argv `tmux split-window -t <reference.window_id> -P -F "#{pane_id}" -d` (the
+  `-d` detach is unconditional; `-P -F "#{pane_id}"` prints the new pane id); for
+  each `(k, v)` in `env` append `-e <k>=<v>`; append the `command` argv elements.
+  Run, take the printed pane id, then call `select_layout(reference.window_id)`
+  (default layout `main-vertical`, **swallowing** any error from it), and return
+  the pane id. `select_layout` runs `tmux select-layout -t <reference.window_id>
+  <layout>` and is internal to the tmux backend (not on the interface).
 - **`send_exit(*, target_pane_id, ignore_missing=False)`** — keystrokes `/exit`
   + Enter via the literal-then-Enter core, **no Esc-first**; tolerates a missing
   pane when `ignore_missing`.
@@ -1819,6 +1869,72 @@ no-command-substitution guarantee. These are exact Unicode scalar values and are
 part of the keystroked payload contract, not cosmetic — distinct from the
 CR/LF-only cosmetic strip in `send_inline_preview`.
 
+#### `HerdrMultiplexer` method surface
+
+Uses the herdr **CLI exclusively** (subprocess, argv list, no shell), mirroring
+`TmuxMultiplexer`'s dispatcher. Pane ids are opaque strings (`w1:p1`), never
+parsed. A `_run()` dispatcher maps binary-not-found / timeout / non-zero exit to
+`HerdrError`, with a `not_found`-tolerant helper for `ignore_missing` teardown.
+Each method's herdr realization:
+
+- **`name`** — the registry key literal `"herdr"`.
+- **`ensure_available()`** — fail-fast (`HerdrError`): the `herdr` binary is
+  missing from `PATH`, or `HERDR_ENV` is unset.
+- **`context_discovery() -> MultiplexerContext`** — `HERDR_ENV` present +
+  `herdr pane current` → current pane id; `herdr pane get <id>` → owning
+  tab/session. Returns the context (`session`, `window_id`, `pane_id`).
+- **`split_window(*, reference, env, command) -> str`** — `herdr pane split
+  <reference.pane_id> --direction down --no-focus [--cwd P] [--env K=V …]` → new
+  pane id, then `herdr pane run <new_id> "<shlex.join(command)>"`. The argv
+  `command` is rendered to a single properly-quoted string with `shlex.join`
+  before the `pane run` because `pane run` submits one text line into the pane's
+  shell (a genuine semantic difference from the tmux exec-argv path — otherwise
+  an argument containing spaces would be re-split).
+- **`kill_pane(*, target_pane_id, ignore_missing=False)`** — `herdr pane close
+  <pane_id>` through the `not_found`-tolerant runner.
+- **`list_pane_ids() -> set`** — `herdr pane list` → the set of pane ids.
+- **`wait_for_pane_gone(...)`** — `poll_until_pane_gone` over `herdr pane get
+  <id>` (absent → gone).
+- **`send_exit(*, target_pane_id, ignore_missing=False)`** — `herdr pane run
+  <id> "/exit"`.
+- **`send_poll_trigger(...) -> bool`** — best-effort. `herdr pane send-keys <id>
+  esc` (the Esc safeguard, with the same short settle delay), then `herdr pane
+  run <id> "cafleet message poll --fleet-id <fleet_id> --agent-id <agent_id>"`.
+- **`send_wake_trigger(...) -> bool`** — best-effort. `herdr pane run <id>
+  "<payload>"` (no Esc — an Esc would self-interrupt the monitoring member).
+- **`send_inline_preview(...) -> bool`** — best-effort. `herdr pane send-keys
+  <id> esc`, then `herdr pane send-text <id> "<2-line payload>"` (raw, no Enter —
+  the embedded newline is literal), then a single `herdr pane send-keys <id>
+  enter`, keeping the tmux contract of "one submit for the whole 2-line payload".
+- **`send_bash_command(*, target_pane_id, command)`** — `herdr pane run <id> "!
+  <command>"`.
+- **`capture_pane(*, target_pane_id, lines=20) -> str`** — `herdr pane read <id>
+  --source recent-unwrapped --lines <lines>`.
+
+**No `_SUBMIT_DELAY`.** herdr `pane run` submits text **and** Enter atomically, so
+the tmux 0.12 s literal-then-Enter delay has no herdr analog — the herdr backend
+omits it. The `esc_first` safeguard maps to a discrete `herdr pane send-keys
+<id> esc` before the payload on exactly the paths that use it today
+(`send_poll_trigger`, `send_inline_preview`).
+
+#### `AgentStateAware` capability (herdr only)
+
+A **separate optional** `@runtime_checkable` Protocol, kept off the base
+`Multiplexer` interface so tmux need not implement anything new:
+
+- **`agent_status(*, target_pane_id) -> str | None`** — the pane's current native
+  agent state (`working`/`blocked`/`done`/`idle`/`unknown`), or `None` when no
+  agent is detected. herdr realization: `herdr pane get` / `pane read --source
+  detection`.
+- **`wait_agent_status(*, target_pane_id, status, timeout_ms) -> bool`** — block
+  until the pane's agent reaches `status` or the timeout elapses; `True` if
+  reached. herdr realization: `herdr wait agent-status <id> --status <s>
+  --timeout <ms>`.
+
+`HerdrMultiplexer` implements both; `TmuxMultiplexer` does **not** implement
+`AgentStateAware` (an `isinstance(mux, AgentStateAware)` guard is therefore
+false on the tmux backend). The monitor loop consumes this capability (§6.6).
+
 ### 6.6 Monitor heartbeat loop
 
 **Scope:** the in-process supervision scheduler. A coding agent launches
@@ -1828,7 +1944,10 @@ and ordinary members. The module owns the OS-facing half — the pure due-check,
 one scan pass, the foreground driver with signal handling and runtime-row
 cleanup, the scan-cadence constant, and the re-export of the four policy
 tunables. It performs no DB internals (the broker's) and no multiplexer
-internals; it orchestrates calls into both.
+internals; it orchestrates calls into both. It resolves its backend via
+`resolve_multiplexer()` (§6.5) and, on a backend that implements `AgentStateAware`
+(herdr only), augments the interval due-check with a native-status due trigger
+(see below); `should_ping` itself stays interval-only.
 
 #### Public surface
 
@@ -1881,11 +2000,18 @@ One scan pass, steps in order:
    `STOP`.
 3. **Locate the watcher.** Ask the broker for the fleet's monitoring member (may
    be absent); shape `{agent_id, name, pane_id}`.
-4. **Fetch pane liveness once.** A **single** `list_pane_ids` call resolves
-   liveness for every agent this tick.
+4. **Fetch pane liveness once.** Resolve the backend via `resolve_multiplexer()`
+   (§6.5); a **single** `list_pane_ids` call resolves liveness for every agent
+   this tick.
 5. **Compute the due set.** For each watched `target` (root Director + ordinary
    members; never the monitoring member): set `target.pane_alive = (target.pane_id
-   ∈ live_panes)`, then if `should_ping(target, now)` add it to the due list.
+   ∈ live_panes)`, then if `should_ping(target, now)` add it to the interval-due
+   list. **On an `AgentStateAware` backend (herdr only):** additionally point-read
+   each watched live agent's `agent_status`, and union into the due set any agent
+   whose status **transitioned into** an attention state (`blocked`/`done`) since
+   the loop's last-seen status for it (see *Native agent-state due trigger*
+   below); each such agent carries a `status:<state>` wake-reason label. On a
+   non-`AgentStateAware` backend (tmux) this branch is skipped entirely.
 6. **Wake the watcher iff due and watcher live.** If the due list is non-empty
    **and** the watcher is present **and** its `pane_id` is in the live set: call
    the multiplexer's wake trigger against the watcher's own pane (the loop's
@@ -1908,6 +2034,28 @@ One scan pass, steps in order:
 
 **Critical ordering invariant:** `record_pings` and the heartbeat echo are gated
 behind `woke == true`. Preserve this gating exactly.
+
+#### Native agent-state due trigger (herdr only)
+
+Augments — never replaces — the interval trigger. The single long-running loop
+process owns an **in-memory** `dict[agent_id, last_status]` that persists across
+ticks (no DB column). Each tick, when the resolved backend passes
+`isinstance(mux, AgentStateAware)`:
+
+1. Point-read `agent_status(target_pane_id=…)` for each watched agent whose pane
+   is live.
+2. A **transition into** an attention state (`blocked` or `done`) — i.e. the new
+   status is an attention state and differs from the loop's last-seen status for
+   that agent — flags the agent due. Comparing against the last-seen status means
+   a single `blocked`/`done` episode wakes the watcher **only once**.
+3. Update the `last_status` map with each read status.
+4. Union the native-due agents with the interval-due set; each native one is
+   tagged with a `status:<state>` wake-reason label.
+
+On the tmux backend the `isinstance` guard is false, so this branch never runs
+and the interval-only behavior is byte-for-byte unchanged. `should_ping` and the
+broker's due computation are untouched — they keep computing interval-due-ness
+only, with no knowledge of native status.
 
 #### `run_monitor_loop(fleet_id, tick_seconds)`
 
@@ -2328,7 +2476,12 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 | `broker_host` | `CAFLEET_BROKER_HOST` | string | `"127.0.0.1"` |
 | `broker_port` | `CAFLEET_BROKER_PORT` | integer (16-bit port) | `8000` |
 | `max_text_len` | `CAFLEET_MAX_TEXT_LEN` | non-negative integer | `200` |
+| `multiplexer` | `CAFLEET_MULTIPLEXER` | optional string | `None` (auto-detect) |
 
+- **`multiplexer`** is the explicit backend override consumed by
+  `resolve_multiplexer()` (§6.5). `None` (unset) means auto-detect from
+  `HERDR_ENV` / `TMUX` — a legitimate default, not a fallback for a missing value.
+  A set value must name a registry key (`tmux`/`herdr`) or resolution raises.
 - **Default DB URL** expands `~` to `$HOME` **only for the factory default**; a
   user-supplied `CAFLEET_DATABASE_URL` is passed through verbatim (no `~`
   expansion, so a user value must already be absolute). Net default on home
@@ -2382,17 +2535,20 @@ diagnostic block (§6.3).
 Exact error strings are catalogued per module in §6; the **strings** are part of
 the contract and should be reproduced (the relaxation in §1 concerns incidental
 formatting artifacts, not these deliberate user-facing messages). Notable
-cross-module string — the "must be run inside a tmux session" text exists in two
+cross-module string — the "must be run inside a … session" text exists in two
 distinct forms with **two different provenances**:
 
-- **Tmux-pane-command path** — the multiplexer's `ensure_available` raises
-  `cafleet member commands must be run inside a tmux session` (§6.5); the CLI
-  surfaces that text as-is (it does not hardcode it).
-- **`fleet create` path** — the CLI **catches** the multiplexer's `TmuxError`,
-  **discards** its message, and raises its own hardcoded command-specific string
-  `cafleet fleet create must be run inside a tmux session` (§6.3, exit 1). This
-  one is genuinely CLI-hardcoded; do not expect it to echo the multiplexer's
-  `member commands` wording.
+- **Pane-command path** — the resolved backend's `ensure_available` raises its own
+  backend-specific text (tmux: `cafleet member commands must be run inside a tmux
+  session`, §6.5; herdr: its own `HerdrError` text); the CLI surfaces that text
+  as-is (it does not hardcode it). Before `ensure_available` runs,
+  `resolve_multiplexer()` may itself raise a `MultiplexerError` when no backend is
+  detected or the environment is ambiguous (§6.5).
+- **`fleet create` path** — the CLI **catches** the multiplexer's
+  `MultiplexerError`, **discards** its message, and raises its own hardcoded
+  command-specific string `cafleet fleet create must be run inside a tmux or herdr
+  session` (§6.3, exit 1). This one is genuinely CLI-hardcoded; do not expect it
+  to echo the backend's own wording.
 
 ### 7.3 Output / JSON / truncation
 

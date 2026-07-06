@@ -15,8 +15,9 @@ with one member per backend and messages each of them.
   `PATH` — `member create` exits 1 with `Error: binary <name> not found on
   PATH` otherwise.
 - You have followed [Install](../get-started/install.md) and
-  [Configure](../get-started/configure.md), and you are inside a tmux
-  session.
+  [Configure](../get-started/configure.md), and you are inside a tmux or herdr
+  session (the multiplexer backend is auto-detected — see
+  [Multiplexer backends](../concepts/multiplexer-backends.md)).
 
 ## Prompt
 
@@ -38,7 +39,7 @@ and the Director never runs the monitor itself
 
 ## What to expect
 
-The agent creates a fleet, then opens three tmux panes — one per backend —
+The agent creates a fleet, then opens three multiplexer panes — one per backend —
 each running its member's coding agent. Each message lands as a 2-line
 inline preview keystroked into the recipient's pane
 ([tmux push](../concepts/tmux-push.md)), so you watch every member wake up

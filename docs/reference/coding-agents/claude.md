@@ -42,7 +42,7 @@ Claude Code honors the leading-`!` shell shortcut that `cafleet member exec` use
 
 ## Verification recipe (manual smoke test)
 
-Gated on local install of the `claude` binary. Run from inside a tmux session. The recipe pastes literal ids: fleet `1`, Director `2`, member `4` — your ids will differ.
+Gated on local install of the `claude` binary. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, member `4` — your ids will differ.
 
 ```bash
 cafleet fleet create --label claude-smoke --coding-agent claude

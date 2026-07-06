@@ -26,6 +26,7 @@ nav = [
         { "Storage" = "concepts/storage.md" },
         { "Member lifecycle" = "concepts/member-lifecycle.md" },
         { "Coding agents" = "concepts/coding-agents.md" },
+        { "Multiplexer backends" = "concepts/multiplexer-backends.md" },
         { "Bash routing" = "concepts/bash-routing.md" },
         { "tmux push notifications" = "concepts/tmux-push.md" },
         { "Monitoring" = "concepts/monitoring.md" },

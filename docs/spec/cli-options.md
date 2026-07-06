@@ -15,7 +15,7 @@ One row per subcommand. "Identity flag" is the per-subcommand option naming the 
 | `setup` | Create the database schema + install the skills (bare group invocation) | no | none | [setup](#cafleet-setup) |
 | `setup db` | Migrate the database schema only | no | none | [setup db](#setup-db) |
 | `setup skill` | Install the skills + record the installed version | no | none | [setup skill](#setup-skill) |
-| `doctor` | Print the calling pane's tmux identifiers + the skills-install report | no | none | [doctor](#cafleet-doctor) |
+| `doctor` | Print the resolved multiplexer backend + the calling pane's identifiers + the skills-install report | no | none | [doctor](#cafleet-doctor) |
 | `server` | Start the admin WebUI server | no | none | [server](#cafleet-server) |
 | `fleet create` | Create a fleet with its root Director and Administrator | no | none | [fleet create](#fleet-create) |
 | `fleet list` | List non-deleted fleets | no | none | [fleet list](#fleet-list) |
@@ -47,6 +47,7 @@ Each parameter has exactly one input source:
 |---|---|
 | Fleet ID | `--fleet-id <int>` per-subcommand option (placed after the subcommand name) |
 | Database URL | `CAFLEET_DATABASE_URL` env var (optional) — see [config](../api/config.md) for its default and the absolute-path requirement. |
+| Multiplexer backend | `CAFLEET_MULTIPLEXER` env var (optional) — an explicit override naming a supported backend (`tmux` or `herdr`); unset ⇒ auto-detect from `HERDR_ENV` / `TMUX`. See [Multiplexer backends](../concepts/multiplexer-backends.md). |
 | Agent ID | `--agent-id <int>` subcommand option |
 | Member ID | `--member-id <int>` subcommand option (the target member on `member *` lifecycle verbs) |
 | JSON output | `--json` global flag |
@@ -305,7 +306,7 @@ The `cafleet fleet` subgroup manages fleets. These commands write directly to SQ
 
 There are no `--name` / `--description` flags. The root Director's name and description are hardcoded (`name="Director"`, `description="Root Director for this fleet"`).
 
-Creates a new fleet with a DB-assigned integer identifier. **Must be run inside a tmux session** — outside tmux the command exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing to the DB. It creates the fleet, its root Director (and placement), and the built-in Administrator atomically (all-or-nothing) — see [data-model.md](./data-model.md) for the Administrator's distinguishing `agent_card_json.cafleet.kind` flag.
+Creates a new fleet with a DB-assigned integer identifier. **Must be run inside a tmux or herdr session** — outside a supported multiplexer the command exits 1 with `Error: cafleet fleet create must be run inside a tmux or herdr session` and writes nothing to the DB. It creates the fleet, its root Director (and placement), and the built-in Administrator atomically (all-or-nothing) — see [data-model.md](./data-model.md) for the Administrator's distinguishing `agent_card_json.cafleet.kind` flag.
 
 **Non-JSON output (default)** — one compact line carrying the new `fleet_id`, the root Director's `agent_id`, and the built-in Administrator's `agent_id`:
 
@@ -321,7 +322,7 @@ Creates a new fleet with a DB-assigned integer identifier. **Must be run inside 
 label:            <label or empty>
 created_at:       <iso8601>
 director_name:    Director
-pane:             <tmux_session>:<tmux_window_id>:<tmux_pane_id>
+pane:             <mux_session>:<mux_window_id>:<mux_pane_id>
 administrator:    <administrator_agent_id>
 ```
 
@@ -340,9 +341,10 @@ administrator:    <administrator_agent_id>
     "registered_at": "2026-04-15T10:00:00+00:00",
     "placement": {
       "director_agent_id": null,
-      "tmux_session": "main",
-      "tmux_window_id": "@3",
-      "tmux_pane_id": "%0",
+      "backend": "tmux",
+      "mux_session": "main",
+      "mux_window_id": "@3",
+      "mux_pane_id": "%0",
       "coding_agent": "claude",
       "created_at": "2026-04-15T10:00:00+00:00"
     }
@@ -404,7 +406,13 @@ Member tmux panes spawned by `cafleet member create` are **not** automatically c
 
 ## `cafleet doctor` — Placement Diagnostics {#cafleet-doctor}
 
-Prints the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE`) for operators diagnosing placement issues without reaching for raw tmux commands, followed by the skills-install report: the runtime CLI version and every recorded `skill_installs` row. `doctor` is exempt from the [stale-skills guard](#stale-skills-guard) — it reports staleness instead of blocking on it.
+Resolves the active multiplexer backend via `resolve_multiplexer()`, then prints
+the resolved backend and the calling pane's session/window/pane identifiers for
+operators diagnosing placement issues without reaching for raw multiplexer
+commands, followed by the skills-install report: the runtime CLI version and
+every recorded `skill_installs` row. `doctor` is exempt from the
+[stale-skills guard](#stale-skills-guard) — it reports staleness instead of
+blocking on it.
 
 | Flag | Required | Notes |
 |---|---|---|
@@ -412,17 +420,20 @@ Prints the calling pane's tmux session/window/pane identifiers (plus `$TMUX_PANE
 
 Environment requirements:
 
-- `TMUX` env var must be set — the command rejects otherwise with `Error: cafleet member commands must be run inside a tmux session` (the same message used by the `member *` tmux guard).
-- `TMUX_PANE` env var must be set — already required for pane discovery.
+- A supported multiplexer must be detected: `resolve_multiplexer()` succeeds when `CAFLEET_MULTIPLEXER` is set to a supported backend, or exactly one of `HERDR_ENV` / `TMUX` is present (see [Multiplexer backends](../concepts/multiplexer-backends.md)). An ambiguous or empty environment fails loudly.
+- The resolved backend's `ensure_available()` + `context_discovery()` must succeed (the binary is on `PATH` and the calling pane is discoverable).
 
-Text output:
+Text output — the `multiplexer:` block carries the resolved `backend`, the three
+pane identifiers, and the backend's presence env var (`TMUX` for tmux,
+`HERDR_ENV` for herdr) with its value:
 
 ```
-tmux:
-  session_name:  main
+multiplexer:
+  backend:       tmux
+  session:       main
   window_id:     @3
   pane_id:       %0
-  TMUX_PANE:     %0
+  presence:      TMUX=/tmp/tmux-501/default,12345,0
 skills:
   cli_version: 0.6.0
   claude:      0.6.0 (2026-07-04T00:12:09.123456+00:00) ok
@@ -440,16 +451,20 @@ skills:
   (no skills install recorded; run 'cafleet setup')
 ```
 
-JSON output — a `"skills"` key sibling to `"tmux"`, with `installs` an empty
-list when no rows exist:
+JSON output — a `"multiplexer"` object with `backend` plus `session` /
+`window_id` / `pane_id` and the presence env var (`presence_var` /
+`presence_value`), sibling to `"skills"` whose `installs` is an empty list when
+no rows exist:
 
 ```json
 {
-  "tmux": {
-    "session_name": "main",
+  "multiplexer": {
+    "backend": "tmux",
+    "session": "main",
     "window_id": "@3",
     "pane_id": "%0",
-    "tmux_pane_env": "%0"
+    "presence_var": "TMUX",
+    "presence_value": "/tmp/tmux-501/default,12345,0"
   },
   "skills": {
     "cli_version": "0.6.0",
@@ -465,8 +480,8 @@ Exit codes:
 
 | Exit | When |
 |---|---|
-| `0` | Success — the tmux fields and the skills report printed. A stale or missing skills install does **not** fail `doctor`. |
-| `1` | Any tmux or environment failure: `TMUX` env var unset, `tmux` binary not on PATH, `TMUX_PANE` env var unset, or a tmux subprocess (e.g. `display-message`) failure. |
+| `0` | Success — the multiplexer fields and the skills report printed. A stale or missing skills install does **not** fail `doctor`. |
+| `1` | Any multiplexer or environment failure: no supported multiplexer detected (or an ambiguous `HERDR_ENV` + `TMUX`), the backend binary not on `PATH`, the pane not discoverable, or a multiplexer subprocess failure. |
 
 ## `cafleet server` — Admin WebUI Server {#cafleet-server}
 
@@ -689,8 +704,8 @@ Member registered and spawned.
 
 `--json` returns
 `{"agent_id":<id>,"name":"<name>","registered_at":"<iso8601>","placement":{...}}`
-where `placement` carries `director_agent_id`, `tmux_session`,
-`tmux_window_id`, `tmux_pane_id`, `coding_agent`, and `created_at` (the same
+where `placement` carries `director_agent_id`, `backend`, `mux_session`,
+`mux_window_id`, `mux_pane_id`, `coding_agent`, and `created_at` (the same
 shape as `fleet create`'s `director.placement`).
 
 ### `member delete` {#member-delete}
@@ -1024,7 +1039,7 @@ agent 5: interval 720s, enabled, last_ping 2026-06-13T04:51:00
 | `setup skill` when the `skill_installs` table is missing | `Error: the database schema is missing or outdated; run 'cafleet setup' or 'cafleet setup db' first` (exit 1) |
 | Missing `--fleet-id` on a fleet-scoped subcommand | `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` (exit 1) |
 | Missing `--agent-id` | `Error: Missing option '--agent-id'.` (exit 2) |
-| `fleet create` run outside a tmux session | `Error: cafleet fleet create must be run inside a tmux session` (exit 1; no DB writes) |
+| `fleet create` run outside a supported multiplexer | `Error: cafleet fleet create must be run inside a tmux or herdr session` (exit 1; no DB writes) |
 | `fleet delete` on unknown fleet_id | `Error: fleet 'X' not found.` (exit 1) |
 | `member create` into a soft-deleted fleet | `Error: fleet X is deleted` (exit 1) |
 | `member delete` against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 1) |

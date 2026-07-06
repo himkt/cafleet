@@ -10,7 +10,8 @@ Agent Teams reinvented for collaborative coding across multiple coding-agent bac
 - **Persistent, auditable messages** — every inter-agent message is stored in SQLite; deregistered agents and their history remain readable.
 - **Single-file broker** — one SQLite database; no separate database daemon to run or monitor. CLI commands write directly through a shared broker module without requiring a running server.
 - **Fleet isolation** — fleets are non-overlapping namespaces; cross-fleet agents are invisible to each other.
-- **tmux push notifications** — after persisting a message, the broker keystrokes a 2-line inline preview into the recipient's tmux pane so coding agents receive messages without invoking `cafleet message poll`.
+- **Pluggable multiplexer backends** — host member panes in **tmux** or **herdr** ([herdr.dev](https://herdr.dev)); the active backend is auto-detected from the environment (`HERDR_ENV` / `TMUX`) and overridable with `CAFLEET_MULTIPLEXER`. On herdr, the monitor also reacts to native `blocked`/`done` agent states.
+- **Push notifications** — after persisting a message, the broker keystrokes a 2-line inline preview into the recipient's multiplexer pane so coding agents receive messages without invoking `cafleet message poll`.
 - **Monitoring member** — a dedicated member runs `cafleet monitor start` as a background task, scheduling periodic heartbeats that keep the Director informed of idle or stalled team members without spending model tokens on scheduling.
 - **Design-doc-driven development** — built-in skills for spec-driven development (SDD), used to evolve CAFleet itself.
 - **Unified CLI** — a single `cafleet` command covers fleet management, member lifecycle, messaging, monitoring, and the admin WebUI server.
@@ -29,7 +30,7 @@ monitor loop ──────────────────────�
                                 monitor_config / monitor_runtime /
                                 skill_installs)
                                          │
-                             ┌──── tmux pane ◄──── inline-preview keystroke
+                             ┌──── multiplexer pane ◄──── inline-preview keystroke
                              │
                      coding-agent pane  monitoring member pane
 ```
@@ -38,7 +39,7 @@ monitor loop ──────────────────────�
 
 - The `cafleet` CLI and the admin WebUI both access SQLite directly through a shared `broker` module — no HTTP server is needed for agent operations.
 - Agents are organized into **fleets** identified by a non-secret integer `fleet_id`. Agents sharing the same fleet can discover and message each other; agents in different fleets are invisible to one another.
-- A fleet has exactly one **root Director** (created by `cafleet fleet create`). Only the root Director may own members. Members are spawned by the Director via `cafleet member create` and are bound to individual tmux panes.
+- A fleet has exactly one **root Director** (created by `cafleet fleet create`). Only the root Director may own members. Members are spawned by the Director via `cafleet member create` and are bound to individual multiplexer panes (tmux or herdr).
 - The `member` group is the single home for the agent lifecycle — spawn, teardown, introspection (`show`, `list --all`), and keystroke interaction.
 - A dedicated **monitoring member** runs `cafleet monitor start` as a background task to supply the heartbeat. The monitor decides only *when* agents are due; the monitoring member inspects each due agent and re-engages an idle Director on demand.
 
@@ -49,7 +50,7 @@ Full architecture documentation: <https://himkt.github.io/cafleet/concepts/overv
 ### Prerequisites
 
 - Python 3.12+
-- tmux (required for `fleet create` and all `member *` commands that touch panes)
+- A terminal multiplexer — **tmux** or **herdr** (required for `fleet create` and all `member *` commands that touch panes). The backend is auto-detected from the environment (`HERDR_ENV` / `TMUX`); set `CAFLEET_MULTIPLEXER` to `tmux` or `herdr` to override.
 - At least one of: `claude` (Claude Code), `codex` (OpenAI Codex CLI), or `opencode`
 
 ### Install
@@ -71,7 +72,7 @@ Per-agent config lives on the Configure page: <https://himkt.github.io/cafleet/g
 
 ### Basic usage
 
-Run inside a tmux session. Create a fleet (records your current pane as the root Director):
+Run inside a tmux or herdr session. Create a fleet (records your current pane as the root Director):
 
 ```bash
 cafleet fleet create --label "my-project"
@@ -143,7 +144,7 @@ The unified `cafleet` CLI is organized as three top-level commands (`setup`, `do
 | `cafleet setup` | Migrate the database schema and install the coding-agent skills in one step (two independent halves, run in order) |
 | `cafleet setup db` | Migrate the database schema only (idempotent) |
 | `cafleet setup skill` | Install the coding-agent skills only and record the installed version (`--agent claude\|codex\|opencode`, repeatable) |
-| `cafleet doctor` | Print the calling pane's tmux session/window/pane identifiers and the skills-install report (recorded version per home, stale/ok status) |
+| `cafleet doctor` | Print the resolved multiplexer backend, the calling pane's session/window/pane identifiers, and the skills-install report (recorded version per home, stale/ok status) |
 | `cafleet server` | Start the admin WebUI server (default `127.0.0.1:8000`) |
 
 ### `fleet` group — fleet lifecycle
@@ -163,7 +164,7 @@ The unified `cafleet` CLI is organized as three top-level commands (`setup`, `do
 | `member delete` | Tear down a member's pane (when one exists) and deregister it; `--force` kills immediately |
 | `member show` | Show one agent's detail (`--member-id` target; `--full` for the labeled block with kind, skills, and placement) |
 | `member list` | List the fleet's members; `--all` lists every active agent with a `kind` column; `--activity` shows message timestamps |
-| `member capture` | Capture the tail of a member's tmux pane |
+| `member capture` | Capture the tail of a member's multiplexer pane |
 | `member exec` | Dispatch a shell command into a member's pane via the `!` shortcut |
 | `member ping` | Inject an inbox-poll keystroke into a member's pane |
 | `member nudge` | Deliver an ACKable task and inline preview to a member (typically the Director) |

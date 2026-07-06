@@ -1,6 +1,6 @@
 # tmux-backed member commands (`cafleet member *`)
 
-Reference page for the Director-only lifecycle and pane-interaction commands — `member create`, `member delete`, `member list` (with `--activity`), `member capture`, `member exec`, `member ping`, `member nudge`. All run inside a tmux session, scoped to the per-subcommand `--fleet-id`. `member create` takes `--agent-id` (the spawning Director, validated to equal the fleet root); every other lifecycle verb identifies its **target** by `--member-id`; `member nudge` additionally takes `--agent-id` (the sender, typically the monitoring member).
+Reference page for the Director-only lifecycle and pane-interaction commands — `member create`, `member delete`, `member list` (with `--activity`), `member capture`, `member exec`, `member ping`, `member nudge`. All run inside a tmux or herdr session, scoped to the per-subcommand `--fleet-id`. `member create` takes `--agent-id` (the spawning Director, validated to equal the fleet root); every other lifecycle verb identifies its **target** by `--member-id`; `member nudge` additionally takes `--agent-id` (the sender, typically the monitoring member).
 
 Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/exec-routing.md`.
 
