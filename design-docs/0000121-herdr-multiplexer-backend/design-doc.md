@@ -1,7 +1,7 @@
 # Herdr Multiplexer Backend
 
 **Status**: Approved
-**Progress**: 22/31 tasks complete
+**Progress**: 25/31 tasks complete
 **Last Updated**: 2026-07-06
 
 ## Overview
@@ -229,9 +229,11 @@ COMMENT(programmer): Step 5 introduces 5 expected test breakages from the docume
 
 ### Step 6: Persistence rename + migration
 
-- [ ] `db/models.py` — rename the three `AgentPlacement` columns to `mux_*` and add `backend` (`server_default="tmux"`). <!-- completed: -->
-- [ ] Author Alembic `0008` (`down_revision="0007"`): `batch_alter_table` rename the three columns + add `backend TEXT NOT NULL DEFAULT 'tmux'`. <!-- completed: -->
-- [ ] Update every read/write site to the new names + set `backend=mux.name` on insert: `broker/agents.py` (register INSERT, `update_placement_pane_id` UPDATE), `broker/fleets.py` (director placement), `broker/members.py` (roster SELECTs), `broker/monitor.py` (pane-id SELECTs), `broker/messaging.py` (recipient pane SELECT), `broker/_shared.py` (`placement_dict`), `cli/member.py` (placement dict + `placement["mux_pane_id"]` reads), `output/formatters.py` (dict-key reads; display labels already neutral). <!-- completed: -->
+- [x] `db/models.py` — rename the three `AgentPlacement` columns to `mux_*` and add `backend` (`server_default="tmux"`). <!-- completed: 2026-07-06T11:15 -->
+- [x] Author Alembic `0008` (`down_revision="0007"`): `batch_alter_table` rename the three columns + add `backend TEXT NOT NULL DEFAULT 'tmux'`. <!-- completed: 2026-07-06T11:15 -->
+- [x] Update every read/write site to the new names + set `backend=mux.name` on insert: `broker/agents.py` (register INSERT, `update_placement_pane_id` UPDATE), `broker/fleets.py` (director placement), `broker/members.py` (roster SELECTs), `broker/monitor.py` (pane-id SELECTs), `broker/messaging.py` (recipient pane SELECT), `broker/_shared.py` (`placement_dict`), `cli/member.py` (placement dict + `placement["mux_pane_id"]` reads), `output/formatters.py` (dict-key reads; display labels already neutral). <!-- completed: 2026-07-06T11:15 -->
+
+COMMENT(programmer): Step 6 intentionally breaks much of the suite (Tester fixes in Step 7). Verified via lint + typecheck only, per Director. Breakage sources: (1) `broker.create_fleet` now requires a `backend` kwarg — every test helper calling it (e.g. `tests/broker/_helpers.py::_create_fleet`, `tests/cli/_member_helpers.py`) must pass `backend="tmux"`. (2) Placement dicts and their assertions use the renamed `mux_session`/`mux_window_id`/`mux_pane_id` keys plus the new `backend` key — shared helpers (`_member_placement`, roster/formatter fixtures) and every test asserting placement-dict keys or the `format_member*`/`format_agent`/`fleet create` renders need updating. (3) `tests/db/test_alembic_smoke.py` must assert head `0008` with the `mux_*` + `backend` columns and validate the rename migration. The Alembic `0008` migration + the model match; runtime migration validation is Step 7's `test_alembic_smoke`.
 
 ### Step 7: Tests
 

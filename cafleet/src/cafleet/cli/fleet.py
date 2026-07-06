@@ -54,6 +54,7 @@ def fleet_create(
         label=label,
         director_context=director_ctx,
         coding_agent=coding_agent,
+        backend=mux.name,
     )
 
     if _wants_json(ctx, as_json):

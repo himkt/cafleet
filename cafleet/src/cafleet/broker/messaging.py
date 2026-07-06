@@ -22,7 +22,7 @@ def _try_notify_recipient(
     if recipient_id == sender_id:
         return False
     pane_id = session.execute(
-        select(AgentPlacement.tmux_pane_id).where(
+        select(AgentPlacement.mux_pane_id).where(
             AgentPlacement.agent_id == recipient_id
         )
     ).scalar_one_or_none()

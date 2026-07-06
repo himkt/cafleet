@@ -18,6 +18,7 @@ def create_fleet(
     *,
     director_context: MultiplexerContext,
     coding_agent: str,
+    backend: str,
 ) -> dict:
     """Atomically bootstrap a fleet with its root Director and Administrator.
 
@@ -27,12 +28,14 @@ def create_fleet(
 
     Args:
         label: Optional human-readable label for the fleet.
-        director_context: Resolved tmux pane identity for the root Director,
-            obtained via ``Multiplexer.context_discovery``.
+        director_context: Resolved multiplexer pane identity for the root
+            Director, obtained via ``Multiplexer.context_discovery``.
         coding_agent: Operator-declared metadata that lands in the root
             Director's ``placement.coding_agent`` column. The CLI is the only
             caller and always supplies it (default ``'claude'`` lives at the
             Click layer).
+        backend: The resolved multiplexer name (``mux.name``) recorded in the
+            Director's ``placement.backend`` column.
 
     Returns:
         A dict carrying ``fleet_id``, ``label``, ``created_at``,
@@ -47,9 +50,10 @@ def create_fleet(
     }
     director_placement = {
         "director_agent_id": None,
-        "tmux_session": director_context.session,
-        "tmux_window_id": director_context.window_id,
-        "tmux_pane_id": director_context.pane_id,
+        "backend": backend,
+        "mux_session": director_context.session,
+        "mux_window_id": director_context.window_id,
+        "mux_pane_id": director_context.pane_id,
         "coding_agent": coding_agent,
         "created_at": created_at,
     }

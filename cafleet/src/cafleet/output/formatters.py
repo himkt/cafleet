@@ -91,9 +91,9 @@ def format_agent(agent: dict, *, full: bool = False) -> str:
                 "  placement:",
                 f"    director_agent_id: {_dash_if_none(placement['director_agent_id'])}",
                 f"    backend:           {placement['coding_agent']}",
-                f"    session:           {placement['tmux_session']}",
-                f"    window_id:         {placement['tmux_window_id']}",
-                f"    pane_id:           {_dash_if_none(placement['tmux_pane_id'])}",
+                f"    session:           {placement['mux_session']}",
+                f"    window_id:         {placement['mux_window_id']}",
+                f"    pane_id:           {_dash_if_none(placement['mux_pane_id'])}",
                 f"    created_at:        {placement['created_at']}",
             ]
         )
@@ -127,7 +127,7 @@ def format_fleet_create(data: dict, *, full: bool = False) -> str:
         f"label:            {data['label'] or ''}",
         f"created_at:       {data['created_at']}",
         f"director_name:    {director['name']}",
-        f"pane:             {placement['tmux_session']}:{placement['tmux_window_id']}:{placement['tmux_pane_id']}",
+        f"pane:             {placement['mux_session']}:{placement['mux_window_id']}:{placement['mux_pane_id']}",
         f"administrator:    {data['administrator_agent_id']}",
     ]
     return "\n".join(lines)
@@ -142,7 +142,7 @@ def format_member(data: dict, *, full: bool = False) -> str:
     """
     placement = data["placement"]
     if not full:
-        pane = placement["tmux_pane_id"] or "(pending)"
+        pane = placement["mux_pane_id"] or "(pending)"
         return (
             f"{data['agent_id']} {data['name']} "
             f"backend={placement['coding_agent']} pane={pane}"
@@ -152,8 +152,8 @@ def format_member(data: dict, *, full: bool = False) -> str:
         f"  agent_id:  {data['agent_id']}",
         f"  name:      {data['name']}",
         f"  backend:   {placement['coding_agent']}",
-        f"  pane_id:   {placement['tmux_pane_id']}",
-        f"  window_id: {placement['tmux_window_id']}",
+        f"  pane_id:   {placement['mux_pane_id']}",
+        f"  window_id: {placement['mux_window_id']}",
     ]
     return "\n".join(lines)
 
@@ -291,9 +291,9 @@ def format_member_roster(agents: list) -> str:
             backend = session_name = window_id = pane = created_at = "-"
         else:
             backend = placement["coding_agent"]
-            session_name = placement["tmux_session"]
-            window_id = placement["tmux_window_id"]
-            pane = placement["tmux_pane_id"] or "(pending)"
+            session_name = placement["mux_session"]
+            window_id = placement["mux_window_id"]
+            pane = placement["mux_pane_id"] or "(pending)"
             created_at = placement["created_at"]
         lines.append(
             f"  {str(a['agent_id']):<8}  {a['name']:<13}  {a['status']:<6}  "
@@ -317,14 +317,14 @@ def format_member_list(members: list) -> str:
     lines.append(sep)
     for m in members:
         placement = m["placement"]
-        pane_display = placement["tmux_pane_id"] or "(pending)"
+        pane_display = placement["mux_pane_id"] or "(pending)"
         agent_id = str(m["agent_id"])
         lines.append(
             f"  {agent_id:<{_AGENT_ID_COLUMN_WIDTH}}  {m['name']:<8}  "
             f"{m['status']:<6}  "
             f"{placement['coding_agent']:<7}  "
-            f"{placement['tmux_session']:<7}  "
-            f"{placement['tmux_window_id']:<9}  "
+            f"{placement['mux_session']:<7}  "
+            f"{placement['mux_window_id']:<9}  "
             f"{pane_display:<7}  "
             f"{placement['created_at']}"
         )

@@ -29,7 +29,7 @@ def member():
 
 
 def _require_member_pane(placement: dict, member_id: int, action: str) -> str:
-    pane_id = placement["tmux_pane_id"]
+    pane_id = placement["mux_pane_id"]
     if pane_id is None:
         raise click.ClickException(
             f"member {member_id} has no pane yet (pending placement) "
@@ -228,9 +228,10 @@ def member_create(
             description,
             placement={
                 "director_agent_id": agent_id,
-                "tmux_session": director_ctx.session,
-                "tmux_window_id": director_ctx.window_id,
-                "tmux_pane_id": None,
+                "backend": mux.name,
+                "mux_session": director_ctx.session,
+                "mux_window_id": director_ctx.window_id,
+                "mux_pane_id": None,
                 "coding_agent": coding_agent,
             },
             kind=_shared.MONITORING_MEMBER_KIND if role == "monitor" else None,
@@ -332,7 +333,7 @@ def member_delete(ctx, member_id, force):
         allow_missing_placement=True,
     )
     member_id = target["agent_id"]
-    pane_id = placement["tmux_pane_id"] if placement is not None else None
+    pane_id = placement["mux_pane_id"] if placement is not None else None
 
     if pane_id is None:
         # Pure registry soft-delete — no multiplexer requirement off the pane paths.
@@ -704,7 +705,7 @@ def member_nudge(ctx, agent_id, member_id, text, text_file):
 
     task_id = result["task"]["task_id"]
     notification_sent = result["notification_sent"]
-    pane_id = placement["tmux_pane_id"]
+    pane_id = placement["mux_pane_id"]
 
     if ctx.obj["json_output"]:
         click.echo(
