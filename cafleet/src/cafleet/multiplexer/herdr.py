@@ -11,11 +11,13 @@ literal-then-Enter submit delay; the ``esc_first`` safeguard maps to a discrete
 ``pane send-keys <id> esc``; the 2-line inline preview uses ``pane send-text``
 (raw, no Enter) then one ``pane send-keys enter``.
 
-**herdr CLI JSON envelope.** Every command prints a JSON envelope. Success →
-exit 0, stdout ``{"id":.., "result":{...}, "type":".."}``. Error → non-zero
-exit, stderr ``{"error":{"code":"..", "message":".."}, "id":".."}``. Reads go
+**herdr CLI JSON envelope.** Commands print a JSON envelope — success → exit 0,
+stdout ``{"id":.., "result":{...}, "type":".."}``; error → non-zero exit, stderr
+``{"error":{"code":"..", "message":".."}, "id":".."}``. Structured reads go
 through ``_run_json`` (returns the ``result`` object); the missing-pane case is
-detected by the error ``code == "pane_not_found"``. A ``result.pane`` object
+detected by the error ``code == "pane_not_found"``. The exception is
+``pane read``, which prints the **raw terminal buffer** (no envelope) —
+``capture_pane`` returns its stdout directly. A ``result.pane`` object
 carries ``pane_id`` (``wG:p1``), ``tab_id`` (``wG:t1``), ``workspace_id``
 (``wG``), and ``agent_status`` (``idle``/``working``/``blocked``/``done``/
 ``unknown``). ``MultiplexerContext`` maps ``session ← workspace_id``,
@@ -161,8 +163,8 @@ class HerdrMultiplexer:
         # stack in a right column) — herdr has no reflow command. The right
         # column is every pane in the Director's tab except the Director's own;
         # the first member splits the Director pane rightward, later members
-        # split a deterministic column pane downward, then the column is
-        # height-equalized.
+        # split a deterministic column pane downward. Pane heights are whatever
+        # herdr assigns at split time — herdr has no CLI to equalize them.
         env_args = [arg for k, v in env.items() for arg in ("--env", f"{k}={v}")]
         result = _run_json(["herdr", "pane", "list"])
         try:
@@ -178,7 +180,6 @@ class HerdrMultiplexer:
             new_pane_id = self._split_pane(reference.pane_id, "right", env_args)
         else:
             new_pane_id = self._split_pane(max(column), "down", env_args)
-            self._equalize_column(column + [new_pane_id])
         # pane run feeds one shell line, so the argv is quoted to preserve boundaries.
         _run(["herdr", "pane", "run", new_pane_id, shlex.join(command)])
         return new_pane_id
@@ -192,30 +193,6 @@ class HerdrMultiplexer:
             return result["pane"]["pane_id"]
         except KeyError as exc:
             raise HerdrError(f"herdr pane split missing {exc} field") from exc
-
-    def _equalize_column(self, pane_ids: list[str]) -> None:
-        # Best-effort height equalization; swallow HerdrError so a resize failure
-        # never fails a spawn over cosmetics.
-        if len(pane_ids) < 2:
-            return
-        amount = round(1 / len(pane_ids), 4)
-        try:
-            for pane_id in pane_ids:
-                _run(
-                    [
-                        "herdr",
-                        "pane",
-                        "resize",
-                        "--pane",
-                        pane_id,
-                        "--direction",
-                        "down",
-                        "--amount",
-                        str(amount),
-                    ]
-                )
-        except HerdrError:
-            return
 
     def send_exit(self, *, target_pane_id: str, ignore_missing: bool = False) -> None:
         _run_tolerating_missing(
@@ -287,9 +264,11 @@ class HerdrMultiplexer:
         _run(["herdr", "pane", "run", target_pane_id, f"! {normalized_command}"])
 
     def capture_pane(self, *, target_pane_id: str, lines: int = 20) -> str:
+        # `herdr pane read` prints the raw terminal buffer (not a JSON envelope),
+        # so return its stdout directly.
         if lines <= 0:
             raise HerdrError(f"capture_pane: lines must be positive, got {lines}")
-        result = _run_json(
+        return _run(
             [
                 "herdr",
                 "pane",
@@ -301,12 +280,6 @@ class HerdrMultiplexer:
                 str(lines),
             ]
         )
-        # The exact pane-read output key is pending operator validation; herdr
-        # docs suggest `output` / `content`.
-        text = result.get("output")
-        if text is None:
-            text = result.get("content", "")
-        return text
 
     def pane_exists(self, *, target_pane_id: str) -> bool:
         try:

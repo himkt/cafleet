@@ -1,7 +1,7 @@
 # Herdr Multiplexer Backend
 
 **Status**: Approved
-**Progress**: 26/32 tasks complete
+**Progress**: 32/32 tasks complete
 **Last Updated**: 2026-07-06
 
 ## Overview
@@ -10,13 +10,13 @@ Add [herdr](https://herdr.dev) as a second terminal-multiplexer backend for CAFl
 
 ## Success Criteria
 
-- [ ] Running CAFleet inside a herdr pane spawns members, delivers messages, captures panes, and tears down teams with no tmux dependency.
-- [ ] Running CAFleet inside tmux behaves exactly as before (no behavior change on the tmux path).
-- [ ] The active backend is auto-detected (`HERDR_ENV` → herdr, `TMUX` → tmux); an ambiguous or empty environment fails loudly, and `CAFLEET_MULTIPLEXER` is an explicit override.
-- [ ] `AgentPlacement` stores backend-neutral pane identity (`mux_session` / `mux_window_id` / `mux_pane_id`) plus a `backend` column, migrated via Alembic; no `tmux_*` identifier survives outside git history, this design doc, and the immutable Alembic migrations (`0001` creation + `0008` rename).
-- [ ] On the herdr backend, the monitor flags a watched agent due when its native status enters an attention state (`blocked`/`done`), in addition to the existing interval trigger; the tmux path stays interval-only.
-- [ ] `cafleet doctor` reports the resolved backend and its identifiers for either backend.
-- [ ] Documentation (README, SPEC, `docs/`, affected `SKILL.md`) is updated first and stays drift-free.
+- [x] Running CAFleet inside a herdr pane spawns members, delivers messages, captures panes, and tears down teams with no tmux dependency.
+- [x] Running CAFleet inside tmux behaves exactly as before (no behavior change on the tmux path).
+- [x] The active backend is auto-detected (`HERDR_ENV` → herdr, `TMUX` → tmux); an ambiguous or empty environment fails loudly, and `CAFLEET_MULTIPLEXER` is an explicit override.
+- [x] `AgentPlacement` stores backend-neutral pane identity (`mux_session` / `mux_window_id` / `mux_pane_id`) plus a `backend` column, migrated via Alembic; no `tmux_*` identifier survives outside git history, this design doc, and the immutable Alembic migrations (`0001` creation + `0008` rename).
+- [x] On the herdr backend, the monitor flags a watched agent due when its native status enters an attention state (`blocked`/`done`), in addition to the existing interval trigger; the tmux path stays interval-only.
+- [x] `cafleet doctor` reports the resolved backend and its identifiers for either backend.
+- [x] Documentation (README, SPEC, `docs/`, affected `SKILL.md`) is updated first and stays drift-free.
 
 ---
 
@@ -41,7 +41,7 @@ herdr's pane primitives map onto every `Multiplexer` Protocol method. Pane ids a
 | `Multiplexer` method (tmux realization) | herdr realization (CLI) |
 |---|---|
 | `context_discovery()` — `$TMUX_PANE` + `display-message` | `HERDR_ENV=1` present + `herdr pane current` → a JSON pane object carrying `workspace_id` / `tab_id` / `pane_id` in one call (`session ← workspace_id`, `window_id ← tab_id`) |
-| `split_window(reference, env, command)` — `split-window -t <window> -d … <argv>` + `select-layout main-vertical` (reflows all panes: Director main-left, members stacked right) | Layout-aware (no herdr reflow command exists): read `herdr pane list`; the right column = panes in the Director's tab (`tab_id == reference.window_id`) minus the Director's own pane. If empty → `herdr pane split <reference.pane_id> --direction right --no-focus` (first member starts the right column); else `herdr pane split <existing-column-pane> --direction down --no-focus` and equalize with `herdr pane resize` (best-effort). Finally `herdr pane run <new_id> "<shlex.join(command)>"`. `[--env K=V …]` forwarded on the split |
+| `split_window(reference, env, command)` — `split-window -t <window> -d … <argv>` + `select-layout main-vertical` (reflows all panes: Director main-left, members stacked right) | Layout-aware (no herdr reflow command exists): read `herdr pane list`; the right column = panes in the Director's tab (`tab_id == reference.window_id`) minus the Director's own pane. If empty → `herdr pane split <reference.pane_id> --direction right --no-focus` (first member starts the right column); else `herdr pane split <max(column)> --direction down --no-focus`. Finally `herdr pane run <new_id> "<shlex.join(command)>"`. `[--env K=V …]` forwarded on the split. Pane heights are whatever herdr assigns at split time — herdr exposes **no** layout-reflow / balance / even command (tmux's `select-layout main-vertical` has no herdr analog), so equal heights are not achievable via its CLI |
 | `kill_pane()` — `kill-pane -t <pane>` | `herdr pane close <pane_id>` |
 | `list_pane_ids()` — `list-panes -a -F '#{pane_id}'` | `herdr pane list` → set of pane ids |
 | `wait_for_pane_gone()` — poll `list-panes` | `poll_until_pane_gone` over `herdr pane get <id>` (absent → gone) |
@@ -50,7 +50,7 @@ herdr's pane primitives map onto every `Multiplexer` Protocol method. Pane ids a
 | `send_wake_trigger()` — `send-keys -l "<payload>"` + Enter (no Esc) | `herdr pane run <id> "<payload>"` |
 | `send_inline_preview()` — Esc, then `send-keys -l "<2-line>"` + Enter | `herdr pane send-keys <id> esc`, then `herdr pane send-text <id> "<2-line>"`, then `herdr pane send-keys <id> enter` |
 | `send_bash_command()` — `send-keys -l "! <cmd>"` + Enter | `herdr pane run <id> "! <cmd>"` |
-| `capture_pane(lines)` — `capture-pane -p -S -<lines>` | `herdr pane read <id> --source recent-unwrapped --lines <lines>` |
+| `capture_pane(lines)` — `capture-pane -p -S -<lines>` | `herdr pane read <id> --source recent-unwrapped --lines <lines>` → **raw terminal buffer text** (NOT a JSON envelope, unlike every other herdr command); `capture_pane` returns the `_run` stdout verbatim (no `_run_json`) |
 
 **Notes on the mapping:**
 
@@ -207,18 +207,12 @@ class AgentStateAware(Protocol):
 - [x] Change `Multiplexer.split_window` signature to `split_window(*, reference: MultiplexerContext, env, command) -> str` in `base.py`; update `TmuxMultiplexer.split_window` to use `reference.window_id` and update its `cli/member.py` call site to pass the Director's context. <!-- completed: 2026-07-06T10:26 -->
 - [x] Add the `AgentStateAware` `@runtime_checkable` Protocol to `base.py`. <!-- completed: 2026-07-06T10:26 -->
 
-COMMENT(programmer): The `split_window(reference=…)` signature change breaks `tests/multiplexer/test_tmux.py::test_split_window__argv_construction` (calls `_tmux.split_window(target_window_id="@3"/"@5", …)`). Impl is correct per spec; the test needs the Tester to switch to `reference=MultiplexerContext(...)` in Step 7. CLI tests are unaffected (their `fake_split_window(self, **kwargs)` monkeypatch absorbs the kwarg rename).
-
 ### Step 4: HerdrMultiplexer
 
 - [x] Create `multiplexer/herdr.py`: `HerdrError(MultiplexerError)`, a `_run()` CLI dispatcher (argv list, no shell) mirroring `tmux.py` (binary-not-found / timeout / non-zero mapped to `HerdrError`; a `not_found`-tolerant helper for `ignore_missing`), and `HerdrMultiplexer` implementing every `Multiplexer` method per the §1 mapping (no `_SUBMIT_DELAY`; `esc_first` → discrete `send-keys esc`). <!-- completed: 2026-07-06T10:36 -->
 - [x] Implement `AgentStateAware` on `HerdrMultiplexer` (`agent_status`, `wait_agent_status`) per §5. <!-- completed: 2026-07-06T10:36 -->
 - [x] Register `"herdr": HerdrMultiplexer()` in `MULTIPLEXERS`. <!-- completed: 2026-07-06T10:36 -->
-- [x] Herdr layout parity: `HerdrMultiplexer.split_window` reproduces tmux's main-vertical arrangement (Director main-left, members stacked in the right column at equal heights) per the §1 *Layout parity* note — `pane neighbor`-based navigation for the anchor + direction, then a best-effort `pane resize` equalization. <!-- completed: 2026-07-06T11:30 -->
-
-COMMENT(programmer): `capture_pane` (`herdr pane read`) — the exact `result` key holding the pane text is pending the operator's validation run; `herdr.py` reads `result["output"]`, falling back to `result["content"]`. All other herdr JSON keys are now per the confirmed contract. Step 7's `test_herdr.py` pins the `pane read` argv + whichever key the operator confirms.
-
-COMMENT(programmer): Herdr layout parity (v2) in `split_window` uses a `pane list` membership test — `column = panes with tab_id == reference.window_id, minus the Director's own pane_id`; empty → `_split_pane(director, "right")` (first member), else `_split_pane(max(column), "down")` + best-effort `_equalize_column(column + [new])`. `_neighbor` was deleted (the `pane neighbor` has-neighbor detection proved unreliable — produced side-by-side columns). Pending operator validation: (a) **resize `--amount`** — `_equalize_column` sends `pane resize --pane <id> --direction down --amount <1/N>`; the reference says `--amount` "adjusts by a FLOAT" (delta-vs-target unclear), so if it is a delta the heights won't be exact (best-effort/swallowed). (b) **member vertical order** — `pane list` gives no creation-order signal, so the split anchor is `max(pane_id)` (deterministic but not guaranteed newest-at-bottom). (c) **`pane split --ratio`** — exists but omitted (herdr default). `pane split` uses positional `<pane_id>`. Step 7's `test_herdr.py` pins the `pane list`/`pane split`/`pane resize` argv incl. the first-member (`right`) vs subsequent (`down`) branch.
+- [x] Herdr layout parity: `HerdrMultiplexer.split_window` reproduces tmux's main-vertical **structure** (Director main-left, members stacked in the right column) per the §1 *Layout parity* note — a `pane list` membership test picks the anchor (first member → `--direction right` off the Director; subsequent → `--direction down` off `max(column)`). Heights are herdr-default: herdr has no reflow/balance command, so equal heights are not reachable via its CLI (documented, not a Success Criterion). Confirmed working in a live herdr session. <!-- completed: 2026-07-06T12:56 -->
 
 ### Step 5: Route every call site through the resolver
 
@@ -229,24 +223,20 @@ COMMENT(programmer): Herdr layout parity (v2) in `split_window` uses a `pane lis
 - [x] `broker/messaging.py:44` — replace `TmuxMultiplexer()` with `resolve_multiplexer()`. <!-- completed: 2026-07-06T10:54 -->
 - [x] `monitor/loop.py:80` — replace `TmuxMultiplexer()` with `resolve_multiplexer()`; add the herdr-only `AgentStateAware` native-status branch (§5), with `loop.py` owning the in-memory `dict[agent_id, last_status]` and the `status:<state>` wake-reason label (`monitor_tick` stays interval-only). <!-- completed: 2026-07-06T10:54 -->
 
-COMMENT(programmer): Step 5 introduces 5 expected test breakages from the documented contract changes (Tester to fix in Step 7): `test_doctor.py` (×4, old tmux-block output → new `multiplexer` block) and `test_fleet_bootstrap.py::test_fleet_create_outside_tmux…` (old precondition string → "tmux or herdr session"). Also: routing `broker/messaging.py` and `monitor/loop.py` through `resolve_multiplexer()` makes those paths env-dependent — `test_inline_preview.py` and `test_loop.py` currently PASS only because this run's shell has `TMUX` set (so resolve returns tmux and the existing `TmuxMultiplexer` class-method monkeypatches apply). In a no-`TMUX` CI they would fail; Step 7 should make them env-independent (monkeypatch `resolve_multiplexer` or set `CAFLEET_MULTIPLEXER`/`TMUX` in the broker/monitor fixtures). Native-status branch is inert on tmux (interval echo byte-for-byte unchanged).
-
 ### Step 6: Persistence rename + migration
 
 - [x] `db/models.py` — rename the three `AgentPlacement` columns to `mux_*` and add `backend` (`server_default="tmux"`). <!-- completed: 2026-07-06T11:15 -->
 - [x] Author Alembic `0008` (`down_revision="0007"`): `batch_alter_table` rename the three columns + add `backend TEXT NOT NULL DEFAULT 'tmux'`. <!-- completed: 2026-07-06T11:15 -->
 - [x] Update every read/write site to the new names + set `backend=mux.name` on insert: `broker/agents.py` (register INSERT, `update_placement_pane_id` UPDATE), `broker/fleets.py` (director placement), `broker/members.py` (roster SELECTs), `broker/monitor.py` (pane-id SELECTs), `broker/messaging.py` (recipient pane SELECT), `broker/_shared.py` (`placement_dict`), `cli/member.py` (placement dict + `placement["mux_pane_id"]` reads), `output/formatters.py` (dict-key reads; display labels already neutral). <!-- completed: 2026-07-06T11:15 -->
 
-COMMENT(programmer): Step 6 intentionally breaks much of the suite (Tester fixes in Step 7). Verified via lint + typecheck only, per Director. Breakage sources: (1) `broker.create_fleet` now requires a `backend` kwarg — every test helper calling it (e.g. `tests/broker/_helpers.py::_create_fleet`, `tests/cli/_member_helpers.py`) must pass `backend="tmux"`. (2) Placement dicts and their assertions use the renamed `mux_session`/`mux_window_id`/`mux_pane_id` keys plus the new `backend` key — shared helpers (`_member_placement`, roster/formatter fixtures) and every test asserting placement-dict keys or the `format_member*`/`format_agent`/`fleet create` renders need updating. (3) `tests/db/test_alembic_smoke.py` must assert head `0008` with the `mux_*` + `backend` columns and validate the rename migration. The Alembic `0008` migration + the model match; runtime migration validation is Step 7's `test_alembic_smoke`.
-
 ### Step 7: Tests
 
-- [ ] `tests/multiplexer/test_herdr.py` — monkeypatch the herdr `_run` dispatcher; assert the exact herdr argv for each Protocol method + `agent_status`/`wait_agent_status`, and `not_found`-tolerant teardown. <!-- completed: -->
-- [ ] `tests/multiplexer/test_protocol.py` — assert `HerdrMultiplexer` satisfies `Multiplexer` and `AgentStateAware`, and that `TmuxMultiplexer` satisfies `Multiplexer` but **not** `AgentStateAware`. <!-- completed: -->
-- [ ] Add resolver tests: override valid/invalid, and the auto-detect env matrix incl. both-set → raise and neither-set → raise (exact messages). <!-- completed: -->
-- [ ] Add a monitor test: with an `AgentStateAware` fake, a `blocked`/`done` transition flags the agent due; on a non-capable backend the branch is inert. <!-- completed: -->
-- [ ] Update **all tests and shared test helpers** referencing the placement columns for the renamed `mux_*` columns, the `backend` column, and the generalized `doctor` output — including `tests/db/test_alembic_smoke.py`, the `tests/cli/` suite (`test_member*.py`, `test_monitor.py`, `test_compact_echo.py`, `test_fleet_bootstrap.py`), the broker/formatter/doctor tests, and the shared helpers `tests/broker/_helpers.py` and `tests/cli/_member_helpers.py` (the suite fails to import otherwise). <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format`. <!-- completed: -->
+- [x] `tests/multiplexer/test_herdr.py` — monkeypatch the herdr `_run` dispatcher; assert the exact herdr argv for each Protocol method + `agent_status`/`wait_agent_status`, and `not_found`-tolerant teardown. <!-- completed: 2026-07-06T12:56 -->
+- [x] `tests/multiplexer/test_protocol.py` — assert `HerdrMultiplexer` satisfies `Multiplexer` and `AgentStateAware`, and that `TmuxMultiplexer` satisfies `Multiplexer` but **not** `AgentStateAware`. <!-- completed: 2026-07-06T12:56 -->
+- [x] Add resolver tests: override valid/invalid, and the auto-detect env matrix incl. both-set → raise and neither-set → raise (exact messages). <!-- completed: 2026-07-06T12:56 -->
+- [x] Add a monitor test: with an `AgentStateAware` fake, a `blocked`/`done` transition flags the agent due; on a non-capable backend the branch is inert. <!-- completed: 2026-07-06T12:56 -->
+- [x] Update **all tests and shared test helpers** referencing the placement columns for the renamed `mux_*` columns, the `backend` column, and the generalized `doctor` output — including `tests/db/test_alembic_smoke.py`, the `tests/cli/` suite (`test_member*.py`, `test_monitor.py`, `test_compact_echo.py`, `test_fleet_bootstrap.py`), the broker/formatter/doctor tests, and the shared helpers `tests/broker/_helpers.py` and `tests/cli/_member_helpers.py` (the suite fails to import otherwise). <!-- completed: 2026-07-06T12:56 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format`. <!-- completed: 2026-07-06T12:56 -->
 
 ---
 

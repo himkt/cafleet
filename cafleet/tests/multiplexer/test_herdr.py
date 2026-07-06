@@ -15,6 +15,7 @@ import json
 import pytest
 
 from cafleet.multiplexer import herdr as multiplexer_herdr
+from cafleet.multiplexer.base import MultiplexerContext
 from cafleet.multiplexer.herdr import HerdrError, HerdrMultiplexer
 
 # Stateless class — one shared instance for all tests is safe.
@@ -111,11 +112,117 @@ def test_context_discovery__missing_field_raises(herdr_run):
         _herdr.context_discovery()
 
 
-# NOTE: split_window layout coverage (the pane-neighbor walk, the first-member
-# --direction right vs subsequent --direction down branch, _neighbor's
-# has-/no-neighbor cases, and the _equalize_column resize sequence) is added once
-# the herdr layout impl stabilizes — the operator's live validation is still
-# settling the real `pane neighbor` JSON shape.
+# --- split_window (layout parity) ------------------------------------------
+#
+# split_window emulates tmux main-vertical without a herdr reflow command: it
+# reads `herdr pane list`, derives the Director's right column as every pane in
+# the Director's tab except the Director's own, and either starts the column
+# (first member → split the Director --direction right) or appends to it
+# (subsequent → split max(column) --direction down). herdr has no CLI to
+# equalize pane heights, so the split leaves them at herdr's assignment. The
+# max()-based stack order is validation-pending against a real herdr binary; the
+# argv shapes below pin the current implementation.
+
+_REFERENCE = MultiplexerContext(session="wG", window_id="wG:t1", pane_id="wG:p1")
+
+
+def test_split_window__first_member_splits_director_right(herdr_run):
+    """No pane in the Director's tab besides the Director itself → empty column →
+    the first member starts the right column with ``pane split --direction
+    right``, then runs the command in the new pane. Panes in other tabs and the
+    Director's own pane are excluded from the column."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _envelope(
+            {
+                "panes": [
+                    {"pane_id": "wG:p1", "tab_id": "wG:t1"},  # the Director — excluded
+                    {"pane_id": "wX:p1", "tab_id": "wX:t9"},  # another tab — excluded
+                ]
+            }
+        ),
+        _envelope({"pane": {"pane_id": "wG:p2"}}),  # split right → new pane
+    )
+    new_pane = _herdr.split_window(
+        reference=_REFERENCE,
+        env={"CAFLEET_DATABASE_URL": "sqlite:////tmp/cafleet.db"},
+        command=["claude", "Hello world"],
+    )
+    assert new_pane == "wG:p2"
+    assert captured == [
+        ["herdr", "pane", "list"],
+        [
+            "herdr",
+            "pane",
+            "split",
+            "wG:p1",
+            "--direction",
+            "right",
+            "--no-focus",
+            "--env",
+            "CAFLEET_DATABASE_URL=sqlite:////tmp/cafleet.db",
+        ],
+        # pane run submits the shlex-joined argv as one shell line.
+        ["herdr", "pane", "run", "wG:p2", "claude 'Hello world'"],
+    ]
+
+
+def test_split_window__first_member_no_env_omits_env_flags(herdr_run):
+    captured, set_returns = herdr_run
+    set_returns(
+        _envelope({"panes": [{"pane_id": "wG:p1", "tab_id": "wG:t1"}]}),
+        _envelope({"pane": {"pane_id": "wG:p2"}}),
+    )
+    _herdr.split_window(reference=_REFERENCE, env={}, command=["claude"])
+    split_argv = captured[1]
+    assert split_argv == [
+        "herdr",
+        "pane",
+        "split",
+        "wG:p1",
+        "--direction",
+        "right",
+        "--no-focus",
+    ]
+    assert "--env" not in split_argv
+
+
+def test_split_window__subsequent_member_splits_max_of_column(herdr_run):
+    """A non-empty column → the member splits ``max(column)`` downward, then runs
+    the command; no equalization step exists. The column is listed [p3, p2] to
+    pin that the split targets ``max`` (p3), not the last-listed pane (p2)."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _envelope(
+            {
+                "panes": [
+                    {"pane_id": "wG:p1", "tab_id": "wG:t1"},  # Director — excluded
+                    {"pane_id": "wG:p3", "tab_id": "wG:t1"},  # column, listed first
+                    {"pane_id": "wG:p2", "tab_id": "wG:t1"},  # column, listed second
+                    {"pane_id": "wX:p9", "tab_id": "wX:t9"},  # other tab — excluded
+                ]
+            }
+        ),
+        _envelope({"pane": {"pane_id": "wG:p4"}}),  # split(max=p3, down) → new pane
+    )
+    new_pane = _herdr.split_window(
+        reference=_REFERENCE, env={}, command=["claude", "second"]
+    )
+    assert new_pane == "wG:p4"
+    assert captured == [
+        ["herdr", "pane", "list"],
+        # max(["wG:p3", "wG:p2"]) == "wG:p3" — the deterministic column anchor.
+        ["herdr", "pane", "split", "wG:p3", "--direction", "down", "--no-focus"],
+        ["herdr", "pane", "run", "wG:p4", "claude second"],
+    ]
+
+
+def test_split_window__pane_list_missing_field_raises(herdr_run):
+    _captured, set_returns = herdr_run
+    # a pane entry missing ``pane_id`` → HerdrError (not a silent skip).
+    set_returns(_envelope({"panes": [{"tab_id": "wG:t1"}]}))
+    with pytest.raises(HerdrError, match="missing"):
+        _herdr.split_window(reference=_REFERENCE, env={}, command=["claude"])
 
 
 # --- list_pane_ids ---------------------------------------------------------
@@ -378,10 +485,12 @@ def test_send_bash_command__validation(herdr_run, command, expected_match):
 # --- capture_pane ----------------------------------------------------------
 
 
-def test_capture_pane__argv_and_output_key(herdr_run):
+def test_capture_pane__returns_raw_stdout_verbatim(herdr_run):
+    """``herdr pane read`` prints the raw terminal buffer (not a JSON envelope),
+    so ``capture_pane`` returns ``_run``'s stdout verbatim."""
     captured, set_returns = herdr_run
-    set_returns(_envelope({"output": "line 1\nline 2"}))
-    assert _herdr.capture_pane(target_pane_id="wG:p1", lines=20) == "line 1\nline 2"
+    set_returns("line 1\nline 2\n")
+    assert _herdr.capture_pane(target_pane_id="wG:p1", lines=20) == "line 1\nline 2\n"
     assert captured == [
         [
             "herdr",
@@ -394,12 +503,6 @@ def test_capture_pane__argv_and_output_key(herdr_run):
             "20",
         ]
     ]
-
-
-def test_capture_pane__falls_back_to_content_key(herdr_run):
-    _captured, set_returns = herdr_run
-    set_returns(_envelope({"content": "fallback text"}))
-    assert _herdr.capture_pane(target_pane_id="wG:p1") == "fallback text"
 
 
 @pytest.mark.parametrize("lines", [0, -1])
