@@ -158,33 +158,30 @@ class HerdrMultiplexer:
         command: list[str],
     ) -> str:
         # Emulate tmux main-vertical (Director keeps the left column, members
-        # stack in a right column) — herdr has no reflow command. First member
-        # splits the Director pane rightward; later members split the bottom of
-        # the right column downward, then the column is height-equalized.
+        # stack in a right column) — herdr has no reflow command. The right
+        # column is every pane in the Director's tab except the Director's own;
+        # the first member splits the Director pane rightward, later members
+        # split a deterministic column pane downward, then the column is
+        # height-equalized.
         env_args = [arg for k, v in env.items() for arg in ("--env", f"{k}={v}")]
-        right = self._neighbor(reference.pane_id, "right")
-        if right is None:
+        result = _run_json(["herdr", "pane", "list"])
+        try:
+            column = [
+                p["pane_id"]
+                for p in result["panes"]
+                if p.get("tab_id") == reference.window_id
+                and p["pane_id"] != reference.pane_id
+            ]
+        except KeyError as exc:
+            raise HerdrError(f"herdr pane list missing {exc} field") from exc
+        if not column:
             new_pane_id = self._split_pane(reference.pane_id, "right", env_args)
         else:
-            bottom = right
-            while (down := self._neighbor(bottom, "down")) is not None:
-                bottom = down
-            new_pane_id = self._split_pane(bottom, "down", env_args)
-            self._equalize_column(right)
+            new_pane_id = self._split_pane(max(column), "down", env_args)
+            self._equalize_column(column + [new_pane_id])
         # pane run feeds one shell line, so the argv is quoted to preserve boundaries.
         _run(["herdr", "pane", "run", new_pane_id, shlex.join(command)])
         return new_pane_id
-
-    def _neighbor(self, pane_id: str, direction: str) -> str | None:
-        # No neighbor exits 0 with an absent/null `pane`, so a missing pane means
-        # "no neighbor", not an error.
-        result = _run_json(
-            ["herdr", "pane", "neighbor", "--pane", pane_id, "--direction", direction]
-        )
-        pane = result.get("pane")
-        if not isinstance(pane, dict):
-            return None
-        return pane["pane_id"]
 
     def _split_pane(self, pane_id: str, direction: str, env_args: list[str]) -> str:
         result = _run_json(
@@ -196,19 +193,14 @@ class HerdrMultiplexer:
         except KeyError as exc:
             raise HerdrError(f"herdr pane split missing {exc} field") from exc
 
-    def _equalize_column(self, top_pane_id: str) -> None:
-        # Best-effort height equalization of the right column; swallow HerdrError
-        # so a resize failure never fails a spawn over cosmetics.
+    def _equalize_column(self, pane_ids: list[str]) -> None:
+        # Best-effort height equalization; swallow HerdrError so a resize failure
+        # never fails a spawn over cosmetics.
+        if len(pane_ids) < 2:
+            return
+        amount = round(1 / len(pane_ids), 4)
         try:
-            column = [top_pane_id]
-            cur = top_pane_id
-            while (down := self._neighbor(cur, "down")) is not None:
-                column.append(down)
-                cur = down
-            if len(column) < 2:
-                return
-            amount = round(1 / len(column), 4)
-            for pane_id in column:
+            for pane_id in pane_ids:
                 _run(
                     [
                         "herdr",
