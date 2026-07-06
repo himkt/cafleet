@@ -1,6 +1,6 @@
 # Herdr Multiplexer Backend
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 32/32 tasks complete
 **Last Updated**: 2026-07-06
 
@@ -245,3 +245,4 @@ class AgentStateAware(Protocol):
 | Date | Changes |
 |------|---------|
 | 2026-07-06 | Initial draft |
+| 2026-07-06 | Implemented (all 32 tasks); herdr backend live-validated (spawn, messaging, stacked+equal-height layout, raw-text capture, teardown). Equal-height column rebalancing added via the herdr `pane layout` ratio-math. Fresh Reviewer approved after 3 rounds (12 findings resolved). PR #169 opened. Status → Complete. |
