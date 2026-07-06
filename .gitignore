@@ -1,3 +1,5 @@
+.*
+
 # ==== Global-gitignore overrides ====
 # Our user-global ~/.config/git/ignore excludes design-docs/, CLAUDE.md, and .claude/.
 # This repo tracks them, so override.
