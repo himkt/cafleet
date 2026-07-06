@@ -14,6 +14,15 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 
+class MultiplexerError(Exception):
+    """Base for terminal-multiplexer backend failures.
+
+    Backend-specific subclasses (:class:`~cafleet.multiplexer.tmux.TmuxError`,
+    :class:`~cafleet.multiplexer.herdr.HerdrError`) let CLI boundaries catch a
+    single ``MultiplexerError`` while each backend keeps its own message text.
+    """
+
+
 @dataclass(frozen=True)
 class MultiplexerContext:
     """Resolved pane identity, returned by ``Multiplexer.context_discovery()``.
@@ -227,6 +236,44 @@ class Multiplexer(Protocol):
 
         Returns:
             Captured pane text, newline-joined.
+        """
+        ...
+
+
+@runtime_checkable
+class AgentStateAware(Protocol):
+    """Optional capability for backends that track native agent lifecycle state.
+
+    Kept **off** the base :class:`Multiplexer` Protocol so a backend without
+    native state (tmux) implements nothing new. Only a backend whose
+    multiplexer natively detects an agent's state (herdr) implements this;
+    consumers gate on ``isinstance(mux, AgentStateAware)``.
+    """
+
+    def agent_status(self, *, target_pane_id: str) -> str | None:
+        """Return the pane's current native agent state.
+
+        Args:
+            target_pane_id: Pane id to read.
+
+        Returns:
+            One of ``working``/``blocked``/``done``/``idle``/``unknown``, or
+            ``None`` when no agent is detected in the pane.
+        """
+        ...
+
+    def wait_agent_status(
+        self, *, target_pane_id: str, status: str, timeout_ms: int
+    ) -> bool:
+        """Block until the pane's agent reaches ``status`` or the timeout elapses.
+
+        Args:
+            target_pane_id: Pane id whose agent to watch.
+            status: The native state to wait for.
+            timeout_ms: Maximum time to wait, in milliseconds.
+
+        Returns:
+            ``True`` if ``status`` was reached before ``timeout_ms`` elapsed.
         """
         ...
 

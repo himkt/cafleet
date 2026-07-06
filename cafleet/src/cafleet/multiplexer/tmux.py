@@ -4,10 +4,14 @@ import shutil
 import subprocess
 import time
 
-from cafleet.multiplexer.base import MultiplexerContext, poll_until_pane_gone
+from cafleet.multiplexer.base import (
+    MultiplexerContext,
+    MultiplexerError,
+    poll_until_pane_gone,
+)
 
 
-class TmuxError(Exception):
+class TmuxError(MultiplexerError):
     """Raised when a tmux subprocess fails or tmux is not reachable."""
 
 

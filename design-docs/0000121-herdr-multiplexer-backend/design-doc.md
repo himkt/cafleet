@@ -1,7 +1,7 @@
 # Herdr Multiplexer Backend
 
 **Status**: Approved
-**Progress**: 8/31 tasks complete
+**Progress**: 11/31 tasks complete
 **Last Updated**: 2026-07-06
 
 ## Overview
@@ -197,9 +197,9 @@ class AgentStateAware(Protocol):
 
 ### Step 2: Config and resolver
 
-- [ ] Add `multiplexer: str | None` field to `Settings` (`config.py`) bound to `CAFLEET_MULTIPLEXER`. <!-- completed: -->
-- [ ] Add `MultiplexerError` base to `base.py`; make `TmuxError` subclass it. <!-- completed: -->
-- [ ] Add `resolve_multiplexer()` to `multiplexer/__init__.py` with the §3 precedence and exact error strings; export it and `MultiplexerError` / `AgentStateAware`. <!-- completed: -->
+- [x] Add `multiplexer: str | None` field to `Settings` (`config.py`) bound to `CAFLEET_MULTIPLEXER`. <!-- completed: 2026-07-06T10:22 -->
+- [x] Add `MultiplexerError` base to `base.py`; make `TmuxError` subclass it. <!-- completed: 2026-07-06T10:22 -->
+- [x] Add `resolve_multiplexer()` to `multiplexer/__init__.py` with the §3 precedence and exact error strings; export it and `MultiplexerError` / `AgentStateAware` (`AgentStateAware` Protocol added to `base.py` here to satisfy the export; Step 3's `AgentStateAware` task lands with it). <!-- completed: 2026-07-06T10:22 -->
 
 ### Step 3: Protocol generalization
 

@@ -43,6 +43,11 @@ class Settings(BaseSettings):
             persisted ``Task.text`` column is never truncated, and the
             WebUI API returns raw broker dicts that do not apply this
             limit.
+        multiplexer: Explicit terminal-multiplexer backend override consumed
+            by ``resolve_multiplexer``. Sourced from ``CAFLEET_MULTIPLEXER``;
+            ``None`` (the default) means auto-detect from ``HERDR_ENV`` /
+            ``TMUX`` — a valid, well-defined state, not a fallback. A set value
+            must name a registered backend (``tmux``/``herdr``).
     """
 
     database_url: str = Field(
@@ -60,6 +65,10 @@ class Settings(BaseSettings):
     max_text_len: int = Field(
         default=200,
         validation_alias="CAFLEET_MAX_TEXT_LEN",
+    )
+    multiplexer: str | None = Field(
+        default=None,
+        validation_alias="CAFLEET_MULTIPLEXER",
     )
 
 
