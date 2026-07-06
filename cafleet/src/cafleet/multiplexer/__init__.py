@@ -7,10 +7,12 @@ from cafleet.multiplexer.base import (
     MultiplexerContext,
     MultiplexerError,
 )
+from cafleet.multiplexer.herdr import HerdrError, HerdrMultiplexer
 from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
 
 MULTIPLEXERS: dict[str, Multiplexer] = {
     "tmux": TmuxMultiplexer(),
+    "herdr": HerdrMultiplexer(),
 }
 
 
@@ -60,6 +62,8 @@ def resolve_multiplexer() -> Multiplexer:
 __all__ = [
     "MULTIPLEXERS",
     "AgentStateAware",
+    "HerdrError",
+    "HerdrMultiplexer",
     "Multiplexer",
     "MultiplexerContext",
     "MultiplexerError",
