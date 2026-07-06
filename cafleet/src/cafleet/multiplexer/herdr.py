@@ -4,21 +4,25 @@ Mirrors :mod:`cafleet.multiplexer.tmux`: a ``_run`` subprocess dispatcher (argv
 list, no shell) over the stable ``herdr`` ``pane`` / ``wait`` command set, and
 :class:`HerdrMultiplexer` realizing every :class:`~cafleet.multiplexer.base.Multiplexer`
 method plus the optional :class:`~cafleet.multiplexer.base.AgentStateAware`
-capability. Pane ids are opaque strings (``w1:p1``), passed verbatim.
+capability. Pane ids are opaque strings (``wG:p1``), passed verbatim.
 
 ``herdr pane run`` submits text and Enter atomically, so there is no
 literal-then-Enter submit delay; the ``esc_first`` safeguard maps to a discrete
 ``pane send-keys <id> esc``; the 2-line inline preview uses ``pane send-text``
 (raw, no Enter) then one ``pane send-keys enter``.
 
-The herdr *argv* is the stable contract; its stdout *formats* are not pinned by
-design 0000121, so the parsers here assume: ``pane current`` prints the pane id;
-``pane get`` prints ``key: value`` lines with ``session`` / ``tab`` (and
-``agent_status`` when an agent is detected); ``pane list`` prints one pane id per
-token; ``wait agent-status`` exits 0 when reached, non-zero on timeout. Validate
-against a real herdr binary.
+**herdr CLI JSON envelope.** Every command prints a JSON envelope. Success →
+exit 0, stdout ``{"id":.., "result":{...}, "type":".."}``. Error → non-zero
+exit, stderr ``{"error":{"code":"..", "message":".."}, "id":".."}``. Reads go
+through ``_run_json`` (returns the ``result`` object); the missing-pane case is
+detected by the error ``code == "pane_not_found"``. A ``result.pane`` object
+carries ``pane_id`` (``wG:p1``), ``tab_id`` (``wG:t1``), ``workspace_id``
+(``wG``), and ``agent_status`` (``idle``/``working``/``blocked``/``done``/
+``unknown``). ``MultiplexerContext`` maps ``session ← workspace_id``,
+``window_id ← tab_id``, ``pane_id ← pane_id``.
 """
 
+import json
 import os
 import shlex
 import shutil
@@ -32,13 +36,29 @@ from cafleet.multiplexer.base import (
     poll_until_pane_gone,
 )
 
+_PANE_NOT_FOUND = "pane_not_found"
+_ESC_SETTLE_DELAY = 0.1
+
 
 class HerdrError(MultiplexerError):
-    """Raised when a herdr subprocess fails or herdr is not reachable."""
+    """Raised when a herdr subprocess fails or herdr is not reachable.
+
+    ``code`` carries the herdr error envelope's ``error.code`` when the failure
+    was a non-zero exit with a JSON error body (else ``None``).
+    """
+
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
 
 
-_PANE_GONE_MARKERS = ("not found", "no such pane", "does not exist")
-_ESC_SETTLE_DELAY = 0.1
+def _error_code(stderr: str) -> str | None:
+    try:
+        payload = json.loads(stderr)
+    except (ValueError, TypeError):
+        return None
+    error = payload.get("error") if isinstance(payload, dict) else None
+    return error.get("code") if isinstance(error, dict) else None
 
 
 def _run(args: list[str], *, timeout: float | None = None) -> str:
@@ -54,9 +74,22 @@ def _run(args: list[str], *, timeout: float | None = None) -> str:
         ) from exc
     except subprocess.CalledProcessError as exc:
         raise HerdrError(
-            f"herdr command failed: {' '.join(args)}\nstderr: {exc.stderr.strip()}"
+            f"herdr command failed: {' '.join(args)}\nstderr: {exc.stderr.strip()}",
+            code=_error_code(exc.stderr),
         ) from exc
     return result.stdout
+
+
+def _run_json(args: list[str], *, timeout: float | None = None) -> dict:
+    out = _run(args, timeout=timeout)
+    try:
+        payload = json.loads(out)
+    except ValueError as exc:
+        raise HerdrError(f"herdr returned non-JSON output: {out!r}") from exc
+    result = payload.get("result") if isinstance(payload, dict) else None
+    if not isinstance(result, dict):
+        raise HerdrError(f"herdr output missing 'result' object: {out!r}")
+    return result
 
 
 def _run_tolerating_missing(
@@ -65,7 +98,7 @@ def _run_tolerating_missing(
     try:
         _run(args, timeout=timeout)
     except HerdrError as exc:
-        if ignore_missing and any(m in str(exc).lower() for m in _PANE_GONE_MARKERS):
+        if ignore_missing and exc.code == _PANE_NOT_FOUND:
             return
         raise
 
@@ -79,15 +112,6 @@ def _best_effort(steps: Callable[[], None]) -> bool:
     except HerdrError:
         return False
     return True
-
-
-def _parse_pane_info(output: str) -> dict[str, str]:
-    info: dict[str, str] = {}
-    for line in output.splitlines():
-        if ":" in line:
-            key, _, value = line.partition(":")
-            info[key.strip()] = value.strip()
-    return info
 
 
 def _sanitize_wake_name(name: str) -> str:
@@ -115,20 +139,16 @@ class HerdrMultiplexer:
             )
 
     def context_discovery(self) -> MultiplexerContext:
-        pane_id = _run(["herdr", "pane", "current"]).strip()
-        if not pane_id:
-            raise HerdrError(
-                "herdr pane current returned no pane; not inside a herdr pane"
-            )
-        info = _parse_pane_info(_run(["herdr", "pane", "get", pane_id]))
+        result = _run_json(["herdr", "pane", "current"])
         try:
-            session = info["session"]
-            window_id = info["tab"]
+            pane = result["pane"]
+            return MultiplexerContext(
+                session=pane["workspace_id"],
+                window_id=pane["tab_id"],
+                pane_id=pane["pane_id"],
+            )
         except KeyError as exc:
-            raise HerdrError(
-                f"herdr pane get missing {exc} field for pane {pane_id!r}"
-            ) from exc
-        return MultiplexerContext(session=session, window_id=window_id, pane_id=pane_id)
+            raise HerdrError(f"herdr pane current missing {exc} field") from exc
 
     def split_window(
         self,
@@ -148,7 +168,11 @@ class HerdrMultiplexer:
         ]
         for k, v in env.items():
             split_args += ["--env", f"{k}={v}"]
-        new_pane_id = _run(split_args).strip()
+        result = _run_json(split_args)
+        try:
+            new_pane_id = result["pane"]["pane_id"]
+        except KeyError as exc:
+            raise HerdrError(f"herdr pane split missing {exc} field") from exc
         # pane run feeds one shell line, so the argv is quoted to preserve boundaries.
         _run(["herdr", "pane", "run", new_pane_id, shlex.join(command)])
         return new_pane_id
@@ -225,7 +249,7 @@ class HerdrMultiplexer:
     def capture_pane(self, *, target_pane_id: str, lines: int = 20) -> str:
         if lines <= 0:
             raise HerdrError(f"capture_pane: lines must be positive, got {lines}")
-        return _run(
+        result = _run_json(
             [
                 "herdr",
                 "pane",
@@ -237,18 +261,28 @@ class HerdrMultiplexer:
                 str(lines),
             ]
         )
+        # The exact pane-read output key is pending operator validation; herdr
+        # docs suggest `output` / `content`.
+        text = result.get("output")
+        if text is None:
+            text = result.get("content", "")
+        return text
 
     def pane_exists(self, *, target_pane_id: str) -> bool:
         try:
             _run(["herdr", "pane", "get", target_pane_id])
         except HerdrError as exc:
-            if any(m in str(exc).lower() for m in _PANE_GONE_MARKERS):
+            if exc.code == _PANE_NOT_FOUND:
                 return False
             raise
         return True
 
     def list_pane_ids(self) -> set[str]:
-        return set(_run(["herdr", "pane", "list"], timeout=5).split())
+        result = _run_json(["herdr", "pane", "list"], timeout=5)
+        try:
+            return {p["pane_id"] for p in result["panes"]}
+        except KeyError as exc:
+            raise HerdrError(f"herdr pane list missing {exc} field") from exc
 
     def kill_pane(self, *, target_pane_id: str, ignore_missing: bool = False) -> None:
         _run_tolerating_missing(
@@ -270,8 +304,12 @@ class HerdrMultiplexer:
         )
 
     def agent_status(self, *, target_pane_id: str) -> str | None:
-        info = _parse_pane_info(_run(["herdr", "pane", "get", target_pane_id]))
-        return info.get("agent_status") or None
+        result = _run_json(["herdr", "pane", "get", target_pane_id])
+        try:
+            pane = result["pane"]
+        except KeyError as exc:
+            raise HerdrError(f"herdr pane get missing {exc} field") from exc
+        return pane.get("agent_status") or None
 
     def wait_agent_status(
         self, *, target_pane_id: str, status: str, timeout_ms: int

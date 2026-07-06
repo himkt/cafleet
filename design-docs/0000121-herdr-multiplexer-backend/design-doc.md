@@ -214,7 +214,7 @@ COMMENT(programmer): The `split_window(reference=…)` signature change breaks `
 - [x] Implement `AgentStateAware` on `HerdrMultiplexer` (`agent_status`, `wait_agent_status`) per §5. <!-- completed: 2026-07-06T10:36 -->
 - [x] Register `"herdr": HerdrMultiplexer()` in `MULTIPLEXERS`. <!-- completed: 2026-07-06T10:36 -->
 
-COMMENT(programmer): The herdr *argv* per §1 is implemented exactly (Step 7's `test_herdr.py` can pin it). herdr's *stdout formats* are NOT specified by the design doc and no herdr binary is available here to verify, so `herdr.py` makes documented parsing assumptions (module docstring): `pane current` → pane id; `pane get` → `key: value` lines with `session`/`tab` (and `agent_status`); `pane list` → whitespace-separated pane ids; `wait agent-status` exits 0 when reached. These need validation against a real herdr binary before relying on the herdr backend in production.
+COMMENT(programmer): `capture_pane` (`herdr pane read`) — the exact `result` key holding the pane text is pending the operator's validation run; `herdr.py` reads `result["output"]`, falling back to `result["content"]`. All other herdr JSON keys are now per the confirmed contract. Step 7's `test_herdr.py` pins the `pane read` argv + whichever key the operator confirms.
 
 ### Step 5: Route every call site through the resolver
 
