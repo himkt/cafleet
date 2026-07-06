@@ -186,7 +186,7 @@ def test_member_show__json_shape_placed_member(bootstrapped_fleet):
     assert row["skills"] == []
     assert row["placement"]["director_agent_id"] == director_id
     assert row["placement"]["coding_agent"] == "claude"
-    assert row["placement"]["tmux_pane_id"] == "%10"
+    assert row["placement"]["mux_pane_id"] == "%10"
 
 
 def test_member_show__json_placementless_is_null_placement(bootstrapped_fleet):

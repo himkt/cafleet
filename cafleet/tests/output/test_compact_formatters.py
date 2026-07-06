@@ -37,9 +37,9 @@ def _fleet_create_data(
             "agent_id": director_agent_id,
             "name": "Director",
             "placement": {
-                "tmux_session": "main",
-                "tmux_window_id": "@3",
-                "tmux_pane_id": "%0",
+                "mux_session": "main",
+                "mux_window_id": "@3",
+                "mux_pane_id": "%0",
                 "coding_agent": "claude",
             },
         },
@@ -58,8 +58,8 @@ def _member_data(
         "agent_id": agent_id,
         "name": name,
         "placement": {
-            "tmux_pane_id": pane_id,
-            "tmux_window_id": window_id,
+            "mux_pane_id": pane_id,
+            "mux_window_id": window_id,
             "coding_agent": coding_agent,
         },
     }

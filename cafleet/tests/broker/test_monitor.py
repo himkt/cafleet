@@ -165,7 +165,7 @@ def test_find_monitoring_member__none_after_deregister():
 
 
 def test_find_monitoring_member__none_when_pane_pending():
-    # a monitoring member whose placement is still pending (tmux_pane_id=None) has
+    # a monitoring member whose placement is still pending (mux_pane_id=None) has
     # no wakeable pane, so find_monitoring_member treats it as absent.
     fleet = _create_fleet()
     broker.register_agent(
@@ -174,9 +174,10 @@ def test_find_monitoring_member__none_when_pane_pending():
         description="monitoring member with a pending pane",
         placement={
             "director_agent_id": fleet["director"]["agent_id"],
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": None,
+            "backend": "tmux",
+            "mux_session": "main",
+            "mux_window_id": "@3",
+            "mux_pane_id": None,
             "coding_agent": "claude",
         },
         kind="monitoring-member",

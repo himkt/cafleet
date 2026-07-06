@@ -94,9 +94,10 @@ def _register_monitoring_member(
         description="monitoring member",
         placement={
             "director_agent_id": director_id,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": pane_id,
+            "backend": "tmux",
+            "mux_session": "main",
+            "mux_window_id": "@3",
+            "mux_pane_id": pane_id,
             "coding_agent": "claude",
         },
         kind="monitoring-member",
@@ -113,9 +114,10 @@ def _register_ordinary_member(
         description="ordinary member",
         placement={
             "director_agent_id": director_id,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": pane_id,
+            "backend": "tmux",
+            "mux_session": "main",
+            "mux_window_id": "@3",
+            "mux_pane_id": pane_id,
             "coding_agent": "claude",
         },
     )

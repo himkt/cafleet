@@ -46,9 +46,10 @@ def bootstrapped_team(_mock_tmux_for_fleet_create):
             description=f"member {name}",
             placement={
                 "director_agent_id": director_id,
-                "tmux_session": "main",
-                "tmux_window_id": "@3",
-                "tmux_pane_id": f"%{10 + i}",
+                "backend": "tmux",
+                "mux_session": "main",
+                "mux_window_id": "@3",
+                "mux_pane_id": f"%{10 + i}",
                 "coding_agent": "claude",
             },
         )

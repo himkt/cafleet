@@ -24,12 +24,13 @@ def director_context():
     return DirectorContext(session="main", window_id="@1", pane_id="%0")
 
 
-def _bootstrap(label=None, ctx=None, coding_agent="claude"):
+def _bootstrap(label=None, ctx=None, coding_agent="claude", backend="tmux"):
     return broker.create_fleet(
         label=label,
         director_context=ctx
         or DirectorContext(session="main", window_id="@1", pane_id="%0"),
         coding_agent=coding_agent,
+        backend=backend,
     )
 
 
@@ -58,9 +59,10 @@ def test_bootstrap__placement_matches_director_context_and_records_coding_agent(
     result = _bootstrap(ctx=director_context, coding_agent=coding_agent)
     placement = result["director"]["placement"]
     assert placement["director_agent_id"] is None
-    assert placement["tmux_session"] == director_context.session
-    assert placement["tmux_window_id"] == director_context.window_id
-    assert placement["tmux_pane_id"] == director_context.pane_id
+    assert placement["backend"] == "tmux"
+    assert placement["mux_session"] == director_context.session
+    assert placement["mux_window_id"] == director_context.window_id
+    assert placement["mux_pane_id"] == director_context.pane_id
     assert placement["coding_agent"] == coding_agent
     assert "created_at" in placement
 
@@ -94,7 +96,7 @@ def test_bootstrap__db_rows_for_fleet_director_administrator_placement(
     placement = placement_rows[0]
     assert placement.agent_id == result["director"]["agent_id"]
     assert placement.director_agent_id is None
-    assert placement.tmux_pane_id == director_context.pane_id
+    assert placement.mux_pane_id == director_context.pane_id
 
     # Administrator.registered_at == fleets.created_at.
     assert by_name["Administrator"].registered_at == fleet_rows[0].created_at
@@ -123,6 +125,7 @@ def test_bootstrap__atomic_rollback_on_failure(
             label="rollback",
             director_context=director_context,
             coding_agent="claude",
+            backend="tmux",
         )
 
     with broker_session() as s:
@@ -258,7 +261,7 @@ def test_deregister_agent__root_director_protected_non_root_unaffected(
         sess_row = s.query(FleetModel).filter(FleetModel.fleet_id == sid).one()
     assert d_row.status == "active"
     assert d_row.deregistered_at is None
-    assert p_row.tmux_pane_id == director_context.pane_id
+    assert p_row.mux_pane_id == director_context.pane_id
     assert sess_row.director_agent_id == director_id
 
     # Non-root member can still be deregistered.
@@ -282,6 +285,7 @@ def test_send_message__notification_invokes_inline_preview_with_director_pane(
         label="notify",
         director_context=director_context,
         coding_agent="claude",
+        backend="tmux",
     )
     sid = result["fleet_id"]
     root_director_id = result["director"]["agent_id"]
@@ -291,9 +295,10 @@ def test_send_message__notification_invokes_inline_preview_with_director_pane(
         description="member under root",
         placement={
             "director_agent_id": root_director_id,
-            "tmux_session": "main",
-            "tmux_window_id": "@1",
-            "tmux_pane_id": "%1",
+            "backend": "tmux",
+            "mux_session": "main",
+            "mux_window_id": "@1",
+            "mux_pane_id": "%1",
             "coding_agent": "claude",
         },
     )

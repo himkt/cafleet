@@ -11,6 +11,7 @@ def _create_fleet(label: str | None = None) -> dict:
             session="main", window_id="@3", pane_id="%0"
         ),
         coding_agent="claude",
+        backend="tmux",
     )
 
 
@@ -35,9 +36,10 @@ def _member_placement(
 ) -> dict:
     return {
         "director_agent_id": director_agent_id,
-        "tmux_session": "main",
-        "tmux_window_id": "@3",
-        "tmux_pane_id": pane_id,
+        "backend": "tmux",
+        "mux_session": "main",
+        "mux_window_id": "@3",
+        "mux_pane_id": pane_id,
         "coding_agent": coding_agent,
     }
 

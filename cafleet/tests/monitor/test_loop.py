@@ -18,7 +18,13 @@ import pytest
 
 from cafleet import broker
 from cafleet.db.models import Fleet
-from cafleet.monitor.loop import CONTINUE, STOP, monitor_tick
+from cafleet.monitor.loop import (
+    CONTINUE,
+    STOP,
+    _flag_native_status_due,
+    _last_agent_status,
+    monitor_tick,
+)
 from tests.broker._helpers import (
     _create_fleet,
     _member_placement,
@@ -32,6 +38,54 @@ _NOW = datetime(2026, 6, 13, 12, 0, 0, tzinfo=UTC)
 @pytest.fixture(autouse=True)
 def _autouse_broker(broker_session):
     return broker_session
+
+
+@pytest.fixture(autouse=True)
+def _clear_native_status():
+    """Reset the per-process ``last_status`` map around each test so native-state
+    transition detection starts from a clean slate (mirrors ``run_monitor_loop``)."""
+    _last_agent_status.clear()
+    yield
+    _last_agent_status.clear()
+
+
+class _FakeStateMux:
+    """A minimal ``AgentStateAware`` multiplexer for the native-status branch:
+    reports per-pane native states and records wake keystrokes. Recognized by
+    ``isinstance(mux, AgentStateAware)`` because it defines both capability
+    methods."""
+
+    name = "herdr"
+
+    def __init__(self, live_panes, statuses, *, wake_ok=True):
+        self._live = set(live_panes)
+        self._statuses = statuses
+        self._wake_ok = wake_ok
+        self.wakes: list[tuple] = []
+
+    def list_pane_ids(self):
+        return set(self._live)
+
+    def agent_status(self, *, target_pane_id):
+        return self._statuses.get(target_pane_id)
+
+    def wait_agent_status(self, *, target_pane_id, status, timeout_ms):
+        return False
+
+    def send_wake_trigger(self, *, target_pane_id, due_agents, director_agent_id):
+        self.wakes.append(
+            (target_pane_id, [t["agent_id"] for t in due_agents], director_agent_id)
+        )
+        return self._wake_ok
+
+
+def _native_target(agent_id, pane_id="%9", *, pane_alive=True, name="alice"):
+    return {
+        "agent_id": agent_id,
+        "pane_id": pane_id,
+        "pane_alive": pane_alive,
+        "name": name,
+    }
 
 
 def _register_member(fleet: dict, name: str, pane_id: str) -> int:
@@ -312,3 +366,130 @@ def test_monitor_tick__stop_when_ownership_lost(monkeypatch):
     assert monitor_tick(sid, _NOW) is STOP
     assert polls == []
     assert wakes == []
+
+
+# --- native agent-state due trigger (§5, herdr-only) -----------------------
+
+
+def test_flag_native_status_due__blocked_transition_flags_with_reason():
+    """A transition into ``blocked`` flags the agent due and tags it with the
+    ``status:blocked`` wake reason (unioned onto the interval-due set)."""
+    mux = _FakeStateMux({"%9"}, {"%9": "blocked"})
+    targets = [_native_target(5)]
+    due: list[dict] = []
+    _flag_native_status_due(mux, targets, due)
+    assert [t["agent_id"] for t in due] == [5]
+    assert due[0]["wake_reason"] == "status:blocked"
+
+
+def test_flag_native_status_due__done_transition_flags_with_reason():
+    mux = _FakeStateMux({"%9"}, {"%9": "done"})
+    targets = [_native_target(5)]
+    due: list[dict] = []
+    _flag_native_status_due(mux, targets, due)
+    assert due[0]["wake_reason"] == "status:done"
+
+
+@pytest.mark.parametrize("status", ["working", "idle", "unknown", None])
+def test_flag_native_status_due__non_attention_status_not_flagged(status):
+    """Only ``blocked``/``done`` are attention states; every other native state
+    (and no-agent ``None``) leaves the agent unflagged."""
+    mux = _FakeStateMux({"%9"}, {"%9": status})
+    targets = [_native_target(5)]
+    due: list[dict] = []
+    _flag_native_status_due(mux, targets, due)
+    assert due == []
+
+
+def test_flag_native_status_due__same_attention_status_wakes_only_once():
+    """One ``blocked`` episode wakes once: a second tick with the same status is a
+    non-transition (prev == current) and does not re-flag."""
+    mux = _FakeStateMux({"%9"}, {"%9": "blocked"})
+    targets = [_native_target(5)]
+    first: list[dict] = []
+    _flag_native_status_due(mux, targets, first)
+    assert [t["agent_id"] for t in first] == [5]
+    second: list[dict] = []
+    _flag_native_status_due(mux, targets, second)
+    assert second == []
+
+
+def test_flag_native_status_due__already_interval_due_not_duplicated():
+    """An agent already in the interval-due set is not appended twice, and keeps
+    no native wake reason (the interval trigger owns it)."""
+    mux = _FakeStateMux({"%9"}, {"%9": "blocked"})
+    target = _native_target(5)
+    due = [target]
+    _flag_native_status_due(mux, [target], due)
+    assert [t["agent_id"] for t in due] == [5]
+    assert "wake_reason" not in target
+
+
+def test_flag_native_status_due__dead_or_pending_pane_skipped():
+    """Agents with no pane (pending) or a dead pane are never point-read."""
+    mux = _FakeStateMux(set(), {})
+    targets = [
+        _native_target(5, pane_id=None),
+        _native_target(6, pane_alive=False),
+    ]
+    due: list[dict] = []
+    _flag_native_status_due(mux, targets, due)
+    assert due == []
+
+
+def test_monitor_tick__native_blocked_transition_wakes_watcher(capsys, monkeypatch):
+    """End-to-end on an AgentStateAware backend: a member that is NOT interval-due
+    but whose native status just entered ``blocked`` is unioned into the due set,
+    wakes the watcher, and logs the ``[status:blocked]`` wake-reason suffix."""
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["agent_id"]
+    _register_monitoring_member(fleet, "watcher", "%7")
+    member = _register_member(fleet, "alice", "%9")
+
+    # Make BOTH watched agents interval-not-due so only the native transition can
+    # flag the member.
+    broker.record_pings([director_id, member], _NOW.isoformat())
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+    fake = _FakeStateMux({"%0", "%7", "%9"}, {"%0": "idle", "%9": "blocked"})
+    monkeypatch.setattr("cafleet.monitor.loop.resolve_multiplexer", lambda: fake)
+
+    result = monitor_tick(sid, _NOW)
+
+    assert result is CONTINUE
+    # the member's native blocked transition flags it due → one wake naming alice
+    assert fake.wakes == [("%7", [member], director_id)]
+    # native-due agents carry the status wake-reason suffix on the stdout line
+    out = capsys.readouterr().out
+    assert f"due agent {member} (" in out
+    assert "[status:blocked]" in out
+    assert "-> wake monitor" in out
+    # the successful wake advanced the member's cadence
+    assert broker.get_monitor_config(sid, member)["last_ping_at"] == _NOW.isoformat()
+
+
+def test_monitor_tick__native_branch_inert_on_tmux_backend(monkeypatch):
+    """On the tmux backend (not AgentStateAware), the native-status branch never
+    runs: with nobody interval-due there is no wake, so a would-be ``blocked``
+    member cannot be flagged natively — the interval-only behavior is preserved."""
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["agent_id"]
+    _register_monitoring_member(fleet, "watcher", "%7")
+    member = _register_member(fleet, "alice", "%9")
+
+    broker.record_pings([director_id, member], _NOW.isoformat())
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+    # resolve_multiplexer returns the tmux singleton (autouse-pinned); _stub_tmux
+    # patches its class methods. tmux is not AgentStateAware → branch skipped.
+    polls, wakes = _stub_tmux(monkeypatch, {"%0", "%7", "%9"})
+
+    result = monitor_tick(sid, _NOW)
+
+    assert result is CONTINUE
+    assert wakes == []
+    assert polls == []

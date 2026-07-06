@@ -964,6 +964,7 @@ def test_member_nudge__target_not_found_exits_1(
                 session="main", window_id="@3", pane_id="%0"
             ),
             coding_agent="claude",
+            backend="tmux",
         )
         target_id = broker.register_agent(
             fleet_id=other["fleet_id"], name="outsider", description="cross-fleet"
@@ -1057,16 +1058,17 @@ def test_member_nudge__no_pane_target_still_queues_task(
 ):
     fleet_id, director_id, runner = bootstrapped_fleet
     sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
-    # A target with a placement row but no pane yet (tmux_pane_id=None).
+    # A target with a placement row but no pane yet (mux_pane_id=None).
     no_pane_id = broker.register_agent(
         fleet_id=fleet_id,
         name="PendingPane",
         description="placement but no pane",
         placement={
             "director_agent_id": director_id,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": None,
+            "backend": "tmux",
+            "mux_session": "main",
+            "mux_window_id": "@3",
+            "mux_pane_id": None,
             "coding_agent": "claude",
         },
     )["agent_id"]
@@ -1108,9 +1110,10 @@ def test_member_nudge__text_output_happy_and_no_pane_variants(
         description="placement but no pane",
         placement={
             "director_agent_id": director_id,
-            "tmux_session": "main",
-            "tmux_window_id": "@3",
-            "tmux_pane_id": None,
+            "backend": "tmux",
+            "mux_session": "main",
+            "mux_window_id": "@3",
+            "mux_pane_id": None,
             "coding_agent": "claude",
         },
     )["agent_id"]

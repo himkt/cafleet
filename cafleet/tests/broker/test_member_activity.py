@@ -12,6 +12,7 @@ def _bootstrap_fleet():
         label="activity-test",
         director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
         coding_agent="claude",
+        backend="tmux",
     )
     return info["fleet_id"], info["director"]["agent_id"]
 
@@ -19,9 +20,10 @@ def _bootstrap_fleet():
 def _register_member(fleet_id, director_id, name, pane):
     placement = {
         "director_agent_id": director_id,
-        "tmux_session": "main",
-        "tmux_window_id": "@3",
-        "tmux_pane_id": pane,
+        "backend": "tmux",
+        "mux_session": "main",
+        "mux_window_id": "@3",
+        "mux_pane_id": pane,
         "coding_agent": "claude",
     }
     agent = broker.register_agent(
@@ -53,7 +55,7 @@ def test_list_members_with_activity__shape_identity_placement_and_activity_keys(
     assert alice["status"] == "active"
     # In the flat model every member's placement director is the fleet root.
     assert alice["placement"]["director_agent_id"] == director_id
-    assert alice["placement"]["tmux_pane_id"] == "%10"
+    assert alice["placement"]["mux_pane_id"] == "%10"
     # Activity keys present even with no tasks yet.
     for key in ("last_sent", "last_recv", "last_ack", "idle"):
         assert key in alice
@@ -135,9 +137,10 @@ def test_register_agent__member_under_non_root_director_is_rejected():
     sid, _director_id, a, _b, _c = _setup_three_member_team()
     placement = {
         "director_agent_id": a,  # a member — not the fleet root Director
-        "tmux_session": "main",
-        "tmux_window_id": "@3",
-        "tmux_pane_id": "%20",
+        "backend": "tmux",
+        "mux_session": "main",
+        "mux_window_id": "@3",
+        "mux_pane_id": "%20",
         "coding_agent": "claude",
     }
     with pytest.raises(click.UsageError):

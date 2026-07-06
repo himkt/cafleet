@@ -441,7 +441,7 @@ def test_pending_placement_force__force_with_pending_placement_skips_all_tmux(
     monkeypatch.setattr(
         broker,
         "get_agent",
-        lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
+        lambda *_a, **_kw: _agent(placement=_placement(mux_pane_id=None)),
     )
 
     result = _invoke(runner, fleet_id, "--force")
@@ -571,7 +571,7 @@ def test_tmux_relaxation__pending_placement_delete_succeeds_without_tmux(
     monkeypatch.setattr(
         broker,
         "get_agent",
-        lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
+        lambda *_a, **_kw: _agent(placement=_placement(mux_pane_id=None)),
     )
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 0, result.output
@@ -598,7 +598,7 @@ def test_pending_placement__pending_pane_id_skips_send_exit(
     monkeypatch.setattr(
         broker,
         "get_agent",
-        lambda *_a, **_kw: _agent(placement=_placement(tmux_pane_id=None)),
+        lambda *_a, **_kw: _agent(placement=_placement(mux_pane_id=None)),
     )
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 0, result.output

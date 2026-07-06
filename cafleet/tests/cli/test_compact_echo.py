@@ -75,9 +75,10 @@ def _broadcast_summary_result(*, summary_id=7000, recipient_count=3):
 def _ping_setup(monkeypatch):
     placement = {
         "director_agent_id": DIRECTOR_ID,
-        "tmux_session": "main",
-        "tmux_window_id": "@3",
-        "tmux_pane_id": PANE_ID,
+        "backend": "tmux",
+        "mux_session": "main",
+        "mux_window_id": "@3",
+        "mux_pane_id": PANE_ID,
         "coding_agent": "claude",
         "created_at": "2026-04-16T08:00:00+00:00",
     }

@@ -180,9 +180,10 @@ def test_fleet_create_json_output__placement_sub_dict_matches_spec(
     assert placement["director_agent_id"] is None
     # Default --coding-agent is 'claude'.
     assert placement["coding_agent"] == "claude"
-    assert placement["tmux_session"] == _FAKE_DIRECTOR_CTX.session
-    assert placement["tmux_window_id"] == _FAKE_DIRECTOR_CTX.window_id
-    assert placement["tmux_pane_id"] == _FAKE_DIRECTOR_CTX.pane_id
+    assert placement["backend"] == "tmux"
+    assert placement["mux_session"] == _FAKE_DIRECTOR_CTX.session
+    assert placement["mux_window_id"] == _FAKE_DIRECTOR_CTX.window_id
+    assert placement["mux_pane_id"] == _FAKE_DIRECTOR_CTX.pane_id
     assert "created_at" in placement
 
 
@@ -259,7 +260,7 @@ def test_fleet_create_outside_tmux__fails_with_specific_error_and_exit_1(
     result = runner.invoke(cli, ["fleet", "create"])
     assert result.exit_code == 1, result.output
     combined = (result.output or "") + (result.stderr or "")
-    assert "cafleet fleet create must be run inside a tmux session" in combined
+    assert "cafleet fleet create must be run inside a tmux or herdr session" in combined
 
 
 def test_fleet_create_outside_tmux__no_fleet_row_is_written_when_tmux_is_missing(
