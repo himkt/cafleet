@@ -176,24 +176,15 @@ class HerdrMultiplexer:
         return new_pane_id
 
     def _neighbor(self, pane_id: str, direction: str) -> str | None:
-        try:
-            result = _run_json(
-                [
-                    "herdr",
-                    "pane",
-                    "neighbor",
-                    "--pane",
-                    pane_id,
-                    "--direction",
-                    direction,
-                ]
-            )
-        except HerdrError:
+        # No neighbor exits 0 with an absent/null `pane`, so a missing pane means
+        # "no neighbor", not an error.
+        result = _run_json(
+            ["herdr", "pane", "neighbor", "--pane", pane_id, "--direction", direction]
+        )
+        pane = result.get("pane")
+        if not isinstance(pane, dict):
             return None
-        try:
-            return result["pane"]["pane_id"]
-        except KeyError as exc:
-            raise HerdrError(f"herdr pane neighbor missing {exc} field") from exc
+        return pane["pane_id"]
 
     def _split_pane(self, pane_id: str, direction: str, env_args: list[str]) -> str:
         result = _run_json(
