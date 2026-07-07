@@ -103,7 +103,7 @@ In resume mode where Step 2 IS run, parse the JSON array from the existing `inte
 #### 2a. Establish a CAFleet fleet
 
 ```bash
-cafleet fleet create --label "design-doc-interview-{slug}" --json
+cafleet fleet create --name "design-doc-interview-{slug}" --json
 ```
 
 Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids.

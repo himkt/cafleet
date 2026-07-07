@@ -45,7 +45,7 @@ Claude Code honors the leading-`!` shell shortcut that `cafleet member exec` use
 Gated on local install of the `claude` binary. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, member `4` — your ids will differ.
 
 ```bash
-cafleet fleet create --label claude-smoke --coding-agent claude
+cafleet fleet create --name claude-smoke --coding-agent claude
 # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
 # Note the fleet and Director ids — the steps below use 1 and 2.
 

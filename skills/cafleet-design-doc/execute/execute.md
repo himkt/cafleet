@@ -154,7 +154,7 @@ Load the `cafleet` skill; its `reference/supervision.md` governance is § Requir
 `cafleet fleet create` (which must be run inside a tmux or herdr session) atomically creates the fleet and registers a root Director bound to the current multiplexer pane. Use `--json` so both IDs are machine-parseable:
 
 ```bash
-cafleet fleet create --label "design-doc-execute-{slug}" --json
+cafleet fleet create --name "design-doc-execute-{slug}" --json
 # → { "fleet_id": <int>, "administrator_agent_id": <int>, "director": { "agent_id": <int>, "name": "Director", "placement": {...} } }
 ```
 

@@ -90,7 +90,7 @@ Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, faci
 
 ```bash
 cafleet doctor
-cafleet --json fleet create --label "present-[topic-slug]"
+cafleet --json fleet create --name "present-[topic-slug]"
 ```
 
 `cafleet doctor` confirms the Director is inside a tmux or herdr session (a hard requirement of `cafleet member create`). On non-zero exit, abort and surface the error to the user — do NOT attempt raw `tmux` probes as a workaround.

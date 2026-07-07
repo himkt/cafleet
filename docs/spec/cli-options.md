@@ -57,7 +57,7 @@ Each parameter has exactly one input source:
 Create a fleet first if you don't have one:
 
 ```bash
-cafleet fleet create --label "my-project"
+cafleet fleet create --name "my-project"
 # → prints the fleet_id
 ```
 
@@ -299,12 +299,12 @@ The `cafleet fleet` subgroup manages fleets. These commands write directly to SQ
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--label` | no | Free-form text label for the fleet |
+| `--name` | yes | Human-readable name for the fleet |
 | `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`, recorded as the root Director's placement `coding_agent` — see [Coding agents](../concepts/coding-agents.md). |
 | `--json` | no | Output as JSON |
 | `--full` | no | Documented flag: switches the non-JSON output from the compact one-line form to the 7-line block below. |
 
-There are no `--name` / `--description` flags. The root Director's name and description are hardcoded (`name="Director"`, `description="Root Director for this fleet"`).
+There is no `--description` flag. The root Director's name and description are hardcoded (`name="Director"`, `description="Root Director for this fleet"`).
 
 Creates a new fleet with a DB-assigned integer identifier. **Must be run inside a tmux or herdr session** — outside a supported multiplexer the command exits 1 with `Error: cafleet fleet create must be run inside a tmux or herdr session` and writes nothing to the DB. It creates the fleet, its root Director (and placement), and the built-in Administrator atomically (all-or-nothing) — see [data-model.md](./data-model.md) for the Administrator's distinguishing `agent_card_json.cafleet.kind` flag.
 
@@ -319,7 +319,7 @@ Creates a new fleet with a DB-assigned integer identifier. **Must be run inside 
 ```
 <fleet_id>
 <director_agent_id>
-label:            <label or empty>
+name:             <name or empty>
 created_at:       <iso8601>
 director_name:    Director
 pane:             <mux_session>:<mux_window_id>:<mux_pane_id>
@@ -331,7 +331,7 @@ administrator:    <administrator_agent_id>
 ```json
 {
   "fleet_id": 1,
-  "label": "my-project",
+  "name": "my-project",
   "created_at": "2026-04-15T10:00:00+00:00",
   "administrator_agent_id": 3,
   "director": {
@@ -362,9 +362,9 @@ Both the root Director and the built-in Administrator are protected from `member
 |---|---|---|
 | `--json` | no | Output as JSON |
 
-Lists all **non-soft-deleted** fleets with their `director_agent_id`, label, created_at, and active agent count. Soft-deleted fleets (`fleets.deleted_at IS NOT NULL`) are hidden.
+Lists all **non-soft-deleted** fleets with their `director_agent_id`, name, created_at, and active agent count. Soft-deleted fleets (`fleets.deleted_at IS NOT NULL`) are hidden.
 
-Each row exposes the fleet's root `director_agent_id` so the Director's ID can be recovered from a list after `fleet create` output scrolls away. The `--json` output carries it as a `director_agent_id` field (integer). Text output renders five columns: `FLEET_ID`, `DIRECTOR`, `LABEL`, and `AGENTS` are each left-padded to widths 40 / 40 / 20 / 8 (one space between columns), followed by an unpadded trailing `CREATED_AT`. The wide left-padding means the real gaps between columns are far larger than a compact sample can depict; the column order is `FLEET_ID`, `DIRECTOR` (immediately after `FLEET_ID`), `LABEL`, `AGENTS`, `CREATED_AT`. Nullable `DIRECTOR` / `LABEL` cells fall back to empty strings.
+Each row exposes the fleet's root `director_agent_id` so the Director's ID can be recovered from a list after `fleet create` output scrolls away. The `--json` output carries it as a `director_agent_id` field (integer). Text output renders five columns: `FLEET_ID`, `DIRECTOR`, `NAME`, and `AGENTS` are each left-padded to widths 40 / 40 / 20 / 8 (one space between columns), followed by an unpadded trailing `CREATED_AT`. The wide left-padding means the real gaps between columns are far larger than a compact sample can depict; the column order is `FLEET_ID`, `DIRECTOR` (immediately after `FLEET_ID`), `NAME`, `AGENTS`, `CREATED_AT`. Nullable `DIRECTOR` / `NAME` cells fall back to empty strings.
 
 ### `fleet show`
 
@@ -379,7 +379,7 @@ Shows details of a single fleet. Exits 1 with `Error: fleet 'X' not found.` if t
 
 ```
 fleet_id: <id>
-label:      example
+name:       example
 created_at: 2026-04-16T09:00:00+00:00
 deleted_at: 2026-04-16T10:00:00+00:00
 ```
@@ -1039,6 +1039,7 @@ agent 5: interval 720s, enabled, last_ping 2026-06-13T04:51:00
 | `setup skill` when the `skill_installs` table is missing | `Error: the database schema is missing or outdated; run 'cafleet setup' or 'cafleet setup db' first` (exit 1) |
 | Missing `--fleet-id` on a fleet-scoped subcommand | `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` (exit 1) |
 | Missing `--agent-id` | `Error: Missing option '--agent-id'.` (exit 2) |
+| `fleet create` with no `--name` | `Error: Missing option '--name'.` (exit 2) |
 | `fleet create` run outside a supported multiplexer | `Error: cafleet fleet create must be run inside a tmux or herdr session` (exit 1; no DB writes) |
 | `fleet delete` on unknown fleet_id | `Error: fleet 'X' not found.` (exit 1) |
 | `member create` into a soft-deleted fleet | `Error: fleet X is deleted` (exit 1) |

@@ -82,7 +82,7 @@ Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters ever
 
 1. **Create a fleet** (if none exists):
    ```bash
-   cafleet fleet create --label "my-project"
+   cafleet fleet create --name "my-project"
    # text: line 1 <fleet-id>, line 2 <root-director-agent-id>; --json for the nested shape
    ```
    Must run inside a tmux or herdr session (else exits 1 with `Error: cafleet fleet create must be run inside a tmux or herdr session`, writes nothing).

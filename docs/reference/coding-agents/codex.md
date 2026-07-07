@@ -69,7 +69,7 @@ Only `claude` sets the pane title to the member name; locate `codex` panes via `
 Gated on local install of both `claude` and `codex` binaries. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, members `4` (claude) / `5` (codex) — your ids will differ.
 
 ```bash
-cafleet fleet create --label codex-smoke --coding-agent claude
+cafleet fleet create --name codex-smoke --coding-agent claude
 # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
 # Note the fleet and Director ids — the steps below use 1 and 2.
 
