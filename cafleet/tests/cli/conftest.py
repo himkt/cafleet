@@ -55,7 +55,9 @@ def make_bootstrapped_fleet(_mock_tmux_for_fleet_create):
 
     def _make() -> tuple[CliRunner, dict]:
         runner = CliRunner()
-        result = runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])
+        result = runner.invoke(
+            cli, ["fleet", "create", "--name", "test-fleet", "--json"]
+        )
         assert result.exit_code == 0, result.output
         return runner, json.loads(result.output)
 
