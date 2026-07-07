@@ -21,7 +21,7 @@ def fleet() -> None:
 
 
 @fleet.command("create")
-@click.option("--label", default=None, help="Optional human-readable label.")
+@click.option("--name", required=True, help="Human-readable name for the fleet.")
 @click.option(
     "--coding-agent",
     "coding_agent",
@@ -35,7 +35,7 @@ def fleet() -> None:
 @click.pass_context
 def fleet_create(
     ctx: click.Context,
-    label: str | None,
+    name: str,
     coding_agent: str,
     as_json: bool,
     full: bool,
@@ -51,7 +51,7 @@ def fleet_create(
         ) from exc
 
     result = broker.create_fleet(
-        label=label,
+        name=name,
         director_context=director_ctx,
         coding_agent=coding_agent,
         backend=mux.name,
@@ -77,13 +77,13 @@ def fleet_list(ctx: click.Context, as_json: bool) -> None:
             click.echo("No fleets found.")
             return
         click.echo(
-            f"{'FLEET_ID':<40} {'DIRECTOR':<40} {'LABEL':<20} "
+            f"{'FLEET_ID':<40} {'DIRECTOR':<40} {'NAME':<20} "
             f"{'AGENTS':<8} {'CREATED_AT'}"
         )
         for r in rows:
             click.echo(
                 f"{r['fleet_id']:<40} {r['director_agent_id'] or '':<40} "
-                f"{r['label'] or '':<20} {r['agent_count']:<8} {r['created_at']}"
+                f"{r['name'] or '':<20} {r['agent_count']:<8} {r['created_at']}"
             )
 
 
@@ -103,7 +103,7 @@ def fleet_show(ctx: click.Context, as_json: bool) -> None:
     else:
         lines = [
             f"fleet_id: {result['fleet_id']}",
-            f"label:      {result['label'] or ''}",
+            f"name:       {result['name'] or ''}",
             f"created_at: {result['created_at']}",
         ]
         if result["deleted_at"] is not None:

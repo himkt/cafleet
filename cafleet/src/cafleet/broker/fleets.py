@@ -14,7 +14,7 @@ _DIRECTOR_DESCRIPTION = "Root Director for this fleet"
 
 
 def create_fleet(
-    label: str | None = None,
+    name: str | None = None,
     *,
     director_context: MultiplexerContext,
     coding_agent: str,
@@ -27,7 +27,7 @@ def create_fleet(
     DB-nullable even though the post-bootstrap invariant is NOT NULL.
 
     Args:
-        label: Optional human-readable label for the fleet.
+        name: Human-readable name for the fleet.
         director_context: Resolved multiplexer pane identity for the root
             Director, obtained via ``Multiplexer.context_discovery``.
         coding_agent: Operator-declared metadata that lands in the root
@@ -38,7 +38,7 @@ def create_fleet(
             Director's ``placement.backend`` column.
 
     Returns:
-        A dict carrying ``fleet_id``, ``label``, ``created_at``,
+        A dict carrying ``fleet_id``, ``name``, ``created_at``,
         ``administrator_agent_id``, and a ``director`` sub-dict with the
         Director's identity and placement metadata.
     """
@@ -60,7 +60,7 @@ def create_fleet(
 
     with _shared.write_session() as session:
         fleet = Fleet(
-            label=label,
+            name=name,
             created_at=created_at,
             deleted_at=None,
             director_agent_id=None,
@@ -114,7 +114,7 @@ def create_fleet(
 
     return {
         "fleet_id": fleet_id,
-        "label": label,
+        "name": name,
         "created_at": created_at,
         "administrator_agent_id": administrator_agent_id,
         "director": {
@@ -133,7 +133,7 @@ def list_fleets() -> list[dict]:
         select(
             Fleet.fleet_id,
             Fleet.director_agent_id,
-            Fleet.label,
+            Fleet.name,
             Fleet.created_at,
             func.count(Agent.agent_id).label("agent_count"),
         )
@@ -149,7 +149,7 @@ def list_fleets() -> list[dict]:
         .group_by(
             Fleet.fleet_id,
             Fleet.director_agent_id,
-            Fleet.label,
+            Fleet.name,
             Fleet.created_at,
         )
         .order_by(Fleet.created_at.desc(), Fleet.fleet_id.asc())
@@ -160,7 +160,7 @@ def list_fleets() -> list[dict]:
         {
             "fleet_id": row.fleet_id,
             "director_agent_id": row.director_agent_id,
-            "label": row.label,
+            "name": row.name,
             "created_at": row.created_at,
             "agent_count": row.agent_count,
         }
@@ -179,7 +179,7 @@ def get_fleet(fleet_id: int) -> dict | None:
         fleet_id: Fleet id to look up.
 
     Returns:
-        Dict with ``fleet_id``, ``label``, ``created_at``, ``deleted_at``,
+        Dict with ``fleet_id``, ``name``, ``created_at``, ``deleted_at``,
         and ``director_agent_id``, or ``None`` if no row exists.
     """
     with _shared.read_session() as session:
@@ -189,7 +189,7 @@ def get_fleet(fleet_id: int) -> dict | None:
         return None
     return {
         "fleet_id": row.fleet_id,
-        "label": row.label,
+        "name": row.name,
         "created_at": row.created_at,
         "deleted_at": row.deleted_at,
         "director_agent_id": row.director_agent_id,

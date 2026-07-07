@@ -12,7 +12,7 @@ class Fleet(Base):
     __tablename__ = "fleets"
 
     fleet_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    label: Mapped[str | None] = mapped_column(String, nullable=True)
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     deleted_at: Mapped[str | None] = mapped_column(String, nullable=True)
     director_agent_id: Mapped[int | None] = mapped_column(

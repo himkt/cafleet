@@ -1,7 +1,7 @@
 # Rename fleet `--label` to `--name` (end-to-end)
 
 **Status**: Approved
-**Progress**: 15/39 tasks complete
+**Progress**: 27/39 tasks complete
 **Last Updated**: 2026-07-07
 
 ## Overview
@@ -14,7 +14,7 @@ Rename the fleet's human-readable identifier from `label` to `name` across every
 - [ ] `cafleet fleet list` shows a `NAME` column; `cafleet fleet show` shows a `name:` field; the `--full` create render shows a `name:` line.
 - [ ] The JSON output of `fleet create` / `fleet list` / `fleet show --json` and the WebUI `/fleets` HTTP response emit the key `name` (never `label`).
 - [ ] The `fleets` table column is `name`; a data-preserving, reversible Alembic migration `0009` renames `label → name` (upgrade) and `name → label` (downgrade); `mise //cafleet:test` passes including the alembic smoke test.
-- [ ] The admin frontend reads `fleet.name`; `cafleet/src/cafleet/webui/dist/` is rebuilt and committed so the shipped bundle reads `name`.
+- [ ] The admin frontend reads `fleet.name`; `mise //admin:build` regenerates the bundle to read `fleet.name`. (`cafleet/src/cafleet/webui/dist/` is a gitignored build artifact, not committed; the publish flow rebuilds it fresh — see Step 7.)
 - [ ] `grep -rn "label"` over source, tests, docs, SPEC.md, README.md, and skills returns **no** fleet-`label` reference (only unrelated incidental `label` uses remain).
 - [ ] The package version is bumped `0.16.0 → 0.17.0` to signal the breaking JSON/HTTP contract change.
 - [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` all pass.
@@ -172,41 +172,41 @@ Bump the minor version `0.16.0 → 0.17.0` via the project's `bump-my-version` f
 
 ### Step 4: Persistence — model + migration
 
-- [ ] `db/models.py:15`: `label: Mapped[str | None]` → `name: Mapped[str | None]`. <!-- completed: -->
-- [ ] Add `cafleet/src/cafleet/db/alembic/versions/0009_rename_fleet_label_to_name.py` (revision `0009`, down_revision `0008`) per the Specification code block: upgrade `label → name`, downgrade `name → label`, batch mode with `table_kwargs={"sqlite_autoincrement": True}`. <!-- completed: -->
+- [x] `db/models.py:15`: `label: Mapped[str | None]` → `name: Mapped[str | None]`. <!-- completed: 2026-07-07T13:22 -->
+- [x] Add `cafleet/src/cafleet/db/alembic/versions/0009_rename_fleet_label_to_name.py` (revision `0009`, down_revision `0008`) per the Specification code block: upgrade `label → name`, downgrade `name → label`, batch mode with `table_kwargs={"sqlite_autoincrement": True}`. <!-- completed: 2026-07-07T13:22 -->
 
 ### Step 5: Broker
 
-- [ ] `broker/fleets.py`: `create_fleet` param `label` → `name` (keyword + docstring); `Fleet(name=name, …)`; return-dict `"label"` → `"name"` in `create_fleet`/`list_fleets`/`get_fleet`; `Fleet.label` → `Fleet.name` in the `list_fleets` select + group_by; update the `create_fleet`/`get_fleet` Returns docstrings. <!-- completed: -->
+- [x] `broker/fleets.py`: `create_fleet` param `label` → `name` (keyword + docstring); `Fleet(name=name, …)`; return-dict `"label"` → `"name"` in `create_fleet`/`list_fleets`/`get_fleet`; `Fleet.label` → `Fleet.name` in the `list_fleets` select + group_by; update the `create_fleet`/`get_fleet` Returns docstrings. <!-- completed: 2026-07-07T13:22 -->
 
 ### Step 6: CLI + formatters
 
-- [ ] `cli/fleet.py`: `--label` → `--name` (`required=True`, help "Human-readable name for the fleet."); param `label`→`name`; pass `name=name` to `broker.create_fleet`; `LABEL`→`NAME` header; row key `r['label']`→`r['name']`; `fleet show` `label:` → `name:` with widened padding. <!-- completed: -->
-- [ ] `output/formatters.py`: `format_fleet_create` — `data['label']`→`data['name']`, `label:` line → `name:` with widened padding, and the docstring reference `label` → `name`. <!-- completed: -->
+- [x] `cli/fleet.py`: `--label` → `--name` (`required=True`, help "Human-readable name for the fleet."); param `label`→`name`; pass `name=name` to `broker.create_fleet`; `LABEL`→`NAME` header; row key `r['label']`→`r['name']`; `fleet show` `label:` → `name:` with widened padding. <!-- completed: 2026-07-07T13:22 -->
+- [x] `output/formatters.py`: `format_fleet_create` — `data['label']`→`data['name']`, `label:` line → `name:` with widened padding, and the docstring reference `label` → `name`. <!-- completed: 2026-07-07T13:22 -->
 
 ### Step 7: Admin frontend + rebuild bundle
 
-- [ ] `admin/src/types.ts:48`: `label: string | null` → `name: string | null` in `FleetListItem`. <!-- completed: -->
-- [ ] `admin/src/App.tsx`: rename `fleetLabel`/`setFleetLabel`/`label` locals to `fleetName`/`setFleetName`/`name` and read `fleet.name` (lines ~30, 53, 69, 93, 98, 138). <!-- completed: -->
-- [ ] `admin/src/components/FleetPicker.tsx`: `onSelect(fleetId, name)` param + `fleet.name` (lines ~11, 19, 24, 30). <!-- completed: -->
-- [ ] `admin/src/components/Dashboard.tsx`: rename the `fleetLabel` prop it threads between `App.tsx` and `AppHeader.tsx` to `fleetName` — props type (line ~15 `fleetLabel: string | null;`), destructure (line ~23), and the `AppHeader` passthrough (line ~97 `fleetLabel={fleetLabel ?? String(fleetId)}` → `fleetName={fleetName ?? String(fleetId)}`). Leaving this unrenamed breaks the TS build once `App.tsx` passes `fleetName`. <!-- completed: -->
-- [ ] `admin/src/components/AppHeader.tsx`: `fleetName?` prop + usage + the breadcrumb comment (lines ~65, 66, 76, 102) and the `{fleetLabel !== undefined && onBack ? (` conditional (line ~90). <!-- completed: -->
+- [x] `admin/src/types.ts:48`: `label: string | null` → `name: string | null` in `FleetListItem`. <!-- completed: 2026-07-07T13:22 -->
+- [x] `admin/src/App.tsx`: rename `fleetLabel`/`setFleetLabel`/`label` locals to `fleetName`/`setFleetName`/`name` and read `fleet.name` (lines ~30, 53, 69, 93, 98, 138). <!-- completed: 2026-07-07T13:22 -->
+- [x] `admin/src/components/FleetPicker.tsx`: `onSelect(fleetId, name)` param + `fleet.name` (lines ~11, 19, 24, 30). <!-- completed: 2026-07-07T13:22 -->
+- [x] `admin/src/components/Dashboard.tsx`: rename the `fleetLabel` prop it threads between `App.tsx` and `AppHeader.tsx` to `fleetName` — props type (line ~15 `fleetLabel: string | null;`), destructure (line ~23), and the `AppHeader` passthrough (line ~97 `fleetLabel={fleetLabel ?? String(fleetId)}` → `fleetName={fleetName ?? String(fleetId)}`). Leaving this unrenamed breaks the TS build once `App.tsx` passes `fleetName`. <!-- completed: 2026-07-07T13:22 -->
+- [x] `admin/src/components/AppHeader.tsx`: `fleetName?` prop + usage + the breadcrumb comment (lines ~65, 66, 76, 102) and the `{fleetLabel !== undefined && onBack ? (` conditional (line ~90). <!-- completed: 2026-07-07T13:22 -->
 
-- [ ] Grep-sweep `admin/src/` for any remaining `fleet.label` / `fleetLabel`. <!-- completed: -->
-- [ ] Run `mise //admin:build` and commit the regenerated `cafleet/src/cafleet/webui/dist/` so the shipped bundle reads `name`. <!-- completed: -->
+- [x] Grep-sweep `admin/src/` for any remaining `fleet.label` / `fleetLabel`. <!-- completed: 2026-07-07T13:22 -->
+- [x] Run `mise //admin:build` so the admin bundle regenerates to read `fleet.name` (verified: `tsc -b && vite build` passes; the emitted bundle reads `fleet.name`, 0× `fleet.label`). Note: `cafleet/src/cafleet/webui/dist/` is a **gitignored build artifact** (`cafleet/.gitignore:7: dist/`) — it is NOT committed (and MUST NOT be force-added). The publish flow `mise //cafleet:publish` rebuilds admin assets fresh (`//admin:build` → `//cafleet:build`), so the shipped wheel always carries a freshly-built bundle; a committed `dist/` is not the shipped source of truth. <!-- completed: 2026-07-07T13:22 -->
 
 ### Step 8: Tests
 
-- [ ] `cafleet/tests/cli/test_fleet.py`: `_seed_fleet(label=…)` param + `INSERT INTO fleets (…, label, …)` + `SELECT … label …` → `name`; `--label` invocations → `--name`; `data[0]["label"]` assertion → `["name"]`; rename `test_fleet_create__label_round_trip_and_default_none` (the default-none half is now covered by the required-flag behavior — assert the value round-trips and adjust the "default none" expectation). <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_fleet_flag.py`: `--label` → `--name` at lines ~133/151/157. <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_fleet_bootstrap.py`: `--label` → `--name`; `SELECT … label …` → `name`; `"label:" in text` → `"name:"`; top-level-keys assertion `"label"` → `"name"`; rename `test_fleet_create_json_output__label_propagates_to_json` → `…name_propagates…`. <!-- completed: -->
-- [ ] `cafleet/tests/broker/test_fleet_bootstrap.py`, `cafleet/tests/broker/test_fleet_list_director.py`, `cafleet/tests/broker/_helpers.py`: update every fleet-`label` seed/assertion to `name` — including `_helpers._create_fleet`'s `label=` param → `name=`. <!-- completed: -->
-- [ ] `cafleet/tests/broker/test_registry.py`: the primary broker-fleet test — every `_create_fleet(label=…)` call (lines ~24, 77, 111–113, 125) → `name=`, the test `test_create_fleet__shape_and_label_handling` (line ~17) → `…name_handling` and its `label` assertions → `name`. (These are fleet labels, **not** incidental.) <!-- completed: -->
-- [ ] `cafleet/tests/broker/test_member_activity.py:12` (`label="activity-test"`) and `cafleet/tests/cli/test_member.py:961` (`create_fleet(label=None, …)`): rename `label` → `name`. <!-- completed: -->
+- [x] `cafleet/tests/cli/test_fleet.py`: `_seed_fleet(label=…)` param + `INSERT INTO fleets (…, label, …)` + `SELECT … label …` → `name`; `--label` invocations → `--name`; `data[0]["label"]` assertion → `["name"]`; rename `test_fleet_create__label_round_trip_and_default_none` (the default-none half is now covered by the required-flag behavior — assert the value round-trips and adjust the "default none" expectation). <!-- completed: 2026-07-07T13:11 -->
+- [x] `cafleet/tests/cli/test_fleet_flag.py`: `--label` → `--name` at lines ~133/151/157. <!-- completed: 2026-07-07T13:11 -->
+- [x] `cafleet/tests/cli/test_fleet_bootstrap.py`: `--label` → `--name`; `SELECT … label …` → `name`; `"label:" in text` → `"name:"`; top-level-keys assertion `"label"` → `"name"`; rename `test_fleet_create_json_output__label_propagates_to_json` → `…name_propagates…`. <!-- completed: 2026-07-07T13:11 -->
+- [x] `cafleet/tests/broker/test_fleet_bootstrap.py`, `cafleet/tests/broker/test_fleet_list_director.py`, `cafleet/tests/broker/_helpers.py`: update every fleet-`label` seed/assertion to `name` — including `_helpers._create_fleet`'s `label=` param → `name=`. <!-- completed: 2026-07-07T13:11 -->
+- [x] `cafleet/tests/broker/test_registry.py`: the primary broker-fleet test — every `_create_fleet(label=…)` call (lines ~24, 77, 111–113, 125) → `name=`, the test `test_create_fleet__shape_and_label_handling` (line ~17) → `…name_handling` and its `label` assertions → `name`. (These are fleet labels, **not** incidental.) <!-- completed: 2026-07-07T13:11 -->
+- [x] `cafleet/tests/broker/test_member_activity.py:12` (`label="activity-test"`) and `cafleet/tests/cli/test_member.py:961` (`create_fleet(label=None, …)`): rename `label` → `name`. <!-- completed: 2026-07-07T13:11 -->
 
-- [ ] Add a regression test that bare `cafleet fleet create` (no `--name`) exits 2 with the missing-required-option error (tests the current required-flag behavior). <!-- completed: -->
-- [ ] `cafleet/tests/db/test_alembic_smoke.py` (handle with care — a blind grep-rename breaks it): the seed at line ~399 `INSERT INTO fleets (fleet_id, label, created_at, …)` runs at a **pre-0008 revision** (old `tmux_*` placement columns), so `label` is CORRECT there and **must stay `label`** — the column is only renamed at `0009`. Update only post-upgrade (HEAD-schema) reads/assertions of the fleet identifier column → `name`. Add a `0009` round-trip assertion: upgrade renames `label → name` preserving the seeded value; downgrade reverses it. <!-- completed: -->
-- [ ] Grep-sweep `cafleet/tests/` for any remaining fleet-`label` reference (the only genuinely incidental `label` uses — leave untouched — are in `test_render_task.py` / `test_compact_formatters.py` / `test_member_show.py`). <!-- completed: -->
+- [x] Add a regression test that bare `cafleet fleet create` (no `--name`) exits 2 with the missing-required-option error (tests the current required-flag behavior). <!-- completed: 2026-07-07T13:11 -->
+- [ ] `cafleet/tests/db/test_alembic_smoke.py` (handle with care — a blind grep-rename breaks it): the seed at line ~399 `INSERT INTO fleets (fleet_id, label, created_at, …)` runs at a **pre-0008 revision** (old `tmux_*` placement columns), so `label` is CORRECT there and **must stay `label`** — the column is only renamed at `0009`. Update only post-upgrade (HEAD-schema) reads/assertions of the fleet identifier column → `name`. Add a `0009` round-trip assertion: upgrade renames `label → name` preserving the seeded value; downgrade reverses it. <!-- completed: 2026-07-07T13:11 -->
+- [x] Grep-sweep `cafleet/tests/` for any remaining fleet-`label` reference. Genuinely incidental `label` uses (left untouched) are the field-label assertions/test-names in `test_render_task.py`, `test_member_show.py`, and `test_compact_formatters.py`. Note: `test_compact_formatters.py` also carried a *real* fleet-`label` ref — its `_fleet_create_data` helper key, renamed to `name` — and `test_member_delete.py`'s `get_fleet` stub key was renamed too; both were outside the explicit bullets but caught by this sweep. <!-- completed: 2026-07-07T13:11 -->
 
 
 ### Step 9: Version bump

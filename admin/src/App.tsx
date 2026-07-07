@@ -27,7 +27,7 @@ function navigate(hash: string): void {
 export default function App() {
   const [route, setRoute] = useState<Route>(parseHash);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [fleetLabel, setFleetLabel] = useState<string | null>(null);
+  const [fleetName, setFleetName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const loadedFleetIdRef = useRef<string | null>(null);
 
@@ -50,7 +50,7 @@ export default function App() {
     // panel) keep their data and skip the skeleton.
     if (loadedFleetIdRef.current !== route.fleetId) {
       setAgents([]);
-      setFleetLabel(null);
+      setFleetName(null);
       setLoading(true);
     }
 
@@ -66,7 +66,7 @@ export default function App() {
           navigate("/fleets");
           return;
         }
-        setFleetLabel(fleet.label);
+        setFleetName(fleet.name);
 
         setFleetId(Number(route.fleetId));
         const data = await getAgents();
@@ -90,12 +90,12 @@ export default function App() {
   }, [route.kind, route.fleetId]);
 
   const handleSelectFleet = useCallback(
-    async (sid: number, label: string | null) => {
+    async (sid: number, name: string | null) => {
       setFleetId(sid);
       try {
         const data = await getAgents();
         setAgents(data.agents);
-        setFleetLabel(label);
+        setFleetName(name);
         loadedFleetIdRef.current = String(sid);
         navigate(`/fleets/${sid}/agents`);
       } catch {
@@ -135,7 +135,7 @@ export default function App() {
     return (
       <Dashboard
         fleetId={Number(route.fleetId)}
-        fleetLabel={fleetLabel}
+        fleetName={fleetName}
         agentId={route.agentId}
         initialAgents={agents}
         onBack={handleBack}
