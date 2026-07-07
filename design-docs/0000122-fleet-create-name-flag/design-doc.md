@@ -1,6 +1,6 @@
 # Rename fleet `--label` to `--name` (end-to-end)
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 39/39 tasks complete
 **Last Updated**: 2026-07-07
 
@@ -226,3 +226,4 @@ Bump the minor version `0.16.0 → 0.17.0` via the project's `bump-my-version` f
 |------|---------|
 | 2026-07-07 | Initial draft |
 | 2026-07-07 | Reviewer round resolved; approved |
+| 2026-07-07 | Implemented end-to-end; Reviewer approved after 1 fix round; PR #173 opened; marked complete |
