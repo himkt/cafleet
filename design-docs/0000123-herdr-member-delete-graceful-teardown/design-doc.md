@@ -1,7 +1,7 @@
 # Herdr member-delete graceful teardown
 
 **Status**: Approved
-**Progress**: 4/14 tasks complete
+**Progress**: 12/14 tasks complete
 **Last Updated**: 2026-07-07
 
 ## Overview
@@ -136,22 +136,22 @@ If the agent never reaches `agent_status is None` within `timeout` — e.g. clau
 
 ### Step 2: Code
 
-- [ ] Rewrite `HerdrMultiplexer.wait_for_pane_gone` in `cafleet/src/cafleet/multiplexer/herdr.py` per Specification §1 (poll `agent_status` until `None` → `kill_pane(ignore_missing=True)` → return `True`; deadline reached → return `False`). Keep the signature and defaults. <!-- completed: -->
-- [ ] Remove the now-unused `poll_until_pane_gone` import from `herdr.py`. <!-- completed: -->
+- [x] Rewrite `HerdrMultiplexer.wait_for_pane_gone` in `cafleet/src/cafleet/multiplexer/herdr.py` per Specification §1 (poll `agent_status` until `None` → `kill_pane(ignore_missing=True)` → return `True`; deadline reached → return `False`). Keep the signature and defaults. <!-- completed: 2026-07-07T22:47 -->
+- [x] Remove the now-unused `poll_until_pane_gone` import from `herdr.py`. <!-- completed: 2026-07-07T22:47 -->
 
 ### Step 3: Tests
 
 Cover `HerdrMultiplexer.wait_for_pane_gone` in `tests/multiplexer/test_herdr.py` (monkeypatch `time.sleep`):
 
-- [ ] Agent exits after N polls: `agent_status` returns `working`, `working`, then `None` → asserts `herdr pane get` polled, then `herdr pane close` issued, returns `True`. <!-- completed: -->
-- [ ] Already gone / teardown race: first `agent_status` read is `None` (pane_not_found) → `kill_pane(ignore_missing=True)` issued, returns `True`, no timeout. <!-- completed: -->
-- [ ] `done` is not an exit: `agent_status` stuck at `done` (or `blocked`) until the deadline → returns `False`, **no** `herdr pane close` issued. <!-- completed: -->
-- [ ] Error propagation: `agent_status` raises a non-`pane_not_found` `HerdrError` → propagates (not swallowed). <!-- completed: -->
-- [ ] Confirm `tests/cli/test_member_delete.py` still passes unchanged — it mocks `wait_for_pane_gone` at the method level, so the member-delete flow assertions are backend-agnostic and unaffected. <!-- completed: -->
+- [x] Agent exits after N polls: `agent_status` returns `working`, `working`, then `None` → asserts `herdr pane get` polled, then `herdr pane close` issued, returns `True`. <!-- completed: 2026-07-07T22:48 -->
+- [x] Already gone / teardown race: first `agent_status` read is `None` (pane_not_found) → `kill_pane(ignore_missing=True)` issued, returns `True`, no timeout. <!-- completed: 2026-07-07T22:48 -->
+- [x] `done` is not an exit: `agent_status` stuck at `done` (or `blocked`) until the deadline → returns `False`, **no** `herdr pane close` issued. <!-- completed: 2026-07-07T22:48 -->
+- [x] Error propagation: `agent_status` raises a non-`pane_not_found` `HerdrError` → propagates (not swallowed). <!-- completed: 2026-07-07T22:48 -->
+- [x] Confirm `tests/cli/test_member_delete.py` still passes unchanged — it mocks `wait_for_pane_gone` at the method level, so the member-delete flow assertions are backend-agnostic and unaffected. <!-- completed: 2026-07-07T22:48 -->
 
 ### Step 4: Verification
 
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` pass. <!-- completed: -->
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` pass. <!-- completed: 2026-07-07T22:48 -->
 - [ ] Live smoke on herdr: `cafleet member create` a claude member, then default `cafleet member delete` — exits 0 (agent exits, pane closes) without `--force`. <!-- completed: -->
 - [ ] Live smoke on herdr: a member wedged on a confirmation prompt — default `cafleet member delete` still exits 2 with the pane tail; `--force` then reaps it. <!-- completed: -->
 
