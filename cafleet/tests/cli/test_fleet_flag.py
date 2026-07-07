@@ -130,7 +130,7 @@ def test_subcommands_that_do_not_require_fleet_id__fleet_create_without_fleet_id
     db_runner,
 ):
     """fleet create mints a fleet, so it cannot itself require one."""
-    result = db_runner.invoke(cli, ["fleet", "create", "--label", "smoke"])
+    result = db_runner.invoke(cli, ["fleet", "create", "--name", "smoke"])
     assert result.exit_code == 0, result.output
 
 
@@ -148,13 +148,13 @@ def test_fleet_id_rejected_where_not_required__fleet_create_rejects_in_both_posi
     the per-subcommand position (exit 2, 'no such option')."""
     sid = "100"
     global_pos = db_runner.invoke(
-        cli, ["--fleet-id", sid, "fleet", "create", "--label", "x"]
+        cli, ["--fleet-id", sid, "fleet", "create", "--name", "x"]
     )
     assert global_pos.exit_code == 2, global_pos.output
     assert "no such option" in (global_pos.output or "").lower()
 
     per_subcommand = db_runner.invoke(
-        cli, ["fleet", "create", "--fleet-id", sid, "--label", "x"]
+        cli, ["fleet", "create", "--fleet-id", sid, "--name", "x"]
     )
     assert per_subcommand.exit_code == 2, per_subcommand.output
     assert "no such option" in (per_subcommand.output or "").lower()
@@ -162,7 +162,7 @@ def test_fleet_id_rejected_where_not_required__fleet_create_rejects_in_both_posi
 
 def _create_fleet_via_cli(runner: CliRunner) -> tuple[int, int]:
     """Run ``fleet create --json`` and return (fleet_id, administrator_agent_id)."""
-    result = runner.invoke(cli, ["fleet", "create", "--json"])
+    result = runner.invoke(cli, ["fleet", "create", "--name", "flag-test", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     return data["fleet_id"], data["administrator_agent_id"]

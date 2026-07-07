@@ -24,9 +24,9 @@ def director_context():
     return DirectorContext(session="main", window_id="@1", pane_id="%0")
 
 
-def _bootstrap(label=None, ctx=None, coding_agent="claude", backend="tmux"):
+def _bootstrap(name=None, ctx=None, coding_agent="claude", backend="tmux"):
     return broker.create_fleet(
-        label=label,
+        name=name,
         director_context=ctx
         or DirectorContext(session="main", window_id="@1", pane_id="%0"),
         coding_agent=coding_agent,
@@ -35,10 +35,10 @@ def _bootstrap(label=None, ctx=None, coding_agent="claude", backend="tmux"):
 
 
 def test_bootstrap__top_level_envelope_and_director_subdict(director_context):
-    result = _bootstrap(label="bootstrap-1", ctx=director_context)
+    result = _bootstrap(name="bootstrap-1", ctx=director_context)
     for key in (
         "fleet_id",
-        "label",
+        "name",
         "created_at",
         "administrator_agent_id",
         "director",
@@ -49,7 +49,7 @@ def test_bootstrap__top_level_envelope_and_director_subdict(director_context):
         assert key in director
     assert director["name"] == "Director"
     assert director["description"] == "Root Director for this fleet"
-    assert result["label"] == "bootstrap-1"
+    assert result["name"] == "bootstrap-1"
 
 
 @pytest.mark.parametrize("coding_agent", ["claude", "codex"])
@@ -102,11 +102,11 @@ def test_bootstrap__db_rows_for_fleet_director_administrator_placement(
     assert by_name["Administrator"].registered_at == fleet_rows[0].created_at
 
 
-@pytest.mark.parametrize("label", ["hello-world", None])
-def test_bootstrap__label_handling_and_unique_ids(director_context, label):
-    r1 = _bootstrap(label=label, ctx=director_context)
-    r2 = _bootstrap(label=label, ctx=director_context)
-    assert r1["label"] == label
+@pytest.mark.parametrize("name", ["hello-world", None])
+def test_bootstrap__name_handling_and_unique_ids(director_context, name):
+    r1 = _bootstrap(name=name, ctx=director_context)
+    r2 = _bootstrap(name=name, ctx=director_context)
+    assert r1["name"] == name
     assert r1["fleet_id"] != r2["fleet_id"]
     assert r1["director"]["agent_id"] != r2["director"]["agent_id"]
     assert r1["administrator_agent_id"] != r2["administrator_agent_id"]
@@ -122,7 +122,7 @@ def test_bootstrap__atomic_rollback_on_failure(
     monkeypatch.setattr(fleets, "AgentPlacement", _BoomPlacement)
     with pytest.raises(RuntimeError, match="injected failure"):
         broker.create_fleet(
-            label="rollback",
+            name="rollback",
             director_context=director_context,
             coding_agent="claude",
             backend="tmux",
@@ -223,8 +223,8 @@ def test_register_agent__rejects_dead_fleets(
 def test_list_fleets__hides_soft_deleted_but_get_fleet_still_returns(
     director_context,
 ):
-    alive = _bootstrap(label="alive", ctx=director_context)
-    dead = _bootstrap(label="dead", ctx=director_context)
+    alive = _bootstrap(name="alive", ctx=director_context)
+    dead = _bootstrap(name="dead", ctx=director_context)
     broker.delete_fleet(dead["fleet_id"])
 
     fleets = broker.list_fleets()
@@ -282,7 +282,7 @@ def test_send_message__notification_invokes_inline_preview_with_director_pane(
         lambda self, **kwargs: mock_preview(**kwargs),
     )
     result = broker.create_fleet(
-        label="notify",
+        name="notify",
         director_context=director_context,
         coding_agent="claude",
         backend="tmux",

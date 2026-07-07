@@ -46,7 +46,7 @@ def _stub_get_fleet(monkeypatch):
         "get_fleet",
         lambda sid: {
             "fleet_id": sid,
-            "label": None,
+            "name": None,
             "created_at": "2026-05-05T00:00:00+00:00",
             "deleted_at": None,
             "director_agent_id": 11,
@@ -685,7 +685,7 @@ def test_root_director__rejected_before_any_tmux_pane_mutation(
         "get_fleet",
         lambda _sid: {
             "fleet_id": fleet_id,
-            "label": None,
+            "name": None,
             "created_at": "2026-05-05T00:00:00+00:00",
             "deleted_at": None,
             "director_agent_id": MEMBER_ID,

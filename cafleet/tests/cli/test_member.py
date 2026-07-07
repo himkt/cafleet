@@ -29,7 +29,7 @@ from cafleet.multiplexer import tmux as multiplexer_tmux
 @pytest.fixture
 def bootstrapped_fleet(_mock_tmux_for_fleet_create):
     runner = CliRunner()
-    create = runner.invoke(cli, ["fleet", "create", "--json"])
+    create = runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
     return data["fleet_id"], data["director"]["agent_id"], runner
@@ -959,7 +959,7 @@ def test_member_nudge__target_not_found_exits_1(
         broker.deregister_agent(target_id)
     else:  # cross_fleet
         other = broker.create_fleet(
-            label=None,
+            name=None,
             director_context=DirectorContext(
                 session="main", window_id="@3", pane_id="%0"
             ),
@@ -1207,7 +1207,7 @@ def make_bootstrapped_fleet(tmp_path, monkeypatch, _mock_tmux_for_fleet_create):
 
     def _make(coding_agent: str = "claude"):
         runner = CliRunner()
-        args = ["fleet", "create", "--json"]
+        args = ["fleet", "create", "--name", "test-fleet", "--json"]
         if coding_agent != "claude":
             args += ["--coding-agent", coding_agent]
         create = runner.invoke(cli, args)

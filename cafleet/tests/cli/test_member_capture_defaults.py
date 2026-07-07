@@ -13,7 +13,7 @@ from tests.broker._helpers import _member_placement
 @pytest.fixture
 def bootstrapped_member(_mock_tmux_for_fleet_create):
     runner = CliRunner()
-    create = runner.invoke(cli, ["fleet", "create", "--json"])
+    create = runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
     sid = data["fleet_id"]

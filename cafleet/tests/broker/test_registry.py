@@ -14,16 +14,16 @@ from tests.broker._helpers import _create_fleet, _register_agent
 # --- create_fleet ------------------------------------------------------
 
 
-def test_create_fleet__shape_and_label_handling():
+def test_create_fleet__shape_and_name_handling():
     r_default = _create_fleet()
-    assert {"fleet_id", "label", "created_at"}.issubset(r_default.keys())
+    assert {"fleet_id", "name", "created_at"}.issubset(r_default.keys())
     assert isinstance(r_default["fleet_id"], int)
-    assert r_default["label"] is None
+    assert r_default["name"] is None
     assert "T" in r_default["created_at"]
 
-    r_labeled = _create_fleet(label="PR-42 review")
-    assert r_labeled["label"] == "PR-42 review"
-    assert r_labeled["fleet_id"] != r_default["fleet_id"]
+    r_named = _create_fleet(name="PR-42 review")
+    assert r_named["name"] == "PR-42 review"
+    assert r_named["fleet_id"] != r_default["fleet_id"]
 
 
 def test_create_fleet__administrator_seed_shape_and_uniqueness(broker_session):
@@ -74,7 +74,7 @@ def test_create_fleet__list_fleet_agents_marks_administrator_kind():
 def test_list_fleets__empty_and_non_empty_with_agent_count():
     assert broker.list_fleets() == []
 
-    fleet = _create_fleet(label="fleet-a")
+    fleet = _create_fleet(name="fleet-a")
     sid = fleet["fleet_id"]
     _register_agent(sid, name="agent-1")
     _register_agent(sid, name="agent-2")
@@ -84,8 +84,8 @@ def test_list_fleets__empty_and_non_empty_with_agent_count():
     rows = broker.list_fleets()
     assert len(rows) == 1
     row = rows[0]
-    assert set(row.keys()) >= {"fleet_id", "label", "created_at", "agent_count"}
-    assert row["label"] == "fleet-a"
+    assert set(row.keys()) >= {"fleet_id", "name", "created_at", "agent_count"}
+    assert row["name"] == "fleet-a"
     # Two user agents (one deregistered → excluded) + Director + Administrator.
     assert row["agent_count"] == 4
 
@@ -108,25 +108,25 @@ def test_list_fleets__newest_first_by_created_at_desc(monkeypatch):
     )
     monkeypatch.setattr(_shared, "now_iso", lambda: next(timestamps))
 
-    _create_fleet(label="a")  # 00:00:01
-    _create_fleet(label="b")  # 00:00:02
-    _create_fleet(label="c")  # 00:00:03
+    _create_fleet(name="a")  # 00:00:01
+    _create_fleet(name="b")  # 00:00:02
+    _create_fleet(name="c")  # 00:00:03
 
     rows = broker.list_fleets()
-    labels = [row["label"] for row in rows]
+    names = [row["name"] for row in rows]
 
-    assert labels == ["c", "b", "a"]
+    assert names == ["c", "b", "a"]
 
 
 # --- get_fleet ---------------------------------------------------------
 
 
 def test_get_fleet__existing_and_nonexistent():
-    created = _create_fleet(label="find-me")
+    created = _create_fleet(name="find-me")
     found = broker.get_fleet(created["fleet_id"])
     assert found is not None
     assert found["fleet_id"] == created["fleet_id"]
-    assert found["label"] == "find-me"
+    assert found["name"] == "find-me"
     assert "created_at" in found
 
     assert broker.get_fleet(999999) is None

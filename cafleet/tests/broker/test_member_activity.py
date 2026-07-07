@@ -9,7 +9,7 @@ from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
 def _bootstrap_fleet():
     info = broker.create_fleet(
-        label="activity-test",
+        name="activity-test",
         director_context=DirectorContext(session="main", window_id="@3", pane_id="%0"),
         coding_agent="claude",
         backend="tmux",
