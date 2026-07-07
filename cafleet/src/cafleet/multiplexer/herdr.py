@@ -386,14 +386,17 @@ class HerdrMultiplexer:
         # and `pane run` types the coding-agent command into it, so /exit returns
         # the pane to a bare shell rather than closing it (unlike tmux, where the
         # agent IS the pane's foreground process). Graceful teardown therefore
-        # waits for the agent to exit — agent_status None means no agent is detected
-        # in the pane — then closes the now-shell-only pane. agent_status also
-        # returns None when the pane is already gone (pane_not_found teardown race),
-        # so the same branch covers "operator already closed it"; kill_pane with
-        # ignore_missing swallows that race.
+        # waits for the agent to exit, then closes the now-shell-only pane. herdr
+        # reports agent_status "unknown" (and drops the `agent` field) once the
+        # agent has exited to the bare shell — the non-live status that means "no
+        # agent process in the pane." agent_status also returns None when the pane
+        # is already gone (pane_not_found teardown race), so the same branch covers
+        # "operator already closed it"; kill_pane with ignore_missing swallows that
+        # race.
         deadline = time.monotonic() + timeout
         while True:
-            if self.agent_status(target_pane_id=target_pane_id) is None:
+            status = self.agent_status(target_pane_id=target_pane_id)
+            if status is None or status == "unknown":
                 self.kill_pane(target_pane_id=target_pane_id, ignore_missing=True)
                 return True
             if time.monotonic() >= deadline:

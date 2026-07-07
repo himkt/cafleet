@@ -1919,12 +1919,14 @@ Each method's herdr realization:
   <pane_id>` through the `not_found`-tolerant runner.
 - **`list_pane_ids() -> set`** — `herdr pane list` → the set of pane ids.
 - **`wait_for_pane_gone(...)`** — graceful teardown for a pane whose shell
-  outlives its agent: poll `agent_status` until it returns `None` (the coding
-  agent has exited back to the bare shell), then `herdr pane close` (`kill_pane`
-  with `ignore_missing`, which also swallows the already-gone teardown race) and
-  return `True`, all within the caller's `timeout`/`interval` budget. `None` is
-  the only exit signal — `done` means "turn finished, agent still running," so
-  it never triggers the close. If the agent never reaches `None` before the
+  outlives its agent: poll `agent_status` until it returns `"unknown"` (herdr
+  drops the `agent` field and reports the non-live `"unknown"` status once the
+  coding agent has exited back to the bare shell) or `None` (the pane is already
+  gone via `pane_not_found`), then `herdr pane close` (`kill_pane` with
+  `ignore_missing`, which also swallows the already-gone teardown race) and
+  return `True`, all within the caller's `timeout`/`interval` budget. `"unknown"`
+  / `None` are the only exit signals — `done`/`blocked` mean the agent is still
+  alive, so they never trigger the close. If the agent never leaves before the
   deadline, return `False` **without** closing the pane, leaving the exit-2
   timeout path to the CLI. tmux's `wait_for_pane_gone` is unchanged (still
   `poll_until_pane_gone` over `list-panes`).
