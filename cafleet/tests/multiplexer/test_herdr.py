@@ -367,7 +367,7 @@ def test_list_pane_ids__collects_pane_id_set(herdr_run):
     assert captured == [["herdr", "pane", "list"]]
 
 
-# --- pane_exists / wait_for_pane_gone --------------------------------------
+# --- pane_exists -----------------------------------------------------------
 
 
 def test_pane_exists__present_returns_true(herdr_run):
@@ -390,19 +390,111 @@ def test_pane_exists__other_error_propagates(herdr_run):
         _herdr.pane_exists(target_pane_id="wG:p1")
 
 
-def test_wait_for_pane_gone__returns_true_when_pane_disappears(monkeypatch, herdr_run):
-    _captured, set_returns = herdr_run
+# --- wait_for_pane_gone (graceful teardown) --------------------------------
+#
+# On herdr a pane hosts a persistent shell: `pane split` creates the shell and
+# `pane run` types the coding-agent command into it, so /exit returns the pane to
+# a bare shell rather than closing it (unlike tmux, where the agent IS the pane's
+# foreground process). Graceful teardown therefore polls agent_status
+# (`herdr pane get`) until it reports no agent in the pane (None) — the authorit-
+# ative "the coding-agent process has exited" signal — then reaps the now-shell-
+# only pane via kill_pane (`herdr pane close`, ignore_missing). The exit signal is
+# None ONLY: `done`/`blocked` mean the agent is still alive, so they never close a
+# pane. On timeout the loop returns False without closing, leaving the exit-2 tail
+# path to cli/member.py. These tests monkeypatch time.sleep (and, for the timeout
+# case, time.monotonic) so no wall-clock elapses.
+
+
+def test_wait_for_pane_gone__waits_for_agent_exit_then_closes_pane(
+    monkeypatch, herdr_run
+):
+    """Agent exits after N polls: agent_status reports working, working, then None
+    (agent exited back to the shell — pane still present, no agent_status). The
+    pane is polled via `herdr pane get` each tick, then reaped via `herdr pane
+    close`, and wait_for_pane_gone returns True."""
+    captured, set_returns = herdr_run
     monkeypatch.setattr("time.sleep", lambda _s: None)
-    # present, present, then pane_not_found → gone.
     set_returns(
-        "",
-        "",
-        HerdrError("herdr command failed", code="pane_not_found"),
+        _envelope({"pane": {"pane_id": "wG:p1", "agent_status": "working"}}),
+        _envelope({"pane": {"pane_id": "wG:p1", "agent_status": "working"}}),
+        # agent exited to the shell: pane present, no agent detected → None.
+        _envelope({"pane": {"pane_id": "wG:p1", "agent_status": ""}}),
+        "",  # kill_pane `herdr pane close` succeeds
     )
     assert (
-        _herdr.wait_for_pane_gone(target_pane_id="wG:p1", timeout=5.0, interval=0.1)
+        _herdr.wait_for_pane_gone(target_pane_id="wG:p1", timeout=15.0, interval=0.5)
         is True
     )
+    assert captured == [
+        ["herdr", "pane", "get", "wG:p1"],
+        ["herdr", "pane", "get", "wG:p1"],
+        ["herdr", "pane", "get", "wG:p1"],
+        ["herdr", "pane", "close", "wG:p1"],
+    ]
+
+
+def test_wait_for_pane_gone__already_gone_closes_and_returns_true(
+    monkeypatch, herdr_run
+):
+    """Already gone / teardown race: the first agent_status read is None because
+    the pane was already closed (pane_not_found → None). kill_pane(ignore_missing)
+    swallows the race and wait_for_pane_gone returns True immediately, without
+    polling to the timeout."""
+    captured, set_returns = herdr_run
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    set_returns(
+        # agent_status `herdr pane get` → pane_not_found → None
+        HerdrError("herdr command failed", code="pane_not_found"),
+        "",  # kill_pane `herdr pane close` (ignore_missing) succeeds
+    )
+    assert (
+        _herdr.wait_for_pane_gone(target_pane_id="wG:p1", timeout=15.0, interval=0.5)
+        is True
+    )
+    assert captured == [
+        ["herdr", "pane", "get", "wG:p1"],
+        ["herdr", "pane", "close", "wG:p1"],
+    ]
+
+
+@pytest.mark.parametrize("stuck_status", ["done", "blocked"])
+def test_wait_for_pane_gone__non_none_status_times_out_without_closing(
+    monkeypatch, herdr_run, stuck_status
+):
+    """`done` is not an exit: agent_status stuck at `done` (turn finished, agent
+    still running) or `blocked` (waiting on a confirmation prompt) until the
+    deadline → wait_for_pane_gone returns False and NEVER closes the pane. --force
+    stays the operator's escalation for a wedged agent. A fake clock advanced by
+    time.sleep drives the loop to its deadline without real elapsed time."""
+    captured, set_returns = herdr_run
+    clock = {"t": 0.0}
+    monkeypatch.setattr("time.monotonic", lambda: clock["t"])
+    monkeypatch.setattr("time.sleep", lambda s: clock.__setitem__("t", clock["t"] + s))
+    stuck = _envelope({"pane": {"pane_id": "wG:p1", "agent_status": stuck_status}})
+    set_returns(*([stuck] * 8))
+    result = _herdr.wait_for_pane_gone(
+        target_pane_id="wG:p1", timeout=1.0, interval=0.5
+    )
+    assert result is False
+    # A live agent's pane is never closed by the graceful path.
+    assert ["herdr", "pane", "close", "wG:p1"] not in captured
+    # Every issued command was an agent_status poll (`herdr pane get`).
+    assert captured
+    assert all(argv[:3] == ["herdr", "pane", "get"] for argv in captured)
+
+
+def test_wait_for_pane_gone__non_pane_not_found_error_propagates(
+    monkeypatch, herdr_run
+):
+    """Error propagation: a real herdr failure (server unreachable) is not a
+    pane_not_found race, so agent_status re-raises it and wait_for_pane_gone
+    propagates it unswallowed (cli/member.py's existing MultiplexerError handler
+    turns it into the exit-1 ClickException)."""
+    _captured, set_returns = herdr_run
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    set_returns(HerdrError("herdr command failed: server unreachable"))
+    with pytest.raises(HerdrError, match="server unreachable"):
+        _herdr.wait_for_pane_gone(target_pane_id="wG:p1", timeout=15.0, interval=0.5)
 
 
 # --- kill_pane (not_found-tolerant teardown) -------------------------------
