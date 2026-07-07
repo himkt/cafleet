@@ -61,12 +61,16 @@ substituting `{fleet_id}`, `{agent_id}` (the member's own newly-allocated id),
 `cafleet member delete` tears down the pane (when one exists) and
 soft-deletes the agent. Default path: send the backend exit keystroke and submit
 it (separate keystrokes with a short settle gap, so every backend's input line
-registers the command before Enter), poll `list-panes` until the pane disappears
-(15 s timeout), then deregister. On timeout, capture the pane tail and fail
-loudly with exit code 2; the operator reruns with `--force` for an atomic
-kill+deregister. A member with a pending placement (no pane yet) is a plain
-registry soft-delete, and so is a placementless agent (no placement row) —
-`cafleet member delete` soft-deletes both without touching tmux.
+registers the command before Enter), wait for the pane to close (15 s timeout),
+then deregister. On a backend where the coding agent *is* the pane's foreground
+process (tmux), the exit closes the pane directly. On a backend whose pane hosts
+a persistent shell that outlives its agent (herdr), the default path first waits
+for the coding agent to exit back to the shell, then closes the now-shell-only
+pane. On timeout, capture the pane tail and fail loudly with exit code 2; the
+operator reruns with `--force` for an atomic kill+deregister. A member with a
+pending placement (no pane yet) is a plain registry soft-delete, and so is a
+placementless agent (no placement row) — `cafleet member delete` soft-deletes
+both without touching the multiplexer.
 
 ## Spawn-prompt input modes
 

@@ -1,7 +1,7 @@
 # Herdr member-delete graceful teardown
 
 **Status**: Approved
-**Progress**: 0/14 tasks complete
+**Progress**: 4/14 tasks complete
 **Last Updated**: 2026-07-07
 
 ## Overview
@@ -129,10 +129,10 @@ If the agent never reaches `agent_status is None` within `timeout` — e.g. clau
 
 ### Step 1: Documentation first
 
-- [ ] Update `SPEC.md` §6.5 — rewrite the herdr `wait_for_pane_gone(...)` bullet (currently "`poll_until_pane_gone` over `herdr pane get <id>` (absent → gone)") to describe graceful teardown: poll `agent_status` until `None` (agent exited to shell), then `herdr pane close` (`kill_pane`, `ignore_missing`), within the caller's `timeout`/`interval`; `None`-only exit signal; timeout → `False` (no pane close), leaving the exit-2 path to the CLI. Note tmux's `wait_for_pane_gone` is unchanged. <!-- completed: -->
-- [ ] Update `docs/concepts/member-lifecycle.md` "Delete ordering" — note that on a backend whose pane outlives the agent (herdr), the default path waits for the coding agent to exit and then closes the pane; keep the altitude conceptual and backend-neutral. Confirm the mermaid `Exiting --> Gone: exit keystroke, wait for pane to close` label still reads correctly. <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md` `member delete` §"Has a pane (default path)" — keep the observable contract (poll up to 15.0 s / 500 ms, timeout → exit 2 + tail) accurate for herdr, where "poll for the pane to disappear" is realized as "wait for the agent to exit, then close the shell pane." The exit-code table (0/1/2) is unchanged. <!-- completed: -->
-- [ ] Update `cafleet/src/cafleet/multiplexer/base.py` `Multiplexer.wait_for_pane_gone` docstring — add the one-sentence generalization (§5) so the contract covers a pane that outlives its agent. <!-- completed: -->
+- [x] Update `SPEC.md` §6.5 — rewrite the herdr `wait_for_pane_gone(...)` bullet (currently "`poll_until_pane_gone` over `herdr pane get <id>` (absent → gone)") to describe graceful teardown: poll `agent_status` until `None` (agent exited to shell), then `herdr pane close` (`kill_pane`, `ignore_missing`), within the caller's `timeout`/`interval`; `None`-only exit signal; timeout → `False` (no pane close), leaving the exit-2 path to the CLI. Note tmux's `wait_for_pane_gone` is unchanged. <!-- completed: 2026-07-07T22:40 -->
+- [x] Update `docs/concepts/member-lifecycle.md` "Delete ordering" — note that on a backend whose pane outlives the agent (herdr), the default path waits for the coding agent to exit and then closes the pane; keep the altitude conceptual and backend-neutral. Confirm the mermaid `Exiting --> Gone: exit keystroke, wait for pane to close` label still reads correctly. <!-- completed: 2026-07-07T22:40 -->
+- [x] Update `docs/spec/cli-options.md` `member delete` §"Has a pane (default path)" — keep the observable contract (poll up to 15.0 s / 500 ms, timeout → exit 2 + tail) accurate for herdr, where "poll for the pane to disappear" is realized as "wait for the agent to exit, then close the shell pane." The exit-code table (0/1/2) is unchanged. <!-- completed: 2026-07-07T22:40 -->
+- [x] Update `cafleet/src/cafleet/multiplexer/base.py` `Multiplexer.wait_for_pane_gone` docstring — add the one-sentence generalization (§5) so the contract covers a pane that outlives its agent. <!-- completed: 2026-07-07T22:40 -->
 
 ### Step 2: Code
 

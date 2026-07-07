@@ -120,6 +120,10 @@ class Multiplexer(Protocol):
     ) -> bool:
         """Block until ``target_pane_id`` disappears or ``timeout`` elapses.
 
+        A backend whose pane outlives its coding agent may realize this as
+        "wait for the agent to exit, then reap the pane" rather than a pure
+        read-only poll.
+
         Args:
             target_pane_id: Pane id to watch.
             timeout: Maximum seconds to wait.

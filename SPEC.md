@@ -1918,8 +1918,16 @@ Each method's herdr realization:
 - **`kill_pane(*, target_pane_id, ignore_missing=False)`** — `herdr pane close
   <pane_id>` through the `not_found`-tolerant runner.
 - **`list_pane_ids() -> set`** — `herdr pane list` → the set of pane ids.
-- **`wait_for_pane_gone(...)`** — `poll_until_pane_gone` over `herdr pane get
-  <id>` (absent → gone).
+- **`wait_for_pane_gone(...)`** — graceful teardown for a pane whose shell
+  outlives its agent: poll `agent_status` until it returns `None` (the coding
+  agent has exited back to the bare shell), then `herdr pane close` (`kill_pane`
+  with `ignore_missing`, which also swallows the already-gone teardown race) and
+  return `True`, all within the caller's `timeout`/`interval` budget. `None` is
+  the only exit signal — `done` means "turn finished, agent still running," so
+  it never triggers the close. If the agent never reaches `None` before the
+  deadline, return `False` **without** closing the pane, leaving the exit-2
+  timeout path to the CLI. tmux's `wait_for_pane_gone` is unchanged (still
+  `poll_until_pane_gone` over `list-panes`).
 - **`send_exit(*, target_pane_id, ignore_missing=False)`** — `herdr pane run
   <id> "/exit"`.
 - **`send_poll_trigger(...) -> bool`** — best-effort. `herdr pane send-keys <id>
