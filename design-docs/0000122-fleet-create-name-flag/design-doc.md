@@ -1,7 +1,7 @@
 # Rename fleet `--label` to `--name` (end-to-end)
 
 **Status**: Approved
-**Progress**: 27/39 tasks complete
+**Progress**: 39/39 tasks complete
 **Last Updated**: 2026-07-07
 
 ## Overview
@@ -10,14 +10,14 @@ Rename the fleet's human-readable identifier from `label` to `name` across every
 
 ## Success Criteria
 
-- [ ] `cafleet fleet create --name "X"` sets the fleet's name; `cafleet fleet create` with no `--name` errors with Click's missing-required-option message (exit 2).
-- [ ] `cafleet fleet list` shows a `NAME` column; `cafleet fleet show` shows a `name:` field; the `--full` create render shows a `name:` line.
-- [ ] The JSON output of `fleet create` / `fleet list` / `fleet show --json` and the WebUI `/fleets` HTTP response emit the key `name` (never `label`).
-- [ ] The `fleets` table column is `name`; a data-preserving, reversible Alembic migration `0009` renames `label → name` (upgrade) and `name → label` (downgrade); `mise //cafleet:test` passes including the alembic smoke test.
-- [ ] The admin frontend reads `fleet.name`; `mise //admin:build` regenerates the bundle to read `fleet.name`. (`cafleet/src/cafleet/webui/dist/` is a gitignored build artifact, not committed; the publish flow rebuilds it fresh — see Step 7.)
-- [ ] `grep -rn "label"` over source, tests, docs, SPEC.md, README.md, and skills returns **no** fleet-`label` reference (only unrelated incidental `label` uses remain).
-- [ ] The package version is bumped `0.16.0 → 0.17.0` to signal the breaking JSON/HTTP contract change.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` all pass.
+- [x] `cafleet fleet create --name "X"` sets the fleet's name; `cafleet fleet create` with no `--name` errors with Click's missing-required-option message (exit 2).
+- [x] `cafleet fleet list` shows a `NAME` column; `cafleet fleet show` shows a `name:` field; the `--full` create render shows a `name:` line.
+- [x] The JSON output of `fleet create` / `fleet list` / `fleet show --json` and the WebUI `/fleets` HTTP response emit the key `name` (never `label`).
+- [x] The `fleets` table column is `name`; a data-preserving, reversible Alembic migration `0009` renames `label → name` (upgrade) and `name → label` (downgrade); `mise //cafleet:test` passes including the alembic smoke test.
+- [x] The admin frontend reads `fleet.name`; `mise //admin:build` regenerates the bundle to read `fleet.name`. (`cafleet/src/cafleet/webui/dist/` is a gitignored build artifact, not committed; the publish flow rebuilds it fresh — see Step 7.)
+- [x] `grep -rn "label"` over source, tests, docs, SPEC.md, README.md, and skills returns **no** fleet-`label` reference (only unrelated incidental `label` uses remain, plus the immutable `0001` + the `0009` rename migrations).
+- [x] The package version is bumped `0.16.0 → 0.17.0` to signal the breaking JSON/HTTP contract change.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` all pass.
 
 ---
 
@@ -211,12 +211,12 @@ Bump the minor version `0.16.0 → 0.17.0` via the project's `bump-my-version` f
 
 ### Step 9: Version bump
 
-- [ ] Bump `0.16.0 → 0.17.0` via `bump-my-version bump minor` (updates `.bumpversion.toml`, `cafleet/pyproject.toml`, `uv.lock`; creates the bump commit). <!-- completed: -->
+- [x] Bump `0.16.0 → 0.17.0` via `bump-my-version bump minor` (updates `.bumpversion.toml`, `cafleet/pyproject.toml`, `uv.lock`; creates the bump commit). <!-- completed: 2026-07-07T13:29 -->
 
 ### Step 10: Verification
 
-- [ ] `mise //cafleet:test` (includes the alembic smoke test), `mise //cafleet:lint`, `mise //cafleet:typecheck` all pass. <!-- completed: -->
-- [ ] `mise //admin:lint` passes; confirm `grep -rn "label"` over source/tests/docs/SPEC/README/skills shows no fleet-`label` reference remains. <!-- completed: -->
+- [x] `mise //cafleet:test` (includes the alembic smoke test — 1044 pass, verified by the Tester), `mise //cafleet:lint`, `mise //cafleet:typecheck` all pass. <!-- completed: 2026-07-07T13:31 -->
+- [x] `mise //admin:lint` passes; `grep -rn "label"` over source/tests/docs/SPEC/README/skills shows no fleet-`label` reference remains (the only fleet-`label` refs are the immutable `0001` historical migration and the `0009` rename migration itself; all other `label` hits are incidental — SQL `.label()` aliases, `branch_labels` boilerplate, HTML/aria labels, status-chip labels, field labels). <!-- completed: 2026-07-07T13:31 -->
 
 ---
 
