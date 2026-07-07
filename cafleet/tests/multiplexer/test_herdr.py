@@ -396,33 +396,39 @@ def test_pane_exists__other_error_propagates(herdr_run):
 # `pane run` types the coding-agent command into it, so /exit returns the pane to
 # a bare shell rather than closing it (unlike tmux, where the agent IS the pane's
 # foreground process). Graceful teardown therefore polls agent_status
-# (`herdr pane get`) until it reports no agent in the pane (None) — the authorit-
-# ative "the coding-agent process has exited" signal — then reaps the now-shell-
-# only pane via kill_pane (`herdr pane close`, ignore_missing). The exit signal is
-# None ONLY: `done`/`blocked` mean the agent is still alive, so they never close a
-# pane. On timeout the loop returns False without closing, leaving the exit-2 tail
-# path to cli/member.py. These tests monkeypatch time.sleep (and, for the timeout
-# case, time.monotonic) so no wall-clock elapses.
+# (`herdr pane get`) until the coding agent has left the pane, then reaps the
+# now-shell-only pane via kill_pane (`herdr pane close`, ignore_missing). The
+# agent has left when herdr reports `agent_status: "unknown"` — it dropped the
+# agent back to the bare shell (and drops the `agent` field) — or the read
+# resolves to None via pane_not_found (the pane was already fully closed).
+# `done`/`blocked` mean the agent is still alive, so they never close a pane. On
+# timeout the loop returns False without closing, leaving the exit-2 tail path to
+# cli/member.py. These tests monkeypatch time.sleep and time.monotonic so no
+# wall-clock elapses.
 
 
 def test_wait_for_pane_gone__waits_for_agent_exit_then_closes_pane(
     monkeypatch, herdr_run
 ):
-    """Agent exits after N polls: agent_status reports working, working, then None
-    (agent exited back to the shell — pane still present, no agent_status). The
-    pane is polled via `herdr pane get` each tick, then reaped via `herdr pane
-    close`, and wait_for_pane_gone returns True."""
+    """Agent exits after N polls: agent_status reports working, working, then
+    `unknown` — real herdr reports `agent_status: "unknown"` (and drops the
+    `agent` field) when the coding agent exits back to the bare shell, so
+    `unknown` (not None) is the agent-left signal here. The pane is polled via
+    `herdr pane get` each tick, then reaped via `herdr pane close`, and
+    wait_for_pane_gone returns True."""
     captured, set_returns = herdr_run
-    monkeypatch.setattr("time.sleep", lambda _s: None)
+    clock = {"t": 0.0}
+    monkeypatch.setattr("time.monotonic", lambda: clock["t"])
+    monkeypatch.setattr("time.sleep", lambda s: clock.__setitem__("t", clock["t"] + s))
     set_returns(
         _envelope({"pane": {"pane_id": "wG:p1", "agent_status": "working"}}),
         _envelope({"pane": {"pane_id": "wG:p1", "agent_status": "working"}}),
-        # agent exited to the shell: pane present, no agent detected → None.
-        _envelope({"pane": {"pane_id": "wG:p1", "agent_status": ""}}),
+        # agent exited to the bare shell: herdr reports `unknown`, not None.
+        _envelope({"pane": {"pane_id": "wG:p1", "agent_status": "unknown"}}),
         "",  # kill_pane `herdr pane close` succeeds
     )
     assert (
-        _herdr.wait_for_pane_gone(target_pane_id="wG:p1", timeout=15.0, interval=0.5)
+        _herdr.wait_for_pane_gone(target_pane_id="wG:p1", timeout=1.0, interval=0.5)
         is True
     )
     assert captured == [
