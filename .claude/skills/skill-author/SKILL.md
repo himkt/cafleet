@@ -79,7 +79,7 @@ When CWD has no `.git` ancestor (typical when CWD is `$HOME` or under `$HOME/.cl
 The Director creates the fleet inside a tmux pane:
 
 ```bash
-cafleet --json fleet create --label "<short-label>"
+cafleet --json fleet create --name "<fleet-name>"
 ```
 
 The CLI atomically (1) creates a `fleets` row, (2) registers a root Director agent bound to the current tmux pane, (3) seeds a built-in Administrator agent. Capture both `fleet_id` and `director.agent_id` from the JSON response and substitute them as **literal id strings** into every subsequent `cafleet ...` call.
@@ -357,7 +357,7 @@ The skill's task convention is `researches/pr-<pr-number>` (PR summaries are res
 ### Fleet bootstrap
 
 ```bash
-cafleet --json fleet create --label "summarize-pr-1234"
+cafleet --json fleet create --name "summarize-pr-1234"
 # → {"fleet_id": 7, "director": {"agent_id": 8}, "administrator_agent_id": 9}
 ```
 
