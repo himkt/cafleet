@@ -23,12 +23,12 @@ import click
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from cafleet import broker
 from cafleet.broker import _shared
-from cafleet.db.models import Agent, Fleet, MonitorConfig, MonitorRuntime, Task
+from cafleet.db.models import Agent, MonitorConfig, MonitorRuntime, Task
 from tests.broker._helpers import (
     _create_fleet,
     _member_placement,
@@ -541,8 +541,14 @@ def _seed_legacy_monitor_config(url: str) -> None:
     engine = create_engine(url)
     try:
         with Session(engine) as s:
-            s.add(Fleet(fleet_id=1, created_at=_SEED_TS))
-            s.flush()
+            # Raw SQL: at this pre-0009 revision the fleets identifier column is
+            # still ``label``; the ORM ``Fleet`` model now maps ``name``, so an
+            # ORM insert/select here would emit ``name`` and fail. The nullable
+            # column is left unset (no value is needed for this seed).
+            s.execute(
+                text("INSERT INTO fleets (fleet_id, created_at) VALUES (1, :ts)"),
+                {"ts": _SEED_TS},
+            )
             s.add_all(
                 [
                     Agent(
@@ -566,7 +572,9 @@ def _seed_legacy_monitor_config(url: str) -> None:
                 ]
             )
             s.flush()
-            s.get(Fleet, 1).director_agent_id = 10
+            s.execute(
+                text("UPDATE fleets SET director_agent_id = 10 WHERE fleet_id = 1")
+            )
             s.add_all(
                 [
                     MonitorConfig(agent_id=10, interval_seconds=60, enabled=1),
@@ -625,8 +633,14 @@ def _seed_director_and_monitoring_member(url: str) -> None:
     engine = create_engine(url)
     try:
         with Session(engine) as s:
-            s.add(Fleet(fleet_id=1, created_at=_SEED_TS))
-            s.flush()
+            # Raw SQL: at this pre-0009 revision the fleets identifier column is
+            # still ``label``; the ORM ``Fleet`` model now maps ``name``, so an
+            # ORM insert/select here would emit ``name`` and fail. The nullable
+            # column is left unset (no value is needed for this seed).
+            s.execute(
+                text("INSERT INTO fleets (fleet_id, created_at) VALUES (1, :ts)"),
+                {"ts": _SEED_TS},
+            )
             s.add_all(
                 [
                     Agent(
@@ -652,7 +666,9 @@ def _seed_director_and_monitoring_member(url: str) -> None:
                 ]
             )
             s.flush()
-            s.get(Fleet, 1).director_agent_id = 10
+            s.execute(
+                text("UPDATE fleets SET director_agent_id = 10 WHERE fleet_id = 1")
+            )
             s.add_all(
                 [
                     MonitorConfig(agent_id=10, interval_seconds=60, enabled=1),

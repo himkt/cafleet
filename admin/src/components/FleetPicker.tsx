@@ -8,7 +8,7 @@ import EmptyState from "./EmptyState";
 import Skeleton from "./Skeleton";
 
 interface FleetPickerProps {
-  onSelect: (fleetId: number, label: string | null) => void;
+  onSelect: (fleetId: number, name: string | null) => void;
 }
 
 function FleetCard({
@@ -16,18 +16,18 @@ function FleetCard({
   onSelect,
 }: {
   fleet: FleetListItem;
-  onSelect: (fleetId: number, label: string | null) => void;
+  onSelect: (fleetId: number, name: string | null) => void;
 }) {
   return (
     <button
       type="button"
-      onClick={() => onSelect(fleet.fleet_id, fleet.label)}
+      onClick={() => onSelect(fleet.fleet_id, fleet.name)}
       className="group flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-surface-raised px-4 py-3.5 text-left shadow-sm hover:border-accent/40 hover:shadow-md hover:ring-2 hover:ring-accent/20 focus-visible:outline-2 focus-visible:outline-accent motion-safe:transition"
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-semibold">
-            {fleet.label ?? `Fleet ${fleet.fleet_id}`}
+            {fleet.name ?? `Fleet ${fleet.fleet_id}`}
           </span>
           <code className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 font-mono text-xs text-text-muted">
             #{fleet.fleet_id}

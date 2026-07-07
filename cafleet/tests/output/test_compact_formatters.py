@@ -25,12 +25,12 @@ def _fleet_create_data(
     *,
     fleet_id=7000,
     director_agent_id=8000,
-    label="my-project",
+    name="my-project",
     administrator_agent_id=9000,
 ) -> dict:
     return {
         "fleet_id": fleet_id,
-        "label": label,
+        "name": name,
         "created_at": "2026-04-16T08:50:00+00:00",
         "administrator_agent_id": administrator_agent_id,
         "director": {

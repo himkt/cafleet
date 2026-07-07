@@ -25,12 +25,12 @@ def _mock_tmux_for_fleet_create(monkeypatch):
     )
 
 
-def _seed_fleet(db_path, fleet_id: int, label: str | None = None) -> None:
+def _seed_fleet(db_path, fleet_id: int, name: str | None = None) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute(
-            "INSERT INTO fleets (fleet_id, label, created_at) VALUES (?, ?, ?)",
-            (fleet_id, label, "2026-01-01T00:00:00+00:00"),
+            "INSERT INTO fleets (fleet_id, name, created_at) VALUES (?, ?, ?)",
+            (fleet_id, name, "2026-01-01T00:00:00+00:00"),
         )
         conn.commit()
     finally:
@@ -65,7 +65,7 @@ def _seed_agent(
 def _fleet_rows(db_path):
     conn = sqlite3.connect(str(db_path))
     try:
-        return conn.execute("SELECT fleet_id, label, created_at FROM fleets").fetchall()
+        return conn.execute("SELECT fleet_id, name, created_at FROM fleets").fetchall()
     finally:
         conn.close()
 
@@ -97,7 +97,7 @@ def fresh_db(tmp_path, monkeypatch):
 @pytest.mark.parametrize("output_mode", ["text", "json"])
 def test_fleet_create__happy_path(fresh_db, output_mode):
     db_file, runner = fresh_db
-    args = ["fleet", "create"]
+    args = ["fleet", "create", "--name", "happy"]
     if output_mode == "json":
         args.append("--json")
     result = runner.invoke(cli, args)
@@ -114,31 +114,35 @@ def test_fleet_create__happy_path(fresh_db, output_mode):
     assert len(rows) == 1
 
 
-def test_fleet_create__label_round_trip_and_default_none(fresh_db):
+def test_fleet_create__name_round_trip(fresh_db):
     db_file, runner = fresh_db
-    result = runner.invoke(cli, ["fleet", "create", "--label", "PR-42 review"])
+    result = runner.invoke(cli, ["fleet", "create", "--name", "PR-42 review"])
     assert result.exit_code == 0, result.output
     assert _fleet_rows(db_file)[0][1] == "PR-42 review"
 
-    # Default label is None.
-    result2 = runner.invoke(cli, ["fleet", "create"])
-    assert result2.exit_code == 0
-    labels = sorted([r[1] or "" for r in _fleet_rows(db_file)])
-    assert "" in labels
-    assert "PR-42 review" in labels
+
+def test_fleet_create__missing_required_name_exits_2(fresh_db):
+    """``--name`` is required (mirrors ``member create``); a bare ``fleet create``
+    fails at parse time with Click's missing-required-option error (exit 2)."""
+    _db_file, runner = fresh_db
+    result = runner.invoke(cli, ["fleet", "create"])
+    assert result.exit_code == 2, result.output
+    out = result.output or ""
+    assert "Missing option" in out
+    assert "--name" in out
 
 
 def test_fleet_create__each_create_mints_unique_id(fresh_db):
     db_file, runner = fresh_db
-    r1 = runner.invoke(cli, ["fleet", "create", "--json"])
-    r2 = runner.invoke(cli, ["fleet", "create", "--json"])
+    r1 = runner.invoke(cli, ["fleet", "create", "--name", "u1", "--json"])
+    r2 = runner.invoke(cli, ["fleet", "create", "--name", "u2", "--json"])
     assert json.loads(r1.output)["fleet_id"] != json.loads(r2.output)["fleet_id"]
     assert len(_fleet_rows(db_file)) == 2
 
 
 def test_fleet_create__bootstraps_administrator_recorded_in_db(fresh_db):
     db_file, runner = fresh_db
-    result = runner.invoke(cli, ["fleet", "create", "--json"])
+    result = runner.invoke(cli, ["fleet", "create", "--name", "admin-check", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     sid = data["fleet_id"]
@@ -167,7 +171,7 @@ def test_fleet_create__bootstraps_administrator_recorded_in_db(fresh_db):
 def test_fleet_list__shape_and_agent_count(fresh_db, output_mode):
     db_file, runner = fresh_db
     sid = 1
-    _seed_fleet(db_file, sid, label="test-fleet")
+    _seed_fleet(db_file, sid, name="test-fleet")
     _seed_agent(db_file, 2, sid, status="active")
     _seed_agent(db_file, 3, sid, status="active")
     _seed_agent(db_file, 4, sid, status="deregistered")
@@ -181,7 +185,7 @@ def test_fleet_list__shape_and_agent_count(fresh_db, output_mode):
         data = json.loads(result.output)
         assert len(data) == 1
         assert data[0]["fleet_id"] == sid
-        assert data[0]["label"] == "test-fleet"
+        assert data[0]["name"] == "test-fleet"
         assert data[0]["agent_count"] == 2  # active only
     else:
         assert str(sid) in result.output
@@ -207,13 +211,13 @@ def test_fleet_show__shape_and_branches(
     db_file, runner = fresh_db
     if scenario == "existing_active":
         sid = 1
-        _seed_fleet(db_file, sid, label="show-test")
+        _seed_fleet(db_file, sid, name="show-test")
         target = sid
     elif scenario == "missing":
         target = 999
     else:
         sid = 1
-        _seed_fleet(db_file, sid, label="audit-me")
+        _seed_fleet(db_file, sid, name="audit-me")
         conn = sqlite3.connect(str(db_file))
         try:
             conn.execute(
@@ -264,7 +268,7 @@ def test_fleet_delete__nonexistent_fleet_handles_gracefully(fresh_db):
 def test_fleet_show__accepts_fleet_id_option(fresh_db):
     db_file, runner = fresh_db
     sid = 1
-    _seed_fleet(db_file, sid, label="opt-show")
+    _seed_fleet(db_file, sid, name="opt-show")
 
     result = runner.invoke(cli, ["fleet", "show", "--fleet-id", str(sid)])
     assert result.exit_code == 0, result.output

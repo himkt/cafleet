@@ -4,9 +4,9 @@ from cafleet import broker
 from cafleet.multiplexer import MultiplexerContext
 
 
-def _create_fleet(label: str | None = None) -> dict:
+def _create_fleet(name: str | None = None) -> dict:
     return broker.create_fleet(
-        label=label,
+        name=name,
         director_context=MultiplexerContext(
             session="main", window_id="@3", pane_id="%0"
         ),

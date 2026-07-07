@@ -51,7 +51,7 @@ integers your own commands print.
 Create a fleet. This records your current pane as the root Director's pane:
 
 ```bash
-cafleet fleet create --label "demo"
+cafleet fleet create --name "demo"
 ```
 
 ```

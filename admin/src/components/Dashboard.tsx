@@ -12,7 +12,7 @@ import MessageInput from "./MessageInput";
 
 interface DashboardProps {
   fleetId: number;
-  fleetLabel: string | null;
+  fleetName: string | null;
   agentId?: string;
   initialAgents: Agent[];
   onBack: () => void;
@@ -20,7 +20,7 @@ interface DashboardProps {
 
 export default function Dashboard({
   fleetId,
-  fleetLabel,
+  fleetName,
   agentId,
   initialAgents,
   onBack,
@@ -94,7 +94,7 @@ export default function Dashboard({
         onRefresh={() => {
           void trigger();
         }}
-        fleetLabel={fleetLabel ?? String(fleetId)}
+        fleetName={fleetName ?? String(fleetId)}
         onBack={onBack}
         sendingAsAdministrator={senderId !== null}
         monitorRunning={monitor === null ? null : monitor.running}

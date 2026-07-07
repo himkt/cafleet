@@ -110,7 +110,7 @@ def format_fleet_create(data: dict, *, full: bool = False) -> str:
     ``full=False`` (default): 1-line compact form
     ``<fleet_id> director=<id> admin=<id>``.
     ``full=True``: 7-line block (fleet_id + director_agent_id on
-    their own lines, plus ``label``, ``created_at``, ``director_name``,
+    their own lines, plus ``name``, ``created_at``, ``director_name``,
     ``pane``, ``administrator``).
     """
     director = data["director"]
@@ -124,7 +124,7 @@ def format_fleet_create(data: dict, *, full: bool = False) -> str:
     lines = [
         str(data["fleet_id"]),
         str(director["agent_id"]),
-        f"label:            {data['label'] or ''}",
+        f"name:             {data['name'] or ''}",
         f"created_at:       {data['created_at']}",
         f"director_name:    {director['name']}",
         f"pane:             {placement['mux_session']}:{placement['mux_window_id']}:{placement['mux_pane_id']}",

@@ -29,7 +29,7 @@ Returns non-soft-deleted fleets (`deleted_at IS NULL`) with agent counts, ordere
   {
     "fleet_id": 1,
     "director_agent_id": 2,
-    "label": "PR-42 review",
+    "name": "PR-42 review",
     "created_at": "2026-04-12T10:00:00+00:00",
     "agent_count": 3
   }

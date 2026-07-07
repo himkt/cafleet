@@ -45,7 +45,7 @@ export interface TimelineResponse {
 
 export interface FleetListItem {
   fleet_id: number;
-  label: string | null;
+  name: string | null;
   created_at: string;
   agent_count: number;
 }

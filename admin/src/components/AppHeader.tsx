@@ -62,8 +62,8 @@ function LiveIndicator({ isPolling }: { isPolling: boolean }) {
 interface AppHeaderProps {
   isPolling: boolean;
   onRefresh: () => void;
-  /** Breadcrumb tail (fleet label or id). Presence switches `Fleets` into a link. */
-  fleetLabel?: string;
+  /** Breadcrumb tail (fleet name or id). Presence switches `Fleets` into a link. */
+  fleetName?: string;
   onBack?: () => void;
   sendingAsAdministrator?: boolean;
   /** Monitor liveness for the fleet; `null` until the first fetch resolves. */
@@ -73,7 +73,7 @@ interface AppHeaderProps {
 export default function AppHeader({
   isPolling,
   onRefresh,
-  fleetLabel,
+  fleetName,
   onBack,
   sendingAsAdministrator = false,
   monitorRunning = null,
@@ -87,7 +87,7 @@ export default function AppHeader({
           aria-label="Breadcrumb"
           className="flex min-w-0 items-center gap-1.5 text-sm"
         >
-          {fleetLabel !== undefined && onBack ? (
+          {fleetName !== undefined && onBack ? (
             <>
               <button
                 type="button"
@@ -99,7 +99,7 @@ export default function AppHeader({
               <span className="text-text-faint" aria-hidden="true">
                 /
               </span>
-              <span className="truncate font-medium">{fleetLabel}</span>
+              <span className="truncate font-medium">{fleetName}</span>
             </>
           ) : (
             <span className="font-medium text-text-muted">Fleets</span>

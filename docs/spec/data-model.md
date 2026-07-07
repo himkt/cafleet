@@ -17,7 +17,7 @@ The schema at head holds seven application tables, plus Alembic's `alembic_versi
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `fleet_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer (first value `1`, monotonically increasing). |
-| `label` | `TEXT` | nullable | Optional free-form text for human bookkeeping (e.g. `"PR-42 review"`). |
+| `name` | `TEXT` | nullable | Human-readable name for the fleet (e.g. `"PR-42 review"`). |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp. |
 | `deleted_at` | `TEXT` | nullable | `NULL` = active; non-NULL ISO-8601 timestamp = soft-deleted. Written on fleet delete; never cleared. |
 | `director_agent_id` | `INTEGER` | nullable (DB), app-enforced NOT NULL after bootstrap; `REFERENCES agents(agent_id) ON DELETE RESTRICT` | Points at the fleet's root Director (the agent auto-registered by `cafleet fleet create`). DB-nullable so the bootstrap transaction can insert the fleet row before the Director's `agents` row exists; post-bootstrap every non-deleted fleet has a non-NULL value. |

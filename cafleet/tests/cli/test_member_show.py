@@ -26,7 +26,7 @@ def bootstrapped_fleet(_mock_tmux_for_fleet_create):
     so no real tmux pane is spawned.
     """
     runner = CliRunner()
-    create = runner.invoke(cli, ["fleet", "create", "--json"])
+    create = runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
     sid = data["fleet_id"]
@@ -94,7 +94,7 @@ def test_member_show__unknown_target_exits_one_not_found(bootstrapped_fleet):
 
 def test_member_show__cross_fleet_target_exits_one_not_found(bootstrapped_fleet):
     sid, _d, _a, alice_id, _m, runner = bootstrapped_fleet
-    other = runner.invoke(cli, ["fleet", "create", "--json"])
+    other = runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])
     assert other.exit_code == 0, other.output
     other_sid = json.loads(other.output)["fleet_id"]
     assert other_sid != sid

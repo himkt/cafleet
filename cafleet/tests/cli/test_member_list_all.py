@@ -26,7 +26,7 @@ def bootstrapped_roster(_mock_tmux_for_fleet_create):
     ``(sid, director_id, admin_id, monitor_id, alice_id, runner)``.
     """
     runner = CliRunner()
-    create = runner.invoke(cli, ["fleet", "create", "--json"])
+    create = runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
     sid = data["fleet_id"]

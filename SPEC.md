@@ -259,7 +259,7 @@ The unified shapes:
 | Field | Type | Notes |
 |---|---|---|
 | `fleet_id` | integer | PK, AUTOINCREMENT |
-| `label` | optional string | |
+| `name` | optional string | |
 | `created_at` | string | ISO timestamp |
 | `deleted_at` | optional string | soft-delete marker |
 | `director_agent_id` | optional integer | FK→agents, ON DELETE RESTRICT; null only mid-bootstrap |
@@ -533,7 +533,7 @@ the kind (`get_agent`'s four values, `list_fleet_agents`'s two-value
 
 #### Fleets
 
-- **`create_fleet(label, director_context, coding_agent)`** — atomically
+- **`create_fleet(name, director_context, coding_agent)`** — atomically
   bootstraps a fleet, its root Director, and a built-in Administrator in one
   write_session. Order: stamp `created_at`; insert the fleet with
   `director_agent_id = NULL`; insert the Director agent (`name="Director"`,
@@ -547,14 +547,14 @@ the kind (`get_agent`'s four values, `list_fleet_agents`'s two-value
   the Administrator agent (`status="active"`, card with
   `cafleet:{kind:"builtin-administrator"}`, description `Built-in administrator
   agent for fleet {fleet_id}`) with **no placement** and **not enrolled**.
-  Returns `{fleet_id, label, created_at, administrator_agent_id, director:{…}}`.
-- **`list_fleets()`** — one record `{fleet_id, director_agent_id, label,
+  Returns `{fleet_id, name, created_at, administrator_agent_id, director:{…}}`.
+- **`list_fleets()`** — one record `{fleet_id, director_agent_id, name,
   created_at, agent_count}` per non-soft-deleted fleet (`deleted_at IS NULL`);
   `agent_count` counts only **active** agents (0 for empty fleets). Ordering:
   **`created_at DESC, fleet_id ASC`**.
 - **`get_fleet(fleet_id)`** — single-row lookup by id; **includes soft-deleted
   fleets** (no `deleted_at` filter) and exposes `deleted_at` so callers
-  distinguish missing (None) from soft-deleted. Returns `{fleet_id, label,
+  distinguish missing (None) from soft-deleted. Returns `{fleet_id, name,
   created_at, deleted_at, director_agent_id}` or None.
 - **`delete_fleet(fleet_id)`** — soft-delete + cascade-deregister in one
   write_session; **idempotent**. If the fleet row does not exist → application
@@ -989,17 +989,18 @@ emits JSON when **either** the local flag **or** global `--json` is set.
 `fleet delete` take the **required `--fleet-id` option** like every other
 fleet-scoped command (§6.3 `--fleet-id`).
 
-- **create** — `--label` (string, optional), `--coding-agent` (choice over the
+- **create** — `--name` (string, **required**; no `--name` → Click usage error
+  `Missing option '--name'.`, exit 2), `--coding-agent` (choice over the
   coding-agent names, default `claude`, shown in help), `--json` (local),
   `--full` (documented). Requires a supported multiplexer: on a `MultiplexerError`
   → application error `cafleet fleet create must be run inside a tmux or herdr
   session` (exit 1, no DB writes).
 - **list** — `--json` (local). Empty → `No fleets found.`; else a header plus
-  one formatted row per fleet (five columns: FLEET_ID / DIRECTOR / LABEL / AGENTS
+  one formatted row per fleet (five columns: FLEET_ID / DIRECTOR / NAME / AGENTS
   left-padded 40 / 40 / 20 / 8, then a trailing unpadded CREATED_AT; nullable
   cells fall back to empty strings).
 - **show** — `--fleet-id` (integer, required) + local `--json`. Not found →
-  application error `fleet '<fleet_id>' not found.`. Text: `fleet_id`, `label`,
+  application error `fleet '<fleet_id>' not found.`. Text: `fleet_id`, `name`,
   `created_at`, plus a `deleted_at:` line when soft-deleted (soft-deleted rows
   are returned intentionally).
 - **delete** — `--fleet-id` (integer, required); no `--force`. Prints `Deleted
@@ -1555,7 +1556,7 @@ Every field is read with required access unless marked optional; required access
 - **Fleet-create** (`format_fleet_create`): `fleet_id` (req), `director` (req
   nested) → `agent_id` (req), `name`/`placement` (req, verbose);
   `director.placement` (verbose) → `mux_session`/`mux_window_id`/`mux_pane_id`
-  (req); `administrator_agent_id` (req); `label` (req key, verbose, empty string
+  (req); `administrator_agent_id` (req); `name` (req key, verbose, empty string
   when falsy); `created_at` (req, verbose).
 - **Member-create** (`format_member`): `agent_id` (req), `name` (req),
   `placement` (req) → `coding_agent` (req), `mux_pane_id` (req key; `(pending)`
@@ -1610,7 +1611,7 @@ with `:`:
 ```
 <fleet_id>
 <director.agent_id>
-label:            <label or "">
+name:             <name or "">
 created_at:       <created_at>
 director_name:    <director.name>
 pane:             <mux_session>:<mux_window_id>:<mux_pane_id>
@@ -2731,7 +2732,7 @@ exit 0, bypasses `--fleet-id`).
 
 **`fleet`:**
 
-- [ ] `cafleet fleet create` (`--label`, `--coding-agent`=claude, `--json`, `--full`)
+- [ ] `cafleet fleet create` (`--name`, `--coding-agent`=claude, `--json`, `--full`)
 - [ ] `cafleet fleet list` (`--json`)
 - [ ] `cafleet fleet show` (`--fleet-id`, `--json`)
 - [ ] `cafleet fleet delete` (`--fleet-id`)

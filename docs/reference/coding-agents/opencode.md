@@ -103,7 +103,7 @@ Gated on local install of `opencode`. Run from inside a tmux or herdr session. T
 ```bash
 rm -f ~/.opencode/agents/cafleet.md
 
-cafleet fleet create --label opencode-smoke --coding-agent claude
+cafleet fleet create --name opencode-smoke --coding-agent claude
 # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
 # Note the fleet and Director ids — the steps below use 1 and 2.
 

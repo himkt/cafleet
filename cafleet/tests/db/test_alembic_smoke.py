@@ -50,26 +50,26 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         engine.dispose()
 
 
-def test_alembic_version_table_records_head_0008(alembic_upgraded_db):
+def test_alembic_version_table_records_head_0009(alembic_upgraded_db):
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version_num FROM alembic_version"))
             rows = result.fetchall()
-        assert rows == [("0008",)]
+        assert rows == [("0009",)]
     finally:
         engine.dispose()
 
 
-def test_eight_migration_revisions_exist():
-    """The migration history is eight revisions: 0001 (base) → 0002 (monitor
+def test_nine_migration_revisions_exist():
+    """The migration history is nine revisions: 0001 (base) → 0002 (monitor
     tables) → 0003 (prune non-Director monitor_config rows) → 0004 (prune the
     root-Director monitor_config rows) → 0005 (per-member intervals: prune the
     monitoring member, backfill the root Director @180 + ordinary members @720)
     → 0006 (skill_installs: the per-home record of the installing CLI version)
     → 0007 (tasks.to_agent_id → nullable so broadcast-summary rows persist
     NULL) → 0008 (backend-neutral placement columns: rename tmux_* → mux_* and
-    add the backend column)."""
+    add the backend column) → 0009 (rename fleets.label → fleets.name)."""
     with importlib.resources.as_file(
         importlib.resources.files("cafleet.db") / "alembic.ini"
     ) as ini_path:
@@ -77,7 +77,7 @@ def test_eight_migration_revisions_exist():
         script = ScriptDirectory.from_config(cfg)
         revisions = list(script.walk_revisions())
 
-    assert len(revisions) == 8
+    assert len(revisions) == 9
     by_revision = {rev.revision: rev for rev in revisions}
     assert set(by_revision) == {
         "0001",
@@ -88,6 +88,7 @@ def test_eight_migration_revisions_exist():
         "0006",
         "0007",
         "0008",
+        "0009",
     }
     assert by_revision["0001"].down_revision is None
     assert by_revision["0002"].down_revision == "0001"
@@ -97,7 +98,8 @@ def test_eight_migration_revisions_exist():
     assert by_revision["0006"].down_revision == "0005"
     assert by_revision["0007"].down_revision == "0006"
     assert by_revision["0008"].down_revision == "0007"
-    assert script.get_current_head() == "0008"
+    assert by_revision["0009"].down_revision == "0008"
+    assert script.get_current_head() == "0009"
 
 
 def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
@@ -479,3 +481,51 @@ def test_0005_prunes_monitoring_member_and_backfills_director_and_member(tmp_pat
     assert configs[_MEMBER_ID].enabled == 1
     # the Administrator stays unenrolled despite its placement (kind guard).
     assert _ADMINISTRATOR_ID not in configs
+
+
+def test_0009_renames_fleet_label_to_name_round_trip(tmp_path):
+    """0009 renames ``fleets.label`` → ``fleets.name`` preserving the stored
+    value; downgrade reverses the rename, also preserving the value. The DB is
+    staged at 0008 (where the column is still ``label``), seeded with a named
+    fleet, upgraded to 0009, then downgraded back to 0008."""
+    db_path = tmp_path / "migration_0009.db"
+    with importlib.resources.as_file(
+        importlib.resources.files("cafleet.db") / "alembic.ini"
+    ) as ini_path:
+        cfg = Config(str(ini_path))
+        cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+        command.upgrade(cfg, "0008")
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO fleets (fleet_id, label, created_at, "
+                        "deleted_at, director_agent_id) "
+                        "VALUES (1, 'PR-42 review', :ts, NULL, NULL)"
+                    ),
+                    {"ts": "2026-07-07T00:00:00+00:00"},
+                )
+
+            command.upgrade(cfg, "0009")
+            cols = {c["name"] for c in inspect(engine).get_columns("fleets")}
+            assert "name" in cols
+            assert "label" not in cols
+            with engine.connect() as conn:
+                value = conn.execute(
+                    text("SELECT name FROM fleets WHERE fleet_id = 1")
+                ).scalar()
+            assert value == "PR-42 review"
+
+            command.downgrade(cfg, "0008")
+            cols = {c["name"] for c in inspect(engine).get_columns("fleets")}
+            assert "label" in cols
+            assert "name" not in cols
+            with engine.connect() as conn:
+                value = conn.execute(
+                    text("SELECT label FROM fleets WHERE fleet_id = 1")
+                ).scalar()
+            assert value == "PR-42 review"
+        finally:
+            engine.dispose()

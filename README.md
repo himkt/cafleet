@@ -75,7 +75,7 @@ Per-agent config lives on the Configure page: <https://himkt.github.io/cafleet/g
 Run inside a tmux or herdr session. Create a fleet (records your current pane as the root Director):
 
 ```bash
-cafleet fleet create --label "my-project"
+cafleet fleet create --name "my-project"
 # → 1 director=2 admin=3
 ```
 

@@ -58,7 +58,7 @@ via `--coding-agent` because cafleet cannot auto-detect it
 ([Coding agents](../concepts/coding-agents.md)):
 
 ```bash
-cafleet fleet create --label "demo" --coding-agent claude
+cafleet fleet create --name "demo" --coding-agent claude
 ```
 
 ```
