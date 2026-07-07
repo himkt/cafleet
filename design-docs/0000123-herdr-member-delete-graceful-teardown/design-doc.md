@@ -10,13 +10,13 @@
 
 ## Success Criteria
 
-- [ ] A live herdr-hosted member (claude / codex / opencode) is deletable via the default `cafleet member delete` path with exit 0 — no `--force` needed.
-- [ ] The graceful path waits for the coding agent to exit (herdr `agent_status` returns `"unknown"`, or `None` if the pane is already gone), then closes the shell pane via `herdr pane close`, then `cli/member.py` deregisters — within the existing 15.0 s / 0.5 s budget.
-- [ ] A herdr member whose agent does **not** exit within 15 s (e.g. blocked on an "exit anyway?" confirmation) still times out to exit 2 with the pane tail on stderr; no auto-force is performed, and `--force` remains the operator escalation.
-- [ ] The fix lives entirely in `HerdrMultiplexer.wait_for_pane_gone`; `cli/member.py`, the 15.0 s budget, and `HerdrMultiplexer.send_exit` are unchanged.
-- [ ] The tmux path is byte-for-byte unchanged; the herdr `--force` path is unchanged.
-- [ ] Documentation (SPEC.md §6.5, `docs/concepts/member-lifecycle.md`, `docs/spec/cli-options.md`) is updated first and stays drift-free.
-- [ ] `mise //cafleet:lint` / `:typecheck` / `:test` pass; herdr tests cover graceful teardown, already-gone, and no-exit-timeout.
+- [x] A live herdr-hosted member (claude / codex / opencode) is deletable via the default `cafleet member delete` path with exit 0 — no `--force` needed.
+- [x] The graceful path waits for the coding agent to exit (herdr `agent_status` returns `"unknown"`, or `None` if the pane is already gone), then closes the shell pane via `herdr pane close`, then `cli/member.py` deregisters — within the existing 15.0 s / 0.5 s budget.
+- [x] A herdr member whose agent does **not** exit within 15 s (e.g. blocked on an "exit anyway?" confirmation) still times out to exit 2 with the pane tail on stderr; no auto-force is performed, and `--force` remains the operator escalation.
+- [x] The fix lives entirely in `HerdrMultiplexer.wait_for_pane_gone`; `cli/member.py`, the 15.0 s budget, and `HerdrMultiplexer.send_exit` are unchanged.
+- [x] The tmux path is byte-for-byte unchanged; the herdr `--force` path is unchanged.
+- [x] Documentation (SPEC.md §6.5, `docs/concepts/member-lifecycle.md`, `docs/spec/cli-options.md`) is updated first and stays drift-free.
+- [x] `mise //cafleet:lint` / `:typecheck` / `:test` pass; herdr tests cover graceful teardown, already-gone, and no-exit-timeout.
 
 ---
 
