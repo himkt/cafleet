@@ -464,14 +464,15 @@ def test_wait_for_pane_gone__already_gone_closes_and_returns_true(
 
 
 @pytest.mark.parametrize("stuck_status", ["done", "blocked"])
-def test_wait_for_pane_gone__non_none_status_times_out_without_closing(
+def test_wait_for_pane_gone__live_status_times_out_without_closing(
     monkeypatch, herdr_run, stuck_status
 ):
-    """`done` is not an exit: agent_status stuck at `done` (turn finished, agent
-    still running) or `blocked` (waiting on a confirmation prompt) until the
-    deadline → wait_for_pane_gone returns False and NEVER closes the pane. --force
-    stays the operator's escalation for a wedged agent. A fake clock advanced by
-    time.sleep drives the loop to its deadline without real elapsed time."""
+    """A live status is not an exit: agent_status stuck at `done` (turn finished,
+    agent still running) or `blocked` (waiting on a confirmation prompt) until the
+    deadline → wait_for_pane_gone returns False and NEVER closes the pane. Only
+    `"unknown"`/None signal exit; a live agent keeps the pane, so --force stays the
+    operator's escalation for a wedged agent. A fake clock advanced by time.sleep
+    drives the loop to its deadline without real elapsed time."""
     captured, set_returns = herdr_run
     clock = {"t": 0.0}
     monkeypatch.setattr("time.monotonic", lambda: clock["t"])
