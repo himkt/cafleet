@@ -33,7 +33,7 @@ def run_db_init() -> None:
     # returns a Traversable that Alembic cannot open. Hold the context
     # open across ``command.upgrade`` so the extracted file survives.
     with importlib.resources.as_file(
-        importlib.resources.files("cafleet.db") / "alembic.ini"
+        importlib.resources.files("cafleet.db") / "alembic" / "alembic.ini"
     ) as ini_path:
         cfg = Config(str(ini_path))
         cfg.set_main_option("sqlalchemy.url", sync_url)

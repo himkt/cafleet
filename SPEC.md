@@ -1326,8 +1326,8 @@ Error: DB has existing tables but no alembic_version. Run `alembic stamp head` m
 Error: DB schema is at revision <rev> which is unknown to this version of cafleet. Refusing to downgrade automatically.
 ```
 
-Never touches `skill_installs` rows (creates the table via migration `0006`
-but records nothing).
+Never touches `skill_installs` rows (the schema migration creates the table
+but `setup db` records nothing).
 
 ##### `setup skill` subcommand
 
@@ -1918,8 +1918,18 @@ Each method's herdr realization:
 - **`kill_pane(*, target_pane_id, ignore_missing=False)`** — `herdr pane close
   <pane_id>` through the `not_found`-tolerant runner.
 - **`list_pane_ids() -> set`** — `herdr pane list` → the set of pane ids.
-- **`wait_for_pane_gone(...)`** — `poll_until_pane_gone` over `herdr pane get
-  <id>` (absent → gone).
+- **`wait_for_pane_gone(...)`** — graceful teardown for a pane whose shell
+  outlives its agent: poll `agent_status` until it returns `"unknown"` (herdr
+  drops the `agent` field and reports the non-live `"unknown"` status once the
+  coding agent has exited back to the bare shell) or `None` (the pane is already
+  gone via `pane_not_found`), then `herdr pane close` (`kill_pane` with
+  `ignore_missing`, which also swallows the already-gone teardown race) and
+  return `True`, all within the caller's `timeout`/`interval` budget. `"unknown"`
+  / `None` are the only exit signals — `done`/`blocked` mean the agent is still
+  alive, so they never trigger the close. If the agent never leaves before the
+  deadline, return `False` **without** closing the pane, leaving the exit-2
+  timeout path to the CLI. tmux's `wait_for_pane_gone` is unchanged (still
+  `poll_until_pane_gone` over `list-panes`).
 - **`send_exit(*, target_pane_id, ignore_missing=False)`** — `herdr pane run
   <id> "/exit"`.
 - **`send_poll_trigger(...) -> bool`** — best-effort. `herdr pane send-keys <id>
@@ -2506,7 +2516,7 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 
 | Field | Env var | Type | Default |
 |---|---|---|---|
-| `database_url` | `CAFLEET_DATABASE_URL` | string | `sqlite:///` + `~/.local/share/cafleet/cafleet.db` (home expanded **at startup**) |
+| `database_url` | `CAFLEET_DATABASE_URL` | string | `sqlite:///` + `~/.local/share/cafleet/cafleet_v2.db` (home expanded **at startup**) |
 | `broker_host` | `CAFLEET_BROKER_HOST` | string | `"127.0.0.1"` |
 | `broker_port` | `CAFLEET_BROKER_PORT` | integer (16-bit port) | `8000` |
 | `max_text_len` | `CAFLEET_MAX_TEXT_LEN` | non-negative integer | `200` |
@@ -2519,7 +2529,7 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 - **Default DB URL** expands `~` to `$HOME` **only for the factory default**; a
   user-supplied `CAFLEET_DATABASE_URL` is passed through verbatim (no `~`
   expansion, so a user value must already be absolute). Net default on home
-  `/home/u`: `sqlite:////home/u/.local/share/cafleet/cafleet.db` (four slashes).
+  `/home/u`: `sqlite:////home/u/.local/share/cafleet/cafleet_v2.db` (four slashes).
 - A non-integer `broker_port`/`max_text_len` must **fail loudly at startup** (a
   hard validation error, not a silent default).
 - `max_text_len` truncates only CLI echo + the broker inline-preview keystroke.
@@ -2627,31 +2637,29 @@ AUTOINCREMENT, and the create-order quirk are in §6.1.
 - `idx_tasks_context_status_ts` on `tasks(context_id, status_timestamp)`
 - `idx_tasks_from_agent_status_ts` on `tasks(from_agent_id, status_timestamp)`
 
-**The migration chain.** Six linear revisions, `0001` → `0006` (each revision's
-`down_revision` is its predecessor; `0006` is head):
+**The migration chain.** A single initial revision, `0001` (no
+predecessor; head). It creates the full §5.2 schema in one step, in this
+order:
 
-1. `0001` — initial schema: `fleets`, `agents` (+ `idx_agents_fleet_status`),
-   `tasks` (+ `idx_tasks_context_status_ts`, `idx_tasks_from_agent_status_ts`),
-   `agent_placements` (+ `idx_placements_director`). `agents` is **created
-   first** because the others FK into it; `agents.fleet_id` forward-references
-   the still-uncreated `fleets` (§6.1). `fleets`/`agents`/`tasks` are
-   AUTOINCREMENT; `agent_placements` is PK=FK `agent_id`, not AUTOINCREMENT,
-   `coding_agent` DDL default `"claude"`.
-2. `0002` — monitor tables: `monitor_config` (PK=FK `agent_id` ON DELETE
-   CASCADE, `interval_seconds` default 60, `enabled` default 1) and
-   `monitor_runtime` (PK=FK `fleet_id` ON DELETE RESTRICT, `tick_seconds`
-   default 5); neither is AUTOINCREMENT.
-3. `0003` — data migration: prunes non-Director `monitor_config` rows.
-4. `0004` — data migration: prunes the root-Director `monitor_config` rows.
-5. `0005` — data migration: prunes the monitoring member's `monitor_config`
-   row and backfills the root Director @180 and active pane-bound ordinary
-   members @720 (the per-member-interval inversion).
-6. `0006` — `skill_installs`: TEXT PK `coding_agent`, no AUTOINCREMENT, no FK
+1. `agents` (+ `idx_agents_fleet_status`) — created **first** because every
+   other FK-bearing table references it; `agents.fleet_id` forward-references
+   the still-uncreated `fleets` (§6.1). AUTOINCREMENT.
+2. `fleets` — AUTOINCREMENT.
+3. `skill_installs` — TEXT PK `coding_agent`, no AUTOINCREMENT, no FK
    constraint. Columns: `coding_agent` TEXT PK, `cafleet_version` TEXT NOT
    NULL, `installed_at` TEXT NOT NULL. Upsert semantics; rows written by the
    skills half of `setup` and by `setup skill` after each home's install
    succeeds; never written by `setup db`. Feeds the stale-skills guard and
    `doctor`.
+4. `agent_placements` (+ `idx_placements_director`) — PK=FK `agent_id`, not
+   AUTOINCREMENT; `coding_agent` DDL default `"claude"`, `backend` DDL default
+   `"tmux"`.
+5. `monitor_config` — PK=FK `agent_id` ON DELETE CASCADE, `interval_seconds`
+   default 60, `enabled` default 1; not AUTOINCREMENT.
+6. `monitor_runtime` — PK=FK `fleet_id` ON DELETE RESTRICT, `tick_seconds`
+   default 5; not AUTOINCREMENT.
+7. `tasks` (+ `idx_tasks_context_status_ts`, `idx_tasks_from_agent_status_ts`)
+   — AUTOINCREMENT.
 
 A fresh DB starts with **no rows in any application table** (only
 `alembic_version` holds its single revision row); monitor enrollment is written
@@ -2797,15 +2805,16 @@ The decisions that shape this surface (full rationale in the design doc):
 - **One error/exit model** (§7.2): usage → exit 2, application/runtime → exit
   1; the `member delete` teardown timeout (exit 2) is the one deliberate
   exception.
-- **Alembic-migrated schema** (§8): a linear chain of six revisions with the
-  current revision recorded in `alembic_version`; no cross-implementation DB
-  interoperability. Re-running `cafleet setup` (or `setup db`) on an existing
-  database applies any pending migrations in place and preserves all existing
-  rows, message history included; it refuses to auto-downgrade an
-  ahead-of-head database and refuses an unversioned database with existing
-  tables. Upgrade path: after `uv tool upgrade cafleet`, the first
-  fleet-scoped command errors with the stale-skills message and instructs the
-  operator to run `cafleet setup skill` to reinstall.
+- **Alembic-migrated schema** (§8): a single initial revision
+  (`0001`) with the current revision recorded in `alembic_version`; no
+  cross-implementation DB interoperability. Re-running `cafleet setup` (or
+  `setup db`) on a database created by this chain applies any pending
+  migrations in place and preserves all existing rows, message history
+  included; it refuses to auto-downgrade an ahead-of-head database and
+  refuses an unversioned database with existing tables. Upgrade path: after
+  `uv tool upgrade cafleet`, the first fleet-scoped command errors with the
+  stale-skills message and instructs the operator to run `cafleet setup skill`
+  to reinstall.
 - **Stale-skills guard** (§6.3): every fleet-scoped group callback validates
   recorded `skill_installs` versions against the runtime CLI version before any
   subcommand body runs; missing/stale → hard error (exit 1); exempt: `setup`,
