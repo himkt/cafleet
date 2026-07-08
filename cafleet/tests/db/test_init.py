@@ -20,7 +20,7 @@ def _table_names(db_path) -> set[str]:
         conn.close()
 
 
-def test_default_database_url_points_at_cafleet_db():
+def test_default_database_url_points_at_cafleet_v2_db():
     """The default registry file is ``~/.local/share/cafleet/cafleet_v2.db``."""
     url = config._default_database_url()
     expected = Path("~/.local/share/cafleet/cafleet_v2.db").expanduser()
