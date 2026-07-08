@@ -101,7 +101,7 @@ Indexes:
 | `mux_session` | `TEXT` | `NOT NULL` | Backend-neutral multiplexer session, e.g. tmux `'main'` (from `display-message '#{session_name}'`) or the herdr session id. |
 | `mux_window_id` | `TEXT` | `NOT NULL` | Backend-neutral window/tab id, e.g. tmux `'@3'` (from `#{window_id}`) or the herdr tab id. |
 | `mux_pane_id` | `TEXT` | nullable | Opaque backend pane id, stored verbatim — e.g. tmux `'%7'` or herdr `'w1:p1'`. `NULL` = pending (row inserted at register time, pane not yet spawned). Set after the pane is spawned. |
-| `backend` | `TEXT` | `NOT NULL`, `DEFAULT 'tmux'` | The multiplexer that produced the pane ids, set to the resolved `mux.name` (`"tmux"` or `"herdr"`) at placement-insert time. The `DEFAULT 'tmux'` backfills pre-existing rows to their real provenance (all placements were tmux before this column existed). |
+| `backend` | `TEXT` | `NOT NULL`, `DEFAULT 'tmux'` | The multiplexer that produced the pane ids, set to the resolved `mux.name` (`"tmux"` or `"herdr"`) at placement-insert time. The `DEFAULT 'tmux'` applies when a placement is inserted without an explicit value. |
 | `coding_agent` | `TEXT` | `NOT NULL`, `DEFAULT 'claude'` | Free-form coding-agent identifier. Current known values are `"claude"` (the default for normal registrations) and `"codex"` / `"opencode"` when chosen at create time. The default `'claude'` applies when a placement is inserted without an explicit value. |
 | `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp, set server-side to match `agents.registered_at`. |
 

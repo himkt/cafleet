@@ -41,12 +41,6 @@ auto-downgrade a database that is ahead of the bundled head, and refuses an
 unversioned database with tables it does not recognize. Without the schema,
 the first request fails with `OperationalError: no such table: agents`.
 
-The current chain is a single squashed initial revision. Databases created by
-the pre-squash chain record a revision this bundle does not know and are
-refused — the default path is versioned (`cafleet_v2.db`) so a fresh install
-starts a new database; there is no data migration from a v1 `cafleet.db`
-file.
-
 ## Skills-install recording
 
 The `skill_installs` table records, per

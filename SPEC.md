@@ -2637,7 +2637,7 @@ AUTOINCREMENT, and the create-order quirk are in §6.1.
 - `idx_tasks_context_status_ts` on `tasks(context_id, status_timestamp)`
 - `idx_tasks_from_agent_status_ts` on `tasks(from_agent_id, status_timestamp)`
 
-**The migration chain.** A single squashed initial revision, `0001` (no
+**The migration chain.** A single initial revision, `0001` (no
 predecessor; head). It creates the full §5.2 schema in one step, in this
 order:
 
@@ -2660,12 +2660,6 @@ order:
    default 5; not AUTOINCREMENT.
 7. `tasks` (+ `idx_tasks_context_status_ts`, `idx_tasks_from_agent_status_ts`)
    — AUTOINCREMENT.
-
-A database produced by the pre-squash `0001`–`0009` chain records a revision
-unknown to this bundle and hits the ahead-of-head refusal (§6.3). The default
-database path is versioned (`cafleet_v2.db`, §7.1) so a fresh install starts a
-new database rather than upgrading a v1 file; there is no data migration from
-`cafleet.db`.
 
 A fresh DB starts with **no rows in any application table** (only
 `alembic_version` holds its single revision row); monitor enrollment is written
@@ -2811,19 +2805,16 @@ The decisions that shape this surface (full rationale in the design doc):
 - **One error/exit model** (§7.2): usage → exit 2, application/runtime → exit
   1; the `member delete` teardown timeout (exit 2) is the one deliberate
   exception.
-- **Alembic-migrated schema** (§8): a single squashed initial revision
+- **Alembic-migrated schema** (§8): a single initial revision
   (`0001`) with the current revision recorded in `alembic_version`; no
   cross-implementation DB interoperability. Re-running `cafleet setup` (or
   `setup db`) on a database created by this chain applies any pending
   migrations in place and preserves all existing rows, message history
   included; it refuses to auto-downgrade an ahead-of-head database and
-  refuses an unversioned database with existing tables. A database from the
-  pre-squash `0001`–`0009` chain records a revision unknown to this bundle
-  and hits that refusal — the versioned default path (`cafleet_v2.db`)
-  starts a fresh database instead; there is no data migration from
-  `cafleet.db`. Upgrade path: after `uv tool upgrade cafleet`, the first
-  fleet-scoped command errors with the stale-skills message and instructs the
-  operator to run `cafleet setup skill` to reinstall.
+  refuses an unversioned database with existing tables. Upgrade path: after
+  `uv tool upgrade cafleet`, the first fleet-scoped command errors with the
+  stale-skills message and instructs the operator to run `cafleet setup skill`
+  to reinstall.
 - **Stale-skills guard** (§6.3): every fleet-scoped group callback validates
   recorded `skill_installs` versions against the runtime CLI version before any
   subcommand body runs; missing/stale → hard error (exit 1); exempt: `setup`,

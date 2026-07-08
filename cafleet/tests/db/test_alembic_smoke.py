@@ -62,9 +62,8 @@ def test_alembic_version_table_records_head_0001(alembic_upgraded_db):
 
 
 def test_single_initial_migration_revision_exists():
-    """The migration history is a single squashed initial revision (0001) with no
-    predecessor — the former 0002–0009 chain was collapsed into this one initial
-    schema."""
+    """The migration history is a single initial revision (0001) with no
+    predecessor, which is the head."""
     with importlib.resources.as_file(
         importlib.resources.files("cafleet.db") / "alembic" / "alembic.ini"
     ) as ini_path:
