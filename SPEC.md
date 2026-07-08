@@ -2663,7 +2663,7 @@ order:
 
 A database produced by the pre-squash `0001`–`0009` chain records a revision
 unknown to this bundle and hits the ahead-of-head refusal (§6.3). The default
-database path is versioned (`cafleet_v2.db`, §10) so a fresh install starts a
+database path is versioned (`cafleet_v2.db`, §7.1) so a fresh install starts a
 new database rather than upgrading a v1 file; there is no data migration from
 `cafleet.db`.
 
