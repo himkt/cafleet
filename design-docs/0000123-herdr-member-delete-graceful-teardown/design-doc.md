@@ -1,6 +1,6 @@
 # Herdr member-delete graceful teardown
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 14/14 tasks complete
 **Last Updated**: 2026-07-07
 
@@ -169,3 +169,4 @@ Cover `HerdrMultiplexer.wait_for_pane_gone` in `tests/multiplexer/test_herdr.py`
 | 2026-07-07 | Finalized: Status → Approved after Reviewer approval and user sign-off. |
 | 2026-07-08 | Live-smoke correction: the box-2 herdr smoke revealed the premise was wrong — an agent that exits to the bare shell reports `agent_status: "unknown"` (and drops the `agent` field), never `None` (which occurs only via `pane_not_found` when the pane is fully gone). Corrected the exit signal to `"unknown"` or `None` across the premise, §1, §2, §Alternatives, SPEC §6.5, and the tests (realistic `"unknown"` mocks). Reset the affected Step 1/2/3/4 tasks for re-verification. |
 | 2026-07-08 | Re-verified after the correction: 73 herdr/member-delete tests + full suite green, lint/typecheck clean, and the box-2 live smoke now passes (`cafleet member delete` on a live herdr member → `pane (closed)`, exit 0, no `--force`). All 14 tasks complete. |
+| 2026-07-08 | Reviewer approved (`approved (doc)`) after a rename-only test-feedback round. Status → Complete via local finalize (no PR); fleet-62 team torn down. |
