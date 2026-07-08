@@ -32,6 +32,11 @@ description = "Install the cafleet CLI as an editable uv tool (source edits take
 run = "uv build --wheel --package cafleet --out-dir ./dist"
 description = "Build the cafleet wheel into cafleet/dist/ (the explicit --out-dir prevents uv from writing to the uv-workspace root by default)"
 
+[tasks.makemigration]
+usage = 'arg "<message>" help="Message passed to alembic revision -m"'
+run = 'uv run --package cafleet alembic -c src/cafleet/db/alembic/alembic.ini revision --autogenerate -m "$usage_message"'
+description = "Autogenerate an Alembic migration into src/cafleet/db/alembic/versions/. Requires the DB at head first (run `cafleet setup db`). The env.py process_revision_directives hook mints the next zero-padded sequential id (000N). Pass the message positionally, e.g. `mise //cafleet:makemigration \"add widget table\"`. Autogenerate cannot detect renames (it emits drop+add) — review and hand-edit the generated file."
+
 [tasks.publish]
 run = [
   { task = "//admin:install" },

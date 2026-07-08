@@ -61,7 +61,7 @@ first fleet-scoped command errors with
 `cafleet setup`, `cafleet doctor`, and `cafleet server` stay runnable so you
 can always repair; `cafleet doctor` reports the recorded per-home versions.
 
-The default database lives at `~/.local/share/cafleet/cafleet.db`. Override
+The default database lives at `~/.local/share/cafleet/cafleet_v2.db`. Override
 with the `CAFLEET_DATABASE_URL` environment variable — use an absolute path,
 since SQLAlchemy does not expand `~` in SQLite URLs.
 

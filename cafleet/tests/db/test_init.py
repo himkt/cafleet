@@ -21,9 +21,9 @@ def _table_names(db_path) -> set[str]:
 
 
 def test_default_database_url_points_at_cafleet_db():
-    """The default registry file is ``~/.local/share/cafleet/cafleet.db``."""
+    """The default registry file is ``~/.local/share/cafleet/cafleet_v2.db``."""
     url = config._default_database_url()
-    expected = Path("~/.local/share/cafleet/cafleet.db").expanduser()
+    expected = Path("~/.local/share/cafleet/cafleet_v2.db").expanduser()
     assert url == f"sqlite:///{expected}"
 
 
