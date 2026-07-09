@@ -1,7 +1,7 @@
 # Monitor Pane-State Taxonomy
 
 **Status**: Approved
-**Progress**: 0/22 tasks complete
+**Progress**: 3/22 tasks complete
 **Last Updated**: 2026-07-08
 
 ## Overview
@@ -245,9 +245,9 @@ The same bar applies one layer down, and belongs in the Director's own doctrine:
 
 ### Step 1: Concepts and user documentation
 
-- [ ] `docs/concepts/monitoring.md` § *Native agent-state due trigger*: rewrite for `_WAKE_ON_STATUS = ("done",)`; state that `blocked` is recorded but never wakes, and why. <!-- completed: -->
-- [ ] `docs/concepts/monitoring.md` § *The monitoring member* steps 2–4: replace the `active/idle` + `progressing/stalled` judgment with the five-state taxonomy and the precedence rubric; fix the `Esc`-dismissal claim at lines 153–154. <!-- completed: -->
-- [ ] `docs/concepts/monitoring.md` § *Cadence and tick precision*: add the stall-check interval knob and its env var. <!-- completed: -->
+- [x] `docs/concepts/monitoring.md` § *Native agent-state due trigger*: rewrite for `_WAKE_ON_STATUS = ("done",)`; state that `blocked` is recorded but never wakes, and why. <!-- completed: 2026-07-09T00:15 -->
+- [x] `docs/concepts/monitoring.md` § *The monitoring member* steps 2–4: replace the `active/idle` + `progressing/stalled` judgment with the five-state taxonomy and the precedence rubric; fix the `Esc`-dismissal claim at lines 153–154. <!-- completed: 2026-07-09T00:15 -->
+- [x] `docs/concepts/monitoring.md` § *Cadence and tick precision*: add the stall-check interval knob and its env var. <!-- completed: 2026-07-09T00:15 -->
 
 ### Step 2: README and SPEC
 

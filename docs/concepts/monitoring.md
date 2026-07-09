@@ -88,10 +88,10 @@ simply continues — there is no one to wake.
 ### Native agent-state due trigger (herdr only)
 
 On the **herdr** backend, a watched agent is due when its interval elapsed **or**
-its native agent status enters an **attention state** — `blocked` or `done`. This
-native trigger **augments, never replaces**, the interval trigger, and it is
-isolated to the monitor loop: `monitor_tick` keeps computing interval-due-ness
-only, with no knowledge of native status.
+its native agent status transitions into `done` — the sole wake-on-status state,
+`_WAKE_ON_STATUS = ("done",)`. This native trigger **augments, never replaces**,
+the interval trigger, and it is isolated to the monitor loop: `monitor_tick` keeps
+computing interval-due-ness only, with no knowledge of native status.
 
 herdr natively tracks each agent's lifecycle state
 (`working`/`blocked`/`done`/`idle`/`unknown`) — a capability the tmux backend
@@ -101,15 +101,28 @@ the loop point-reads the native status of every **enabled** watched agent whose
 pane is alive, comparing it against an in-memory `dict[agent_id, last_status]` it
 owns (a monitor-disabled agent is skipped on the native path too, matching the
 interval path).
-A **transition into** an attention state flags that agent due — and because the
-comparison is against the last-seen status, a single `blocked`/`done` episode
-wakes the watcher only once. Each natively-due agent is tagged with a
-`status:<state>` wake-reason label, and its set is unioned with the interval-due
-set to decide the wake.
+
+A **transition into `done`** flags that agent due, tagged with a `status:done`
+wake-reason label, and its set is unioned with the interval-due (and stall-check)
+set to decide the wake. Because the comparison is against the last-seen status, a
+single `done` episode wakes the watcher only once.
+
+A **transition into `blocked` is recorded but never wakes the watcher.** `blocked`
+means the agent is awaiting a user answer, and the monitoring member's only
+actuation is nudging the Director. Waking the watcher for a `blocked` agent has
+exactly one correct outcome — capture the pane, classify it `awaiting_user`, and
+do nothing — so the wake is pure token cost plus a nonzero chance the watcher
+misjudges and nudges the pane, whose keystroke leads with `Esc` and cancels the
+pending prompt (an `AskUserQuestion` box, when the blocked agent is the Director).
+The `blocked` status is still written into `last_status` so the episode is tracked
+and a later `blocked → working` recovery is detected; it simply never flags a
+wake. `done` is therefore the only native state that can emit a wake-reason tag,
+and its worst case is a `finished` report the Director then judges — a
+non-destructive path.
 
 On the **tmux** backend the capability is absent, so this branch never runs and
-the interval-only behavior is byte-for-byte unchanged. No DB column backs the
-native status; the last-seen state lives only in the running loop's memory.
+agents come due by interval and stall-check only. No DB column backs the native
+status; the last-seen state lives only in the running loop's memory.
 
 ## The monitoring member
 
@@ -131,28 +144,54 @@ its own pane, and the monitoring member runs its routine — staying within two
 read/act commands, read-only `cafleet member capture` and
 `cafleet member nudge`:
 
-1. **Read the freshly-due agents named in the wake nudge** — each rendered as
-   `<role> <id> (<name>)`. Those agents, plus the Director, are who you inspect
-   this wake. (`cafleet monitor status` is available as optional context — e.g. to
-   read intervals or pending counts — but it is **not** the source of the due set;
-   the nudge's named list is authoritative.)
+1. **Read the due agents named in the wake nudge** — each rendered as
+   `<role> <id> (<name>) [<reasons>]`, the reasons drawn from `interval`,
+   `status:done`, and `stall-check`. Those agents, plus the Director, are who you
+   inspect this wake. (`cafleet monitor status` is available as optional context —
+   e.g. to read intervals or pending counts — but it is **not** the source of the
+   due set; the nudge's named list is authoritative.)
 2. **Capture each named due agent's pane** via `cafleet member capture
-   --member-id <id>` (read-only; `member capture` accepts any in-fleet agent
-   with a placement, the root Director included) and judge it active/idle and
-   progressing/stalled.
-3. **Always also capture the Director's pane** via `cafleet member capture
-   --member-id <director-id>` and classify it ACTIVE vs IDLE — the Director is the
-   only actuation target. (If the Director is itself among the named due agents,
-   step 2 already captured it; step 3 only adds the Director when it is not in the
-   named list.)
+   --member-id <id>` (read-only; `member capture` accepts any in-fleet agent with a
+   placement, the root Director included), always also capturing the Director, and
+   **classify each pane from its capture content only** into one of five states,
+   applied in precedence order — the first match wins and stops:
+
+   | State | Evidence | Monitor action |
+   |---|---|---|
+   | `awaiting_user` | The capture shows an unanswered question or permission prompt | **None** — never re-engage |
+   | `unknown` | The pane is dead/unreadable, or this is a stall-check wake and no previous stall-check capture of this pane is remembered | **None** — fail-safe |
+   | `finished` | A completed turn at an empty input prompt, no pending question | Report to the Director |
+   | `stalled` | A stall-check wake whose capture is identical to this pane's previous stall-check capture | Report to the Director |
+   | `working` | In-flight work matched by no earlier rule | None |
+
+   Native `agent_status` is **never** classification evidence — the rubric is
+   capture-content only, and byte-identical across the tmux and herdr backends.
+   When a capture cannot distinguish `awaiting_user` from `finished`, classify
+   **`awaiting_user`**: the costs are asymmetric — a missed `finished` delays a
+   nudge by one cycle, but a misjudged `awaiting_user` destroys the user's pending
+   prompt.
+3. **Compare only against the previous stall-check capture.** For an agent tagged
+   `stall-check`, compare its capture against the single capture you remember from
+   that pane's last stall-check wake; with no such baseline, classify `unknown`.
+   Then — unconditionally, whatever you classified, including `awaiting_user` and
+   `unknown` — replace that pane's remembered baseline with the capture you just
+   took. A capture taken on an `interval` or `status:done` wake is read, classified,
+   and discarded; it never becomes a baseline. You remember exactly one baseline
+   capture per pane, from its last stall-check wake.
 4. **Re-engage the Director** via `cafleet member nudge
-   --agent-id <monitoring-member-id> --member-id <director-id> --text "..."`
-   when the Director is idle
-   with un-ACKed inbox / stalled members, **or** when any named due agent looks
-   stalled — naming what needs attention (idle Director, stalled member `<id>`).
-   `member nudge` persists an ACKable broker task and fires the hardened,
-   `Esc`-safeguarded inline preview into the Director's pane. The Director then
-   drives the stalled member.
+   --agent-id <monitoring-member-id> --member-id <director-id> --text "..."` when a
+   due agent is `stalled` or `finished`, or the Director itself is `finished` with
+   un-ACKed inbox — naming what needs attention. The Director alone judges whether a
+   `finished` agent still owes assigned work; the monitoring member cannot see the
+   dispatch ledger and never makes that call. **But when the Director's own pane is
+   `awaiting_user`, send nothing this wake — no matter how many due agents are
+   `stalled` or `finished`.** Re-engaging an `awaiting_user` pane is barred
+   outright, and that bar outranks every nudge trigger: `member nudge` fires an
+   inline preview whose keystroke leads with `Esc`, and that `Esc` exists to stop
+   the trailing `Enter` from blindly *confirming* a prompt — the same keystroke
+   would cancel a Director's pending `AskUserQuestion`. The suppressed report is not
+   buffered and not lost: the agent stays due on its interval and stall-check
+   cadences and re-surfaces, unchanged, on its next wake.
 
 The monitoring member's *observation* spans the Director **and** every
 freshly-due member, but its *actuation* is **Director-only**: it never
@@ -165,6 +204,7 @@ back through the Director, who owns the whole task.
 |---|---|---|
 | Root Director ping interval | `180s` | `monitor_config.interval_seconds` (the Director's row) |
 | Ordinary member ping interval | `720s` | `monitor_config.interval_seconds` (each member's row) |
+| Stall-check interval | `240s` | `monitor_stall_interval` / `CAFLEET_MONITOR_STALL_INTERVAL` (`0` disables) |
 | Scan tick | `5s` | `monitor start --tick N` (per run) |
 
 The monitor scans once per **tick** and flags each watched agent whose
@@ -175,6 +215,20 @@ interval that is not a multiple of the tick snaps up to the next tick boundary
 the smallest interval you care about. Each interval is editable per agent
 (`cafleet monitor config` or the admin WebUI), so the 180 s / 720 s defaults are
 just the enrollment seeds.
+
+**Stall detection runs on its own cadence**, independent of the 180 s / 720 s
+ping intervals. Each watched agent is additionally **stall-check due** every
+`monitor_stall_interval` seconds (default **240 s**, from
+`CAFLEET_MONITOR_STALL_INTERVAL`; `0` disables stall detection entirely). A
+stall-check wake tags the agent `stall-check`, telling the monitoring member to
+compare its capture against that pane's previous stall-check baseline — two
+unchanged observations one interval apart classify it `stalled`, calling a hang in
+~8 minutes rather than the ~24 minutes it would take if bullet 2 rode the 720 s
+member interval. The stall cadence is tracked process-locally (never persisted, no
+schema change); an agent not yet seen is stall-check due on the first tick,
+mirroring the interval path's `last_ping_at is None → due` convention, which seeds
+each pane's baseline one interval early. A stall-check-only wake does **not**
+advance the 720 s ping cadence, so the two cadences stay independent.
 
 ## Single-instance and liveness
 
