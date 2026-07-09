@@ -1,6 +1,6 @@
 # Avoid polling loop on member pane
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 3/3 tasks complete
 **Last Updated**: 2026-07-09
 
@@ -75,3 +75,11 @@ Two edits, both wording-only. No behavior in the CLI changes.
 ### Step 2: Verify consistency
 
 - [x] Re-read the two edited passages and confirm the affirmative rule reads cleanly, the banned pattern is unambiguous (behavior-anchored, not keyed to the literal `sleep && poll` string), the legitimate single poll is preserved, and no cross-reference (`member.md` ↔ `SKILL.md`) now contradicts another; confirm `docs/concepts/monitoring.md` and `reference/supervision.md` are untouched. <!-- completed: 2026-07-09T13:52 -->
+
+---
+
+## Changelog
+
+| Date | Change |
+|---|---|
+| 2026-07-09 | Executed via the cafleet-design-doc execute workflow (Director + monitor + Programmer, fresh Reviewer). Both wording-only edits applied to `skills/cafleet/roles/member.md` and `skills/cafleet/SKILL.md § Poll`; all 3 Implementation tasks and 4 Success Criteria checked off. Reviewer approved on round 1 (no issues). Branch `feat/0000125-avoid-member-pane-poll-loop`, PR #178. Status → Complete. |
