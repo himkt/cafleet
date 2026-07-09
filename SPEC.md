@@ -1752,16 +1752,18 @@ Director's `MultiplexerContext` and passes it directly.
   **Esc-first=YES**, any error → `false`. Used only by `member ping`.
 - **`send_wake_trigger(*, target_pane_id, due_agents, director_agent_id) ->
   bool`** — best-effort; the **sole** keystroke the monitor loop fires. Each due
-  entry has `agent_id`, `name`, `is_director`. tmux missing → `false`; `noun =
-  "agent"` if one due else `"agents"`; build `due_list` by joining with `", "`,
-  each `<"director" if is_director else "member"> <agent_id> (<sanitized
-  name>)`; single-line payload (note the em-dash, `{N}` = count):
+  entry has `agent_id`, `name`, `is_director`, `wake_reasons` (an ordered, deduped
+  `list[str]` drawn from `{"interval", "status:done", "stall-check"}`). tmux missing
+  → `false`; `noun = "agent"` if one due else `"agents"`; build `due_list` by joining
+  with `", "`, each `<"director" if is_director else "member"> <agent_id> (<sanitized
+  name>) [<wake_reasons joined by ",">]`; single-line payload (note the em-dash,
+  `{N}` = count):
   ```
-  [monitor] wake: {N} {noun} due — {due_list}. Capture each named pane read-only, with the Director pane ({director_agent_id}) always inspected; judge each active/idle and progressing/stalled; re-engage the Director via cafleet member nudge when it is idle with un-acked work or any due agent looks stalled.
+  [monitor] wake: {N} {noun} due — {due_list}. Capture each named pane read-only, with the Director pane ({director_agent_id}) always inspected. From capture content only, classify each pane in this precedence order: awaiting_user, unknown, finished, stalled, working. For an agent tagged stall-check, compare its capture against your previous stall-check capture of that pane, then keep the new capture as that pane's baseline; with no previous stall-check capture, classify unknown. Never re-engage a pane classified awaiting_user: when the Director is awaiting_user, send nothing this wake, whatever the other panes show. Otherwise re-engage the Director via cafleet member nudge when a due agent is stalled or finished, or the Director is finished with un-acked work.
   ```
   literal-then-Enter, `timeout=5`s, **Esc-first=NO** (an Esc would self-interrupt
-  the monitoring member); any error → `false`. The payload carries no backtick
-  and no command-substitution sequence.
+  the monitoring member); any error → `false`. The payload carries no backtick, no
+  command-substitution sequence, and no pipe.
 - **`send_inline_preview(*, target_pane_id, task_id, sender_id, ts, text) ->
   bool`** — best-effort; the broker's inline-preview path (the broker truncates
   `text` first). tmux missing → `false`; cosmetic CR/LF strip on `text`
@@ -1936,7 +1938,11 @@ Each method's herdr realization:
   esc` (the Esc safeguard, with the same short settle delay), then `herdr pane
   run <id> "cafleet message poll --fleet-id <fleet_id> --agent-id <agent_id>"`.
 - **`send_wake_trigger(...) -> bool`** — best-effort. `herdr pane run <id>
-  "<payload>"` (no Esc — an Esc would self-interrupt the monitoring member).
+  "<payload>"` (no Esc — an Esc would self-interrupt the monitoring member). The
+  `<payload>` — its single-line text and its per-agent `[<wake_reasons joined by
+  ",">]` due-list suffix — is **byte-identical** to the tmux `send_wake_trigger`
+  payload above, carrying no backtick, no command-substitution sequence, and no
+  pipe.
 - **`send_inline_preview(...) -> bool`** — best-effort. `herdr pane send-keys
   <id> esc`, then `herdr pane send-text <id> "<2-line payload>"` (raw, no Enter —
   the embedded newline is literal), then a single `herdr pane send-keys <id>
@@ -2040,73 +2046,127 @@ One scan pass, steps in order:
    this tick.
 5. **Compute the due set.** For each watched `target` (root Director + ordinary
    members; never the monitoring member): set `target.pane_alive = (target.pane_id
-   ∈ live_panes)`, then if `should_ping(target, now)` add it to the interval-due
-   list. **On an `AgentStateAware` backend (herdr only):** additionally point-read
-   each **enabled** watched live agent's `agent_status`, and union into the due set any agent
-   whose status **transitioned into** an attention state (`blocked`/`done`) since
-   the loop's last-seen status for it (see *Native agent-state due trigger*
-   below); each such agent carries a `status:<state>` wake-reason label. On a
-   non-`AgentStateAware` backend (tmux) this branch is skipped entirely.
+   ∈ live_panes)`, then if `should_ping(target, now)` add it to the due set with an
+   `interval` wake-reason. Each due target carries `wake_reasons: list[str]`,
+   ordered and deduped, drawn from `{"interval", "status:done", "stall-check"}`:
+   - **Stall-check trigger.** When `monitor_stall_interval > 0`, additionally flag
+     each **enabled** watched live agent that is stall-check due — its
+     `_last_stall_check_at` entry absent (first tick) or `now -
+     _last_stall_check_at[id] ≥ monitor_stall_interval` — unioning it into the due
+     set with a `stall-check` reason (see § *Stall-detection cadence* below). When
+     `monitor_stall_interval == 0` this branch is skipped and no `stall-check`
+     reason is ever emitted.
+   - **Native `done` trigger (`AgentStateAware` backend, herdr only).** Additionally
+     point-read each **enabled** watched live agent's `agent_status`, and union into
+     the due set any agent whose status **transitioned into** `done` since the loop's
+     last-seen status for it (see *Native agent-state due trigger* below), with a
+     `status:done` reason. A transition into `blocked` is recorded but **never** flags
+     a wake. On a non-`AgentStateAware` backend (tmux) this branch is skipped
+     entirely, so agents come due by interval and stall-check only.
 6. **Wake the watcher iff due and watcher live.** If the due list is non-empty
    **and** the watcher is present **and** its `pane_id` is in the live set: call
    the multiplexer's wake trigger against the watcher's own pane (the loop's
-   **only** keystroke), passing the due agents and the fleet's
-   `director_agent_id`; it returns a boolean `woke`.
-   - If `woke` is true: call the broker's `record_pings` with the due ids and
-     `now-as-ISO` (advancing each due agent's `last_ping_at` **only** on a
-     successful wake, so a just-flagged agent is not due again next tick), and
-     emit one stdout heartbeat line per due agent with this **exact** format:
-     ```
-     {now.isoformat()} due agent {agent_id} ({name}) -> wake monitor
-     ```
-     `name` is emitted **raw** (sanitization applies only to the keystroke
-     payload). A **native-due** agent (herdr only) inserts a ` [status:<state>]`
-     suffix before ` -> wake monitor`; an interval-due agent's line is unchanged
-     (so the tmux path is byte-for-byte identical).
-   - If `woke` is false: do **not** record pings and do **not** echo — the due
-     agents stay flagged, so the next tick retries (no wake-storm, no silent
-     skip).
+   **only** keystroke), passing the due agents (each with its `wake_reasons`) and
+   the fleet's `director_agent_id`; it returns a boolean `woke`.
+   - If `woke` is true:
+     - call the broker's `record_pings` with `now-as-ISO` and **only** the due
+       agents whose `wake_reasons` include `interval` or `status:done` (a
+       stall-check-only agent is **excluded**, keeping the ping cadence and the
+       stall cadence independent), advancing their `last_ping_at` **only** on a
+       successful wake, so a just-flagged agent is not due again next tick;
+     - commit `_last_stall_check_at[id] = now` for **every** due agent whose reasons
+       include `stall-check`;
+     - emit one stdout heartbeat line per due agent, appending that agent's joined
+       `wake_reasons` as a ` [<reasons joined by ",">]` suffix before ` -> wake
+       monitor`, with this **exact** format:
+       ```
+       {now.isoformat()} due agent {agent_id} ({name}) [{reasons}] -> wake monitor
+       ```
+       `name` is emitted **raw** (sanitization applies only to the keystroke
+       payload). The only native-status reason that can appear is `status:done`,
+       since a `blocked` transition never flags a wake.
+   - If `woke` is false: do **not** record pings, do **not** commit
+     `_last_stall_check_at`, and do **not** echo — the due agents stay flagged, so
+     the next tick retries (no wake-storm, no silent skip).
    - No live watcher to wake: nothing is recorded.
 7. Return `CONTINUE`.
 
-**Critical ordering invariant:** `record_pings` and the heartbeat echo are gated
-behind `woke == true`. Preserve this gating exactly.
+**Critical ordering invariant:** `record_pings`, the `_last_stall_check_at`
+commit, and the heartbeat echo are all gated behind `woke == true`. Preserve this
+gating exactly.
 
 #### Native agent-state due trigger (herdr only)
 
-Augments — never replaces — the interval trigger. The single long-running loop
-process owns an **in-memory** `dict[agent_id, last_status]` that persists across
-ticks (no DB column). Each tick, when the resolved backend passes
-`isinstance(mux, AgentStateAware)`:
+Augments — never replaces — the interval and stall-check triggers. The single
+long-running loop process owns an **in-memory** `_last_agent_status: dict[agent_id,
+last_status]` that persists across ticks (no DB column). `_WAKE_ON_STATUS =
+("done",)` is the sole wake-on-status set. Each tick, when the resolved backend
+passes `isinstance(mux, AgentStateAware)`:
 
 1. Point-read `agent_status(target_pane_id=…)` for each **enabled** watched agent
    whose pane is live (a monitor-disabled agent is skipped, matching `should_ping`).
-2. A **transition into** an attention state (`blocked` or `done`) — i.e. the new
-   status is an attention state and differs from the loop's last-seen status for
-   that agent — flags the agent due. Comparing against the last-seen status means
-   a single `blocked`/`done` episode wakes the watcher **only once**.
-3. Union the native-due agents with the interval-due set; each native one is
-   tagged with a `status:<state>` wake-reason label.
-4. Commit each **non-flagged** agent's read to the `last_status` map
-   **immediately** (so a recovery read like `blocked → working` is always
-   recorded and a later `blocked` is still detected as a transition). Return only
-   the **natively-flagged** agents' reads to the caller, which commits them to
+2. A **transition into `done`** — the new status is `done` and differs from the
+   loop's last-seen status for that agent — flags the agent due with a `status:done`
+   wake-reason. Comparing against the last-seen status means a single `done` episode
+   wakes the watcher **only once**.
+3. A **transition into `blocked`** is **recorded but never flags a wake.** `blocked`
+   means the agent is awaiting a user answer; waking about it would only have the
+   watcher classify the pane `awaiting_user` and take no action (§ classification
+   rubric), at pure token cost plus a risk it misjudges and nudges — the destructive
+   path this design closes. The `blocked` read is still committed to `last_status`
+   (step 4) so the episode is tracked and a later `blocked → working` recovery is
+   detected as a transition; it produces no due flag and no wake-reason.
+4. Commit each **non-flagged** agent's read (every status other than a fresh
+   `done` transition, including every `blocked` read) to the `last_status` map
+   **immediately** (so a recovery read like `blocked → working` is always recorded
+   and a later `done` is still detected as a transition). Return only the
+   **`done`-flagged** agents' reads to the caller, which commits them to
    `last_status` **only after a successful wake** (`woke == True`, alongside
    `record_pings`). On a failed/no-wake tick a flagged agent's status is **not**
-   committed, so its `blocked`/`done` episode stays un-consumed and re-flags next
-   tick (no silent skip) — mirroring the interval branch's `record_pings` gating.
+   committed, so its `done` episode stays un-consumed and re-flags next tick (no
+   silent skip) — mirroring the interval branch's `record_pings` gating.
 
 On the tmux backend the `isinstance` guard is false, so this branch never runs
-and the interval-only behavior is byte-for-byte unchanged. `should_ping` and the
+and agents come due by interval and stall-check only. `should_ping` and the
 broker's due computation are untouched — they keep computing interval-due-ness
 only, with no knowledge of native status.
+
+#### Stall-detection cadence
+
+Independent of the interval trigger and driven by `settings.monitor_stall_interval`
+(`CAFLEET_MONITOR_STALL_INTERVAL`, default `240`; `0` disables). The loop owns a
+process-local `_last_stall_check_at: dict[agent_id, datetime]`, **cleared per run**
+in `run_monitor_loop` (the same lifecycle as `_last_agent_status`); it backs no DB
+column and is never persisted. On **both** backends:
+
+1. When `monitor_stall_interval == 0`, stall detection is disabled: no agent is
+   ever stall-check flagged and no `stall-check` wake-reason is emitted, so an
+   in-flight pane never classifies `stalled`.
+2. Otherwise each tick, every **enabled** watched live agent is **stall-check due**
+   when its `_last_stall_check_at` entry is **absent** — first-tick semantics,
+   mirroring `should_ping`'s `last_ping_at is None → due`; the dict is **not**
+   pre-seeded — or when `now - _last_stall_check_at[id] ≥ monitor_stall_interval`.
+   A stall-check-due agent is unioned into the due set with a `stall-check` reason.
+3. `_last_stall_check_at[id]` is committed to `now` **only on a successful wake**
+   (`woke == True`), for every due agent whose reasons include `stall-check` —
+   mirroring the `record_pings` gating, so a failed keystroke re-flags the agent
+   next tick.
+4. A **stall-check-only** agent (its `wake_reasons` are exactly `["stall-check"]`)
+   is **excluded** from `record_pings`, so its `last_ping_at` interval cadence is
+   untouched and the two cadences stay independent. On the first tick every watched
+   agent is stall-check due; the watcher captures and classifies each pane `unknown`
+   (no prior stall-check capture exists) and takes no action, seeding each pane's
+   baseline one interval early — the wake itself is not extra, since the root
+   Director is interval-due on tick 1 regardless.
 
 #### `run_monitor_loop(fleet_id, tick_seconds)`
 
 Foreground driver. The fleet's monitor-runtime row is the **only** coordination
 artifact (no PID file); identity throughout is the OS process id.
 
-1. Reset the shared stop flag to false; capture `pid = this-pid`.
+1. Reset the shared stop flag to false; clear the process-local
+   `_last_agent_status` and `_last_stall_check_at` dicts (so each run starts with no
+   remembered native status and no stall-check baseline); capture `pid = this-pid`.
 2. **Claim the slot** via the broker's atomic claim `(fleet_id, pid,
    tick_seconds, now-as-ISO)`. On refusal (returns false) → application error
    (exit 1) `monitor already running for fleet {fleet_id}`. There is no silent
@@ -2521,11 +2581,17 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 | `broker_port` | `CAFLEET_BROKER_PORT` | integer (16-bit port) | `8000` |
 | `max_text_len` | `CAFLEET_MAX_TEXT_LEN` | non-negative integer | `200` |
 | `multiplexer` | `CAFLEET_MULTIPLEXER` | optional string | `None` (auto-detect) |
+| `monitor_stall_interval` | `CAFLEET_MONITOR_STALL_INTERVAL` | non-negative integer | `240` |
 
 - **`multiplexer`** is the explicit backend override consumed by
   `resolve_multiplexer()` (§6.5). `None` (unset) means auto-detect from
   `HERDR_ENV` / `TMUX` — a legitimate default, not a fallback for a missing value.
   A set value must name a registry key (`tmux`/`herdr`) or resolution raises.
+- **`monitor_stall_interval`** is the per-agent stall-check cadence (seconds)
+  driven by the monitor loop, independent of the `monitor_config.interval_seconds`
+  ping intervals. A watched agent is stall-check due every `monitor_stall_interval`
+  seconds; `0` disables stall detection entirely (no `stall-check` wake-reason tag
+  is ever emitted). Tracked process-locally in the running loop; no DB column.
 - **Default DB URL** expands `~` to `$HOME` **only for the factory default**; a
   user-supplied `CAFLEET_DATABASE_URL` is passed through verbatim (no `~`
   expansion, so a user value must already be absolute). Net default on home

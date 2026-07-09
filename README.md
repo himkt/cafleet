@@ -10,9 +10,9 @@ Agent Teams reinvented for collaborative coding across multiple coding-agent bac
 - **Persistent, auditable messages** — every inter-agent message is stored in SQLite; deregistered agents and their history remain readable.
 - **Single-file broker** — one SQLite database; no separate database daemon to run or monitor. CLI commands write directly through a shared broker module without requiring a running server.
 - **Fleet isolation** — fleets are non-overlapping namespaces; cross-fleet agents are invisible to each other.
-- **Pluggable multiplexer backends** — host member panes in **tmux** or **herdr** ([herdr.dev](https://herdr.dev)); the active backend is auto-detected from the environment (`HERDR_ENV` / `TMUX`) and overridable with `CAFLEET_MULTIPLEXER`. On herdr, the monitor also reacts to native `blocked`/`done` agent states.
+- **Pluggable multiplexer backends** — host member panes in **tmux** or **herdr** ([herdr.dev](https://herdr.dev)); the active backend is auto-detected from the environment (`HERDR_ENV` / `TMUX`) and overridable with `CAFLEET_MULTIPLEXER`. On herdr, the monitor additionally wakes on a native `done` agent-state transition (a `blocked` transition is recorded but never wakes).
 - **Push notifications** — after persisting a message, the broker keystrokes a 2-line inline preview into the recipient's multiplexer pane so coding agents receive messages without invoking `cafleet message poll`.
-- **Monitoring member** — a dedicated member runs `cafleet monitor start` as a background task, scheduling periodic heartbeats that keep the Director informed of idle or stalled team members without spending model tokens on scheduling.
+- **Monitoring member** — a dedicated member runs `cafleet monitor start` as a background task, driving periodic heartbeats plus an independent stall-check cadence (`CAFLEET_MONITOR_STALL_INTERVAL`, default 240 s). On each wake it classifies every due pane from its capture content into one of five states (`awaiting_user`, `working`, `stalled`, `finished`, `unknown`) and reports stalled or finished agents to the Director — never re-engaging a pane awaiting a user answer — without spending model tokens on scheduling.
 - **Design-doc-driven development** — built-in skills for spec-driven development (SDD), used to evolve CAFleet itself.
 - **Unified CLI** — a single `cafleet` command covers fleet management, member lifecycle, messaging, monitoring, and the admin WebUI server.
 
@@ -41,7 +41,7 @@ monitor loop ──────────────────────�
 - Agents are organized into **fleets** identified by a non-secret integer `fleet_id`. Agents sharing the same fleet can discover and message each other; agents in different fleets are invisible to one another.
 - A fleet has exactly one **root Director** (created by `cafleet fleet create`). Only the root Director may own members. Members are spawned by the Director via `cafleet member create` and are bound to individual multiplexer panes (tmux or herdr).
 - The `member` group is the single home for the agent lifecycle — spawn, teardown, introspection (`show`, `list --all`), and keystroke interaction.
-- A dedicated **monitoring member** runs `cafleet monitor start` as a background task to supply the heartbeat. The monitor decides only *when* agents are due; the monitoring member inspects each due agent and re-engages an idle Director on demand.
+- A dedicated **monitoring member** runs `cafleet monitor start` as a background task to supply the heartbeat. The monitor decides only *when* agents are due; the monitoring member classifies each due pane on the five-state taxonomy (`awaiting_user`/`working`/`stalled`/`finished`/`unknown`) from its capture alone and reports stalled or finished agents to the Director, never re-engaging an `awaiting_user` pane.
 
 Full architecture documentation: <https://himkt.github.io/cafleet/concepts/overview/>
 

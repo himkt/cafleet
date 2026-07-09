@@ -1,7 +1,7 @@
 # Monitor Pane-State Taxonomy
 
 **Status**: Approved
-**Progress**: 3/22 tasks complete
+**Progress**: 7/23 tasks complete
 **Last Updated**: 2026-07-08
 
 ## Overview
@@ -251,9 +251,10 @@ The same bar applies one layer down, and belongs in the Director's own doctrine:
 
 ### Step 2: README and SPEC
 
-- [ ] `README.md`: update the monitoring description to the five-state taxonomy and the stall cadence. <!-- completed: -->
-- [ ] `SPEC.md` `send_wake_trigger` contract — **two edit sites**: the tmux contract at ~lines 1753–1764 and the herdr contract at ~line 1938. Replace the payload template with the new single-line text and the `[<reasons>]` due-list entry shape in both, keeping them byte-identical. <!-- completed: -->
-- [ ] `SPEC.md` configuration section: add `CAFLEET_MONITOR_STALL_INTERVAL` (default `240`, `0` disables) alongside the other `CAFLEET_*` vars. <!-- completed: -->
+- [x] `README.md`: update the monitoring description to the five-state taxonomy and the stall cadence. <!-- completed: 2026-07-09T00:18 -->
+- [x] `SPEC.md` `send_wake_trigger` contract — **two edit sites**: the tmux contract at ~lines 1753–1764 and the herdr contract at ~line 1938. Replace the payload template with the new single-line text and the `[<reasons>]` due-list entry shape in both, keeping them byte-identical. <!-- completed: 2026-07-09T00:18 -->
+- [x] `SPEC.md` configuration section: add `CAFLEET_MONITOR_STALL_INTERVAL` (default `240`, `0` disables) alongside the other `CAFLEET_*` vars. <!-- completed: 2026-07-09T00:18 -->
+- [x] `SPEC.md` monitor-loop algorithm section (`Compute the due set` / `Wake the watcher` steps ~2047–2074, § *Native agent-state due trigger* ~2081–2108): rewrite for `_WAKE_ON_STATUS = ("done",)` (only `done` flags a wake; `blocked` is recorded but never flags), per-agent `wake_reasons: list[str]` drawn from `{interval, status:done, stall-check}`, the `status:done`-only stdout suffix, `record_pings` receiving only interval/`status:done` agents (a stall-check-only agent is excluded), and add a § *Stall-detection cadence* covering `_last_stall_check_at`, first-tick due-ness, and `monitor_stall_interval == 0` disabling stall detection. Keep the § *Native agent-state due trigger* subsection accurate to the new behavior. <!-- completed: 2026-07-09T00:24 -->
 
 ### Step 3: Skills
 
