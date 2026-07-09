@@ -10,10 +10,10 @@ CAFleet members sometimes self-schedule a repeated wait-then-poll cycle (e.g. `s
 
 ## Success Criteria
 
-- [ ] `skills/cafleet/roles/member.md` states affirmatively that a member ends its turn on an empty poll and names the wake channels that re-open it, and explicitly bans a self-scheduled repeated wait-then-poll cycle in any form (with `sleep … && cafleet message poll` as one illustrative example).
-- [ ] The legitimate single poll (on wake, or while awaiting a reply just routed to the Director) is preserved — the wording bans the repeated timed loop, not polling itself.
-- [ ] `skills/cafleet/SKILL.md § Poll` frames poll as an on-demand inbox check, consistent with the sharpened `member.md`.
-- [ ] No code, no `permissions.deny` entry, and no change to `docs/concepts/monitoring.md` or `reference/supervision.md`.
+- [x] `skills/cafleet/roles/member.md` states affirmatively that a member ends its turn on an empty poll and names the wake channels that re-open it, and explicitly bans a self-scheduled repeated wait-then-poll cycle in any form (with `sleep … && cafleet message poll` as one illustrative example).
+- [x] The legitimate single poll (on wake, or while awaiting a reply just routed to the Director) is preserved — the wording bans the repeated timed loop, not polling itself.
+- [x] `skills/cafleet/SKILL.md § Poll` frames poll as an on-demand inbox check, consistent with the sharpened `member.md`.
+- [x] No code, no `permissions.deny` entry, and no change to `docs/concepts/monitoring.md` or `reference/supervision.md`.
 
 ---
 
