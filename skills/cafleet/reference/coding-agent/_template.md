@@ -21,6 +21,18 @@ Required section. Convert every note (a constraint/caveat the inline value shoul
 | Note | Applies at |
 |------|-----------|
 | <the caveat, one row each> | `{token}` — `<skill>/<file>` § <base heading> |
+| *Pane-state capture cues* (below) — this backend's `awaiting_user` vs `finished` discriminators. | classification rubric rule 1 (`awaiting_user`) — `cafleet/roles/monitor.md` § On each wake; the pane-state taxonomy in `docs/concepts/monitoring.md`. |
+
+## Pane-state capture cues
+
+Required section. Give this backend's concrete capture-content discriminators for the two pane states a single capture most easily confuses — `awaiting_user` (classification rubric rule 1, the destructive-if-missed class) vs `finished` (rule 3) — so the monitoring member can tell them apart from pane text alone, never from native `agent_status`. Register a row for this table in the *Note → applies at* table above, bound to the rubric's rule 1.
+
+| State | <backend> capture cue |
+|---|---|
+| `awaiting_user` | <the concrete frame this backend shows when a pane is waiting on a user answer or approval — the box/prompt shape, awaiting a keypress> |
+| `finished` | <the concrete frame this backend shows at a completed turn — the empty composer/prompt at rest, no pending box, no active-turn indicator> |
+
+State the ambiguity tie-break: when a capture cannot cleanly separate the two, classify `awaiting_user`.
 
 ## Worked resolution
 

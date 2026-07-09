@@ -48,33 +48,41 @@ Every wake stays within those two pane actions. You never keystroke task instruc
 
 ## On each wake
 
-A wake is a single-line `[monitor] wake: N agent(s) due — …` nudge keystroked into this pane by the loop. It does **not** lead with `Esc` — your pane runs a read-only routine and is never on a permission-approval prompt, so a leading `Esc` would only self-interrupt an in-progress routine. Open by reading the freshly-due agents the nudge names, then act through `cafleet member capture` and `cafleet member nudge` only:
+A wake is a single-line `[monitor] wake: N agent(s) due — …` nudge keystroked into this pane by the loop. It does **not** lead with `Esc` — your pane runs a read-only routine and is never on a permission-approval prompt, so a leading `Esc` would only self-interrupt an in-progress routine. Open by reading the due agents the nudge names, then act through `cafleet member capture` and `cafleet member nudge` only:
 
-1. **Read the named due set.** Each freshly-due agent is rendered `<role> <id> (<name>)` (role `director` or `member`). Those agents, plus the Director, are who you inspect this wake. (`cafleet monitor status --fleet-id <fleet-id>` is available as optional context — e.g. to read intervals or pending counts — but the nudge's named list is authoritative for the due set.)
-2. **Capture each named due agent (read-only)** and judge whether it is active or idle and progressing or stalled:
+1. **Read the named due set.** Each due agent is rendered `<role> <id> (<name>) [<reasons>]` (role `director` or `member`; reasons drawn from `interval`, `status:done`, `stall-check`). Those agents, plus the Director, are who you inspect this wake. (`cafleet monitor status --fleet-id <fleet-id>` is available as optional context — e.g. to read intervals or pending counts — but the nudge's named list is authoritative for the due set.)
+2. **Capture each named due agent, plus the Director (read-only), and classify each pane from its capture content only** into one of five states, applied in precedence order — the first match wins and stops:
    ```bash
    cafleet member capture --fleet-id <fleet-id> --member-id <id> --lines 120
    ```
-3. **Always also capture the Director** (your only actuation target):
-   ```bash
-   cafleet member capture --fleet-id <fleet-id> --member-id <director-agent-id> --lines 120
-   ```
-   Classify the Director ACTIVE vs IDLE with your own judgment (mid-turn, running a tool, or typing = ACTIVE; sitting at an empty prompt with un-acked inbox or visibly stalled members = IDLE). If the Director is itself among the named due agents, step 2 already captured it.
-4. **Re-engage the Director via `cafleet member nudge`** when the Director is IDLE with un-acked inbox / stalled members, OR when any named due agent looks stalled — naming what needs attention (idle Director, stalled member `<id>`). The **target** is the Director (`--member-id`) and the **sender** is you (`--agent-id`):
+
+   | State | Evidence | Your action |
+   |---|---|---|
+   | `awaiting_user` | The capture shows an unanswered question or permission prompt | **None** — never re-engage this pane |
+   | `unknown` | The pane is dead/unreadable, or this is a stall-check wake and you remember no previous stall-check capture of this pane | **None** — fail-safe |
+   | `finished` | A completed turn at an empty input prompt, no pending question | Report to the Director |
+   | `stalled` | A stall-check wake whose capture is identical to this pane's previous stall-check capture | Report to the Director |
+   | `working` | In-flight work matched by no earlier rule | None |
+
+   Classify from the **capture content only** — never from native `agent_status`; the rubric is byte-identical on every backend. The concrete `awaiting_user` vs `finished` capture cues for your backend are in your overlay's *Pane-state capture cues* table. **Ambiguity tie-break:** when a capture cannot distinguish `awaiting_user` from `finished`, classify **`awaiting_user`** — a missed `finished` costs one wake cycle, but a misjudged `awaiting_user` destroys the user's pending prompt.
+3. **Maintain the stall-check baseline.** For an agent tagged `stall-check`, compare its capture against the single capture you remember from that pane's last stall-check wake (that is the `stalled` rule); with no such baseline, classify `unknown`. Then — **unconditionally**, whatever you classified, including `awaiting_user` and `unknown` — replace that pane's remembered baseline with the capture you just took. A capture taken on an `interval` or `status:done` wake is read, classified, and discarded; it never becomes a baseline. You remember exactly one baseline capture per pane, from its last stall-check wake.
+4. **Re-engage the Director via `cafleet member nudge`** when a due agent is `stalled` or `finished`, or the Director itself is `finished` with un-acked inbox — naming what needs attention. The **target** is the Director (`--member-id`) and the **sender** is you (`--agent-id`):
    ```bash
    cafleet member nudge --fleet-id <fleet-id> --agent-id <my-agent-id> --member-id <director-agent-id> --text "<summary>"
    ```
-   `member nudge` persists an ACKable task AND fires the hardened, `Esc`-safeguarded inline preview, so a Director sitting on a permission prompt has it dismissed before the preview's Enter lands. If the Director is ACTIVE and no named due agent looks stalled, do nothing and end your turn.
+   The Director alone judges whether a `finished` agent still owes assigned work — you cannot see the dispatch ledger, so you report and let the Director decide.
+
+   **Never re-engage a pane you classified `awaiting_user`, and that bar outranks every nudge trigger.** When the Director's own pane is `awaiting_user`, send **nothing** this wake — no matter how many due agents are `stalled` or `finished`. `member nudge` fires an inline preview whose keystroke leads with `Esc`, and that `Esc` exists to stop the trailing `Enter` from blindly *confirming* a prompt — the same keystroke would cancel a Director's pending `AskUserQuestion`. The suppressed report is not lost: the agent stays due on its interval and stall-check cadences and re-surfaces, unchanged, on its next wake. If nothing is `stalled`/`finished` and the Director is not `awaiting_user`, do nothing and end your turn.
 
 ### The wake nudge you consume
 
-The loop's wake nudge is a single line that **names** the freshly-due agents and the Director id — for example, when the Director (332) and member 336 "alice" are both due:
+The loop's wake nudge is a single line that **names** the due agents (each with its wake reasons) and the Director id — for example, when the Director (332, interval-due) and member 336 "alice" (interval + stall-check due) are both due:
 
 ```text
-[monitor] wake: 2 agents due — director 332 (Director), member 336 (alice). Capture each named pane read-only, with the Director pane (332) always inspected; judge each active/idle and progressing/stalled; re-engage the Director via cafleet member nudge when it is idle with un-acked work or any due agent looks stalled.
+[monitor] wake: 2 agents due — director 332 (Director) [interval], member 336 (alice) [interval,stall-check]. Capture each named pane read-only, with the Director pane (332) always inspected. From capture content only, classify each pane in this precedence order: awaiting_user, unknown, finished, stalled, working. For an agent tagged stall-check, compare its capture against your previous stall-check capture of that pane, then keep the new capture as that pane's baseline; with no previous stall-check capture, classify unknown. Never re-engage a pane classified awaiting_user: when the Director is awaiting_user, send nothing this wake, whatever the other panes show. Otherwise re-engage the Director via cafleet member nudge when a due agent is stalled or finished, or the Director is finished with un-acked work.
 ```
 
-The count (`N agent(s) due`), the named agents (`<role> <id> (<name>)`, one per freshly-due agent), and the Director id are filled in per wake.
+The count (`N agent(s) due`), the named agents (`<role> <id> (<name>) [<reasons>]`, one per due agent), and the Director id are filled in per wake.
 
 ## Teardown
 

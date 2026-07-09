@@ -1,7 +1,7 @@
 # Monitor Pane-State Taxonomy
 
 **Status**: Approved
-**Progress**: 7/23 tasks complete
+**Progress**: 11/23 tasks complete
 **Last Updated**: 2026-07-08
 
 ## Overview
@@ -258,10 +258,10 @@ The same bar applies one layer down, and belongs in the Director's own doctrine:
 
 ### Step 3: Skills
 
-- [ ] `skills/cafleet/roles/monitor.md`: replace the step-2 2x2 judgment with the five-state taxonomy, the precedence rubric, and the ambiguity tie-break; add the stall-check comparand rule, the unconditional baseline-replacement rule, the `unknown` fail-safe, and the never-re-engage-outranks-every-trigger invariant; update the sample wake nudge at line 74. <!-- completed: -->
-- [ ] `skills/cafleet/roles/monitor.md:67`: remove the "has it dismissed before the preview's Enter lands" feature claim; state the `Esc`'s real purpose and the never-nudge-`awaiting_user` policy. <!-- completed: -->
-- [ ] `skills/cafleet/reference/supervision.md`: amend § *Idle Semantics* so a `finished` member with outstanding assigned work IS nudged (bullet 3) while an `awaiting_user` member is never nudged (bullet 1); fix the line-33 `Esc` claim. <!-- completed: -->
-- [ ] `skills/cafleet/reference/coding-agent/{_template,claude,codex,opencode}.md`: add a *Pane-state capture cues* table per backend giving the concrete `awaiting_user` vs `finished` discriminators; register the note in each overlay's *Note → applies at* table, bound to the rubric's rule 1. <!-- completed: -->
+- [x] `skills/cafleet/roles/monitor.md`: replace the step-2 2x2 judgment with the five-state taxonomy, the precedence rubric, and the ambiguity tie-break; add the stall-check comparand rule, the unconditional baseline-replacement rule, the `unknown` fail-safe, and the never-re-engage-outranks-every-trigger invariant; update the sample wake nudge at line 74. <!-- completed: 2026-07-09T00:30 -->
+- [x] `skills/cafleet/roles/monitor.md:67`: remove the "has it dismissed before the preview's Enter lands" feature claim; state the `Esc`'s real purpose and the never-nudge-`awaiting_user` policy. <!-- completed: 2026-07-09T00:30 -->
+- [x] `skills/cafleet/reference/supervision.md`: amend § *Idle Semantics* so a `finished` member with outstanding assigned work IS nudged (bullet 3) while an `awaiting_user` member is never nudged (bullet 1); fix the line-33 `Esc` claim. <!-- completed: 2026-07-09T00:30 -->
+- [x] `skills/cafleet/reference/coding-agent/{_template,claude,codex,opencode}.md`: add a *Pane-state capture cues* table per backend giving the concrete `awaiting_user` vs `finished` discriminators; register the note in each overlay's *Note → applies at* table, bound to the rubric's rule 1. <!-- completed: 2026-07-09T00:30 -->
 
 ### Step 4: Configuration and monitor loop
 

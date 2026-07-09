@@ -30,7 +30,7 @@ Each tick the loop scans the **watched set** — the root Director (default **18
 
 See [`SKILL.md`](../SKILL.md) and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring/) for the full command surface and policy. **The monitoring member — not the Director — runs `cafleet monitor start`** (see § Monitor Lifecycle).
 
-**The Director is never woken by the loop.** It is re-engaged only on demand: by the monitoring member's idle nudge (`cafleet member nudge`, which persists an ACKable broker task **and** fires the hardened, `Esc`-safeguarded inline preview, when the routine classifies the Director as idle), and by the broker's inline-preview keystroke on every inbound `cafleet message send`. When woken by one of those, the Director runs the entire 5-step facilitation loop (poll → ACK → dispatch → health-check → escalate), not just an inbox read. The monitor decides only *when* to wake the monitoring member; this file defines *what* the Director does once re-engaged.
+**The Director is never woken by the loop.** It is re-engaged only on demand: by the monitoring member's nudge (`cafleet member nudge`, which persists an ACKable broker task **and** fires the `Esc`-safeguarded inline preview, when the routine reports a `stalled`/`finished` member or classifies the Director's own pane `finished` with un-acked work — but **never** when the Director's pane is `awaiting_user`), and by the broker's inline-preview keystroke on every inbound `cafleet message send`. The nudge's leading `Esc` exists to stop the trailing `Enter` from blindly *confirming* a prompt; a pending `AskUserQuestion` is protected because the monitoring member never nudges an `awaiting_user` pane at all — by policy, not by the keystroke. When woken by one of those, the Director runs the entire 5-step facilitation loop (poll → ACK → dispatch → health-check → escalate), not just an inbox read. The monitor decides only *when* to wake the monitoring member; this file defines *what* the Director does once re-engaged.
 
 ### How ordinary members are woken
 
@@ -49,12 +49,13 @@ The monitoring member's own first-person routine — its Startup (the `ready: mo
 
 ## Idle Semantics
 
-**Members go idle after every turn. Idle is normal, not a stall.** A member that finished its turn and is awaiting the next instruction is doing exactly what it should.
+**A member at rest between turns is normal, not a stall.** A member that finished its turn with no assigned work outstanding is doing exactly what it should — leave it. When a member goes quiet, what you do depends on the pane state the monitoring member reports (the five-state taxonomy in [`roles/monitor.md`](../roles/monitor.md)):
 
-- Idle members receive messages normally — the broker's inline preview wakes them.
-- Idle notifications are informational. Do not react to them unless you are ready to assign new work or to dispatch already-queued work (see Authorization-Scope Guard below).
-- Do **not** nudge a member just because it went idle. Only nudge when idleness is **blocking your next step** AND health-check evidence (no recent message, no terminal forward progress) confirms a real stall.
-- A member that has sent you a question and is awaiting your reply is idle by design — do not nudge it. Reply via `cafleet message send`.
+- **`finished` with outstanding assigned work → drive it forward (issue #174 bullet 3).** A member that completed its turn while the task you assigned is unfinished is NOT left alone: dispatch the next step or re-engage it via `cafleet message send` / `cafleet member ping`. You alone judge whether assigned work remains — the monitoring member reports `finished`, you decide. This corrects the old "do not nudge a member just because it went idle" reading.
+- **`finished` with nothing outstanding → leave it.** Expected rest; idle notifications about it are informational, not a call to act. Idle members receive messages normally — the broker's inline preview wakes them when you have new work.
+- **`stalled` mid-execution → re-engage (issue #174 bullet 2).** The monitoring member surfaces a member whose capture is unchanged across two consecutive stall-check observations; re-engage via `cafleet member ping` / `cafleet message send`.
+- **`awaiting_user` → never keystroke it (issue #174 bullet 1).** Never `cafleet member ping` or `cafleet message send` a member you know to be awaiting a user answer while its prompt is up — both primitives keystroke `Esc` first, which would cancel the pending prompt. Relay the answer through the user ({decision_surface}) and let the member consume it.
+- A member that sent you a question and sits at an **idle** prompt awaiting your reply is not `awaiting_user` (its pane shows no live prompt) — reply via `cafleet message send`; the reply's `Esc`-first keystroke cancels nothing.
 
 Idleness alone is never a stop signal, never a stall, and never grounds for a passive-hold message. See the Authorization-Scope Guard below.
 
