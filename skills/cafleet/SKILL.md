@@ -125,7 +125,7 @@ cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
 
 ## Poll (Check Inbox)
 
-Returns only un-acked (`input_required`) deliveries addressed to this agent, newest first; ACKing one drops it from `poll` output. `--full` emits the untruncated typed-column envelope.
+Returns only un-acked (`input_required`) deliveries addressed to this agent, newest first; ACKing one drops it from `poll` output. `--full` emits the untruncated typed-column envelope. Poll is an on-demand inbox check — run it on wake or when you have a reason to check now, never on a self-scheduled `sleep`-timer loop; the broker re-opens your turn when work arrives.
 
 ```bash
 cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id> [--full]
