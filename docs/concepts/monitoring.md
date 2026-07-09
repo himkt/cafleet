@@ -38,16 +38,17 @@ The loop's only keystroke is a *wake nudge* (the `send_wake_trigger` helper) int
 the monitoring member's own pane — a single-line instruction to run its
 capture-classify-reengage routine now. The loop fires that wake when **≥ 1
 watched agent** (the Director or an ordinary member) has come due, and the nudge
-**names** each freshly-due agent as `<role> <id> (<name>)` (role `director` or
-`member`) plus the Director id as the standing inspect-and-re-engage target, so
-the monitoring member inspects exactly those named panes plus the Director this
-wake. The loop runs inside the monitoring member's own pane, so this wake lands
-in that same pane's foreground (see [The monitoring member](#the-monitoring-member)).
+**names** each due agent as `<role> <id> (<name>) [<reasons>]` (role `director` or
+`member`; reasons drawn from `interval`, `status:done`, `stall-check`) plus the
+Director id as the standing inspect-and-re-engage target, so the monitoring member
+inspects exactly those named panes plus the Director this wake. The loop runs
+inside the monitoring member's own pane, so this wake lands in that same pane's
+foreground (see [The monitoring member](#the-monitoring-member)).
 The wake nudge does not lead with `Esc` — `send_wake_trigger` does not pass
 `esc_first`, because the monitoring member's pane is never on a permission prompt.
 
 The Director receives **no** keystroke from the loop. It is re-engaged only on
-demand: by the monitoring member's idle nudge — `cafleet member nudge`,
+demand: by the monitoring member's nudge — `cafleet member nudge`,
 which persists an ACKable broker task carrying the summary **and** fires the
 hardened, `Esc`-safeguarded inline preview — and by the broker's inline-preview
 keystroke on every inbound `cafleet message send`.
@@ -63,10 +64,13 @@ member is **not** enrolled: it is the *watcher*, not a watched agent (see
 placementless agents are never enrolled.
 
 When ≥ 1 watched agent is due, the loop wakes the monitoring member **once** and
-stamps `last_ping_at = now` on each due agent. That stamp advances each watched
-agent's cadence, so a just-flagged agent is not due again on the next tick — this
-prevents a wake-storm while the watcher is still working. `last_ping_at` means
-"the last time the monitor dispatched a check for this agent."
+stamps `last_ping_at = now` on each agent due by `interval` or `status:done` (a
+stall-check-only due agent is excluded from that stamp — its `last_ping_at` is
+untouched and its stall baseline is committed instead; see [Cadence and tick
+precision](#cadence-and-tick-precision)). That stamp advances the pinged agent's
+cadence, so a just-flagged agent is not due again on the next tick — this prevents
+a wake-storm while the watcher is still working. `last_ping_at` means "the last
+time the monitor dispatched a check for this agent."
 
 The loop **never keystrokes a watched pane** — its only keystroke is the wake
 nudge into the watcher's own pane.
@@ -79,7 +83,8 @@ A watched agent is flagged only when it is enabled, its pane is alive, and its
 interval has elapsed since its last wake-dispatch; otherwise it is skipped.
 
 Each wake-dispatch is logged to the monitor's stdout as
-`<iso-ts> due agent <id> (<name>) -> wake monitor`, one line per due agent.
+`<iso-ts> due agent <id> (<name>) [<reasons>] -> wake monitor`, one line per due
+agent (the `[<reasons>]` suffix lists that agent's joined wake reasons).
 Because `cafleet monitor start` runs in the foreground of the monitoring member's
 background task, that task's output shows live heartbeat activity. If there is
 **no** monitoring member (or its pane is dead), the loop records nothing and

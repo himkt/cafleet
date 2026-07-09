@@ -52,11 +52,13 @@ herdr natively tracks each agent's lifecycle state
 **separate optional capability** Protocol, `AgentStateAware`, that only the herdr
 backend implements — the base `Multiplexer` Protocol stays clean and tmux
 implements nothing new. On the herdr backend the monitor loop point-reads each
-watched agent's native status and flags it due when the status enters an
-**attention state** (`blocked`/`done`), in addition to the interval heartbeat.
-On the tmux backend the capability is absent, so this branch never runs and the
-interval-only behavior is unchanged. See [Monitoring](monitoring.md) for the
-native-status due trigger.
+watched agent's native status and flags it due when the status transitions into
+`done` — the sole wake-on-status state (`_WAKE_ON_STATUS = ("done",)`) — in
+addition to the interval and stall-check triggers. A transition into `blocked` is
+recorded but never flags a wake (an agent awaiting a user answer must not be woken
+about). On the tmux backend the capability is absent, so this native branch never
+runs; tmux agents come due by interval and stall-check only. See
+[Monitoring](monitoring.md) for the native-status due trigger.
 
 ## Access mechanism
 

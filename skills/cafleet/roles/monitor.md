@@ -22,7 +22,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 Your on-wake routine acts through exactly two `cafleet member` commands:
 
 - `cafleet member capture` — read-only inspection of a pane.
-- `cafleet member nudge` — re-engage the idle Director.
+- `cafleet member nudge` — report `stalled`/`finished` findings to the Director.
 
 Every wake stays within those two pane actions. You never keystroke task instructions into an ordinary member's pane — all member-driving routes back through the Director.
 

@@ -221,9 +221,9 @@ Keystrokes **`Esc` → `cafleet … message poll` → `Enter`** into a member's 
 cafleet member ping --fleet-id <fleet-id> --member-id <member-id>
 ```
 
-## Member Nudge (re-engage an idle Director)
+## Member Nudge (re-engage the Director)
 
-The monitoring member's purpose-built re-engage primitive for waking an idle Director. Unlike `member ping` (a pure poll keystroke), `member nudge` **persists an ACKable broker task** (so the Director's facilitation loop sees an inbox item naming what needs attention) **and** fires the hardened, `Esc`-safeguarded inline preview into the target's pane — the same persist + preview effect as a monitoring-member `cafleet message send --to <director>`, just the named interface over it.
+The monitoring member's purpose-built re-engage primitive for waking the Director when its capture-and-classify routine reports a `stalled`/`finished` agent (or classifies the Director's own pane `finished` with un-acked work). Unlike `member ping` (a pure poll keystroke), `member nudge` **persists an ACKable broker task** (so the Director's facilitation loop sees an inbox item naming what needs attention) **and** fires the hardened, `Esc`-safeguarded inline preview into the target's pane — the same persist + preview effect as a monitoring-member `cafleet message send --to <director>`, just the named interface over it.
 
 ```bash
 cafleet member nudge --fleet-id <fleet-id> \

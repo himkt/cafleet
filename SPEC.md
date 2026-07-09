@@ -2673,7 +2673,8 @@ UTF-8 (no ASCII escaping).
 ### 7.4 Logging & stdout discipline
 
 - The monitor loop emits per-due-agent heartbeat lines to **stdout**
-  (`{iso} due agent {id} ({name}) -> wake monitor`), `name` raw (unsanitized).
+  (`{iso} due agent {id} ({name}) [{reasons}] -> wake monitor`), `name` raw
+  (unsanitized), the `[{reasons}]` suffix listing that agent's joined wake reasons.
 - The "WebUI not built" warning, `member create`/`member delete` rollback and
   timeout diagnostics, and `monitor start`'s "no monitoring member" warning all
   go to **stderr**. Preserve the stream choice (stdout vs. stderr) — it is part
