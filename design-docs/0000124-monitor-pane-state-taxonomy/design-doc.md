@@ -10,13 +10,13 @@ The monitoring member classifies every due pane on a 2x2 grid (`active|idle` x `
 
 ## Success Criteria
 
-- [ ] A pane awaiting a user answer is classified `awaiting_user` and receives no re-engagement primitive from any agent, including when other due agents are `stalled` or `finished`.
-- [ ] A `blocked` native-status transition no longer flags a wake; a `done` transition still does.
-- [ ] The monitoring member is woken on a stall-detection cadence independent of the 720 s member interval, and the wake payload tells it which wakes are stall checks.
-- [ ] A pane whose capture is unchanged across two consecutive stall-check observations, and which is not `awaiting_user`, is classified `stalled` and reported to the Director.
-- [ ] A pane at a completed turn is classified `finished` and reported to the Director, who alone judges whether assigned work remains.
-- [ ] The classification rubric is byte-identical across the tmux and herdr backends; native `agent_status` is never consulted as classification evidence.
-- [ ] No Alembic migration, no new CLI subcommand, and no change to any `Esc` keystroke behavior.
+- [x] A pane awaiting a user answer is classified `awaiting_user` and receives no re-engagement primitive from any agent, including when other due agents are `stalled` or `finished`.
+- [x] A `blocked` native-status transition no longer flags a wake; a `done` transition still does.
+- [x] The monitoring member is woken on a stall-detection cadence independent of the 720 s member interval, and the wake payload tells it which wakes are stall checks.
+- [x] A pane whose capture is unchanged across two consecutive stall-check observations, and which is not `awaiting_user`, is classified `stalled` and reported to the Director.
+- [x] A pane at a completed turn is classified `finished` and reported to the Director, who alone judges whether assigned work remains.
+- [x] The classification rubric is byte-identical across the tmux and herdr backends; native `agent_status` is never consulted as classification evidence.
+- [x] No Alembic migration, no new CLI subcommand, and no change to any `Esc` keystroke behavior.
 
 ---
 
