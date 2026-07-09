@@ -1,8 +1,8 @@
 # Monitor Pane-State Taxonomy
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 23/23 tasks complete
-**Last Updated**: 2026-07-08
+**Last Updated**: 2026-07-09
 
 ## Overview
 
@@ -291,3 +291,4 @@ The same bar applies one layer down, and belongs in the Director's own doctrine:
 | Date | Changes |
 |------|---------|
 | 2026-07-08 | Initial draft |
+| 2026-07-09 | Implemented via execute workflow: five-state taxonomy, `_WAKE_ON_STATUS = ("done",)`, independent stall-check cadence, byte-identical wake payload. All 23 tasks + 7 Success Criteria complete; Reviewer-approved (2 rounds); PR #176. Status → Complete. |
