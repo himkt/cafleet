@@ -125,11 +125,11 @@ def _sanitize_wake_name(name: str) -> str:
     the wake nudge's guarantees, before the name is interpolated into the payload:
 
     * CR/LF/tab → U+23CE (⏎), preserving the single-line guarantee.
-    * a backtick → U+02CB (ˋ) and a ``$(`` command-substitution opener →
-      ``$`` + U+FE59 (﹙), so the no-backtick / no-``$(`` payload guarantee holds
-      for *any* name, not just the static template — defense-in-depth for the
-      agent-crash / mis-launch edge where the monitoring pane could momentarily
-      sit at a shell prompt.
+    * a backtick → U+02CB (ˋ), a ``$(`` command-substitution opener →
+      ``$`` + U+FE59 (﹙), and a pipe ``|`` → U+2502 (│), so the no-backtick /
+      no-``$(`` / no-``|`` payload guarantee holds for *any* name, not just the
+      static template — defense-in-depth for the agent-crash / mis-launch edge
+      where the monitoring pane could momentarily sit at a shell prompt.
 
     Distinct from the CR/LF-only cosmetic strip ``send_inline_preview`` applies;
     the ``$(`` replacement is non-empty so it cannot reintroduce ``$(`` by joining
@@ -142,6 +142,7 @@ def _sanitize_wake_name(name: str) -> str:
         .replace("\t", "⏎")
         .replace("`", "ˋ")
         .replace("$(", "$﹙")
+        .replace("|", "│")
     )
 
 
@@ -247,10 +248,10 @@ class TmuxMultiplexer:
     ) -> bool:
         """Best-effort wake nudge for the monitoring member's pane.
 
-        Carries a single-line instruction that **names** each freshly-due agent
-        (``<role> <id> (<name>)``) and the Director id, directing the monitoring
-        member to run its capture-classify-reengage routine over those named
-        panes plus the Director — distinct from the poll command
+        Carries a single-line instruction that **names** each due agent
+        (``<role> <id> (<name>) [<reasons>]``) and the Director id, directing the
+        monitoring member to classify each pane on the five-state taxonomy and
+        re-engage the Director — distinct from the poll command
         ``send_poll_trigger`` carries (now used only by ``cafleet member ping``).
         This is the sole keystroke the loop fires — it wakes only the monitoring
         member. No leading ``Escape``: the target is the monitoring member's own
@@ -258,21 +259,29 @@ class TmuxMultiplexer:
         parked on a permission-approval prompt, so an ``Esc`` would merely
         self-interrupt an in-progress routine. User-controlled agent names are
         sanitized (CR/LF/tab → U+23CE) to preserve the single-line shape, and the
-        payload carries no backtick and no ``$(…)`` command substitution, so it
-        is safe in the monitoring member's coding-agent input box.
+        payload carries no backtick, no ``$(…)`` command substitution, and no
+        pipe, so it is safe in the monitoring member's coding-agent input box. The
+        payload is byte-identical to the herdr backend's.
         """
         noun = "agent" if len(due_agents) == 1 else "agents"
         due_list = ", ".join(
             f"{'director' if t['is_director'] else 'member'} {t['agent_id']} "
-            f"({_sanitize_wake_name(t['name'])})"
+            f"({_sanitize_wake_name(t['name'])}) [{','.join(t['wake_reasons'])}]"
             for t in due_agents
         )
         payload = (
             f"[monitor] wake: {len(due_agents)} {noun} due — {due_list}. "
             f"Capture each named pane read-only, with the Director pane "
-            f"({director_agent_id}) always inspected; judge each active/idle and "
-            "progressing/stalled; re-engage the Director via cafleet member nudge "
-            "when it is idle with un-acked work or any due agent looks stalled."
+            f"({director_agent_id}) always inspected. From capture content only, "
+            "classify each pane in this precedence order: awaiting_user, unknown, "
+            "finished, stalled, working. For an agent tagged stall-check, compare "
+            "its capture against your previous stall-check capture of that pane, "
+            "then keep the new capture as that pane's baseline; with no previous "
+            "stall-check capture, classify unknown. Never re-engage a pane "
+            "classified awaiting_user: when the Director is awaiting_user, send "
+            "nothing this wake, whatever the other panes show. Otherwise re-engage "
+            "the Director via cafleet member nudge when a due agent is stalled or "
+            "finished, or the Director is finished with un-acked work."
         )
         return _best_effort_send(target_pane_id=target_pane_id, payload=payload)
 

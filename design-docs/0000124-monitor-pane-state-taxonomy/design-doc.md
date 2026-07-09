@@ -1,8 +1,8 @@
 # Monitor Pane-State Taxonomy
 
-**Status**: Approved
-**Progress**: 0/22 tasks complete
-**Last Updated**: 2026-07-08
+**Status**: Complete
+**Progress**: 23/23 tasks complete
+**Last Updated**: 2026-07-09
 
 ## Overview
 
@@ -10,13 +10,13 @@ The monitoring member classifies every due pane on a 2x2 grid (`active|idle` x `
 
 ## Success Criteria
 
-- [ ] A pane awaiting a user answer is classified `awaiting_user` and receives no re-engagement primitive from any agent, including when other due agents are `stalled` or `finished`.
-- [ ] A `blocked` native-status transition no longer flags a wake; a `done` transition still does.
-- [ ] The monitoring member is woken on a stall-detection cadence independent of the 720 s member interval, and the wake payload tells it which wakes are stall checks.
-- [ ] A pane whose capture is unchanged across two consecutive stall-check observations, and which is not `awaiting_user`, is classified `stalled` and reported to the Director.
-- [ ] A pane at a completed turn is classified `finished` and reported to the Director, who alone judges whether assigned work remains.
-- [ ] The classification rubric is byte-identical across the tmux and herdr backends; native `agent_status` is never consulted as classification evidence.
-- [ ] No Alembic migration, no new CLI subcommand, and no change to any `Esc` keystroke behavior.
+- [x] A pane awaiting a user answer is classified `awaiting_user` and receives no re-engagement primitive from any agent, including when other due agents are `stalled` or `finished`.
+- [x] A `blocked` native-status transition no longer flags a wake; a `done` transition still does.
+- [x] The monitoring member is woken on a stall-detection cadence independent of the 720 s member interval, and the wake payload tells it which wakes are stall checks.
+- [x] A pane whose capture is unchanged across two consecutive stall-check observations, and which is not `awaiting_user`, is classified `stalled` and reported to the Director.
+- [x] A pane at a completed turn is classified `finished` and reported to the Director, who alone judges whether assigned work remains.
+- [x] The classification rubric is byte-identical across the tmux and herdr backends; native `agent_status` is never consulted as classification evidence.
+- [x] No Alembic migration, no new CLI subcommand, and no change to any `Esc` keystroke behavior.
 
 ---
 
@@ -245,43 +245,44 @@ The same bar applies one layer down, and belongs in the Director's own doctrine:
 
 ### Step 1: Concepts and user documentation
 
-- [ ] `docs/concepts/monitoring.md` § *Native agent-state due trigger*: rewrite for `_WAKE_ON_STATUS = ("done",)`; state that `blocked` is recorded but never wakes, and why. <!-- completed: -->
-- [ ] `docs/concepts/monitoring.md` § *The monitoring member* steps 2–4: replace the `active/idle` + `progressing/stalled` judgment with the five-state taxonomy and the precedence rubric; fix the `Esc`-dismissal claim at lines 153–154. <!-- completed: -->
-- [ ] `docs/concepts/monitoring.md` § *Cadence and tick precision*: add the stall-check interval knob and its env var. <!-- completed: -->
+- [x] `docs/concepts/monitoring.md` § *Native agent-state due trigger*: rewrite for `_WAKE_ON_STATUS = ("done",)`; state that `blocked` is recorded but never wakes, and why. <!-- completed: 2026-07-09T00:15 -->
+- [x] `docs/concepts/monitoring.md` § *The monitoring member* steps 2–4: replace the `active/idle` + `progressing/stalled` judgment with the five-state taxonomy and the precedence rubric; fix the `Esc`-dismissal claim at lines 153–154. <!-- completed: 2026-07-09T00:15 -->
+- [x] `docs/concepts/monitoring.md` § *Cadence and tick precision*: add the stall-check interval knob and its env var. <!-- completed: 2026-07-09T00:15 -->
 
 ### Step 2: README and SPEC
 
-- [ ] `README.md`: update the monitoring description to the five-state taxonomy and the stall cadence. <!-- completed: -->
-- [ ] `SPEC.md` `send_wake_trigger` contract — **two edit sites**: the tmux contract at ~lines 1753–1764 and the herdr contract at ~line 1938. Replace the payload template with the new single-line text and the `[<reasons>]` due-list entry shape in both, keeping them byte-identical. <!-- completed: -->
-- [ ] `SPEC.md` configuration section: add `CAFLEET_MONITOR_STALL_INTERVAL` (default `240`, `0` disables) alongside the other `CAFLEET_*` vars. <!-- completed: -->
+- [x] `README.md`: update the monitoring description to the five-state taxonomy and the stall cadence. <!-- completed: 2026-07-09T00:18 -->
+- [x] `SPEC.md` `send_wake_trigger` contract — **two edit sites**: the tmux contract at ~lines 1753–1764 and the herdr contract at ~line 1938. Replace the payload template with the new single-line text and the `[<reasons>]` due-list entry shape in both, keeping them byte-identical. <!-- completed: 2026-07-09T00:18 -->
+- [x] `SPEC.md` configuration section: add `CAFLEET_MONITOR_STALL_INTERVAL` (default `240`, `0` disables) alongside the other `CAFLEET_*` vars. <!-- completed: 2026-07-09T00:18 -->
+- [x] `SPEC.md` monitor-loop algorithm section (`Compute the due set` / `Wake the watcher` steps ~2047–2074, § *Native agent-state due trigger* ~2081–2108): rewrite for `_WAKE_ON_STATUS = ("done",)` (only `done` flags a wake; `blocked` is recorded but never flags), per-agent `wake_reasons: list[str]` drawn from `{interval, status:done, stall-check}`, the `status:done`-only stdout suffix, `record_pings` receiving only interval/`status:done` agents (a stall-check-only agent is excluded), and add a § *Stall-detection cadence* covering `_last_stall_check_at`, first-tick due-ness, and `monitor_stall_interval == 0` disabling stall detection. Keep the § *Native agent-state due trigger* subsection accurate to the new behavior. <!-- completed: 2026-07-09T00:24 -->
 
 ### Step 3: Skills
 
-- [ ] `skills/cafleet/roles/monitor.md`: replace the step-2 2x2 judgment with the five-state taxonomy, the precedence rubric, and the ambiguity tie-break; add the stall-check comparand rule, the unconditional baseline-replacement rule, the `unknown` fail-safe, and the never-re-engage-outranks-every-trigger invariant; update the sample wake nudge at line 74. <!-- completed: -->
-- [ ] `skills/cafleet/roles/monitor.md:67`: remove the "has it dismissed before the preview's Enter lands" feature claim; state the `Esc`'s real purpose and the never-nudge-`awaiting_user` policy. <!-- completed: -->
-- [ ] `skills/cafleet/reference/supervision.md`: amend § *Idle Semantics* so a `finished` member with outstanding assigned work IS nudged (bullet 3) while an `awaiting_user` member is never nudged (bullet 1); fix the line-33 `Esc` claim. <!-- completed: -->
-- [ ] `skills/cafleet/reference/coding-agent/{_template,claude,codex,opencode}.md`: add a *Pane-state capture cues* table per backend giving the concrete `awaiting_user` vs `finished` discriminators; register the note in each overlay's *Note → applies at* table, bound to the rubric's rule 1. <!-- completed: -->
+- [x] `skills/cafleet/roles/monitor.md`: replace the step-2 2x2 judgment with the five-state taxonomy, the precedence rubric, and the ambiguity tie-break; add the stall-check comparand rule, the unconditional baseline-replacement rule, the `unknown` fail-safe, and the never-re-engage-outranks-every-trigger invariant; update the sample wake nudge at line 74. <!-- completed: 2026-07-09T00:30 -->
+- [x] `skills/cafleet/roles/monitor.md:67`: remove the "has it dismissed before the preview's Enter lands" feature claim; state the `Esc`'s real purpose and the never-nudge-`awaiting_user` policy. <!-- completed: 2026-07-09T00:30 -->
+- [x] `skills/cafleet/reference/supervision.md`: amend § *Idle Semantics* so a `finished` member with outstanding assigned work IS nudged (bullet 3) while an `awaiting_user` member is never nudged (bullet 1); fix the line-33 `Esc` claim. <!-- completed: 2026-07-09T00:30 -->
+- [x] `skills/cafleet/reference/coding-agent/{_template,claude,codex,opencode}.md`: add a *Pane-state capture cues* table per backend giving the concrete `awaiting_user` vs `finished` discriminators; register the note in each overlay's *Note → applies at* table, bound to the rubric's rule 1. <!-- completed: 2026-07-09T00:30 -->
 
 ### Step 4: Configuration and monitor loop
 
-- [ ] `cafleet/src/cafleet/config.py`: add `monitor_stall_interval: int = Field(default=240, validation_alias="CAFLEET_MONITOR_STALL_INTERVAL")` and document it in the `Settings` docstring. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/monitor/loop.py`: replace `_ATTENTION_STATES` with `_WAKE_ON_STATUS = ("done",)`; `blocked` is recorded, never flagged. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/monitor/loop.py`: give each due target `wake_reasons: list[str]`; tag `interval` in `monitor_tick`, `status:done` in `_flag_native_status_due`. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/monitor/loop.py`: add `_last_stall_check_at` and `_flag_stall_check_due(targets, due, now)`; clear the dict in `run_monitor_loop`; skip entirely when `monitor_stall_interval == 0`. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/monitor/loop.py`: pass only agents whose reasons include `interval` or `status:done` to `record_pings`; commit `_last_stall_check_at` on successful wake; render joined reasons in the stdout echo. <!-- completed: -->
+- [x] `cafleet/src/cafleet/config.py`: add `monitor_stall_interval: int = Field(default=240, validation_alias="CAFLEET_MONITOR_STALL_INTERVAL")` and document it in the `Settings` docstring. <!-- completed: 2026-07-09T00:52 -->
+- [x] `cafleet/src/cafleet/monitor/loop.py`: replace `_ATTENTION_STATES` with `_WAKE_ON_STATUS = ("done",)`; `blocked` is recorded, never flagged. <!-- completed: 2026-07-09T00:52 -->
+- [x] `cafleet/src/cafleet/monitor/loop.py`: give each due target `wake_reasons: list[str]`; tag `interval` in `monitor_tick`, `status:done` in `_flag_native_status_due`. <!-- completed: 2026-07-09T00:52 -->
+- [x] `cafleet/src/cafleet/monitor/loop.py`: add `_last_stall_check_at` and `_flag_stall_check_due(targets, due, now)`; clear the dict in `run_monitor_loop`; skip entirely when `monitor_stall_interval == 0`. <!-- completed: 2026-07-09T00:52 -->
+- [x] `cafleet/src/cafleet/monitor/loop.py`: pass only agents whose reasons include `interval` or `status:done` to `record_pings`; commit `_last_stall_check_at` on successful wake; render joined reasons in the stdout echo. <!-- completed: 2026-07-09T00:52 -->
 
 ### Step 5: Multiplexer wake payload
 
-- [ ] `cafleet/src/cafleet/multiplexer/tmux.py::send_wake_trigger`: emit the new payload with per-agent `[<reasons>]` tags; keep `esc_first=NO` and the no-backtick / no-`$(` / no-`|` guarantee. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/multiplexer/herdr.py::send_wake_trigger`: apply the byte-identical payload change. <!-- completed: -->
+- [x] `cafleet/src/cafleet/multiplexer/tmux.py::send_wake_trigger`: emit the new payload with per-agent `[<reasons>]` tags; keep `esc_first=NO` and the no-backtick / no-`$(` / no-`|` guarantee. <!-- completed: 2026-07-09T00:52 -->
+- [x] `cafleet/src/cafleet/multiplexer/herdr.py::send_wake_trigger`: apply the byte-identical payload change. <!-- completed: 2026-07-09T00:52 -->
 
 ### Step 6: Tests
 
-- [ ] `cafleet/tests/monitor/test_loop.py`: assert a `blocked` transition flags no wake, a `done` transition still does, and a `blocked` read is still recorded in `_last_agent_status`. <!-- completed: -->
-- [ ] `cafleet/tests/monitor/test_loop.py`: assert stall-check due-ness fires on `monitor_stall_interval`, that a stall-check-only agent is absent from the `record_pings` call, and that `monitor_stall_interval == 0` emits no `stall-check` tag. <!-- completed: -->
-- [ ] `cafleet/tests/monitor/test_loop.py`: assert `_last_stall_check_at` is committed only on a successful wake, so a failed keystroke re-flags the agent next tick. <!-- completed: -->
-- [ ] `cafleet/tests/monitor/test_loop.py`: assert first-tick semantics — an agent absent from `_last_stall_check_at` is stall-check due, and the dict is not pre-seeded by `run_monitor_loop`. <!-- completed: -->
-- [ ] `cafleet/tests/multiplexer/`: pin the new payload text for both backends, assert the two are byte-identical, and assert the payload contains no backtick, no `$(`, and no `|`. <!-- completed: -->
+- [x] `cafleet/tests/monitor/test_loop.py`: assert a `blocked` transition flags no wake, a `done` transition still does, and a `blocked` read is still recorded in `_last_agent_status`. <!-- completed: 2026-07-09T00:35 -->
+- [x] `cafleet/tests/monitor/test_loop.py`: assert stall-check due-ness fires on `monitor_stall_interval`, that a stall-check-only agent is absent from the `record_pings` call, and that `monitor_stall_interval == 0` emits no `stall-check` tag. <!-- completed: 2026-07-09T00:35 -->
+- [x] `cafleet/tests/monitor/test_loop.py`: assert `_last_stall_check_at` is committed only on a successful wake, so a failed keystroke re-flags the agent next tick. <!-- completed: 2026-07-09T00:35 -->
+- [x] `cafleet/tests/monitor/test_loop.py`: assert first-tick semantics — an agent absent from `_last_stall_check_at` is stall-check due, and the dict is not pre-seeded by `run_monitor_loop`. <!-- completed: 2026-07-09T00:35 -->
+- [x] `cafleet/tests/multiplexer/`: pin the new payload text for both backends, assert the two are byte-identical, and assert the payload contains no backtick, no `$(`, and no `|`. <!-- completed: 2026-07-09T00:35 -->
 
 ---
 
@@ -290,3 +291,4 @@ The same bar applies one layer down, and belongs in the Director's own doctrine:
 | Date | Changes |
 |------|---------|
 | 2026-07-08 | Initial draft |
+| 2026-07-09 | Implemented via execute workflow: five-state taxonomy, `_WAKE_ON_STATUS = ("done",)`, independent stall-check cadence, byte-identical wake payload. All 23 tasks + 7 Success Criteria complete; Reviewer-approved (2 rounds); PR #176. Status → Complete. |

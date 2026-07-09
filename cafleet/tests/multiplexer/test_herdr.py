@@ -602,7 +602,14 @@ def test_send_wake_trigger__no_esc_single_pane_run(monkeypatch, herdr_run):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/herdr")
     result = _herdr.send_wake_trigger(
         target_pane_id="wG:p1",
-        due_agents=[{"agent_id": 332, "name": "Director", "is_director": True}],
+        due_agents=[
+            {
+                "agent_id": 332,
+                "name": "Director",
+                "is_director": True,
+                "wake_reasons": ["interval"],
+            }
+        ],
         director_agent_id=332,
     )
     assert result is True
@@ -613,7 +620,8 @@ def test_send_wake_trigger__no_esc_single_pane_run(monkeypatch, herdr_run):
     assert "esc" not in argv
     payload = argv[4]
     assert payload.startswith("[monitor] wake: 1 agent due")
-    assert "director 332 (Director)" in payload
+    # The due agent is named ``<role> <id> (<name>) [<reasons>]``.
+    assert "director 332 (Director) [interval]" in payload
     assert "(332)" in payload
 
 
@@ -623,8 +631,18 @@ def test_send_wake_trigger__sanitizes_name_metacharacters(monkeypatch, herdr_run
     _herdr.send_wake_trigger(
         target_pane_id="wG:p1",
         due_agents=[
-            {"agent_id": 332, "name": "Director", "is_director": True},
-            {"agent_id": 336, "name": "evil\r\nname\there`$(id)", "is_director": False},
+            {
+                "agent_id": 332,
+                "name": "Director",
+                "is_director": True,
+                "wake_reasons": ["interval"],
+            },
+            {
+                "agent_id": 336,
+                "name": "evil\r\nname\there`$(id)|whoami",
+                "is_director": False,
+                "wake_reasons": ["stall-check"],
+            },
         ],
         director_agent_id=332,
     )
@@ -636,6 +654,7 @@ def test_send_wake_trigger__sanitizes_name_metacharacters(monkeypatch, herdr_run
     assert "\t" not in payload
     assert "`" not in payload
     assert "$(" not in payload
+    assert "|" not in payload
     assert "⏎" in payload
 
 

@@ -48,6 +48,14 @@ class Settings(BaseSettings):
             ``None`` (the default) means auto-detect from ``HERDR_ENV`` /
             ``TMUX`` — a valid, well-defined state, not a fallback. A set value
             must name a registered backend (``tmux``/``herdr``).
+        monitor_stall_interval: Per-agent stall-check cadence in seconds,
+            driven by the monitor loop independently of the
+            ``monitor_config.interval_seconds`` ping intervals. Sourced from
+            ``CAFLEET_MONITOR_STALL_INTERVAL``; defaults to ``240``. A watched
+            agent is stall-check due every ``monitor_stall_interval`` seconds;
+            ``0`` disables stall detection entirely (no ``stall-check`` wake
+            reason is emitted). Tracked process-locally in the running loop —
+            there is no DB column.
     """
 
     database_url: str = Field(
@@ -69,6 +77,10 @@ class Settings(BaseSettings):
     multiplexer: str | None = Field(
         default=None,
         validation_alias="CAFLEET_MULTIPLEXER",
+    )
+    monitor_stall_interval: int = Field(
+        default=240,
+        validation_alias="CAFLEET_MONITOR_STALL_INTERVAL",
     )
 
 
