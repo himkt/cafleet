@@ -18,14 +18,27 @@ from datetime import UTC, datetime
 import click
 
 from cafleet import broker
+from cafleet.config import settings
 from cafleet.multiplexer import AgentStateAware, resolve_multiplexer
 
-_ATTENTION_STATES = ("blocked", "done")
+# The sole native agent status that flags a wake. ``blocked`` is deliberately
+# excluded (design 0000124): it means the agent awaits a user answer, and the
+# monitoring member's only correct action there is inaction — waking about it is
+# pure token cost plus a nonzero chance of a destructive nudge. ``blocked`` is
+# still recorded in ``_last_agent_status`` so the episode is tracked and a later
+# recovery is detected; it simply never flags a wake.
+_WAKE_ON_STATUS = ("done",)
 
-# Per-process last-seen native agent status, keyed by agent_id. Only transitions
-# INTO an attention state flag an agent due, so one blocked/done episode wakes the
-# watcher once. Reset per run in ``run_monitor_loop``.
+# Per-process last-seen native agent status, keyed by agent_id. Only a transition
+# INTO ``done`` flags an agent due, so one ``done`` episode wakes the watcher
+# once. Reset per run in ``run_monitor_loop``.
 _last_agent_status: dict[int, str | None] = {}
+
+# Per-process last stall-check time per agent (tz-aware ``datetime``, not an ISO
+# string — it is compared against ``now`` directly, never persisted). An agent
+# absent from this map is stall-check due on its first observation. Reset per run
+# in ``run_monitor_loop``.
+_last_stall_check_at: dict[int, datetime] = {}
 
 
 class _Sentinel:
@@ -92,7 +105,12 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
     for target in targets:
         target["pane_alive"] = target["pane_id"] in live_panes
         if should_ping(target, now):
+            target["wake_reasons"] = ["interval"]
             due.append(target)
+
+    # Stall-check cadence runs on BOTH backends, independent of the interval
+    # trigger; it unions ``stall-check`` onto each stall-check-due watched agent.
+    _flag_stall_check_due(targets, due, now)
 
     pending_status: dict[int, str | None] = {}
     if isinstance(mux, AgentStateAware):
@@ -100,32 +118,43 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
 
     if due and watcher is not None and watcher["pane_id"] in live_panes:
         # The loop's only keystroke: a single best-effort wake nudge into the
-        # watcher's own pane. The nudge NAMES the freshly-due agents and the
-        # Director id, driving the watcher's capture-classify-reengage routine
-        # over exactly those panes plus the Director. A watched pane (Director /
-        # member) is never keystroked.
+        # watcher's own pane. The nudge NAMES the due agents (each with its
+        # ``wake_reasons``) and the Director id, driving the watcher's
+        # capture-classify-reengage routine over exactly those panes plus the
+        # Director. A watched pane (Director / member) is never keystroked.
         woke = mux.send_wake_trigger(
             target_pane_id=watcher["pane_id"],
             due_agents=due,
             director_agent_id=fleet["director_agent_id"],
         )
         if woke:
-            # Stamp each due agent's cadence ONLY on a successful wake, so a
-            # just-flagged agent is not due again next tick (no wake-storm while
-            # the watcher works). A failed best-effort keystroke leaves the due
-            # agents flagged, so the next tick retries instead of silently
-            # skipping a check for a full interval. pending_status holds only the
-            # natively-flagged agents' reads, committed on this same wake gate so
-            # a wake failure re-flags the episode (non-flagged reads were already
-            # committed in _flag_native_status_due).
-            broker.record_pings([t["agent_id"] for t in due], now.isoformat())
+            # All ledger writes are gated on a successful wake, so a failed
+            # best-effort keystroke leaves the due agents flagged and the next
+            # tick retries instead of silently skipping a check.
+            #
+            # ``record_pings`` receives only agents whose reasons include
+            # ``interval`` or ``status:done`` — a stall-check-only agent is
+            # EXCLUDED, keeping the ping cadence and the stall cadence
+            # independent. ``_last_stall_check_at`` is committed for every agent
+            # whose reasons include ``stall-check``. ``pending_status`` holds the
+            # natively-flagged agents' reads, committed on this same gate (the
+            # non-flagged reads were already committed in
+            # ``_flag_native_status_due``).
+            ping_ids = [
+                t["agent_id"]
+                for t in due
+                if "interval" in t["wake_reasons"] or "status:done" in t["wake_reasons"]
+            ]
+            if ping_ids:
+                broker.record_pings(ping_ids, now.isoformat())
             _last_agent_status.update(pending_status)
-            # Visible heartbeat: one line per due agent on the launching task's stdout.
-            # Native-due agents carry a ``[status:<state>]`` suffix; interval-due
-            # agents keep the bare line unchanged.
             for target in due:
-                reason = target.get("wake_reason")
-                suffix = f" [{reason}]" if reason else ""
+                if "stall-check" in target["wake_reasons"]:
+                    _last_stall_check_at[target["agent_id"]] = now
+            # Visible heartbeat: one line per due agent on the launching task's
+            # stdout, each carrying its joined ``[<reasons>]`` suffix.
+            for target in due:
+                suffix = f" [{','.join(target['wake_reasons'])}]"
                 click.echo(
                     f"{now.isoformat()} due agent {target['agent_id']} "
                     f"({target['name']}){suffix} -> wake monitor"
@@ -136,17 +165,20 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
 def _flag_native_status_due(
     mux: AgentStateAware, targets: list[dict], due: list[dict]
 ) -> dict[int, str | None]:
-    """Union native ``blocked``/``done`` transitions into the interval-due set.
+    """Union native ``done`` transitions into the due set.
 
     Point-reads each **enabled** watched live agent's native status and flags any
-    whose status just transitioned into an attention state, tagging it with a
-    ``status:<state>`` wake reason. Herdr-only: the caller guards on
-    ``isinstance(mux, AgentStateAware)``.
+    whose status just transitioned into ``done`` (the sole ``_WAKE_ON_STATUS``
+    state), tagging it with a ``status:done`` wake reason. A transition into
+    ``blocked`` NEVER flags a wake — it is committed to ``_last_agent_status`` via
+    the non-flagged branch below, so the episode is tracked and a later
+    ``blocked → working`` recovery is detected, but the agent is never woken about.
+    Herdr-only: the caller guards on ``isinstance(mux, AgentStateAware)``.
 
-    Non-flagged reads (recovery / idle / steady-state) are committed to
+    Non-flagged reads (recovery / idle / blocked / steady-state) are committed to
     ``_last_agent_status`` **immediately**, so a recovery (e.g. blocked→working)
     is recorded even on a no-wake tick and the next episode is detected. Only the
-    natively-**flagged** agents' reads are returned as pending; the caller commits
+    natively-**flagged** ``done`` reads are returned as pending; the caller commits
     those **only after a successful wake**, so a wake failure re-flags that
     episode next tick (mirrors the interval branch's ``record_pings`` gating).
     """
@@ -160,14 +192,51 @@ def _flag_native_status_due(
         agent_id = target["agent_id"]
         status = mux.agent_status(target_pane_id=target["pane_id"])
         prev = _last_agent_status.get(agent_id)
-        if status in _ATTENTION_STATES and status != prev and agent_id not in due_ids:
-            target["wake_reason"] = f"status:{status}"
+        if status in _WAKE_ON_STATUS and status != prev and agent_id not in due_ids:
+            target["wake_reasons"] = [f"status:{status}"]
             due.append(target)
             due_ids.add(agent_id)
             pending[agent_id] = status
         else:
             _last_agent_status[agent_id] = status
     return pending
+
+
+def _flag_stall_check_due(targets: list[dict], due: list[dict], now: datetime) -> None:
+    """Union each stall-check-due watched agent into the due set (both backends).
+
+    Driven by ``settings.monitor_stall_interval`` (default 240; ``0`` disables the
+    trigger entirely). An **enabled** watched live agent is stall-check due when it
+    is ABSENT from ``_last_stall_check_at`` (first-tick semantics, mirroring
+    ``should_ping``'s ``last_ping_at is None → due``; the map is never pre-seeded)
+    or when at least one full interval has elapsed since its last stall-check. A
+    stall-check-due agent already in the due set (e.g. interval-due) has
+    ``stall-check`` UNIONED onto its existing ``wake_reasons``; an agent not yet due
+    is appended with ``["stall-check"]``.
+
+    This never commits ``_last_stall_check_at`` — that commit is gated on a
+    successful wake in ``monitor_tick``, so a failed keystroke re-flags the agent
+    next tick (mirrors the ``record_pings`` gating).
+    """
+    interval = settings.monitor_stall_interval
+    if interval <= 0:
+        return
+    due_ids = {t["agent_id"] for t in due}
+    for target in targets:
+        if not target["enabled"]:
+            continue
+        if target["pane_id"] is None or not target["pane_alive"]:
+            continue
+        agent_id = target["agent_id"]
+        last = _last_stall_check_at.get(agent_id)
+        if last is not None and (now - last).total_seconds() < interval:
+            continue
+        if agent_id in due_ids:
+            target["wake_reasons"].append("stall-check")
+        else:
+            target["wake_reasons"] = ["stall-check"]
+            due.append(target)
+            due_ids.add(agent_id)
 
 
 _stop_requested = False
@@ -202,6 +271,7 @@ def run_monitor_loop(fleet_id: int, tick_seconds: int) -> None:
     global _stop_requested
     _stop_requested = False
     _last_agent_status.clear()
+    _last_stall_check_at.clear()
     pid = os.getpid()
     if not broker.claim_monitor_runtime(
         fleet_id, pid, tick_seconds, datetime.now(UTC).isoformat()

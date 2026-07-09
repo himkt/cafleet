@@ -21,9 +21,9 @@ from cafleet import broker
 from cafleet.config import settings
 from cafleet.db.models import Fleet
 from cafleet.monitor.loop import (
+    _WAKE_ON_STATUS,
     CONTINUE,
     STOP,
-    _WAKE_ON_STATUS,
     _flag_native_status_due,
     _flag_stall_check_due,
     _last_agent_status,

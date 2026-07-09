@@ -1,7 +1,7 @@
 # Monitor Pane-State Taxonomy
 
 **Status**: Approved
-**Progress**: 16/23 tasks complete
+**Progress**: 23/23 tasks complete
 **Last Updated**: 2026-07-08
 
 ## Overview
@@ -265,16 +265,16 @@ The same bar applies one layer down, and belongs in the Director's own doctrine:
 
 ### Step 4: Configuration and monitor loop
 
-- [ ] `cafleet/src/cafleet/config.py`: add `monitor_stall_interval: int = Field(default=240, validation_alias="CAFLEET_MONITOR_STALL_INTERVAL")` and document it in the `Settings` docstring. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/monitor/loop.py`: replace `_ATTENTION_STATES` with `_WAKE_ON_STATUS = ("done",)`; `blocked` is recorded, never flagged. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/monitor/loop.py`: give each due target `wake_reasons: list[str]`; tag `interval` in `monitor_tick`, `status:done` in `_flag_native_status_due`. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/monitor/loop.py`: add `_last_stall_check_at` and `_flag_stall_check_due(targets, due, now)`; clear the dict in `run_monitor_loop`; skip entirely when `monitor_stall_interval == 0`. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/monitor/loop.py`: pass only agents whose reasons include `interval` or `status:done` to `record_pings`; commit `_last_stall_check_at` on successful wake; render joined reasons in the stdout echo. <!-- completed: -->
+- [x] `cafleet/src/cafleet/config.py`: add `monitor_stall_interval: int = Field(default=240, validation_alias="CAFLEET_MONITOR_STALL_INTERVAL")` and document it in the `Settings` docstring. <!-- completed: 2026-07-09T00:52 -->
+- [x] `cafleet/src/cafleet/monitor/loop.py`: replace `_ATTENTION_STATES` with `_WAKE_ON_STATUS = ("done",)`; `blocked` is recorded, never flagged. <!-- completed: 2026-07-09T00:52 -->
+- [x] `cafleet/src/cafleet/monitor/loop.py`: give each due target `wake_reasons: list[str]`; tag `interval` in `monitor_tick`, `status:done` in `_flag_native_status_due`. <!-- completed: 2026-07-09T00:52 -->
+- [x] `cafleet/src/cafleet/monitor/loop.py`: add `_last_stall_check_at` and `_flag_stall_check_due(targets, due, now)`; clear the dict in `run_monitor_loop`; skip entirely when `monitor_stall_interval == 0`. <!-- completed: 2026-07-09T00:52 -->
+- [x] `cafleet/src/cafleet/monitor/loop.py`: pass only agents whose reasons include `interval` or `status:done` to `record_pings`; commit `_last_stall_check_at` on successful wake; render joined reasons in the stdout echo. <!-- completed: 2026-07-09T00:52 -->
 
 ### Step 5: Multiplexer wake payload
 
-- [ ] `cafleet/src/cafleet/multiplexer/tmux.py::send_wake_trigger`: emit the new payload with per-agent `[<reasons>]` tags; keep `esc_first=NO` and the no-backtick / no-`$(` / no-`|` guarantee. <!-- completed: -->
-- [ ] `cafleet/src/cafleet/multiplexer/herdr.py::send_wake_trigger`: apply the byte-identical payload change. <!-- completed: -->
+- [x] `cafleet/src/cafleet/multiplexer/tmux.py::send_wake_trigger`: emit the new payload with per-agent `[<reasons>]` tags; keep `esc_first=NO` and the no-backtick / no-`$(` / no-`|` guarantee. <!-- completed: 2026-07-09T00:52 -->
+- [x] `cafleet/src/cafleet/multiplexer/herdr.py::send_wake_trigger`: apply the byte-identical payload change. <!-- completed: 2026-07-09T00:52 -->
 
 ### Step 6: Tests
 

@@ -116,7 +116,7 @@ def _best_effort(steps: Callable[[], None]) -> bool:
 
 
 def _sanitize_wake_name(name: str) -> str:
-    """Neutralize CR/LF/tab/backtick/``$(`` in a name so the wake payload stays
+    """Neutralize CR/LF/tab/backtick/``$(``/pipe in a name so the wake payload stays
     single-line with no shell metacharacters (mirrors the tmux payload contract)."""
     return (
         name.replace("\r\n", "⏎")
@@ -125,6 +125,7 @@ def _sanitize_wake_name(name: str) -> str:
         .replace("\t", "⏎")
         .replace("`", "ˋ")
         .replace("$(", "$﹙")
+        .replace("|", "│")
     )
 
 
@@ -289,15 +290,22 @@ class HerdrMultiplexer:
         noun = "agent" if len(due_agents) == 1 else "agents"
         due_list = ", ".join(
             f"{'director' if t['is_director'] else 'member'} {t['agent_id']} "
-            f"({_sanitize_wake_name(t['name'])})"
+            f"({_sanitize_wake_name(t['name'])}) [{','.join(t['wake_reasons'])}]"
             for t in due_agents
         )
         payload = (
             f"[monitor] wake: {len(due_agents)} {noun} due — {due_list}. "
             f"Capture each named pane read-only, with the Director pane "
-            f"({director_agent_id}) always inspected; judge each active/idle and "
-            "progressing/stalled; re-engage the Director via cafleet member nudge "
-            "when it is idle with un-acked work or any due agent looks stalled."
+            f"({director_agent_id}) always inspected. From capture content only, "
+            "classify each pane in this precedence order: awaiting_user, unknown, "
+            "finished, stalled, working. For an agent tagged stall-check, compare "
+            "its capture against your previous stall-check capture of that pane, "
+            "then keep the new capture as that pane's baseline; with no previous "
+            "stall-check capture, classify unknown. Never re-engage a pane "
+            "classified awaiting_user: when the Director is awaiting_user, send "
+            "nothing this wake, whatever the other panes show. Otherwise re-engage "
+            "the Director via cafleet member nudge when a due agent is stalled or "
+            "finished, or the Director is finished with un-acked work."
         )
 
         # No esc: the monitoring member's own pane is never on a permission prompt.

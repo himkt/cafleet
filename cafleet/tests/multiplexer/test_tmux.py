@@ -849,9 +849,7 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     assert "⏎" in payload
 
     # The five-state precedence rubric is spelled out verbatim in the instruction.
-    assert (
-        "awaiting_user, unknown, finished, stalled, working" in payload
-    )
+    assert "awaiting_user, unknown, finished, stalled, working" in payload
 
     # The Director id is named as the standing inspect-and-re-engage target via
     # the "the Director pane ({director_id})" clause — distinct from the due-list
