@@ -1,7 +1,7 @@
 # Avoid polling loop on member pane
 
 **Status**: Approved
-**Progress**: 2/3 tasks complete
+**Progress**: 3/3 tasks complete
 **Last Updated**: 2026-07-09
 
 ## Overview
@@ -74,4 +74,4 @@ Two edits, both wording-only. No behavior in the CLI changes.
 
 ### Step 2: Verify consistency
 
-- [ ] Re-read the two edited passages and confirm the affirmative rule reads cleanly, the banned pattern is unambiguous (behavior-anchored, not keyed to the literal `sleep && poll` string), the legitimate single poll is preserved, and no cross-reference (`member.md` ↔ `SKILL.md`) now contradicts another; confirm `docs/concepts/monitoring.md` and `reference/supervision.md` are untouched. <!-- completed: -->
+- [x] Re-read the two edited passages and confirm the affirmative rule reads cleanly, the banned pattern is unambiguous (behavior-anchored, not keyed to the literal `sleep && poll` string), the legitimate single poll is preserved, and no cross-reference (`member.md` ↔ `SKILL.md`) now contradicts another; confirm `docs/concepts/monitoring.md` and `reference/supervision.md` are untouched. <!-- completed: 2026-07-09T13:52 -->
