@@ -760,7 +760,14 @@ def test_send_wake_trigger__return_branches_and_argv(
     monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     result = _tmux.send_wake_trigger(
         target_pane_id="%7",
-        due_agents=[{"agent_id": 332, "name": "Director", "is_director": True}],
+        due_agents=[
+            {
+                "agent_id": 332,
+                "name": "Director",
+                "is_director": True,
+                "wake_reasons": ["interval"],
+            }
+        ],
         director_agent_id=332,
     )
     assert result is expected_result
@@ -775,12 +782,12 @@ def test_send_wake_trigger__return_branches_and_argv(
 
 def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     """The wake nudge is a single-line monitoring instruction that NAMES the
-    freshly-due agents and the Director id (spec §2) — distinct from the
-    ``cafleet ... message poll`` command the Director receives. A crafted
-    user-controlled name carrying CR/LF/tab, a backtick, and a ``$(…)``
-    command-substitution sequence is sanitized so the single-line guarantee
-    holds and the payload carries no backtick / ``$(`` (the narrowed
-    shell-safety guarantee, §2)."""
+    freshly-due agents (each with its ``[<wake_reasons>]`` tag) and the Director id
+    — distinct from the ``cafleet ... message poll`` command the Director receives.
+    A crafted user-controlled name carrying CR/LF/tab, a backtick, a ``$(…)``
+    command-substitution sequence, and a pipe is sanitized so the single-line
+    guarantee holds and the payload carries no backtick, no ``$(``, and no ``|``
+    (design 0000124)."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
     monkeypatch.setattr("time.sleep", lambda _secs: None)
     captured: list[list[str]] = []
@@ -790,60 +797,72 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
         lambda args, **_kw: captured.append(list(args)) or "",
     )
 
-    # Worked example A (§2): the Director (332) and a member (336) are both due.
-    # The member's user-controlled name carries a CR/LF, a tab, a backtick, and a
-    # ``$(…)`` command-substitution sequence — every metacharacter the sanitizer
-    # must neutralize so the no-raw-control / no-backtick / no-``$(`` assertions
-    # below verify the contract for user-controlled names (§2).
+    # The Director (332, interval-due) and a member (336, both interval- and
+    # stall-check-due) are both due. The member's user-controlled name carries a
+    # CR/LF, a tab, a backtick, a ``$(…)`` sequence, and a pipe — every
+    # metacharacter the sanitizer must neutralize so the no-raw-control /
+    # no-backtick / no-``$(`` / no-``|`` assertions below hold for any name.
     result = _tmux.send_wake_trigger(
         target_pane_id="%7",
         due_agents=[
-            {"agent_id": 332, "name": "Director", "is_director": True},
+            {
+                "agent_id": 332,
+                "name": "Director",
+                "is_director": True,
+                "wake_reasons": ["interval"],
+            },
             {
                 "agent_id": 336,
-                "name": "evil\r\nname\there`$(id)",
+                "name": "evil\r\nname\there`$(id)|whoami",
                 "is_director": False,
+                "wake_reasons": ["interval", "stall-check"],
             },
         ],
         director_agent_id=332,
     )
     assert result is True
 
-    # After 0000092 §2 the wake keystroke leads with the literal payload — no
-    # leading `Escape` — so the literal call is the first captured send-keys.
+    # The wake keystroke leads with the literal payload — no leading `Escape` — so
+    # the literal call is the first captured send-keys.
     assert all("Escape" not in call for call in captured)
     literal_call = captured[0]
     assert literal_call[:5] == ["tmux", "send-keys", "-t", "%7", "-l"]
     payload = literal_call[5]
 
-    # Single line — no raw CR/LF survives, including the crafted name's controls
-    # (per 0000092 §3 an embedded ``\n`` under ``-l`` soft-inserts, so single-line
-    # is a shape choice; here the sanitizer also strips the crafted control chars).
+    # Single line — no raw CR/LF/tab survives, including the crafted name's controls.
     assert "\n" not in payload
     assert "\r" not in payload
-    # The tab is sanitized too (§2 extends the CR/LF cosmetic strip with the tab).
     assert "\t" not in payload
 
-    # Provenance tag + count/noun prefix (§2 template: "{N} {agent|agents} due"),
-    # NOT the ``cafleet ... message poll`` command the Director receives.
+    # Provenance tag + count/noun prefix ("{N} {agent|agents} due"), NOT the
+    # ``cafleet ... message poll`` command the Director receives.
     assert payload.startswith("[monitor] wake: 2 agents due")
     assert not payload.startswith("cafleet")
 
-    # Each freshly-due agent is named ``<role> <id> (<name>)`` (§2): the Director
-    # (is_director=True) renders with role ``director``, the member with ``member``.
-    assert "director 332 (Director)" in payload
+    # Each freshly-due agent is named ``<role> <id> (<name>) [<reasons>]``: the
+    # Director (is_director=True) renders with role ``director`` and its interval
+    # tag; the member with role ``member`` and its two comma-joined reasons.
+    assert "director 332 (Director) [interval]" in payload
     assert "member 336 (evil" in payload
+    assert "[interval,stall-check]" in payload
     # The crafted control chars collapsed to U+23CE rather than vanishing.
     assert "⏎" in payload
+
+    # The five-state precedence rubric is spelled out verbatim in the instruction.
+    assert (
+        "awaiting_user, unknown, finished, stalled, working" in payload
+    )
 
     # The Director id is named as the standing inspect-and-re-engage target via
     # the "the Director pane ({director_id})" clause — distinct from the due-list
     # rendering (where the id is not parenthesized).
     assert "(332)" in payload
 
-    # Narrowed shell-safety guarantee (§2): no backtick, no ``$(`` command sub.
+    # Shell-safety guarantee (design 0000124): no backtick, no ``$(`` command sub,
+    # and no pipe survive into the payload.
     assert "`" not in payload
     assert "$(" not in payload
+    assert "|" not in payload
 
 
 def test_send_wake_trigger__singular_noun_and_director_named_when_not_due(monkeypatch):
@@ -862,21 +881,85 @@ def test_send_wake_trigger__singular_noun_and_director_named_when_not_due(monkey
 
     result = _tmux.send_wake_trigger(
         target_pane_id="%7",
-        due_agents=[{"agent_id": 336, "name": "alice", "is_director": False}],
+        due_agents=[
+            {
+                "agent_id": 336,
+                "name": "alice",
+                "is_director": False,
+                "wake_reasons": ["stall-check"],
+            }
+        ],
         director_agent_id=332,
     )
     assert result is True
 
     payload = captured[0][5]
-    # Singular noun for a single due agent (§2 template: "{N} {agent|agents} due").
+    # Singular noun for a single due agent ("{N} {agent|agents} due").
     assert payload.startswith("[monitor] wake: 1 agent due")
-    # The lone due member is named ``member <id> (<name>)``.
-    assert "member 336 (alice)" in payload
+    # The lone due member is named ``member <id> (<name>) [<reasons>]``.
+    assert "member 336 (alice) [stall-check]" in payload
     # The Director (332) is not in the due set, yet it is named via the standing
     # clause; it is never rendered as a due agent (no ``member 332`` / ``director 332``).
     assert "(332)" in payload
     assert "member 332" not in payload
     assert "director 332" not in payload
+
+
+def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
+    """The wake payload is byte-identical on the tmux and herdr backends (spec:
+    the two ``send_wake_trigger`` contracts are kept byte-identical). Driving both
+    with the same due set yields the exact same payload string, and it carries no
+    backtick, no ``$(``, and no ``|``."""
+    from cafleet.multiplexer import herdr as multiplexer_herdr
+    from cafleet.multiplexer.herdr import HerdrMultiplexer
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/bin")
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+
+    due_agents = [
+        {
+            "agent_id": 332,
+            "name": "Director",
+            "is_director": True,
+            "wake_reasons": ["interval"],
+        },
+        {
+            "agent_id": 336,
+            "name": "alice",
+            "is_director": False,
+            "wake_reasons": ["interval", "stall-check"],
+        },
+    ]
+
+    tmux_calls: list[list[str]] = []
+    monkeypatch.setattr(
+        multiplexer_tmux,
+        "_run",
+        lambda args, **_kw: tmux_calls.append(list(args)) or "",
+    )
+    _tmux.send_wake_trigger(
+        target_pane_id="%7", due_agents=due_agents, director_agent_id=332
+    )
+    # tmux literal-then-Enter: the payload is arg index 5 of the first send-keys call.
+    tmux_payload = tmux_calls[0][5]
+
+    herdr_calls: list[list[str]] = []
+    monkeypatch.setattr(
+        multiplexer_herdr,
+        "_run",
+        lambda args, **_kw: herdr_calls.append(list(args)) or "",
+    )
+    HerdrMultiplexer().send_wake_trigger(
+        target_pane_id="wG:p1", due_agents=due_agents, director_agent_id=332
+    )
+    # herdr ``pane run``: the payload is arg index 4 (herdr pane run <pane> <payload>).
+    herdr_payload = herdr_calls[0][4]
+
+    assert tmux_payload == herdr_payload
+    for payload in (tmux_payload, herdr_payload):
+        assert "`" not in payload
+        assert "$(" not in payload
+        assert "|" not in payload
 
 
 @pytest.mark.parametrize(

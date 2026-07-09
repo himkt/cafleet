@@ -1,7 +1,7 @@
 # Monitor Pane-State Taxonomy
 
 **Status**: Approved
-**Progress**: 11/23 tasks complete
+**Progress**: 16/23 tasks complete
 **Last Updated**: 2026-07-08
 
 ## Overview
@@ -278,11 +278,11 @@ The same bar applies one layer down, and belongs in the Director's own doctrine:
 
 ### Step 6: Tests
 
-- [ ] `cafleet/tests/monitor/test_loop.py`: assert a `blocked` transition flags no wake, a `done` transition still does, and a `blocked` read is still recorded in `_last_agent_status`. <!-- completed: -->
-- [ ] `cafleet/tests/monitor/test_loop.py`: assert stall-check due-ness fires on `monitor_stall_interval`, that a stall-check-only agent is absent from the `record_pings` call, and that `monitor_stall_interval == 0` emits no `stall-check` tag. <!-- completed: -->
-- [ ] `cafleet/tests/monitor/test_loop.py`: assert `_last_stall_check_at` is committed only on a successful wake, so a failed keystroke re-flags the agent next tick. <!-- completed: -->
-- [ ] `cafleet/tests/monitor/test_loop.py`: assert first-tick semantics — an agent absent from `_last_stall_check_at` is stall-check due, and the dict is not pre-seeded by `run_monitor_loop`. <!-- completed: -->
-- [ ] `cafleet/tests/multiplexer/`: pin the new payload text for both backends, assert the two are byte-identical, and assert the payload contains no backtick, no `$(`, and no `|`. <!-- completed: -->
+- [x] `cafleet/tests/monitor/test_loop.py`: assert a `blocked` transition flags no wake, a `done` transition still does, and a `blocked` read is still recorded in `_last_agent_status`. <!-- completed: 2026-07-09T00:35 -->
+- [x] `cafleet/tests/monitor/test_loop.py`: assert stall-check due-ness fires on `monitor_stall_interval`, that a stall-check-only agent is absent from the `record_pings` call, and that `monitor_stall_interval == 0` emits no `stall-check` tag. <!-- completed: 2026-07-09T00:35 -->
+- [x] `cafleet/tests/monitor/test_loop.py`: assert `_last_stall_check_at` is committed only on a successful wake, so a failed keystroke re-flags the agent next tick. <!-- completed: 2026-07-09T00:35 -->
+- [x] `cafleet/tests/monitor/test_loop.py`: assert first-tick semantics — an agent absent from `_last_stall_check_at` is stall-check due, and the dict is not pre-seeded by `run_monitor_loop`. <!-- completed: 2026-07-09T00:35 -->
+- [x] `cafleet/tests/multiplexer/`: pin the new payload text for both backends, assert the two are byte-identical, and assert the payload contains no backtick, no `$(`, and no `|`. <!-- completed: 2026-07-09T00:35 -->
 
 ---
 
