@@ -13,7 +13,13 @@ Fleets partition agents into isolated namespaces and the CLI accesses SQLite
 directly through a shared `broker` module, so no HTTP server is required; three
 coding-agent backends — `claude` (Claude Code), `codex` (OpenAI Codex CLI), and
 `opencode` — coexist in the same fleet, for developers and operators running
-auditable multi-agent coding teams in tmux.
+auditable multi-agent coding teams in tmux or herdr.
+
+- Persistent, auditable messages — [Storage](concepts/storage.md)
+- Pluggable multiplexer backends (tmux / herdr) — [Multiplexer backends](concepts/multiplexer-backends.md)
+- Push notifications — [tmux push notifications](concepts/tmux-push.md)
+- Monitoring member — [Monitoring](concepts/monitoring.md)
+- Design-doc-driven development (SDD skills) — [Design-doc-driven development](how-to/design-doc-development.md)
 
 [Get started :material-arrow-right:](get-started/){ .md-button .md-button--primary }
 

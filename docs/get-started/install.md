@@ -8,6 +8,14 @@ CAFleet has two install surfaces: the **broker CLI** (`cafleet`), which every
 fleet needs, and the **coding-agent skills**, one set per backend you intend to
 use. The recommended end-user path installs both in two commands.
 
+## Prerequisites
+
+- Python 3.12+
+- A terminal multiplexer — tmux or herdr (see
+  [Multiplexer backends](../concepts/multiplexer-backends.md))
+- At least one of: `claude` (Claude Code), `codex` (OpenAI Codex CLI), or
+  `opencode`
+
 ## Quick start (recommended)
 
 ```bash

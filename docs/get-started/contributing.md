@@ -20,6 +20,15 @@ path.
 | `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
 | `docs/` | CLI reference, message envelope, and other operator-facing docs. |
 
+## Tech stack
+
+- **Language:** Python 3.12+, managed with [uv](https://docs.astral.sh/uv/)
+- **Server:** [FastAPI](https://fastapi.tiangolo.com/) (admin WebUI)
+- **Database:** [SQLAlchemy](https://www.sqlalchemy.org/) 2.x (sync `pysqlite` driver) + SQLite
+- **CLI:** [click](https://click.palletsprojects.com/)
+- **Admin frontend:** Vite + Bun (SPA served at `/`)
+- **Task runner:** [mise](https://mise.jdx.dev/)
+
 ## Development
 
 Clone the repo and use mise for all common tasks:
