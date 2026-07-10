@@ -87,6 +87,24 @@ fleet id sits past the matched prefix, so no per-fleet rule is needed.
 `["cafleet", "member", "exec"]` prompt rule (the prefix is matched before the
 trailing `--fleet-id`), so `member exec` keeps prompting.
 
+### Trust the working directory
+
+Before spawning codex members, add a trust entry for the workspace to
+`~/.codex/config.toml`:
+
+```toml
+[projects."/abs/path/to/workspace"]
+trust_level = "trusted"
+```
+
+The path is the absolute working directory the member panes run in. Add one
+entry per workspace — including each git worktree, since codex trusts paths,
+not repositories.
+
+This prevents a spawn-time stall: in an untrusted directory, codex's
+first-run trust prompt stalls a freshly spawned member — the member ignores
+every incoming message until the prompt is cleared.
+
 ## Opencode
 
 !!! tip "Where this lives"

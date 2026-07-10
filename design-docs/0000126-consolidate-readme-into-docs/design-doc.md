@@ -1,7 +1,7 @@
 # Consolidate README.md into the docs/ site
 
 **Status**: Approved
-**Progress**: 4/12 tasks complete
+**Progress**: 6/12 tasks complete
 **Last Updated**: 2026-07-10
 
 ## Overview
@@ -145,8 +145,8 @@ SPEC.md itself is untouched by this design — no contract surface (CLI, config,
 
 ### Step 2: Document codex workspace pre-trust
 
-- [ ] Add the `### Trust the working directory` subsection to `docs/get-started/configure.md` § Codex (trust snippet + stall failure mode, prevention only) <!-- completed: -->
-- [ ] Add the one-line pointer from `docs/reference/coding-agents/codex.md` to the configure.md subsection <!-- completed: -->
+- [x] Add the `### Trust the working directory` subsection to `docs/get-started/configure.md` § Codex (trust snippet + stall failure mode, prevention only) <!-- completed: 2026-07-10T20:42 -->
+- [x] Add the one-line pointer from `docs/reference/coding-agents/codex.md` to the configure.md subsection <!-- completed: 2026-07-10T20:42 -->
 
 ### Step 3: Thin the README
 

@@ -42,6 +42,8 @@ codex --ask-for-approval never --sandbox workspace-write <prompt>
 >
 > Use the absolute path matching `CAFLEET_DATABASE_URL` or the default XDG location.
 
+The working directory must also be pre-trusted in `~/.codex/config.toml` before spawning — see [Configure § Trust the working directory](../../get-started/configure.md#trust-the-working-directory).
+
 Refer to the same upstream page for the canonical write-up of the `--ask-for-approval` and `--sandbox` flags.
 
 ## Required codex CLI version
