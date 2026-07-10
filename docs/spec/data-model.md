@@ -4,208 +4,183 @@ icon: lucide/table
 
 # Data model
 
-The `Task` payload is fully relational: every routing field plus the message body lives in its own typed column. The only JSON `TEXT` blob is `agents.agent_card_json`, which stores an `AgentCard`-shaped document.
+The `Task` payload is fully relational: every routing field plus the message
+body lives in its own typed column. The only JSON `TEXT` blob is
+`agents.agent_card_json`. The runtime engine is SQLAlchemy 2.x with the
+synchronous `pysqlite` driver; the schema is managed by a chain of Alembic
+migrations bundled inside the wheel — run `cafleet setup` (or `cafleet setup
+db`) to migrate to head (idempotent, data-preserving; see
+[Storage](../concepts/storage.md)). The exact column-level DDL contract lives
+in the repository's `SPEC.md`.
 
-The runtime engine is SQLAlchemy 2.x with the synchronous `pysqlite` driver. The schema is managed by a **chain of Alembic migrations** bundled inside the wheel; run `cafleet setup` (or its schema-only subcommand `cafleet setup db`) to migrate the database to the head revision before starting the server — the upgrade is idempotent and preserves existing data (see [Storage](../concepts/storage.md)).
+## Schema diagram
 
-## SQL Schema
+```mermaid
+erDiagram
+    fleets ||--o{ agents : "fleet_id"
+    fleets ||--o| monitor_runtime : "1:1 (reused PK)"
+    agents ||--o| agent_placements : "1:1 (reused PK)"
+    agents ||--o| monitor_config : "1:1 (reused PK)"
+    agents ||--o{ tasks : "context_id"
 
-The schema at head holds seven application tables, plus Alembic's `alembic_version` bookkeeping table (a single `version_num` row recording the current revision). All application tables key on `INTEGER` columns except `skill_installs`, which keys on a `TEXT` name. The three minted-id tables (`fleets`, `agents`, `tasks`) use `INTEGER PRIMARY KEY AUTOINCREMENT`. AUTOINCREMENT creates a per-table `sqlite_sequence` row that tracks the high-water mark, so **ids are never reused** — even after the highest row is deleted. The first AUTOINCREMENT value is `1`, so real ids are always `>= 1`. Three more tables — `agent_placements`, `monitor_config`, and `monitor_runtime` — are integer PKs **without** AUTOINCREMENT: each reuses a parent id (`agents.agent_id` for the first two, `fleets.fleet_id` for `monitor_runtime`) as a 1:1 PK rather than minting a fresh sequence. The seventh table, `skill_installs`, keys on the coding-agent name (`TEXT`, no AUTOINCREMENT, not FK-linked).
+    fleets {
+        INTEGER fleet_id PK "AUTOINCREMENT"
+        TEXT name
+        TEXT created_at
+        TEXT deleted_at "NULL = active"
+        INTEGER director_agent_id FK "root Director"
+    }
+    agents {
+        INTEGER agent_id PK "AUTOINCREMENT"
+        INTEGER fleet_id FK
+        TEXT name
+        TEXT description
+        TEXT status "active | deregistered"
+        TEXT registered_at
+        TEXT deregistered_at "NULL = active"
+        TEXT agent_card_json "AgentCard blob"
+    }
+    tasks {
+        INTEGER task_id PK "AUTOINCREMENT"
+        INTEGER context_id FK "recipient (or broadcaster for summary)"
+        INTEGER from_agent_id "sender; not an FK"
+        INTEGER to_agent_id "NULL for broadcast_summary"
+        TEXT type "unicast | broadcast_summary"
+        TEXT created_at
+        TEXT status_state "input_required | completed | canceled"
+        TEXT status_timestamp
+        INTEGER origin_task_id "broadcast grouping self-link"
+        TEXT text "message body"
+    }
+    agent_placements {
+        INTEGER agent_id PK "reuses agents.agent_id"
+        INTEGER director_agent_id FK "NULL for the root Director"
+        TEXT mux_session
+        TEXT mux_window_id
+        TEXT mux_pane_id "NULL = pending"
+        TEXT backend "tmux | herdr"
+        TEXT coding_agent "claude | codex | opencode"
+        TEXT created_at
+    }
+    monitor_config {
+        INTEGER agent_id PK "reuses agents.agent_id"
+        INTEGER interval_seconds
+        TEXT last_ping_at "NULL = due immediately"
+        INTEGER enabled "bool as 0/1"
+    }
+    monitor_runtime {
+        INTEGER fleet_id PK "reuses fleets.fleet_id"
+        INTEGER pid
+        TEXT started_at
+        TEXT last_tick_at "liveness heartbeat"
+        INTEGER tick_seconds
+    }
+    skill_installs {
+        TEXT coding_agent PK "claude | codex | opencode"
+        TEXT cafleet_version
+        TEXT installed_at
+    }
+```
+
+The three minted-id tables (`fleets`, `agents`, `tasks`) use `INTEGER PRIMARY
+KEY AUTOINCREMENT`, so **ids are never reused** and real ids are always `>= 1`.
+The three 1:1 tables reuse a parent id as their PK; `skill_installs` keys on
+the coding-agent name and is not FK-linked.
+
+## Tables
 
 ### `fleets`
 
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `fleet_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer (first value `1`, monotonically increasing). |
-| `name` | `TEXT` | nullable | Human-readable name for the fleet (e.g. `"PR-42 review"`). |
-| `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp. |
-| `deleted_at` | `TEXT` | nullable | `NULL` = active; non-NULL ISO-8601 timestamp = soft-deleted. Written on fleet delete; never cleared. |
-| `director_agent_id` | `INTEGER` | nullable (DB), app-enforced NOT NULL after bootstrap; `REFERENCES agents(agent_id) ON DELETE RESTRICT` | Points at the fleet's root Director (the agent auto-registered by `cafleet fleet create`). DB-nullable so the bootstrap transaction can insert the fleet row before the Director's `agents` row exists; post-bootstrap every non-deleted fleet has a non-NULL value. |
-
-Fleet deletion is a **soft-delete** keyed on `deleted_at`. See [cli-options.md](./cli-options.md) `fleet delete` for the observable delete behavior.
-
-#### Root Director bootstrap
-
-`cafleet fleet create` writes the fleet row, the root Director (and its placement), the `director_agent_id` back-reference, and the built-in Administrator in one all-or-nothing transaction. See [cli-options.md](./cli-options.md) `fleet create` for the observable bootstrap behavior.
+Fleet deletion is a **soft-delete** keyed on `deleted_at`. `cafleet fleet
+create` writes the fleet row, the root Director (and its placement), the
+`director_agent_id` back-reference, and the built-in Administrator in one
+all-or-nothing transaction — which is why `director_agent_id` is DB-nullable
+despite the post-bootstrap NOT NULL invariant.
 
 ### `agents`
 
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `agent_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer. |
-| `fleet_id` | `INTEGER` | `NOT NULL`, `REFERENCES fleets(fleet_id) ON DELETE RESTRICT` | The owning fleet. SQLite enforces the FK once `PRAGMA foreign_keys=ON` is set. |
-| `name` | `TEXT` | `NOT NULL` | |
-| `description` | `TEXT` | `NOT NULL` | |
-| `status` | `TEXT` | `NOT NULL` | `'active'` or `'deregistered'`. |
-| `registered_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp. |
-| `deregistered_at` | `TEXT` | nullable | ISO-8601 timestamp; populated on soft-delete. |
-| `agent_card_json` | `TEXT` | `NOT NULL` | AgentCard-shaped blob (CAFleet-defined internal schema). |
-
-Indexes:
-
-| Name | Columns | Purpose |
-|---|---|---|
-| `idx_agents_fleet_status` | `(fleet_id, status)` | List active agents in a fleet; covers the `WHERE fleet_id = ? AND status = 'active'` predicate. |
-
-Deregistration is a soft-delete: `status='deregistered'` plus `deregistered_at` is set in a single statement. There is no row delete and no background cleanup loop. Active query paths filter `status='active'` so dead rows are invisible to normal traffic, though the WebUI still surfaces deregistered agents and their inbox tasks remain readable.
-
-#### Built-in Administrator agent
-
-Each fleet owns exactly one built-in `Administrator` agent, distinguished by a flag inside `agent_card_json` (`cafleet.kind == "builtin-administrator"`) rather than a separate table or column:
-
-```json
-{
-  "name": "Administrator",
-  "description": "Built-in administrator agent for fleet <fleet_id>",
-  "skills": [],
-  "cafleet": {
-    "kind": "builtin-administrator"
-  }
-}
-```
-
-The `cafleet.*` namespace inside `agent_card_json` is reserved for broker-owned flags; callers cannot set `cafleet.kind` through any public path. The Administrator row is written as the final operation of the fleet-create bootstrap transaction, and its `registered_at` matches `fleets.created_at`. The Administrator row is written at fleet-create time, not seeded by the schema.
-
-**Invariant**: Every fleet has exactly one active `Administrator` agent. The WebUI surfaces a derived `kind` field (`"builtin-administrator"` | `"user"`) so it can locate the Administrator without matching on the name.
-
-**Protection**: The Administrator is a write-only identity — it is used as the WebUI's implicit sender but never receives messages or a tmux pane. It cannot be deregistered (`Administrator cannot be deregistered`) and cannot be made a Director (`Administrator cannot be a director`). It is excluded from broadcast recipients, though it may itself be the broadcast sender.
+Deregistration is a soft-delete (`status='deregistered'` + `deregistered_at`);
+active query paths filter `status='active'`. Special agents are marked by a
+broker-owned `cafleet.kind` flag inside `agent_card_json` rather than a column:
+`"builtin-administrator"` for the write-only Administrator every fleet owns
+exactly one of (it never receives messages or a pane, cannot be deregistered
+or made a Director, and is excluded from broadcast recipients), and
+`"monitoring-member"` for the fleet's single monitoring member (which skips
+`monitor_config` enrollment and is located by this marker — see
+[Monitoring](../concepts/monitoring.md)). Callers cannot set `cafleet.kind`
+through any public path.
 
 ### `tasks`
 
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `task_id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | DB-assigned integer. Identifies a single delivery (unicast row, broadcast delivery row, or broadcast summary row). |
-| `context_id` | `INTEGER` | `NOT NULL`, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The recipient agent for unicast/broadcast deliveries; the broadcaster for `broadcast_summary`; the preserved original for ACK/cancel. See [Storage](../concepts/storage.md) for the contextId routing convention. |
-| `from_agent_id` | `INTEGER` | `NOT NULL` | Sender agent. **Not** a foreign key — historical tasks may outlive their sender. |
-| `to_agent_id` | `INTEGER` | nullable | Recipient agent. **`NULL`** for `broadcast_summary` rows (they have no single recipient). |
-| `type` | `TEXT` | `NOT NULL` | `'unicast'` or `'broadcast_summary'`. |
-| `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; set at insert time, never updated. |
-| `status_state` | `TEXT` | `NOT NULL` | `input_required`, `completed`, or `canceled`. |
-| `status_timestamp` | `TEXT` | `NOT NULL` | ISO-8601 timestamp; updated on every state change. Used for `ORDER BY DESC`. |
-| `origin_task_id` | `INTEGER` | nullable | Broadcast grouping link. `NULL` on unicast deliveries. On broadcast delivery rows, holds the summary task's `task_id`, shared across every delivery row in the same broadcast. On the broadcast summary row itself, holds its own `task_id` (self-reference) so the delivery rows and the summary row all share a single grouping value. **Not** a foreign key — it is a nullable self-link. |
-| `text` | `TEXT` | `NOT NULL` | Message body. For `broadcast_summary` rows, the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time. |
-
-Indexes:
-
-| Name | Columns | Purpose |
-|---|---|---|
-| `idx_tasks_context_status_ts` | `(context_id, status_timestamp)` | Inbox listing: `WHERE context_id = ? ORDER BY status_timestamp DESC`. |
-| `idx_tasks_from_agent_status_ts` | `(from_agent_id, status_timestamp)` | WebUI sender outbox: `WHERE from_agent_id = ? ORDER BY status_timestamp DESC`. |
+One row per delivery: a unicast row, a broadcast delivery row, or a broadcast
+summary row (see [Broadcast grouping](#broadcast-grouping)). `from_agent_id`
+is deliberately not a foreign key — historical tasks may outlive their sender.
+`status_timestamp` is updated on every state change and drives `ORDER BY DESC`
+listing. The rendered envelope is specified in
+[Message envelope](message-envelope.md).
 
 ### `agent_placements`
 
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `agent_id` | `INTEGER` | `PRIMARY KEY` (no AUTOINCREMENT), `REFERENCES agents(agent_id) ON DELETE CASCADE` | The member agent. This is the parent `agents.agent_id` value reused as a 1:1 PK — it is **not** a freshly minted sequence, so AUTOINCREMENT is deliberately excluded. CASCADE ensures hard-delete of an agent (if any future path adds one) also removes the placement. |
-| `director_agent_id` | `INTEGER` | nullable, `REFERENCES agents(agent_id) ON DELETE RESTRICT` | The fleet's root Director — the single Director that owns every member. RESTRICT prevents hard-deleting a Director with live placements. For every member placement this always equals `fleets.director_agent_id` (the fleet root); it is **NULL** only for the root Director's own placement (it has no parent), set at bootstrap time. Nested teams are forbidden — member registration rejects any placement whose `director_agent_id` is not the fleet root. |
-| `mux_session` | `TEXT` | `NOT NULL` | Backend-neutral multiplexer session, e.g. tmux `'main'` (from `display-message '#{session_name}'`) or the herdr session id. |
-| `mux_window_id` | `TEXT` | `NOT NULL` | Backend-neutral window/tab id, e.g. tmux `'@3'` (from `#{window_id}`) or the herdr tab id. |
-| `mux_pane_id` | `TEXT` | nullable | Opaque backend pane id, stored verbatim — e.g. tmux `'%7'` or herdr `'w1:p1'`. `NULL` = pending (row inserted at register time, pane not yet spawned). Set after the pane is spawned. |
-| `backend` | `TEXT` | `NOT NULL`, `DEFAULT 'tmux'` | The multiplexer that produced the pane ids, set to the resolved `mux.name` (`"tmux"` or `"herdr"`) at placement-insert time. The `DEFAULT 'tmux'` applies when a placement is inserted without an explicit value. |
-| `coding_agent` | `TEXT` | `NOT NULL`, `DEFAULT 'claude'` | Free-form coding-agent identifier. Current known values are `"claude"` (the default for normal registrations) and `"codex"` / `"opencode"` when chosen at create time. The default `'claude'` applies when a placement is inserted without an explicit value. |
-| `created_at` | `TEXT` | `NOT NULL` | ISO-8601 timestamp, set server-side to match `agents.registered_at`. |
+Links an agent to its multiplexer pane; pane ids are stored verbatim as opaque
+strings. `director_agent_id` is `NULL` only for the root Director's own
+placement; nested teams are forbidden — member registration rejects any
+placement whose `director_agent_id` is not the fleet root. Placement rows are
+hard-deleted when the agent is deregistered — they have no historical value.
 
-Indexes:
+### `monitor_config` and `monitor_runtime`
 
-| Name | Columns | Purpose |
-|---|---|---|
-| `idx_placements_director` | `(director_agent_id)` | List the fleet's members; every member placement's `director_agent_id` is the fleet root. |
-
-Placement rows are hard-deleted (not soft-deleted) when the agent is deregistered through any path. They have no historical value and must not outlive the agent they describe.
-
-If a user kills a pane manually without going through `cafleet member delete`, the placement row stays until the next `member delete` resolves it; the "pane already gone" case is handled gracefully.
-
-### `monitor_config`
-
-Per-agent monitoring schedule, one row per **enrolled** agent. The `cafleet monitor` process reads this table each tick to decide which agents are due (see [Monitoring](../concepts/monitoring.md)).
-
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `agent_id` | `INTEGER` | `PRIMARY KEY` (no AUTOINCREMENT), `REFERENCES agents(agent_id) ON DELETE CASCADE` | The enrolled agent. This is the parent `agents.agent_id` value reused as a 1:1 PK (mirrors `agent_placements.agent_id`) — not a freshly minted sequence, so AUTOINCREMENT is deliberately excluded. |
-| `interval_seconds` | `INTEGER` | `NOT NULL`, `DEFAULT 60` | Ping cadence for this agent. The schema `DEFAULT 60` is inert — every enrollment path writes an explicit per-role interval (see [Monitoring](../concepts/monitoring.md) for the watched-set intervals). |
-| `last_ping_at` | `TEXT` | nullable | ISO-8601 of the last check the monitor dispatched for this agent. `NULL` = never pinged ⇒ due immediately. Persisted (not in-memory) so a monitor restart resumes cadence and `monitor status` can display it. |
-| `enabled` | `INTEGER` | `NOT NULL`, `DEFAULT 1` | Boolean stored as SQLite `0`/`1`. `0` = the monitor skips this agent while preserving its interval for re-enable. Every broker read casts it to a Python `bool` at the read boundary, so the integer representation never leaks past the broker (the CLI and the WebUI/JSON contract both see `enabled: bool`). |
-
-Enrollment covers the fleet's **watched set** — which agents are enrolled and at what cadence is defined in [Monitoring](../concepts/monitoring.md). The root Director is enrolled in `create_fleet` after its placement row is added, and every ordinary member is enrolled in `register_agent` when it has a placement AND its `agent_card_json.cafleet.kind != "monitoring-member"`. The dedicated **monitoring member** is **not** enrolled — it is the *watcher*, located by its kind marker (see below), not a watched row. The write-only Administrator and agents without a placement are likewise not enrolled. There is no `fleet_id` column — fleet scoping is reached through the `monitor_config.agent_id → agents.agent_id → agents.fleet_id` join (the same pattern `agent_placements` uses). `is_director` is **derived** at scan time (`agent_id == fleets.director_agent_id`), never denormalized, and is retained for the `monitor status` role label (`director` vs `member`).
-
-The row is hard-deleted (not soft-deleted) when the agent is deregistered, alongside its `agent_placements` row — runtime config with no historical value, on the same lifecycle as the placement.
-
-#### Monitoring-member `kind` marker
-
-The dedicated monitoring member is identified the same way the built-in Administrator is — a `kind` flag inside `agent_card_json` rather than a separate table or column:
-
-```json
-{
-  "name": "monitor",
-  "description": "...",
-  "skills": [],
-  "cafleet": {
-    "kind": "monitoring-member"
-  }
-}
-```
-
-The marker is written by `register_agent` when `cafleet member create --role monitor` passes `kind="monitoring-member"` through. It serves two purposes: `register_agent` **skips** the `monitor_config` enrollment for this kind (the monitoring member is the watcher, not a watched agent), and the monitor loop **locates** the watcher by this marker via `find_monitoring_member` — which selects the single active agent whose `json_extract(agent_card_json, '$.cafleet.kind') == "monitoring-member"`, inner-joined to `agent_placements` for its pane. At most one active monitoring member is allowed per fleet; `register_agent` rejects a second.
-
-### `monitor_runtime`
-
-Per-fleet process and heartbeat state, one row per fleet. A dedicated single-row-per-fleet table (rather than columns on `fleets`) keeps high-write heartbeat telemetry off the slow-changing fleet identity row, models "no monitor" cleanly as "no row", and lets single-instance claims and teardown operate independently of the `fleets` lifecycle.
-
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `fleet_id` | `INTEGER` | `PRIMARY KEY` (no AUTOINCREMENT), `REFERENCES fleets(fleet_id) ON DELETE RESTRICT` | One row per fleet; reuses `fleets.fleet_id` as a 1:1 PK. |
-| `pid` | `INTEGER` | nullable | OS PID of the running monitor loop. `NULL` after a clean stop. The single-instance claim records it; the ownership-checked heartbeat/clear match on it; `_is_live` corroborates liveness with `os.kill(pid, 0)`. |
-| `started_at` | `TEXT` | nullable | ISO-8601 when the current worker claimed the runtime. |
-| `last_tick_at` | `TEXT` | nullable | ISO-8601 heartbeat, rewritten every tick. The **authority** for `status` liveness — a process that died silently stops updating it, so it reads as stale. |
-| `tick_seconds` | `INTEGER` | `NOT NULL`, `DEFAULT 5` | Scan-tick cadence the running monitor uses, so `status` can report it. |
-
-The `monitor_runtime` row is deleted explicitly inside the `fleet delete` transaction (along with the fleet's `monitor_config` rows). Because agents are soft-deregistered and fleets soft-deleted, neither the CASCADE off `agents` nor the RESTRICT off `fleets` fires on the normal delete paths — the rows are cleaned explicitly, mirroring how `agent_placements` is explicitly deleted today.
+The two monitor tables: `monitor_config` holds one row per **enrolled** agent
+(the root Director and every ordinary member — never the monitoring member,
+the Administrator, or placementless agents), hard-deleted alongside the
+placement on deregistration; `monitor_runtime` holds one row per fleet with
+the running loop's pid and `last_tick_at` heartbeat — "no monitor" is modeled
+as "no row". Both are removed explicitly inside the `fleet delete`
+transaction. Enrollment, cadence, and liveness semantics are on
+[Monitoring](../concepts/monitoring.md).
 
 ### `skill_installs`
 
-One row per coding-agent home, recording the CLI version whose skills install last landed in that home — **not** a schema version (see [Storage](../concepts/storage.md)).
+One upserted row per coding-agent home, recording the CLI version whose skills
+install last landed there. Written by `cafleet setup` / `cafleet setup skill`;
+feeds the stale-skills guard and the `cafleet doctor` report (see
+[CLI options](cli-options.md#stale-skills-guard)).
 
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `coding_agent` | `TEXT` | `PRIMARY KEY` (no AUTOINCREMENT) | One of `claude` / `codex` / `opencode` — the known coding-agent homes. Not a foreign key. |
-| `cafleet_version` | `TEXT` | `NOT NULL` | The exact `importlib.metadata.version("cafleet")` string at install time. |
-| `installed_at` | `TEXT` | `NOT NULL` | UTC ISO-8601 timestamp (microsecond precision), written at install time. |
+## Foreign key enforcement
 
-Writes are **upserts**: re-installing into a home replaces that home's row. Rows are written by the skills half of `cafleet setup` and by `cafleet setup skill` after each home's install succeeds; `cafleet setup db` never touches the rows (schema only). The rows feed the stale-skills guard on every fleet-scoped command and the `cafleet doctor` skills report — see [cli-options.md](./cli-options.md).
-
-### Foreign key enforcement
-
-SQLite ignores foreign key declarations unless `PRAGMA foreign_keys=ON` is issued on every connection. A SQLAlchemy engine `connect` event listener runs the PRAGMA on every new connection.
-
-The foreign keys on `agents.fleet_id`, `tasks.context_id`, `fleets.director_agent_id`, `agent_placements.director_agent_id`, and `monitor_runtime.fleet_id` all use `ON DELETE RESTRICT` (agents are only soft-deregistered today, so RESTRICT is the safest default). `agent_placements.agent_id → agents.agent_id` and `monitor_config.agent_id → agents.agent_id` both use `ON DELETE CASCADE` so a hard-deleted agent (if any future path adds one) cannot leave a dangling placement or config row. Fleet deletion uses a soft-delete (`deleted_at`) — it never physically removes rows, so the RESTRICTs are not triggered by the normal delete path; the `monitor_config` and `monitor_runtime` rows are instead removed explicitly inside the `fleet delete` transaction.
+SQLite ignores FK declarations unless `PRAGMA foreign_keys=ON` is issued per
+connection; a SQLAlchemy `connect` event listener does so. FKs use
+`ON DELETE RESTRICT` except the `agent_id` PK=FK of the two 1:1 child tables
+(`agent_placements`, `monitor_config`), which uses `CASCADE` so a hard-deleted
+agent cannot leave dangling rows (`agent_placements.director_agent_id` stays
+RESTRICT). Normal delete paths are soft-deletes, so neither fires in practice.
 
 ## Task Visibility Rules
 
-Read access is **fleet-scoped**; per-agent identity is enforced only on state transitions:
+Read access is **fleet-scoped**; per-agent identity is enforced only on state
+transitions:
 
 | Operation | Enforcement |
 |---|---|
-| `message poll` | Returns the `input_required` deliveries whose `context_id` equals the passed `--agent-id`. The CLI gates only that `--agent-id` belongs to `--fleet-id`, so any in-fleet caller can poll any in-fleet agent's inbox by id — there is no per-caller snoop guard. |
-| `message show` | Returns the task iff at least one of its endpoints (`from_agent_id` / `to_agent_id`) belongs to `--fleet-id`. No per-caller check; cross-fleet lookups return "not found". |
-| `message ack` | Only the recipient may ACK — the caller's `agent_id` must equal the task's `context_id`, otherwise `Only the recipient can ACK a task`. |
-| `message cancel` | Only the sender may cancel — the caller's `agent_id` must equal the task's `from_agent_id`, otherwise `Only the sender can cancel a task`. |
-
-The only cross-fleet boundary is fleet membership; within a fleet, reads are not partitioned per agent. Recipient/sender identity is enforced only when transitioning a task's state (ack / cancel).
+| `message poll` | Returns the `input_required` deliveries whose `context_id` equals `--agent-id`; any in-fleet caller can poll any in-fleet inbox by id. |
+| `message show` | Returns the task iff at least one endpoint belongs to `--fleet-id`; cross-fleet lookups return "not found". |
+| `message ack` | Recipient-only — the caller must equal the task's `context_id`. |
+| `message cancel` | Sender-only — the caller must equal the task's `from_agent_id`. |
 
 ## Broadcast Grouping
 
-A broadcast produces N+1 rows — one delivery task per active recipient plus one `broadcast_summary` task — and the admin WebUI timeline presents all of them as a single entry. The `tasks.origin_task_id` column is the grouping link:
+A broadcast produces N+1 rows — one delivery task per active recipient plus
+one `broadcast_summary` task — grouped by `origin_task_id`:
 
 | Row kind | `origin_task_id` value |
 |---|---|
 | Unicast delivery | `NULL` |
-| Broadcast delivery row (one per recipient) | The summary task's `task_id` (shared across all N delivery rows in the same broadcast) |
+| Broadcast delivery row (one per recipient) | The summary task's `task_id` |
 | Broadcast summary row | Its own `task_id` (self-reference) |
 
-Because ids are DB-assigned, the summary row is inserted **first** with `origin_task_id` temporarily `NULL`; the broker reads back its DB-assigned `task_id`, updates that row's `origin_task_id` to itself (self-reference), then inserts each delivery row with `origin_task_id = summary_task_id`. Unicast deliveries are inserted with `origin_task_id` left `NULL`.
-
-The grouping predicate on the wire is `origin_task_id IS NOT NULL`, which cleanly partitions the timeline into "standalone unicast entry" vs "part of a broadcast group".
-
-### ACK timestamp inference
-
-The timeline reads each broadcast's per-recipient ACK time from the `status_timestamp` of the matching `completed` delivery row, which is valid because a delivery task makes exactly one state transition over its lifetime (`input_required → completed` on ACK). If a future change adds a second transition that rewrites `status_timestamp`, a dedicated `acknowledged_at` column must be added.
+Because ids are DB-assigned, the summary row is inserted first with a
+temporarily `NULL` `origin_task_id`, then self-linked before the delivery rows
+are inserted. The grouping predicate `origin_task_id IS NOT NULL` cleanly
+partitions the timeline into standalone unicasts vs broadcast groups. The
+per-recipient ACK time is read from the `completed` delivery row's
+`status_timestamp`, which is valid because a delivery task makes exactly one
+state transition over its lifetime.

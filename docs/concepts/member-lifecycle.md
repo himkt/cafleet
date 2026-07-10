@@ -94,5 +94,6 @@ additionally takes `--agent-id` for the sender). See
 [CLI options](../spec/cli-options.md) for every flag and the shared
 resolution rules.
 
-`cafleet member exec` is the bash-routing primitive — see
-[Bash routing](bash-routing.md).
+`cafleet member exec` is the shell-dispatch primitive of the
+bash-via-Director fallback protocol — see
+[CLI options](../spec/cli-options.md#member-exec).

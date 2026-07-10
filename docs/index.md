@@ -17,7 +17,7 @@ auditable multi-agent coding teams in tmux or herdr.
 
 - Persistent, auditable messages — [Storage](concepts/storage.md)
 - Pluggable multiplexer backends (tmux / herdr) — [Multiplexer backends](concepts/multiplexer-backends.md)
-- Push notifications — [tmux push notifications](concepts/tmux-push.md)
+- Push notifications — [Multiplexer backends § Push notifications](spec/multiplexer-backends.md#push-notifications)
 - Monitoring member — [Monitoring](concepts/monitoring.md)
 - Design-doc-driven development (SDD skills) — [Design-doc-driven development](how-to/design-doc-development.md)
 
@@ -28,5 +28,5 @@ auditable multi-agent coding teams in tmux or herdr.
 - [Get Started](get-started/) — install, configure, and quickstart walkthroughs.
 - [How-to guides](how-to/) — prompt-first task guides for common workflows.
 - [Concepts](concepts/overview.md) — architecture and the ideas behind it.
-- [Specification](spec/data-model.md) — data model, message envelope, CLI, and WebUI API reference.
+- [Specification](spec/data-model.md) — data model, message envelope, CLI, multiplexer backends, WebUI API, and coding-agent backends.
 - [API Reference](api/broker.md) — Python API generated from source.

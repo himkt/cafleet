@@ -1,6 +1,6 @@
 # Routing Bash via the Director
 
-The bash-via-Director protocol is the **fallback** for the harness deny-list. Members run cafleet and any shell command directly via the Bash tool by default (workspace-scoped auto-approval — see [`roles/member.md`](../roles/member.md) and [Bash routing](../../../docs/concepts/bash-routing.md)). The fallback fires only when the coding-agent harness deny-list rejects a Bash invocation (e.g. `git push`, `rm -rf`): the member auto-routes a plain CAFleet message to its Director, which dispatches the command into the member's pane via `cafleet member exec` (keystrokes literal `! <cmd>` + `Enter`, honored by `claude` / `codex` / `opencode`).
+The bash-via-Director protocol is the **fallback** for the harness deny-list. Members run cafleet and any shell command directly via the Bash tool by default (workspace-scoped auto-approval — see [`roles/member.md`](../roles/member.md)). The fallback fires only when the coding-agent harness deny-list rejects a Bash invocation (e.g. `git push`, `rm -rf`): the member auto-routes a plain CAFleet message to its Director, which dispatches the command into the member's pane via `cafleet member exec` (keystrokes literal `! <cmd>` + `Enter`, honored by `claude` / `codex` / `opencode`).
 
 ## The two primitives
 

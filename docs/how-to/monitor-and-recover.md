@@ -44,9 +44,10 @@ Your agent loads the `cafleet` skill and reads its Director-only
 The agent renders the roster with per-agent idle times, captures the pane of
 any member that has gone quiet, and climbs the recovery ladder from mildest
 to harshest: re-poke the inbox, dispatch a shell
-command ([Bash routing](../concepts/bash-routing.md)), and only as a last
-resort deregister the member. You see each intervention land as keystrokes in
-the member's pane ([tmux push](../concepts/tmux-push.md)).
+command ([`member exec`](../spec/cli-options.md#member-exec)), and only as a
+last resort deregister the member. You see each intervention land as
+keystrokes in the member's pane
+([Push notifications](../spec/multiplexer-backends.md#push-notifications)).
 
 ## Appendix: the CLI underneath
 
@@ -93,7 +94,7 @@ ids — fleet `1`, members `4`/`5`/`6`; your ids will differ.
     `cafleet message poll` keystroke (the leading `Esc` dismisses any pending
     permission prompt) so the member drains anything it missed; panes need
     re-poking at all because inline previews are best-effort keystrokes
-    ([tmux push](../concepts/tmux-push.md)):
+    ([Push notifications](../spec/multiplexer-backends.md#push-notifications)):
 
     ```bash
     cafleet member ping --fleet-id 1 --member-id 4
@@ -105,7 +106,7 @@ ids — fleet `1`, members `4`/`5`/`6`; your ids will differ.
 
     Ladder rung 2, `member exec` — keystrokes `! git status` into the pane so
     the coding agent runs it natively, the dispatch half of the
-    bash-via-Director protocol ([Bash routing](../concepts/bash-routing.md)):
+    bash-via-Director protocol ([`member exec`](../spec/cli-options.md#member-exec)):
 
     ```bash
     cafleet member exec --fleet-id 1 --member-id 4 "git status"
