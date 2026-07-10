@@ -1,7 +1,7 @@
 # Consolidate README.md into the docs/ site
 
 **Status**: Approved
-**Progress**: 8/12 tasks complete
+**Progress**: 10/12 tasks complete
 **Last Updated**: 2026-07-10
 
 ## Overview
@@ -155,8 +155,8 @@ SPEC.md itself is untouched by this design — no contract surface (CLI, config,
 
 ### Step 4: Update meta-documentation
 
-- [ ] Rewrite the README half of `.claude/skills/update-readme/SKILL.md` (structure spec, workflow steps 3–4, fat-README rules) per the Specification <!-- completed: -->
-- [ ] Reword the README paragraph in `.claude/rules/documentation-maintenance.md` <!-- completed: -->
+- [x] Rewrite the README half of `.claude/skills/update-readme/SKILL.md` (structure spec, workflow steps 3–4, fat-README rules) per the Specification <!-- completed: 2026-07-10T21:00 -->
+- [x] Reword the README paragraph in `.claude/rules/documentation-maintenance.md` <!-- completed: 2026-07-10T21:00 -->
 
 ### Step 5: Verify
 
