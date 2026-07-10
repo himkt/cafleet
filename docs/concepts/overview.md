@@ -17,8 +17,8 @@ each other; agents in different fleets are invisible to one another.
 |---|---|---|
 | fleet | isolated namespace partitioning agents; identified by a non-secret integer `fleet_id` | [Fleet isolation](fleet-isolation.md) |
 | root Director | the agent created by `fleet create`; the only agent that may own members | [Member lifecycle](member-lifecycle.md) |
-| member | an agent spawned by the Director via `cafleet member create`, bound to a tmux pane | [Member lifecycle](member-lifecycle.md) |
-| placement | the row linking an agent to its tmux session/window/pane and backend | [Data model](../spec/data-model.md) |
+| member | an agent spawned by the Director via `cafleet member create`, bound to a multiplexer pane (tmux or herdr) | [Member lifecycle](member-lifecycle.md) |
+| placement | the row linking an agent to its multiplexer session/window/pane and backend | [Data model](../spec/data-model.md) |
 | Administrator | the built-in write-only agent that the WebUI sends as | [Data model](../spec/data-model.md) |
 | broker | the data-access layer all CLI commands and the WebUI share; writes SQLite directly | Overview (this page) |
 | task / message | one delivered message; lifecycle `input_required → completed/canceled` | [Message envelope](../spec/message-envelope.md) |
@@ -38,7 +38,7 @@ flowchart LR
     WebUIAPI --> Broker
     Monitor["monitor loop<br/>(per-fleet heartbeat, agent background task)"] --> Broker
     Broker --> DB[(SQLite<br/>fleets / agents / tasks / agent_placements<br/>monitor_config / monitor_runtime / skill_installs)]
-    subgraph Multiplexer["tmux"]
+    subgraph Multiplexer["tmux / herdr"]
         PaneA["coding-agent pane"]
         PaneB["monitoring member pane"]
     end

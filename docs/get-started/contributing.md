@@ -20,6 +20,15 @@ path.
 | `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
 | `docs/` | CLI reference, message envelope, and other operator-facing docs. |
 
+## Tech stack
+
+- **Language:** Python 3.12+, managed with [uv](https://docs.astral.sh/uv/)
+- **Server:** [FastAPI](https://fastapi.tiangolo.com/) (admin WebUI)
+- **Database:** [SQLAlchemy](https://www.sqlalchemy.org/) 2.x (sync `pysqlite` driver) + SQLite
+- **CLI:** [click](https://click.palletsprojects.com/)
+- **Admin frontend:** Vite + Bun (SPA served at `/`)
+- **Task runner:** [mise](https://mise.jdx.dev/)
+
 ## Development
 
 Clone the repo and use mise for all common tasks:
@@ -46,6 +55,17 @@ To change the WebUI's dependencies, edit `admin/package.json` and run plain
 `bun install` inside `admin/` to regenerate `admin/bun.lock`.
 `mise //admin:install` runs `bun install --frozen-lockfile`, so it only
 reinstalls from the committed lockfile and cannot update it.
+
+## Building docs locally
+
+Build the documentation site (this site) locally with:
+
+```bash
+mise //:docs-build
+```
+
+That task is a thin wrapper around `uv run zensical build --clean` and is the
+same command the GitHub Actions workflow runs.
 
 ## Contributing changes
 

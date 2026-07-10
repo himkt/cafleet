@@ -97,7 +97,7 @@ Free (limited beta): Big Pickle, DeepSeek V4 Flash Free, MiMo-V2.5 Free, North M
 
 Intelligence ranking within the Zen catalog: `gpt-5.5-pro` highest, then `gpt-5.5` / `claude-opus-4-8`, then the mid-tier `gpt-5.4` / `claude-sonnet-4-6`, then the fast tier. Each overlay's `{reviewer_model}` value equals the entry its backend's table marks as highest intelligence — directly for codex (`gpt-5.5`) and opencode (`opencode/gpt-5.5-pro`); for claude via the `best` alias, which resolves to the highest available model (Fable 5 if the org has access, else the latest Opus).
 
-The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`; the Zen catalog above is normalized to the `opencode/` gateway prefix, and the direct-provider examples elsewhere in `director.md` / `README.md` / `coding-agents.md` stay valid.
+The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`; the Zen catalog above is normalized to the `opencode/` gateway prefix, and the direct-provider examples elsewhere in `director.md` / `coding-agents.md` stay valid.
 
 **Identity substitution (`str.format`)**: the four-placeholder `str.format` render (and the brace-doubling rule) is canonical in the cafleet [`SKILL.md`](../SKILL.md) § *Spawned-member identity via `str.format` substitution*. Director-side deltas: an unknown placeholder raises a `UsageError` listing the four supported names, a malformed brace expression raises the distinct "double literal braces" `UsageError`, and both (exit 2) roll back the just-registered agent.
 

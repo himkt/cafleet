@@ -105,6 +105,19 @@ current bundled preset. See
 materialization protocol, refresh recipe, and the operator MUST-NOT rule on
 MCP servers (MCP-contributed tools bypass the deny-list).
 
+## Trust the working directory
+
+Coding agents ask for a trust confirmation the first time they start in a
+directory they have not seen before. Trust the workspace in advance: launch
+your coding agent once in the working directory the member panes will run in
+and accept its first-run prompt, or add a trust entry to the agent's
+configuration file (see your agent's reference page). Trust is granted per
+directory, so each git worktree needs its own approval.
+
+This prevents a spawn-time stall: in an untrusted directory, the agent's
+first-run trust prompt stalls a freshly spawned member — the member ignores
+every incoming message until the prompt is cleared.
+
 ## Passing the fleet id
 
 Every fleet-scoped command except `fleet create` and `fleet list` takes a
@@ -113,15 +126,3 @@ member reads its fleet id from the `FLEET ID:` line of its spawn prompt). Agents
 `permissions.allow` pass `--fleet-id` as a literal flag — the allow patterns
 match the literal command string, so a shell-expanded variable would break the
 match and prompt.
-
-## Building docs locally
-
-Once the CLI is installed, you can build the
-documentation site (this site) locally with:
-
-```bash
-mise //:docs-build
-```
-
-That task is a thin wrapper around `uv run zensical build --clean` and is the
-same command the GitHub Actions workflow runs.
