@@ -100,41 +100,43 @@ The opencode backend writes exactly one file — `~/.opencode/agents/cafleet.md`
 
 Gated on local install of `opencode`. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, member `4` — your ids will differ.
 
-```bash
-rm -f ~/.opencode/agents/cafleet.md
+??? example "Expand the recipe"
 
-cafleet fleet create --name opencode-smoke --coding-agent claude
-# Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
-# Note the fleet and Director ids — the steps below use 1 and 2.
+    ```bash
+    rm -f ~/.opencode/agents/cafleet.md
 
-cafleet member create --fleet-id 1 --agent-id 2 \
-  --name Opencode-Smoke --description "opencode smoke member" --coding-agent opencode \
-  --text "You are Opencode-Smoke. Reply hello when polled."
-# Expect: ~/.opencode/agents/cafleet.md is materialized with the
-# cafleet preset (cat it and verify the JSON frontmatter).
+    cafleet fleet create --name opencode-smoke --coding-agent claude
+    # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
+    # Note the fleet and Director ids — the steps below use 1 and 2.
 
-cafleet member list --fleet-id 1 --all
-# Expect: backend column shows 'opencode' for the smoke member.
+    cafleet member create --fleet-id 1 --agent-id 2 \
+      --name Opencode-Smoke --description "opencode smoke member" --coding-agent opencode \
+      --text "You are Opencode-Smoke. Reply hello when polled."
+    # Expect: ~/.opencode/agents/cafleet.md is materialized with the
+    # cafleet preset (cat it and verify the JSON frontmatter).
 
-cafleet message send --fleet-id 1 --agent-id 2 \
-  --to 4 --text "ping"
-# Expect: the opencode pane receives the inline preview and the member ack-loops.
+    cafleet member list --fleet-id 1 --all
+    # Expect: backend column shows 'opencode' for the smoke member.
 
-cafleet member exec --fleet-id 1 \
-  --member-id 4 "git status --short"
-# Expect: '! git status --short' lands in the opencode pane and the
-# command runs.
+    cafleet message send --fleet-id 1 --agent-id 2 \
+      --to 4 --text "ping"
+    # Expect: the opencode pane receives the inline preview and the member ack-loops.
 
-cafleet member exec --fleet-id 1 \
-  --member-id 4 "curl https://example.com"
-# Expect: the deny-list blocks the curl command. If it does NOT, the
-# safety floor is broken — STOP and inspect ~/.opencode/agents/cafleet.md;
-# the preset's deny ruleset is not being applied.
+    cafleet member exec --fleet-id 1 \
+      --member-id 4 "git status --short"
+    # Expect: '! git status --short' lands in the opencode pane and the
+    # command runs.
 
-cafleet member delete --fleet-id 1 --member-id 4
-cafleet fleet delete --fleet-id 1
-```
+    cafleet member exec --fleet-id 1 \
+      --member-id 4 "curl https://example.com"
+    # Expect: the deny-list blocks the curl command. If it does NOT, the
+    # safety floor is broken — STOP and inspect ~/.opencode/agents/cafleet.md;
+    # the preset's deny ruleset is not being applied.
 
-A second `cafleet member create --coding-agent opencode` invocation with the preset file already in place should leave the file unchanged (verify by capturing `stat --format=%Y ~/.opencode/agents/cafleet.md` before and after).
+    cafleet member delete --fleet-id 1 --member-id 4
+    cafleet fleet delete --fleet-id 1
+    ```
+
+    A second `cafleet member create --coding-agent opencode` invocation with the preset file already in place should leave the file unchanged (verify by capturing `stat --format=%Y ~/.opencode/agents/cafleet.md` before and after).
 
 This recipe is not part of the automated test suite — it is the manual verification path before shipping changes that touch the opencode backend.
