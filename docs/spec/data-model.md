@@ -149,10 +149,10 @@ feeds the stale-skills guard and the `cafleet doctor` report (see
 
 SQLite ignores FK declarations unless `PRAGMA foreign_keys=ON` is issued per
 connection; a SQLAlchemy `connect` event listener does so. FKs use
-`ON DELETE RESTRICT` except the two 1:1 child tables of `agents`
-(`agent_placements`, `monitor_config`), which use `CASCADE` so a hard-deleted
-agent cannot leave dangling rows. Normal delete paths are soft-deletes, so
-neither fires in practice.
+`ON DELETE RESTRICT` except the `agent_id` PK=FK of the two 1:1 child tables
+(`agent_placements`, `monitor_config`), which uses `CASCADE` so a hard-deleted
+agent cannot leave dangling rows (`agent_placements.director_agent_id` stays
+RESTRICT). Normal delete paths are soft-deletes, so neither fires in practice.
 
 ## Task Visibility Rules
 

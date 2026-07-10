@@ -41,8 +41,10 @@ Enrollment covers the **root Director** (default interval **180 s**) and
 not enrolled — it is the watcher — and neither are the write-only
 Administrator or placementless agents. A watched agent is flagged only when it
 is enabled, its pane is alive, and its interval has elapsed since its last
-wake-dispatch (`last_ping_at`); the stamp written on each wake prevents a
-wake-storm while the watcher is still working.
+wake-dispatch (`last_ping_at`); the stamp written for each interval-due agent
+prevents a wake-storm while the watcher is still working (a stall-check-only
+due agent keeps its `last_ping_at` untouched — only its stall baseline
+advances).
 
 On the **herdr** backend a watched agent is additionally due when its native
 agent status transitions into `done`; a transition into `blocked` (awaiting a
