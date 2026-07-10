@@ -53,103 +53,105 @@ deletes the fleet.
 The commands the agent runs, with literal ids — fleet `1`, root Director
 `2`, members `4`/`5`/`6`; your ids will differ.
 
-Create the fleet — the operator declares the binary running in *your* pane
-via `--coding-agent` because cafleet cannot auto-detect it
-([Coding agents](../concepts/coding-agents.md)):
+??? example "Expand the walkthrough"
 
-```bash
-cafleet fleet create --name "demo" --coding-agent claude
-```
+    Create the fleet — the operator declares the binary running in *your* pane
+    via `--coding-agent` because cafleet cannot auto-detect it
+    ([Coding agents](../concepts/coding-agents.md)):
 
-```
-1 director=2 admin=3
-```
+    ```bash
+    cafleet fleet create --name "demo" --coding-agent claude
+    ```
 
-Spawn one member per backend:
+    ```
+    1 director=2 admin=3
+    ```
 
-```bash
-cafleet member create --fleet-id 1 --agent-id 2 \
-  --name "alice" --description "claude member" \
-  --coding-agent claude --text "You are alice. Wait for instructions."
-```
+    Spawn one member per backend:
 
-```
-4 alice backend=claude pane=%7
-```
+    ```bash
+    cafleet member create --fleet-id 1 --agent-id 2 \
+      --name "alice" --description "claude member" \
+      --coding-agent claude --text "You are alice. Wait for instructions."
+    ```
 
-```bash
-cafleet member create --fleet-id 1 --agent-id 2 \
-  --name "bob" --description "codex member" \
-  --coding-agent codex --text "You are bob. Wait for instructions."
-```
+    ```
+    4 alice backend=claude pane=%7
+    ```
 
-```
-5 bob backend=codex pane=%8
-```
+    ```bash
+    cafleet member create --fleet-id 1 --agent-id 2 \
+      --name "bob" --description "codex member" \
+      --coding-agent codex --text "You are bob. Wait for instructions."
+    ```
 
-```bash
-cafleet member create --fleet-id 1 --agent-id 2 \
-  --name "carol" --description "opencode member" \
-  --coding-agent opencode --text "You are carol. Wait for instructions."
-```
+    ```
+    5 bob backend=codex pane=%8
+    ```
 
-```
-6 carol backend=opencode pane=%9
-```
+    ```bash
+    cafleet member create --fleet-id 1 --agent-id 2 \
+      --name "carol" --description "opencode member" \
+      --coding-agent opencode --text "You are carol. Wait for instructions."
+    ```
 
-List the panes — only the `claude` pane titles itself with the member name
-([Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals)),
-so use the `pane_id` column to locate `bob` and `carol`:
+    ```
+    6 carol backend=opencode pane=%9
+    ```
 
-```bash
-cafleet member list --fleet-id 1 --all
-```
+    List the panes — only the `claude` pane titles itself with the member name
+    ([Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals)),
+    so use the `pane_id` column to locate `bob` and `carol`:
 
-```
-5 agents:
-  agent_id  name           status  kind           backend   session  window_id  pane_id  created_at
-  --------  -------------  ------  -------------  --------  -------  ---------  -------  --------------------
-  2         Director       active  director       claude    main     @3         %0       2026-04-15T10:00:00+00:00
-  3         Administrator  active  administrator  -         -        -          -        -
-  4         alice          active  member         claude    main     @3         %7       2026-04-15T10:01:00+00:00
-  5         bob            active  member         codex     main     @3         %8       2026-04-15T10:02:00+00:00
-  6         carol          active  member         opencode  main     @3         %9       2026-04-15T10:03:00+00:00
-```
+    ```bash
+    cafleet member list --fleet-id 1 --all
+    ```
 
-Message each member — repeat with `--to 5` and `--to 6`; the envelope and
-the 2-line inline preview are identical for every backend
-([tmux push](../concepts/tmux-push.md)):
+    ```
+    5 agents:
+      agent_id  name           status  kind           backend   session  window_id  pane_id  created_at
+      --------  -------------  ------  -------------  --------  -------  ---------  -------  --------------------
+      2         Director       active  director       claude    main     @3         %0       2026-04-15T10:00:00+00:00
+      3         Administrator  active  administrator  -         -        -          -        -
+      4         alice          active  member         claude    main     @3         %7       2026-04-15T10:01:00+00:00
+      5         bob            active  member         codex     main     @3         %8       2026-04-15T10:02:00+00:00
+      6         carol          active  member         opencode  main     @3         %9       2026-04-15T10:03:00+00:00
+    ```
 
-```bash
-cafleet message send --fleet-id 1 --agent-id 2 --to 4 --text "alice: report status"
-```
+    Message each member — repeat with `--to 5` and `--to 6`; the envelope and
+    the 2-line inline preview are identical for every backend
+    ([tmux push](../concepts/tmux-push.md)):
 
-```
-Message sent.
-[10 | from:2 | 2026-06-11T09:05:00.123456+00:00]
-alice: report status
-```
+    ```bash
+    cafleet message send --fleet-id 1 --agent-id 2 --to 4 --text "alice: report status"
+    ```
 
-Tear down — repeat `member delete` for members `5` and `6`, then delete the
-fleet:
+    ```
+    Message sent.
+    [10 | from:2 | 2026-06-11T09:05:00.123456+00:00]
+    alice: report status
+    ```
 
-```bash
-cafleet member delete --fleet-id 1 --member-id 4
-```
+    Tear down — repeat `member delete` for members `5` and `6`, then delete the
+    fleet:
 
-```
-Member deleted.
-  agent_id:  4
-  pane_id:   %7 (closed)
-```
+    ```bash
+    cafleet member delete --fleet-id 1 --member-id 4
+    ```
 
-```bash
-cafleet fleet delete --fleet-id 1
-```
+    ```
+    Member deleted.
+      agent_id:  4
+      pane_id:   %7 (closed)
+    ```
 
-```
-Deleted fleet 1. Deregistered 2 agents.
-```
+    ```bash
+    cafleet fleet delete --fleet-id 1
+    ```
+
+    ```
+    Deleted fleet 1. Deregistered 2 agents.
+    ```
 
 Every `member create` / `member delete` flag and exit code is documented in
 [CLI options](../spec/cli-options.md#member-create).

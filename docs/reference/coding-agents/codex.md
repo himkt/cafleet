@@ -75,32 +75,34 @@ Only `claude` sets the pane title to the member name; locate `codex` panes via `
 
 Gated on local install of both `claude` and `codex` binaries. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, members `4` (claude) / `5` (codex) — your ids will differ.
 
-```bash
-cafleet fleet create --name codex-smoke --coding-agent claude
-# Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
-# Note the fleet and Director ids — the steps below use 1 and 2.
+??? example "Expand the recipe"
 
-cafleet member create --fleet-id 1 --agent-id 2 \
-  --name Claude-Smoke --description "claude smoke member" --coding-agent claude \
-  --text "You are Claude-Smoke. Reply hello when polled."
-cafleet member create --fleet-id 1 --agent-id 2 \
-  --name Codex-Smoke --description "codex smoke member" --coding-agent codex \
-  --text "You are Codex-Smoke. Reply hello when polled."
+    ```bash
+    cafleet fleet create --name codex-smoke --coding-agent claude
+    # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
+    # Note the fleet and Director ids — the steps below use 1 and 2.
 
-cafleet member list --fleet-id 1 --all
-# Expect: two member rows, backend column shows 'claude' and 'codex' respectively.
+    cafleet member create --fleet-id 1 --agent-id 2 \
+      --name Claude-Smoke --description "claude smoke member" --coding-agent claude \
+      --text "You are Claude-Smoke. Reply hello when polled."
+    cafleet member create --fleet-id 1 --agent-id 2 \
+      --name Codex-Smoke --description "codex smoke member" --coding-agent codex \
+      --text "You are Codex-Smoke. Reply hello when polled."
 
-cafleet message send --fleet-id 1 --agent-id 2 \
-  --to 5 --text "ping"
-# Expect: the codex pane receives the 2-line inline preview and the member ack-loops correctly.
+    cafleet member list --fleet-id 1 --all
+    # Expect: two member rows, backend column shows 'claude' and 'codex' respectively.
 
-cafleet member exec --fleet-id 1 \
-  --member-id 5 "git status --short"
-# Expect: '! git status --short' lands in the codex pane and the command runs.
+    cafleet message send --fleet-id 1 --agent-id 2 \
+      --to 5 --text "ping"
+    # Expect: the codex pane receives the 2-line inline preview and the member ack-loops correctly.
 
-cafleet member delete --fleet-id 1 --member-id 5
-cafleet member delete --fleet-id 1 --member-id 4
-cafleet fleet delete --fleet-id 1
-```
+    cafleet member exec --fleet-id 1 \
+      --member-id 5 "git status --short"
+    # Expect: '! git status --short' lands in the codex pane and the command runs.
+
+    cafleet member delete --fleet-id 1 --member-id 5
+    cafleet member delete --fleet-id 1 --member-id 4
+    cafleet fleet delete --fleet-id 1
+    ```
 
 This recipe is not part of the automated test suite — it is the manual verification path before shipping changes that touch the codex backend.
