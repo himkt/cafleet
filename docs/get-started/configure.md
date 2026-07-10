@@ -126,15 +126,3 @@ member reads its fleet id from the `FLEET ID:` line of its spawn prompt). Agents
 `permissions.allow` pass `--fleet-id` as a literal flag — the allow patterns
 match the literal command string, so a shell-expanded variable would break the
 match and prompt.
-
-## Building docs locally
-
-Once the CLI is installed, you can build the
-documentation site (this site) locally with:
-
-```bash
-mise //:docs-build
-```
-
-That task is a thin wrapper around `uv run zensical build --clean` and is the
-same command the GitHub Actions workflow runs.

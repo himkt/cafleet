@@ -56,6 +56,17 @@ To change the WebUI's dependencies, edit `admin/package.json` and run plain
 `mise //admin:install` runs `bun install --frozen-lockfile`, so it only
 reinstalls from the committed lockfile and cannot update it.
 
+## Building docs locally
+
+Build the documentation site (this site) locally with:
+
+```bash
+mise //:docs-build
+```
+
+That task is a thin wrapper around `uv run zensical build --clean` and is the
+same command the GitHub Actions workflow runs.
+
 ## Contributing changes
 
 CAFleet uses its own design-doc-driven development skills to evolve the
