@@ -42,7 +42,8 @@ and the Director never runs the monitor itself
 The agent creates a fleet, then opens three multiplexer panes — one per backend —
 each running its member's coding agent. Each message lands as a 2-line
 inline preview keystroked into the recipient's pane
-([tmux push](../concepts/tmux-push.md)), so you watch every member wake up
+([Push notifications](../spec/multiplexer-backends.md#push-notifications)),
+so you watch every member wake up
 and reply. Only the `claude` pane shows the member name in its pane title
 ([Coding agents](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals)).
 When all three replies are confirmed, the agent closes the panes and
@@ -120,7 +121,7 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
 
     Message each member — repeat with `--to 5` and `--to 6`; the envelope and
     the 2-line inline preview are identical for every backend
-    ([tmux push](../concepts/tmux-push.md)):
+    ([Push notifications](../spec/multiplexer-backends.md#push-notifications)):
 
     ```bash
     cafleet message send --fleet-id 1 --agent-id 2 --to 4 --text "alice: report status"
