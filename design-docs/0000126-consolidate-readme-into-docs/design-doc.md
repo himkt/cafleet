@@ -1,6 +1,6 @@
 # Consolidate README.md into the docs/ site
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 12/12 tasks complete
 **Last Updated**: 2026-07-10
 
@@ -171,3 +171,4 @@ SPEC.md itself is untouched by this design — no contract surface (CLI, config,
 |------|---------|
 | 2026-07-10 | Initial draft |
 | 2026-07-10 | Review round 1: Prerequisites moved to install.md; four tmux-or-herdr edit points enumerated; final index capability list fixed at five bullets; update-readme skill rewrite scoped end-to-end; README skeleton fence fixed |
+| 2026-07-10 | Executed: all 12 tasks and 7 Success Criteria complete; Reviewer approved (round 1); PR #181 opened; Status → Complete |
