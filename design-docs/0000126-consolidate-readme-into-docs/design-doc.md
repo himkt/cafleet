@@ -172,3 +172,4 @@ SPEC.md itself is untouched by this design — no contract surface (CLI, config,
 | 2026-07-10 | Initial draft |
 | 2026-07-10 | Review round 1: Prerequisites moved to install.md; four tmux-or-herdr edit points enumerated; final index capability list fixed at five bullets; update-readme skill rewrite scoped end-to-end; README skeleton fence fixed |
 | 2026-07-10 | Executed: all 12 tasks and 7 Success Criteria complete; Reviewer approved (round 1); PR #181 opened; Status → Complete |
+| 2026-07-10 | Post-approval amendment (user): workspace trust applies to every coding agent, not codex alone — configure.md's trust subsection promoted to a backend-neutral top-level `## Trust the working directory` section; the codex TOML mechanism relocated to `docs/reference/coding-agents/codex.md` |

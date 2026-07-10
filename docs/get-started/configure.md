@@ -87,24 +87,6 @@ fleet id sits past the matched prefix, so no per-fleet rule is needed.
 `["cafleet", "member", "exec"]` prompt rule (the prefix is matched before the
 trailing `--fleet-id`), so `member exec` keeps prompting.
 
-### Trust the working directory
-
-Before spawning codex members, add a trust entry for the workspace to
-`~/.codex/config.toml`:
-
-```toml
-[projects."/abs/path/to/workspace"]
-trust_level = "trusted"
-```
-
-The path is the absolute working directory the member panes run in. Add one
-entry per workspace — including each git worktree, since codex trusts paths,
-not repositories.
-
-This prevents a spawn-time stall: in an untrusted directory, codex's
-first-run trust prompt stalls a freshly spawned member — the member ignores
-every incoming message until the prompt is cleared.
-
 ## Opencode
 
 !!! tip "Where this lives"
@@ -122,6 +104,19 @@ current bundled preset. See
 [Opencode members](../reference/coding-agents/opencode.md) for the full
 materialization protocol, refresh recipe, and the operator MUST-NOT rule on
 MCP servers (MCP-contributed tools bypass the deny-list).
+
+## Trust the working directory
+
+Coding agents ask for a trust confirmation the first time they start in a
+directory they have not seen before. Trust the workspace in advance: launch
+your coding agent once in the working directory the member panes will run in
+and accept its first-run prompt, or add a trust entry to the agent's
+configuration file (see your agent's reference page). Trust is granted per
+directory, so each git worktree needs its own approval.
+
+This prevents a spawn-time stall: in an untrusted directory, the agent's
+first-run trust prompt stalls a freshly spawned member — the member ignores
+every incoming message until the prompt is cleared.
 
 ## Passing the fleet id
 
