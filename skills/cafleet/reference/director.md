@@ -215,7 +215,7 @@ Skip the ping only on non-zero `member exec` exit (the dispatch did not complete
 
 ## Member Ping (manual inbox-poll nudge)
 
-Keystrokes **`Esc` → `cafleet … message poll` → `Enter`** into a member's pane (the leading `Esc` dismisses any pending permission-approval prompt, so the trailing `Enter` cannot blindly confirm it) for re-poking a member that missed the broker's auto-fired inline preview. The action is fully fixed by the command — no operator-controlled body — so it sits in `permissions.allow` while `member exec` stays in `permissions.ask`. Keystroke mechanics: [`tmux-push.md`](../../../docs/concepts/tmux-push.md).
+Keystrokes **`Esc` → `cafleet … message poll` → `Enter`** into a member's pane (the leading `Esc` dismisses any pending permission-approval prompt, so the trailing `Enter` cannot blindly confirm it) for re-poking a member that missed the broker's auto-fired inline preview. The action is fully fixed by the command — no operator-controlled body — so it sits in `permissions.allow` while `member exec` stays in `permissions.ask`. Keystroke mechanics: [`multiplexer-backends.md`](../../../docs/spec/multiplexer-backends.md#esc-safeguard).
 
 ```bash
 cafleet member ping --fleet-id <fleet-id> --member-id <member-id>

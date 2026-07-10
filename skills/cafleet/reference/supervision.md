@@ -12,7 +12,7 @@ CAFleet members spawned via `cafleet member create` do not act autonomously. The
 
 ## Communication Model
 
-Supervision happens over the CAFleet message broker: the Director `cafleet message send`s a member → the broker keystrokes a 2-line inline preview into the member's pane (it processes the preview as a fresh user-turn; the full body is fetched via `cafleet message poll`) → the member acts and replies via `cafleet message send` → the broker keystrokes that reply into the Director's pane, which the Director ACKs (`cafleet message ack`). The inline-preview mechanics are canonical in [`SKILL.md`](../SKILL.md) § Send and [`tmux-push.md`](../../../docs/concepts/tmux-push.md).
+Supervision happens over the CAFleet message broker: the Director `cafleet message send`s a member → the broker keystrokes a 2-line inline preview into the member's pane (it processes the preview as a fresh user-turn; the full body is fetched via `cafleet message poll`) → the member acts and replies via `cafleet message send` → the broker keystrokes that reply into the Director's pane, which the Director ACKs (`cafleet message ack`). The inline-preview mechanics are canonical in [`SKILL.md`](../SKILL.md) § Send and [`multiplexer-backends.md`](../../../docs/spec/multiplexer-backends.md#push-notifications).
 
 **Long or multi-line bodies.** `message send` / `message broadcast` / `member nudge` accept a `--text-file <path>` (or `--text-file -` for stdin) alternative to inline `--text`. A long or multi-line body MUST be passed via `--text-file`, never inline `--text`, so it never lands on the command line and hits the shell's `ARG_MAX` limit. Short one-line bodies stay fine inline with `--text`.
 

@@ -121,7 +121,7 @@ cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
   --to <target-agent-id> --text "Did the API schema change?"
 ```
 
-`--to` (recipient id) is required, plus exactly one of `--text` (inline body) or `--text-file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`); the delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview by default. `--full` per [`reference/output-flags.md`](reference/output-flags.md). After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast` / `member nudge`), caught on the next manual `message poll` or a Director `cafleet member ping` if missed; full mechanics in [`tmux-push.md`](../../docs/concepts/tmux-push.md).
+`--to` (recipient id) is required, plus exactly one of `--text` (inline body) or `--text-file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`); the delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview by default. `--full` per [`reference/output-flags.md`](reference/output-flags.md). After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast` / `member nudge`), caught on the next manual `message poll` or a Director `cafleet member ping` if missed; full mechanics in [`multiplexer-backends.md`](../../docs/spec/multiplexer-backends.md#push-notifications).
 
 ## Poll (Check Inbox)
 
