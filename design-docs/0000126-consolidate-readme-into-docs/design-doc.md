@@ -1,7 +1,7 @@
 # Consolidate README.md into the docs/ site
 
 **Status**: Approved
-**Progress**: 6/12 tasks complete
+**Progress**: 8/12 tasks complete
 **Last Updated**: 2026-07-10
 
 ## Overview
@@ -150,8 +150,8 @@ SPEC.md itself is untouched by this design — no contract surface (CLI, config,
 
 ### Step 3: Thin the README
 
-- [ ] Rewrite `README.md` to the thin structure in the Specification <!-- completed: -->
-- [ ] Sweep the repository for links to removed README sections/anchors and fix them <!-- completed: -->
+- [x] Rewrite `README.md` to the thin structure in the Specification <!-- completed: 2026-07-10T20:53 -->
+- [x] Sweep the repository for links to removed README sections/anchors and fix them <!-- completed: 2026-07-10T20:53 -->
 
 ### Step 4: Update meta-documentation
 
