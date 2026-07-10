@@ -1,7 +1,7 @@
 # Consolidate README.md into the docs/ site
 
 **Status**: Approved
-**Progress**: 10/12 tasks complete
+**Progress**: 12/12 tasks complete
 **Last Updated**: 2026-07-10
 
 ## Overview
@@ -10,13 +10,13 @@ README.md duplicates almost every descriptive section of the docs/ site, so each
 
 ## Success Criteria
 
-- [ ] README.md contains only: title + demo video + pitch, Install, Documentation links, License — the Features, Architecture, Quick Start walkthrough, CLI Usage, API Overview, Tech Stack, Project Structure, and Development sections are gone.
-- [ ] Every README-only fact has a docs/ home per the content-mapping table (Tech Stack in `docs/get-started/contributing.md`; Prerequisites in `docs/get-started/install.md`; Features facts folded into `docs/index.md`; the tmux-or-herdr fact merged at the four edit points in `docs/concepts/overview.md` and `docs/index.md`).
-- [ ] `docs/get-started/configure.md` § Codex documents pre-trusting the workspace via a `[projects."<abs path>"] trust_level = "trusted"` entry, and `docs/reference/coding-agents/codex.md` links to it.
-- [ ] `.claude/skills/update-readme/SKILL.md` prescribes the thin README structure (SPEC.md maintenance rules unchanged).
-- [ ] `.claude/rules/documentation-maintenance.md` names docs/ as the primary content home; README updates are required only when the thin surface (pitch / install / links) changes.
-- [ ] SPEC.md is untouched.
-- [ ] `mise //:docs-build` passes and no repository file links to a removed README section.
+- [x] README.md contains only: title + demo video + pitch, Install, Documentation links, License — the Features, Architecture, Quick Start walkthrough, CLI Usage, API Overview, Tech Stack, Project Structure, and Development sections are gone.
+- [x] Every README-only fact has a docs/ home per the content-mapping table (Tech Stack in `docs/get-started/contributing.md`; Prerequisites in `docs/get-started/install.md`; Features facts folded into `docs/index.md`; the tmux-or-herdr fact merged at the four edit points in `docs/concepts/overview.md` and `docs/index.md`).
+- [x] `docs/get-started/configure.md` § Codex documents pre-trusting the workspace via a `[projects."<abs path>"] trust_level = "trusted"` entry, and `docs/reference/coding-agents/codex.md` links to it.
+- [x] `.claude/skills/update-readme/SKILL.md` prescribes the thin README structure (SPEC.md maintenance rules unchanged).
+- [x] `.claude/rules/documentation-maintenance.md` names docs/ as the primary content home; README updates are required only when the thin surface (pitch / install / links) changes.
+- [x] SPEC.md is untouched.
+- [x] `mise //:docs-build` passes and no repository file links to a removed README section.
 
 ---
 
@@ -160,8 +160,8 @@ SPEC.md itself is untouched by this design — no contract surface (CLI, config,
 
 ### Step 5: Verify
 
-- [ ] `mise //:docs-build` passes <!-- completed: -->
-- [ ] Confirm `SPEC.md` has no diff (`git status`) <!-- completed: -->
+- [x] `mise //:docs-build` passes <!-- completed: 2026-07-10T21:01 -->
+- [x] Confirm `SPEC.md` has no diff (`git status`) <!-- completed: 2026-07-10T21:01 -->
 
 ---
 
