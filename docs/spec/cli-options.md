@@ -24,8 +24,7 @@ subcommand rejects it with `No such option`.
 | `setup db` | Migrate the database schema only | no | none | [setup db](#setup-db) |
 | `setup skill` | Install the skills + record the installed version | no | none | [setup skill](#setup-skill) |
 | `doctor` | Print the resolved multiplexer backend + the calling pane's identifiers + the skills-install report | no | none | [doctor](#cafleet-doctor) |
-| `server` | Start the admin WebUI server | no | none | [server](#cafleet-server) |
-| `fleet create` | Create a fleet with its root Director and Administrator | no | none | [fleet create](#fleet-create) |
+| `fleet create` | Create a fleet with its root Director | no | none | [fleet create](#fleet-create) |
 | `fleet list` | List non-deleted fleets | no | none | [fleet list](#fleet-list) |
 | `fleet show` | Show one fleet (soft-deleted included) | yes | none | [fleet show](#fleet-show) |
 | `fleet delete` | Soft-delete a fleet and deregister its members | yes | none | [fleet delete](#fleet-delete) |
@@ -38,11 +37,10 @@ subcommand rejects it with `No such option`.
 | `member create` | Register a member and spawn its coding-agent pane | yes | none (Director auto-resolved) | [member create](#member-create) |
 | `member delete` | Tear down a member's pane (when one exists) and deregister it | yes | `--member-id` | [member delete](#member-delete) |
 | `member show` | Show one member's detail | yes | `--member-id` | [member show](#member-show) |
-| `member list` | List the fleet's members (every active registry entry with `--all`) | yes | none | [member list](#member-list) |
+| `member list` | List every active registry entry of the fleet | yes | none | [member list](#member-list) |
 | `member capture` | Capture the tail of a member's pane | yes | `--member-id` | [member capture](#member-capture) |
 | `member exec` | Dispatch a shell command into a member's pane | yes | `--member-id` | [member exec](#member-exec) |
 | `member ping` | Inject an inbox-poll keystroke into a member's pane | yes | `--member-id` | [member ping](#member-ping) |
-| `member nudge` | Deliver an ACKable task + inline preview to a member | yes | `--from-member-id` (sender) + `--to-member-id` (target) | [member nudge](#member-nudge) |
 | `monitor start` | Run the per-fleet scheduler loop in-process (launch as a background task) | yes | none | [monitor start](#monitor-start) |
 | `monitor status` | Show monitor liveness and the per-member schedule | yes | none | [monitor status](#monitor-status) |
 | `monitor config` | Show or edit a member's monitor schedule | yes | `--member-id` | [monitor config](#monitor-config) |
@@ -104,7 +102,7 @@ Subcommands accepting `--json`:
 | Group | Subcommands |
 |---|---|
 | `message` | `send`, `broadcast`, `poll`, `ack`, `cancel`, `show` |
-| `member` | `create`, `delete`, `show`, `list`, `capture`, `exec`, `ping`, `nudge` |
+| `member` | `create`, `delete`, `show`, `list`, `capture`, `exec`, `ping` |
 | `monitor` | `status`, `config` |
 | `fleet` | `create`, `list`, `show` |
 | (root) | `doctor` |
@@ -138,8 +136,8 @@ member on `monitor config`.
 ## Sender and recipient (`--from-member-id`, `--to-member-id`) {#from-to-member-id}
 
 Two-party commands name both parties: `--from-member-id` is the sender
-(`message send`, `message broadcast`, `member nudge`) and `--to-member-id` is
-the recipient/target (`message send`, `member nudge`). A pane-touching target
+(`message send`, `message broadcast`) and `--to-member-id` is
+the recipient (`message send`). A pane-touching target
 must be an active member of `--fleet-id` with a placement row — see
 [Member targeting and key delivery](#member-targeting-and-key-delivery).
 
@@ -177,8 +175,7 @@ per-subcommand option) to disable truncation; it composes orthogonally with
 |---|---|---|---|
 | `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Also bounds the broker's inline-preview truncation. `member.description` truncation uses a separate hard-coded 60-codepoint limit. |
 
-This applies to CLI emit sites only — FastAPI `/api/*` responses
-([webui-api.md](./webui-api.md)) and `member capture` content are untouched.
+This applies to CLI emit sites only — `member capture` content is untouched.
 A `--quiet` flag on `cafleet message send`, `cafleet message ack`, and
 `cafleet member ping` suppresses the normal output and prints only the bare
 `task_id` (the target member id for `ping`), for shell capture.
@@ -257,8 +254,8 @@ runs:
 3. Otherwise the command proceeds silently.
 
 Homes with no recorded row are not checked. Exempt surfaces: the `setup` group
-(must remain runnable to repair), `doctor` (reports instead of blocking), and
-`server`. Group-level help (`cafleet fleet --help`) prints before the callback
+(must remain runnable to repair) and `doctor` (reports instead of
+blocking). Group-level help (`cafleet fleet --help`) prints before the callback
 runs and always works; subcommand help runs the group callback first, so under
 a missing/stale install the guard errors instead of printing help.
 
@@ -281,17 +278,17 @@ detail: [`create_fleet`](../api/broker.md#cafleet.broker.create_fleet),
 
 **Must be run inside a tmux or herdr session** — outside one it exits 1 with
 `Error: cafleet fleet create must be run inside a tmux or herdr session` and
-writes nothing. It creates the fleet, its root Director (hardcoded
-`name="Director"`; there is no `--description` flag), and the built-in
-Administrator atomically — see [data-model.md](./data-model.md). Default
-output is one compact line carrying the three ids:
+writes nothing. It creates the fleet and its root Director (hardcoded
+`name="Director"`; there is no `--description` flag)
+atomically — see [data-model.md](./data-model.md). Default
+output is one compact line carrying the two ids:
 
 ```
-<fleet_id> director=<director_member_id> admin=<administrator_member_id>
+<fleet_id> director=<director_member_id>
 ```
 
 `--json` returns the fleet dict with a nested `director` (including its
-`placement`) and a top-level `administrator_member_id`.
+`placement`).
 
 ### `fleet list`
 
@@ -358,23 +355,6 @@ skills:
 
 Exit 1 on any multiplexer or environment failure (no supported multiplexer
 detected, ambiguous environment, binary not on `PATH`, pane not discoverable).
-
-## `cafleet server` — Admin WebUI Server {#cafleet-server}
-
-Starts the admin WebUI FastAPI app via uvicorn (uvicorn defaults — no reload,
-workers, or log-level flags; users who need them invoke uvicorn directly,
-which is what `mise //cafleet:dev` does). CLI commands do not require this
-server. Does not accept `--fleet-id`.
-
-| Flag | Default | Notes |
-|---|---|---|
-| `--host` | `settings.broker_host` (default `127.0.0.1`) | Bind address. Overrides `CAFLEET_BROKER_HOST` when both are set. |
-| `--port` | `settings.broker_port` (default `8000`) | Bind port. Overrides `CAFLEET_BROKER_PORT` when both are set. |
-
-Flag wins over env var; env var wins over the hardcoded default. If the
-bundled WebUI dist directory does not exist, the app warns on stderr
-(`warning: admin WebUI is not built. / will return 404. Run 'mise
-//admin:build'.`); port-in-use errors propagate unwrapped from uvicorn.
 
 ## `cafleet message` — Message Broker
 
@@ -455,15 +435,13 @@ an empty inbox prints `No messages found.`.
 
 The `cafleet member` subgroup owns the member lifecycle: `create` registers a
 member **and** spawns its coding-agent pane; `delete` tears it down; `capture`
-/ `exec` / `ping` / `nudge` inspect or keystroke an existing member's pane;
+/ `exec` / `ping` inspect or keystroke an existing member's pane;
 `show` and `list` are registry reads (no multiplexer requirement). All run
 behind the [stale-skills guard](#stale-skills-guard). Behavior detail:
 [`register_member`](../api/broker.md#cafleet.broker.register_member),
 [`deregister_member`](../api/broker.md#cafleet.broker.deregister_member),
 [`get_member`](../api/broker.md#cafleet.broker.get_member),
-[`list_members`](../api/broker.md#cafleet.broker.list_members),
-[`list_members_with_activity`](../api/broker.md#cafleet.broker.list_members_with_activity),
-[`list_roster`](../api/broker.md#cafleet.broker.list_roster).
+[`list_members`](../api/broker.md#cafleet.broker.list_members).
 
 ### Member targeting and key delivery
 
@@ -476,7 +454,7 @@ Resolution rules shared by the `--member-id` verbs:
 2. No placement row → exit 1 (see [Error Messages](#error-messages)) — except
    `member show` and `member delete`, which tolerate a missing placement.
 3. A pending placement (`pane_id` is `None`) → `capture` / `exec` / `ping`
-   exit 1; `delete` and `nudge` tolerate it.
+   exit 1; `delete` tolerates it.
 
 Key sequences are delivered **literally** (`send-keys` with `shell=False`) —
 shell meta, key names, and multi-byte characters all arrive as plain
@@ -535,7 +513,7 @@ the placement); `--json` returns the member dict with its `placement`.
 | `--force` / `-f` | no | Skip the graceful close wait: immediately kill-pane the target, then deregister. Exit 0 even if the pane was already gone. |
 
 Tears down the target's pane (when one exists) and soft-deletes the member.
-Targeting the root Director or the Administrator is blocked (see
+Targeting the root Director is blocked (see
 [Error Messages](#error-messages)). A placementless or pending-placement
 delete is a pure registry soft-delete and succeeds outside a multiplexer.
 The default pane path sends the backend exit keystroke and waits for the pane
@@ -548,7 +526,7 @@ header plus `member_id:` / `pane_id:` lines; JSON is `{member_id, pane_status}`.
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--member-id` | yes | Any active in-fleet registry entry — placed or placementless (root Director and Administrator included). |
+| `--member-id` | yes | Any active in-fleet registry entry — placed or placementless (root Director included). |
 | `--full` | no | Text mode only — see [`--full` semantics](#full-semantics). |
 
 Registry read — no multiplexer requirement. Default text is the compact
@@ -556,33 +534,37 @@ one-line row `<member_id> <name> <status>`; `--full` renders the labeled block
 with `kind`, `skills`, and the placement sub-block (`placement:   none` when
 placementless; `None` fields render `-`). `--json` returns the broker
 `get_member` dict unchanged regardless of `--full`. `kind` is one of
-`director`, `administrator`, `monitor`, or `member`.
+`director`, `monitor`, or `member`.
 
 ### `member list` {#member-list}
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--activity` | no | Aggregate per-member activity timestamps from `tasks`. Mutually exclusive with `--all`. |
-| `--all` | no | List every active registry entry of the fleet (adds a `kind` column), not just ordinary members. Mutually exclusive with `--activity`. |
+No flags beyond `--fleet-id` and the shared trailing [`--json`](#json-output)
+flag; no identity flag. Lists every **active** registry entry of the fleet —
+the root Director, the monitoring member, ordinary members, and placementless
+rows. An empty roster prints `0 members.`.
 
-No identity flag. Default output is a placement table over every **member**
-(placed registry rows other than the root Director); an empty roster
-prints `0 members.`; a pending placement renders `(pending)`. `--json` returns
-the rows unprojected.
+Text output renders one row per member with `member_id`, `name`, `kind`
+(`director` / `monitor` / `member`), `backend`, `pane_id`, and `idle` columns.
+A placementless row renders `-` in its placement cells (`backend`, `pane_id`);
+a placed row whose pane id is not yet patched renders `(pending)` in
+`pane_id`. `idle` is the wall-time since the member's most recent task
+activity — the latest of `last_sent` (most recent outgoing message) and
+`last_recv` (most recent delivery), broadcast summaries excluded — humanized
+as `Ns` / `Nm` / `Nh`, `-` when the member has no task activity.
 
-#### `member list --activity` output {#member-list-activity-output}
-
-Renders `last_sent` (most recent outgoing message), `last_recv` (most recent
-delivery), `last_ack` (most recent acknowledged delivery; broadcast summaries
-excluded), and `idle` (wall-time since the latest of `last_sent` /
-`last_recv`) per member. An absent cell renders as a single ASCII `-`.
+`--json` returns one dict per row with `member_id`, `name`, `kind`,
+`placement` (the placement sub-dict, `null` for a placementless row), and the
+activity fields `last_sent` / `last_recv` / `last_ack` (ISO timestamps or
+`null`; `last_ack` is the most recent acknowledged delivery) plus `idle`
+(integer seconds or `null`). Per-member detail such as `description` and
+`registered_at` lives on [`member show`](#member-show).
 
 ### `member capture` {#member-capture}
 
 | Flag | Required | Notes |
 |---|---|---|
 | `--member-id` | yes | Target member's ID |
-| `--lines` / `--tail` | no | Number of trailing lines to capture (default: **20**). |
+| `--lines` | no | Number of trailing lines to capture (default: **20**). |
 | `--ansi` / `--no-ansi` | no | Default `--no-ansi` strips ANSI escapes and cleans carriage-return redraws; `--ansi` emits the raw capture. |
 
 JSON: `{member_id, pane_id, lines, content}`; text emits the content
@@ -622,27 +604,6 @@ operator-controlled body — which is why `member ping` sits in
 
 Text: `Pinged member <name> (<pane_id>) — poll keystroke dispatched.`; JSON:
 `{member_id, pane_id}`. A keystroke non-delivery exits 1.
-
-### `member nudge` {#member-nudge}
-
-Re-engages a member (typically the Director) by persisting an ACKable broker
-task **and** firing an `Esc`-safeguarded inline preview into the target's pane
-— the same hardened send path as `cafleet message send`. A target with no live
-pane is tolerated: the task still persists and the keystroke best-effort
-no-ops.
-
-| Flag | Required | Notes |
-|---|---|---|
-| `--from-member-id` | yes | The **sender** (typically the monitoring member), persisted as `from_member_id`. |
-| `--to-member-id` | yes | The **target** member (typically the Director). |
-| `--text` / `--text-file` | one of | The re-engage summary, as on `message send`. |
-
-Text output reports the queued `task_id` and whether the preview landed
-(`… — task <task_id> queued, Esc-safeguarded preview dispatched.` / `… — no
-pane; task <task_id> queued.` / `… queued; inline preview not delivered.`).
-JSON: `{member_id, pane_id, task_id, notification_sent}`. Exit 1 when
-the target resolution or the broker send path rejects; exit 2 on `--text` /
-`--text-file` validation.
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 
@@ -723,19 +684,16 @@ never pinged). Exits 1 for a not-in-fleet or not-enrolled member.
 | `member create` when the fleet row has no `director_member_id` recorded (mid-bootstrap corruption) | `Error: fleet <fleet-id> has no root Director recorded; re-create the fleet with 'cafleet fleet create'.` (exit 1) |
 | `member create` (with a placement) when the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` (exit 1; the `register_member` invariant guard) |
 | `member delete` against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 1) |
-| `member delete` against the Administrator's `member_id` | `Error: Administrator cannot be deregistered` (exit 1) |
 | `member delete` default path when the pane does not close within 15.0 s | `Error: pane <pane> did not close within 15.0s after /exit.` (exit 2; pane tail printed on stderr) |
-| `member list` with both `--all` and `--activity` | `Error: --all and --activity are mutually exclusive.` (exit 2) |
 | `message send` / `message broadcast` / `message poll` / `message ack` / `message cancel` / `message show` with an acting member id (`--member-id` / `--from-member-id`) that is not in `--fleet-id` | `Error: member <member-id> is not in fleet <fleet-id>.` (exit 1) — the fleet-membership gate runs before any read/write operation, and also fires for an unknown id. |
 | `member exec` with missing positional `COMMAND` | `Error: Missing argument 'COMMAND'.` (exit 2) |
 | `member exec ""` (empty / whitespace-only) | `Error: command may not be empty.` (exit 2) |
 | `member exec` with `\n` or `\r` | `Error: command may not contain newlines.` (exit 2) |
 | `member capture` / `member exec` / `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to <capture|exec|ping>.` (exit 1) |
 | `member ping` when the keystroke fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
-| `member show` / `member capture` / `member exec` / `member ping` / `member nudge` with a cross-fleet / unknown / inactive target member id | `Error: Member <member-id> not found` (exit 1) |
-| `member capture` / `member exec` / `member ping` / `member nudge` on an in-fleet target with no placement row | ``Error: member <member-id> has no placement row; it was not spawned via `cafleet member create`.`` (exit 1) |
-| `member nudge` whose `--from-member-id` (sender) is rejected by the broker send path | `Error: <sender ValueError from the broker send path>` (exit 1) |
-| Any `--text` / `--text-file` command (`message send`, `message broadcast`, `member nudge`, `member create`) with neither flag | `Error: Provide exactly one of --text or --text-file.` (exit 2) |
+| `member show` / `member capture` / `member exec` / `member ping` with a cross-fleet / unknown / inactive target member id | `Error: Member <member-id> not found` (exit 1) |
+| `member capture` / `member exec` / `member ping` on an in-fleet target with no placement row | ``Error: member <member-id> has no placement row; it was not spawned via `cafleet member create`.`` (exit 1) |
+| Any `--text` / `--text-file` command (`message send`, `message broadcast`, `member create`) with neither flag | `Error: Provide exactly one of --text or --text-file.` (exit 2) |
 | Any `--text` / `--text-file` command with both flags | `Error: --text and --text-file are mutually exclusive.` (exit 2) |
 | `--text` empty or whitespace-only | `Error: text may not be empty.` (exit 2) |
 | `--text-file <path>` to an empty (zero-byte or whitespace-only) file | `Error: --text-file <path>: file is empty.` (exit 1) |

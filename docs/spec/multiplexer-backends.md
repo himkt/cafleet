@@ -4,9 +4,25 @@ icon: lucide/layout-grid
 
 # Multiplexer backends
 
-The contract behind the [Multiplexer backends](../concepts/multiplexer-backends.md)
-concept: how a backend is resolved, how failures surface, what the optional
-capabilities are, and the exact push-notification mechanics.
+cafleet hosts every coding-agent member inside a **terminal-multiplexer pane**.
+The multiplexer is abstracted behind the `Multiplexer` Protocol
+(`cafleet.multiplexer.base`), so the spawn, keystroke-delivery, capture, and
+teardown paths are backend-neutral. Two backends ship today: **tmux** and
+**herdr** ([herdr.dev](https://herdr.dev)). Both satisfy the same Protocol, so
+every `member *` path behaves identically regardless of which one is active.
+
+Pane ids are treated as **opaque strings** end to end — tmux ids look like `%7`,
+herdr ids look like `w1:p1`; cafleet stores and passes them verbatim and never
+parses them.
+
+The pane is also cafleet's only push channel: message delivery stays pull-based
+(recipients drain the persisted queue with `cafleet message poll`), and the
+broker keystrokes a best-effort inline preview into the recipient's pane after
+persisting a message — see [Push notifications](#push-notifications).
+
+The rest of this page specifies the contract: how a backend is resolved, how
+failures surface, what the optional capabilities are, and the exact
+push-notification mechanics.
 
 ## Backend selection {#backend-selection}
 
@@ -111,8 +127,8 @@ The preview keystroke **leads with `Esc`** (`send_inline_preview` is called
 with `esc_first=True`): it presses `Escape`, lets the pane settle ~0.1 s, then
 types the payload and `Enter`, so a recipient parked on a pending
 permission-approval prompt has that prompt dismissed before the trailing
-`Enter` lands. The same `Esc`-safeguarded path serves `message send`,
-`message broadcast`, and `member nudge`. Two related keystroke paths differ:
+`Enter` lands. The same `Esc`-safeguarded path serves `message send` and
+`message broadcast`. Two related keystroke paths differ:
 
 - `cafleet member ping` injects `Esc` → a literal `cafleet message poll`
   command → `Enter` (the `send_poll_trigger` helper, also `esc_first=True`) —

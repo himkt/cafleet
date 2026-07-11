@@ -73,13 +73,13 @@ Only `claude` sets the pane title to the member name; locate `codex` panes via `
 
 ## Verification recipe (manual smoke test)
 
-Gated on local install of both `claude` and `codex` binaries. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, members `4` (claude) / `5` (codex) — your ids will differ.
+Gated on local install of both `claude` and `codex` binaries. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, members `3` (claude) / `4` (codex) — your ids will differ.
 
 ??? example "Expand the recipe"
 
     ```bash
     cafleet fleet create --name codex-smoke --coding-agent claude
-    # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
+    # Expect: a '<fleet_id> director=<director_id>' line.
     # Note the fleet and Director ids — the steps below use 1 and 2.
 
     cafleet member create --fleet-id 1 \
@@ -89,19 +89,19 @@ Gated on local install of both `claude` and `codex` binaries. Run from inside a 
       --name Codex-Smoke --description "codex smoke member" --coding-agent codex \
       --text "You are Codex-Smoke. Reply hello when polled."
 
-    cafleet member list --fleet-id 1 --all
+    cafleet member list --fleet-id 1
     # Expect: two member rows, backend column shows 'claude' and 'codex' respectively.
 
     cafleet message send --fleet-id 1 --from-member-id 2 \
-      --to-member-id 5 --text "ping"
+      --to-member-id 4 --text "ping"
     # Expect: the codex pane receives the 2-line inline preview and the member ack-loops correctly.
 
     cafleet member exec --fleet-id 1 \
-      --member-id 5 "git status --short"
+      --member-id 4 "git status --short"
     # Expect: '! git status --short' lands in the codex pane and the command runs.
 
-    cafleet member delete --fleet-id 1 --member-id 5
     cafleet member delete --fleet-id 1 --member-id 4
+    cafleet member delete --fleet-id 1 --member-id 3
     cafleet fleet delete --fleet-id 1
     ```
 

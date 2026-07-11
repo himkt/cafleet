@@ -38,8 +38,8 @@ lead with `Esc` — unlike the message-delivery preview and `cafleet member ping
 
 Enrollment covers the **root Director** (default interval **180 s**) and
 **every ordinary member** (default **720 s**). The monitoring member itself is
-not enrolled — it is the watcher — and neither are the write-only
-Administrator or placementless registry rows. A watched member is flagged only
+not enrolled — it is the watcher — and neither are placementless registry
+rows. A watched member is flagged only
 when it is enabled, its pane is alive, and its interval has elapsed since its
 last wake-dispatch (`last_ping_at`); the stamp written for each interval-due
 member prevents a wake-storm while the watcher is still working (a
@@ -62,7 +62,7 @@ identified by `member_card_json.cafleet.kind == "monitoring-member"`; a second
 `--role monitor` spawn is rejected.
 
 On each wake it runs a routine bounded to two read/act commands — read-only
-`cafleet member capture` and `cafleet member nudge`:
+`cafleet member capture` and `cafleet message send`:
 
 1. **Read the due members named in the wake nudge** — that list is
    authoritative; those members, plus the Director, are who it inspects.
@@ -82,11 +82,11 @@ On each wake it runs a routine bounded to two read/act commands — read-only
    misjudged `awaiting_user` destroys the user's pending prompt.
 3. **Keep one stall baseline per pane** — the capture from that pane's last
    stall-check wake, replaced unconditionally on every stall-check wake.
-4. **Re-engage the Director** via `cafleet member nudge` when a due member is
+4. **Re-engage the Director** via `cafleet message send` when a due member is
    `stalled` or `finished` — **unless the Director's own pane is
-   `awaiting_user`**, in which case send nothing this wake: the nudge's
-   keystroke leads with `Esc` and would cancel the Director's pending prompt.
-   The suppressed report re-surfaces on the member's next wake.
+   `awaiting_user`**, in which case send nothing this wake: the message's
+   inline-preview keystroke leads with `Esc` and would cancel the Director's
+   pending prompt. The suppressed report re-surfaces on the member's next wake.
 
 Observation spans the Director and every due member, but actuation is
 Director-only: the monitoring member never keystrokes ordinary members —
@@ -104,7 +104,7 @@ all member-driving routes back through the Director.
 The monitor scans once per **tick** and a member only comes due at a tick
 boundary, so the tick is the floor on interval precision — set it smaller than
 the smallest interval you care about. Per-member intervals are editable via
-`cafleet monitor config` or the admin WebUI. Stall detection runs on its own
+`cafleet monitor config`. Stall detection runs on its own
 independent cadence: a stall-check wake compares the pane's capture against its
 previous stall-check baseline, so two unchanged observations one interval apart
 classify it `stalled` without waiting for the (much longer) member interval.

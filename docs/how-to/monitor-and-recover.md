@@ -52,28 +52,32 @@ keystrokes in the member's pane
 ## Appendix: the CLI underneath
 
 The commands the agent runs, all from the Director's pane, with literal
-ids — fleet `1`, members `4`/`5`/`6`; your ids will differ.
+ids — fleet `1`, monitoring member `3`, members `4`/`5`/`6`; your ids will
+differ.
 
 ??? example "Expand the walkthrough"
 
-    Watch the team — `last_sent` is the member's most recent outgoing message,
-    `last_recv` its most recent delivery, `last_ack` the most recent delivery
-    it acknowledged, and `idle` the wall-time since the latest of `last_sent` /
-    `last_recv`; a member that receives work but never sends or acks is stalled
-    — `alice` (`4`) below has been quiet for 14 minutes (aggregation rules in
-    [CLI options](../spec/cli-options.md#member-list-activity-output)):
+    Watch the team — `idle` is the wall-time since the member's most recent
+    task activity (the latest of its most recent outgoing message and its most
+    recent delivery); `--json` adds the underlying `last_sent` / `last_recv` /
+    `last_ack` timestamps. A member whose `idle` keeps growing while the rest
+    of the team moves is stalled — `alice` (`4`) below has been quiet for 14
+    minutes (aggregation rules in
+    [CLI options](../spec/cli-options.md#member-list)):
 
     ```bash
-    cafleet member list --fleet-id 1 --activity
+    cafleet member list --fleet-id 1
     ```
 
     ```
-    3 members:
-      member_id       name      status  last_sent  last_recv  last_ack   idle
-      --------------  --------  ------  ---------  ---------  ---------  -----
-      4               alice     active  -          12:20:00   12:20:00   14m
-      5               bob       active  12:30:11   12:33:02   12:33:02   2m
-      6               carol     active  12:34:56   12:34:50   12:34:50   6s
+    5 members:
+      member_id  name      kind      backend  pane_id  idle
+      ---------  --------  --------  -------  -------  ----
+      2          Director  director  claude   %0       6s
+      3          monitor   monitor   claude   %6       -
+      4          alice     member    claude   %7       14m
+      5          bob       member    claude   %8       2m
+      6          carol     member    claude   %9       6s
     ```
 
     Inspect the quiet member — prints the last 20 lines of the pane buffer with

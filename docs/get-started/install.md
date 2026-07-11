@@ -12,7 +12,7 @@ use. The recommended end-user path installs both in two commands.
 
 - Python 3.12+
 - A terminal multiplexer — tmux or herdr (see
-  [Multiplexer backends](../concepts/multiplexer-backends.md))
+  [Multiplexer backends](../spec/multiplexer-backends.md))
 - At least one of: `claude` (Claude Code), `codex` (OpenAI Codex CLI), or
   `opencode`
 
@@ -66,7 +66,7 @@ or when any recorded version differs from the running CLI version. After
 `uv tool upgrade cafleet`, you don't have to remember to re-run setup — the
 first fleet-scoped command errors with
 `stale skills detected (...); run 'cafleet setup skill' to reinstall`.
-`cafleet setup`, `cafleet doctor`, and `cafleet server` stay runnable so you
+`cafleet setup` and `cafleet doctor` stay runnable so you
 can always repair; `cafleet doctor` reports the recorded per-home versions.
 
 The default database lives at `~/.local/share/cafleet/cafleet_v3.db`. Override

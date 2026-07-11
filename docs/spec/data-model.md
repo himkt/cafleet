@@ -91,8 +91,8 @@ the coding-agent name and is not FK-linked.
 ### `fleets`
 
 Fleet deletion is a **soft-delete** keyed on `deleted_at`. `cafleet fleet
-create` writes the fleet row, the root Director (and its placement), the
-`director_member_id` back-reference, and the built-in Administrator in one
+create` writes the fleet row, the root Director (and its placement), and the
+`director_member_id` back-reference in one
 all-or-nothing transaction — which is why `director_member_id` is DB-nullable
 despite the post-bootstrap NOT NULL invariant.
 
@@ -101,11 +101,8 @@ despite the post-bootstrap NOT NULL invariant.
 Deregistration is a soft-delete (`status='deregistered'` + `deregistered_at`);
 active query paths filter `status='active'`. Special members are marked by a
 broker-owned `cafleet.kind` flag inside `member_card_json` rather than a
-column: `"builtin-administrator"` for the write-only Administrator every fleet
-owns exactly one of (it never receives messages or a pane, cannot be
-deregistered, and is excluded from broadcast recipients), and
-`"monitoring-member"` for the fleet's single monitoring member (which skips
-`monitor_config` enrollment and is located by this marker — see
+column: `"monitoring-member"` marks the fleet's single monitoring member
+(which skips `monitor_config` enrollment and is located by this marker — see
 [Monitoring](../concepts/monitoring.md)). Callers cannot set `cafleet.kind`
 through any public path.
 
@@ -129,8 +126,8 @@ when the member is deregistered — they have no historical value.
 ### `monitor_config` and `monitor_runtime`
 
 The two monitor tables: `monitor_config` holds one row per **enrolled** member
-(the root Director and every ordinary member — never the monitoring member,
-the Administrator, or placementless registry rows), hard-deleted alongside the
+(the root Director and every ordinary member — never the monitoring member
+or placementless registry rows), hard-deleted alongside the
 placement on deregistration; `monitor_runtime` holds one row per fleet with
 the running loop's pid and `last_tick_at` heartbeat — "no monitor" is modeled
 as "no row". Both are removed explicitly inside the `fleet delete`
