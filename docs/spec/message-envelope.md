@@ -44,13 +44,13 @@ CLI JSON output is governed by the `--json` flag:
 
 A poll result with one unicast delivery (id `42`, from `7`, body `"build OK"`).
 
-**Default (`cafleet --json message poll --member-id <my-member-id>`)**:
+**Default (`cafleet message poll --member-id <my-member-id> --json`)**:
 
 ```json
 [{"id":42,"from":7,"ts":"2026-05-05T05:42:11.123456+00:00","text":"build OK"}]
 ```
 
-**`--full` (`cafleet --json message poll --member-id <my-member-id> --full`)**:
+**`--full` (`cafleet message poll --member-id <my-member-id> --full --json`)**:
 
 ```json
 [
@@ -90,7 +90,7 @@ Optional segments `| kind:<kind>` and `| origin:<id>` are appended to line 1 whe
 
 The flags that govern envelope rendering are documented in [cli-options.md](cli-options.md):
 
-- [`--json`](cli-options.md#global-options) — emit JSON output (compact).
+- [`--json`](cli-options.md#json-output) — emit JSON output (compact).
 - [`--full`](cli-options.md#full-semantics) — return the full typed-column envelope and untruncated body.
 
 `CAFLEET_MAX_TEXT_LEN` (default `200`) controls body truncation in the rendered envelope; it is documented under [Message Body Truncation](cli-options.md#message-body-truncation).
