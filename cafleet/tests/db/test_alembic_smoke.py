@@ -36,7 +36,7 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         expected = {
             "fleets",
             "members",
-            "tasks",
+            "messages",
             "member_placements",
             "monitor_config",
             "monitor_runtime",
@@ -46,6 +46,7 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         missing = expected - tables
         assert not missing
         assert "api_keys" not in tables
+        assert "tasks" not in tables
     finally:
         engine.dispose()
 
@@ -78,7 +79,7 @@ def test_single_initial_migration_revision_exists():
 
 
 def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
-    """``fleets``/``members``/``tasks`` mint ids via AUTOINCREMENT; placements do not."""
+    """``fleets``/``members``/``messages`` mint ids via AUTOINCREMENT; placements do not."""
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         with engine.connect() as conn:
@@ -92,7 +93,7 @@ def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
             ).fetchall()
             assert seq, "sqlite_sequence must exist for AUTOINCREMENT tables"
 
-            for table in ("fleets", "members", "tasks"):
+            for table in ("fleets", "members", "messages"):
                 ddl = conn.execute(
                     text(
                         "SELECT sql FROM sqlite_master WHERE type='table' AND name=:t"
@@ -119,7 +120,7 @@ def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
     [
         ("fleets", "fleet_id"),
         ("members", "member_id"),
-        ("tasks", "task_id"),
+        ("messages", "message_id"),
         ("member_placements", "member_id"),
         ("monitor_config", "member_id"),
         ("monitor_runtime", "fleet_id"),
@@ -176,27 +177,94 @@ def test_member_placements_table_created_by_migration(alembic_upgraded_db):
         engine.dispose()
 
 
-def test_tasks_table_has_origin_task_id_column(alembic_upgraded_db):
+def test_messages_table_columns(alembic_upgraded_db):
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         insp = inspect(engine)
-        cols = {col["name"]: col for col in insp.get_columns("tasks")}
+        cols = {col["name"]: col for col in insp.get_columns("messages")}
 
-        assert "origin_task_id" in cols
-
-        # Must be nullable because unicast + historical rows store NULL
-        assert cols["origin_task_id"]["nullable"] is True
+        assert set(cols) == {
+            "message_id",
+            "owner_member_id",
+            "from_member_id",
+            "to_member_id",
+            "type",
+            "created_at",
+            "status_state",
+            "status_timestamp",
+            "origin_message_id",
+            "text",
+        }
     finally:
         engine.dispose()
 
 
-def test_tasks_to_member_id_is_nullable_after_migration(alembic_upgraded_db):
-    """``tasks.to_member_id`` is nullable so broadcast-summary rows persist NULL
+def test_messages_indexes_renamed(alembic_upgraded_db):
+    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
+    try:
+        insp = inspect(engine)
+        indexes = {idx["name"]: idx for idx in insp.get_indexes("messages")}
+
+        assert set(indexes) == {
+            "idx_messages_owner_member_status_ts",
+            "idx_messages_from_member_status_ts",
+        }
+        assert indexes["idx_messages_owner_member_status_ts"]["column_names"] == [
+            "owner_member_id",
+            "status_timestamp",
+        ]
+        assert indexes["idx_messages_from_member_status_ts"]["column_names"] == [
+            "from_member_id",
+            "status_timestamp",
+        ]
+    finally:
+        engine.dispose()
+
+
+def test_messages_owner_member_fk_restrict(alembic_upgraded_db):
+    """``messages.owner_member_id`` keeps the members FK with ON DELETE RESTRICT."""
+    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
+    try:
+        insp = inspect(engine)
+        fks = insp.get_foreign_keys("messages")
+        assert len(fks) == 1
+        assert fks[0]["constrained_columns"] == ["owner_member_id"]
+        assert fks[0]["referred_table"] == "members"
+        assert fks[0]["referred_columns"] == ["member_id"]
+
+        with engine.connect() as conn:
+            ddl = conn.execute(
+                text(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='messages'"
+                )
+            ).scalar()
+        assert ddl is not None
+        assert "ON DELETE RESTRICT" in ddl.upper()
+    finally:
+        engine.dispose()
+
+
+def test_messages_table_has_origin_message_id_column(alembic_upgraded_db):
+    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
+    try:
+        insp = inspect(engine)
+        cols = {col["name"]: col for col in insp.get_columns("messages")}
+
+        assert "origin_message_id" in cols
+
+        # Must be nullable because unicast + historical rows store NULL
+        assert cols["origin_message_id"]["nullable"] is True
+    finally:
+        engine.dispose()
+
+
+def test_messages_to_member_id_is_nullable_after_migration(alembic_upgraded_db):
+    """``messages.to_member_id`` is nullable so broadcast-summary rows persist NULL
     instead of the ``0`` sentinel."""
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         insp = inspect(engine)
-        cols = {col["name"]: col for col in insp.get_columns("tasks")}
+        cols = {col["name"]: col for col in insp.get_columns("messages")}
 
         assert cols["to_member_id"]["nullable"] is True
     finally:
