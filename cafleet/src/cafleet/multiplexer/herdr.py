@@ -40,6 +40,14 @@ from cafleet.multiplexer.base import (
 _PANE_NOT_FOUND = "pane_not_found"
 _ESC_SETTLE_DELAY = 0.1
 
+# Sleep between ``pane send-text`` and the following ``pane send-keys enter`` so
+# the codex TUI submits the payload instead of absorbing the Enter: codex
+# classifies the fast-injected text as a paste and suppresses an Enter arriving
+# within its ~120ms post-paste window, leaving the preview stuck in the
+# composer. 1.0s clears that window with margin for a busy event loop reading
+# the burst late (applied unconditionally to keep the helper backend-agnostic).
+_SUBMIT_DELAY = 1.0
+
 
 class HerdrError(MultiplexerError):
     """Raised when a herdr subprocess fails or herdr is not reachable.
@@ -331,6 +339,7 @@ class HerdrMultiplexer:
         def steps() -> None:
             self._send_esc(target_pane_id)
             _run(["herdr", "pane", "send-text", target_pane_id, payload], timeout=5)
+            time.sleep(_SUBMIT_DELAY)
             _run(["herdr", "pane", "send-keys", target_pane_id, "enter"], timeout=5)
 
         return _best_effort(steps)
