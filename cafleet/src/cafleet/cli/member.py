@@ -14,6 +14,7 @@ from cafleet.cli._helpers import (
     fleet_id_option,
     from_member_id_option,
     full_flag,
+    json_flag,
     member_id_option,
     quiet_flag,
     text_body_options,
@@ -207,6 +208,7 @@ def _resolve_coding_agent(
 )
 @text_body_options("Inline spawn prompt.")
 @full_flag
+@json_flag
 @click.pass_context
 def member_create(
     ctx,
@@ -218,6 +220,7 @@ def member_create(
     text,
     text_file,
     full,
+    json_output,
 ):
     """Register a new member and spawn its pane (Director auto-resolved)."""
     fleet_id = ctx.obj["fleet_id"]
@@ -329,7 +332,7 @@ def member_create(
         )
 
     result["placement"] = placement_view
-    if ctx.obj["json_output"]:
+    if json_output:
         click.echo(output.format_json(result))
     else:
         click.echo(output.format_member(result, full=full))
@@ -346,8 +349,9 @@ def member_create(
     default=False,
     help="Skip /exit; kill-pane immediately.",
 )
+@json_flag
 @click.pass_context
-def member_delete(ctx, member_id, force):
+def member_delete(ctx, member_id, force, json_output):
     """Deregister a member and close its tmux pane."""
     fleet_id = ctx.obj["fleet_id"]
 
@@ -370,7 +374,7 @@ def member_delete(ctx, member_id, force):
         _deregister_or_die(member_id)
         pane_status = "(no placement)" if placement is None else "(pending — no pane)"
         _emit_member_delete_output(
-            ctx, member_id, pane_status, header="Member deleted."
+            json_output, member_id, pane_status, header="Member deleted."
         )
         return
 
@@ -388,7 +392,7 @@ def member_delete(ctx, member_id, force):
         _deregister_or_die(member_id)
         pane_status = f"{pane_id} (killed)"
         _emit_member_delete_output(
-            ctx, member_id, pane_status, header="Member deleted (--force)."
+            json_output, member_id, pane_status, header="Member deleted (--force)."
         )
         return
 
@@ -415,7 +419,7 @@ def member_delete(ctx, member_id, force):
         _deregister_or_die(member_id)
         pane_status = f"{pane_id} (closed)"
         _emit_member_delete_output(
-            ctx, member_id, pane_status, header="Member deleted."
+            json_output, member_id, pane_status, header="Member deleted."
         )
         return
 
@@ -443,7 +447,7 @@ def member_delete(ctx, member_id, force):
     )
 
     pane_status = f"{pane_id} (timeout)"
-    _emit_member_delete_output(ctx, member_id, pane_status, header=None)
+    _emit_member_delete_output(json_output, member_id, pane_status, header=None)
     ctx.exit(2)
 
 
@@ -463,13 +467,13 @@ def _deregister_or_die(member_id: int) -> None:
 
 
 def _emit_member_delete_output(
-    ctx: click.Context,
+    json_output: bool,
     member_id: int,
     pane_status: str,
     *,
     header: str | None,
 ) -> None:
-    if ctx.obj["json_output"]:
+    if json_output:
         click.echo(
             output.format_json(
                 {"member_id": member_id, "pane_status": pane_status},
@@ -491,8 +495,9 @@ def _emit_member_delete_output(
     default=False,
     help="Verbose labeled block (text mode only).",
 )
+@json_flag
 @click.pass_context
-def member_show(ctx, member_id, full):
+def member_show(ctx, member_id, full, json_output):
     """Show one member's detail (registry read; no tmux required)."""
     fleet_id = ctx.obj["fleet_id"]
     target, _placement = _load_authorized_member(
@@ -500,7 +505,7 @@ def member_show(ctx, member_id, full):
         member_id,
         allow_missing_placement=True,
     )
-    if ctx.obj["json_output"]:
+    if json_output:
         click.echo(output.format_json(target))
     else:
         click.echo(output.format_member_detail(target, full=full))
@@ -522,8 +527,9 @@ def member_show(ctx, member_id, full):
     default=False,
     help="List every active registry entry of the fleet.",
 )
+@json_flag
 @click.pass_context
-def member_list(ctx, activity, all_members):
+def member_list(ctx, activity, all_members, json_output):
     """List the fleet's members; --all lists every active registry entry."""
     fleet_id = ctx.obj["fleet_id"]
     if all_members and activity:
@@ -539,7 +545,7 @@ def member_list(ctx, activity, all_members):
         raise
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
-    if ctx.obj["json_output"]:
+    if json_output:
         click.echo(output.format_json(rows))
     elif all_members:
         click.echo(output.format_member_roster(rows))
@@ -566,8 +572,9 @@ def member_list(ctx, activity, all_members):
     default=False,
     help="Emit raw ANSI instead of stripping it.",
 )
+@json_flag
 @click.pass_context
-def member_capture(ctx, member_id, lines, ansi):
+def member_capture(ctx, member_id, lines, ansi, json_output):
     """Capture the last N lines of a member pane's terminal buffer."""
     fleet_id = ctx.obj["fleet_id"]
 
@@ -588,7 +595,7 @@ def member_capture(ctx, member_id, lines, ansi):
     if not ansi:
         content = output.strip_ansi(content)
 
-    if ctx.obj["json_output"]:
+    if json_output:
         click.echo(
             output.format_json(
                 {
@@ -610,8 +617,9 @@ def member_capture(ctx, member_id, lines, ansi):
 @fleet_id_option
 @member_id_option
 @click.argument("command")
+@json_flag
 @click.pass_context
-def member_exec(ctx, member_id, command):
+def member_exec(ctx, member_id, command, json_output):
     """Dispatch a shell command via the coding agent's `!` shortcut."""
     fleet_id = ctx.obj["fleet_id"]
 
@@ -635,7 +643,7 @@ def member_exec(ctx, member_id, command):
     except MultiplexerError as exc:
         raise click.ClickException(f"send failed: {exc}") from exc
 
-    if ctx.obj["json_output"]:
+    if json_output:
         click.echo(
             output.format_json(
                 {
@@ -655,8 +663,9 @@ def member_exec(ctx, member_id, command):
 @fleet_id_option
 @member_id_option
 @quiet_flag
+@json_flag
 @click.pass_context
-def member_ping(ctx, member_id, quiet):
+def member_ping(ctx, member_id, quiet, json_output):
     """Inject an inbox-poll keystroke into a member's pane (Director-only)."""
     fleet_id = ctx.obj["fleet_id"]
 
@@ -683,7 +692,7 @@ def member_ping(ctx, member_id, quiet):
             f"keystroke to pane {pane_id}."
         )
 
-    if ctx.obj["json_output"]:
+    if json_output:
         click.echo(
             output.format_json(
                 {
@@ -705,8 +714,9 @@ def member_ping(ctx, member_id, quiet):
 @from_member_id_option
 @to_member_id_option
 @text_body_options("Re-engage summary (inline).")
+@json_flag
 @click.pass_context
-def member_nudge(ctx, from_member_id, to_member_id, text, text_file):
+def member_nudge(ctx, from_member_id, to_member_id, text, text_file, json_output):
     """Re-engage a member (typically the Director) with an ACKable task + preview."""
     fleet_id = ctx.obj["fleet_id"]
 
@@ -734,7 +744,7 @@ def member_nudge(ctx, from_member_id, to_member_id, text, text_file):
     notification_sent = result["notification_sent"]
     pane_id = placement["mux_pane_id"]
 
-    if ctx.obj["json_output"]:
+    if json_output:
         click.echo(
             output.format_json(
                 {

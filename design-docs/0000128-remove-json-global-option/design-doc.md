@@ -1,7 +1,7 @@
 # Remove `--json` from the Global Option Surface
 
 **Status**: Approved
-**Progress**: 14/26 tasks complete
+**Progress**: 26/26 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -128,21 +128,21 @@ Documentation lands first, per `.claude/rules/documentation-maintenance.md`. `RE
 
 ### Step 4: Code (`cafleet/src/cafleet/cli/`)
 
-- [ ] `_helpers.py`: add `json_flag` beside `full_flag` / `quiet_flag` <!-- completed: -->
-- [ ] `_helpers.py`: `client_command` branches on `kwargs["json_output"]` instead of `ctx.obj["json_output"]` <!-- completed: -->
-- [ ] `__init__.py`: remove the global `--json` option, the `json_output` parameter, `@click.pass_context`, and the `ctx.obj` assignment from the root group callback <!-- completed: -->
-- [ ] `message.py`: apply `json_flag` to all six subcommands; add the `json_output: bool` parameter to each callback <!-- completed: -->
-- [ ] `fleet.py`: replace `_json_flag` and `_wants_json` with the shared `json_flag`; rename the `as_json` parameters to `json_output` <!-- completed: -->
-- [ ] `member.py`: apply `json_flag` to `create`, `delete`, `show`, `list`, `capture`, `exec`, `ping`, `nudge`; branch on the parameter (thread it through `_emit_member_delete_output`) <!-- completed: -->
-- [ ] `monitor.py`: apply `json_flag` to `status` and `config`; branch on the parameter <!-- completed: -->
-- [ ] `doctor.py`: apply `json_flag`; branch on the parameter <!-- completed: -->
+- [x] `_helpers.py`: add `json_flag` beside `full_flag` / `quiet_flag` <!-- completed: 2026-07-11T09:20 -->
+- [x] `_helpers.py`: `client_command` branches on `kwargs["json_output"]` instead of `ctx.obj["json_output"]` <!-- completed: 2026-07-11T09:20 -->
+- [x] `__init__.py`: remove the global `--json` option, the `json_output` parameter, `@click.pass_context`, and the `ctx.obj` assignment from the root group callback <!-- completed: 2026-07-11T09:20 -->
+- [x] `message.py`: apply `json_flag` to all six subcommands; add the `json_output: bool` parameter to each callback <!-- completed: 2026-07-11T09:20 -->
+- [x] `fleet.py`: replace `_json_flag` and `_wants_json` with the shared `json_flag`; rename the `as_json` parameters to `json_output` <!-- completed: 2026-07-11T09:20 -->
+- [x] `member.py`: apply `json_flag` to `create`, `delete`, `show`, `list`, `capture`, `exec`, `ping`, `nudge`; branch on the parameter (thread it through `_emit_member_delete_output`) <!-- completed: 2026-07-11T09:20 -->
+- [x] `monitor.py`: apply `json_flag` to `status` and `config`; branch on the parameter <!-- completed: 2026-07-11T09:20 -->
+- [x] `doctor.py`: apply `json_flag`; branch on the parameter <!-- completed: 2026-07-11T09:20 -->
 
 ### Step 5: Tests and verification
 
-- [ ] Migrate every global-position invocation (`["--json", <grp>, ...]`) to the trailing per-subcommand position across `tests/cli/` (touched suites: `test_monitor.py`, `test_doctor.py`, `test_message_truncation.py`, `test_broadcast_json_to_member_id.py`, `test_member_exec.py`, `test_member_ping.py`, `test_message.py`, `test_member.py`, `test_member_delete.py`, `test_member_list_activity.py`, `test_member_capture_defaults.py`, `test_member_show.py`, `test_member_list_all.py` — the last two hoist `--json` inside their invocation helpers `_show` / `_list`, so the fix lands in the helper, not the per-test call sites; the fleet suites and `conftest.py` already use the trailing local flag and stay untouched) <!-- completed: -->
-- [ ] `tests/cli/test_client_command.py`: replace the harness's re-declared global `--json` (lines 26-30) with the shared per-command `json_flag` <!-- completed: -->
-- [ ] Add a regression guard asserting the pre-subcommand position no longer parses: `cafleet --json doctor` exits 2 with `No such option: --json` <!-- completed: -->
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:format` pass <!-- completed: -->
+- [x] Migrate every global-position invocation (`["--json", <grp>, ...]`) to the trailing per-subcommand position across `tests/cli/` (touched suites: `test_monitor.py`, `test_doctor.py`, `test_message_truncation.py`, `test_broadcast_json_to_member_id.py`, `test_member_exec.py`, `test_member_ping.py`, `test_message.py`, `test_member.py`, `test_member_delete.py`, `test_member_list_activity.py`, `test_member_capture_defaults.py`, `test_member_show.py`, `test_member_list_all.py` — the last two hoist `--json` inside their invocation helpers `_show` / `_list`, so the fix lands in the helper, not the per-test call sites; the fleet suites and `conftest.py` already use the trailing local flag and stay untouched) <!-- completed: 2026-07-11T08:47 -->
+- [x] `tests/cli/test_client_command.py`: replace the harness's re-declared global `--json` (lines 26-30) with the shared per-command `json_flag` <!-- completed: 2026-07-11T08:47 -->
+- [x] Add a regression guard asserting the pre-subcommand position no longer parses: `cafleet --json doctor` exits 2 with `No such option: --json` <!-- completed: 2026-07-11T08:47 -->
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:format` pass <!-- completed: 2026-07-11T09:10 -->
 
 ---
 
