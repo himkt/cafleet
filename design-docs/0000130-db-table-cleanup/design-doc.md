@@ -1,8 +1,8 @@
 # Rename the `tasks` table to `messages` (end-to-end)
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 27/27 tasks complete
-**Last Updated**: 2026-07-11
+**Last Updated**: 2026-07-12
 
 ## Overview
 
@@ -179,3 +179,4 @@ Documentation-first order applies (per `.claude/rules/documentation-maintenance.
 | 2026-07-11 | Initial draft |
 | 2026-07-11 | Reviewer round 1: stale-v4-DB loud guard in `cafleet setup db`; send-endpoint `task_id` response key added to the WebUI edit surface; skills documentation inventory completed (all `skills/` trees + `.claude/skills/skill-author/`) |
 | 2026-07-11 | Reviewer round 2: stale-schema guard scoped to a non-empty chain (`head_rev is not None`) so the empty-chain regeneration transient passes through |
+| 2026-07-12 | Implemented end-to-end via the execute TDD team: all 27 tasks + 6 success criteria complete; 1005 tests / lint / typecheck / admin lint+build green; fresh-Reviewer loop approved after 2 revision rounds (15 doc-prose vocabulary stragglers fixed). User approved local finalize (no PR). Status → Complete. |
