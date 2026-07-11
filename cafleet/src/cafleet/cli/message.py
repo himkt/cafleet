@@ -130,9 +130,7 @@ def message_poll(ctx, member_id, full, json_output):
 @message.command("ack")
 @fleet_id_option
 @member_id_option
-@click.option(
-    "--message-id", type=int, required=True, help="Message ID to acknowledge"
-)
+@click.option("--message-id", type=int, required=True, help="Message ID to acknowledge")
 @full_flag
 @quiet_flag
 @json_flag

@@ -1,7 +1,7 @@
 # Rename the `tasks` table to `messages` (end-to-end)
 
 **Status**: Approved
-**Progress**: 24/27 tasks complete
+**Progress**: 27/27 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -166,9 +166,9 @@ Documentation-first order applies (per `.claude/rules/documentation-maintenance.
 
 ### Step 6: Test sweep and verification
 
-- [ ] Sweep the remaining ~24 test files: fixtures, assertions, test names, and the `test_render_task.py` → `test_render_message.py` file rename <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format`, `mise //admin:lint` <!-- completed: -->
-- [ ] Final vocabulary check: no `task` / `Task` / `task_id` identifier remains in `cafleet/src/` or `admin/src/`; no `tasks`-table / `--task-id` / `<task-id>` / `[task-id]` mention remains in SPEC.md, `docs/`, any `skills/` tree, or `.claude/skills/skill-author/` <!-- completed: -->
+- [x] Sweep the remaining ~24 test files: fixtures, assertions, test names, and the `test_render_task.py` → `test_render_message.py` file rename <!-- completed: 2026-07-12T01:15 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format`, `mise //admin:lint` <!-- completed: 2026-07-12T01:15 -->
+- [x] Final vocabulary check: no `task` / `Task` / `task_id` identifier remains in `cafleet/src/` or `admin/src/`; no `tasks`-table / `--task-id` / `<task-id>` / `[task-id]` mention remains in SPEC.md, `docs/`, any `skills/` tree, or `.claude/skills/skill-author/` <!-- completed: 2026-07-12T01:15 -->
 
 ---
 
