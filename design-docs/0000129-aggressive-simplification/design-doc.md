@@ -1,7 +1,7 @@
 # Aggressive Simplification: Drop the Administrator, Consolidate CLI, Docs, and Skills
 
 **Status**: Approved
-**Progress**: 23/49 tasks complete
+**Progress**: 28/50 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -11,7 +11,7 @@ Shrink the repository along five axes without losing fundamental features: delet
 ## Success Criteria
 
 - [ ] The admin WebUI is fully intact: `admin/`, `cafleet/src/cafleet/webui/`, `cafleet/tests/webui/`, and `cafleet/src/cafleet/cli/server.py` exist; `cafleet server --help` exits 0; `fastapi` and `uvicorn` remain in `cafleet/pyproject.toml` and `uv.lock`; `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` remain as settings; the WebUI docs (`docs/how-to/use-the-webui.md`, `docs/spec/webui-api.md`, SPEC.md §WebUI, README pitch/bullet) are restored
-- [ ] `cafleet fleet create` seeds exactly one built-in member (the root Director) and its output carries no administrator field; the member `kind` taxonomy is exactly `director` / `monitor` / `member`
+- [ ] `cafleet fleet create` seeds exactly one built-in member (the root Director) and its output carries no administrator field; the member `kind` taxonomy is exactly `director` / `monitor` / `member`; the WebUI sends as the root Director (per § B *WebUI sender model*) and its rebuilt bundle carries no administrator branch
 - [ ] Alembic migration `0002` deregisters legacy `builtin-administrator` rows; the chain is linear `0001 → 0002` and the chain-guard test in `tests/db/test_alembic_smoke.py` asserts it
 - [ ] `cafleet member nudge` no longer exists; re-engagement is documented as `cafleet message send`
 - [ ] `cafleet member list` has a single output shape (no `--activity` / `--all` flags, both fail with Click's `No such option`, exit 2): every active registry entry with `kind` and `idle` columns; the WebUI `/members` endpoint still serves roster rows (`description` / `status` / `registered_at`) via the retained `broker.list_roster`
@@ -58,7 +58,9 @@ The WebUI doc/spec surfaces removed by the already-landed Step 1–4 commits are
 
 ### B. Remove the built-in Administrator member
 
-The Administrator is seeded per fleet, has no pane, is excluded from monitoring and broadcasts, cannot be deregistered, and is referenced by no command or documented workflow (`webui/api.py` has no Administrator reference; the WebUI renders whatever the roster returns). It is identified by card kind (`$.cafleet.kind` = `builtin-administrator`), not by a schema column, so removal is code + a data migration; no schema change.
+The Administrator is seeded per fleet, has no pane, is excluded from monitoring and broadcasts, cannot be deregistered, and is referenced by no command or documented CLI workflow. It is identified by card kind (`$.cafleet.kind` = `builtin-administrator`), not by a schema column, so removal is code + a data migration; no schema change.
+
+**WebUI sender model (user decision, mid-execution)**: the WebUI frontend previously sent messages AS the Administrator (`admin/src/Dashboard.tsx` selected the `administrator`-kind member as `sender_id` and disabled Send when absent). Post-removal, the WebUI sends as the fleet's **root Director**: Dashboard selects the `director`-kind member as sender (Send disabled only if no active Director exists — a state no real fleet reaches); the recipient dropdown excludes the sender (unchanged semantics, now keyed off the Director); the `administrator` literal disappears from `types.ts`'s kind union and from every component branch (`MessageInput`, `MemberAvatar`, `Sidebar`, `MemberDetail`, `AppHeader` if referenced). Rebuild the bundle via `mise //admin:build` so `webui/dist` matches. `webui/api.py` needs no change (it has no Administrator reference).
 
 | Site | Change |
 |---|---|
@@ -203,13 +205,15 @@ Steps 1–4 landed under the original (pre-revision) scope; their checked tasks 
 
 ### Step 5: restore the WebUI surfaces (scope revision)
 
+
 The Step 5 code deletion staged under the original scope was fully reverted in the working tree (admin/, webui/, server.py, queries.py, config, pyproject, mise tasks, uv.lock — nothing was committed). This step reverts the WebUI-related **documentation** edits that DID land in the Step 1–3 commits, with the § A re-sweep constraint (restored text must not reintroduce Administrator / nudge / `--activity` / `--all` / `--tail` mentions).
 
-- [ ] Restore `docs/how-to/use-the-webui.md` and `docs/spec/webui-api.md` from git history; restore both `zensical.toml` nav rows; re-sweep the restored pages per § A <!-- completed: -->
-- [ ] Restore the WebUI/server mentions swept from `docs/` (file list in § A); restore the `server` command section in `docs/spec/cli-options.md` and the `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` rows in `docs/get-started/configure.md` <!-- completed: -->
-- [ ] Restore SPEC.md: WebUI module spec (§6.8), `server` command surface, `broker_host` / `broker_port` configuration rows, and the other pruned WebUI mentions; keep the broker-module section consistent with § C2 (queries.py / get_member_names / list_monitor_configs / list_roster stay; `list_members_with_activity` goes; single CLI `list_members` documented) <!-- completed: -->
-- [ ] Restore README (pitch + Specification bullet via `/update-readme`), CLAUDE.md tech-stack line, `.claude/rules/commands.md` WebUI/admin bullets, and the `.claude/settings.json` `Bash(mise //admin*)` allow row <!-- completed: -->
-- [ ] `mise //:docs-build` passes with the restored nav; grep confirms the restored files carry no Administrator / nudge / `--activity` / `--all` / `--tail` mentions <!-- completed: -->
+
+- [x] Restore `docs/how-to/use-the-webui.md` and `docs/spec/webui-api.md` from git history; restore both `zensical.toml` nav rows; re-sweep the restored pages per § A <!-- completed: 2026-07-11T11:35 -->
+- [x] Restore the WebUI/server mentions swept from `docs/` (file list in § A); restore the `server` command section in `docs/spec/cli-options.md` and the `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` rows in `docs/get-started/configure.md` <!-- completed: 2026-07-11T11:35 -->
+- [x] Restore SPEC.md: WebUI module spec (§6.8), `server` command surface, `broker_host` / `broker_port` configuration rows, and the other pruned WebUI mentions; keep the broker-module section consistent with § C2 (queries.py / get_member_names / list_monitor_configs / list_roster stay; `list_members_with_activity` goes; single CLI `list_members` documented) <!-- completed: 2026-07-11T11:35 -->
+- [x] Restore README (pitch + Specification bullet via `/update-readme`), CLAUDE.md tech-stack line, `.claude/rules/commands.md` WebUI/admin bullets, and the `.claude/settings.json` `Bash(mise //admin*)` allow row <!-- completed: 2026-07-11T11:45 -->
+- [x] `mise //:docs-build` passes with the restored nav; grep confirms the restored files carry no Administrator / nudge / `--activity` / `--all` / `--tail` mentions <!-- completed: 2026-07-11T11:45 -->
 
 ### Step 6: code — Administrator removal
 
@@ -218,6 +222,7 @@ The Step 5 code deletion staged under the original scope was fully reverted in t
 - [ ] `broker/messaging.py`: drop the administrator condition from the broadcast recipient query <!-- completed: -->
 - [ ] `broker/_shared.py`: delete `ADMINISTRATOR_KIND` / `is_administrator` (and `_card_kind` if uncalled); collapse `derive_member_kind` to 3 values; `broker/__init__.py`: drop the export <!-- completed: -->
 - [ ] `output/formatters.py` `format_fleet_create`: compact `<fleet_id> director=<member_id>`; full block loses the administrator line <!-- completed: -->
+- [ ] Rework the WebUI sender model per § B: `admin/src/{Dashboard,MessageInput,MemberAvatar,Sidebar,MemberDetail}.tsx` + `types.ts` switch from the administrator to the director kind; rebuild via `mise //admin:build` <!-- completed: -->
 - [ ] Generate migration `0002` (`mise //cafleet:makemigration "deregister builtin administrator members"`), hand-edit to the pure data migration in § B (no-op downgrade) <!-- completed: -->
 - [ ] Update the chain-guard test in `tests/db/test_alembic_smoke.py`: 2 revisions, `0002.down_revision == "0001"`, rename the test <!-- completed: -->
 
@@ -236,7 +241,7 @@ The Step 5 code deletion staged under the original scope was fully reverted in t
 - [ ] Delete `tests/broker/test_administrator.py`, all nudge tests (including the entry in `tests/cli/test_text_input.py`'s shared command matrix), `tests/cli/test_client_command.py` (unique coverage moves into the message suites); `tests/webui/` and `tests/cli/test_server.py` stay per scope revision <!-- completed: -->
 - [ ] Delete `tests/cli/test_agent_flags_removed.py`, `test_agent_group_removed.py`, `test_db_group_removed.py`, and the 0000128 pre-subcommand `--json` guard <!-- completed: -->
 - [ ] Consolidate the member-list suites into `tests/cli/test_member_list.py` covering the single shape (text columns, JSON fields, placementless/pending, idle) <!-- completed: -->
-- [ ] Update the remaining suites: fleet bootstrap/kind/messaging/monitor (Administrator removal, broadcast recipients, 3-value kind), capture (`--tail`), herdr + the `tests/monitor/test_loop.py` fake-backend stub (`wait_agent_status`), fleet-create output; `tests/broker/test_typed_columns.py` keeps its queries.py cases <!-- completed: -->
+- [ ] Update the remaining suites: fleet bootstrap/kind/messaging/monitor (Administrator removal, broadcast recipients, 3-value kind), capture (`--tail`), herdr + the `tests/monitor/test_loop.py` fake-backend stub (`wait_agent_status`), fleet-create output; `tests/broker/test_typed_columns.py` keeps its queries.py cases; `tests/webui/` cases asserting the administrator sender/kind move to the Director sender model <!-- completed: -->
 
 ### Step 9: verification
 
@@ -254,3 +259,4 @@ The Step 5 code deletion staged under the original scope was fully reverted in t
 | 2026-07-11 | Initial draft |
 | 2026-07-11 | Reviewer round 1: accurate `member nudge` delta rationale; `member list` drops the constant `status` column and records the `description`/`registered_at` JSON drop; corrected `template.md` inbound links; test enumeration extended (`test_server.py`, `test_text_input.py`, `test_typed_columns.py`, `test_loop.py` stub); Steps 5–8 declared one atomic block; added `.claude/settings.json` `mise //admin*` cleanup; dropped the no-op `update-readme` sweep |
 | 2026-07-11 | **Scope revision (user, mid-execution)**: the admin WebUI stays. Axis A becomes a restoration spec (Step 5 reverts the landed WebUI doc/spec/README sweeps; the staged WebUI code deletion was reverted uncommitted). Broker WebUI dependencies (`queries.py`, `get_member_names`, `list_monitor_configs`, `list_roster`) stay; C2 keeps `list_roster` as the WebUI provider; F keeps `tests/webui/` and `test_server.py`. Success criteria and Steps 5/8/9 rewritten accordingly; task total 50 → 49 |
+| 2026-07-11 | **Arbitration (user)**: post-Administrator WebUI sender model = the root Director. § B gains the *WebUI sender model* spec (frontend rework + `mise //admin:build` rebuild as a new Step 6 task, `tests/webui/` sender-model update in Step 8); task total 49 → 50 |

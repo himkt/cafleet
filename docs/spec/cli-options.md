@@ -24,6 +24,7 @@ subcommand rejects it with `No such option`.
 | `setup db` | Migrate the database schema only | no | none | [setup db](#setup-db) |
 | `setup skill` | Install the skills + record the installed version | no | none | [setup skill](#setup-skill) |
 | `doctor` | Print the resolved multiplexer backend + the calling pane's identifiers + the skills-install report | no | none | [doctor](#cafleet-doctor) |
+| `server` | Start the admin WebUI server | no | none | [server](#cafleet-server) |
 | `fleet create` | Create a fleet with its root Director | no | none | [fleet create](#fleet-create) |
 | `fleet list` | List non-deleted fleets | no | none | [fleet list](#fleet-list) |
 | `fleet show` | Show one fleet (soft-deleted included) | yes | none | [fleet show](#fleet-show) |
@@ -175,7 +176,8 @@ per-subcommand option) to disable truncation; it composes orthogonally with
 |---|---|---|---|
 | `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Also bounds the broker's inline-preview truncation. `member.description` truncation uses a separate hard-coded 60-codepoint limit. |
 
-This applies to CLI emit sites only — `member capture` content is untouched.
+This applies to CLI emit sites only — FastAPI `/api/*` responses
+([webui-api.md](./webui-api.md)) and `member capture` content are untouched.
 A `--quiet` flag on `cafleet message send`, `cafleet message ack`, and
 `cafleet member ping` suppresses the normal output and prints only the bare
 `task_id` (the target member id for `ping`), for shell capture.
@@ -254,8 +256,8 @@ runs:
 3. Otherwise the command proceeds silently.
 
 Homes with no recorded row are not checked. Exempt surfaces: the `setup` group
-(must remain runnable to repair) and `doctor` (reports instead of
-blocking). Group-level help (`cafleet fleet --help`) prints before the callback
+(must remain runnable to repair), `doctor` (reports instead of blocking), and
+`server`. Group-level help (`cafleet fleet --help`) prints before the callback
 runs and always works; subcommand help runs the group callback first, so under
 a missing/stale install the guard errors instead of printing help.
 
@@ -355,6 +357,23 @@ skills:
 
 Exit 1 on any multiplexer or environment failure (no supported multiplexer
 detected, ambiguous environment, binary not on `PATH`, pane not discoverable).
+
+## `cafleet server` — Admin WebUI Server {#cafleet-server}
+
+Starts the admin WebUI FastAPI app via uvicorn (uvicorn defaults — no reload,
+workers, or log-level flags; users who need them invoke uvicorn directly,
+which is what `mise //cafleet:dev` does). CLI commands do not require this
+server. Does not accept `--fleet-id`.
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--host` | `settings.broker_host` (default `127.0.0.1`) | Bind address. Overrides `CAFLEET_BROKER_HOST` when both are set. |
+| `--port` | `settings.broker_port` (default `8000`) | Bind port. Overrides `CAFLEET_BROKER_PORT` when both are set. |
+
+Flag wins over env var; env var wins over the hardcoded default. If the
+bundled WebUI dist directory does not exist, the app warns on stderr
+(`warning: admin WebUI is not built. / will return 404. Run 'mise
+//admin:build'.`); port-in-use errors propagate unwrapped from uvicorn.
 
 ## `cafleet message` — Message Broker
 

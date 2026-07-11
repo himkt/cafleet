@@ -4,13 +4,17 @@
 
 - Run tests: `mise //cafleet:test`
 - Lint: `mise //cafleet:lint`
+- Lint (admin): `mise //admin:lint`
 - Format: `mise //cafleet:format`
 - Type check: `mise //cafleet:typecheck`
 - Sync dependencies: `mise //:uv-sync`
 - Install the `cafleet` CLI (editable uv tool): `mise //cafleet:install` — run this after pulling any change under `cafleet/src/cafleet/` if the global `cafleet` binary was previously installed non-editably; the editable reinstall makes future source edits take effect without another install.
 - Build cafleet wheel: `mise //cafleet:build` — emits the wheel into `cafleet/dist/`.
 - Generate a DB migration: `mise //cafleet:makemigration "short description"` — autogenerates an Alembic migration with the next sequential `000N` id. Requires the DB at head first (`cafleet setup db`). This is the **only** supported way to create a migration — see `database-migrations.md`; never invoke `alembic revision` directly.
-- Publish cafleet: `mise //cafleet:publish` — chained task that builds the wheel, then runs `uv publish`.
+- Publish cafleet: `mise //cafleet:publish` — chained task that builds admin assets, builds the wheel, then runs `uv publish`.
+- Start admin WebUI server: either `cafleet server` (packaged launcher; `--host` / `--port` flags, defaults `127.0.0.1:8000` from `settings.broker_host` / `settings.broker_port`, also honors `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT`) **or** `mise //cafleet:dev` (runs `uv run --package cafleet uvicorn cafleet.webui.app:app --host 127.0.0.1 --port 8000` directly; does NOT delegate to `cafleet server`). Both are independent entry points for the same FastAPI app and neither runs with `--reload` — contributors restart manually between edits. WebUI-only: CLI commands do not require a running server. Serves `/` only after `mise //admin:build` has been run.
+- Start admin dev server: `mise //admin:dev`
+- Build admin: `mise //admin:build`
 
 ## mise Tasks
 

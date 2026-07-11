@@ -17,6 +17,7 @@ nav = [
         "how-to/index.md",
         { "Run a mixed-backend team" = "how-to/mixed-backend-team.md" },
         { "Monitor and recover members" = "how-to/monitor-and-recover.md" },
+        { "Use the admin WebUI" = "how-to/use-the-webui.md" },
         { "Design-doc-driven development" = "how-to/design-doc-development.md" },
     ] },
     { "Concepts" = [
@@ -32,6 +33,7 @@ nav = [
         { "Message envelope" = "spec/message-envelope.md" },
         { "CLI options" = "spec/cli-options.md" },
         { "Multiplexer backends" = "spec/multiplexer-backends.md" },
+        { "WebUI API" = "spec/webui-api.md" },
         { "Coding-agent backends" = [
             "reference/coding-agents/index.md",
             { "Claude members" = "reference/coding-agents/claude.md" },

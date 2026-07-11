@@ -104,7 +104,7 @@ all member-driving routes back through the Director.
 The monitor scans once per **tick** and a member only comes due at a tick
 boundary, so the tick is the floor on interval precision — set it smaller than
 the smallest interval you care about. Per-member intervals are editable via
-`cafleet monitor config`. Stall detection runs on its own
+`cafleet monitor config` or the admin WebUI. Stall detection runs on its own
 independent cadence: a stall-check wake compares the pane's capture against its
 previous stall-check baseline, so two unchanged observations one interval apart
 classify it `stalled` without waiting for the (much longer) member interval.

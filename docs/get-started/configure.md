@@ -54,6 +54,7 @@ The recommended Codex rules for `cafleet` commands live at
 prefix_rule(pattern = ["cafleet", "--version"],  decision = "allow")
 prefix_rule(pattern = ["cafleet", "setup"],      decision = "allow")
 prefix_rule(pattern = ["cafleet", "doctor"],     decision = "allow")
+prefix_rule(pattern = ["cafleet", "server"],     decision = "allow")
 prefix_rule(pattern = ["cafleet", "fleet"],      decision = "allow")
 prefix_rule(pattern = ["cafleet", "message"],    decision = "allow")
 prefix_rule(pattern = ["cafleet", "monitor"],    decision = "allow")

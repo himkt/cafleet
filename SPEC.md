@@ -10,10 +10,14 @@ resolves type disagreements centrally, and carries the full per-module
 behavioral contract inline — there is no external detail document to consult.
 
 The implementation is **documented as the eight sections** below, each specified
-in full in [§6](#6-module-specifications). This documentation grouping matches
-the **architectural decomposition** in [§3](#3-module-layout) /
-[§4](#4-architecture--module-dependency-graph), which keeps
-`config` as its own leaf module and `cli` as its own unit (eight modules total).
+in full in [§6](#6-module-specifications). Note that this documentation grouping
+differs from the **architectural decomposition** in [§3](#3-module-layout) /
+[§4](#4-architecture--module-dependency-graph): the dependency graph keeps
+`config` as its own leaf module and `cli` as its own unit (nine modules total),
+whereas the table below documents `config` inside the WebUI section (§6.8) and
+gives `cli` its own section (§6.3). `config` is an independent module regardless
+of where it is documented (§3/§4/§11) — the "WebUI + Config" row is a doc-layout
+choice, not a merge.
 
 | Module | Scope |
 |---|---|
@@ -24,7 +28,7 @@ the **architectural decomposition** in [§3](#3-module-layout) /
 | Multiplexer | tmux + herdr integration, keystroke injection |
 | Monitor | heartbeat supervision loop |
 | Coding agents | claude/codex/opencode backends |
-| Config | `CAFLEET_*` settings |
+| WebUI + Config | HTTP API + `CAFLEET_*` settings |
 
 Where this document states both a high-level invariant and a detailed rule, the
 detailed rule governs; they are written to agree.
@@ -38,7 +42,8 @@ SQLite database holds fleets, members, their tmux placements, messaging tasks,
 and a monitor schedule. The `cafleet` CLI is the primary surface: it creates
 fleets, spawns coding-agent members into tmux panes, routes messages between
 them by keystroke-injecting inline previews, and runs a heartbeat loop that
-keeps a dedicated *monitoring member* periodically woken.
+keeps a dedicated *monitoring member* periodically woken. An admin WebUI exposes
+a read-mostly JSON API over the same broker.
 
 **Goal:** specify the **redesigned** `cafleet` command surface end-to-end so any
 implementation can reproduce it. The contract is the *interface and observable
@@ -57,6 +62,8 @@ What is part of the contract (must be reproduced):
 - **Persistence surface:** the SQLite schema at the migration head — table
   names, columns, types, nullability, defaults, foreign-key rules, indexes,
   and status/enum string values.
+- **HTTP surface:** every route, method, request/response shape, header
+  contract, and status code of the WebUI API.
 - **Observable semantics:** the task status lifecycle, the soft-delete +
   cascade rules, the monitor claim/heartbeat/clear protocol, the message
   routing and best-effort notification behavior, and the stdout-vs-stderr stream
@@ -87,13 +94,19 @@ Points the per-module sections leave implicit are clarified in
 
 ## 2. Architecture stance
 
-The reimplementation is **fully synchronous**. The
-CLI, broker, monitor, multiplexer, and coding-agent layers are all synchronous:
+The reimplementation adopts a **synchronous-core + async-server** shape. The
+CLI, broker, monitor, multiplexer, and coding-agent layers are all synchronous;
+only the WebUI HTTP server may be asynchronous, and it calls the synchronous
+broker from blocking tasks.
+
+This mirrors the reference implementation's sync-CLI / async-server split:
 
 - CLI invocations stay runtime-free — no async runtime spin-up for a one-shot
   command like `cafleet message send`.
 - SQLite's per-connection write lock serializes monitor claims without async
   complication.
+- Only the long-lived server pays for an async runtime, if the target language
+  even has one.
 
 The concurrency model is an implementation choice and is not itself part of the
 contract. The one hard requirement is that the monitor's "SQLite write lock
@@ -109,23 +122,28 @@ conformant, regardless of its threading or concurrency model.
 ## 3. Module layout
 
 The implementation is organized as a set of modules, one per concern, plus a
-single CLI entry point. Whether these are separate compilation units, packages,
+single CLI entry point. The CLI embeds the WebUI as a library launched by its
+`server` subcommand. Whether these are separate compilation units, packages,
 namespaces, or directories is a target-language choice; the **dependency
 structure** below is the contract.
 
 ```
 cafleet
-├── config          Settings singleton, CAFLEET_* env
+├── config          config half: Settings singleton, CAFLEET_* env
 ├── db              connection factory, Alembic migration chain
 ├── multiplexer     Multiplexer interface, tmux + herdr backends, resolver, keystrokes
 ├── coding-agent    coding-agent interface + claude/codex/opencode
 ├── output          render + formatter layers
 ├── broker          data-access layer
 ├── monitor         heartbeat loop
+├── webui           server half: HTTP app, /api router, SPA fallback
 └── cli             command tree + handlers; the cafleet entry point
 ```
 
-**Entry points:** exactly one user-facing binary/command — `cafleet`.
+**Entry points:** exactly one user-facing binary/command — `cafleet`. There is
+no separate server binary; `cafleet server` constructs the WebUI app and serves
+it. The reference implementation's server target maps to "construct the WebUI
+application object and serve it".
 
 ---
 
@@ -137,20 +155,21 @@ to trace, defer to the edge list.
 
 ```
                  config  ◄─────────────────────┐ (leaf; CAFLEET_* settings)
-                  ▲   ▲                         │
-        ┌─────────┘   └──────────┐              │
-       db          output                    broker
-        ▲             ▲                         ▲
-        │             │                         │ (db + multiplexer + config)
-   multiplexer    coding-agent                  │
-        ▲   ▲          ▲                        │
-        │   └──────────┼─────────┐              │
-        │           monitor ─────┴──────────────┤ (broker + multiplexer)
-        │              ▲                        │
-        └────────────  cli  ────────────────────┘
+                  ▲   ▲   ▲                     │
+        ┌─────────┘   │   └──────────┐          │
+       db          output          webui        │
+        ▲             ▲              ▲   │       │
+        │             │              │   └──► broker
+        │             │              │          ▲
+   multiplexer    coding-agent       │          │ (db + multiplexer + config)
+        ▲   ▲          ▲             │          │
+        │   └──────────┼─────────┐   │          │
+        │           monitor ─────┘───┼──────────┤ (broker + multiplexer)
+        │              ▲             │          │
+        └────────────  cli  ─────────┴──────────┘
                  (broker, output, multiplexer,
                   coding-agent, monitor, config,
-                  db)  → cafleet entry point
+                  db, webui)  → cafleet entry point
 ```
 
 Edges (who depends on whom):
@@ -170,8 +189,11 @@ Edges (who depends on whom):
   inline previews), and `config` (`max_text_len` for preview truncation).
 - **monitor** — depends on `broker` (monitor DB ops + `get_fleet`) and
   `multiplexer` (`list_pane_ids`, `send_wake_trigger`).
+- **webui** — depends on `broker` and `config`. Treats broker results as
+  pass-through payloads (renaming two keys, dropping one).
 - **cli** — depends on all of the above; it is the orchestration glue that
-  wires broker ↔ multiplexer ↔ coding-agent ↔ output.
+  wires broker ↔ multiplexer ↔ coding-agent ↔ output, and embeds `webui` for
+  `cafleet server`.
 
 **Reconciled overlap points** (specced once, here, then referenced):
 
@@ -341,9 +363,9 @@ not be unified:
   (derived: `member_id == fleets.director_member_id`), `monitor` (the card
   marks a monitoring member), else
   `member` — produced by the single `derive_member_kind` collapse over the
-  SQL-supplied `is_root` flag and card kind, and shared by `get_member` and
-  `list_members`. There is no parallel two-value
-  discriminator.
+  SQL-supplied `is_root` flag and card kind, and shared by `get_member`,
+  `list_members`, `list_roster`, and the WebUI roster. There is no parallel
+  two-value discriminator.
 
 ### 5.5 Nullable `to_member_id` (resolved)
 
@@ -357,7 +379,7 @@ sentinel.
 
 ### 5.6 Result shapes vs. typed entities
 
-The reference broker returns dictionaries; the output layer is
+The reference broker returns dictionaries; the output and webui layers are
 duck-typed on them. How the boundary is modeled — typed entities (as in §5.2)
 for broker results, versus a generic JSON/value type for the output render
 walkers (which must handle heterogeneous nested shapes and conditional key
@@ -459,7 +481,7 @@ not a no-op. Both must run on every connection the reimplementation opens.
 
 ### 6.2 Broker
 
-**Scope:** the synchronous data-access layer consumed by the CLI; the only
+**Scope:** the synchronous data-access layer shared by CLI and WebUI; the only
 module that reads/writes the operational tables (fleets, members, placements,
 messaging tasks, monitor schedule/runtime, task queries). Owns
 transaction boundaries, the member-kind predicates, soft-delete + cascade, the
@@ -578,6 +600,8 @@ documented non-match, not an error mask.
   projection. Called after the multiplexer resolves a spawned pane's real id.
 - **`verify_member_fleet(member_id, fleet_id)`** — EXISTS check; **status-
   agnostic** (deregistered members still pass).
+- **`get_member_names(member_ids)`** — empty input → `{}` with no query; else a
+  map id→name; **status-agnostic**.
 
 #### Members — roster
 
@@ -596,6 +620,18 @@ documented non-match, not an error mask.
   kind, placement, last_sent, last_recv, last_ack, idle}` per row — `kind` is
   the same three values as `get_member`, `placement` is null for placementless
   rows. Backs `member list`.
+- **`list_roster(fleet_id, *, include_task_holders=False)`** — every **active**
+  registry row of the fleet: active rows LEFT OUTER
+  JOIN `member_placements`, joined against `fleets` for the `is_root` flag, the
+  card kind derived in SQL via `json_extract`, both collapsed by the single
+  `derive_member_kind` path (§5.4). With `include_task_holders=True` (the WebUI
+  roster), deregistered members that still own tasks (a task exists with
+  `context_id = member_id OR from_member_id = member_id`) are also returned, so
+  the audit-relevant deregistered set stays visible. Returns `{member_id, name,
+  description, status, registered_at, placement}` per row plus `kind` (the same
+  three values as `get_member`), with
+  `placement` null for placementless rows. Backs `GET /api/members`
+  (`include_task_holders=True`); it is not a CLI surface.
 
 #### Messaging
 
@@ -649,6 +685,16 @@ documented non-match, not an error mask.
   **cancel**: authorized = sender (`from_member_id`); new state `canceled`;
   permission error `Only the sender can cancel a task`. `input_required` is the
   only state a task may transition from.
+
+#### Queries
+
+- **`list_inbox(member_id)`** — all tasks where `context_id = member_id`, any
+  state, `broadcast_summary` excluded, ordered `status_timestamp DESC`.
+- **`list_sent(member_id)`** — all tasks where `from_member_id = member_id`, any
+  state, `broadcast_summary` excluded, ordered `status_timestamp DESC`.
+- **`list_timeline(fleet_id, limit=200)`** — tasks joined to their **sender's**
+  member row, filtered to the sender's `fleet_id`, `broadcast_summary` excluded,
+  ordered `status_timestamp DESC`, capped at `limit`.
 - **`get_task(fleet_id, task_id)`** — fleet-gated. Load; absent → value error
   `Task {task_id} not found`. Build the endpoint set `[from_member_id]`,
   appending `to_member_id` only when it is **non-null** (so a `broadcast_summary`
@@ -669,6 +715,8 @@ documented non-match, not an error mask.
 - **`get_monitor_config(fleet_id, member_id)`** — `{member_id, interval_seconds,
   last_ping_at, enabled}` with `enabled` as a boolean; None if not enrolled / not
   in fleet.
+- **`list_monitor_configs(fleet_id)`** — every enrolled member's config in the
+  fleet, `enabled` as boolean.
 - **`update_monitor_config(fleet_id, member_id, interval_seconds=None,
   enabled=None)`** — if not enrolled → application error `member {member_id} is
   not enrolled in monitoring for fleet {fleet_id}.`. **Partial update** — only
@@ -728,15 +776,16 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
 - Placements and monitor rows (monitor_config, monitor_runtime) **are
   hard-deleted** on cascade.
 - **Tasks are never deleted** — audit history is permanent.
-- Deregistered members remain visible via `verify_member_fleet`
-  (status-agnostic); they
+- Deregistered members remain visible via `verify_member_fleet`,
+  `get_member_names` (both status-agnostic), and
+  `list_roster(include_task_holders=True)` (when they still own tasks); they
   are hidden from `get_member` and `list_members` (active-only).
 
 #### Contract error strings → exception class → exit code
 
 Usage-class → exit 2; application-class → exit 1; value/permission errors are
-raised by messaging and translated by the CLI to exit 1;
-permission errors gate authorization. The exit-code policy is
+raised by messaging/queries and translated by the caller (CLI → exit 1, WebUI →
+HTTP status); permission errors gate authorization. The exit-code policy is
 §7.2; the strings below are the broker's contract.
 
 | Function | Class | Message |
@@ -762,7 +811,7 @@ permission errors gate authorization. The exit-code policy is
 
 ### 6.3 CLI
 
-**Scope:** the entire `cafleet` command tree (22 commands across 5 groups + 2
+**Scope:** the entire `cafleet` command tree (23 commands across 5 groups + 3
 top-level commands — §1, §10), the shared option guards, and the `member create`
 spawn orchestration + rollback ladder. Orchestration glue only — it wires
 broker/multiplexer/output/coding-agent. The command/option checklist is §10; this
@@ -796,7 +845,7 @@ into its spawn prompt (the placeholder substitution below).
 
 Subcommands taking `--fleet-id`: all of `member *`, `message *`,
 `monitor *`, plus `fleet show` and `fleet delete`. Commands that do not operate
-within a single existing fleet — `setup`, `doctor`, `fleet create`,
+within a single existing fleet — `setup`, `doctor`, `server`, `fleet create`,
 `fleet list` — do not declare it and reject `--fleet-id` with the parser's
 unknown-option error (exit 2).
 
@@ -1212,6 +1261,13 @@ A shared `_require_live_fleet` guard fetches the fleet; missing or soft-deleted
   mode), fetch the config; not enrolled → application error `member <member_id>
   is not enrolled in monitoring for fleet <fleet_id>.`. Else update.
 
+#### `server`
+
+Options: `--host` (string, default `settings.broker_host` = `127.0.0.1`, shown
+in help), `--port` (integer, default `settings.broker_port` = `8000`, shown in
+help). Serves the WebUI app on host/port; port-in-use and all other server
+errors propagate unwrapped.
+
 #### `setup`
 
 `setup` is a Click **group** with `invoke_without_command=True`. Bare `cafleet
@@ -1330,8 +1386,8 @@ before any subcommand body runs:
 3. Otherwise proceed silently.
 
 Homes with no recorded row (an agent that was never installed) are not checked.
-Exempt surfaces: `setup` (must remain runnable to repair) and `doctor` (reports
-instead of blocking).
+Exempt surfaces: `setup` (must remain runnable to repair), `doctor` (reports
+instead of blocking), and `server` (human-facing WebUI, not fleet-scoped).
 
 **Help interaction.** Group-level help (`cafleet fleet --help`) is parsed
 eagerly before the callback runs and always works — even under a missing or
@@ -1368,8 +1424,8 @@ variable is injected into the pane (§7.1).
 **Scope:** every line of human/machine output for members, tasks, fleets,
 and the monitor. Pure string/structure transformation — no I/O, no DB,
 no network; the only external input is `settings.max_text_len` (default `200`).
-One consumer depends on these exact shapes: the CLI (which prints them). This
-module
+Two consumers depend on these exact shapes: the CLI (which prints them) and the
+WebUI (which reuses the JSON serialization but bypasses truncation). This module
 sets no exit codes. (`doctor` output is produced by the CLI, §6.3, not here.)
 
 The text-vs-JSON selection is the CLI's: `--full` and `--json` are **documented**
@@ -1426,7 +1482,8 @@ an idle-seconds humanizer; a ping-age humanizer.
 separator `,`, key/value separator `:`); **non-ASCII kept raw** as UTF-8 (e.g.
 `…` stays 3 bytes), never escaped to `\uXXXX`; **insertion-order keys** (the
 render functions build their output maps in a fixed key order, which is part of
-the contract).
+the contract). The WebUI bypasses `truncate_*` but its JSON serialization must
+still obey these three rules.
 
 #### The `unicast` suppression sentinel
 
@@ -1495,6 +1552,10 @@ Every field is read with required access unless marked optional; required access
   "(pending)")}` feed the `backend` / `pane_id` cells, `-` cells when null),
   `last_sent`, `last_recv`, `last_ack` (ISO str | null), `idle` (int seconds |
   null).
+- **Roster row (the WebUI `GET /api/members` roster)**: `member_id`, `name`,
+  `description`, `status`, `registered_at`, `kind` (the three `get_member`
+  values), `placement` (null when placementless); serialized directly by the
+  WebUI, not by a formatter.
 - **Monitor-status payload**: `{runtime, members}`. `runtime.running` (bool, req);
   when true also `pid`, `last_tick_age_seconds`, `tick_seconds`, `started_at`.
   Each member: `member_id`, `name`, `role`, `interval_seconds`,
@@ -2324,12 +2385,169 @@ heading and its blank line); the file ends with exactly one trailing newline.
   platform-dependent): `cannot materialize CAFleet opencode agent preset at
   {target}: {error}`
 
-### 6.8 Config
+### 6.8 WebUI + Config
 
-**Scope:** the global `Settings` singleton from the `CAFLEET_*` env block —
-consumed CLI-wide. All configuration detail — the env-var table, defaults,
-single explicit binding per field (no prefix magic), loud failure on bad
-numerics, and the `max_text_len` truncation scope — is specified in §7.1.
+**Scope (two concerns):** (a) the HTTP app factory `create_app`, the `/api/*`
+router, the `X-Fleet-Id` header dependency, the SPA-fallback static server, and
+the `cafleet server` launcher; (b) the global `Settings` singleton from the
+`CAFLEET_*` env block — consumed CLI-wide, not webui-local. The reference builds
+a specific HTTP framework's app; the contract below is stack-neutral. The config
+env-var table is §7.1.
+
+#### App factory (`create_app`)
+
+Takes an optional explicit "WebUI dist directory" argument and returns the
+configured HTTP application:
+
+1. Constructs an app titled `CAFleet Admin`, version `0.1.0`. **This `0.1.0` is a
+   hardcoded literal, independent of the CLI's package version.** The CLI
+   `--version` output and `setup`'s skills-release tag (§6.3) read the **installed
+   package version** dynamically; the WebUI app-version string does not track it.
+   Keep them decoupled.
+2. **Registers the `/api/*` router before mounting the static file server.**
+   This ordering is load-bearing: unmatched `/api/*` paths must produce a JSON
+   404 from the router, never be swallowed by the SPA fallback.
+3. The "not built" warning is enabled only when the caller passed no explicit
+   dist directory (the default-dir branch); an explicit directory **suppresses**
+   it. With no directory given, it resolves the default dist dir (`<webui module
+   dir>/dist`).
+4. If the warning is enabled **and** the resolved dist path does not exist, print
+   this exact one-line text to **stderr** (one time, at factory call):
+   ```
+   warning: admin WebUI is not built. / will return 404. Run 'mise //admin:build'.
+   ```
+5. If the dist path exists, mount the SPA static file server at `/`, named
+   `webui`. If it does not exist, no mount is added: `/` and every non-API path
+   404, while `/api/*` still works.
+
+A module-level app singleton is created by calling `create_app()` with no
+argument (the server target); because it uses the default dir, it emits the
+stderr warning when the SPA is unbuilt.
+
+#### SPA static file server
+
+Wraps a directory and a reserved-prefix set `("ui", "api")`. Delegates to the
+static handler; returns any non-404 result unchanged. On a 404: if the **first
+path segment** (the path with the leading `/` stripped — split on the first `/`,
+take segment 0) is in the reserved set, re-raise the genuine 404; otherwise serve
+`index.html` (the SPA entry). So `GET /anything/else` with no asset returns
+`index.html` (200); `GET /ui/...` or `/api/...` with no asset returns a genuine
+non-HTML 404.
+
+#### `X-Fleet-Id` header dependency
+
+Every data endpoint (everything except `GET /api/fleets`) resolves the fleet via
+a header dependency reading `X-Fleet-Id` (case-insensitive). Resolution order and
+exact error details (each serialized as `{"detail": <string>}`):
+
+1. Missing or **empty** → `400`, detail `X-Fleet-Id header required`. (An empty
+   string counts as missing; a whitespace-only value passes this check and fails
+   the next.)
+2. Not parseable to an integer (including whitespace-only) → `400`, detail
+   `X-Fleet-Id must be an integer`.
+3. Fleet does not exist → `404`, detail `Fleet not found`.
+4. Otherwise return the integer fleet id.
+
+#### Wire renames & response wrapping
+
+When projecting broker message rows to the wire (inbox / sent / timeline):
+`status_state` → `status`, `text` → `body`. The monitor-config projection renames
+nothing but **drops** `member_id`. `GET /api/fleets` returns a **bare JSON
+array**; every other list endpoint wraps in an object (member rows under
+`members`, message rows under `messages`). All HTTP errors serialize as
+`{"detail": <string>}`; body-validation failures use the framework's default
+`422` validation-error body instead.
+
+#### The 9 routes
+
+- **`GET /api/fleets`** — unscoped (no `X-Fleet-Id`). Returns the broker fleet
+  list **directly as a bare array**.
+- **`GET /api/members`** — fleet-scoped. Returns the roster via
+  `list_roster(include_task_holders=True)` (§6.2) — every active registry row
+  plus deregistered members still owning tasks — each row carrying the
+  three-value `kind` (§5.4) and a `monitor` field set to the projected monitor
+  config when an enrolled config exists, else `null`.
+  Response `{"members": [ <member dict> + "monitor": <MonitorConfig>|null, … ]}`.
+  Projected `MonitorConfig`: `{interval_seconds, last_ping_at, enabled}`
+  (`member_id` dropped).
+- **`GET /api/monitor`** — fleet-scoped. Returns `{running, pid, tick_seconds,
+  last_tick_at, last_tick_age_seconds, started_at}`. Read the runtime row and
+  the live-check (current UTC). If absent **or** not live: `running=false`,
+  `pid=null`, `tick_seconds` = the row's value when a row exists else `null`,
+  `last_tick_at`/`last_tick_age_seconds`/`started_at` all `null` — **a stale row
+  never leaks a lingering pid or start time**. When live: `running=true` with the
+  live `pid`, `tick_seconds`, `last_tick_at`, `started_at`, and a computed
+  `last_tick_age_seconds` (null when `last_tick_at` is null; else whole-seconds
+  now − parsed `last_tick_at`, **integer-truncated**).
+- **`GET /api/members/{member_id}/monitor`** — fleet-scoped. Absent config → `404`,
+  detail `Member not enrolled`; else the projected `MonitorConfig` (single
+  object).
+- **`PATCH /api/members/{member_id}/monitor`** — fleet-scoped. Body
+  `{interval_seconds?: int, enabled?: bool}` (both optional). A present
+  `interval_seconds` must be **≥ 1**; `< 1` → `422` (framework default). A
+  `null`/`null` patch is a valid no-op. Pre-check the config; absent → `404`,
+  detail `Member not enrolled`. Then update; if the member was deregistered
+  between the pre-check and the update (TOCTOU), the raised error is caught and
+  **collapsed to `404` detail `Member not enrolled`** (not 500). Returns the
+  projected updated config.
+- **`GET /api/members/{member_id}/inbox`** — fleet-scoped. Member not in fleet →
+  `404`, detail `Member not found`; else `{"messages": [ <FormattedMessage>, …
+  ]}` over the member's inbox.
+- **`GET /api/members/{member_id}/sent`** — fleet-scoped. Same as inbox over sent
+  messages; same `404` detail `Member not found`.
+- **`GET /api/timeline`** — fleet-scoped, no per-member check. `{"messages": […]}`
+  over the fleet's messages, hard-capped at the **200** most recent
+  (`status_timestamp DESC`).
+- **`POST /api/messages/send`** — fleet-scoped. Body `{from_member_id: int,
+  to_member_id: int | "*", text: string}`. `to_member_id` deserializes as **either
+  a JSON integer or the exact JSON string `"*"`** (broadcast); anything else
+  (e.g. a stringified integer `"5"`) is rejected, not coerced. If `from_member_id`
+  is not in the fleet → `400`, detail `from_member not in fleet`. If `"*"`:
+  broadcast, return `{task_id: <summary task_id>, status: <summary
+  status_state>}`. Else: recipient not an **active** member in the fleet →
+  `404`, detail `Member not found`; otherwise send and return `{task_id,
+  status}`. Both branches:
+  `{task_id: int, status: string}` (`status` = the broker task's `status_state`).
+  The SPA always submits `from_member_id = director.member_id` (the fleet's
+  root Director); the endpoint itself is sender-agnostic.
+
+**`FormattedMessage`** (one element of any `messages` array): `{task_id,
+from_member_id, from_member_name, to_member_id, to_member_name, type, status,
+created_at, status_timestamp, origin_task_id, body}`. Names are resolved by a
+single bulk lookup over the union of all `from_member_id`/`to_member_id` values,
+using **direct keyed access** — a missing id is a hard failure (→ 500), never a
+silent fallback. `status` is the renamed `status_state`; `body` the renamed
+`text`; `type` the raw row type. Empty input → empty array.
+
+#### `cafleet server` launcher
+
+Runs the WebUI app under an HTTP server. `--host` (default `settings.broker_host`)
+and `--port` (default `settings.broker_port`, integer) both read their defaults
+from settings at command-definition time and are shown in `--help`. Serves the
+app singleton in a single process **with no auto-reload**. Because the defaults
+come from settings, `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` are honored
+indirectly. This is the only entry point to the HTTP server.
+
+#### Configuration
+
+All configuration detail — the env-var table, defaults, single explicit binding
+per field (no prefix magic), loud failure on bad numerics, and the `max_text_len`
+truncation scope — is specified in §7.1.
+
+#### Invariants
+
+1. **Router before static** — `/api/*` 404s serialize as JSON, never the SPA
+   `index.html`.
+2. **Reserved-prefix hard-404** — first path segment `ui` or `api` never falls
+   back to `index.html`.
+3. **Stale monitor never leaks process fields** — when not live, `pid` /
+   `started_at` / `last_tick_at` / `last_tick_age_seconds` are all `null` even if
+   a stale row exists; only `tick_seconds` survives from a stale row.
+4. **Field renames are wire contract** — `status_state → status`, `text → body`,
+   `member_id` dropped from the monitor projection.
+5. **`list_fleets` returns a bare array**; every other list wraps in
+   `{"members"|"messages": [...]}`.
+6. **PATCH TOCTOU collapses to 404**, not 500.
 
 ---
 
@@ -2345,6 +2563,8 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 | Field | Env var | Type | Default |
 |---|---|---|---|
 | `database_url` | `CAFLEET_DATABASE_URL` | string | `sqlite:///` + `~/.local/share/cafleet/cafleet_v3.db` (home expanded **at startup**) |
+| `broker_host` | `CAFLEET_BROKER_HOST` | string | `"127.0.0.1"` |
+| `broker_port` | `CAFLEET_BROKER_PORT` | integer (16-bit port) | `8000` |
 | `max_text_len` | `CAFLEET_MAX_TEXT_LEN` | non-negative integer | `200` |
 | `multiplexer` | `CAFLEET_MULTIPLEXER` | optional string | `None` (auto-detect) |
 | `monitor_stall_interval` | `CAFLEET_MONITOR_STALL_INTERVAL` | non-negative integer | `240` |
@@ -2362,10 +2582,10 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
   user-supplied `CAFLEET_DATABASE_URL` is passed through verbatim (no `~`
   expansion, so a user value must already be absolute). Net default on home
   `/home/u`: `sqlite:////home/u/.local/share/cafleet/cafleet_v3.db` (four slashes).
-- A non-integer `max_text_len` must **fail loudly at startup** (a
+- A non-integer `broker_port`/`max_text_len` must **fail loudly at startup** (a
   hard validation error, not a silent default).
 - `max_text_len` truncates only CLI echo + the broker inline-preview keystroke.
-  It never
+  It is **never** applied by the WebUI API (raw broker results) and never
   truncates the persisted `Task.text` column.
 
 **Spawned-pane environment.** The only environment variable forwarded into a
@@ -2385,7 +2605,8 @@ printer that writes `Error: <message>` to stderr.
 |---|---|---|---|
 | usage error | **2** | argument/parse/usage mistakes: missing required option; unknown option; invalid integer; integer-range violations; mutually-exclusive-option violations; the spawn-prompt placeholder errors; explicit usage errors | a usage-class error; prints `Error: <msg>` (+ usage line). Parser-native parse errors already exit 2. |
 | application error | **1** | application/runtime errors: runtime conflicts (one-monitor rule, not-enrolled, not-found-on-delete), the root-Director-deregistration guard, the spawn rollback ladder, and the missing-`--fleet-id` callback error | an app-class error; prints `Error: <msg>`. |
-| value-error / permission-error (broker/messaging) | translated by caller | the CLI wraps to exit 1 | distinct error variants; permission-error gates authorization (recipient-acks / sender-cancels). |
+| value-error / permission-error (broker/messaging/queries) | translated by caller | callable from CLI **and** WebUI; CLI wraps to exit 1, WebUI maps to HTTP status | distinct error variants; permission-error gates authorization (recipient-acks / sender-cancels). |
+| HTTP error | — | serialized `{"detail": <string>}` | HTTP error responses with the same status + body. |
 
 The root-Director-deregistration guard raises a single **application error
 (exit 1)** on both the broker side and the `member delete` CLI side. The one
@@ -2432,14 +2653,16 @@ distinct forms with **two different provenances**:
 
 Output formatting is specified in §6.4. The cross-cutting choices: the CLI selects
 text-vs-JSON (the shared per-subcommand `--json` flag, §6.3) and full-vs-compact
-(documented `--full`).
+(documented `--full`); the WebUI bypasses `truncate_*`
+(raw broker results) but its JSON serialization still preserves key order and raw
+UTF-8 (no ASCII escaping).
 
 ### 7.4 Logging & stdout discipline
 
 - The monitor loop emits per-due-member heartbeat lines to **stdout**
   (`{iso} due member {id} ({name}) [{reasons}] -> wake monitor`), `name` raw
   (unsanitized), the `[{reasons}]` suffix listing that member's joined wake reasons.
-- The `member create`/`member delete` rollback and
+- The "WebUI not built" warning, `member create`/`member delete` rollback and
   timeout diagnostics, and `monitor start`'s "no monitoring member" warning all
   go to **stderr**. Preserve the stream choice (stdout vs. stderr) — it is part
   of the observable contract.
@@ -2528,10 +2751,13 @@ for bare `setup`'s db half and for `setup db` — both print the same lines.
     `monitor_tick` against a fake broker+multiplexer asserting the `woke`-gated
     `record_pings` and the `STOP` paths.
   - *Config* — env-var parsing, the default-URL home expansion, and loud failure
-    on a non-integer `max_text_len`.
+    on non-integer port/len.
 - **Integration:**
   - End-to-end DB lifecycle: `create_fleet → register_member → send_message →
     poll → ack`, asserting persisted rows and soft-delete cascade.
+  - WebUI: spin the app over an in-memory/temp DB; assert each route's status
+    codes, the wire renames, the bare-array vs. wrapped shapes, the `X-Fleet-Id`
+    errors, and the SPA/reserved-prefix fallback.
   - Monitor claim/heartbeat/clear concurrency: two "processes" (distinct fake
     pids) racing `claim_monitor_runtime`; assert single-winner and the displaced
     loser self-terminates (`heartbeat` returns false) + no-op clear.
@@ -2546,7 +2772,7 @@ for bare `setup`'s db half and for `setup db` — both print the same lines.
 
 ## 10. CLI command checklist
 
-The full command surface — **22 commands across 5 groups + 2 top-level commands**.
+The full command surface — **23 commands across 5 groups + 3 top-level commands**.
 Each must be reproduced with identical option names, types, defaults,
 required-ness, documented-vs-hidden status, output shapes, and exit codes. Every
 interaction flag is now **documented** (there are no hidden flags). Per-command
@@ -2561,6 +2787,7 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 - [ ] `cafleet setup db` (no options; db migration only; prints the created/upgraded/already-at-head line)
 - [ ] `cafleet setup skill` (`--agent` multiple: claude/codex/opencode; pre-flight requires `skill_installs` table)
 - [ ] `cafleet doctor` (`--json`; emits tmux block + skills-install report)
+- [ ] `cafleet server` (`--host`=settings.broker_host, `--port`=settings.broker_port)
 
 **`fleet`:**
 
@@ -2598,7 +2825,7 @@ Every `member *`, `message *`, and `monitor *` command, plus `fleet
 show` and `fleet delete`, takes the **required `--fleet-id` option** (integer);
 a missing `--fleet-id` is the shared callback's application error (exit 1,
 §6.3). It is omitted from the per-command rows above to avoid repetition.
-`setup`, `doctor`, `fleet create`, and `fleet list` do **not** take
+`setup`, `doctor`, `server`, `fleet create`, and `fleet list` do **not** take
 `--fleet-id`.
 
 ---
@@ -2640,8 +2867,8 @@ The decisions that shape this surface (full rationale in the design doc):
   to reinstall.
 - **Stale-skills guard** (§6.3): every fleet-scoped group callback validates
   recorded `skill_installs` versions against the runtime CLI version before any
-  subcommand body runs; missing/stale → hard error (exit 1); exempt: `setup`
-  and `doctor`.
+  subcommand body runs; missing/stale → hard error (exit 1); exempt: `setup`,
+  `doctor`, `server`.
 - **Nullable `to_member_id`** (§5.5): `NULL` on `broadcast_summary` rows; no `0`
   sentinel.
 - **Prompt-substitution identity delivery** (§6.3/§7.1): identity reaches a
@@ -2672,4 +2899,4 @@ specified in the cited section):
 - **Policy tunables** (180/720/3/15) have a single home in the broker module,
   re-exported by the monitor module.
 - **`settings` singleton** is config-module-owned and reachable from every
-  module.
+  module, not webui-local.

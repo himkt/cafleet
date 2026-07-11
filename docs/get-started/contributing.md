@@ -13,7 +13,8 @@ path.
 
 | Top-level entry | Purpose |
 |---|---|
-| `cafleet/` | The `cafleet` Python package (SQLAlchemy + Alembic + click). |
+| `cafleet/` | The `cafleet` Python package (FastAPI + SQLAlchemy + Alembic + click). |
+| `admin/` | Admin WebUI SPA (Vite + React + TypeScript + Tailwind CSS). |
 | `skills/` | Coding-agent skill files (`cafleet`, `cafleet-design-doc`, `cafleet-research`), installed into the agent homes by `cafleet setup` / `mise //:skill-install`. |
 | `package.json` + `bun.lock` (repo root) | Bun toolchain manifests for the Slidev + agent-browser tools used in the repo. Driven via `mise //:bun-install` / `mise //:slidev <deck>`; `node_modules/` is gitignored. |
 | `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
@@ -22,8 +23,10 @@ path.
 ## Tech stack
 
 - **Language:** Python 3.12+, managed with [uv](https://docs.astral.sh/uv/)
+- **Server:** [FastAPI](https://fastapi.tiangolo.com/) (admin WebUI)
 - **Database:** [SQLAlchemy](https://www.sqlalchemy.org/) 2.x (sync `pysqlite` driver) + SQLite
 - **CLI:** [click](https://click.palletsprojects.com/)
+- **Admin frontend:** Vite + Bun (SPA served at `/`)
 - **Task runner:** [mise](https://mise.jdx.dev/)
 
 ## Development
@@ -42,7 +45,16 @@ mise //cafleet:lint       # ruff check + ruff format --check
 mise //cafleet:format     # ruff check --fix + ruff format
 mise //cafleet:typecheck  # ty
 mise //cafleet:test       # pytest
+
+mise //admin:build        # build the WebUI (required before / is served)
+mise //admin:dev          # WebUI dev server (Vite)
+mise //admin:install      # reinstall WebUI deps from the committed lockfile
 ```
+
+To change the WebUI's dependencies, edit `admin/package.json` and run plain
+`bun install` inside `admin/` to regenerate `admin/bun.lock`.
+`mise //admin:install` runs `bun install --frozen-lockfile`, so it only
+reinstalls from the committed lockfile and cannot update it.
 
 ## Building docs locally
 

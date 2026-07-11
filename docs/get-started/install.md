@@ -66,7 +66,7 @@ or when any recorded version differs from the running CLI version. After
 `uv tool upgrade cafleet`, you don't have to remember to re-run setup — the
 first fleet-scoped command errors with
 `stale skills detected (...); run 'cafleet setup skill' to reinstall`.
-`cafleet setup` and `cafleet doctor` stay runnable so you
+`cafleet setup`, `cafleet doctor`, and `cafleet server` stay runnable so you
 can always repair; `cafleet doctor` reports the recorded per-home versions.
 
 The default database lives at `~/.local/share/cafleet/cafleet_v3.db`. Override

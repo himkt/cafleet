@@ -34,7 +34,7 @@ schema.
 The schema is managed by a **chain of Alembic migrations**; the current
 revision is recorded in the `alembic_version` table. Operators run
 `cafleet setup` (or its schema-only subcommand `cafleet setup db`) once before
-using the fleet-scoped commands; it migrates the database in place to the bundled head
+starting the server; it migrates the database in place to the bundled head
 revision, preserving existing data (message history included), so it is
 idempotent and safe to re-run after every upgrade. It refuses to
 auto-downgrade a database that is ahead of the bundled head, and refuses an
@@ -59,8 +59,8 @@ after a CLI upgrade. `cafleet doctor` reports the per-home detail. See
 
 Deregistered members and their tasks remain in the database forever. There is
 no background cleanup loop. Active query paths filter `status='active'` so
-dead rows are invisible to normal traffic; the retained rows keep the full
-message history inspectable directly in the database file.
+dead rows are invisible to normal traffic; the WebUI is the only consumer
+that surfaces deregistered members (so their inbox history can be inspected).
 
 ## contextId convention
 

@@ -44,9 +44,9 @@ folder holds real examples produced by this loop.
 
 ## Watch the team work
 
-Every inter-member message is persisted in SQLite, so the team's coordination
-is fully auditable: inspect any message with `cafleet message show`, or query
-the database file directly — see [Storage](../concepts/storage.md).
+Every inter-member message is persisted in SQLite, so you can follow the
+team's coordination live: open the WebUI timeline for the team's fleet —
+see [Use the admin WebUI](use-the-webui.md).
 
 ## Invocation syntax
 
