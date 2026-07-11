@@ -10,12 +10,12 @@ Resolves GitHub issues #184 ("Consolidate agent and member") and #185 ("Director
 
 ## Success Criteria
 
-- [ ] `cafleet member create --fleet-id <f> --name <n> --description <d> --text <p>` spawns a member with no Director-identity flag; the CLI resolves the Director from `fleets.director_member_id`.
-- [ ] `cafleet message send --fleet-id <f> --from-member-id <s> --to-member-id <r> --text <t>` is the send shape; the removed spellings (`--agent-id`, `--to`) fail with Click's standard no-such-option error (exit 2).
-- [ ] The default SQLite file is `~/.local/share/cafleet/cafleet_v3.db`; the migration chain is a single fresh initial revision `0001` creating the members schema (the old chain is deleted, not migrated); the chain-guard test asserts the 1-revision chain. Pre-existing `cafleet_v2.db` files are never opened by the new code.
-- [ ] Member-ness derives from "active member WITH a placement row AND `member_id != fleets.director_member_id`"; the broker has one list/kind-derivation path (no parallel `list_fleet_agents` vs `list_members` families, no Python-vs-SQL kind split).
-- [ ] The registry noun "agent" is absent from CLI help, error strings, JSON keys, docs, SPEC.md, and skills — outside the coding-agent boundary (§ Scope boundary) and historical records (git, design docs).
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` pass; `mise //admin:build` regenerates the frontend bundle with the renamed API keys.
+- [x] `cafleet member create --fleet-id <f> --name <n> --description <d> --text <p>` spawns a member with no Director-identity flag; the CLI resolves the Director from `fleets.director_member_id`.
+- [x] `cafleet message send --fleet-id <f> --from-member-id <s> --to-member-id <r> --text <t>` is the send shape; the removed spellings (`--agent-id`, `--to`) fail with Click's standard no-such-option error (exit 2).
+- [x] The default SQLite file is `~/.local/share/cafleet/cafleet_v3.db`; the migration chain is a single fresh initial revision `0001` creating the members schema (the old chain is deleted, not migrated); the chain-guard test asserts the 1-revision chain. Pre-existing `cafleet_v2.db` files are never opened by the new code.
+- [x] Member-ness derives from "active member WITH a placement row AND `member_id != fleets.director_member_id`"; the broker has one list/kind-derivation path (no parallel `list_fleet_agents` vs `list_members` families, no Python-vs-SQL kind split).
+- [x] The registry noun "agent" is absent from CLI help, error strings, JSON keys, docs, SPEC.md, and skills — outside the coding-agent boundary (§ Scope boundary) and historical records (git, design docs).
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` pass; `mise //admin:build` regenerates the frontend bundle with the renamed API keys.
 
 ---
 
