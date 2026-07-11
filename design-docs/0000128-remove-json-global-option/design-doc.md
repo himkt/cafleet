@@ -1,6 +1,6 @@
 # Remove `--json` from the Global Option Surface
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 26/26 tasks complete
 **Last Updated**: 2026-07-11
 
@@ -152,3 +152,4 @@ Documentation lands first, per `.claude/rules/documentation-maintenance.md`. `RE
 |------|---------|
 | 2026-07-11 | Initial draft |
 | 2026-07-11 | Reviewer round 1: operator-side companion-pattern cleanup note; corrected `cli-options.md` sweep task (fleet tables and truncation section are position-neutral); added `test_member_show.py` / `test_member_list_all.py` helper-level migration |
+| 2026-07-11 | Implementation complete: 26/26 tasks, all Success Criteria verified, Reviewer approved round 1, PR #188 opened; help-budget suite bumped via escalation arbitration (10 line budgets +1, aggregate 5800 → 6500) |
