@@ -30,7 +30,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Communication Protocol
 
-You do NOT speak to the Manager directly — all coordination flows through the Director via `cafleet message send` (completion reports, questions, contradiction flags), and you `cafleet message ack` each inbound Director message after acting (command shapes in the `cafleet` skill core + your spawn prompt). The poll `id:` integer is the cafleet message-task id — **distinct from** any harness task-list id used to claim your sub-topic (present only where your backend has a task list). Pane silence after writing your file + completion report is the expected between-turn state — no status pings.
+You do NOT speak to the Manager directly — all coordination flows through the Director via `cafleet message send` (completion reports, questions, contradiction flags), and you `cafleet message ack` each inbound Director message after acting (command shapes in the `cafleet` skill core + your spawn prompt). The poll `id:` integer is the cafleet message id — **distinct from** any harness task-list id used to claim your sub-topic (present only where your backend has a task list). Pane silence after writing your file + completion report is the expected between-turn state — no status pings.
 
 ## Fact Verification Protocol
 

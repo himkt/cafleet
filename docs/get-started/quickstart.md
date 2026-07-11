@@ -47,7 +47,7 @@ the `fleet create` and `member create` commands require one.
 ??? example "Expand the walkthrough"
 
     The walkthrough pastes literal integer ids: fleet `1`, root Director `2`,
-    members `3` and `4`, task `10`. Your ids will differ — substitute the
+    members `3` and `4`, message `10`. Your ids will differ — substitute the
     integers your own commands print.
 
     Create a fleet. This records your current pane as the root Director's pane:

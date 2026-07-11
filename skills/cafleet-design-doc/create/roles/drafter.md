@@ -30,7 +30,7 @@ Angle-bracket tokens (`<fleet-id>`, `<my-member-id>`, `<director-member-id>`) ar
 
 ## Communication Protocol
 
-You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each task — command shapes in the `cafleet` skill core; your ids are the literal `FLEET ID:` / `YOUR MEMBER ID:` / `DIRECTOR MEMBER ID:` lines in your spawn prompt.
+You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each message — command shapes in the `cafleet` skill core; your ids are the literal `FLEET ID:` / `YOUR MEMBER ID:` / `DIRECTOR MEMBER ID:` lines in your spawn prompt.
 
 **Coordination Protocol**: From Step 3 onward (once the draft exists) every cafleet message follows the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md) — single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(role)` markers. Your Step-2 clarifying-question messages are exempt (free-form multi-line, per coordination.md § Scope).
 
