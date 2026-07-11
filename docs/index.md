@@ -16,7 +16,7 @@ coding-agent backends — `claude` (Claude Code), `codex` (OpenAI Codex CLI), an
 auditable multi-agent coding teams in tmux or herdr.
 
 - Persistent, auditable messages — [Storage](concepts/storage.md)
-- Pluggable multiplexer backends (tmux / herdr) — [Multiplexer backends](concepts/multiplexer-backends.md)
+- Pluggable multiplexer backends (tmux / herdr) — [Multiplexer backends](spec/multiplexer-backends.md)
 - Push notifications — [Multiplexer backends § Push notifications](spec/multiplexer-backends.md#push-notifications)
 - Monitoring member — [Monitoring](concepts/monitoring.md)
 - Design-doc-driven development (SDD skills) — [Design-doc-driven development](how-to/design-doc-development.md)

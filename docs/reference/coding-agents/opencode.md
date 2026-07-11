@@ -98,7 +98,7 @@ The opencode backend writes exactly one file — `~/.opencode/agents/cafleet.md`
 
 ## Verification recipe (manual smoke test)
 
-Gated on local install of `opencode`. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, member `4` — your ids will differ.
+Gated on local install of `opencode`. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, member `3` — your ids will differ.
 
 ??? example "Expand the recipe"
 
@@ -106,7 +106,7 @@ Gated on local install of `opencode`. Run from inside a tmux or herdr session. T
     rm -f ~/.opencode/agents/cafleet.md
 
     cafleet fleet create --name opencode-smoke --coding-agent claude
-    # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
+    # Expect: a '<fleet_id> director=<director_id>' line.
     # Note the fleet and Director ids — the steps below use 1 and 2.
 
     cafleet member create --fleet-id 1 \
@@ -115,25 +115,25 @@ Gated on local install of `opencode`. Run from inside a tmux or herdr session. T
     # Expect: ~/.opencode/agents/cafleet.md is materialized with the
     # cafleet preset (cat it and verify the JSON frontmatter).
 
-    cafleet member list --fleet-id 1 --all
+    cafleet member list --fleet-id 1
     # Expect: backend column shows 'opencode' for the smoke member.
 
     cafleet message send --fleet-id 1 --from-member-id 2 \
-      --to-member-id 4 --text "ping"
+      --to-member-id 3 --text "ping"
     # Expect: the opencode pane receives the inline preview and the member ack-loops.
 
     cafleet member exec --fleet-id 1 \
-      --member-id 4 "git status --short"
+      --member-id 3 "git status --short"
     # Expect: '! git status --short' lands in the opencode pane and the
     # command runs.
 
     cafleet member exec --fleet-id 1 \
-      --member-id 4 "curl https://example.com"
+      --member-id 3 "curl https://example.com"
     # Expect: the deny-list blocks the curl command. If it does NOT, the
     # safety floor is broken — STOP and inspect ~/.opencode/agents/cafleet.md;
     # the preset's deny ruleset is not being applied.
 
-    cafleet member delete --fleet-id 1 --member-id 4
+    cafleet member delete --fleet-id 1 --member-id 3
     cafleet fleet delete --fleet-id 1
     ```
 

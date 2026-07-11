@@ -1,7 +1,7 @@
 """Shared ``--text`` / ``--text-file`` body reader for the text-body commands.
 
-``read_text_input`` owns all body resolution and validation for the four
-text-body commands (``message send`` / ``message broadcast`` / ``member nudge``
+``read_text_input`` owns all body resolution and validation for the three
+text-body commands (``message send`` / ``message broadcast``
 / ``member create``): the mutual-exclusivity of the two flags, path resolution
 (absolute or CWD-relative), ``-`` stdin, UTF-8 decoding (byte-for-byte — no
 universal-newline translation), and uniform empty-body rejection.

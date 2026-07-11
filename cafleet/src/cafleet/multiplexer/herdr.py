@@ -304,7 +304,7 @@ class HerdrMultiplexer:
             "stall-check capture, classify unknown. Never re-engage a pane "
             "classified awaiting_user: when the Director is awaiting_user, send "
             "nothing this wake, whatever the other panes show. Otherwise re-engage "
-            "the Director via cafleet member nudge when a due member is stalled or "
+            "the Director via cafleet message send when a due member is stalled or "
             "finished, or the Director is finished with un-acked work."
         )
 
@@ -425,27 +425,6 @@ class HerdrMultiplexer:
         except KeyError as exc:
             raise HerdrError(f"herdr pane get missing {exc} field") from exc
         return pane.get("agent_status") or None
-
-    def wait_agent_status(
-        self, *, target_pane_id: str, status: str, timeout_ms: int
-    ) -> bool:
-        try:
-            _run(
-                [
-                    "herdr",
-                    "wait",
-                    "agent-status",
-                    target_pane_id,
-                    "--status",
-                    status,
-                    "--timeout",
-                    str(timeout_ms),
-                ],
-                timeout=timeout_ms / 1000 + 5,
-            )
-        except HerdrError:
-            return False
-        return True
 
     def _send_esc(self, target_pane_id: str) -> None:
         _run(["herdr", "pane", "send-keys", target_pane_id, "esc"], timeout=5)

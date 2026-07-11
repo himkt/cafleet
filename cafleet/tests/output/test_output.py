@@ -28,8 +28,7 @@ def _list_entry(*, member_id, name, coding_agent, pane_id):
     return {
         "member_id": member_id,
         "name": name,
-        "status": "active",
-        "registered_at": "2026-04-12T10:15:00Z",
+        "kind": "member",
         "placement": {
             "mux_session": "main",
             "mux_window_id": "@3",
@@ -37,6 +36,10 @@ def _list_entry(*, member_id, name, coding_agent, pane_id):
             "coding_agent": coding_agent,
             "created_at": "2026-04-12T10:15:00Z",
         },
+        "last_sent": None,
+        "last_recv": None,
+        "last_ack": None,
+        "idle": None,
     }
 
 

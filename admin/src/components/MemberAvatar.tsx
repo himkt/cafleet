@@ -1,4 +1,3 @@
-import { Zap } from "lucide-react";
 import type { Member } from "../types";
 
 const PALETTE = [
@@ -24,32 +23,19 @@ const SIZE_CLASSES: Record<AvatarSize, string> = {
   lg: "size-12 text-base",
 };
 
-const ICON_SIZES: Record<AvatarSize, number> = {
-  sm: 12,
-  md: 14,
-  lg: 20,
-};
-
 interface MemberAvatarProps {
   member: Pick<Member, "member_id" | "name" | "kind">;
   size?: AvatarSize;
 }
 
 export default function MemberAvatar({ member, size = "md" }: MemberAvatarProps) {
-  const isAdministrator = member.kind === "administrator";
-  const colorClass = isAdministrator
-    ? "bg-accent text-accent-fg"
-    : `${PALETTE[member.member_id % PALETTE.length]} text-white`;
+  const colorClass = `${PALETTE[member.member_id % PALETTE.length]} text-white`;
   return (
     <span
       aria-hidden="true"
       className={`inline-flex shrink-0 select-none items-center justify-center rounded-full font-medium ${SIZE_CLASSES[size]} ${colorClass}`}
     >
-      {isAdministrator ? (
-        <Zap size={ICON_SIZES[size]} fill="currentColor" />
-      ) : (
-        member.name.slice(0, 2)
-      )}
+      {member.name.slice(0, 2)}
     </span>
   );
 }

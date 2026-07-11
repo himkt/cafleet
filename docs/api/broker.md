@@ -15,7 +15,7 @@ persisted behavior lands here.
 | Submodule | Contents |
 |---|---|
 | `broker/fleets.py` | fleet CRUD (`create_fleet`, `list_fleets`, `get_fleet`, `delete_fleet`) |
-| `broker/members.py` | the member registry — registration + placement (`register_member`, `deregister_member`, `get_member`, `verify_member_fleet`, …) plus roster + activity proxies (`list_members`, `list_members_with_activity`, `list_roster`) |
+| `broker/members.py` | the member registry — registration + placement (`register_member`, `deregister_member`, `get_member`, `verify_member_fleet`, …) plus the CLI list with activity proxies (`list_members`), the WebUI roster (`list_roster`), and `get_member_names` |
 | `broker/messaging.py` | `send_message`, `broadcast_message`, `poll_tasks`, `ack_task`, `cancel_task` + inline-preview notification |
 | `broker/queries.py` | read-only task queries (`list_inbox`, `list_sent`, `list_timeline`, `get_task`) |
 | `broker/monitor.py` | monitor runtime, enrollment, and ping records (`find_monitoring_member`, `claim_monitor_runtime`, `heartbeat_monitor_runtime`, `clear_monitor_runtime`, `read_monitor_runtime`, `monitor_is_live`, `monitor_runtime_payload`, `record_pings`, `list_monitor_targets`, `list_monitor_configs`, `get_monitor_config`, `update_monitor_config`) |

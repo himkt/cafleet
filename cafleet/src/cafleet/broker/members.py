@@ -137,13 +137,9 @@ def register_member(
             )
             # Enroll every pane-bound ordinary member in the heartbeat @720,
             # atomically with its placement insert. The dedicated monitoring
-            # member (the unenrolled watcher, located by kind) and a placed
-            # Administrator are both excluded; the root Director is enrolled
-            # separately at create_fleet.
-            if kind not in (
-                _shared.MONITORING_MEMBER_KIND,
-                _shared.ADMINISTRATOR_KIND,
-            ):
+            # member (the unenrolled watcher, located by kind) is excluded;
+            # the root Director is enrolled separately at create_fleet.
+            if kind != _shared.MONITORING_MEMBER_KIND:
                 monitor.enroll_member(
                     session, member_id, interval=monitor.MEMBER_PING_INTERVAL_SECONDS
                 )
@@ -164,8 +160,8 @@ def get_member(member_id: int, fleet_id: int) -> dict | None:
 
     Returns:
         Dict with ``member_id``, ``name``, ``description``, ``status``,
-        ``registered_at``, ``kind`` (``director`` / ``administrator`` /
-        ``monitor`` / ``member``), ``skills`` (the card's skills list,
+        ``registered_at``, ``kind`` (``director`` / ``monitor`` /
+        ``member``), ``skills`` (the card's skills list,
         usually ``[]``), and ``placement`` (the placement sub-dict or
         ``None``). Returns ``None`` if no active member matches.
     """
@@ -224,8 +220,7 @@ def deregister_member(member_id: int) -> bool:
 
     Raises:
         click.ClickException: If ``member_id`` is the root Director of any
-            fleet (torn down via ``cafleet fleet delete`` instead), or the
-            built-in Administrator.
+            fleet (torn down via ``cafleet fleet delete`` instead).
     """
     with _shared.write_session() as session:
         is_root_director = session.execute(
@@ -237,11 +232,6 @@ def deregister_member(member_id: int) -> bool:
                 "use 'cafleet fleet delete' instead"
             )
 
-        card_json = session.execute(
-            select(Member.member_card_json).where(Member.member_id == member_id)
-        ).scalar_one_or_none()
-        if card_json is not None and _shared.is_administrator(card_json):
-            raise click.ClickException("Administrator cannot be deregistered")
         deregistered = session.execute(
             update(Member)
             .where(
@@ -329,67 +319,114 @@ def get_member_names(member_ids: list[int]) -> dict[int, str]:
     return {row.member_id: row.name for row in rows}
 
 
-def _base_members_select(fleet_id: int):
-    return (
+def list_members(fleet_id: int) -> list[dict]:
+    """Return every active registry entry with kind, placement, and activity.
+
+    The single CLI list shape: active rows LEFT OUTER JOINed to their
+    placements (placementless rows included, the root Director and monitoring
+    member too), joined against ``fleets`` for the ``is_root`` flag, the card
+    ``kind`` derived in SQL via ``json_extract``, both collapsed by
+    :func:`cafleet.broker._shared.derive_member_kind`.
+
+    ``last_sent`` / ``last_recv`` / ``last_ack`` aggregate ``status_timestamp``
+    over the ``tasks`` table per member. All three filter ``Task.type !=
+    'broadcast_summary'`` (mirrors ``poll_tasks``); broadcast_summary rows
+    land in the broadcaster's own context with ``status_state='completed'``
+    and would otherwise pollute every proxy for the broadcaster.
+
+    Args:
+        fleet_id: Fleet id to scope the query to.
+
+    Returns:
+        List of dicts each carrying ``member_id``, ``name``, ``kind``
+        (``director`` / ``monitor`` / ``member``), ``placement`` (``None``
+        for placementless rows), ``last_sent``, ``last_recv``, ``last_ack``
+        (ISO timestamps or ``None``), and ``idle`` — the integer-second delta
+        between ``now`` and the most recent of ``last_sent`` / ``last_recv``,
+        or ``None`` when both are ``None``.
+    """
+    last_sent_sq = (
+        select(func.max(Task.status_timestamp))
+        .where(
+            Task.from_member_id == Member.member_id,
+            _shared.NOT_BROADCAST_SUMMARY,
+        )
+        .correlate(Member)
+        .scalar_subquery()
+    )
+    last_recv_sq = (
+        select(func.max(Task.status_timestamp))
+        .where(
+            Task.context_id == Member.member_id,
+            _shared.NOT_BROADCAST_SUMMARY,
+        )
+        .correlate(Member)
+        .scalar_subquery()
+    )
+    last_ack_sq = (
+        select(func.max(Task.status_timestamp))
+        .where(
+            Task.context_id == Member.member_id,
+            Task.status_state == "completed",
+            _shared.NOT_BROADCAST_SUMMARY,
+        )
+        .correlate(Member)
+        .scalar_subquery()
+    )
+    stmt = (
         select(
             Member.member_id,
             Member.name,
-            Member.description,
-            Member.status,
-            Member.registered_at,
+            MemberPlacement.member_id.label("placement_member_id"),
             MemberPlacement.backend,
             MemberPlacement.mux_session,
             MemberPlacement.mux_window_id,
             MemberPlacement.mux_pane_id,
             MemberPlacement.coding_agent,
             MemberPlacement.created_at,
+            Fleet.director_member_id.label("root_director_id"),
+            _shared.CARD_KIND_SQL.label("card_kind"),
+            last_sent_sq.label("last_sent"),
+            last_recv_sq.label("last_recv"),
+            last_ack_sq.label("last_ack"),
         )
-        .join(MemberPlacement, Member.member_id == MemberPlacement.member_id)
         .join(Fleet, Fleet.fleet_id == Member.fleet_id)
+        .outerjoin(MemberPlacement, Member.member_id == MemberPlacement.member_id)
         .where(
             Member.fleet_id == fleet_id,
             Member.status == "active",
-            Member.member_id != Fleet.director_member_id,
         )
     )
-
-
-def list_members(fleet_id: int) -> list[dict]:
-    """Return the fleet's active members, with placements.
-
-    A "member" here is an active registry row with a placement, other than the
-    fleet's root Director: the ``fleets`` join supplies
-    ``director_member_id`` and ``member_id != director_member_id`` excludes
-    the root Director's own placement while including every member.
-
-    Args:
-        fleet_id: Fleet id to scope the query to.
-
-    Returns:
-        List of dicts each carrying ``member_id``, ``name``, ``description``,
-        ``status``, ``registered_at``, and ``placement``.
-    """
-    stmt = _base_members_select(fleet_id)
     with _shared.read_session() as session:
         rows = session.execute(stmt).all()
+
+    now = datetime.now(UTC)
     return [
         {
             "member_id": row.member_id,
             "name": row.name,
-            "description": row.description,
-            "status": row.status,
-            "registered_at": row.registered_at,
-            "placement": _shared.placement_dict(row),
+            "kind": _shared.derive_member_kind(
+                row.member_id == row.root_director_id, row.card_kind
+            ),
+            "placement": (
+                _shared.placement_dict(row)
+                if row.placement_member_id is not None
+                else None
+            ),
+            "last_sent": row.last_sent,
+            "last_recv": row.last_recv,
+            "last_ack": row.last_ack,
+            "idle": _idle_seconds(now, row.last_sent, row.last_recv),
         }
         for row in rows
     ]
 
 
 def list_roster(fleet_id: int, *, include_task_holders: bool = False) -> list[dict]:
-    """Return the fleet's roster, placed or placementless, with the 4-value kind.
+    """Return the fleet's roster, placed or placementless, with the 3-value kind.
 
     Unlike :func:`list_members`, the roster covers the root Director, the
-    Administrator, the monitoring member, ordinary members, and placementless
+    monitoring member, ordinary members, and placementless
     rows — active rows LEFT OUTER JOINed to their placements. SQL supplies the
     ``fleets`` join (``is_root``) and the card ``kind`` via ``json_extract``;
     :func:`cafleet.broker._shared.derive_member_kind` is the single Python
@@ -407,8 +444,7 @@ def list_roster(fleet_id: int, *, include_task_holders: bool = False) -> list[di
         List of dicts each carrying the :func:`list_members` row shape
         (``member_id``, ``name``, ``description``, ``status``,
         ``registered_at``, ``placement`` — ``None`` for placementless rows)
-        plus ``kind`` (``director`` / ``administrator`` / ``monitor`` /
-        ``member``).
+        plus ``kind`` (``director`` / ``monitor`` / ``member``).
     """
     status_filter = Member.status == "active"
     if include_task_holders:
@@ -463,83 +499,6 @@ def list_roster(fleet_id: int, *, include_task_holders: bool = False) -> list[di
             "kind": _shared.derive_member_kind(
                 row.member_id == row.root_director_id, row.card_kind
             ),
-        }
-        for row in rows
-    ]
-
-
-def list_members_with_activity(fleet_id: int) -> list[dict]:
-    """``list_members`` plus per-member activity proxies sourced from ``tasks``.
-
-    Scoped by ``fleet_id`` only — the same member predicate as
-    :func:`list_members` (placed, active, not the fleet's root Director)
-    applies here too.
-
-    ``last_sent`` / ``last_recv`` / ``last_ack`` aggregate ``status_timestamp``
-    over the ``tasks`` table per member. All three filter ``Task.type !=
-    'broadcast_summary'`` (mirrors ``poll_tasks``); broadcast_summary rows
-    land in the broadcaster's own context with ``status_state='completed'``
-    and would otherwise pollute every proxy for the broadcaster.
-
-    Args:
-        fleet_id: Fleet id to scope the query to.
-
-    Returns:
-        List of dicts as in :func:`list_members`, additionally carrying
-        ``last_sent``, ``last_recv``, ``last_ack`` (ISO timestamps or
-        ``None``), and ``idle`` — the integer-second delta between ``now``
-        and the most recent of ``last_sent`` / ``last_recv``, or ``None``
-        when both are ``None``.
-    """
-    last_sent_sq = (
-        select(func.max(Task.status_timestamp))
-        .where(
-            Task.from_member_id == Member.member_id,
-            _shared.NOT_BROADCAST_SUMMARY,
-        )
-        .correlate(Member)
-        .scalar_subquery()
-    )
-    last_recv_sq = (
-        select(func.max(Task.status_timestamp))
-        .where(
-            Task.context_id == Member.member_id,
-            _shared.NOT_BROADCAST_SUMMARY,
-        )
-        .correlate(Member)
-        .scalar_subquery()
-    )
-    last_ack_sq = (
-        select(func.max(Task.status_timestamp))
-        .where(
-            Task.context_id == Member.member_id,
-            Task.status_state == "completed",
-            _shared.NOT_BROADCAST_SUMMARY,
-        )
-        .correlate(Member)
-        .scalar_subquery()
-    )
-    stmt = _base_members_select(fleet_id).add_columns(
-        last_sent_sq.label("last_sent"),
-        last_recv_sq.label("last_recv"),
-        last_ack_sq.label("last_ack"),
-    )
-    with _shared.read_session() as session:
-        rows = session.execute(stmt).all()
-
-    now = datetime.now(UTC)
-    return [
-        {
-            "member_id": row.member_id,
-            "name": row.name,
-            "description": row.description,
-            "status": row.status,
-            "registered_at": row.registered_at,
-            "placement": _shared.placement_dict(row),
-            "last_sent": row.last_sent,
-            "last_recv": row.last_recv,
-            "last_ack": row.last_ack,
-            "idle": _idle_seconds(now, row.last_sent, row.last_recv),
         }
         for row in rows
     ]

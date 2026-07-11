@@ -34,11 +34,11 @@ The first load lands on a fleet picker. Selecting a fleet opens the unified
 timeline: a sidebar of the fleet's members, a center timeline of unicast and
 broadcast messages, and a bottom input.
 
-## Send as the Administrator
+## Send as the root Director
 
 The bottom input parses `@<member> text` for unicast and `@all text` for
-broadcast. Every send goes out as the fleet's built-in Administrator —
-a write-only registry identity with no tmux pane — so you never register
+broadcast. Every send goes out as the fleet's root Director — the member
+`cafleet fleet create` registered for the fleet — so you never register
 yourself as a member to use the dashboard.
 
 ## Inspect history

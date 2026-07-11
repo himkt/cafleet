@@ -19,7 +19,6 @@ each other; members in different fleets are invisible to one another.
 | root Director | the member created by `fleet create`; the only member that may own other members | [Member lifecycle](member-lifecycle.md) |
 | member | a registry entry spawned by the Director via `cafleet member create`, bound to a multiplexer pane (tmux or herdr) | [Member lifecycle](member-lifecycle.md) |
 | placement | the row linking a member to its multiplexer session/window/pane and backend | [Data model](../spec/data-model.md) |
-| Administrator | the built-in write-only member that the WebUI sends as | [Data model](../spec/data-model.md) |
 | broker | the data-access layer all CLI commands and the WebUI share; writes SQLite directly | Overview (this page) |
 | task / message | one delivered message; lifecycle `input_required → completed/canceled` | [Message envelope](../spec/message-envelope.md) |
 | inline preview | the 2-line message preview the broker keystrokes into the recipient's pane | [Multiplexer backends](../spec/multiplexer-backends.md#push-notifications) |
@@ -55,14 +54,14 @@ The `cafleet` CLI is organized as three top-level commands (`setup`, `doctor`,
 | Group | Scope | Subcommands |
 |---|---|---|
 | `fleet` | fleet lifecycle | `create`, `list`, `show`, `delete` |
-| `member` | member lifecycle + keystroke interaction | `create`, `delete`, `show`, `list`, `capture`, `exec`, `ping`, `nudge` |
+| `member` | member lifecycle + keystroke interaction | `create`, `delete`, `show`, `list`, `capture`, `exec`, `ping` |
 | `message` | the message broker | `send`, `broadcast`, `poll`, `ack`, `cancel`, `show` |
 | `monitor` | the supervision scheduler | `start`, `status`, `config` |
 
 `member` is the single home for the member lifecycle — spawn, teardown,
-introspection (`show`, `list --all`), and keystroke interaction (a "member" in
-list output is a placed registry row other than the fleet's root
-Director). The canonical CLI surface — every
+introspection (`show`, `list`), and keystroke interaction (the `kind` column in
+list output distinguishes the root `director`, the `monitor`, and ordinary
+`member` rows). The canonical CLI surface — every
 subcommand, option, and option source — lives at
 [CLI options](../spec/cli-options.md).
 
@@ -71,9 +70,9 @@ subcommand, option, and option source — lives at
 A browser-based dashboard served as a SPA at `/`, with no login: a fleet
 picker, then a Discord-style unified timeline per fleet — a member sidebar,
 unicast and broadcast messages, and a bottom input parsing `@<member> text` and
-`@all text`. The admin is not itself a CAFleet member; the built-in
-`Administrator` is the implicit sender. The full API surface and per-member
-routes live at [WebUI API](../spec/webui-api.md).
+`@all text`. Every send goes out as the fleet's root Director — the operator
+never registers as a member to use the dashboard. The full API surface and
+per-member routes live at [WebUI API](../spec/webui-api.md).
 
 ## Monitoring
 

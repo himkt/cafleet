@@ -33,7 +33,7 @@ codex --ask-for-approval never --sandbox workspace-write <prompt>
 - `--model <m>` is appended immediately before the prompt when `cafleet member create --model <m>` is supplied (e.g. `codex --ask-for-approval never --sandbox workspace-write --model gpt-5.4-mini <prompt>`). Any string passes through verbatim — the codex binary itself rejects unknown models, so newly released models work without a cafleet release. Example models (not enforced by cafleet): `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`. When the flag is omitted, no model tokens are emitted and codex uses the model set in its configuration.
 
 > [!IMPORTANT]
-> Codex's `--sandbox workspace-write` blocks writes outside the workspace, including cafleet's default SQLite DB at `~/.local/share/cafleet/cafleet_v3.db`. Operators must add the cafleet DB directory to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads, such as `~/.codex/config.toml`:
+> Codex's `--sandbox workspace-write` blocks writes outside the workspace, including cafleet's default SQLite DB at `~/.local/share/cafleet/cafleet_v4.db`. Operators must add the cafleet DB directory to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads, such as `~/.codex/config.toml`:
 >
 > ```toml
 > [sandbox_workspace_write]
@@ -73,13 +73,13 @@ Only `claude` sets the pane title to the member name; locate `codex` panes via `
 
 ## Verification recipe (manual smoke test)
 
-Gated on local install of both `claude` and `codex` binaries. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, members `4` (claude) / `5` (codex) — your ids will differ.
+Gated on local install of both `claude` and `codex` binaries. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, members `3` (claude) / `4` (codex) — your ids will differ.
 
 ??? example "Expand the recipe"
 
     ```bash
     cafleet fleet create --name codex-smoke --coding-agent claude
-    # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
+    # Expect: a '<fleet_id> director=<director_id>' line.
     # Note the fleet and Director ids — the steps below use 1 and 2.
 
     cafleet member create --fleet-id 1 \
@@ -89,19 +89,19 @@ Gated on local install of both `claude` and `codex` binaries. Run from inside a 
       --name Codex-Smoke --description "codex smoke member" --coding-agent codex \
       --text "You are Codex-Smoke. Reply hello when polled."
 
-    cafleet member list --fleet-id 1 --all
+    cafleet member list --fleet-id 1
     # Expect: two member rows, backend column shows 'claude' and 'codex' respectively.
 
     cafleet message send --fleet-id 1 --from-member-id 2 \
-      --to-member-id 5 --text "ping"
+      --to-member-id 4 --text "ping"
     # Expect: the codex pane receives the 2-line inline preview and the member ack-loops correctly.
 
     cafleet member exec --fleet-id 1 \
-      --member-id 5 "git status --short"
+      --member-id 4 "git status --short"
     # Expect: '! git status --short' lands in the codex pane and the command runs.
 
-    cafleet member delete --fleet-id 1 --member-id 5
     cafleet member delete --fleet-id 1 --member-id 4
+    cafleet member delete --fleet-id 1 --member-id 3
     cafleet fleet delete --fleet-id 1
     ```
 

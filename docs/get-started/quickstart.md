@@ -47,7 +47,7 @@ the `fleet create` and `member create` commands require one.
 ??? example "Expand the walkthrough"
 
     The walkthrough pastes literal integer ids: fleet `1`, root Director `2`,
-    members `4` and `5`, task `10`. Your ids will differ — substitute the
+    members `3` and `4`, task `10`. Your ids will differ — substitute the
     integers your own commands print.
 
     Create a fleet. This records your current pane as the root Director's pane:
@@ -57,11 +57,11 @@ the `fleet create` and `member create` commands require one.
     ```
 
     ```
-    1 director=2 admin=3
+    1 director=2
     ```
 
-    The line carries the fleet id (`1`), the root Director's member id (`2`), and
-    the built-in Administrator's member id (`3`). If it scrolls away, run
+    The line carries the fleet id (`1`) and the root Director's member id
+    (`2`). If it scrolls away, run
     `cafleet fleet list` — it re-prints the fleet id and the Director id (the
     `DIRECTOR` column).
 
@@ -77,7 +77,7 @@ the `fleet create` and `member create` commands require one.
     ```
 
     ```
-    4 demo-member backend=claude pane=%7
+    3 demo-member backend=claude pane=%7
     ```
 
     ```bash
@@ -88,36 +88,35 @@ the `fleet create` and `member create` commands require one.
     ```
 
     ```
-    5 reviewer backend=claude pane=%8
+    4 reviewer backend=claude pane=%8
     ```
 
-    List the fleet's roster — the new members' ids (`4` and `5`) appear
-    alongside the Director and the Administrator:
+    List the fleet's roster — the new members' ids (`3` and `4`) appear
+    alongside the Director:
 
     ```bash
-    cafleet member list --fleet-id 1 --all
+    cafleet member list --fleet-id 1
     ```
 
     ```
-    4 members:
-      member_id  name           status  kind           backend  session  window_id  pane_id  created_at
-      ---------  -------------  ------  -------------  -------  -------  ---------  -------  --------------------
-      2          Director       active  director       claude   main     @3         %0       2026-04-15T10:00:00+00:00
-      3          Administrator  active  administrator  -        -        -          -        -
-      4          demo-member    active  member         claude   main     @3         %7       2026-04-15T10:01:00+00:00
-      5          reviewer       active  member         claude   main     @3         %8       2026-04-15T10:02:00+00:00
+    3 members:
+      member_id  name           kind      backend   pane_id  idle
+      ---------  -------------  --------  --------  -------  ----
+      2          Director       director  claude    %0       -
+      3          demo-member    member    claude    %7       -
+      4          reviewer       member    claude    %8       -
     ```
 
-    Send a message between the members — `demo-member` (`4`) messages
-    `reviewer` (`5`):
+    Send a message between the members — `demo-member` (`3`) messages
+    `reviewer` (`4`):
 
     ```bash
-    cafleet message send --fleet-id 1 --from-member-id 4 --to-member-id 5 --text "hi"
+    cafleet message send --fleet-id 1 --from-member-id 3 --to-member-id 4 --text "hi"
     ```
 
     ```
     Message sent.
-    [10 | from:4 | 2026-06-11T09:00:00.123456+00:00]
+    [10 | from:3 | 2026-06-11T09:00:00.123456+00:00]
     hi
     ```
 
@@ -129,13 +128,13 @@ the `fleet create` and `member create` commands require one.
     When you are done, tear the fleet down:
 
     ```bash
+    cafleet member delete --fleet-id 1 --member-id 3
     cafleet member delete --fleet-id 1 --member-id 4
-    cafleet member delete --fleet-id 1 --member-id 5
     cafleet fleet delete --fleet-id 1
     ```
 
     ```
-    Deleted fleet 1. Deregistered 2 members.
+    Deleted fleet 1. Deregistered 1 members.
     ```
 
 Where to go next:

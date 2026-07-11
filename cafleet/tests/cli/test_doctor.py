@@ -210,16 +210,3 @@ def test_doctor_json_skills_installs(runner, mock_tmux_ok, registry_db):
             },
         ],
     }
-
-
-# --------------------------------------------------------------------------- #
-# regression guard — pre-subcommand --json no longer parses                    #
-# --------------------------------------------------------------------------- #
-
-
-def test_pre_subcommand_json__no_longer_parses(runner):
-    """The relocated ``--json`` is a per-subcommand flag; a pre-subcommand use
-    on the root group is an unknown option (Click ``No such option``, exit 2)."""
-    result = runner.invoke(cli, ["--json", "doctor"])
-    assert result.exit_code == 2, result.output
-    assert "No such option: --json" in result.output

@@ -14,7 +14,7 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 |---|------|------------------------------|
 | 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{decision_surface}` / `{monitor_model}` / `{permission_flags}`, **or** guess a wrong/default value (spawn the monitor on the wrong model), **or** ignore a backend note (codex has no harness task list) |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + `cafleet monitor` heartbeat (monitor-first spawn, the `ready: monitor live` gate, the 5-step facilitation loop, the Authorization-Scope Guard) — you spawn an unsupervised team |
-| 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `member delete` / `member list --activity` / `member capture` / `member exec` / `member ping` / `member nudge`) and the canonical spawn-prompt skeleton — you can't spawn or drive members |
+| 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `member delete` / `member list` / `member capture` / `member exec` / `member ping`) and the canonical spawn-prompt skeleton — you can't spawn or drive members |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**
 
@@ -22,13 +22,13 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 |------|------------------|------------------------------|
 | [`reference/exec-routing.md`](../reference/exec-routing.md) | process a member's denial-fallback request | the `cafleet member exec` dispatch shape, the required `cafleet member ping` follow-up, and serialization (one request at a time, poll order) — the member stalls waiting on `! <command>` output |
 | [`reference/recovery.md`](../reference/recovery.md) | tear down or recover a member / fleet | the 2-stage health check, stalled-member classification, and the first-out Shutdown Protocol order (stop monitor → delete members → verify → `fleet delete`) — you orphan panes / leak the fleet |
-| [`reference/broadcast.md`](../reference/broadcast.md) | broadcast to the fleet | the fan-out semantics, the `broadcast_summary` envelope, and `origin_task_id` threading — your broadcast misfires |
+| [`reference/cli.md`](../reference/cli.md) § *Broadcast* | broadcast to the fleet | the fan-out semantics, the `broadcast_summary` envelope, and `origin_task_id` threading — your broadcast misfires |
 
 **On-demand — Read only when you need that capability:**
 
 | Read | When |
 |------|------|
-| [`reference/output-flags.md`](../reference/output-flags.md) | you need `--full` / `--json` opt-back-in semantics |
+| [`reference/cli.md`](../reference/cli.md) § *Output flags* | you need `--full` / `--json` opt-back-in semantics |
 
 Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
 
@@ -38,7 +38,7 @@ Angle-bracket tokens are placeholders, **not** shell variables — substitute th
 
 ## Director-only primitives
 
-You own these; members do NOT call them: `member create`, `member delete`, `member list [--activity]`, `member capture`, `member exec`, `member ping`, `member nudge` (plus the backend-specific decision-relay primitive your overlay names). `member exec` carries an operator-controlled command body and stays under `permissions.ask`; the rest have no operator-controlled body and are pre-approved (`permissions.allow`), so the Director can fire them during supervision without prompts. Full flags and behavior live in [`reference/director.md`](../reference/director.md); the bash-via-Director fallback that uses `member exec` + `member ping` is in [`reference/exec-routing.md`](../reference/exec-routing.md).
+You own these; members do NOT call them: `member create`, `member delete`, `member list`, `member capture`, `member exec`, `member ping` (plus the backend-specific decision-relay primitive your overlay names). `member exec` carries an operator-controlled command body and stays under `permissions.ask`; the rest have no operator-controlled body and are pre-approved (`permissions.allow`), so the Director can fire them during supervision without prompts. Full flags and behavior live in [`reference/director.md`](../reference/director.md); the bash-via-Director fallback that uses `member exec` + `member ping` is in [`reference/exec-routing.md`](../reference/exec-routing.md).
 
 ## When you, as Director, want to run your own command
 

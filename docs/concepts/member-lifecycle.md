@@ -11,7 +11,7 @@ registry row with a placement row, other than the fleet's root Director —
 spawned by a Director via `cafleet member create`, linking it to a specific
 tmux pane, window, and session. The root Director is not an ordinary member —
 it is bootstrapped internally by `cafleet fleet create` (keeping its own
-placement row, since it is pane-bound), along with the built-in Administrator.
+placement row, since it is pane-bound).
 
 **Single-Director invariant**: A fleet has exactly one Director — the root
 Director recorded in `fleets.director_member_id` at `fleet create` time. Only
@@ -83,15 +83,13 @@ whole prompt from stdin); literal braces in prompt text must be doubled (`{{`,
 
 The lifecycle ops live in the `member` group: `member create`, `member delete`
 (with `--force` for an atomic kill+deregister), `member show` (single-member
-detail — kind, skills, placement block), and `member list` (with `--activity`
-for per-member activity aggregation, or `--all` to list every active registry
-entry of the fleet with a `kind` column). Keystroke interaction lives
-in the same group: `member capture`, `member exec`, `member ping`, and
-`member nudge`. `member create` takes no identity flag — the CLI resolves the
+detail — kind, skills, placement block), and `member list` (every active
+registry entry of the fleet, with `kind` and `idle` columns). Keystroke
+interaction lives
+in the same group: `member capture`, `member exec`, and `member ping`.
+`member create` takes no identity flag — the CLI resolves the
 Director from `fleets.director_member_id`; every other lifecycle verb targets
-its member by `--member-id`, scoped to the per-subcommand `--fleet-id`
-(`member nudge` names both parties: `--from-member-id` for the sender and
-`--to-member-id` for the target). See
+its member by `--member-id`, scoped to the per-subcommand `--fleet-id`. See
 [CLI options](../spec/cli-options.md) for every flag and the shared
 resolution rules.
 

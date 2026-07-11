@@ -1,6 +1,6 @@
 # Design Doc Create (CAFleet Edition)
 
-Create high-quality design documents using a three-role team orchestrated via the CAFleet message broker: Director (orchestrator), Drafter (writes the document), and Reviewer (critically reviews drafts). Every inter-member message is persisted in SQLite and visible in the admin WebUI timeline. The team iterates through an internal quality loop before presenting a polished draft to the user.
+Create high-quality design documents using a three-role team orchestrated via the CAFleet message broker: Director (orchestrator), Drafter (writes the document), and Reviewer (critically reviews drafts). Every inter-member message is persisted in SQLite and auditable. The team iterates through an internal quality loop before presenting a polished draft to the user.
 
 ## Required reading
 
@@ -25,8 +25,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Additional resources
 
-- For the document template, see: [../reference/template.md](../reference/template.md)
-- For section guidelines and quality standards, see: [../reference/guidelines.md](../reference/guidelines.md)
+- For the document template, section guidelines, and quality standards, see: [../reference/guidelines.md](../reference/guidelines.md)
 - For the inter-member coordination protocol (verb + pointer schema, `COMMENT(role)` markers), see: [../reference/coordination.md](../reference/coordination.md)
 
 ## Coordination Protocol
@@ -40,7 +39,7 @@ Two skill-specific notes layer on top of that canonical protocol:
 
 ## Architecture
 
-The Director is the root member of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns both the Drafter and Reviewer via `cafleet member create`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
+The Director is the root member of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns both the Drafter and Reviewer via `cafleet member create`. All coordination goes through the persistent message queue — every message is persisted in SQLite and auditable.
 
 ```
 User
@@ -90,7 +89,7 @@ Load the `cafleet` skill; its `reference/supervision.md` governance is § Requir
 
 ```bash
 cafleet fleet create --name "design-doc-create-{slug}" --json
-# → { "fleet_id": <int>, "administrator_member_id": <int>, "director": { "member_id": <int>, "name": "Director", "placement": {...} } }
+# → { "fleet_id": <int>, "director": { "member_id": <int>, "name": "Director", "placement": {...} } }
 ```
 
 Capture `fleet_id` and `director.member_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids.
@@ -253,6 +252,6 @@ No round limit — loop continues until approved or aborted.
    ```
    Wait for the Drafter's `addressed (doc)` confirmation.
 
-2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then Drafter and Reviewer (each call blocks 15 s; on the 15 s timeout (exit 2) use `member capture` + your overlay's decision-prompt recovery or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
+2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then Drafter and Reviewer (each call blocks 15 s; on the 15 s timeout (exit 2) use `member capture` + your overlay's decision-prompt recovery or `--force`); `cafleet member list` to verify only the root Director's row remains; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
 
-The fleet row is soft-deleted and `tasks` are preserved so the message trail remains inspectable in the admin WebUI.
+The fleet row is soft-deleted and `tasks` are preserved so the message trail remains inspectable in the broker database.

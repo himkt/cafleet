@@ -353,23 +353,19 @@ All values are persisted/compared as exact lowercase strings.
 ### 5.4 Member kind discriminator (resolved cross-module)
 
 The member "kind" lives in `member_card_json` at JSON path `$.cafleet.kind`.
-Three distinct representations coexist; **they are not the same enum** and must
+Two distinct representations coexist; **they are not the same enum** and must
 not be unified:
 
-- **Raw card values** (§6.1/§6.2/§6.7): `"builtin-administrator"`,
-  `"monitoring-member"`, or **absent** (ordinary member/Director). Constants:
-  `ADMINISTRATOR_KIND = "builtin-administrator"`,
+- **Raw card values** (§6.1/§6.2/§6.7): `"monitoring-member"` or **absent**
+  (ordinary member/Director). Constant:
   `MONITORING_MEMBER_KIND = "monitoring-member"`.
-- **The broker projection** (§6.2) is one **four-value** `kind` — `director`
-  (derived: `member_id == fleets.director_member_id`), `administrator` (the card
-  marks an administrator), `monitor` (the card marks a monitoring member), else
+- **The broker projection** (§6.2) is one **three-value** `kind` — `director`
+  (derived: `member_id == fleets.director_member_id`), `monitor` (the card
+  marks a monitoring member), else
   `member` — produced by the single `derive_member_kind` collapse over the
   SQL-supplied `is_root` flag and card kind, and shared by `get_member`,
-  `list_roster`, and the WebUI roster. There is no parallel two-value
-  discriminator.
-- **Internal predicates:** `is_administrator(card)` parses the JSON and compares
-  `$.cafleet.kind`; it returns false on absent/empty/malformed-JSON (a deliberate
-  non-match, not an error mask).
+  `list_members`, `list_roster`, and the WebUI roster. There is no parallel
+  two-value discriminator.
 
 ### 5.5 Nullable `to_member_id` (resolved)
 
@@ -509,21 +505,19 @@ during message delivery (§6.5) and one process-liveness probe (signal-0).
   exactly one row and fail loudly if the invariant breaks. Do not coerce a
   missing row to a default.
 
-#### Kind predicates, constants, and intervals
+#### Kind constants and intervals
 
-`is_administrator(card)` parses `member_card_json`, reads `$.cafleet.kind`, and
-compares to its kind constant. Absent / null / empty / malformed-JSON /
-non-object `cafleet` value → non-match (`false`) — a deliberate, documented
-non-match, not an error mask. How the broker surfaces the kind (the single
-four-value `derive_member_kind` collapse shared by `get_member`, `list_roster`,
-and the WebUI) is detailed in §5.4.
+How the broker surfaces the kind (the single
+three-value `derive_member_kind` collapse shared by `get_member` and
+`list_members`) is detailed in §5.4. An absent / null / empty / malformed-JSON /
+non-object `cafleet` card value collapses to the ordinary kind — a deliberate,
+documented non-match, not an error mask.
 
-- `ADMINISTRATOR_KIND = "builtin-administrator"`,
-  `MONITORING_MEMBER_KIND = "monitoring-member"`.
+- `MONITORING_MEMBER_KIND = "monitoring-member"`.
 - Enrollment intervals: the root Director is enrolled at **180 seconds**
   (`DIRECTOR_PING_INTERVAL_SECONDS`) by `create_fleet`; ordinary pane-bound
   members at **720 seconds** (`MEMBER_PING_INTERVAL_SECONDS`) by
-  `register_member`. The monitoring member and the Administrator are **never**
+  `register_member`. The monitoring member is **never**
   enrolled.
 - Liveness staleness: `MONITOR_STALE_FACTOR = 3`,
   `MONITOR_STALE_FLOOR_SECONDS = 15` → `stale_after = max(3·tick_seconds, 15)`.
@@ -533,7 +527,7 @@ and the WebUI) is detailed in §5.4.
 #### Fleets
 
 - **`create_fleet(name, director_context, coding_agent)`** — atomically
-  bootstraps a fleet, its root Director, and a built-in Administrator in one
+  bootstraps a fleet and its root Director in one
   write_session. Order: stamp `created_at`; insert the fleet with
   `director_member_id = NULL`; insert the Director member row (`name="Director"`,
   `description="Root Director for this fleet"`, `status="active"`, card
@@ -542,11 +536,8 @@ and the WebUI) is detailed in §5.4.
   placement row) carrying the multiplexer identity (`mux_session`
   / `mux_window_id` / `mux_pane_id`), the `backend` (the resolved `mux.name`),
   and `coding_agent`;
-  enroll the Director at 180s; back-fill the fleet's `director_member_id`; insert
-  the Administrator member row (`status="active"`, card with
-  `cafleet:{kind:"builtin-administrator"}`, description `Built-in administrator
-  for fleet {fleet_id}`) with **no placement** and **not enrolled**.
-  Returns `{fleet_id, name, created_at, administrator_member_id, director:{…}}`.
+  enroll the Director at 180s; back-fill the fleet's `director_member_id`.
+  Returns `{fleet_id, name, created_at, director:{…}}`.
 - **`list_fleets()`** — one record `{fleet_id, director_member_id, name,
   created_at, member_count}` per non-soft-deleted fleet (`deleted_at IS NULL`);
   `member_count` counts only **active** members (0 for empty fleets). Ordering:
@@ -587,19 +578,18 @@ and the WebUI) is detailed in §5.4.
     the value is not user input. Nested teams stay impossible by
     construction: no caller supplies a director id.
   - Insert the member row; if `placement` given, insert it; then, **only if
-    `kind` is neither monitoring-member nor administrator**, enroll the member
+    `kind` is not the monitoring-member kind**, enroll the member
     at 720s.
 - **`get_member(member_id, fleet_id)`** — **active only**. Returns `{member_id,
   name, description, status, registered_at, kind, skills, placement}` where
-  `skills` is the card's `skills` list (usually `[]`) and `kind` is one of four
+  `skills` is the card's `skills` list (usually `[]`) and `kind` is one of three
   values: `director` (derived: `member_id == fleets.director_member_id`),
-  `administrator` (the card marks an administrator), `monitor` (the card marks
+  `monitor` (the card marks
   a monitoring member), else `member`; `placement` is None if absent.
 - **`deregister_member(member_id)`** — soft-delete one member + drop placement +
   monitor row. If the member is the root Director of any fleet → **application
   error (exit 1)** `cannot deregister the root Director; use 'cafleet fleet
-  delete' instead`; if it is an Administrator → application error `Administrator
-  cannot be deregistered`. The root-Director guard raises a single
+  delete' instead`. The root-Director guard raises a single
   **application** error (exit 1) here on the broker side and identically on the
   `cafleet member delete` CLI side (§6.3) — one error model for the same
   string and condition. Flip `active → deregistered` (stamp `deregistered_at`);
@@ -615,35 +605,33 @@ and the WebUI) is detailed in §5.4.
 
 #### Members — roster
 
-A "member" (in the roster sense) is an active registry row joined to its
-placement, excluding the fleet's root Director. All three list functions build
-on one shared base select (`_base_members_select`).
-
-- **`list_members(fleet_id)`** — joins members to placements to `fleets` where
-  the row is **active in the fleet** AND **`member_id !=
-  fleets.director_member_id`** (the fleets join excludes the root Director's
-  own placement while including every member). Returns `{member_id, name,
-  description, status, registered_at, placement}` per row.
-- **`list_members_with_activity(fleet_id)`** — `list_members` plus three
+- **`list_members(fleet_id)`** — every **active** registry row of the fleet:
+  active rows LEFT OUTER
+  JOIN `member_placements`, joined against `fleets` for the `is_root` flag, the
+  card kind derived in SQL via `json_extract`, both collapsed by the single
+  `derive_member_kind` path (§5.4); plus three
   correlated per-member aggregates over tasks, all filtered to `type !=
   "broadcast_summary"`: `last_sent` (max `status_timestamp` where `from_member_id
   = member_id`), `last_recv` (where `context_id = member_id`), `last_ack` (where
   `context_id = member_id` AND `status_state = "completed"`). Then `idle` against
   a single `now`: take the non-null of `(last_sent, last_recv)`; none → `idle =
   null`; else `most_recent` = lexicographic max of the ISO timestamps, `idle =
-  max(0, floor(now − most_recent))` in seconds.
+  max(0, floor(now − most_recent))` in seconds. Returns `{member_id, name,
+  kind, placement, last_sent, last_recv, last_ack, idle}` per row — `kind` is
+  the same three values as `get_member`, `placement` is null for placementless
+  rows. Backs `member list`.
 - **`list_roster(fleet_id, *, include_task_holders=False)`** — every **active**
-  registry row of the fleet, not just ordinary members: active rows LEFT OUTER
+  registry row of the fleet: active rows LEFT OUTER
   JOIN `member_placements`, joined against `fleets` for the `is_root` flag, the
   card kind derived in SQL via `json_extract`, both collapsed by the single
   `derive_member_kind` path (§5.4). With `include_task_holders=True` (the WebUI
   roster), deregistered members that still own tasks (a task exists with
   `context_id = member_id OR from_member_id = member_id`) are also returned, so
-  the audit-relevant deregistered set stays visible. Returns the `list_members`
-  row shape plus `kind` (the same four values as `get_member`), with
-  `placement` null for placementless rows. Backs `member list --all` (default)
-  and `GET /api/members` (`include_task_holders=True`); `list_members` /
-  `list_members_with_activity` are untouched.
+  the audit-relevant deregistered set stays visible. Returns `{member_id, name,
+  description, status, registered_at, placement}` per row plus `kind` (the same
+  three values as `get_member`), with
+  `placement` null for placementless rows. Backs `GET /api/members`
+  (`include_task_holders=True`); it is not a CLI surface.
 
 #### Messaging
 
@@ -659,10 +647,10 @@ on one shared base select (`_base_members_select`).
   `notification_sent = _try_notify_recipient(...)`. The persisted row holds the
   **full untruncated text**. Returns `{task, notification_sent}`.
 - **`broadcast_message(fleet_id, member_id, text)`** — fan out one unicast
-  delivery per active non-admin peer plus one `broadcast_summary` owned by the
+  delivery per active peer plus one `broadcast_summary` owned by the
   sender. Sender not active → value error `Sender member not found or not active
   in fleet: {member_id}`. Recipients = active members in the fleet, **excluding
-  the sender** and **excluding Administrators** (the monitoring member and the
+  the sender** (the monitoring member and the
   Director **are** included); let `N` = the count of these recipients. Build the
   summary (`context_id = member_id`, `from_member_id = member_id`, **`to_member_id =
   NULL`**, `type = "broadcast_summary"`, `status_state = "completed"`, `text =
@@ -770,8 +758,8 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
   last_tick_at, tick_seconds}` or None.
 - **`monitor_is_live(fleet_id, now)`** — `false` if no row, else `_is_live`. An
   advisory pre-check for `monitor start`; the atomic claim is authoritative.
-- **`monitor_runtime_payload(fleet_id, now)`** — the runtime-liveness dict shared
-  by `cafleet monitor status` and `GET /api/monitor`: `{running, pid,
+- **`monitor_runtime_payload(fleet_id, now)`** — the runtime-liveness dict
+  consumed by `cafleet monitor status`: `{running, pid,
   tick_seconds, last_tick_at, last_tick_age_seconds, started_at}`, with the
   process fields null when the monitor is not live (no row, or a stale/cleared
   heartbeat).
@@ -791,7 +779,7 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
 - Deregistered members remain visible via `verify_member_fleet`,
   `get_member_names` (both status-agnostic), and
   `list_roster(include_task_holders=True)` (when they still own tasks); they
-  are hidden from `get_member`, `list_members` (active-only).
+  are hidden from `get_member` and `list_members` (active-only).
 
 #### Contract error strings → exception class → exit code
 
@@ -808,7 +796,6 @@ HTTP status); permission errors gate authorization. The exit-code policy is
 | `register_member` | application | `fleet {fleet_id} already has an active monitoring member (member {existing}); only one is allowed.` |
 | `register_member` | application | `fleet {fleet_id}'s root Director (member {id}) is not active.` |
 | `deregister_member` | application | `cannot deregister the root Director; use 'cafleet fleet delete' instead` |
-| `deregister_member` | application | `Administrator cannot be deregistered` |
 | `delete_fleet` | application | `fleet '{fleet_id}' not found.` |
 | `update_monitor_config` | application | `member {member_id} is not enrolled in monitoring for fleet {fleet_id}.` |
 | `send_message` | value | `Invalid destination format: {to}` |
@@ -824,7 +811,7 @@ HTTP status); permission errors gate authorization. The exit-code policy is
 
 ### 6.3 CLI
 
-**Scope:** the entire `cafleet` command tree (24 commands across 5 groups + 3
+**Scope:** the entire `cafleet` command tree (23 commands across 5 groups + 3
 top-level commands — §1, §10), the shared option guards, and the `member create`
 spawn orchestration + rollback ladder. Orchestration glue only — it wires
 broker/multiplexer/output/coding-agent. The command/option checklist is §10; this
@@ -870,7 +857,7 @@ unknown-option error (exit 2).
   JSON format.`; a shared per-subcommand flag (declaration `json_flag` in
   `cli/_helpers.py`), canonically written **trailing**, after all other flags.
   On every `message` subcommand; `member create` / `delete` / `show` / `list` /
-  `capture` / `exec` / `ping` / `nudge`; `monitor status` / `config`;
+  `capture` / `exec` / `ping`; `monitor status` / `config`;
   `fleet create` / `list` / `show`; and `doctor`. Emits compact single-line
   JSON instead of text; composes with `--full` (truncation is applied to the
   result before the json-vs-text fork); `--quiet` is a text-only shortcut,
@@ -882,15 +869,15 @@ unknown-option error (exit 2).
   member in question)`. Shared declaration `member_id_option` in
   `cli/_helpers.py`.
 - `--from-member-id` / `--to-member-id` — required integers naming both parties
-  of a two-party command: `--from-member-id` is the sender on `message send`,
-  `message broadcast`, and `member nudge`; `--to-member-id` is the
-  recipient/target on `message send` and `member nudge`. Help texts:
+  of a two-party command: `--from-member-id` is the sender on `message send`
+  and `message broadcast`; `--to-member-id` is the
+  recipient on `message send`. Help texts:
   `Sender's member ID` / `Recipient member ID`. Shared declarations
   `from_member_id_option` / `to_member_id_option` in `cli/_helpers.py`.
 
 #### Shared `--text` / `--text-file` body input {#text-body-input}
 
-`message send`, `message broadcast`, `member nudge`, and `member create`
+`message send`, `message broadcast`, and `member create`
 resolve their text body through **one shared reader** taking the `--text`
 (string) and `--text-file` (string path) pair. Both options are declared with
 **no** parser-level `required`; the reader enforces exactly-one-of. Resolution,
@@ -917,14 +904,14 @@ in order:
   is empty.`.
 
 The body is returned **verbatim** (no stripping). Empty-body rejection is
-**uniform** across all four commands and across inline / file / stdin. Long or
+**uniform** across all three commands and across inline / file / stdin. Long or
 multi-line bodies use `--text-file` (or `-` stdin) to bypass the shell's
 `ARG_MAX` limit.
 
-#### The `client_command` wrapper (message group)
+#### Shared `message` handler sequence
 
-The `message` group routes every leaf handler (which returns a
-broker result) through one shared wrapper, configured per command by a
+Every `message` leaf handler (which returns a
+broker result) follows one shared sequence, configured per command by a
 **required** text renderer and one switch, `requires_member_fleet`. Per
 invocation, in order:
 
@@ -997,7 +984,8 @@ the stale-skills guard — it reports instead of blocking.
 
 #### `fleet` group
 
-Does **not** use `client_command`. `fleet create`, `fleet list`, and
+Does **not** follow the shared `message` handler sequence. `fleet create`,
+`fleet list`, and
 `fleet show` take the shared `--json` flag and emit JSON when it is set.
 
 `fleet create` and `fleet list` do **not** take `--fleet-id`; `fleet show` and
@@ -1024,7 +1012,7 @@ fleet-scoped command (§6.3 `--fleet-id`).
 
 #### `message` group
 
-All six route through `client_command`. Common: the acting member id —
+All six follow the shared handler sequence above. Common: the acting member id —
 `--from-member-id` (integer, required — the sender) on `send` / `broadcast`,
 `--member-id` (integer, required) on `poll` / `ack` / `cancel` / `show`;
 `--task-id` (integer, required) on `ack`/`cancel`/`show`; `--full` (documented)
@@ -1064,8 +1052,8 @@ These helpers back the `member` subcommands. The target member is named by
   placement row; it was not spawned via `cafleet member create`.``, unless the
   caller opts into tolerating a missing placement (`member show` and `member
   delete` do — a placementless target resolves successfully). Does **not**
-  check pane presence (`member delete` tolerates a pending placement, and
-  `member nudge` tolerates a pending pane). Callers re-fetch by the canonical
+  check pane presence (`member delete` tolerates a pending
+  placement). Callers re-fetch by the canonical
   member id.
 - **Deregister-with-warning** — best-effort deregister; on failure print a
   `WARNING: rollback deregister failed …` line to **stderr**, do not raise.
@@ -1148,9 +1136,7 @@ operation and succeeds outside tmux.
 1. **Root-Director guard, before any pane mutation** — fetch the fleet; if the
    target is the fleet's Director → application error (exit 1) `cannot deregister
    the root Director; use 'cafleet fleet delete' instead` (the same string and
-   exit code the broker's `deregister_member` guard raises, §6.2). The broker's
-   Administrator guard (`Administrator cannot be deregistered`, §6.2) surfaces
-   verbatim from the deregister call on every path below.
+   exit code the broker's `deregister_member` guard raises, §6.2).
 2. Load the authorized member **tolerating a missing placement**; re-fetch
    the canonical id and read the pane id (absent when placementless or
    pending).
@@ -1192,7 +1178,7 @@ JSON: `{member_id, pane_status}`.
 
 Registry read — no tmux requirement and no requester gate. Options:
 `--member-id` (integer, required — the **target**; any active in-fleet
-registry entry, placed or placementless, the root Director and Administrator
+registry entry, placed or placementless, the root Director
 included), `--full` (documented; affects **text mode only**). Load the target
 tolerating a missing placement: cross-fleet / unknown / inactive → application
 error `Member <member_id> not found`. JSON emits the broker `get_member` dict
@@ -1202,28 +1188,22 @@ block (`kind`, `skills`, placement sub-block) with `--full`.
 
 #### `member list`
 
-`member list` takes `--activity` (boolean, default `false`) and `--all`
-(boolean, default `false`); both together → usage error (exit 2) `--all and
---activity are mutually exclusive.`. Default: lists the
-fleet's members — active placed registry rows, the root Director
-excluded. The base list is a placement table (member id, name, status, backend,
-session, window id, pane id — `(pending)` when unset — and created-at); the
-`--activity` rows instead carry the per-member send/recv/ack/idle aggregates.
-Empty case `0 members.`. JSON emits the raw rows.
-
-`--all` instead lists every **active registry entry** of the fleet via
-`list_roster` (§6.2): the header is `<N> members:`; the table gains a `kind`
-column (the four
-`get_member` values) and renders `-` in every placement column (backend,
-session, window id, pane id, created-at) for placementless rows. JSON emits
-the raw roster rows (the member-row shape plus `kind`, `placement` null when
-placementless). The default (no `--all`) output is byte-identical to the
-members-only listing above.
+No options beyond the required `--fleet-id` and the shared `--json` flag; no
+identity flag. Lists every **active registry entry** of the fleet via
+`list_members` (§6.2) — the root Director, the monitoring member, ordinary
+members, and placementless rows. Empty case `0 members.`; else the header is
+`<N> members:` and the table renders one row per member with `member_id`,
+`name`, `kind` (the three `get_member` values), `backend` (the placement's
+`coding_agent`), `pane_id` (`(pending)` when unset), and the humanized `idle`
+columns (§6.4 `format_member_list`); a placementless row renders `-` in the
+`backend` and `pane_id` cells. JSON emits
+the raw `list_members` rows (`member_id`, `name`, `kind`, `placement` — null
+when placementless — `last_sent`, `last_recv`, `last_ack`, `idle`).
 
 #### `member capture`
 
 Options: `--member-id` (integer, required), `--lines` (integer, default **20**,
-shown in help; `--tail` is an accepted alias spelling), `--ansi` /
+shown in help), `--ansi` /
 `--no-ansi` (boolean pair, default `false`).
 Ensure tmux, load the member, require a pane (`capture`). Capture the last N lines
 (a tmux error → application error `capture failed: <error>`). When `--ansi` is
@@ -1255,27 +1235,6 @@ failed: tmux send-keys did not deliver the poll-trigger keystroke to pane
 returns `false`, the only reachable failure surface is the non-delivery message
 above. JSON: `{member_id, pane_id}`; text: `Pinged member <name>
 (<pane_id>) — poll keystroke dispatched.`.
-
-#### `member nudge`
-
-Re-engages a member (typically the Director) with an ACKable task + inline
-preview. Options: `--from-member-id` (integer, required — the **sender**,
-typically the monitoring member), `--to-member-id` (integer, required — the
-**target**), and the shared `--text` / `--text-file` body pair (§6.3 [text-body
-input](#text-body-input)); a missing body is the shared usage error (exit 2).
-Ensure tmux. The body is resolved by the shared reader (empty/whitespace inline
-`--text` → usage error `text may not be empty.`; file/stdin surfaces per §6.3).
-Resolve the target **first** (fleet-isolation only; re-fetch the canonical id) —
-a cross-fleet / unknown / inactive `--to-member-id` fails with `Member
-<member_id> not found` before the send path runs, and a pending pane is
-tolerated. Send the message from `--from-member-id` to the target; a
-sender-not-active value error →
-application error carrying that message. JSON: `{member_id, pane_id,
-task_id, notification_sent}` (a boolean, not a count). Text, by outcome:
-notification sent → `Nudged <name> (<pane_id>) — task <task_id> queued,
-Esc-safeguarded preview dispatched.`; no pane → `Nudged <name> — no pane; task
-<task_id> queued.`; otherwise → `Nudged <name> (<pane_id>) — task <task_id>
-queued; inline preview not delivered.`.
 
 #### `monitor` group
 
@@ -1454,8 +1413,8 @@ placeholder '<key>' in custom prompt. Supported placeholders: {fleet_id},
 {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }})
 to keep them as text.`; a malformed brace expression → `Malformed custom prompt:
 <detail>. Double literal braces ({{, }}) to keep them as text.`. Substitution is
-applied **only** by `member create`; the three message-body commands
-(`message send`, `message broadcast`, `member nudge`) call the shared
+applied **only** by `member create`; the two message-body commands
+(`message send`, `message broadcast`) call the shared
 reader alone and never run `.format`. This substitution is the **sole**
 identity-delivery mechanism for a spawned member — no identity environment
 variable is injected into the pane (§7.1).
@@ -1472,7 +1431,8 @@ sets no exit codes. (`doctor` output is produced by the CLI, §6.3, not here.)
 The text-vs-JSON selection is the CLI's: `--full` and `--json` are **documented**
 flags (Q5 hidden-flag cleanup). Every JSON-capable subcommand takes the one
 shared per-subcommand `--json` flag (§6.3): the `message` group branches on it
-inside `client_command`, while the `member`, `monitor`, `fleet`, and `doctor`
+inside the shared handler sequence, while the `member`, `monitor`, `fleet`, and
+`doctor`
 handlers branch on it per-handler with their own emit sites (§7.3). The single
 absent glyph below and the compact-JSON rules apply to every path.
 
@@ -1498,7 +1458,7 @@ envelopes and flat task dicts).
 **Formatter functions:** `format_task`; `format_indexed_list`
 (joins formatted items with one blank line between, `empty_msg` when empty —
 not numbered); `format_member_detail`; `format_fleet_create`; `format_member`;
-`format_member_list`; `format_member_list_activity`; `format_monitor_status`;
+`format_member_list`; `format_monitor_status`;
 `format_monitor_config`. Private contract helpers: an ISO→`HH:MM:SS` extractor;
 an idle-seconds humanizer; a ping-age humanizer.
 
@@ -1579,21 +1539,23 @@ Every field is read with required access unless marked optional; required access
   `skills` (req, verbose; a compact JSON array, `-` when empty), `placement`
   (optional; verbose renders the placement sub-block when present,
   `placement:   none` otherwise, with `-` for a null field inside it).
-- **Roster row (`member list --all`)**: the member-list row plus `kind`;
-  every placement cell renders `-` for a placementless row.
 - **Fleet-create** (`format_fleet_create`): `fleet_id` (req), `director` (req
   nested) → `member_id` (req), `name`/`placement` (req, verbose);
   `director.placement` (verbose) → `mux_session`/`mux_window_id`/`mux_pane_id`
-  (req); `administrator_member_id` (req); `name` (req key, verbose, empty string
+  (req); `name` (req key, verbose, empty string
   when falsy); `created_at` (req, verbose).
 - **Member-create** (`format_member`): `member_id` (req), `name` (req),
   `placement` (req) → `coding_agent` (req), `mux_pane_id` (req key; `(pending)`
   when falsy in compact), `mux_window_id` (req, verbose).
-- **Member-list row**: `member_id`, `name`, `status`, `placement` →
-  `{coding_agent, mux_session, mux_window_id, mux_pane_id (→ "(pending)"),
-  created_at}`.
-- **Member-list-activity row**: `member_id`, `name`, `status`, `last_sent`,
-  `last_recv`, `last_ack` (ISO str | null), `idle` (int seconds | null).
+- **Member-list row**: `member_id`, `name`, `kind`, `placement` (optional,
+  null for a placementless row; when present → `{coding_agent, mux_pane_id (→
+  "(pending)")}` feed the `backend` / `pane_id` cells, `-` cells when null),
+  `last_sent`, `last_recv`, `last_ack` (ISO str | null), `idle` (int seconds |
+  null).
+- **Roster row (the WebUI `GET /api/members` roster)**: `member_id`, `name`,
+  `description`, `status`, `registered_at`, `kind` (the three `get_member`
+  values), `placement` (null when placementless); serialized directly by the
+  WebUI, not by a formatter.
 - **Monitor-status payload**: `{runtime, members}`. `runtime.running` (bool, req);
   when true also `pid`, `last_tick_age_seconds`, `tick_seconds`, `started_at`.
   Each member: `member_id`, `name`, `role`, `interval_seconds`,
@@ -1631,8 +1593,8 @@ row exists, else `  placement:` followed by the indented
 `    backend:` / `    session:` / `    window_id:` /
 `    pane_id:` / `    created_at:` lines, each null field rendering `-`.
 
-`format_fleet_create` — **compact**: `<fleet_id> director=<director.member_id>
-admin=<administrator_member_id>`. **Verbose** — 7 lines; first two are bare
+`format_fleet_create` — **compact**: `<fleet_id> director=<director.member_id>`.
+**Verbose** — 6 lines; first two are bare
 stringified values with no key prefix; `pane` joins the three placement fields
 with `:`:
 
@@ -1643,7 +1605,6 @@ name:             <name or "">
 created_at:       <created_at>
 director_name:    <director.name>
 pane:             <mux_session>:<mux_window_id>:<mux_pane_id>
-administrator:    <administrator_member_id>
 ```
 
 `format_member` — **compact** (`pane` = `mux_pane_id` or `(pending)`):
@@ -1663,14 +1624,10 @@ Member registered and spawned.
 (trailing `s` only when `count > 1`; `1 member:` exactly), a column header and
 separator, then one row per member. Each row begins with a two-space indent and
 columns separated by two spaces, left-justified to fixed widths (longer values
-are **not** truncated): `member_id` 14, `name` 8, `status` 6, `coding_agent` 7,
-`mux_session` 7, `mux_window_id` 9, `mux_pane_id` (→`(pending)`) 7, then
-`created_at` with no padding (last column). `member_id` is stringified.
-
-`format_member_list_activity` — empty → `0 members.`; same pluralized header.
-Per row, left-justified: `member_id` 14, `name` 8, `status` 6, then the HMS
-extraction of `last_sent`/`last_recv`/`last_ack` each width 9, then the humanized
-`idle` with no padding.
+are **not** truncated): `member_id` 9, `name` 13, `kind` 8, `backend` (the
+placement's `coding_agent`; `-` when placementless) 8, `mux_pane_id`
+(→`(pending)` when unset; `-` when placementless) 7, then
+the humanized `idle` with no padding (last column). `member_id` is stringified.
 
 `format_monitor_status` — line 1 when running: `monitor: running (pid <pid>,
 last tick <last_tick_age_seconds>s ago, tick <tick_seconds>s, started
@@ -1787,7 +1744,7 @@ Director's `MultiplexerContext` and passes it directly.
   name>) [<wake_reasons joined by ",">]`; single-line payload (note the em-dash,
   `{N}` = count):
   ```
-  [monitor] wake: {N} {noun} due — {due_list}. Capture each named pane read-only, with the Director pane ({director_member_id}) always inspected. From capture content only, classify each pane in this precedence order: awaiting_user, unknown, finished, stalled, working. For a member tagged stall-check, compare its capture against your previous stall-check capture of that pane, then keep the new capture as that pane's baseline; with no previous stall-check capture, classify unknown. Never re-engage a pane classified awaiting_user: when the Director is awaiting_user, send nothing this wake, whatever the other panes show. Otherwise re-engage the Director via cafleet member nudge when a due member is stalled or finished, or the Director is finished with un-acked work.
+  [monitor] wake: {N} {noun} due — {due_list}. Capture each named pane read-only, with the Director pane ({director_member_id}) always inspected. From capture content only, classify each pane in this precedence order: awaiting_user, unknown, finished, stalled, working. For a member tagged stall-check, compare its capture against your previous stall-check capture of that pane, then keep the new capture as that pane's baseline; with no previous stall-check capture, classify unknown. Never re-engage a pane classified awaiting_user: when the Director is awaiting_user, send nothing this wake, whatever the other panes show. Otherwise re-engage the Director via cafleet message send when a due member is stalled or finished, or the Director is finished with un-acked work.
   ```
   literal-then-Enter, `timeout=5`s, **Esc-first=NO** (an Esc would self-interrupt
   the monitoring member); any error → `false`. The payload carries no backtick, no
@@ -1995,12 +1952,8 @@ A **separate optional** `@runtime_checkable` Protocol, kept off the base
   agent state (`working`/`blocked`/`done`/`idle`/`unknown`), or `None` when no
   agent is detected. herdr realization: `herdr pane get` / `pane read --source
   detection`.
-- **`wait_agent_status(*, target_pane_id, status, timeout_ms) -> bool`** — block
-  until the pane's agent reaches `status` or the timeout elapses; `True` if
-  reached. herdr realization: `herdr wait agent-status <id> --status <s>
-  --timeout <ms>`.
 
-`HerdrMultiplexer` implements both; `TmuxMultiplexer` does **not** implement
+`HerdrMultiplexer` implements it; `TmuxMultiplexer` does **not** implement
 `AgentStateAware` (an `isinstance(mux, AgentStateAware)` guard is therefore
 false on the tmux backend). The monitor loop consumes this capability (§6.6).
 
@@ -2512,7 +2465,7 @@ array**; every other list endpoint wraps in an object (member rows under
 - **`GET /api/members`** — fleet-scoped. Returns the roster via
   `list_roster(include_task_holders=True)` (§6.2) — every active registry row
   plus deregistered members still owning tasks — each row carrying the
-  four-value `kind` (§5.4) and a `monitor` field set to the projected monitor
+  three-value `kind` (§5.4) and a `monitor` field set to the projected monitor
   config when an enrolled config exists, else `null`.
   Response `{"members": [ <member dict> + "monitor": <MonitorConfig>|null, … ]}`.
   Projected `MonitorConfig`: `{interval_seconds, last_ping_at, enabled}`
@@ -2555,6 +2508,8 @@ array**; every other list endpoint wraps in an object (member rows under
   `404`, detail `Member not found`; otherwise send and return `{task_id,
   status}`. Both branches:
   `{task_id: int, status: string}` (`status` = the broker task's `status_state`).
+  The SPA always submits `from_member_id = director.member_id` (the fleet's
+  root Director); the endpoint itself is sender-agnostic.
 
 **`FormattedMessage`** (one element of any `messages` array): `{task_id,
 from_member_id, from_member_name, to_member_id, to_member_name, type, status,
@@ -2607,7 +2562,7 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 
 | Field | Env var | Type | Default |
 |---|---|---|---|
-| `database_url` | `CAFLEET_DATABASE_URL` | string | `sqlite:///` + `~/.local/share/cafleet/cafleet_v3.db` (home expanded **at startup**) |
+| `database_url` | `CAFLEET_DATABASE_URL` | string | `sqlite:///` + `~/.local/share/cafleet/cafleet_v4.db` (home expanded **at startup**) |
 | `broker_host` | `CAFLEET_BROKER_HOST` | string | `"127.0.0.1"` |
 | `broker_port` | `CAFLEET_BROKER_PORT` | integer (16-bit port) | `8000` |
 | `max_text_len` | `CAFLEET_MAX_TEXT_LEN` | non-negative integer | `200` |
@@ -2626,7 +2581,7 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 - **Default DB URL** expands `~` to `$HOME` **only for the factory default**; a
   user-supplied `CAFLEET_DATABASE_URL` is passed through verbatim (no `~`
   expansion, so a user value must already be absolute). Net default on home
-  `/home/u`: `sqlite:////home/u/.local/share/cafleet/cafleet_v3.db` (four slashes).
+  `/home/u`: `sqlite:////home/u/.local/share/cafleet/cafleet_v4.db` (four slashes).
 - A non-integer `broker_port`/`max_text_len` must **fail loudly at startup** (a
   hard validation error, not a silent default).
 - `max_text_len` truncates only CLI echo + the broker inline-preview keystroke.
@@ -2649,7 +2604,7 @@ printer that writes `Error: <message>` to stderr.
 | Error class | Exit | Meaning | Mapping |
 |---|---|---|---|
 | usage error | **2** | argument/parse/usage mistakes: missing required option; unknown option; invalid integer; integer-range violations; mutually-exclusive-option violations; the spawn-prompt placeholder errors; explicit usage errors | a usage-class error; prints `Error: <msg>` (+ usage line). Parser-native parse errors already exit 2. |
-| application error | **1** | application/runtime errors: runtime conflicts (one-monitor rule, Administrator immutability, not-enrolled, not-found-on-delete), the root-Director-deregistration guard, the spawn rollback ladder, and the missing-`--fleet-id` callback error | an app-class error; prints `Error: <msg>`. |
+| application error | **1** | application/runtime errors: runtime conflicts (one-monitor rule, not-enrolled, not-found-on-delete), the root-Director-deregistration guard, the spawn rollback ladder, and the missing-`--fleet-id` callback error | an app-class error; prints `Error: <msg>`. |
 | value-error / permission-error (broker/messaging/queries) | translated by caller | callable from CLI **and** WebUI; CLI wraps to exit 1, WebUI maps to HTTP status | distinct error variants; permission-error gates authorization (recipient-acks / sender-cancels). |
 | HTTP error | — | serialized `{"detail": <string>}` | HTTP error responses with the same status + body. |
 
@@ -2664,12 +2619,13 @@ diagnostic block (§6.3).
 - `--fleet-id` is a required option enforced by its shared callback (missing →
   exit 1, §6.3); it has **no environment default** and **must not** default to
   an arbitrary fleet.
-- `client_command` fleet-gate runs **before** the handler body.
+- The `message` fleet-gate runs **before** the handler body.
 - `doctor` reads the resolved backend's presence env var (`TMUX` / `HERDR_ENV`)
   via `os.environ.get(presence_var, "")`; an empty value is legitimate under an
   explicit `CAFLEET_MULTIPLEXER` override, so the fail-fast lives upstream in
   `resolve_multiplexer()` + `ensure_available()`, not in this read.
-- `is_administrator` returns false on malformed JSON (a deliberate non-match).
+- `derive_member_kind` collapses a malformed card kind to the ordinary kind (a
+  deliberate non-match).
 - `register_member` monitoring-member-without-placement raises.
 - The opencode preset refuses to overwrite a non-regular-file target.
 - Broker "exactly one row" invariants raise if the assumption breaks — keep
@@ -2816,7 +2772,7 @@ for bare `setup`'s db half and for `setup db` — both print the same lines.
 
 ## 10. CLI command checklist
 
-The full command surface — **24 commands across 5 groups + 3 top-level commands**.
+The full command surface — **23 commands across 5 groups + 3 top-level commands**.
 Each must be reproduced with identical option names, types, defaults,
 required-ness, documented-vs-hidden status, output shapes, and exit codes. Every
 interaction flag is now **documented** (there are no hidden flags). Per-command
@@ -2845,11 +2801,10 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 - [ ] `cafleet member create` (no identity flag — Director auto-resolved; `--name`, `--description`, `--coding-agent`, `--model`, `--role`=member, `--text` / `--text-file` xor-required, `--full`, `--json`)
 - [ ] `cafleet member delete` (`--member-id` target, `--force`/`-f`, `--json`; placementless target → registry soft-delete, exit 0)
 - [ ] `cafleet member show` (`--member-id` target, `--full`, `--json`)
-- [ ] `cafleet member list` (`--activity`, `--all` — mutually exclusive; `--json`)
-- [ ] `cafleet member capture` (`--member-id`, `--lines`=**20** / `--tail` alias, `--ansi`/`--no-ansi`, `--json`)
+- [ ] `cafleet member list` (`--json`)
+- [ ] `cafleet member capture` (`--member-id`, `--lines`=**20**, `--ansi`/`--no-ansi`, `--json`)
 - [ ] `cafleet member exec` (`--member-id`, positional `command`, `--json`)
 - [ ] `cafleet member ping` (`--member-id`, `--quiet`, `--json`)
-- [ ] `cafleet member nudge` (`--from-member-id` sender, `--to-member-id` target, `--text` / `--text-file` xor-required, `--json`)
 
 **`message`:**
 
@@ -2894,7 +2849,7 @@ failure, and an exception's exact internal-repr fragment.
 
 The decisions that shape this surface (full rationale in the design doc):
 
-- **`member` is the single member-lifecycle surface.** `member` owns member registration, teardown, introspection (`show`, `list --all`), and keystroke interaction (`create`/`delete`/`show`/`list`/`capture`/`exec`/`ping`/`nudge`). There is no separate `agent` group.
+- **`member` is the single member-lifecycle surface.** `member` owns member registration, teardown, introspection (`show`, `list`), and keystroke interaction (`create`/`delete`/`show`/`list`/`capture`/`exec`/`ping`). There is no separate `agent` group.
 - **`--fleet-id` is a required option with no environment default** (§6.3); a
   missing value is the shared callback's exit-1 error.
 - **One error/exit model** (§7.2): usage → exit 2, application/runtime → exit

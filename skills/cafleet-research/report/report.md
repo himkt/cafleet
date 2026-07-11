@@ -72,7 +72,7 @@ Run `cafleet doctor` to confirm the Director is inside a tmux or herdr session w
 
 ### Step 0b: Bootstrap CAFleet Fleet (Director — MANDATORY)
 
-`cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current tmux pane, and seeds the built-in Administrator. Capture both integer ids from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
+`cafleet fleet create` atomically creates the fleet and registers a root Director bound to the current tmux pane. Capture the `fleet_id` and `director.member_id` integer ids from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
 
 ```bash
 cafleet fleet create --name "research-[topic-slug]" --json

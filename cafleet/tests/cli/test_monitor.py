@@ -499,17 +499,6 @@ def test_monitor_config__mutual_exclusion_exits_two(fleet):
     assert "no such command" not in result.output.lower()
 
 
-def test_monitor_config__administrator_not_enrolled_exits_one(fleet):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    admin_id = data["administrator_member_id"]
-    result = runner.invoke(
-        cli, ["monitor", "config", "--fleet-id", str(sid), "--member-id", str(admin_id)]
-    )
-
-    assert result.exit_code == 1, result.output
-
-
 def test_monitor_config__monitoring_member_reports_not_enrolled(fleet):
     # the monitoring member is the unenrolled watcher → config reports not-enrolled
     db_file, runner, data = fleet

@@ -1,13 +1,11 @@
 """Sync SQLAlchemy data-access layer shared by the CLI and WebUI."""
 
-from cafleet.broker._shared import ADMINISTRATOR_KIND
 from cafleet.broker.fleets import create_fleet, delete_fleet, get_fleet, list_fleets
 from cafleet.broker.members import (
     deregister_member,
     get_member,
     get_member_names,
     list_members,
-    list_members_with_activity,
     list_roster,
     register_member,
     update_placement_pane_id,
@@ -37,7 +35,6 @@ from cafleet.broker.monitor import (
 from cafleet.broker.queries import get_task, list_inbox, list_sent, list_timeline
 
 __all__ = [
-    "ADMINISTRATOR_KIND",
     "create_fleet",
     "list_fleets",
     "get_fleet",
@@ -47,7 +44,6 @@ __all__ = [
     "deregister_member",
     "update_placement_pane_id",
     "list_members",
-    "list_members_with_activity",
     "list_roster",
     "verify_member_fleet",
     "get_member_names",

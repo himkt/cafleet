@@ -38,7 +38,7 @@ Returns non-soft-deleted fleets (`deleted_at IS NULL`) with member counts, order
 
 ### GET /api/members — List Members
 
-Returns the selected fleet's roster via `list_roster(include_task_holders=True)`: every active registry entry plus deregistered members that still own tasks (so their message history stays inspectable). Every row carries a `kind` discriminator so the frontend can locate the built-in Administrator without matching on its name.
+Returns the selected fleet's roster via `list_roster(include_task_holders=True)`: every active registry entry plus deregistered members that still own tasks (so their message history stays inspectable). Every row carries a `kind` discriminator so the frontend can locate the root Director without matching on its name.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -58,15 +58,6 @@ Returns the selected fleet's roster via `list_roster(include_task_holders=True)`
     },
     {
       "member_id": 3,
-      "name": "Administrator",
-      "description": "Built-in administrator for fleet 1",
-      "status": "active",
-      "registered_at": "2026-04-15T10:00:00+00:00",
-      "kind": "administrator",
-      "monitor": null
-    },
-    {
-      "member_id": 4,
       "name": "monitor",
       "description": "Monitoring member: owns the heartbeat",
       "status": "active",
@@ -75,7 +66,7 @@ Returns the selected fleet's roster via `list_roster(include_task_holders=True)`
       "monitor": null
     },
     {
-      "member_id": 5,
+      "member_id": 4,
       "name": "alice",
       "description": "Ordinary member",
       "status": "active",
@@ -89,23 +80,22 @@ Returns the selected fleet's roster via `list_roster(include_task_holders=True)`
 
 **`monitor` field**: each member carries its folded monitoring schedule —
 `{"interval_seconds": int, "last_ping_at": str|null, "enabled": bool}` — or
-`null` when the member is not enrolled (the unenrolled watcher, the
-Administrator, deregistered members, and members without a placement all carry
+`null` when the member is not enrolled (the unenrolled watcher, deregistered
+members, and members without a placement all carry
 `monitor: null`). Folding the schedule into the list lets the SPA render every
 member's schedule without an extra request per member. Which members are
 enrolled — the watched set — is defined in
 [Monitoring](../concepts/monitoring.md).
 
-**`kind` values** — the unified 4-value vocabulary:
+**`kind` values** — the unified 3-value vocabulary:
 
 | Value | Meaning |
 |---|---|
 | `"director"` | The fleet's root Director (`member_id == fleets.director_member_id`). Exactly one per fleet. |
-| `"administrator"` | The fleet's built-in Administrator. Exactly one per fleet. Derived from `member_card_json.cafleet.kind == "builtin-administrator"`. |
 | `"monitor"` | The fleet's dedicated monitoring member. Derived from `member_card_json.cafleet.kind == "monitoring-member"`. |
 | `"member"` | Any other (ordinary) member. |
 
-The discriminator is derived at read time — the fleets join supplies "is this the root Director" and the stored member card supplies the special-kind marker; there is no dedicated column. See [data-model.md](./data-model.md) for the Administrator's full definition.
+The discriminator is derived at read time — the fleets join supplies "is this the root Director" and the stored member card supplies the special-kind marker; there is no dedicated column.
 
 ### GET /api/monitor — Fleet Monitor Runtime
 
@@ -154,7 +144,7 @@ Returns one member's monitoring schedule.
 ```
 
 **Errors**: 404 (`detail: "Member not enrolled"`) when the member is not in the
-fleet or not enrolled (the monitoring member, Administrator, deregistered,
+fleet or not enrolled (the monitoring member, deregistered,
 placementless). 400 for a missing or non-integer `X-Fleet-Id`; 404
 (`detail: "Fleet not found"`) for an unknown fleet. The SPA reads the folded
 `monitor` field on `GET /api/members` instead of calling this endpoint per
@@ -286,7 +276,7 @@ X-Fleet-Id: <fleet_id>
 
 ```json
 {
-  "from_member_id": 3,
+  "from_member_id": 2,
   "to_member_id": 4,
   "text": "Hello!"
 }
@@ -296,9 +286,9 @@ X-Fleet-Id: <fleet_id>
 
 **Unicast** (`to_member_id` is an integer): the server verifies both the sender and the destination belong to the caller's fleet and that the destination is active.
 
-**Broadcast** (`to_member_id == "*"`): the server skips destination validation (no specific recipient to verify) and fans out to every active member in the fleet (except the built-in Administrator, which is filtered out of the recipient set at the broker layer) plus a summary task. The sender is still required to be active and in the caller's fleet; the sender MAY be the Administrator. The response's `task_id` is the summary task's id.
+**Broadcast** (`to_member_id == "*"`): the server skips destination validation (no specific recipient to verify) and fans out to every active member in the fleet except the sender, plus a summary task. The sender is still required to be active and in the caller's fleet. The response's `task_id` is the summary task's id.
 
-**Sender identity**: The Admin WebUI always submits `from_member_id = administrator.member_id` (the fleet's built-in Administrator). The endpoint itself is sender-agnostic — it accepts any active member in the fleet — but no UI path lets the operator pick a different sender.
+**Sender identity**: The Admin WebUI always submits `from_member_id = director.member_id` (the fleet's root Director). The endpoint itself is sender-agnostic — it accepts any active member in the fleet — but no UI path lets the operator pick a different sender.
 
 **Response** (200 OK):
 

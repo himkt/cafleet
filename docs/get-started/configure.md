@@ -64,7 +64,6 @@ prefix_rule(pattern = ["cafleet", "member", "show"],    decision = "allow")
 prefix_rule(pattern = ["cafleet", "member", "list"],    decision = "allow")
 prefix_rule(pattern = ["cafleet", "member", "capture"], decision = "allow")
 prefix_rule(pattern = ["cafleet", "member", "ping"],    decision = "allow")
-prefix_rule(pattern = ["cafleet", "member", "nudge"],   decision = "allow")
 
 prefix_rule(
     pattern = ["cafleet", "member", "exec"],

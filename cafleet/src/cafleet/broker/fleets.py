@@ -20,7 +20,7 @@ def create_fleet(
     coding_agent: str,
     backend: str,
 ) -> dict:
-    """Atomically bootstrap a fleet with its root Director and Administrator.
+    """Atomically bootstrap a fleet with its root Director.
 
     The fleet row is written first with ``director_member_id=NULL`` and
     back-filled once the Director's member row exists, so the column is
@@ -38,9 +38,9 @@ def create_fleet(
             Director's ``placement.backend`` column.
 
     Returns:
-        A dict carrying ``fleet_id``, ``name``, ``created_at``,
-        ``administrator_member_id``, and a ``director`` sub-dict with the
-        Director's identity and placement metadata.
+        A dict carrying ``fleet_id``, ``name``, ``created_at``, and a
+        ``director`` sub-dict with the Director's identity and placement
+        metadata.
     """
     created_at = _shared.now_iso()
     director_card = {
@@ -94,30 +94,11 @@ def create_fleet(
             .where(Fleet.fleet_id == fleet_id)
             .values(director_member_id=director_member_id)
         )
-        administrator_card = {
-            "name": "Administrator",
-            "description": f"Built-in administrator for fleet {fleet_id}",
-            "skills": [],
-            "cafleet": {"kind": _shared.ADMINISTRATOR_KIND},
-        }
-        administrator = Member(
-            fleet_id=fleet_id,
-            name=administrator_card["name"],
-            description=administrator_card["description"],
-            status="active",
-            registered_at=created_at,
-            deregistered_at=None,
-            member_card_json=json.dumps(administrator_card),
-        )
-        session.add(administrator)
-        session.flush()
-        administrator_member_id = administrator.member_id
 
     return {
         "fleet_id": fleet_id,
         "name": name,
         "created_at": created_at,
-        "administrator_member_id": administrator_member_id,
         "director": {
             "member_id": director_member_id,
             "name": _DIRECTOR_NAME,

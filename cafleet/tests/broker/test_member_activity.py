@@ -1,4 +1,4 @@
-"""Tests for ``broker.list_members_with_activity`` (flat single-Director model)."""
+"""Tests for the activity aggregation of ``broker.list_members``."""
 
 import pytest
 
@@ -41,16 +41,15 @@ def _setup_three_member_team():
     return sid, director_id, a, b, c
 
 
-def test_list_members_with_activity__shape_identity_placement_and_activity_keys():
-    sid, _director_id, a, b, c = _setup_three_member_team()
-    rows = broker.list_members_with_activity(sid)
-    assert len(rows) == 3
-    assert {row["member_id"] for row in rows} == {a, b, c}
+def test_list_members__shape_identity_placement_and_activity_keys():
+    sid, director_id, a, b, c = _setup_three_member_team()
+    rows = broker.list_members(sid)
+    assert len(rows) == 4
+    assert {row["member_id"] for row in rows} == {director_id, a, b, c}
 
     alice = next(r for r in rows if r["member_id"] == a)
-    # Identity + placement match list_members superset contract.
     assert alice["name"] == "alice"
-    assert alice["status"] == "active"
+    assert alice["kind"] == "member"
     assert alice["placement"]["mux_pane_id"] == "%10"
     # Activity keys present even with no tasks yet.
     for key in ("last_sent", "last_recv", "last_ack", "idle"):
@@ -58,11 +57,11 @@ def test_list_members_with_activity__shape_identity_placement_and_activity_keys(
         assert alice[key] is None
 
 
-def test_list_members_with_activity__last_sent_and_last_recv_track_most_recent_timestamp():
+def test_list_members__last_sent_and_last_recv_track_most_recent_timestamp():
     sid, _director_id, a, b, _c = _setup_three_member_team()
     broker.send_message(sid, a, b, "first")
     second = broker.send_message(sid, a, b, "second")
-    rows = broker.list_members_with_activity(sid)
+    rows = broker.list_members(sid)
     alice = next(r for r in rows if r["member_id"] == a)
     bob = next(r for r in rows if r["member_id"] == b)
     assert alice["last_sent"] == second["task"]["status_timestamp"]
@@ -71,60 +70,58 @@ def test_list_members_with_activity__last_sent_and_last_recv_track_most_recent_t
     assert bob["last_ack"] is None
 
 
-def test_list_members_with_activity__last_ack_tracks_real_acks_only():
+def test_list_members__last_ack_tracks_real_acks_only():
     sid, _director_id, a, b, _c = _setup_three_member_team()
     sent = broker.send_message(sid, b, a, "ping")
     acked = broker.ack_task(a, sent["task"]["task_id"])
     # Broadcast summary (status_state=completed) must NOT pollute last_ack.
     broker.broadcast_message(sid, a, "team-wide note")
-    rows = broker.list_members_with_activity(sid)
+    rows = broker.list_members(sid)
     alice = next(r for r in rows if r["member_id"] == a)
     assert alice["last_ack"] == acked["task"]["status_timestamp"]
 
 
 @pytest.mark.parametrize("column", ["last_recv", "last_ack"])
-def test_list_members_with_activity__broadcast_summary_filtered_from_proxy_columns(
+def test_list_members__broadcast_summary_filtered_from_proxy_columns(
     column,
 ):
     sid, _director_id, a, _b, _c = _setup_three_member_team()
     # Alice broadcasts; her own broadcast_summary lands in her context with
     # status_state='completed'. Neither last_recv nor last_ack should register it.
     broker.broadcast_message(sid, a, "team-wide note")
-    rows = broker.list_members_with_activity(sid)
+    rows = broker.list_members(sid)
     alice = next(r for r in rows if r["member_id"] == a)
     assert alice[column] is None
 
 
-def test_list_members_with_activity__idle_transitions_from_none_after_activity():
+def test_list_members__idle_transitions_from_none_after_activity():
     sid, _director_id, a, b, _c = _setup_three_member_team()
-    rows_pre = broker.list_members_with_activity(sid)
+    rows_pre = broker.list_members(sid)
     alice_pre = next(r for r in rows_pre if r["member_id"] == a)
     assert alice_pre["idle"] is None
 
     broker.send_message(sid, a, b, "hello")
-    rows_post = broker.list_members_with_activity(sid)
+    rows_post = broker.list_members(sid)
     alice_post = next(r for r in rows_post if r["member_id"] == a)
     assert alice_post["idle"] is not None
 
 
-def test_list_members_with_activity__lists_root_members_excludes_root_and_deregistered():
+def test_list_members__includes_root_director_excludes_deregistered():
     sid, director_id, a, b, c = _setup_three_member_team()
     broker.deregister_member(c)
 
-    rows = broker.list_members_with_activity(sid)
+    rows = broker.list_members(sid)
     member_ids = {row["member_id"] for row in rows}
-    # Flat model: every member under the root is listed. The root Director
-    # (member_id == fleets.director_member_id) is excluded, and the
+    # Every active registry entry is listed — the root Director included; the
     # deregistered carol is gone.
-    assert member_ids == {a, b}
-    assert director_id not in member_ids
+    assert member_ids == {director_id, a, b}
 
-    # Empty fleet (bootstrap-only) → no members.
-    sid2, _director_id2 = _bootstrap_fleet()
-    assert broker.list_members_with_activity(sid2) == []
+    # Bootstrap-only fleet → just the root Director.
+    sid2, director_id2 = _bootstrap_fleet()
+    assert [r["member_id"] for r in broker.list_members(sid2)] == [director_id2]
 
     # Unknown fleet-id returns [].
-    assert broker.list_members_with_activity(999999) == []
+    assert broker.list_members(999999) == []
 
 
 def test_register_member__placed_member_is_listed():

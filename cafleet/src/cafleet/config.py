@@ -15,7 +15,7 @@ from pydantic_settings import BaseSettings
 
 def _default_database_url() -> str:
     """Return the default SQLite URL under ``~/.local/share/cafleet/``."""
-    db_path = Path("~/.local/share/cafleet/cafleet_v3.db").expanduser()
+    db_path = Path("~/.local/share/cafleet/cafleet_v4.db").expanduser()
     return f"sqlite:///{db_path}"
 
 
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     Attributes:
         database_url: SQLAlchemy URL for the SQLite registry. Sourced from
             ``CAFLEET_DATABASE_URL``; defaults to
-            ``sqlite:///~/.local/share/cafleet/cafleet_v3.db`` (the home
+            ``sqlite:///~/.local/share/cafleet/cafleet_v4.db`` (the home
             directory is expanded at import time). Use an absolute path —
             SQLAlchemy does not expand ``~`` in SQLite URLs.
         broker_host: Bind host for ``cafleet server``. Sourced from

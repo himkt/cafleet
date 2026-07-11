@@ -140,31 +140,22 @@ def test_fleet_create__each_create_mints_unique_id(fresh_db):
     assert len(_fleet_rows(db_file)) == 2
 
 
-def test_fleet_create__bootstraps_administrator_recorded_in_db(fresh_db):
+def test_fleet_create__seeds_only_the_root_director_in_db(fresh_db):
     db_file, runner = fresh_db
-    result = runner.invoke(cli, ["fleet", "create", "--name", "admin-check", "--json"])
+    result = runner.invoke(cli, ["fleet", "create", "--name", "seed-check", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     sid = data["fleet_id"]
-    admin_id = data["administrator_member_id"]
-    assert isinstance(admin_id, int)
 
     conn = sqlite3.connect(str(db_file))
     try:
         rows = conn.execute(
-            "SELECT member_id, fleet_id, name, status, member_card_json "
-            "FROM members WHERE member_id = ?",
-            (admin_id,),
+            "SELECT member_id, name, status FROM members WHERE fleet_id = ?",
+            (sid,),
         ).fetchall()
     finally:
         conn.close()
-    assert len(rows) == 1
-    _mid, row_sid, row_name, row_status, row_card = rows[0]
-    assert row_sid == sid
-    assert row_name == "Administrator"
-    assert row_status == "active"
-    card = json.loads(row_card)
-    assert card["cafleet"]["kind"] == "builtin-administrator"
+    assert rows == [(data["director"]["member_id"], "Director", "active")]
 
 
 @pytest.mark.parametrize("output_mode", ["text", "json"])

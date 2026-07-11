@@ -1,9 +1,9 @@
 """Regression tests: the shared operator flags are visible and documented (design 0000118, items 3.4 + 3.5).
 
-``--full`` / ``--quiet`` (shared ``full_flag`` / ``quiet_flag``), ``--activity``
-(``member list``), and ``--ansi/--no-ansi`` (``member capture``) are visible
-and carry help text, so they appear in the relevant ``--help`` output. The
-Click param carries ``hidden is False`` and a non-empty ``help``.
+``--full`` / ``--quiet`` (shared ``full_flag`` / ``quiet_flag``) and
+``--ansi/--no-ansi`` (``member capture``) are visible and carry help text, so
+they appear in the relevant ``--help`` output. The Click param carries
+``hidden is False`` and a non-empty ``help``.
 """
 
 import pytest
@@ -17,7 +17,6 @@ _UNHIDDEN_FLAGS = [
     (("message", "send"), "quiet"),
     (("message", "ack"), "quiet"),
     (("member", "ping"), "quiet"),
-    (("member", "list"), "activity"),
     (("member", "capture"), "ansi"),
 ]
 
@@ -49,12 +48,6 @@ def test_message_send_help_shows_full_and_quiet(runner):
     assert result.exit_code == 0, result.output
     assert "--full" in result.output
     assert "--quiet" in result.output
-
-
-def test_member_list_help_shows_activity(runner):
-    result = runner.invoke(cli, ["member", "list", "--help"])
-    assert result.exit_code == 0, result.output
-    assert "--activity" in result.output
 
 
 def test_member_capture_help_shows_ansi(runner):

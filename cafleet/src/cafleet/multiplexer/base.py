@@ -270,21 +270,6 @@ class AgentStateAware(Protocol):
         """
         ...
 
-    def wait_agent_status(
-        self, *, target_pane_id: str, status: str, timeout_ms: int
-    ) -> bool:
-        """Block until the pane's agent reaches ``status`` or the timeout elapses.
-
-        Args:
-            target_pane_id: Pane id whose agent to watch.
-            status: The native state to wait for.
-            timeout_ms: Maximum time to wait, in milliseconds.
-
-        Returns:
-            ``True`` if ``status`` was reached before ``timeout_ms`` elapsed.
-        """
-        ...
-
 
 def poll_until_pane_gone(
     pane_exists_fn: Callable[[], bool],

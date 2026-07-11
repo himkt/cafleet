@@ -51,9 +51,9 @@ Pick the chart/format per the `../../reference/visualization.md` Chart Type Sele
 
 ## Text Emphasis
 
-Follow the **Color Discipline** and **Usage Rules** subsections under § Highlight in `../../reference/slidev/techniques/formatting.md`. Key rules:
+Follow the **Color Discipline** and **Usage Rules** subsections under § Highlight in `../../reference/slidev.md`. Key rules:
 
-- **Always use the `Highlight` component** for colored numbers and keywords. The actual slide.md syntax is the Vue tag form documented in `../../reference/slidev/techniques/formatting.md`. Never use `span class="c-..."` markup directly.
+- **Always use the `Highlight` component** for colored numbers and keywords. The actual slide.md syntax is the Vue tag form documented in `../../reference/slidev.md` § *Formatting Components*. Never use `span class="c-..."` markup directly.
 - **Max 3 per slide.** More than 3 → move data to a table or chart.
 - **Semantic color**: positive (green), negative (red), neutral (blue), caution (orange). Ask "is this good or bad for the audience?"
 

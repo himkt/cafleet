@@ -42,13 +42,13 @@ Claude Code honors the leading-`!` shell shortcut that `cafleet member exec` use
 
 ## Verification recipe (manual smoke test)
 
-Gated on local install of the `claude` binary. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, member `4` — your ids will differ.
+Gated on local install of the `claude` binary. Run from inside a tmux or herdr session. The recipe pastes literal ids: fleet `1`, Director `2`, member `3` — your ids will differ.
 
 ??? example "Expand the recipe"
 
     ```bash
     cafleet fleet create --name claude-smoke --coding-agent claude
-    # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
+    # Expect: a '<fleet_id> director=<director_id>' line.
     # Note the fleet and Director ids — the steps below use 1 and 2.
 
     cafleet member create --fleet-id 1 \
@@ -56,18 +56,18 @@ Gated on local install of the `claude` binary. Run from inside a tmux or herdr s
       --text "You are Claude-Smoke. Reply hello when polled."
     # Expect: the backend defaults to claude (no --coding-agent needed).
 
-    cafleet member list --fleet-id 1 --all
+    cafleet member list --fleet-id 1
     # Expect: the new member's row, backend column shows 'claude'; the pane title shows the member name.
 
     cafleet message send --fleet-id 1 --from-member-id 2 \
-      --to-member-id 4 --text "ping"
+      --to-member-id 3 --text "ping"
     # Expect: the claude pane receives the 2-line inline preview and the member ack-loops correctly.
 
     cafleet member exec --fleet-id 1 \
-      --member-id 4 "git status --short"
+      --member-id 3 "git status --short"
     # Expect: '! git status --short' lands in the claude pane and the command runs.
 
-    cafleet member delete --fleet-id 1 --member-id 4
+    cafleet member delete --fleet-id 1 --member-id 3
     cafleet fleet delete --fleet-id 1
     ```
 

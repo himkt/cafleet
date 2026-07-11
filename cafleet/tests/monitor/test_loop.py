@@ -77,8 +77,8 @@ def _default_stall_disabled(monkeypatch):
 class _FakeStateMux:
     """A minimal ``AgentStateAware`` multiplexer for the native-status branch:
     reports per-pane native states and records wake keystrokes. Recognized by
-    ``isinstance(mux, AgentStateAware)`` because it defines both capability
-    methods."""
+    ``isinstance(mux, AgentStateAware)`` because it defines the capability
+    method."""
 
     name = "herdr"
 
@@ -93,9 +93,6 @@ class _FakeStateMux:
 
     def agent_status(self, *, target_pane_id):
         return self._statuses.get(target_pane_id)
-
-    def wait_agent_status(self, *, target_pane_id, status, timeout_ms):
-        return False
 
     def send_wake_trigger(self, *, target_pane_id, due_members, director_member_id):
         self.wakes.append(

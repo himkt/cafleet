@@ -22,7 +22,6 @@ does not exist at all.
 
 | Behavior | Summary | Reference |
 |---|---|---|
-| Fleet bootstrap | `cafleet fleet create` (run inside tmux) atomically creates the fleet, its root Director, and the built-in Administrator | [CLI options](../spec/cli-options.md) `fleet create` |
+| Fleet bootstrap | `cafleet fleet create` (run inside tmux) atomically creates the fleet and its root Director | [CLI options](../spec/cli-options.md) `fleet create` |
 | Fleet soft-delete | `cafleet fleet delete <id>` soft-deletes a fleet | [CLI options](../spec/cli-options.md) `fleet delete` |
 | Root Director protection | the root Director cannot be deregistered; tear down via `fleet delete` | [CLI options](../spec/cli-options.md) `fleet delete` |
-| Built-in Administrator | each fleet has exactly one built-in Administrator | [data model](../spec/data-model.md) |

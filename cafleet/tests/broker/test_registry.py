@@ -1,13 +1,10 @@
 """Tests for ``broker`` fleet + registry operations."""
 
-import json
-
 import click
 import pytest
 
 from cafleet import broker
-from cafleet.broker import ADMINISTRATOR_KIND, _shared
-from cafleet.db.models import Fleet as FleetModel
+from cafleet.broker import _shared
 from cafleet.db.models import Member
 from tests.broker._helpers import _create_fleet, _member_placement, _register_member
 
@@ -26,11 +23,9 @@ def test_create_fleet__shape_and_name_handling():
     assert r_named["fleet_id"] != r_default["fleet_id"]
 
 
-def test_create_fleet__administrator_seed_shape_and_uniqueness(broker_session):
+def test_create_fleet__seeds_only_the_root_director(broker_session):
     r1 = _create_fleet()
     sid = r1["fleet_id"]
-    admin_id = r1["administrator_member_id"]
-    assert isinstance(admin_id, int)
 
     with broker_session() as s:
         rows = (
@@ -38,32 +33,18 @@ def test_create_fleet__administrator_seed_shape_and_uniqueness(broker_session):
             .filter(Member.fleet_id == sid, Member.status == "active")
             .all()
         )
-    assert len(rows) == 2
-    admins = [r for r in rows if r.name == "Administrator"]
-    assert len(admins) == 1
-    assert admins[0].member_id == admin_id
-    card = json.loads(admins[0].member_card_json)
-    assert card["cafleet"]["kind"] == ADMINISTRATOR_KIND
-
-    # Administrator registered_at matches fleets.created_at.
-    with broker_session() as s:
-        fleet_row = s.query(FleetModel).filter(FleetModel.fleet_id == sid).one()
-        admin_row = s.query(Member).filter(Member.member_id == admin_id).one()
-    assert admin_row.registered_at == fleet_row.created_at
-
-    # Each fleet mints its own Administrator.
-    r2 = _create_fleet()
-    assert r2["administrator_member_id"] != admin_id
+    assert len(rows) == 1
+    assert rows[0].name == "Director"
+    assert rows[0].member_id == r1["director"]["member_id"]
 
 
-def test_create_fleet__roster_marks_administrator_and_director_kinds():
+def test_create_fleet__roster_marks_director_and_member_kinds():
     result = _create_fleet()
     sid = result["fleet_id"]
     _register_member(sid, name="user-member")
     entries = broker.list_roster(sid)
-    assert len(entries) == 3
+    assert len(entries) == 2
     kinds = {e["member_id"]: e["kind"] for e in entries}
-    assert kinds[result["administrator_member_id"]] == "administrator"
     assert kinds[result["director"]["member_id"]] == "director"
     member_entries = [e for e in entries if e["kind"] == "member"]
     assert {e["name"] for e in member_entries} == {"user-member"}
@@ -87,14 +68,14 @@ def test_list_fleets__empty_and_non_empty_with_member_count():
     row = rows[0]
     assert set(row.keys()) >= {"fleet_id", "name", "created_at", "member_count"}
     assert row["name"] == "fleet-a"
-    # Two user members (one deregistered → excluded) + Director + Administrator.
-    assert row["member_count"] == 4
+    # Two user members (one deregistered → excluded) + Director.
+    assert row["member_count"] == 3
 
 
-def test_list_fleets__bootstrap_only_count_is_two():
+def test_list_fleets__bootstrap_only_count_is_one():
     _create_fleet()
     rows = broker.list_fleets()
-    assert rows[0]["member_count"] == 2
+    assert rows[0]["member_count"] == 1
 
 
 def test_list_fleets__newest_first_by_created_at_desc(monkeypatch):
@@ -234,9 +215,9 @@ def test_list_roster__active_only_with_required_keys():
     broker.deregister_member(dead["member_id"])
 
     result = broker.list_roster(sid)
-    assert len(result) == 4  # 2 user + Director + Administrator
+    assert len(result) == 3  # 2 user + Director
     names = {a["name"] for a in result}
-    assert names == {"active-1", "active-2", "Director", "Administrator"}
+    assert names == {"active-1", "active-2", "Director"}
     entry = result[0]
     assert {
         "member_id",
@@ -249,10 +230,10 @@ def test_list_roster__active_only_with_required_keys():
     assert entry["status"] == "active"
 
 
-def test_list_roster__bootstrap_only_lists_director_and_admin():
+def test_list_roster__bootstrap_only_lists_the_director():
     fleet = _create_fleet()
     result = broker.list_roster(fleet["fleet_id"])
-    assert {a["name"] for a in result} == {"Director", "Administrator"}
+    assert {a["name"] for a in result} == {"Director"}
 
 
 def test_list_roster__scoped_per_fleet():
@@ -303,7 +284,7 @@ def test_deregister_member__active_member_returns_true():
     member = _register_member(sid, name="retiring")
     assert broker.deregister_member(member["member_id"]) is True
     names = {a["name"] for a in broker.list_roster(sid)}
-    assert names == {"Director", "Administrator"}
+    assert names == {"Director"}
     # The deregistered member still belongs to the fleet (verify_member_fleet).
     assert broker.verify_member_fleet(member["member_id"], sid) is True
 
@@ -363,17 +344,16 @@ def test_list_members__returns_members_with_placement_info():
     _register_member(sid, name="member-2", placement=_member_placement(None))
 
     result = broker.list_members(sid)
-    assert len(result) == 2
-    assert {m["name"] for m in result} == {"member-1", "member-2"}
-    member = result[0]
-    assert "placement" in member
+    assert len(result) == 3
+    assert {m["name"] for m in result} == {"Director", "member-1", "member-2"}
+    member = next(m for m in result if m["name"] == "member-1")
     assert member["placement"]["mux_session"] == "main"
-    assert member["status"] == "active"
+    assert member["kind"] == "member"
 
 
-def test_list_members__flat_listing_excludes_root_and_empty_case():
-    """Flat model: ``list_members(fleet_id)`` returns every member of the fleet
-    and never surfaces the root Director itself."""
+def test_list_members__includes_root_director_and_bootstrap_case():
+    """``list_members(fleet_id)`` returns every active registry entry of the
+    fleet — the root Director included."""
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     did = fleet["director"]["member_id"]
@@ -381,10 +361,11 @@ def test_list_members__flat_listing_excludes_root_and_empty_case():
     _register_member(sid, name="member-2", placement=_member_placement(None))
 
     result = broker.list_members(sid)
-    assert {m["name"] for m in result} == {"member-1", "member-2"}
-    # The root Director (member_id == fleets.director_member_id) is excluded.
-    assert did not in {m["member_id"] for m in result}
+    assert {m["name"] for m in result} == {"Director", "member-1", "member-2"}
+    assert did in {m["member_id"] for m in result}
 
-    # Bootstrap-only fleet → no members.
-    empty = _create_fleet()
-    assert broker.list_members(empty["fleet_id"]) == []
+    # Bootstrap-only fleet → just the root Director.
+    bare = _create_fleet()
+    assert [m["member_id"] for m in broker.list_members(bare["fleet_id"])] == [
+        bare["director"]["member_id"]
+    ]

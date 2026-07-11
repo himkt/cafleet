@@ -17,7 +17,7 @@ with one member per backend and messages each of them.
 - You have followed [Install](../get-started/install.md) and
   [Configure](../get-started/configure.md), and you are inside a tmux or herdr
   session (the multiplexer backend is auto-detected — see
-  [Multiplexer backends](../concepts/multiplexer-backends.md)).
+  [Multiplexer backends](../spec/multiplexer-backends.md)).
 
 ## Prompt
 
@@ -52,7 +52,7 @@ deletes the fleet.
 ## Appendix: the CLI underneath
 
 The commands the agent runs, with literal ids — fleet `1`, root Director
-`2`, members `4`/`5`/`6`; your ids will differ.
+`2`, members `3`/`4`/`5`; your ids will differ.
 
 ??? example "Expand the walkthrough"
 
@@ -65,7 +65,7 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
     ```
 
     ```
-    1 director=2 admin=3
+    1 director=2
     ```
 
     Spawn one member per backend:
@@ -77,7 +77,7 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
     ```
 
     ```
-    4 alice backend=claude pane=%7
+    3 alice backend=claude pane=%7
     ```
 
     ```bash
@@ -87,7 +87,7 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
     ```
 
     ```
-    5 bob backend=codex pane=%8
+    4 bob backend=codex pane=%8
     ```
 
     ```bash
@@ -97,7 +97,7 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
     ```
 
     ```
-    6 carol backend=opencode pane=%9
+    5 carol backend=opencode pane=%9
     ```
 
     List the panes — only the `claude` pane titles itself with the member name
@@ -105,26 +105,25 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
     so use the `pane_id` column to locate `bob` and `carol`:
 
     ```bash
-    cafleet member list --fleet-id 1 --all
+    cafleet member list --fleet-id 1
     ```
 
     ```
-    5 members:
-      member_id  name           status  kind           backend   session  window_id  pane_id  created_at
-      ---------  -------------  ------  -------------  --------  -------  ---------  -------  --------------------
-      2          Director       active  director       claude    main     @3         %0       2026-04-15T10:00:00+00:00
-      3          Administrator  active  administrator  -         -        -          -        -
-      4          alice          active  member         claude    main     @3         %7       2026-04-15T10:01:00+00:00
-      5          bob            active  member         codex     main     @3         %8       2026-04-15T10:02:00+00:00
-      6          carol          active  member         opencode  main     @3         %9       2026-04-15T10:03:00+00:00
+    4 members:
+      member_id  name           kind      backend   pane_id  idle
+      ---------  -------------  --------  --------  -------  ----
+      2          Director       director  claude    %0       -
+      3          alice          member    claude    %7       -
+      4          bob            member    codex     %8       -
+      5          carol          member    opencode  %9       -
     ```
 
-    Message each member — repeat with `--to-member-id 5` and `--to-member-id 6`;
+    Message each member — repeat with `--to-member-id 4` and `--to-member-id 5`;
     the envelope and the 2-line inline preview are identical for every backend
     ([Push notifications](../spec/multiplexer-backends.md#push-notifications)):
 
     ```bash
-    cafleet message send --fleet-id 1 --from-member-id 2 --to-member-id 4 --text "alice: report status"
+    cafleet message send --fleet-id 1 --from-member-id 2 --to-member-id 3 --text "alice: report status"
     ```
 
     ```
@@ -133,16 +132,16 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
     alice: report status
     ```
 
-    Tear down — repeat `member delete` for members `5` and `6`, then delete the
+    Tear down — repeat `member delete` for members `4` and `5`, then delete the
     fleet:
 
     ```bash
-    cafleet member delete --fleet-id 1 --member-id 4
+    cafleet member delete --fleet-id 1 --member-id 3
     ```
 
     ```
     Member deleted.
-      member_id:  4
+      member_id:  3
       pane_id:    %7 (closed)
     ```
 
@@ -151,7 +150,7 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
     ```
 
     ```
-    Deleted fleet 1. Deregistered 2 members.
+    Deleted fleet 1. Deregistered 1 members.
     ```
 
 Every `member create` / `member delete` flag and exit code is documented in

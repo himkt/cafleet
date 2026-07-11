@@ -2,7 +2,7 @@
 
 You are a **member** spawned by `cafleet member create`. You run in workspace-scoped auto-approval mode ({permission_flags}): your Bash tool is **enabled** and routine permission prompts auto-resolve silently.
 
-This file is your role anchor. The cafleet CLI surface you call (poll / send / ack / cancel / show) is in [`skills/cafleet/SKILL.md`](../SKILL.md); the bash-via-Director fallback (when your harness deny-list rejects a Bash invocation) is in [`reference/exec-routing.md`](../reference/exec-routing.md). You do NOT read `reference/director.md`, `reference/recovery.md`, or `reference/broadcast.md` — those are Director-side.
+This file is your role anchor. The cafleet CLI surface you call (poll / send / ack / cancel / show) is in [`skills/cafleet/SKILL.md`](../SKILL.md); the bash-via-Director fallback (when your harness deny-list rejects a Bash invocation) is in [`reference/exec-routing.md`](../reference/exec-routing.md). You do NOT read `reference/director.md` or `reference/recovery.md` — those are Director-side.
 
 ## Required reading
 

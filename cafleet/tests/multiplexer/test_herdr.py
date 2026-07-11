@@ -798,36 +798,3 @@ def test_agent_status__other_error_propagates(herdr_run):
     set_returns(HerdrError("herdr command failed: server unreachable"))
     with pytest.raises(HerdrError, match="server unreachable"):
         _herdr.agent_status(target_pane_id="wG:p1")
-
-
-# --- AgentStateAware: wait_agent_status ------------------------------------
-
-
-def test_wait_agent_status__argv_and_true_on_success(herdr_run):
-    captured, set_returns = herdr_run
-    set_returns("")
-    result = _herdr.wait_agent_status(
-        target_pane_id="wG:p1", status="done", timeout_ms=5000
-    )
-    assert result is True
-    assert captured == [
-        [
-            "herdr",
-            "wait",
-            "agent-status",
-            "wG:p1",
-            "--status",
-            "done",
-            "--timeout",
-            "5000",
-        ]
-    ]
-
-
-def test_wait_agent_status__false_on_error(herdr_run):
-    _captured, set_returns = herdr_run
-    set_returns(HerdrError("herdr command timed out"))
-    assert (
-        _herdr.wait_agent_status(target_pane_id="wG:p1", status="done", timeout_ms=1000)
-        is False
-    )

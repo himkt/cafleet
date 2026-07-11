@@ -26,7 +26,6 @@ nav = [
         { "Storage" = "concepts/storage.md" },
         { "Member lifecycle" = "concepts/member-lifecycle.md" },
         { "Coding agents" = "concepts/coding-agents.md" },
-        { "Multiplexer backends" = "concepts/multiplexer-backends.md" },
         { "Monitoring" = "concepts/monitoring.md" },
     ] },
     { "Specification" = [

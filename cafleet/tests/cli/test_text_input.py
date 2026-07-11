@@ -1,8 +1,8 @@
 """Tests for the shared text-input helper (design 0000112 §1, §2).
 
-``read_text_input`` owns all body resolution and validation for the four
-text-body commands (``message send`` / ``message broadcast`` / ``member nudge``
-/ ``member create``): the ``--text`` / ``--text-file`` mutual-exclusivity, path
+``read_text_input`` owns all body resolution and validation for the three
+text-body commands (``message send`` / ``message broadcast`` / ``member
+create``): the ``--text`` / ``--text-file`` mutual-exclusivity, path
 resolution (absolute or CWD-relative), ``-`` stdin, UTF-8 decoding, and uniform
 empty-body rejection. ``substitute_spawn_placeholders`` runs the ``member
 create``-only spawn-prompt ``.format`` substitution on the resolved body.

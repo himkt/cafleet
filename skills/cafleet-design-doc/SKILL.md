@@ -33,8 +33,7 @@ Before routing into a workflow or consulting a reference page, Read your overlay
 
 | Read | When |
 |------|------|
-| [reference/template.md](reference/template.md) | you are writing or checking a doc against the standard structure |
-| [reference/guidelines.md](reference/guidelines.md) | you need section guidelines, quality standards, or formatting rules |
+| [reference/guidelines.md](reference/guidelines.md) | you are writing or checking a doc against the standard structure (the template opens the page), or need section guidelines, quality standards, or formatting rules |
 | [reference/coordination.md](reference/coordination.md) | you need the inter-member verb + pointer + `COMMENT(role)` schema |
 
 Each workflow body (create / interview / execute) carries its own Required-reading block for the team it runs — base-dir, supervision, and coordination are gated there, not on this dispatch surface.

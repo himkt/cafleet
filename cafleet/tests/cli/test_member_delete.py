@@ -533,23 +533,23 @@ def test_placementless__json_pane_status_no_placement(
     }
 
 
-def test_administrator_guard__broker_error_surfaces_verbatim(
+def test_root_director_guard__broker_error_surfaces_verbatim(
     runner, fleet_id, monkeypatch
 ):
-    """The broker's Administrator guard reaches the operator verbatim (no
-    ``deregister failed:`` wrapping), exit 1."""
+    """A broker deregister guard (the root-Director protection) reaches the
+    operator verbatim (no ``deregister failed:`` wrapping), exit 1."""
     monkeypatch.setattr(
         broker, "get_member", lambda *_a, **_kw: _member(placement=None)
     )
 
     def guard(_member_id):
-        raise click.ClickException("Administrator cannot be deregistered")
+        raise click.ClickException("cannot deregister the root Director")
 
     monkeypatch.setattr(broker, "deregister_member", guard)
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
-    assert "Error: Administrator cannot be deregistered" in out
+    assert "Error: cannot deregister the root Director" in out
     assert "deregister failed" not in out
 
 
