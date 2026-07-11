@@ -28,7 +28,7 @@ def register_member(
     identity, so nested teams are impossible by construction. When
     ``placement`` is supplied, the fleet's root Director must be an active
     member of the fleet (a loud invariant failure otherwise, since the value
-    is no longer caller input).
+    is not caller input).
 
     Args:
         fleet_id: Fleet id the new member belongs to.

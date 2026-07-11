@@ -584,7 +584,7 @@ and the WebUI) is detailed in §5.4.
     fleet's `director_member_id` must reference an active member of the fleet;
     violation → application error `fleet {fleet_id}'s root Director (member
     {id}) is not active.` — a loud invariant failure, not a usage error, since
-    the value is no longer user input. Nested teams stay impossible by
+    the value is not user input. Nested teams stay impossible by
     construction: no caller supplies a director id.
   - Insert the member row; if `placement` given, insert it; then, **only if
     `kind` is neither monitoring-member nor administrator**, enroll the member
