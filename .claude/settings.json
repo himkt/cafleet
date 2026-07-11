@@ -18,7 +18,6 @@
       "Bash(bun run agent-browser --session vr-batch-* errors *)",
       "Bash(bun run agent-browser --session vr-batch-* reload)",
       "Bash(bun run agent-browser close --all)",
-      "Bash(mise //admin*)",
       "Bash(mise //cafleet*)",
       "Bash(mise //:bun-install)",
       "Bash(mise //:docs-build)",

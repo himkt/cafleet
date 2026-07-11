@@ -1,7 +1,7 @@
 # Aggressive Simplification: Drop the WebUI and Administrator, Consolidate CLI, Docs, and Skills
 
 **Status**: Approved
-**Progress**: 12/50 tasks complete
+**Progress**: 17/50 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -195,11 +195,12 @@ Steps 5â€“8 form one atomic implementation block: each code deletion in Steps 5â
 
 ### Step 3: README, CLAUDE.md, rules
 
-- [ ] Run `/update-readme`: pitch drops "and an admin WebUI"; Specification bullet drops "WebUI API" (SPEC.md edits from Step 2 are its other input) <!-- completed: -->
-- [ ] `CLAUDE.md`: update the tech-stack line (drop FastAPI/server) and the CLI blurb if it mentions the server <!-- completed: -->
-- [ ] `.claude/rules/commands.md`: delete the WebUI server bullets (`cafleet server`, `mise //cafleet:dev`), `mise //admin:dev` / `//admin:build` / `//admin:lint` rows, and the admin steps in the publish description <!-- completed: -->
-- [ ] `.claude/rules/bash-tool.md`: sweep the `member nudge` mention (Director-side primitives) <!-- completed: -->
-- [ ] `.claude/settings.json`: delete the `Bash(mise //admin*)` `permissions.allow` row (dead once `admin/` and its mise tasks are gone) <!-- completed: -->
+
+- [x] Run `/update-readme`: pitch drops "and an admin WebUI"; Specification bullet drops "WebUI API" (SPEC.md edits from Step 2 are its other input) <!-- completed: 2026-07-11T10:25 -->
+- [x] `CLAUDE.md`: update the tech-stack line (drop FastAPI/server) and the CLI blurb if it mentions the server <!-- completed: 2026-07-11T10:25 -->
+- [x] `.claude/rules/commands.md`: delete the WebUI server bullets (`cafleet server`, `mise //cafleet:dev`), `mise //admin:dev` / `//admin:build` / `//admin:lint` rows, and the admin steps in the publish description <!-- completed: 2026-07-11T10:32 -->
+- [x] `.claude/rules/bash-tool.md`: sweep the `member nudge` mention (Director-side primitives) <!-- completed: 2026-07-11T10:25 -->
+- [x] `.claude/settings.json`: delete the `Bash(mise //admin*)` `permissions.allow` row (dead once `admin/` and its mise tasks are gone) <!-- completed: 2026-07-11T10:32 -->
 
 ### Step 4: skills
 
