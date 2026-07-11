@@ -61,9 +61,9 @@ def test_alembic_version_table_records_head_0001(alembic_upgraded_db):
         engine.dispose()
 
 
-def test_single_initial_migration_revision_exists():
-    """The migration history is a single initial revision (0001) with no
-    predecessor, which is the head."""
+def test_two_migration_revisions_exist():
+    """The migration history is a linear 2-revision chain: 0002 (head) on top
+    of the initial 0001."""
     with importlib.resources.as_file(
         importlib.resources.files("cafleet.db") / "alembic" / "alembic.ini"
     ) as ini_path:
@@ -71,10 +71,12 @@ def test_single_initial_migration_revision_exists():
         script = ScriptDirectory.from_config(cfg)
         revisions = list(script.walk_revisions())
 
-    assert len(revisions) == 1
-    assert revisions[0].revision == "0001"
-    assert revisions[0].down_revision is None
-    assert script.get_current_head() == "0001"
+    assert len(revisions) == 2
+    assert revisions[0].revision == "0002"
+    assert revisions[0].down_revision == "0001"
+    assert revisions[1].revision == "0001"
+    assert revisions[1].down_revision is None
+    assert script.get_current_head() == "0002"
 
 
 def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
@@ -333,5 +335,337 @@ def test_skill_installs_table_created_by_migration(alembic_upgraded_db):
             ).scalar()
         assert ddl is not None
         assert "AUTOINCREMENT" not in ddl.upper()
+    finally:
+        engine.dispose()
+
+
+def _populate_0001(db_path):
+    """Insert rows into every table migration 0002 renames or touches: one
+    fleet, a root Director + an ordinary member with their placements
+    (director's placement carries NULL director_agent_id, the member's carries
+    the Director's id), unicast tasks both ways plus a broadcast summary with a
+    NULL recipient, a monitor schedule, a runtime row, and a skill install."""
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO fleets "
+                    "(fleet_id, name, created_at, deleted_at, director_agent_id) "
+                    "VALUES (1, 'fleet-one', '2026-07-11T00:00:00+00:00', NULL, NULL)"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO agents (agent_id, fleet_id, name, description, "
+                    "status, registered_at, deregistered_at, agent_card_json) VALUES "
+                    "(1, 1, 'Director', 'root director', 'active', "
+                    "'2026-07-11T00:00:01+00:00', NULL, '{\"name\": \"Director\"}'), "
+                    "(2, 1, 'Worker', 'ordinary member', 'active', "
+                    "'2026-07-11T00:00:02+00:00', NULL, '{\"name\": \"Worker\"}')"
+                )
+            )
+            conn.execute(
+                text("UPDATE fleets SET director_agent_id = 1 WHERE fleet_id = 1")
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO agent_placements (agent_id, director_agent_id, "
+                    "mux_session, mux_window_id, mux_pane_id, backend, coding_agent, "
+                    "created_at) VALUES "
+                    "(1, NULL, 'cafleet-1', '@1', '%1', 'tmux', 'claude', "
+                    "'2026-07-11T00:00:01+00:00'), "
+                    "(2, 1, 'cafleet-1', '@1', '%2', 'tmux', 'claude', "
+                    "'2026-07-11T00:00:02+00:00')"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO tasks (task_id, context_id, from_agent_id, "
+                    "to_agent_id, type, created_at, status_state, status_timestamp, "
+                    "origin_task_id, text) VALUES "
+                    "(1, 2, 1, 2, 'message', '2026-07-11T00:01:00+00:00', "
+                    "'input_required', '2026-07-11T00:01:00+00:00', NULL, "
+                    "'hello worker'), "
+                    "(2, 1, 2, 1, 'message', '2026-07-11T00:02:00+00:00', "
+                    "'completed', '2026-07-11T00:02:30+00:00', NULL, "
+                    "'hello director'), "
+                    "(3, 1, 1, NULL, 'message', '2026-07-11T00:03:00+00:00', "
+                    "'completed', '2026-07-11T00:03:00+00:00', NULL, "
+                    "'broadcast summary')"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO monitor_config "
+                    "(agent_id, interval_seconds, last_ping_at, enabled) "
+                    "VALUES (2, 90, NULL, 1)"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO monitor_runtime "
+                    "(fleet_id, pid, started_at, last_tick_at, tick_seconds) "
+                    "VALUES (1, 4242, '2026-07-11T00:00:03+00:00', NULL, 5)"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO skill_installs "
+                    "(coding_agent, cafleet_version, installed_at) "
+                    "VALUES ('claude', '0.1.0', '2026-07-11T00:00:00+00:00')"
+                )
+            )
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture(scope="module")
+def upgraded_populated_db(tmp_path_factory):
+    """A DB populated at revision 0001, then upgraded to head (0002)."""
+    db_path = tmp_path_factory.mktemp("alembic_populated") / "populated.db"
+
+    with importlib.resources.as_file(
+        importlib.resources.files("cafleet.db") / "alembic" / "alembic.ini"
+    ) as ini_path:
+        cfg = Config(str(ini_path))
+        cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+        command.upgrade(cfg, "0001")
+        _populate_0001(db_path)
+        command.upgrade(cfg, "head")
+
+    return db_path
+
+
+def test_upgrade_renames_registry_tables(upgraded_populated_db):
+    engine = create_engine(f"sqlite:///{upgraded_populated_db}")
+    try:
+        tables = set(inspect(engine).get_table_names())
+        assert "members" in tables
+        assert "member_placements" in tables
+        assert "agents" not in tables
+        assert "agent_placements" not in tables
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_records_head_0002(upgraded_populated_db):
+    engine = create_engine(f"sqlite:///{upgraded_populated_db}")
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT version_num FROM alembic_version"))
+            assert rows.fetchall() == [("0002",)]
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_preserves_member_rows(upgraded_populated_db):
+    engine = create_engine(f"sqlite:///{upgraded_populated_db}")
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT member_id, fleet_id, name, description, status, "
+                    "registered_at, deregistered_at, member_card_json "
+                    "FROM members ORDER BY member_id"
+                )
+            ).fetchall()
+        assert rows == [
+            (
+                1,
+                1,
+                "Director",
+                "root director",
+                "active",
+                "2026-07-11T00:00:01+00:00",
+                None,
+                '{"name": "Director"}',
+            ),
+            (
+                2,
+                1,
+                "Worker",
+                "ordinary member",
+                "active",
+                "2026-07-11T00:00:02+00:00",
+                None,
+                '{"name": "Worker"}',
+            ),
+        ]
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_drops_placement_director_column(upgraded_populated_db):
+    engine = create_engine(f"sqlite:///{upgraded_populated_db}")
+    try:
+        cols = {c["name"] for c in inspect(engine).get_columns("member_placements")}
+        assert cols == {
+            "member_id",
+            "mux_session",
+            "mux_window_id",
+            "mux_pane_id",
+            "backend",
+            "coding_agent",
+            "created_at",
+        }
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_preserves_placement_rows(upgraded_populated_db):
+    """Both placement rows survive the director-column drop — including the
+    root Director's own (formerly NULL-director) row."""
+    engine = create_engine(f"sqlite:///{upgraded_populated_db}")
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT member_id, mux_session, mux_window_id, mux_pane_id, "
+                    "backend, coding_agent, created_at "
+                    "FROM member_placements ORDER BY member_id"
+                )
+            ).fetchall()
+        assert rows == [
+            (1, "cafleet-1", "@1", "%1", "tmux", "claude", "2026-07-11T00:00:01+00:00"),
+            (2, "cafleet-1", "@1", "%2", "tmux", "claude", "2026-07-11T00:00:02+00:00"),
+        ]
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_renames_fleet_director_column_preserving_reference(
+    upgraded_populated_db,
+):
+    engine = create_engine(f"sqlite:///{upgraded_populated_db}")
+    try:
+        cols = {c["name"] for c in inspect(engine).get_columns("fleets")}
+        assert "director_member_id" in cols
+        assert "director_agent_id" not in cols
+
+        with engine.connect() as conn:
+            director = conn.execute(
+                text("SELECT director_member_id FROM fleets WHERE fleet_id = 1")
+            ).scalar()
+        assert director == 1
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_preserves_task_rows(upgraded_populated_db):
+    """Task party columns are renamed with values intact — including the NULL
+    to_member_id on the broadcast-summary row."""
+    engine = create_engine(f"sqlite:///{upgraded_populated_db}")
+    try:
+        cols = {c["name"] for c in inspect(engine).get_columns("tasks")}
+        assert {"from_member_id", "to_member_id"} <= cols
+        assert "from_agent_id" not in cols
+        assert "to_agent_id" not in cols
+
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT task_id, context_id, from_member_id, to_member_id, text "
+                    "FROM tasks ORDER BY task_id"
+                )
+            ).fetchall()
+        assert rows == [
+            (1, 2, 1, 2, "hello worker"),
+            (2, 1, 2, 1, "hello director"),
+            (3, 1, 1, None, "broadcast summary"),
+        ]
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_renames_monitor_config_pk_preserving_schedule(
+    upgraded_populated_db,
+):
+    engine = create_engine(f"sqlite:///{upgraded_populated_db}")
+    try:
+        cols = {c["name"] for c in inspect(engine).get_columns("monitor_config")}
+        assert "member_id" in cols
+        assert "agent_id" not in cols
+
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT member_id, interval_seconds, last_ping_at, enabled "
+                    "FROM monitor_config"
+                )
+            ).fetchall()
+        assert rows == [(2, 90, None, 1)]
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_preserves_untouched_tables(upgraded_populated_db):
+    engine = create_engine(f"sqlite:///{upgraded_populated_db}")
+    try:
+        with engine.connect() as conn:
+            runtime = conn.execute(
+                text(
+                    "SELECT fleet_id, pid, started_at, last_tick_at, tick_seconds "
+                    "FROM monitor_runtime"
+                )
+            ).fetchall()
+            installs = conn.execute(
+                text(
+                    "SELECT coding_agent, cafleet_version, installed_at "
+                    "FROM skill_installs"
+                )
+            ).fetchall()
+        assert runtime == [(1, 4242, "2026-07-11T00:00:03+00:00", None, 5)]
+        assert installs == [("claude", "0.1.0", "2026-07-11T00:00:00+00:00")]
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_recreates_renamed_indexes(upgraded_populated_db):
+    engine = create_engine(f"sqlite:///{upgraded_populated_db}")
+    try:
+        insp = inspect(engine)
+        member_idx = {i["name"] for i in insp.get_indexes("members")}
+        assert "idx_members_fleet_status" in member_idx
+
+        task_idx = {i["name"] for i in insp.get_indexes("tasks")}
+        assert "idx_tasks_from_member_status_ts" in task_idx
+        assert "idx_tasks_context_status_ts" in task_idx
+
+        placement_idx = {i["name"] for i in insp.get_indexes("member_placements")}
+        assert placement_idx == set()
+
+        with engine.connect() as conn:
+            old_names = conn.execute(
+                text(
+                    "SELECT name FROM sqlite_master WHERE type='index' AND name IN "
+                    "('idx_agents_fleet_status', 'idx_placements_director', "
+                    "'idx_tasks_from_agent_status_ts')"
+                )
+            ).fetchall()
+        assert old_names == []
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_rewrites_fk_references_and_breaks_nothing(upgraded_populated_db):
+    """SQLite's RENAME auto-rewrites FK definitions in referencing tables, and
+    the placement batch recreate must not leave dangling references."""
+    engine = create_engine(f"sqlite:///{upgraded_populated_db}")
+    try:
+        insp = inspect(engine)
+        for table in ("fleets", "tasks", "monitor_config", "member_placements"):
+            referred = {fk["referred_table"] for fk in insp.get_foreign_keys(table)}
+            assert "agents" not in referred, table
+            assert "agent_placements" not in referred, table
+
+        member_referrers = ("fleets", "tasks", "monitor_config", "member_placements")
+        for table in member_referrers:
+            referred = {fk["referred_table"] for fk in insp.get_foreign_keys(table)}
+            assert "members" in referred, table
+
+        with engine.connect() as conn:
+            violations = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
+        assert violations == []
     finally:
         engine.dispose()
