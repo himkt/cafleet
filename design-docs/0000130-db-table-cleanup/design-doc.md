@@ -1,7 +1,7 @@
 # Rename the `tasks` table to `messages` (end-to-end)
 
 **Status**: Approved
-**Progress**: 10/27 tasks complete
+**Progress**: 15/27 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -140,11 +140,11 @@ Documentation-first order applies (per `.claude/rules/documentation-maintenance.
 
 ### Step 2: Schema and model
 
-- [ ] Rename in `db/models.py`: class `Message`, `__tablename__ = "messages"`, columns `message_id` / `owner_member_id` / `origin_message_id`, index names `idx_messages_owner_member_status_ts` / `idx_messages_from_member_status_ts` <!-- completed: -->
-- [ ] Bump `config.py` default DB file to `cafleet_v5.db` (line 18 + docstring line 33) and fix the `Task.text` docstring mention <!-- completed: -->
-- [ ] Delete `0001_initial_schema.py`, run `cafleet setup db` against the fresh v5 file, regenerate via `mise //cafleet:makemigration "initial schema"`, and review the generated DDL <!-- completed: -->
-- [ ] Add the stale-schema guard to `cafleet setup db` (`run_db_init`) — loud exit 1 when the DB is at head on a non-empty chain (`head_rev is not None`) but the `messages` table is absent — with a test that builds a `tasks`-schema database stamped `0001` and asserts the failure <!-- completed: -->
-- [ ] Update `tests/db/test_alembic_smoke.py` table/column assertions and renamed test names (chain-guard assertions unchanged); update `tests/db/test_init.py` <!-- completed: -->
+- [x] Rename in `db/models.py`: class `Message`, `__tablename__ = "messages"`, columns `message_id` / `owner_member_id` / `origin_message_id`, index names `idx_messages_owner_member_status_ts` / `idx_messages_from_member_status_ts` <!-- completed: 2026-07-11T15:40 -->
+- [x] Bump `config.py` default DB file to `cafleet_v5.db` (line 18 + docstring line 33) and fix the `Task.text` docstring mention <!-- completed: 2026-07-11T15:40 -->
+- [x] Regenerate the initial migration to the renamed DDL (same revision id `0001`, `down_revision = None`, `messages` table + both `idx_messages_*` indexes + `sqlite_autoincrement`); review the DDL <!-- completed: 2026-07-11T15:40 -->
+- [x] Add the stale-schema guard to `cafleet setup db` (`run_db_init`) — loud exit 1 when the DB is at head on a non-empty chain (`head_rev is not None`) but the `messages` table is absent — with a test that builds a `tasks`-schema database stamped `0001` and asserts the failure <!-- completed: 2026-07-11T15:40 -->
+- [x] Update `tests/db/test_alembic_smoke.py` table/column assertions and renamed test names (chain-guard assertions unchanged); update `tests/db/test_init.py` <!-- completed: 2026-07-11T15:40 -->
 
 ### Step 3: Broker, output, multiplexer
 

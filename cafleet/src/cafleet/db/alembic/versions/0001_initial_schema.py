@@ -19,7 +19,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # ``members`` is created first because ``fleets``, ``tasks``, ``monitor_config``,
+    # ``members`` is created first because ``fleets``, ``messages``, ``monitor_config``,
     # and ``member_placements`` all FK into it. ``members.fleet_id`` forward-references
     # ``fleets`` — SQLite tolerates a FK to a not-yet-created table at CREATE TABLE
     # time, and no rows are inserted during the migration. Do NOT reorder these two
@@ -101,42 +101,42 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("fleet_id"),
     )
     op.create_table(
-        "tasks",
-        sa.Column("task_id", sa.Integer(), nullable=False),
-        sa.Column("context_id", sa.Integer(), nullable=False),
+        "messages",
+        sa.Column("message_id", sa.Integer(), nullable=False),
+        sa.Column("owner_member_id", sa.Integer(), nullable=False),
         sa.Column("from_member_id", sa.Integer(), nullable=False),
         sa.Column("to_member_id", sa.Integer(), nullable=True),
         sa.Column("type", sa.String(), nullable=False),
         sa.Column("created_at", sa.String(), nullable=False),
         sa.Column("status_state", sa.String(), nullable=False),
         sa.Column("status_timestamp", sa.String(), nullable=False),
-        sa.Column("origin_task_id", sa.Integer(), nullable=True),
+        sa.Column("origin_message_id", sa.Integer(), nullable=True),
         sa.Column("text", sa.String(), nullable=False),
         sa.ForeignKeyConstraint(
-            ["context_id"], ["members.member_id"], ondelete="RESTRICT"
+            ["owner_member_id"], ["members.member_id"], ondelete="RESTRICT"
         ),
-        sa.PrimaryKeyConstraint("task_id"),
+        sa.PrimaryKeyConstraint("message_id"),
         sqlite_autoincrement=True,
     )
-    with op.batch_alter_table("tasks", schema=None) as batch_op:
+    with op.batch_alter_table("messages", schema=None) as batch_op:
         batch_op.create_index(
-            "idx_tasks_context_status_ts",
-            ["context_id", "status_timestamp"],
+            "idx_messages_owner_member_status_ts",
+            ["owner_member_id", "status_timestamp"],
             unique=False,
         )
         batch_op.create_index(
-            "idx_tasks_from_member_status_ts",
+            "idx_messages_from_member_status_ts",
             ["from_member_id", "status_timestamp"],
             unique=False,
         )
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("tasks", schema=None) as batch_op:
-        batch_op.drop_index("idx_tasks_from_member_status_ts")
-        batch_op.drop_index("idx_tasks_context_status_ts")
+    with op.batch_alter_table("messages", schema=None) as batch_op:
+        batch_op.drop_index("idx_messages_from_member_status_ts")
+        batch_op.drop_index("idx_messages_owner_member_status_ts")
 
-    op.drop_table("tasks")
+    op.drop_table("messages")
     op.drop_table("monitor_runtime")
     op.drop_table("monitor_config")
     op.drop_table("member_placements")

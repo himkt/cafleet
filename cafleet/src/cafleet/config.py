@@ -15,7 +15,7 @@ from pydantic_settings import BaseSettings
 
 def _default_database_url() -> str:
     """Return the default SQLite URL under ``~/.local/share/cafleet/``."""
-    db_path = Path("~/.local/share/cafleet/cafleet_v4.db").expanduser()
+    db_path = Path("~/.local/share/cafleet/cafleet_v5.db").expanduser()
     return f"sqlite:///{db_path}"
 
 
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     Attributes:
         database_url: SQLAlchemy URL for the SQLite registry. Sourced from
             ``CAFLEET_DATABASE_URL``; defaults to
-            ``sqlite:///~/.local/share/cafleet/cafleet_v4.db`` (the home
+            ``sqlite:///~/.local/share/cafleet/cafleet_v5.db`` (the home
             directory is expanded at import time). Use an absolute path —
             SQLAlchemy does not expand ``~`` in SQLite URLs.
         broker_host: Bind host for ``cafleet server``. Sourced from
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         max_text_len: Codepoint truncation limit applied when rendering
             message bodies (CLI echo and broker inline-preview keystroke).
             Sourced from ``CAFLEET_MAX_TEXT_LEN``; defaults to ``200``. The
-            persisted ``Task.text`` column is never truncated, and the
+            persisted ``Message.text`` column is never truncated, and the
             WebUI API returns raw broker dicts that do not apply this
             limit.
         multiplexer: Explicit terminal-multiplexer backend override consumed
