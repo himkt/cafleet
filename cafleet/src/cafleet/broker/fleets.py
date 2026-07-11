@@ -6,7 +6,7 @@ import click
 from sqlalchemy import and_, delete, exists, func, select, update
 
 from cafleet.broker import _shared, monitor
-from cafleet.db.models import Agent, AgentPlacement, Fleet
+from cafleet.db.models import Fleet, Member, MemberPlacement
 from cafleet.multiplexer import MultiplexerContext
 
 _DIRECTOR_NAME = "Director"
@@ -22,8 +22,8 @@ def create_fleet(
 ) -> dict:
     """Atomically bootstrap a fleet with its root Director and Administrator.
 
-    The fleet row is written first with ``director_agent_id=NULL`` and
-    back-filled once the Director's agent row exists, so the column is
+    The fleet row is written first with ``director_member_id=NULL`` and
+    back-filled once the Director's member row exists, so the column is
     DB-nullable even though the post-bootstrap invariant is NOT NULL.
 
     Args:
@@ -39,7 +39,7 @@ def create_fleet(
 
     Returns:
         A dict carrying ``fleet_id``, ``name``, ``created_at``,
-        ``administrator_agent_id``, and a ``director`` sub-dict with the
+        ``administrator_member_id``, and a ``director`` sub-dict with the
         Director's identity and placement metadata.
     """
     created_at = _shared.now_iso()
@@ -49,7 +49,6 @@ def create_fleet(
         "skills": [],
     }
     director_placement = {
-        "director_agent_id": None,
         "backend": backend,
         "mux_session": director_context.session,
         "mux_window_id": director_context.window_id,
@@ -63,62 +62,64 @@ def create_fleet(
             name=name,
             created_at=created_at,
             deleted_at=None,
-            director_agent_id=None,
+            director_member_id=None,
         )
         session.add(fleet)
         session.flush()
         fleet_id = fleet.fleet_id
-        director = Agent(
+        director = Member(
             fleet_id=fleet_id,
             name=_DIRECTOR_NAME,
             description=_DIRECTOR_DESCRIPTION,
             status="active",
             registered_at=created_at,
             deregistered_at=None,
-            agent_card_json=json.dumps(director_card),
+            member_card_json=json.dumps(director_card),
         )
         session.add(director)
         session.flush()
-        director_agent_id = director.agent_id
-        session.add(AgentPlacement(agent_id=director_agent_id, **director_placement))
+        director_member_id = director.member_id
+        session.add(MemberPlacement(member_id=director_member_id, **director_placement))
         session.flush()
         # Enroll the root Director in the heartbeat @180, atomically with fleet
-        # creation. The Director is a watched agent — the loop wakes the
+        # creation. The Director is a watched member — the loop wakes the
         # monitoring member when the Director comes due on this interval.
-        monitor.enroll_agent(
-            session, director_agent_id, interval=monitor.DIRECTOR_PING_INTERVAL_SECONDS
+        monitor.enroll_member(
+            session,
+            director_member_id,
+            interval=monitor.DIRECTOR_PING_INTERVAL_SECONDS,
         )
         session.execute(
             update(Fleet)
             .where(Fleet.fleet_id == fleet_id)
-            .values(director_agent_id=director_agent_id)
+            .values(director_member_id=director_member_id)
         )
         administrator_card = {
             "name": "Administrator",
-            "description": f"Built-in administrator agent for fleet {fleet_id}",
+            "description": f"Built-in administrator for fleet {fleet_id}",
             "skills": [],
             "cafleet": {"kind": _shared.ADMINISTRATOR_KIND},
         }
-        administrator = Agent(
+        administrator = Member(
             fleet_id=fleet_id,
             name=administrator_card["name"],
             description=administrator_card["description"],
             status="active",
             registered_at=created_at,
             deregistered_at=None,
-            agent_card_json=json.dumps(administrator_card),
+            member_card_json=json.dumps(administrator_card),
         )
         session.add(administrator)
         session.flush()
-        administrator_agent_id = administrator.agent_id
+        administrator_member_id = administrator.member_id
 
     return {
         "fleet_id": fleet_id,
         "name": name,
         "created_at": created_at,
-        "administrator_agent_id": administrator_agent_id,
+        "administrator_member_id": administrator_member_id,
         "director": {
-            "agent_id": director_agent_id,
+            "member_id": director_member_id,
             "name": _DIRECTOR_NAME,
             "description": _DIRECTOR_DESCRIPTION,
             "registered_at": created_at,
@@ -128,27 +129,27 @@ def create_fleet(
 
 
 def list_fleets() -> list[dict]:
-    """Return non-soft-deleted fleets with their active agent counts."""
+    """Return non-soft-deleted fleets with their active member counts."""
     stmt = (
         select(
             Fleet.fleet_id,
-            Fleet.director_agent_id,
+            Fleet.director_member_id,
             Fleet.name,
             Fleet.created_at,
-            func.count(Agent.agent_id).label("agent_count"),
+            func.count(Member.member_id).label("member_count"),
         )
         .select_from(Fleet)
         .outerjoin(
-            Agent,
+            Member,
             and_(
-                Agent.fleet_id == Fleet.fleet_id,
-                Agent.status == "active",
+                Member.fleet_id == Fleet.fleet_id,
+                Member.status == "active",
             ),
         )
         .where(Fleet.deleted_at.is_(None))
         .group_by(
             Fleet.fleet_id,
-            Fleet.director_agent_id,
+            Fleet.director_member_id,
             Fleet.name,
             Fleet.created_at,
         )
@@ -159,10 +160,10 @@ def list_fleets() -> list[dict]:
     return [
         {
             "fleet_id": row.fleet_id,
-            "director_agent_id": row.director_agent_id,
+            "director_member_id": row.director_member_id,
             "name": row.name,
             "created_at": row.created_at,
-            "agent_count": row.agent_count,
+            "member_count": row.member_count,
         }
         for row in rows
     ]
@@ -172,7 +173,7 @@ def get_fleet(fleet_id: int) -> dict | None:
     """Return the fleet row (including soft-deleted) or None.
 
     The returned dict exposes ``deleted_at`` so callers can distinguish a
-    missing fleet from a soft-deleted one — ``register_agent`` relies on
+    missing fleet from a soft-deleted one — ``register_member`` relies on
     this to reject soft-deleted fleets with a different error message.
 
     Args:
@@ -180,7 +181,7 @@ def get_fleet(fleet_id: int) -> dict | None:
 
     Returns:
         Dict with ``fleet_id``, ``name``, ``created_at``, ``deleted_at``,
-        and ``director_agent_id``, or ``None`` if no row exists.
+        and ``director_member_id``, or ``None`` if no row exists.
     """
     with _shared.read_session() as session:
         result = session.execute(select(Fleet).where(Fleet.fleet_id == fleet_id))
@@ -192,12 +193,12 @@ def get_fleet(fleet_id: int) -> dict | None:
         "name": row.name,
         "created_at": row.created_at,
         "deleted_at": row.deleted_at,
-        "director_agent_id": row.director_agent_id,
+        "director_member_id": row.director_member_id,
     }
 
 
 def delete_fleet(fleet_id: int) -> dict:
-    """Soft-delete a fleet and deregister its agents, in one transaction.
+    """Soft-delete a fleet and deregister its members, in one transaction.
 
     Tasks are left untouched so audit history survives. Idempotent: re-running
     against an already-deleted row short-circuits on the ``deleted_at IS NULL``
@@ -207,7 +208,7 @@ def delete_fleet(fleet_id: int) -> dict:
         fleet_id: Fleet id to soft-delete.
 
     Returns:
-        Dict with ``deregistered_count`` — the number of agents flipped from
+        Dict with ``deregistered_count`` — the number of members flipped from
         ``active`` to ``deregistered`` by this call.
 
     Raises:
@@ -236,18 +237,20 @@ def delete_fleet(fleet_id: int) -> dict:
             return {"deregistered_count": 0}
 
         deregistered = session.execute(
-            update(Agent)
+            update(Member)
             .where(
-                Agent.fleet_id == fleet_id,
-                Agent.status == "active",
+                Member.fleet_id == fleet_id,
+                Member.status == "active",
             )
             .values(status="deregistered", deregistered_at=now)
-            .returning(Agent.agent_id)
+            .returning(Member.member_id)
         ).all()
         deregistered_count = len(deregistered)
-        agents_in_fleet = select(Agent.agent_id).where(Agent.fleet_id == fleet_id)
+        members_in_fleet = select(Member.member_id).where(Member.fleet_id == fleet_id)
         session.execute(
-            delete(AgentPlacement).where(AgentPlacement.agent_id.in_(agents_in_fleet))
+            delete(MemberPlacement).where(
+                MemberPlacement.member_id.in_(members_in_fleet)
+            )
         )
         monitor.delete_fleet_monitor_rows(session, fleet_id)
 

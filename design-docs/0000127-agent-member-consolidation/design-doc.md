@@ -1,7 +1,7 @@
 # Agent → Member Consolidation, Uniform Identity Flags, and Director Auto-Discovery
 
 **Status**: Approved
-**Progress**: 13/28 tasks complete
+**Progress**: 18/28 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -232,11 +232,11 @@ Per the removal rule: after this lands, the repository reads as if the registry 
 
 ### Step 3: Broker
 
-- [ ] Merge `broker/agents.py` into `broker/members.py` with the renamed function set; update `broker/__init__.py` exports <!-- completed: -->
-- [ ] Re-point member-ness and kind derivation at the `fleets` join (`member_id != director_member_id`); rename `_shared` helpers (`derive_member_kind`, `member_is_active_in_fleet`, `placement_dict` without the director key) <!-- completed: -->
-- [ ] Fold `list_fleet_agents` into `list_roster(fleet_id, include_task_holders=False)` with the single kind path <!-- completed: -->
-- [ ] `register_member`: drop the director input from `placement`, delete the nested-team and Administrator-as-director guards, add the root-Director-active invariant guard <!-- completed: -->
-- [ ] Rename `agent_id` params across `broker/messaging.py`, `broker/queries.py`, `broker/monitor.py` (`enroll_member`, `delete_member_monitor_row`), `broker/fleets.py` <!-- completed: -->
+- [x] Merge `broker/agents.py` into `broker/members.py` with the renamed function set; update `broker/__init__.py` exports <!-- completed: 2026-07-11T03:27 -->
+- [x] Re-point member-ness and kind derivation at the `fleets` join (`member_id != director_member_id`); rename `_shared` helpers (`derive_member_kind`, `member_is_active_in_fleet`, `placement_dict` without the director key) <!-- completed: 2026-07-11T03:27 -->
+- [x] Fold `list_fleet_agents` into `list_roster(fleet_id, include_task_holders=False)` with the single kind path <!-- completed: 2026-07-11T03:27 -->
+- [x] `register_member`: drop the director input from `placement`, delete the nested-team and Administrator-as-director guards, add the root-Director-active invariant guard <!-- completed: 2026-07-11T03:27 -->
+- [x] Rename `agent_id` params across `broker/messaging.py`, `broker/queries.py`, `broker/monitor.py` (`enroll_member`, `delete_member_monitor_row`), `broker/fleets.py` <!-- completed: 2026-07-11T03:27 -->
 
 ### Step 4: CLI
 

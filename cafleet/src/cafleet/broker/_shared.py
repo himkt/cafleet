@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from sqlalchemy import exists, func, select
 
 from cafleet.db.engine import get_sync_sessionmaker
-from cafleet.db.models import Agent, Task
+from cafleet.db.models import Member, Task
 
 ADMINISTRATOR_KIND = "builtin-administrator"
 MONITORING_MEMBER_KIND = "monitoring-member"
@@ -16,10 +16,10 @@ TASK_COLUMNS = tuple(Task.__table__.columns.keys())
 
 NOT_BROADCAST_SUMMARY = Task.type != "broadcast_summary"
 
-# Shared SQL expression extracting an agent card's ``$.cafleet.kind`` (NULL → "")
+# Shared SQL expression extracting a member card's ``$.cafleet.kind`` (NULL → "")
 # so a comparison against a non-empty kind constant selects identical rows.
 CARD_KIND_SQL = func.coalesce(
-    func.json_extract(Agent.agent_card_json, "$.cafleet.kind"), ""
+    func.json_extract(Member.member_card_json, "$.cafleet.kind"), ""
 )
 
 
@@ -37,17 +37,17 @@ def write_session():
         yield session
 
 
-def _card_kind(agent_card_json: str | None) -> str | None:
+def _card_kind(member_card_json: str | None) -> str | None:
     """Extract ``$.cafleet.kind`` from a card, or None on any malformation.
 
     Guards against invalid JSON, a non-object top level, and a null / non-object
     ``cafleet`` value — every malformed shape resolves to a non-match (None)
     rather than raising ``AttributeError``.
     """
-    if not agent_card_json:
+    if not member_card_json:
         return None
     try:
-        card = json.loads(agent_card_json)
+        card = json.loads(member_card_json)
     except ValueError:
         return None
     if not isinstance(card, dict):
@@ -58,12 +58,12 @@ def _card_kind(agent_card_json: str | None) -> str | None:
     return cafleet.get("kind")
 
 
-def is_administrator(agent_card_json: str | None) -> bool:
-    return _card_kind(agent_card_json) == ADMINISTRATOR_KIND
+def is_administrator(member_card_json: str | None) -> bool:
+    return _card_kind(member_card_json) == ADMINISTRATOR_KIND
 
 
-def derive_agent_kind(is_root_director: bool, card_kind: str | None) -> str:
-    """Collapse an agent to its 4-value ``kind``.
+def derive_member_kind(is_root_director: bool, card_kind: str | None) -> str:
+    """Collapse a member to its 4-value ``kind``.
 
     ``card_kind`` values that match neither builtin constant (including the
     SQL-coalesced ``""``) fall through to ``member``.
@@ -83,7 +83,6 @@ def now_iso() -> str:
 
 def placement_dict(row) -> dict:
     return {
-        "director_agent_id": row.director_agent_id,
         "backend": row.backend,
         "mux_session": row.mux_session,
         "mux_window_id": row.mux_window_id,
@@ -93,13 +92,13 @@ def placement_dict(row) -> dict:
     }
 
 
-def agent_is_active_in_fleet(session, agent_id: int, fleet_id: int) -> bool:
+def member_is_active_in_fleet(session, member_id: int, fleet_id: int) -> bool:
     return session.execute(
         select(
             exists().where(
-                Agent.agent_id == agent_id,
-                Agent.fleet_id == fleet_id,
-                Agent.status == "active",
+                Member.member_id == member_id,
+                Member.fleet_id == fleet_id,
+                Member.status == "active",
             )
         )
     ).scalar_one()
