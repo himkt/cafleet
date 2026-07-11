@@ -15,7 +15,7 @@ from pydantic_settings import BaseSettings
 
 def _default_database_url() -> str:
     """Return the default SQLite URL under ``~/.local/share/cafleet/``."""
-    db_path = Path("~/.local/share/cafleet/cafleet_v2.db").expanduser()
+    db_path = Path("~/.local/share/cafleet/cafleet_v3.db").expanduser()
     return f"sqlite:///{db_path}"
 
 
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     Attributes:
         database_url: SQLAlchemy URL for the SQLite registry. Sourced from
             ``CAFLEET_DATABASE_URL``; defaults to
-            ``sqlite:///~/.local/share/cafleet/cafleet_v2.db`` (the home
+            ``sqlite:///~/.local/share/cafleet/cafleet_v3.db`` (the home
             directory is expanded at import time). Use an absolute path —
             SQLAlchemy does not expand ``~`` in SQLite URLs.
         broker_host: Bind host for ``cafleet server``. Sourced from
@@ -48,11 +48,11 @@ class Settings(BaseSettings):
             ``None`` (the default) means auto-detect from ``HERDR_ENV`` /
             ``TMUX`` — a valid, well-defined state, not a fallback. A set value
             must name a registered backend (``tmux``/``herdr``).
-        monitor_stall_interval: Per-agent stall-check cadence in seconds,
+        monitor_stall_interval: Per-member stall-check cadence in seconds,
             driven by the monitor loop independently of the
             ``monitor_config.interval_seconds`` ping intervals. Sourced from
             ``CAFLEET_MONITOR_STALL_INTERVAL``; defaults to ``240``. A watched
-            agent is stall-check due every ``monitor_stall_interval`` seconds;
+            member is stall-check due every ``monitor_stall_interval`` seconds;
             ``0`` disables stall detection entirely (no ``stall-check`` wake
             reason is emitted). Tracked process-locally in the running loop —
             there is no DB column.

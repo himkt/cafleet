@@ -2,7 +2,7 @@
 
 https://github.com/user-attachments/assets/bd2b195a-f3de-4fa3-bcc8-3c6ef9f1016a
 
-Agent Teams reinvented for collaborative coding across multiple coding-agent backends (Claude Code, Codex, and OpenCode), with full code transparency. CAFleet is a message broker and agent registry for coding agents — a unified `cafleet` CLI and an admin WebUI over a single-file SQLite database — for developers and operators running auditable multi-agent coding teams in tmux or herdr.
+Agent Teams reinvented for collaborative coding across multiple coding-agent backends (Claude Code, Codex, and OpenCode), with full code transparency. CAFleet is a message broker and member registry for coding agents — a unified `cafleet` CLI and an admin WebUI over a single-file SQLite database — for developers and operators running auditable multi-agent coding teams in tmux or herdr.
 
 ## Install
 

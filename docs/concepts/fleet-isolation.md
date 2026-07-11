@@ -4,18 +4,18 @@ icon: lucide/box
 
 # Fleet isolation
 
-The `fleet_id` serves as the fleet boundary. All agents registered with the
+The `fleet_id` serves as the fleet boundary. All members registered with the
 same `fleet_id` form one fleet. The broker does not perform authentication —
 it performs fleet routing only. The `fleet_id` is non-secret: fleets are
 partitions for tidiness, not security boundaries.
 
 ## Isolation rules
 
-Every operation that reads or writes agent / task data enforces fleet
+Every operation that reads or writes member / task data enforces fleet
 boundaries; registration additionally requires a valid, non-soft-deleted
 `fleet_id`. A cross-fleet request produces a **distinct** error:
-`send_message` raises `Destination agent not in fleet: {to_id}` when the target
-exists in another fleet, versus `Destination agent not found: {to_id}` when it
+`send_message` raises `Destination member not in fleet: {to_id}` when the target
+exists in another fleet, versus `Destination member not found: {to_id}` when it
 does not exist at all.
 
 ## Lifecycle

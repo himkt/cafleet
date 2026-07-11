@@ -274,9 +274,9 @@ class HerdrMultiplexer:
         )
 
     def send_poll_trigger(
-        self, *, target_pane_id: str, fleet_id: int, agent_id: int
+        self, *, target_pane_id: str, fleet_id: int, member_id: int
     ) -> bool:
-        payload = f"cafleet message poll --fleet-id {fleet_id} --agent-id {agent_id}"
+        payload = f"cafleet message poll --fleet-id {fleet_id} --member-id {member_id}"
 
         def steps() -> None:
             self._send_esc(target_pane_id)
@@ -285,26 +285,26 @@ class HerdrMultiplexer:
         return _best_effort(steps)
 
     def send_wake_trigger(
-        self, *, target_pane_id: str, due_agents: list[dict], director_agent_id: int
+        self, *, target_pane_id: str, due_members: list[dict], director_member_id: int
     ) -> bool:
-        noun = "agent" if len(due_agents) == 1 else "agents"
+        noun = "member" if len(due_members) == 1 else "members"
         due_list = ", ".join(
-            f"{'director' if t['is_director'] else 'member'} {t['agent_id']} "
+            f"{'director' if t['is_director'] else 'member'} {t['member_id']} "
             f"({_sanitize_wake_name(t['name'])}) [{','.join(t['wake_reasons'])}]"
-            for t in due_agents
+            for t in due_members
         )
         payload = (
-            f"[monitor] wake: {len(due_agents)} {noun} due — {due_list}. "
+            f"[monitor] wake: {len(due_members)} {noun} due — {due_list}. "
             f"Capture each named pane read-only, with the Director pane "
-            f"({director_agent_id}) always inspected. From capture content only, "
+            f"({director_member_id}) always inspected. From capture content only, "
             "classify each pane in this precedence order: awaiting_user, unknown, "
-            "finished, stalled, working. For an agent tagged stall-check, compare "
+            "finished, stalled, working. For a member tagged stall-check, compare "
             "its capture against your previous stall-check capture of that pane, "
             "then keep the new capture as that pane's baseline; with no previous "
             "stall-check capture, classify unknown. Never re-engage a pane "
             "classified awaiting_user: when the Director is awaiting_user, send "
             "nothing this wake, whatever the other panes show. Otherwise re-engage "
-            "the Director via cafleet member nudge when a due agent is stalled or "
+            "the Director via cafleet member nudge when a due member is stalled or "
             "finished, or the Director is finished with un-acked work."
         )
 

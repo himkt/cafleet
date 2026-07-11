@@ -10,7 +10,7 @@ binary (`claude`, `codex`, `opencode`) implements to add or change a backend
 
 `build_spawn_argv` receives the spawn prompt already rendered: `cafleet member
 create` runs `str.format` over the prompt body first, substituting `{fleet_id}`,
-`{agent_id}`, `{director_agent_id}`, and `{coding_agent}` to literals, so the
+`{member_id}`, `{director_member_id}`, and `{coding_agent}` to literals, so the
 backend layer never sees a brace placeholder. The only environment variable
 injected at window-split time is `CAFLEET_DATABASE_URL`; see
 [Coding agents](../concepts/coding-agents.md) for the identity convention.

@@ -13,7 +13,7 @@ webui_router = APIRouter(prefix="/api")
 
 
 def _monitor_config_response(cfg: dict) -> dict:
-    """Project a broker config dict to the WebUI's ``monitor`` shape (no ``agent_id``)."""
+    """Project a broker config dict to the WebUI's ``monitor`` shape (no ``member_id``)."""
     return {
         "interval_seconds": cfg["interval_seconds"],
         "last_ping_at": cfg["last_ping_at"],
@@ -49,17 +49,17 @@ def get_webui_fleet(request: Request) -> int:
 def _format_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not rows:
         return []
-    agent_ids = {row["from_agent_id"] for row in rows} | {
-        row["to_agent_id"] for row in rows
+    member_ids = {row["from_member_id"] for row in rows} | {
+        row["to_member_id"] for row in rows
     }
-    agent_names = broker.get_agent_names(list(agent_ids))
+    member_names = broker.get_member_names(list(member_ids))
     return [
         {
             "task_id": row["task_id"],
-            "from_agent_id": row["from_agent_id"],
-            "from_agent_name": agent_names[row["from_agent_id"]],
-            "to_agent_id": row["to_agent_id"],
-            "to_agent_name": agent_names[row["to_agent_id"]],
+            "from_member_id": row["from_member_id"],
+            "from_member_name": member_names[row["from_member_id"]],
+            "to_member_id": row["to_member_id"],
+            "to_member_name": member_names[row["to_member_id"]],
             "type": row["type"],
             "status": row["status_state"],
             "created_at": row["created_at"],
@@ -72,13 +72,13 @@ def _format_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 class SendMessageRequest(BaseModel):
-    from_agent_id: int
-    to_agent_id: int | Literal["*"]
+    from_member_id: int
+    to_member_id: int | Literal["*"]
     text: str
 
 
 class MonitorPatch(BaseModel):
-    """Body for ``PATCH /api/agents/{id}/monitor`` — both fields optional."""
+    """Body for ``PATCH /api/members/{id}/monitor`` — both fields optional."""
 
     interval_seconds: int | None = Field(default=None, ge=1)
     enabled: bool | None = None
@@ -89,14 +89,14 @@ def list_fleets():
     return broker.list_fleets()
 
 
-@webui_router.get("/agents")
-def list_agents(fleet_id: int = Depends(get_webui_fleet)):
-    agents = broker.list_fleet_agents(fleet_id)
-    configs = {c["agent_id"]: c for c in broker.list_monitor_configs(fleet_id)}
-    for agent in agents:
-        cfg = configs.get(agent["agent_id"])
-        agent["monitor"] = _monitor_config_response(cfg) if cfg is not None else None
-    return {"agents": agents}
+@webui_router.get("/members")
+def list_members(fleet_id: int = Depends(get_webui_fleet)):
+    members = broker.list_roster(fleet_id, include_task_holders=True)
+    configs = {c["member_id"]: c for c in broker.list_monitor_configs(fleet_id)}
+    for member in members:
+        cfg = configs.get(member["member_id"])
+        member["monitor"] = _monitor_config_response(cfg) if cfg is not None else None
+    return {"members": members}
 
 
 @webui_router.get("/monitor")
@@ -104,57 +104,57 @@ def get_monitor(fleet_id: int = Depends(get_webui_fleet)):
     return _monitor_runtime_payload(fleet_id)
 
 
-@webui_router.get("/agents/{agent_id}/monitor")
-def get_agent_monitor(agent_id: int, fleet_id: int = Depends(get_webui_fleet)):
-    cfg = broker.get_monitor_config(fleet_id, agent_id)
+@webui_router.get("/members/{member_id}/monitor")
+def get_member_monitor(member_id: int, fleet_id: int = Depends(get_webui_fleet)):
+    cfg = broker.get_monitor_config(fleet_id, member_id)
     if cfg is None:
-        raise HTTPException(status_code=404, detail="Agent not enrolled")
+        raise HTTPException(status_code=404, detail="Member not enrolled")
     return _monitor_config_response(cfg)
 
 
-@webui_router.patch("/agents/{agent_id}/monitor")
-def patch_agent_monitor(
-    agent_id: int,
+@webui_router.patch("/members/{member_id}/monitor")
+def patch_member_monitor(
+    member_id: int,
     body: MonitorPatch,
     fleet_id: int = Depends(get_webui_fleet),
 ):
-    if broker.get_monitor_config(fleet_id, agent_id) is None:
-        raise HTTPException(status_code=404, detail="Agent not enrolled")
+    if broker.get_monitor_config(fleet_id, member_id) is None:
+        raise HTTPException(status_code=404, detail="Member not enrolled")
     try:
         cfg = broker.update_monitor_config(
             fleet_id,
-            agent_id,
+            member_id,
             interval_seconds=body.interval_seconds,
             enabled=body.enabled,
         )
     except click.ClickException as exc:
-        # TOCTOU: the agent may be deregistered (its config row deleted) between
+        # TOCTOU: the member may be deregistered (its config row deleted) between
         # the pre-check above and this update — surface as 404, not a 500.
-        raise HTTPException(status_code=404, detail="Agent not enrolled") from exc
+        raise HTTPException(status_code=404, detail="Member not enrolled") from exc
     return _monitor_config_response(cfg)
 
 
-@webui_router.get("/agents/{agent_id}/inbox")
+@webui_router.get("/members/{member_id}/inbox")
 def get_inbox(
-    agent_id: int,
+    member_id: int,
     fleet_id: int = Depends(get_webui_fleet),
 ):
-    if not broker.verify_agent_fleet(agent_id, fleet_id):
-        raise HTTPException(status_code=404, detail="Agent not found")
+    if not broker.verify_member_fleet(member_id, fleet_id):
+        raise HTTPException(status_code=404, detail="Member not found")
 
-    rows = broker.list_inbox(agent_id)
+    rows = broker.list_inbox(member_id)
     return {"messages": _format_messages(rows)}
 
 
-@webui_router.get("/agents/{agent_id}/sent")
+@webui_router.get("/members/{member_id}/sent")
 def get_sent(
-    agent_id: int,
+    member_id: int,
     fleet_id: int = Depends(get_webui_fleet),
 ):
-    if not broker.verify_agent_fleet(agent_id, fleet_id):
-        raise HTTPException(status_code=404, detail="Agent not found")
+    if not broker.verify_member_fleet(member_id, fleet_id):
+        raise HTTPException(status_code=404, detail="Member not found")
 
-    rows = broker.list_sent(agent_id)
+    rows = broker.list_sent(member_id)
     return {"messages": _format_messages(rows)}
 
 
@@ -171,19 +171,19 @@ def send_message(
     body: SendMessageRequest,
     fleet_id: int = Depends(get_webui_fleet),
 ):
-    if broker.get_agent(body.from_agent_id, fleet_id) is None:
-        raise HTTPException(status_code=400, detail="from_agent not in fleet")
+    if broker.get_member(body.from_member_id, fleet_id) is None:
+        raise HTTPException(status_code=400, detail="from_member not in fleet")
 
-    if body.to_agent_id == "*":
-        result = broker.broadcast_message(fleet_id, body.from_agent_id, body.text)
+    if body.to_member_id == "*":
+        result = broker.broadcast_message(fleet_id, body.from_member_id, body.text)
         summary = result[0]["task"]
         return {"task_id": summary["task_id"], "status": summary["status_state"]}
 
-    if broker.get_agent(body.to_agent_id, fleet_id) is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    if broker.get_member(body.to_member_id, fleet_id) is None:
+        raise HTTPException(status_code=404, detail="Member not found")
 
     result = broker.send_message(
-        fleet_id, body.from_agent_id, body.to_agent_id, body.text
+        fleet_id, body.from_member_id, body.to_member_id, body.text
     )
     task = result["task"]
     return {"task_id": task["task_id"], "status": task["status_state"]}

@@ -18,7 +18,7 @@ fleet's dedicated **monitoring member** runs as a background task in its own pan
 spawn prompt lives in the `/cafleet` skill's `roles/monitor.md`):
 
 ```bash
-cafleet member create --fleet-id 1 --agent-id 2 \
+cafleet member create --fleet-id 1 \
   --name monitor --description "Monitoring member: owns the heartbeat" \
   --role monitor --model sonnet \
   --text-file /abs/path/to/monitor-prompt.md   # spawned first; runs monitor start in its own pane
@@ -41,7 +41,7 @@ Your agent loads the `cafleet` skill and reads its Director-only
 
 ## What to expect
 
-The agent renders the roster with per-agent idle times, captures the pane of
+The agent renders the roster with per-member idle times, captures the pane of
 any member that has gone quiet, and climbs the recovery ladder from mildest
 to harshest: re-poke the inbox, dispatch a shell
 command ([`member exec`](../spec/cli-options.md#member-exec)), and only as a
@@ -56,7 +56,7 @@ ids — fleet `1`, members `4`/`5`/`6`; your ids will differ.
 
 ??? example "Expand the walkthrough"
 
-    Watch the team — `last_sent` is the agent's most recent outgoing message,
+    Watch the team — `last_sent` is the member's most recent outgoing message,
     `last_recv` its most recent delivery, `last_ack` the most recent delivery
     it acknowledged, and `idle` the wall-time since the latest of `last_sent` /
     `last_recv`; a member that receives work but never sends or acks is stalled
@@ -69,7 +69,7 @@ ids — fleet `1`, members `4`/`5`/`6`; your ids will differ.
 
     ```
     3 members:
-      agent_id        name      status  last_sent  last_recv  last_ack   idle
+      member_id       name      status  last_sent  last_recv  last_ack   idle
       --------------  --------  ------  ---------  ---------  ---------  -----
       4               alice     active  -          12:20:00   12:20:00   14m
       5               bob       active  12:30:11   12:33:02   12:33:02   2m
@@ -125,8 +125,8 @@ ids — fleet `1`, members `4`/`5`/`6`; your ids will differ.
 
     ```
     Member deleted.
-      agent_id:  4
-      pane_id:   %7 (closed)
+      member_id:  4
+      pane_id:    %7 (closed)
     ```
 
     A pane that refuses to close makes the command exit 2 with the pane tail

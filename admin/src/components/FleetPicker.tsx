@@ -34,7 +34,7 @@ function FleetCard({
           </code>
         </div>
         <p className="mt-1 text-xs text-text-muted">
-          {fleet.agent_count} agent{fleet.agent_count !== 1 ? "s" : ""} ·
+          {fleet.member_count} member{fleet.member_count !== 1 ? "s" : ""} ·
           created {new Date(fleet.created_at).toLocaleDateString()}
         </p>
       </div>

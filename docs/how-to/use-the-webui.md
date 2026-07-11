@@ -31,20 +31,20 @@ bundle the built UI.
 ## Pick a fleet
 
 The first load lands on a fleet picker. Selecting a fleet opens the unified
-timeline: a sidebar of the fleet's agents, a center timeline of unicast and
+timeline: a sidebar of the fleet's members, a center timeline of unicast and
 broadcast messages, and a bottom input.
 
 ## Send as the Administrator
 
-The bottom input parses `@<agent> text` for unicast and `@all text` for
-broadcast. Every send goes out as the fleet's built-in Administrator agent —
+The bottom input parses `@<member> text` for unicast and `@all text` for
+broadcast. Every send goes out as the fleet's built-in Administrator —
 a write-only registry identity with no tmux pane — so you never register
-yourself as an agent to use the dashboard.
+yourself as a member to use the dashboard.
 
 ## Inspect history
 
-Clicking an agent in the sidebar opens its detail panel with Inbox / Sent
-tabs. This works for deregistered agents too — the WebUI is the only surface
+Clicking a member in the sidebar opens its detail panel with Inbox / Sent
+tabs. This works for deregistered members too — the WebUI is the only surface
 that shows them ([Storage](../concepts/storage.md#no-physical-cleanup)).
 
 ## API contracts

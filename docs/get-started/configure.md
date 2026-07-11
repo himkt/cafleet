@@ -31,7 +31,7 @@ snippets below are the recommended starting points.
 ```
 
 The `Bash(cafleet *)` pattern is the single allow-everything entry that the
-literal `--fleet-id <int>` / `--agent-id <int>` flag convention enables —
+literal `--fleet-id <int>` / `--member-id <int>` flag convention enables —
 one pattern covers every subcommand for every fleet. `cafleet member exec *`
 is moved to the `ask` list because it dispatches arbitrary shell commands on
 behalf of a member; the operator should confirm each invocation.
@@ -122,7 +122,7 @@ every incoming message until the prompt is cleared.
 
 Every fleet-scoped command except `fleet create` and `fleet list` takes a
 required `--fleet-id`, passed as a literal integer flag on each invocation (a
-member reads its fleet id from the `FLEET ID:` line of its spawn prompt). Agents driving cafleet under
+member reads its fleet id from the `FLEET ID:` line of its spawn prompt). Members driving cafleet under
 `permissions.allow` pass `--fleet-id` as a literal flag — the allow patterns
 match the literal command string, so a shell-expanded variable would break the
 match and prompt.

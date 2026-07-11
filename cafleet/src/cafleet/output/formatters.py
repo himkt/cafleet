@@ -13,7 +13,7 @@ def format_task(task: dict, *, full: bool = False) -> str:
     line 1 is ``[<id> | from:<from> | <ts>]`` (with optional
     ``| kind:<kind>`` and ``| origin:<id>`` segments), line 2 is the body.
 
-    ``full=True``: 6-line verbose layout that exposes every typed column
+    ``full=True``: verbose labeled layout that exposes every typed column
     (``id``, ``state``, ``from``, ``to``, ``type``, ``text``).
     """
     if "task" in task and isinstance(task["task"], dict):
@@ -34,10 +34,10 @@ def format_task(task: dict, *, full: bool = False) -> str:
     lines = [
         f"  id:    {task['task_id']}",
         f"  state: {task['status_state']}",
-        f"  from:  {task['from_agent_id']}",
+        f"  from:  {task['from_member_id']}",
     ]
-    if task.get("to_agent_id") is not None:
-        lines.append(f"  to:    {task['to_agent_id']}")
+    if task.get("to_member_id") is not None:
+        lines.append(f"  to:    {task['to_member_id']}")
     lines.append(f"  type:  {task['type']}")
     if task.get("text"):
         lines.append(f"  text:  {task['text']}")
@@ -51,7 +51,7 @@ def format_indexed_list(
 ) -> str:
     """Join formatted items with a single blank line between them.
 
-    Items are not numbered — agents reference tasks by ``task_id``, not list
+    Items are not numbered — members reference tasks by ``task_id``, not list
     index, so index markers would cost tokens without surfacing useful
     information.
     """
@@ -60,41 +60,40 @@ def format_indexed_list(
     return "\n\n".join(formatter(item) for item in items)
 
 
-def format_agent(agent: dict, *, full: bool = False) -> str:
-    """Render an agent (the ``member show`` shape) as text.
+def format_member_detail(member: dict, *, full: bool = False) -> str:
+    """Render a member (the ``member show`` shape) as text.
 
     ``full=False`` (default): 1-line compact ``<id> <name> <status>``.
-    ``full=True``: labeled block exposing ``agent_id``, ``name``, truncated
+    ``full=True``: labeled block exposing ``member_id``, ``name``, truncated
     ``description`` (60 codepoints + ``…``), ``status``, ``kind``, ``skills``
     (compact JSON array, ``-`` when empty), and the placement sub-block
     (``placement:   none`` when no placement row exists; ``None`` fields
     inside the placement render ``-``).
     """
     if not full:
-        return f"{agent['agent_id']} {agent['name']} {agent['status']}"
-    description = truncate_text(agent["description"], full=False, limit=60)
-    skills = agent["skills"]
+        return f"{member['member_id']} {member['name']} {member['status']}"
+    description = truncate_text(member["description"], full=False, limit=60)
+    skills = member["skills"]
     lines = [
-        f"  agent_id:    {agent['agent_id']}",
-        f"  name:        {agent['name']}",
+        f"  member_id:   {member['member_id']}",
+        f"  name:        {member['name']}",
         f"  description: {description}",
-        f"  status:      {agent['status']}",
-        f"  kind:        {agent['kind']}",
+        f"  status:      {member['status']}",
+        f"  kind:        {member['kind']}",
         f"  skills:      {format_json(skills) if skills else '-'}",
     ]
-    placement = agent["placement"]
+    placement = member["placement"]
     if placement is None:
         lines.append("  placement:   none")
     else:
         lines.extend(
             [
                 "  placement:",
-                f"    director_agent_id: {_dash_if_none(placement['director_agent_id'])}",
-                f"    backend:           {placement['coding_agent']}",
-                f"    session:           {placement['mux_session']}",
-                f"    window_id:         {placement['mux_window_id']}",
-                f"    pane_id:           {_dash_if_none(placement['mux_pane_id'])}",
-                f"    created_at:        {placement['created_at']}",
+                f"    backend:    {placement['coding_agent']}",
+                f"    session:    {placement['mux_session']}",
+                f"    window_id:  {placement['mux_window_id']}",
+                f"    pane_id:    {_dash_if_none(placement['mux_pane_id'])}",
+                f"    created_at: {placement['created_at']}",
             ]
         )
     return "\n".join(lines)
@@ -109,7 +108,7 @@ def format_fleet_create(data: dict, *, full: bool = False) -> str:
 
     ``full=False`` (default): 1-line compact form
     ``<fleet_id> director=<id> admin=<id>``.
-    ``full=True``: 7-line block (fleet_id + director_agent_id on
+    ``full=True``: 7-line block (fleet_id + director_member_id on
     their own lines, plus ``name``, ``created_at``, ``director_name``,
     ``pane``, ``administrator``).
     """
@@ -117,18 +116,18 @@ def format_fleet_create(data: dict, *, full: bool = False) -> str:
     if not full:
         return (
             f"{data['fleet_id']} "
-            f"director={director['agent_id']} "
-            f"admin={data['administrator_agent_id']}"
+            f"director={director['member_id']} "
+            f"admin={data['administrator_member_id']}"
         )
     placement = director["placement"]
     lines = [
         str(data["fleet_id"]),
-        str(director["agent_id"]),
+        str(director["member_id"]),
         f"name:             {data['name'] or ''}",
         f"created_at:       {data['created_at']}",
         f"director_name:    {director['name']}",
         f"pane:             {placement['mux_session']}:{placement['mux_window_id']}:{placement['mux_pane_id']}",
-        f"administrator:    {data['administrator_agent_id']}",
+        f"administrator:    {data['administrator_member_id']}",
     ]
     return "\n".join(lines)
 
@@ -144,12 +143,12 @@ def format_member(data: dict, *, full: bool = False) -> str:
     if not full:
         pane = placement["mux_pane_id"] or "(pending)"
         return (
-            f"{data['agent_id']} {data['name']} "
+            f"{data['member_id']} {data['name']} "
             f"backend={placement['coding_agent']} pane={pane}"
         )
     lines = [
         "Member registered and spawned.",
-        f"  agent_id:  {data['agent_id']}",
+        f"  member_id: {data['member_id']}",
         f"  name:      {data['name']}",
         f"  backend:   {placement['coding_agent']}",
         f"  pane_id:   {placement['mux_pane_id']}",
@@ -158,7 +157,7 @@ def format_member(data: dict, *, full: bool = False) -> str:
     return "\n".join(lines)
 
 
-_AGENT_ID_COLUMN_WIDTH = 14
+_MEMBER_ID_COLUMN_WIDTH = 14
 
 
 def format_member_list_activity(members: list) -> str:
@@ -173,14 +172,14 @@ def format_member_list_activity(members: list) -> str:
         return "0 members."
     count = len(members)
     lines = [f"{count} member{'s' if count > 1 else ''}:"]
-    header = "  agent_id        name      status  last_sent  last_recv  last_ack   idle"
+    header = "  member_id       name      status  last_sent  last_recv  last_ack   idle"
     sep = "  --------------  --------  ------  ---------  ---------  ---------  -----"
     lines.append(header)
     lines.append(sep)
     for m in members:
-        agent_id = str(m["agent_id"])
+        member_id = str(m["member_id"])
         lines.append(
-            f"  {agent_id:<{_AGENT_ID_COLUMN_WIDTH}}  {m['name']:<8}  "
+            f"  {member_id:<{_MEMBER_ID_COLUMN_WIDTH}}  {m['name']:<8}  "
             f"{m['status']:<6}  "
             f"{_format_iso_hms(m['last_sent']):<9}  "
             f"{_format_iso_hms(m['last_recv']):<9}  "
@@ -210,16 +209,16 @@ def _format_idle(seconds: int | None) -> str:
 
 
 def _format_ping_age(age_seconds: int | None) -> str:
-    """Render a watched agent's last-ping age for the status table."""
+    """Render a watched member's last-ping age for the status table."""
     if age_seconds is None:
         return "-"
     return f"{age_seconds}s ago"
 
 
 def format_monitor_status(payload: dict) -> str:
-    """Render ``monitor status`` as text: a runtime line + watched-agent table.
+    """Render ``monitor status`` as text: a runtime line + watched-member table.
 
-    ``payload`` is ``{"runtime": {...}, "agents": [...]}`` (the same shape the
+    ``payload`` is ``{"runtime": {...}, "members": [...]}`` (the same shape the
     ``--json`` path emits). The runtime line reads ``running``/``stopped`` from
     the DB heartbeat; the table lists the watched set (the root Director + every
     ordinary member) with role / interval / last-ping age / enabled / pending.
@@ -235,58 +234,58 @@ def format_monitor_status(payload: dict) -> str:
     else:
         line1 = "monitor: stopped"
     lines = [line1]
-    agents = payload["agents"]
-    if agents:
+    members = payload["members"]
+    if members:
         lines.append(
-            "  agent_id  name         role      interval  last_ping  enabled  pending"
+            "  member_id  name         role      interval  last_ping  enabled  pending"
         )
         lines.append(
-            "  --------  -----------  --------  --------  ---------  -------  -------"
+            "  ---------  -----------  --------  --------  ---------  -------  -------"
         )
-        for a in agents:
-            interval_s = f"{a['interval_seconds']}s"
-            last_ping = _format_ping_age(a["last_ping_age_seconds"])
-            enabled_s = "yes" if a["enabled"] else "no"
+        for m in members:
+            interval_s = f"{m['interval_seconds']}s"
+            last_ping = _format_ping_age(m["last_ping_age_seconds"])
+            enabled_s = "yes" if m["enabled"] else "no"
             lines.append(
-                f"  {str(a['agent_id']):<8}  {a['name']:<11}  {a['role']:<8}  "
+                f"  {str(m['member_id']):<9}  {m['name']:<11}  {m['role']:<8}  "
                 f"{interval_s:<8}  {last_ping:<9}  {enabled_s:<7}  "
-                f"{a['pending_count']}"
+                f"{m['pending_count']}"
             )
     return "\n".join(lines)
 
 
 def format_monitor_config(cfg: dict) -> str:
-    """Render one agent's ``monitor config`` row as a single compact line."""
+    """Render one member's ``monitor config`` row as a single compact line."""
     state = "enabled" if cfg["enabled"] else "disabled"
     last_ping = cfg["last_ping_at"] or "-"
     return (
-        f"agent {cfg['agent_id']}: interval {cfg['interval_seconds']}s, "
+        f"member {cfg['member_id']}: interval {cfg['interval_seconds']}s, "
         f"{state}, last_ping {last_ping}"
     )
 
 
-def format_member_roster(agents: list) -> str:
+def format_member_roster(members: list) -> str:
     """Render the ``member list --all`` roster as text.
 
-    One row per active agent of the fleet with a ``kind`` column; every
-    placement cell renders ``-`` for a placementless row, and a placed row
-    with no pane yet renders ``(pending)`` in ``pane_id`` (matching
+    One row per active registry entry of the fleet with a ``kind`` column;
+    every placement cell renders ``-`` for a placementless row, and a placed
+    row with no pane yet renders ``(pending)`` in ``pane_id`` (matching
     :func:`format_member_list`).
     """
-    if not agents:
-        return "0 agents."
-    count = len(agents)
-    lines = [f"{count} agent{'s' if count > 1 else ''}:"]
+    if not members:
+        return "0 members."
+    count = len(members)
+    lines = [f"{count} member{'s' if count > 1 else ''}:"]
     lines.append(
-        "  agent_id  name           status  kind           backend  session  "
+        "  member_id  name           status  kind           backend  session  "
         "window_id  pane_id  created_at"
     )
     lines.append(
-        "  --------  -------------  ------  -------------  -------  -------  "
+        "  ---------  -------------  ------  -------------  -------  -------  "
         "---------  -------  --------------------"
     )
-    for a in agents:
-        placement = a["placement"]
+    for m in members:
+        placement = m["placement"]
         if placement is None:
             backend = session_name = window_id = pane = created_at = "-"
         else:
@@ -296,8 +295,8 @@ def format_member_roster(agents: list) -> str:
             pane = placement["mux_pane_id"] or "(pending)"
             created_at = placement["created_at"]
         lines.append(
-            f"  {str(a['agent_id']):<8}  {a['name']:<13}  {a['status']:<6}  "
-            f"{a['kind']:<13}  {backend:<7}  {session_name:<7}  "
+            f"  {str(m['member_id']):<9}  {m['name']:<13}  {m['status']:<6}  "
+            f"{m['kind']:<13}  {backend:<7}  {session_name:<7}  "
             f"{window_id:<9}  {pane:<7}  {created_at}"
         )
     return "\n".join(lines)
@@ -308,7 +307,7 @@ def format_member_list(members: list) -> str:
         return "0 members."
     count = len(members)
     lines = [f"{count} member{'s' if count > 1 else ''}:"]
-    header = "  agent_id        name      status  backend  session  window_id  pane_id  created_at"
+    header = "  member_id       name      status  backend  session  window_id  pane_id  created_at"
     sep = (
         "  --------------  --------  ------  -------  -------  ---------  -------  "
         "--------------------"
@@ -318,9 +317,9 @@ def format_member_list(members: list) -> str:
     for m in members:
         placement = m["placement"]
         pane_display = placement["mux_pane_id"] or "(pending)"
-        agent_id = str(m["agent_id"])
+        member_id = str(m["member_id"])
         lines.append(
-            f"  {agent_id:<{_AGENT_ID_COLUMN_WIDTH}}  {m['name']:<8}  "
+            f"  {member_id:<{_MEMBER_ID_COLUMN_WIDTH}}  {m['name']:<8}  "
             f"{m['status']:<6}  "
             f"{placement['coding_agent']:<7}  "
             f"{placement['mux_session']:<7}  "

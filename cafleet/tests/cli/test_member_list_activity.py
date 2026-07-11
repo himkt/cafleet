@@ -27,7 +27,7 @@ def bootstrapped_team(_mock_tmux_for_fleet_create):
     """Fresh fleet + 3 registered members. Returns ``(sid, director,
     [member_ids], runner)``.
 
-    Members are registered via ``broker.register_agent`` (placement supplied)
+    Members are registered via ``broker.register_member`` (placement supplied)
     so the test does not have to spin up real tmux panes via ``member create``.
     """
     runner = CliRunner()
@@ -36,16 +36,15 @@ def bootstrapped_team(_mock_tmux_for_fleet_create):
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
     sid = data["fleet_id"]
-    director_id = data["director"]["agent_id"]
+    director_id = data["director"]["member_id"]
 
     members: list[str] = []
     for i, name in enumerate(("alice", "bob", "carol")):
-        agent = broker.register_agent(
+        member = broker.register_member(
             fleet_id=sid,
             name=name,
             description=f"member {name}",
             placement={
-                "director_agent_id": director_id,
                 "backend": "tmux",
                 "mux_session": "main",
                 "mux_window_id": "@3",
@@ -53,7 +52,7 @@ def bootstrapped_team(_mock_tmux_for_fleet_create):
                 "coding_agent": "claude",
             },
         )
-        members.append(agent["agent_id"])
+        members.append(member["member_id"])
 
     return sid, director_id, members, runner
 
@@ -88,8 +87,8 @@ def test_member_list_no_activity_flag__omits_activity_keys(bootstrapped_team):
 
 
 def test_member_list__scoped_by_fleet_id_lists_members_excludes_root(bootstrapped_team):
-    """``member list`` takes only the global ``--fleet-id`` (no ``--agent-id``):
-    it lists every member of the fleet and never surfaces the root Director."""
+    """``member list`` takes only ``--fleet-id`` (no identity flag): it lists
+    every member of the fleet and never surfaces the root Director."""
     sid, director_id, members, runner = bootstrapped_team
 
     result = runner.invoke(
@@ -104,29 +103,9 @@ def test_member_list__scoped_by_fleet_id_lists_members_excludes_root(bootstrappe
     )
     assert result.exit_code == 0, result.output
     rows = json.loads(result.output)
-    listed_ids = {row["agent_id"] for row in rows}
+    listed_ids = {row["member_id"] for row in rows}
     assert listed_ids == set(members)
     assert director_id not in listed_ids
-
-
-def test_member_list__agent_id_flag_removed(bootstrapped_team):
-    """``member list`` no longer accepts ``--agent-id`` — Click rejects it with
-    its standard 'no such option' error (exit 2)."""
-    sid, _director_id, _members, runner = bootstrapped_team
-
-    result = runner.invoke(
-        cli,
-        [
-            "member",
-            "list",
-            "--fleet-id",
-            str(sid),
-            "--agent-id",
-            "999",
-        ],
-    )
-    assert result.exit_code == 2, result.output
-    assert "no such option" in (result.output or "").lower()
 
 
 # --- with --activity ---
@@ -206,7 +185,7 @@ def test_member_list_activity_flag__activity_visible_after_send(bootstrapped_tea
         ],
     )
     assert result.exit_code == 0, result.output
-    rows = {row["agent_id"]: row for row in json.loads(result.output)}
+    rows = {row["member_id"]: row for row in json.loads(result.output)}
 
     assert rows[alice]["last_sent"] == sent["task"]["status_timestamp"]
     assert rows[bob]["last_recv"] == sent["task"]["status_timestamp"]

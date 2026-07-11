@@ -23,13 +23,13 @@ def fleet_id():
 
 
 @pytest.fixture
-def agent_id():
+def member_id():
     return 200
 
 
 @pytest.fixture(autouse=True)
 def _stub_verify(monkeypatch):
-    monkeypatch.setattr(broker, "verify_agent_fleet", lambda *_a, **_k: True)
+    monkeypatch.setattr(broker, "verify_member_fleet", lambda *_a, **_k: True)
 
 
 def _typed_task(
@@ -45,8 +45,8 @@ def _typed_task(
     return {
         "task_id": task_id,
         "context_id": recipient,
-        "from_agent_id": sender,
-        "to_agent_id": recipient,
+        "from_member_id": sender,
+        "to_member_id": recipient,
         "type": type_,
         "created_at": "2026-05-05T12:00:00.000000+00:00",
         "status_state": status_state,
@@ -66,7 +66,7 @@ def _broadcast_summary_result(*, summary_id=7000, recipient_count=3):
         origin_task_id=summary_id,
         status_state="completed",
     )
-    summary["to_agent_id"] = None
+    summary["to_member_id"] = None
     return [
         {"task": summary, "recipients": recipient_count, "delivered": recipient_count}
     ]
@@ -74,7 +74,6 @@ def _broadcast_summary_result(*, summary_id=7000, recipient_count=3):
 
 def _ping_setup(monkeypatch):
     placement = {
-        "director_agent_id": DIRECTOR_ID,
         "backend": "tmux",
         "mux_session": "main",
         "mux_window_id": "@3",
@@ -82,23 +81,23 @@ def _ping_setup(monkeypatch):
         "coding_agent": "claude",
         "created_at": "2026-04-16T08:00:00+00:00",
     }
-    agent = {
-        "agent_id": MEMBER_ID,
+    member = {
+        "member_id": MEMBER_ID,
         "name": "Claude-B",
         "description": "Test member",
         "status": "active",
         "registered_at": "2026-04-16T08:00:00+00:00",
-        "kind": "user",
+        "kind": "member",
         "placement": placement,
     }
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_k: agent)
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_k: member)
     monkeypatch.setattr(TmuxMultiplexer, "ensure_available", lambda self: None)
     monkeypatch.setattr(
         TmuxMultiplexer, "send_poll_trigger", lambda self, **_k: True, raising=False
     )
 
 
-def _setup_command(monkeypatch, command, fleet_id, agent_id):
+def _setup_command(monkeypatch, command, fleet_id, member_id):
     if command == "broadcast":
         monkeypatch.setattr(
             broker,
@@ -110,8 +109,8 @@ def _setup_command(monkeypatch, command, fleet_id, agent_id):
             "broadcast",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
-            str(agent_id),
+            "--from-member-id",
+            str(member_id),
             "--text",
             "hello",
         ]
@@ -129,9 +128,9 @@ def _setup_command(monkeypatch, command, fleet_id, agent_id):
             "send",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
-            str(agent_id),
-            "--to",
+            "--from-member-id",
+            str(member_id),
+            "--to-member-id",
             "999",
             "--text",
             "hello",
@@ -149,8 +148,8 @@ def _setup_command(monkeypatch, command, fleet_id, agent_id):
             "ack",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
-            str(agent_id),
+            "--member-id",
+            str(member_id),
             "--task-id",
             "5000",
         ]
@@ -184,14 +183,14 @@ def _setup_command(monkeypatch, command, fleet_id, agent_id):
 def test_command_echo__one_line_vs_multi_line_shape(
     runner,
     fleet_id,
-    agent_id,
+    member_id,
     monkeypatch,
     command,
     mode,
     expect_oneline,
     must_not_contain,
 ):
-    args = _setup_command(monkeypatch, command, fleet_id, agent_id)
+    args = _setup_command(monkeypatch, command, fleet_id, member_id)
     if mode == "quiet":
         args.append("--quiet")
     elif mode == "full":
@@ -209,7 +208,7 @@ def test_command_echo__one_line_vs_multi_line_shape(
 
 
 def test_broadcast_default__canonical_summary_pattern(
-    runner, fleet_id, agent_id, monkeypatch
+    runner, fleet_id, member_id, monkeypatch
 ):
     monkeypatch.setattr(
         broker,
@@ -223,8 +222,8 @@ def test_broadcast_default__canonical_summary_pattern(
             "broadcast",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
-            str(agent_id),
+            "--from-member-id",
+            str(member_id),
             "--text",
             "hello",
         ],
@@ -237,7 +236,7 @@ def test_broadcast_default__canonical_summary_pattern(
 
 
 def test_broadcast_full__multi_line_per_recipient_envelopes(
-    runner, fleet_id, agent_id, monkeypatch
+    runner, fleet_id, member_id, monkeypatch
 ):
     monkeypatch.setattr(
         broker,
@@ -251,8 +250,8 @@ def test_broadcast_full__multi_line_per_recipient_envelopes(
             "broadcast",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
-            str(agent_id),
+            "--from-member-id",
+            str(member_id),
             "--text",
             "hello",
             "--full",
@@ -264,8 +263,8 @@ def test_broadcast_full__multi_line_per_recipient_envelopes(
 
 
 @pytest.mark.parametrize("command", ["send", "ack"])
-def test_quiet__emits_only_task_id(runner, fleet_id, agent_id, monkeypatch, command):
-    args = _setup_command(monkeypatch, command, fleet_id, agent_id) + ["--quiet"]
+def test_quiet__emits_only_task_id(runner, fleet_id, member_id, monkeypatch, command):
+    args = _setup_command(monkeypatch, command, fleet_id, member_id) + ["--quiet"]
     result = runner.invoke(cli, args)
     assert result.exit_code == 0, result.output
     assert result.output.strip() == "5000"

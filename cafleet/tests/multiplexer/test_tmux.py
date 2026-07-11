@@ -401,7 +401,7 @@ def test_send_poll_trigger__return_branches_and_argv(
     result = _tmux.send_poll_trigger(
         target_pane_id="%7",
         fleet_id="sess-001",
-        agent_id="agent-001",
+        member_id="member-001",
     )
     assert result is expected_result
     if expect_run_called and scenario == "success_returns_true":
@@ -416,7 +416,7 @@ def test_send_poll_trigger__return_branches_and_argv(
                 "-t",
                 "%7",
                 "-l",
-                "cafleet message poll --fleet-id sess-001 --agent-id agent-001",
+                "cafleet message poll --fleet-id sess-001 --member-id member-001",
             ],
             ["tmux", "send-keys", "-t", "%7", "Enter"],
         ]
@@ -760,15 +760,15 @@ def test_send_wake_trigger__return_branches_and_argv(
     monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     result = _tmux.send_wake_trigger(
         target_pane_id="%7",
-        due_agents=[
+        due_members=[
             {
-                "agent_id": 332,
+                "member_id": 332,
                 "name": "Director",
                 "is_director": True,
                 "wake_reasons": ["interval"],
             }
         ],
-        director_agent_id=332,
+        director_member_id=332,
     )
     assert result is expected_result
     if scenario == "success_returns_true":
@@ -782,7 +782,7 @@ def test_send_wake_trigger__return_branches_and_argv(
 
 def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     """The wake nudge is a single-line monitoring instruction that NAMES the
-    freshly-due agents (each with its ``[<wake_reasons>]`` tag) and the Director id
+    freshly-due members (each with its ``[<wake_reasons>]`` tag) and the Director id
     — distinct from the ``cafleet ... message poll`` command the Director receives.
     A crafted user-controlled name carrying CR/LF/tab, a backtick, a ``$(…)``
     command-substitution sequence, and a pipe is sanitized so the single-line
@@ -804,21 +804,21 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     # no-backtick / no-``$(`` / no-``|`` assertions below hold for any name.
     result = _tmux.send_wake_trigger(
         target_pane_id="%7",
-        due_agents=[
+        due_members=[
             {
-                "agent_id": 332,
+                "member_id": 332,
                 "name": "Director",
                 "is_director": True,
                 "wake_reasons": ["interval"],
             },
             {
-                "agent_id": 336,
+                "member_id": 336,
                 "name": "evil\r\nname\there`$(id)|whoami",
                 "is_director": False,
                 "wake_reasons": ["interval", "stall-check"],
             },
         ],
-        director_agent_id=332,
+        director_member_id=332,
     )
     assert result is True
 
@@ -834,12 +834,12 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     assert "\r" not in payload
     assert "\t" not in payload
 
-    # Provenance tag + count/noun prefix ("{N} {agent|agents} due"), NOT the
+    # Provenance tag + count/noun prefix ("{N} {member|members} due"), NOT the
     # ``cafleet ... message poll`` command the Director receives.
-    assert payload.startswith("[monitor] wake: 2 agents due")
+    assert payload.startswith("[monitor] wake: 2 members due")
     assert not payload.startswith("cafleet")
 
-    # Each freshly-due agent is named ``<role> <id> (<name>) [<reasons>]``: the
+    # Each freshly-due member is named ``<role> <id> (<name>) [<reasons>]``: the
     # Director (is_director=True) renders with role ``director`` and its interval
     # tag; the member with role ``member`` and its two comma-joined reasons.
     assert "director 332 (Director) [interval]" in payload
@@ -865,7 +865,7 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
 
 def test_send_wake_trigger__singular_noun_and_director_named_when_not_due(monkeypatch):
     """Worked example B (§2): a single due member yields the singular noun
-    ("1 agent due"), and the Director id is still named as the standing
+    ("1 member due"), and the Director id is still named as the standing
     inspect-and-re-engage target even though the Director is not itself due —
     the property this design restores (the Director is always inspected)."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
@@ -879,25 +879,25 @@ def test_send_wake_trigger__singular_noun_and_director_named_when_not_due(monkey
 
     result = _tmux.send_wake_trigger(
         target_pane_id="%7",
-        due_agents=[
+        due_members=[
             {
-                "agent_id": 336,
+                "member_id": 336,
                 "name": "alice",
                 "is_director": False,
                 "wake_reasons": ["stall-check"],
             }
         ],
-        director_agent_id=332,
+        director_member_id=332,
     )
     assert result is True
 
     payload = captured[0][5]
-    # Singular noun for a single due agent ("{N} {agent|agents} due").
-    assert payload.startswith("[monitor] wake: 1 agent due")
+    # Singular noun for a single due member ("{N} {member|members} due").
+    assert payload.startswith("[monitor] wake: 1 member due")
     # The lone due member is named ``member <id> (<name>) [<reasons>]``.
     assert "member 336 (alice) [stall-check]" in payload
     # The Director (332) is not in the due set, yet it is named via the standing
-    # clause; it is never rendered as a due agent (no ``member 332`` / ``director 332``).
+    # clause; it is never rendered as a due member (no ``member 332`` / ``director 332``).
     assert "(332)" in payload
     assert "member 332" not in payload
     assert "director 332" not in payload
@@ -914,15 +914,15 @@ def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/bin")
     monkeypatch.setattr("time.sleep", lambda _secs: None)
 
-    due_agents = [
+    due_members = [
         {
-            "agent_id": 332,
+            "member_id": 332,
             "name": "Director",
             "is_director": True,
             "wake_reasons": ["interval"],
         },
         {
-            "agent_id": 336,
+            "member_id": 336,
             "name": "alice",
             "is_director": False,
             "wake_reasons": ["interval", "stall-check"],
@@ -936,7 +936,7 @@ def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
         lambda args, **_kw: tmux_calls.append(list(args)) or "",
     )
     _tmux.send_wake_trigger(
-        target_pane_id="%7", due_agents=due_agents, director_agent_id=332
+        target_pane_id="%7", due_members=due_members, director_member_id=332
     )
     # tmux literal-then-Enter: the payload is arg index 5 of the first send-keys call.
     tmux_payload = tmux_calls[0][5]
@@ -948,7 +948,7 @@ def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
         lambda args, **_kw: herdr_calls.append(list(args)) or "",
     )
     HerdrMultiplexer().send_wake_trigger(
-        target_pane_id="wG:p1", due_agents=due_agents, director_agent_id=332
+        target_pane_id="wG:p1", due_members=due_members, director_member_id=332
     )
     # herdr ``pane run``: the payload is arg index 4 (herdr pane run <pane> <payload>).
     herdr_payload = herdr_calls[0][4]

@@ -1,6 +1,5 @@
 """Tests for ``broker.list_members_with_activity`` (flat single-Director model)."""
 
-import click
 import pytest
 
 from cafleet import broker
@@ -14,47 +13,44 @@ def _bootstrap_fleet():
         coding_agent="claude",
         backend="tmux",
     )
-    return info["fleet_id"], info["director"]["agent_id"]
+    return info["fleet_id"], info["director"]["member_id"]
 
 
-def _register_member(fleet_id, director_id, name, pane):
+def _register_member(fleet_id, name, pane):
     placement = {
-        "director_agent_id": director_id,
         "backend": "tmux",
         "mux_session": "main",
         "mux_window_id": "@3",
         "mux_pane_id": pane,
         "coding_agent": "claude",
     }
-    agent = broker.register_agent(
+    member = broker.register_member(
         fleet_id=fleet_id,
         name=name,
         description=f"member {name}",
         placement=placement,
     )
-    return agent["agent_id"]
+    return member["member_id"]
 
 
 def _setup_three_member_team():
     sid, director_id = _bootstrap_fleet()
-    a = _register_member(sid, director_id, "alice", "%10")
-    b = _register_member(sid, director_id, "bob", "%11")
-    c = _register_member(sid, director_id, "carol", "%12")
+    a = _register_member(sid, "alice", "%10")
+    b = _register_member(sid, "bob", "%11")
+    c = _register_member(sid, "carol", "%12")
     return sid, director_id, a, b, c
 
 
 def test_list_members_with_activity__shape_identity_placement_and_activity_keys():
-    sid, director_id, a, b, c = _setup_three_member_team()
+    sid, _director_id, a, b, c = _setup_three_member_team()
     rows = broker.list_members_with_activity(sid)
     assert len(rows) == 3
-    assert {row["agent_id"] for row in rows} == {a, b, c}
+    assert {row["member_id"] for row in rows} == {a, b, c}
 
-    alice = next(r for r in rows if r["agent_id"] == a)
+    alice = next(r for r in rows if r["member_id"] == a)
     # Identity + placement match list_members superset contract.
     assert alice["name"] == "alice"
     assert alice["status"] == "active"
-    # In the flat model every member's placement director is the fleet root.
-    assert alice["placement"]["director_agent_id"] == director_id
     assert alice["placement"]["mux_pane_id"] == "%10"
     # Activity keys present even with no tasks yet.
     for key in ("last_sent", "last_recv", "last_ack", "idle"):
@@ -67,8 +63,8 @@ def test_list_members_with_activity__last_sent_and_last_recv_track_most_recent_t
     broker.send_message(sid, a, b, "first")
     second = broker.send_message(sid, a, b, "second")
     rows = broker.list_members_with_activity(sid)
-    alice = next(r for r in rows if r["agent_id"] == a)
-    bob = next(r for r in rows if r["agent_id"] == b)
+    alice = next(r for r in rows if r["member_id"] == a)
+    bob = next(r for r in rows if r["member_id"] == b)
     assert alice["last_sent"] == second["task"]["status_timestamp"]
     assert bob["last_recv"] == second["task"]["status_timestamp"]
     # last_ack stays None until recipient acks.
@@ -82,7 +78,7 @@ def test_list_members_with_activity__last_ack_tracks_real_acks_only():
     # Broadcast summary (status_state=completed) must NOT pollute last_ack.
     broker.broadcast_message(sid, a, "team-wide note")
     rows = broker.list_members_with_activity(sid)
-    alice = next(r for r in rows if r["agent_id"] == a)
+    alice = next(r for r in rows if r["member_id"] == a)
     assert alice["last_ack"] == acked["task"]["status_timestamp"]
 
 
@@ -95,33 +91,33 @@ def test_list_members_with_activity__broadcast_summary_filtered_from_proxy_colum
     # status_state='completed'. Neither last_recv nor last_ack should register it.
     broker.broadcast_message(sid, a, "team-wide note")
     rows = broker.list_members_with_activity(sid)
-    alice = next(r for r in rows if r["agent_id"] == a)
+    alice = next(r for r in rows if r["member_id"] == a)
     assert alice[column] is None
 
 
 def test_list_members_with_activity__idle_transitions_from_none_after_activity():
     sid, _director_id, a, b, _c = _setup_three_member_team()
     rows_pre = broker.list_members_with_activity(sid)
-    alice_pre = next(r for r in rows_pre if r["agent_id"] == a)
+    alice_pre = next(r for r in rows_pre if r["member_id"] == a)
     assert alice_pre["idle"] is None
 
     broker.send_message(sid, a, b, "hello")
     rows_post = broker.list_members_with_activity(sid)
-    alice_post = next(r for r in rows_post if r["agent_id"] == a)
+    alice_post = next(r for r in rows_post if r["member_id"] == a)
     assert alice_post["idle"] is not None
 
 
 def test_list_members_with_activity__lists_root_members_excludes_root_and_deregistered():
     sid, director_id, a, b, c = _setup_three_member_team()
-    broker.deregister_agent(c)
+    broker.deregister_member(c)
 
     rows = broker.list_members_with_activity(sid)
-    agent_ids = {row["agent_id"] for row in rows}
-    # Flat model: every member under the root is listed. The root Director's
-    # own placement row (director_agent_id IS NULL) is excluded, and the
+    member_ids = {row["member_id"] for row in rows}
+    # Flat model: every member under the root is listed. The root Director
+    # (member_id == fleets.director_member_id) is excluded, and the
     # deregistered carol is gone.
-    assert agent_ids == {a, b}
-    assert director_id not in agent_ids
+    assert member_ids == {a, b}
+    assert director_id not in member_ids
 
     # Empty fleet (bootstrap-only) → no members.
     sid2, _director_id2 = _bootstrap_fleet()
@@ -131,29 +127,8 @@ def test_list_members_with_activity__lists_root_members_excludes_root_and_deregi
     assert broker.list_members_with_activity(999999) == []
 
 
-def test_register_agent__member_under_non_root_director_is_rejected():
-    """Nested teams are forbidden: a member whose placement names a non-root
-    director (another member) is rejected by ``register_agent``."""
-    sid, _director_id, a, _b, _c = _setup_three_member_team()
-    placement = {
-        "director_agent_id": a,  # a member — not the fleet root Director
-        "backend": "tmux",
-        "mux_session": "main",
-        "mux_window_id": "@3",
-        "mux_pane_id": "%20",
-        "coding_agent": "claude",
-    }
-    with pytest.raises(click.UsageError):
-        broker.register_agent(
-            fleet_id=sid,
-            name="nested-outsider",
-            description="must be rejected",
-            placement=placement,
-        )
-
-
-def test_register_agent__member_under_root_succeeds_and_is_listed():
-    sid, director_id = _bootstrap_fleet()
-    member_id = _register_member(sid, director_id, "rooted", "%30")
+def test_register_member__placed_member_is_listed():
+    sid, _director_id = _bootstrap_fleet()
+    member_id = _register_member(sid, "rooted", "%30")
     rows = broker.list_members(sid)
-    assert member_id in {r["agent_id"] for r in rows}
+    assert member_id in {r["member_id"] for r in rows}

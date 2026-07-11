@@ -1,12 +1,12 @@
-import type { TimelineEntry, Agent } from "../types";
+import type { TimelineEntry, Member } from "../types";
 import { entrySortKey } from "../timeline";
 import { formatTime } from "../format";
-import AgentAvatar from "./AgentAvatar";
+import MemberAvatar from "./MemberAvatar";
 import ReactionBar from "./ReactionBar";
 
 interface TimelineMessageProps {
   entry: TimelineEntry;
-  agents: Agent[];
+  members: Member[];
 }
 
 function MentionChip({ name }: { name: string }) {
@@ -32,29 +32,29 @@ function isCanceled(entry: TimelineEntry): boolean {
 
 function recipientNames(entry: TimelineEntry): string[] {
   if (entry.kind === "unicast") {
-    return [entry.message.to_agent_name];
+    return [entry.message.to_member_name];
   }
-  return entry.rows.map((r) => r.to_agent_name);
+  return entry.rows.map((r) => r.to_member_name);
 }
 
 export default function TimelineMessageComponent({
   entry,
-  agents,
+  members,
 }: TimelineMessageProps) {
   const canceled = isCanceled(entry);
   const row = firstRow(entry);
-  const sender = agents.find((a) => a.agent_id === row.from_agent_id) ?? {
-    agent_id: row.from_agent_id,
-    name: row.from_agent_name,
-    kind: "user" as const,
+  const sender = members.find((m) => m.member_id === row.from_member_id) ?? {
+    member_id: row.from_member_id,
+    name: row.from_member_name,
+    kind: "member" as const,
   };
 
   return (
     <div className="flex gap-3 px-4 py-2 hover:bg-surface-hover motion-safe:animate-rise-in">
-      <AgentAvatar agent={sender} size="md" />
+      <MemberAvatar member={sender} size="md" />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-1.5">
-          <span className="text-sm font-semibold">{row.from_agent_name}</span>
+          <span className="text-sm font-semibold">{row.from_member_name}</span>
           <span className="text-xs text-text-faint" aria-hidden="true">
             &rarr;
           </span>
@@ -74,7 +74,7 @@ export default function TimelineMessageComponent({
             <p className="mt-0.5 whitespace-pre-wrap break-words text-sm">
               {body(entry)}
             </p>
-            <ReactionBar entry={entry} agents={agents} />
+            <ReactionBar entry={entry} members={members} />
           </>
         )}
       </div>

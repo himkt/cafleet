@@ -18,20 +18,19 @@ def _member(**placement_overrides) -> dict:
     }
     placement.update(placement_overrides)
     return {
-        "agent_id": 1,
+        "member_id": 1,
         "name": "Claude-B",
         "placement": placement,
     }
 
 
-def _list_entry(*, agent_id, name, coding_agent, pane_id):
+def _list_entry(*, member_id, name, coding_agent, pane_id):
     return {
-        "agent_id": agent_id,
+        "member_id": member_id,
         "name": name,
         "status": "active",
         "registered_at": "2026-04-12T10:15:00Z",
         "placement": {
-            "director_agent_id": 9,
             "mux_session": "main",
             "mux_window_id": "@3",
             "mux_pane_id": pane_id,
@@ -45,8 +44,8 @@ def _task(text="the body of the message") -> dict:
     base: dict = {
         "task_id": 1,
         "context_id": 20,
-        "from_agent_id": 10,
-        "to_agent_id": 20,
+        "from_member_id": 10,
+        "to_member_id": 20,
         "type": "unicast",
         "created_at": "2026-05-05T12:00:00.000000+00:00",
         "status_state": "input_required",
@@ -68,7 +67,7 @@ def test_format_member_list__header_and_row_shape_and_empty_message():
     result = format_member_list(
         [
             _list_entry(
-                agent_id=1,
+                member_id=1,
                 name="Claude-B",
                 coding_agent="claude",
                 pane_id="%7",
@@ -181,6 +180,6 @@ def test_truncate_task_text__missing_text_key_is_noop_and_siblings_unchanged(
     truncate_task_text(task, full=False)
     assert task["task_id"] == 1
     assert task["status_state"] == "input_required"
-    assert task["from_agent_id"] == 10
-    assert task["to_agent_id"] == 20
+    assert task["from_member_id"] == 10
+    assert task["to_member_id"] == 20
     assert task["type"] == "unicast"

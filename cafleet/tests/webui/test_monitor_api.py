@@ -53,12 +53,12 @@ def client(tmp_path):
 
 
 def _register_member(fleet: dict, name: str = "member", pane_id: str = "%5") -> int:
-    return broker.register_agent(
+    return broker.register_member(
         fleet_id=fleet["fleet_id"],
         name=name,
         description="m",
-        placement=_member_placement(fleet["director"]["agent_id"], pane_id),
-    )["agent_id"]
+        placement=_member_placement(pane_id),
+    )["member_id"]
 
 
 def _headers(fleet_id: int) -> dict:
@@ -106,44 +106,44 @@ def test_get_monitor__stale_row_reports_not_running_with_nulls(api_db, client):
     assert data["tick_seconds"] == 5  # the row exists (stale, not absent)
 
 
-# --- GET /api/agents folded monitor field ----------------------------------
+# --- GET /api/members folded monitor field ----------------------------------
 
 
-def test_get_agents__monitor_field_folded(api_db, client):
+def test_get_members__monitor_field_folded(api_db, client):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    director_id = fleet["director"]["agent_id"]
-    admin_id = fleet["administrator_agent_id"]
+    director_id = fleet["director"]["member_id"]
+    admin_id = fleet["administrator_member_id"]
     member_id = _register_member(fleet, name="alice")
-    watcher_id = _register_monitoring_member(fleet, pane_id="%7")["agent_id"]
+    watcher_id = _register_monitoring_member(fleet, pane_id="%7")["member_id"]
 
-    resp = client.get("/api/agents", headers=_headers(sid))
+    resp = client.get("/api/members", headers=_headers(sid))
     assert resp.status_code == 200, resp.text
-    agents = {a["agent_id"]: a for a in resp.json()["agents"]}
+    members = {m["member_id"]: m for m in resp.json()["members"]}
 
     # the watched set folds a non-null monitor: the root Director @180 and every
     # ordinary member @720. The monitoring member is the unenrolled watcher and
     # the Administrator has no placement, so both fold null.
-    assert agents[director_id]["monitor"] is not None
-    assert agents[director_id]["monitor"]["enabled"] is True
-    assert agents[director_id]["monitor"]["interval_seconds"] == 180
-    assert agents[member_id]["monitor"] is not None
-    assert agents[member_id]["monitor"]["enabled"] is True
-    assert agents[member_id]["monitor"]["interval_seconds"] == 720
-    assert agents[watcher_id]["monitor"] is None
-    assert agents[admin_id]["monitor"] is None
+    assert members[director_id]["monitor"] is not None
+    assert members[director_id]["monitor"]["enabled"] is True
+    assert members[director_id]["monitor"]["interval_seconds"] == 180
+    assert members[member_id]["monitor"] is not None
+    assert members[member_id]["monitor"]["enabled"] is True
+    assert members[member_id]["monitor"]["interval_seconds"] == 720
+    assert members[watcher_id]["monitor"] is None
+    assert members[admin_id]["monitor"] is None
 
 
-# --- GET /api/agents/{id}/monitor ------------------------------------------
+# --- GET /api/members/{id}/monitor ------------------------------------------
 
 
-def test_get_agent_monitor__200_for_director(api_db, client):
+def test_get_member_monitor__200_for_director(api_db, client):
     # the root Director is enrolled @180
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    director_id = fleet["director"]["agent_id"]
+    director_id = fleet["director"]["member_id"]
 
-    resp = client.get(f"/api/agents/{director_id}/monitor", headers=_headers(sid))
+    resp = client.get(f"/api/members/{director_id}/monitor", headers=_headers(sid))
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["interval_seconds"] == 180
@@ -151,13 +151,13 @@ def test_get_agent_monitor__200_for_director(api_db, client):
     assert "last_ping_at" in data
 
 
-def test_get_agent_monitor__200_for_member(api_db, client):
+def test_get_member_monitor__200_for_member(api_db, client):
     # an ordinary member is enrolled @720
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     member_id = _register_member(fleet, name="alice")
 
-    resp = client.get(f"/api/agents/{member_id}/monitor", headers=_headers(sid))
+    resp = client.get(f"/api/members/{member_id}/monitor", headers=_headers(sid))
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["interval_seconds"] == 720
@@ -165,42 +165,42 @@ def test_get_agent_monitor__200_for_member(api_db, client):
     assert "last_ping_at" in data
 
 
-def test_get_agent_monitor__404_for_monitoring_member_not_enrolled(api_db, client):
+def test_get_member_monitor__404_for_monitoring_member_not_enrolled(api_db, client):
     # the monitoring member is the unenrolled watcher → its monitor endpoint 404s
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    watcher_id = _register_monitoring_member(fleet, pane_id="%7")["agent_id"]
+    watcher_id = _register_monitoring_member(fleet, pane_id="%7")["member_id"]
 
-    resp = client.get(f"/api/agents/{watcher_id}/monitor", headers=_headers(sid))
+    resp = client.get(f"/api/members/{watcher_id}/monitor", headers=_headers(sid))
     assert resp.status_code == 404, resp.text
 
 
-def test_get_agent_monitor__404_for_administrator_not_enrolled(api_db, client):
+def test_get_member_monitor__404_for_administrator_not_enrolled(api_db, client):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    admin_id = fleet["administrator_agent_id"]
+    admin_id = fleet["administrator_member_id"]
 
-    resp = client.get(f"/api/agents/{admin_id}/monitor", headers=_headers(sid))
+    resp = client.get(f"/api/members/{admin_id}/monitor", headers=_headers(sid))
     assert resp.status_code == 404, resp.text
 
 
-def test_get_agent_monitor__404_for_unknown_agent(api_db, client):
+def test_get_member_monitor__404_for_unknown_member(api_db, client):
     sid = _create_fleet()["fleet_id"]
-    resp = client.get("/api/agents/999999/monitor", headers=_headers(sid))
+    resp = client.get("/api/members/999999/monitor", headers=_headers(sid))
     assert resp.status_code == 404, resp.text
 
 
-# --- PATCH /api/agents/{id}/monitor ----------------------------------------
+# --- PATCH /api/members/{id}/monitor ----------------------------------------
 
 
-def test_patch_agent_monitor__updates_member_interval_and_enabled(api_db, client):
+def test_patch_member_monitor__updates_member_interval_and_enabled(api_db, client):
     # an ordinary member is enrolled @720 and editable via the API
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     member_id = _register_member(fleet, name="alice")
 
     resp = client.patch(
-        f"/api/agents/{member_id}/monitor",
+        f"/api/members/{member_id}/monitor",
         headers=_headers(sid),
         json={"interval_seconds": 30, "enabled": False},
     )
@@ -214,56 +214,56 @@ def test_patch_agent_monitor__updates_member_interval_and_enabled(api_db, client
     assert cfg["enabled"] is False
 
 
-def test_patch_agent_monitor__422_on_interval_below_one(api_db, client):
+def test_patch_member_monitor__422_on_interval_below_one(api_db, client):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     member_id = _register_member(fleet, name="alice")
 
     resp = client.patch(
-        f"/api/agents/{member_id}/monitor",
+        f"/api/members/{member_id}/monitor",
         headers=_headers(sid),
         json={"interval_seconds": 0},
     )
     assert resp.status_code == 422, resp.text
 
 
-def test_patch_agent_monitor__404_on_not_enrolled(api_db, client):
+def test_patch_member_monitor__404_on_not_enrolled(api_db, client):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    admin_id = fleet["administrator_agent_id"]
+    admin_id = fleet["administrator_member_id"]
 
     resp = client.patch(
-        f"/api/agents/{admin_id}/monitor",
+        f"/api/members/{admin_id}/monitor",
         headers=_headers(sid),
         json={"interval_seconds": 30},
     )
     assert resp.status_code == 404, resp.text
 
 
-def test_patch_agent_monitor__404_on_unknown_agent(api_db, client):
+def test_patch_member_monitor__404_on_unknown_member(api_db, client):
     sid = _create_fleet()["fleet_id"]
     resp = client.patch(
-        "/api/agents/999999/monitor",
+        "/api/members/999999/monitor",
         headers=_headers(sid),
         json={"interval_seconds": 30},
     )
     assert resp.status_code == 404, resp.text
 
 
-def test_patch_agent_monitor__404_not_500_when_update_raises(
+def test_patch_member_monitor__404_not_500_when_update_raises(
     api_db, tmp_path, monkeypatch
 ):
-    # TOCTOU race: the agent passes the initial enrolled check, then
+    # TOCTOU race: the member passes the initial enrolled check, then
     # update_monitor_config raises a ClickException (e.g. deregistered mid-call).
     # The endpoint must surface 404, not let the ClickException become a 500.
     # The target must be enrolled to pass the pre-check, so use an ordinary
-    # member (a watched agent enrolled @720).
+    # member (a watched member enrolled @720).
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     member_id = _register_member(fleet, name="alice")
 
     def boom(*args, **kwargs):
-        raise click.ClickException("agent not enrolled")
+        raise click.ClickException("member not enrolled")
 
     monkeypatch.setattr(broker, "update_monitor_config", boom)
 
@@ -273,7 +273,7 @@ def test_patch_agent_monitor__404_not_500_when_update_raises(
         create_app(str(tmp_path / "nodist")), raise_server_exceptions=False
     )
     resp = client.patch(
-        f"/api/agents/{member_id}/monitor",
+        f"/api/members/{member_id}/monitor",
         headers=_headers(sid),
         json={"interval_seconds": 30},
     )

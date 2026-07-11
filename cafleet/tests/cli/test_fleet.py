@@ -37,21 +37,21 @@ def _seed_fleet(db_path, fleet_id: int, name: str | None = None) -> None:
         conn.close()
 
 
-def _seed_agent(
-    db_path, agent_id: int, fleet_id: int, *, status: str = "active"
+def _seed_member(
+    db_path, member_id: int, fleet_id: int, *, status: str = "active"
 ) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute(
-            "INSERT INTO agents "
-            "(agent_id, fleet_id, name, description, status, "
-            "registered_at, deregistered_at, agent_card_json) "
+            "INSERT INTO members "
+            "(member_id, fleet_id, name, description, status, "
+            "registered_at, deregistered_at, member_card_json) "
             "VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
             (
-                agent_id,
+                member_id,
                 fleet_id,
-                f"agent-{agent_id}",
-                "test agent",
+                f"member-{member_id}",
+                "test member",
                 status,
                 "2026-01-01T00:00:00+00:00",
                 "{}",
@@ -146,20 +146,20 @@ def test_fleet_create__bootstraps_administrator_recorded_in_db(fresh_db):
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     sid = data["fleet_id"]
-    admin_id = data["administrator_agent_id"]
+    admin_id = data["administrator_member_id"]
     assert isinstance(admin_id, int)
 
     conn = sqlite3.connect(str(db_file))
     try:
         rows = conn.execute(
-            "SELECT agent_id, fleet_id, name, status, agent_card_json "
-            "FROM agents WHERE agent_id = ?",
+            "SELECT member_id, fleet_id, name, status, member_card_json "
+            "FROM members WHERE member_id = ?",
             (admin_id,),
         ).fetchall()
     finally:
         conn.close()
     assert len(rows) == 1
-    _aid, row_sid, row_name, row_status, row_card = rows[0]
+    _mid, row_sid, row_name, row_status, row_card = rows[0]
     assert row_sid == sid
     assert row_name == "Administrator"
     assert row_status == "active"
@@ -168,13 +168,13 @@ def test_fleet_create__bootstraps_administrator_recorded_in_db(fresh_db):
 
 
 @pytest.mark.parametrize("output_mode", ["text", "json"])
-def test_fleet_list__shape_and_agent_count(fresh_db, output_mode):
+def test_fleet_list__shape_and_member_count(fresh_db, output_mode):
     db_file, runner = fresh_db
     sid = 1
     _seed_fleet(db_file, sid, name="test-fleet")
-    _seed_agent(db_file, 2, sid, status="active")
-    _seed_agent(db_file, 3, sid, status="active")
-    _seed_agent(db_file, 4, sid, status="deregistered")
+    _seed_member(db_file, 2, sid, status="active")
+    _seed_member(db_file, 3, sid, status="active")
+    _seed_member(db_file, 4, sid, status="deregistered")
 
     args = ["fleet", "list"]
     if output_mode == "json":
@@ -186,7 +186,7 @@ def test_fleet_list__shape_and_agent_count(fresh_db, output_mode):
         assert len(data) == 1
         assert data[0]["fleet_id"] == sid
         assert data[0]["name"] == "test-fleet"
-        assert data[0]["agent_count"] == 2  # active only
+        assert data[0]["member_count"] == 2  # active only
     else:
         assert str(sid) in result.output
         assert "test-fleet" in result.output
@@ -243,8 +243,8 @@ def test_fleet_delete__soft_deletes_and_marks_row(fresh_db):
     db_file, runner = fresh_db
     sid = 1
     _seed_fleet(db_file, sid)
-    _seed_agent(db_file, 2, sid, status="active")
-    _seed_agent(db_file, 3, sid, status="active")
+    _seed_member(db_file, 2, sid, status="active")
+    _seed_member(db_file, 3, sid, status="active")
 
     result = runner.invoke(cli, ["fleet", "delete", "--fleet-id", str(sid)])
     assert result.exit_code == 0, result.output

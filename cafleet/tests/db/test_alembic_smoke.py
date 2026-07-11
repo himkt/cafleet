@@ -35,9 +35,9 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
 
         expected = {
             "fleets",
-            "agents",
+            "members",
             "tasks",
-            "agent_placements",
+            "member_placements",
             "monitor_config",
             "monitor_runtime",
             "skill_installs",
@@ -78,7 +78,7 @@ def test_single_initial_migration_revision_exists():
 
 
 def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
-    """``fleets``/``agents``/``tasks`` mint ids via AUTOINCREMENT; placements do not."""
+    """``fleets``/``members``/``tasks`` mint ids via AUTOINCREMENT; placements do not."""
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         with engine.connect() as conn:
@@ -92,7 +92,7 @@ def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
             ).fetchall()
             assert seq, "sqlite_sequence must exist for AUTOINCREMENT tables"
 
-            for table in ("fleets", "agents", "tasks"):
+            for table in ("fleets", "members", "tasks"):
                 ddl = conn.execute(
                     text(
                         "SELECT sql FROM sqlite_master WHERE type='table' AND name=:t"
@@ -101,12 +101,12 @@ def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
                 ).scalar()
                 assert "AUTOINCREMENT" in ddl.upper()
 
-            # agent_placements.agent_id is the agents FK reused as a 1:1 PK —
+            # member_placements.member_id is the members FK reused as a 1:1 PK —
             # explicitly NOT AUTOINCREMENT.
             placements_ddl = conn.execute(
                 text(
                     "SELECT sql FROM sqlite_master "
-                    "WHERE type='table' AND name='agent_placements'"
+                    "WHERE type='table' AND name='member_placements'"
                 )
             ).scalar()
             assert "AUTOINCREMENT" not in placements_ddl.upper()
@@ -118,10 +118,10 @@ def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
     ("table", "pk_column"),
     [
         ("fleets", "fleet_id"),
-        ("agents", "agent_id"),
+        ("members", "member_id"),
         ("tasks", "task_id"),
-        ("agent_placements", "agent_id"),
-        ("monitor_config", "agent_id"),
+        ("member_placements", "member_id"),
+        ("monitor_config", "member_id"),
         ("monitor_runtime", "fleet_id"),
     ],
 )
@@ -135,35 +135,32 @@ def test_primary_key_columns_are_integer(alembic_upgraded_db, table, pk_column):
         engine.dispose()
 
 
-def test_agent_placements_table_created_by_migration(alembic_upgraded_db):
+def test_member_placements_table_created_by_migration(alembic_upgraded_db):
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         insp = inspect(engine)
 
         tables = set(insp.get_table_names())
-        assert "agent_placements" in tables
+        assert "member_placements" in tables
 
-        cols = {col["name"]: col for col in insp.get_columns("agent_placements")}
-        expected_cols = {
-            "agent_id",
-            "director_agent_id",
+        # exact column set — member-ness derives from the fleets join, so the
+        # placement table carries no director column
+        cols = {col["name"]: col for col in insp.get_columns("member_placements")}
+        assert set(cols) == {
+            "member_id",
             "backend",
+            "coding_agent",
             "mux_session",
             "mux_window_id",
             "mux_pane_id",
             "created_at",
         }
-        missing = expected_cols - set(cols.keys())
-        assert not missing
 
         # NULL = pending placement before the pane is spawned
         assert cols["mux_pane_id"]["nullable"] is True
 
-        # NULL marks the root Director's own placement (no parent)
-        assert cols["director_agent_id"]["nullable"] is True
-
         for name in (
-            "agent_id",
+            "member_id",
             "backend",
             "mux_session",
             "mux_window_id",
@@ -171,12 +168,10 @@ def test_agent_placements_table_created_by_migration(alembic_upgraded_db):
         ):
             assert cols[name]["nullable"] is False
 
-        # backend backfills existing rows to 'tmux' (matching their provenance)
+        # backend defaults to 'tmux'
         assert "tmux" in str(cols["backend"]["default"])
 
-        indexes = insp.get_indexes("agent_placements")
-        idx_names = {idx["name"] for idx in indexes}
-        assert "idx_placements_director" in idx_names
+        assert insp.get_indexes("member_placements") == []
     finally:
         engine.dispose()
 
@@ -195,15 +190,15 @@ def test_tasks_table_has_origin_task_id_column(alembic_upgraded_db):
         engine.dispose()
 
 
-def test_tasks_to_agent_id_is_nullable_after_migration(alembic_upgraded_db):
-    """``tasks.to_agent_id`` is nullable so broadcast-summary rows persist NULL
+def test_tasks_to_member_id_is_nullable_after_migration(alembic_upgraded_db):
+    """``tasks.to_member_id`` is nullable so broadcast-summary rows persist NULL
     instead of the ``0`` sentinel."""
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         insp = inspect(engine)
         cols = {col["name"]: col for col in insp.get_columns("tasks")}
 
-        assert cols["to_agent_id"]["nullable"] is True
+        assert cols["to_member_id"]["nullable"] is True
     finally:
         engine.dispose()
 
@@ -225,7 +220,7 @@ def test_monitor_config_table_created_by_migration(alembic_upgraded_db):
 
         cols = {col["name"]: col for col in insp.get_columns("monitor_config")}
         expected_cols = {
-            "agent_id",
+            "member_id",
             "interval_seconds",
             "last_ping_at",
             "enabled",
@@ -237,16 +232,16 @@ def test_monitor_config_table_created_by_migration(alembic_upgraded_db):
         assert cols["last_ping_at"]["nullable"] is True
 
         # schedule columns are NOT NULL
-        for name in ("agent_id", "interval_seconds", "enabled"):
+        for name in ("member_id", "interval_seconds", "enabled"):
             assert cols[name]["nullable"] is False
 
         # defaults per §2: interval_seconds 60, enabled 1
         assert _default_int(cols, "interval_seconds") == 60
         assert _default_int(cols, "enabled") == 1
 
-        # agent_id is the agents FK reused as a 1:1 PK
+        # member_id is the members FK reused as a 1:1 PK
         fks = insp.get_foreign_keys("monitor_config")
-        assert any(fk["referred_table"] == "agents" for fk in fks)
+        assert any(fk["referred_table"] == "members" for fk in fks)
     finally:
         engine.dispose()
 
@@ -289,7 +284,7 @@ def test_monitor_runtime_table_created_by_migration(alembic_upgraded_db):
 
 
 def test_monitor_tables_do_not_declare_autoincrement(alembic_upgraded_db):
-    """monitor_config (agent_id) and monitor_runtime (fleet_id) reuse a parent id 1:1 — no AUTOINCREMENT."""
+    """monitor_config (member_id) and monitor_runtime (fleet_id) reuse a parent id 1:1 — no AUTOINCREMENT."""
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         with engine.connect() as conn:

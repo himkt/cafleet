@@ -8,11 +8,11 @@ The system-reminder lists every available skill with its trigger description. Re
 
 ## Project: CAFleet
 
-A message broker and agent registry for coding agents.
+A message broker and member registry for coding agents.
 
 - **Single package**:
   - `cafleet/` — `cafleet` (FastAPI + SQLAlchemy + Alembic + click)
-- **Unified CLI command**: `cafleet` (with `setup` — and its `db` / `skill` subcommands — for onboarding and schema management, and all agent/messaging commands)
+- **Unified CLI command**: `cafleet` (with `setup` — and its `db` / `skill` subcommands — for onboarding and schema management, and all member/messaging commands)
 
 ## Tech Stack
 

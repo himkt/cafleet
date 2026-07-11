@@ -44,18 +44,18 @@ def _fleet_rows(db_path) -> list[tuple]:
     conn = sqlite3.connect(str(db_path))
     try:
         return conn.execute(
-            "SELECT fleet_id, name, created_at, deleted_at, director_agent_id "
+            "SELECT fleet_id, name, created_at, deleted_at, director_member_id "
             "FROM fleets"
         ).fetchall()
     finally:
         conn.close()
 
 
-def _agent_rows(db_path) -> list[tuple]:
+def _member_rows(db_path) -> list[tuple]:
     conn = sqlite3.connect(str(db_path))
     try:
         return conn.execute(
-            "SELECT agent_id, fleet_id, name, status FROM agents"
+            "SELECT member_id, fleet_id, name, status FROM members"
         ).fetchall()
     finally:
         conn.close()
@@ -131,7 +131,7 @@ def test_fleet_create_text_output__full_administrator_line_references_seeded_adm
             break
     assert admin_id is not None
 
-    rows = _agent_rows(db_file)
+    rows = _member_rows(db_file)
     matches = [r for r in rows if r[0] == admin_id]
     assert len(matches) == 1
     assert matches[0][2] == "Administrator"
@@ -147,12 +147,12 @@ def test_fleet_create_json_output__top_level_keys(db_file, mock_tmux_ok):
         "fleet_id",
         "name",
         "created_at",
-        "administrator_agent_id",
+        "administrator_member_id",
         "director",
     ):
         assert key in data
 
-    assert isinstance(data["administrator_agent_id"], int)
+    assert isinstance(data["administrator_member_id"], int)
 
 
 def test_fleet_create_json_output__director_sub_dict(db_file, mock_tmux_ok):
@@ -161,11 +161,11 @@ def test_fleet_create_json_output__director_sub_dict(db_file, mock_tmux_ok):
     assert result.exit_code == 0
     data = json.loads(result.output)
     director = data["director"]
-    for key in ("agent_id", "name", "description", "registered_at", "placement"):
+    for key in ("member_id", "name", "description", "registered_at", "placement"):
         assert key in director
     assert director["name"] == "Director"
     assert director["description"] == "Root Director for this fleet"
-    assert isinstance(director["agent_id"], int)
+    assert isinstance(director["member_id"], int)
 
 
 def test_fleet_create_json_output__placement_sub_dict_matches_spec(
@@ -177,7 +177,6 @@ def test_fleet_create_json_output__placement_sub_dict_matches_spec(
     data = json.loads(result.output)
     placement = data["director"]["placement"]
 
-    assert placement["director_agent_id"] is None
     # Default --coding-agent is 'claude'.
     assert placement["coding_agent"] == "claude"
     assert placement["backend"] == "tmux"
@@ -252,7 +251,7 @@ def test_fleet_create_json_output__administrator_and_director_are_distinct_ids(
     result = runner.invoke(cli, ["fleet", "create", "--name", "boot", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
-    assert data["administrator_agent_id"] != data["director"]["agent_id"]
+    assert data["administrator_member_id"] != data["director"]["member_id"]
 
 
 def test_fleet_create_outside_tmux__fails_with_specific_error_and_exit_1(
@@ -341,4 +340,4 @@ def test_fleet_delete_unknown_and_idempotent__second_delete_is_idempotent_and_re
 
     assert first.exit_code == 0, first.output
     assert second.exit_code == 0, second.output
-    assert "0 agents" in second.output
+    assert "0 members" in second.output

@@ -78,7 +78,7 @@ def render_task(task: dict, *, full: bool = False) -> dict:
         return task
     out: dict = {
         "id": task["task_id"],
-        "from": task["from_agent_id"],
+        "from": task["from_member_id"],
         "ts": task["status_timestamp"],
         "text": task["text"],
     }

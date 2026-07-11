@@ -19,12 +19,12 @@ def fleet_id():
 
 
 @pytest.fixture
-def agent_id():
+def member_id():
     return 200
 
 
 @pytest.fixture
-def other_agent_id():
+def other_member_id():
     return 300
 
 
@@ -40,15 +40,15 @@ def runner():
 
 @pytest.fixture(autouse=True)
 def _stub_verify(monkeypatch):
-    monkeypatch.setattr(broker, "verify_agent_fleet", lambda *_a, **_k: True)
+    monkeypatch.setattr(broker, "verify_member_fleet", lambda *_a, **_k: True)
 
 
 def _task_payload(task_id, *, sender, recipient, text, type_="unicast"):
     return {
         "task_id": task_id,
         "context_id": recipient,
-        "from_agent_id": sender,
-        "to_agent_id": recipient,
+        "from_member_id": sender,
+        "to_member_id": recipient,
         "type": type_,
         "created_at": "2026-05-01T00:00:00+00:00",
         "status_state": "input_required",
@@ -64,8 +64,8 @@ def _broadcast_summary_payload(task_id, *, sender, count):
             "task": {
                 "task_id": task_id,
                 "context_id": sender,
-                "from_agent_id": sender,
-                "to_agent_id": None,
+                "from_member_id": sender,
+                "to_member_id": None,
                 "type": "broadcast_summary",
                 "created_at": "2026-05-01T00:00:00+00:00",
                 "status_state": "completed",
@@ -80,7 +80,7 @@ def _broadcast_summary_payload(task_id, *, sender, count):
 
 
 def _setup_subcommand(
-    monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
+    monkeypatch, subcommand, fleet_id, member_id, other_member_id, task_id
 ):
     """Patch the broker call and return the CLI argv prefix for the chosen subcommand."""
     if subcommand == "poll":
@@ -88,7 +88,7 @@ def _setup_subcommand(
             broker,
             "poll_tasks",
             lambda *_a, **_k: [
-                _task_payload(1, sender=11, recipient=agent_id, text=LONG_BODY)
+                _task_payload(1, sender=11, recipient=member_id, text=LONG_BODY)
             ],
         )
         return (
@@ -97,8 +97,8 @@ def _setup_subcommand(
                 "poll",
                 "--fleet-id",
                 str(fleet_id),
-                "--agent-id",
-                str(agent_id),
+                "--member-id",
+                str(member_id),
             ],
             "list",
         )
@@ -108,7 +108,10 @@ def _setup_subcommand(
             "get_task",
             lambda *_a, **_k: {
                 "task": _task_payload(
-                    task_id, sender=other_agent_id, recipient=agent_id, text=LONG_BODY
+                    task_id,
+                    sender=other_member_id,
+                    recipient=member_id,
+                    text=LONG_BODY,
                 )
             },
         )
@@ -117,8 +120,8 @@ def _setup_subcommand(
             "show",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
-            str(agent_id),
+            "--member-id",
+            str(member_id),
             "--task-id",
             str(task_id),
         ], "envelope"
@@ -128,7 +131,7 @@ def _setup_subcommand(
         "send_message",
         lambda *_a, **_k: {
             "task": _task_payload(
-                task_id, sender=agent_id, recipient=other_agent_id, text=LONG_BODY
+                task_id, sender=member_id, recipient=other_member_id, text=LONG_BODY
             )
         },
     )
@@ -137,10 +140,10 @@ def _setup_subcommand(
         "send",
         "--fleet-id",
         str(fleet_id),
-        "--agent-id",
-        str(agent_id),
-        "--to",
-        str(other_agent_id),
+        "--from-member-id",
+        str(member_id),
+        "--to-member-id",
+        str(other_member_id),
         "--text",
         LONG_BODY,
     ], "envelope"
@@ -149,10 +152,10 @@ def _setup_subcommand(
 @pytest.mark.parametrize("subcommand", ["poll", "show", "send"])
 @pytest.mark.parametrize("full", [False, True])
 def test_truncation__poll_show_send_text_output(
-    runner, fleet_id, agent_id, other_agent_id, task_id, monkeypatch, subcommand, full
+    runner, fleet_id, member_id, other_member_id, task_id, monkeypatch, subcommand, full
 ):
     args, _shape = _setup_subcommand(
-        monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
+        monkeypatch, subcommand, fleet_id, member_id, other_member_id, task_id
     )
     full_args = args + (["--full"] if full else [])
     result = runner.invoke(cli, full_args)
@@ -167,10 +170,10 @@ def test_truncation__poll_show_send_text_output(
 @pytest.mark.parametrize("subcommand", ["poll", "show", "send"])
 @pytest.mark.parametrize("full", [False, True])
 def test_truncation__poll_show_send_json_output(
-    runner, fleet_id, agent_id, other_agent_id, task_id, monkeypatch, subcommand, full
+    runner, fleet_id, member_id, other_member_id, task_id, monkeypatch, subcommand, full
 ):
     args, shape = _setup_subcommand(
-        monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
+        monkeypatch, subcommand, fleet_id, member_id, other_member_id, task_id
     )
     full_args = args + (["--full"] if full else [])
     result = runner.invoke(cli, ["--json", *full_args])
@@ -183,10 +186,10 @@ def test_truncation__poll_show_send_json_output(
 
 @pytest.mark.parametrize("subcommand", ["poll", "show", "send"])
 def test_truncation__non_text_fields_byte_identical_between_default_and_full(
-    runner, fleet_id, agent_id, other_agent_id, task_id, monkeypatch, subcommand
+    runner, fleet_id, member_id, other_member_id, task_id, monkeypatch, subcommand
 ):
     args, shape = _setup_subcommand(
-        monkeypatch, subcommand, fleet_id, agent_id, other_agent_id, task_id
+        monkeypatch, subcommand, fleet_id, member_id, other_member_id, task_id
     )
     default_res = runner.invoke(cli, ["--json", *args])
     full_res = runner.invoke(cli, ["--json", *args, "--full"])
@@ -199,27 +202,29 @@ def test_truncation__non_text_fields_byte_identical_between_default_and_full(
         default_task = json.loads(default_res.output)["task"]
         full_task = json.loads(full_res.output)["task"]
     assert default_task["id"] == full_task["task_id"]
-    assert default_task["from"] == full_task["from_agent_id"]
+    assert default_task["from"] == full_task["from_member_id"]
     assert default_task["ts"] == full_task["status_timestamp"]
 
 
 @pytest.mark.parametrize("output_mode", ["text", "json"])
 @pytest.mark.parametrize("full", [False, True])
 def test_truncation__broadcast_summary_emitted_verbatim(
-    runner, fleet_id, agent_id, task_id, monkeypatch, output_mode, full
+    runner, fleet_id, member_id, task_id, monkeypatch, output_mode, full
 ):
     monkeypatch.setattr(
         broker,
         "broadcast_message",
-        lambda *_a, **_k: _broadcast_summary_payload(task_id, sender=agent_id, count=3),
+        lambda *_a, **_k: _broadcast_summary_payload(
+            task_id, sender=member_id, count=3
+        ),
     )
     args = [
         "message",
         "broadcast",
         "--fleet-id",
         str(fleet_id),
-        "--agent-id",
-        str(agent_id),
+        "--from-member-id",
+        str(member_id),
         "--text",
         LONG_BODY,
     ]
@@ -252,7 +257,7 @@ def test_truncation__broadcast_summary_emitted_verbatim(
 
 
 def test_truncation__poll_list_of_three_tasks_each_truncated(
-    runner, fleet_id, agent_id, monkeypatch
+    runner, fleet_id, member_id, monkeypatch
 ):
     bodies = [LONG_BODY + "X", LONG_BODY + "Y", LONG_BODY + "Z"]
     monkeypatch.setattr(
@@ -260,7 +265,7 @@ def test_truncation__poll_list_of_three_tasks_each_truncated(
         "poll_tasks",
         lambda *_a, **_k: [
             _task_payload(
-                f"t-{i}", sender=f"from-{i}", recipient=agent_id, text=bodies[i]
+                f"t-{i}", sender=f"from-{i}", recipient=member_id, text=bodies[i]
             )
             for i in range(3)
         ],
@@ -273,8 +278,8 @@ def test_truncation__poll_list_of_three_tasks_each_truncated(
             "poll",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
-            str(agent_id),
+            "--member-id",
+            str(member_id),
         ],
     )
     assert result.exit_code == 0, result.output

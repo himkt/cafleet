@@ -71,7 +71,7 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
     Spawn one member per backend:
 
     ```bash
-    cafleet member create --fleet-id 1 --agent-id 2 \
+    cafleet member create --fleet-id 1 \
       --name "alice" --description "claude member" \
       --coding-agent claude --text "You are alice. Wait for instructions."
     ```
@@ -81,7 +81,7 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
     ```
 
     ```bash
-    cafleet member create --fleet-id 1 --agent-id 2 \
+    cafleet member create --fleet-id 1 \
       --name "bob" --description "codex member" \
       --coding-agent codex --text "You are bob. Wait for instructions."
     ```
@@ -91,7 +91,7 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
     ```
 
     ```bash
-    cafleet member create --fleet-id 1 --agent-id 2 \
+    cafleet member create --fleet-id 1 \
       --name "carol" --description "opencode member" \
       --coding-agent opencode --text "You are carol. Wait for instructions."
     ```
@@ -109,22 +109,22 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
     ```
 
     ```
-    5 agents:
-      agent_id  name           status  kind           backend   session  window_id  pane_id  created_at
-      --------  -------------  ------  -------------  --------  -------  ---------  -------  --------------------
-      2         Director       active  director       claude    main     @3         %0       2026-04-15T10:00:00+00:00
-      3         Administrator  active  administrator  -         -        -          -        -
-      4         alice          active  member         claude    main     @3         %7       2026-04-15T10:01:00+00:00
-      5         bob            active  member         codex     main     @3         %8       2026-04-15T10:02:00+00:00
-      6         carol          active  member         opencode  main     @3         %9       2026-04-15T10:03:00+00:00
+    5 members:
+      member_id  name           status  kind           backend   session  window_id  pane_id  created_at
+      ---------  -------------  ------  -------------  --------  -------  ---------  -------  --------------------
+      2          Director       active  director       claude    main     @3         %0       2026-04-15T10:00:00+00:00
+      3          Administrator  active  administrator  -         -        -          -        -
+      4          alice          active  member         claude    main     @3         %7       2026-04-15T10:01:00+00:00
+      5          bob            active  member         codex     main     @3         %8       2026-04-15T10:02:00+00:00
+      6          carol          active  member         opencode  main     @3         %9       2026-04-15T10:03:00+00:00
     ```
 
-    Message each member — repeat with `--to 5` and `--to 6`; the envelope and
-    the 2-line inline preview are identical for every backend
+    Message each member — repeat with `--to-member-id 5` and `--to-member-id 6`;
+    the envelope and the 2-line inline preview are identical for every backend
     ([Push notifications](../spec/multiplexer-backends.md#push-notifications)):
 
     ```bash
-    cafleet message send --fleet-id 1 --agent-id 2 --to 4 --text "alice: report status"
+    cafleet message send --fleet-id 1 --from-member-id 2 --to-member-id 4 --text "alice: report status"
     ```
 
     ```
@@ -142,8 +142,8 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
 
     ```
     Member deleted.
-      agent_id:  4
-      pane_id:   %7 (closed)
+      member_id:  4
+      pane_id:    %7 (closed)
     ```
 
     ```bash
@@ -151,7 +151,7 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
     ```
 
     ```
-    Deleted fleet 1. Deregistered 2 agents.
+    Deleted fleet 1. Deregistered 2 members.
     ```
 
 Every `member create` / `member delete` flag and exit code is documented in

@@ -78,12 +78,12 @@ def fleet_list(ctx: click.Context, as_json: bool) -> None:
             return
         click.echo(
             f"{'FLEET_ID':<40} {'DIRECTOR':<40} {'NAME':<20} "
-            f"{'AGENTS':<8} {'CREATED_AT'}"
+            f"{'MEMBERS':<8} {'CREATED_AT'}"
         )
         for r in rows:
             click.echo(
-                f"{r['fleet_id']:<40} {r['director_agent_id'] or '':<40} "
-                f"{r['name'] or '':<20} {r['agent_count']:<8} {r['created_at']}"
+                f"{r['fleet_id']:<40} {r['director_member_id'] or '':<40} "
+                f"{r['name'] or '':<20} {r['member_count']:<8} {r['created_at']}"
             )
 
 
@@ -115,11 +115,11 @@ def fleet_show(ctx: click.Context, as_json: bool) -> None:
 @fleet_id_option
 @click.pass_context
 def fleet_delete(ctx: click.Context) -> None:
-    """Soft-delete a fleet and deregister every active agent (idempotent)."""
+    """Soft-delete a fleet and deregister every active member (idempotent)."""
     # No monitor-stop step: a running monitor loop self-terminates on its next
     # tick once the fleet is soft-deleted (monitor_tick → STOP), and
     # broker.delete_fleet removes the monitor_config + monitor_runtime rows.
     fleet_id = ctx.obj["fleet_id"]
     result = broker.delete_fleet(fleet_id)
     n = result["deregistered_count"]
-    click.echo(f"Deleted fleet {fleet_id}. Deregistered {n} agents.")
+    click.echo(f"Deleted fleet {fleet_id}. Deregistered {n} members.")

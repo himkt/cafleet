@@ -17,19 +17,19 @@ def bootstrapped_member(_mock_tmux_for_fleet_create):
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
     sid = data["fleet_id"]
-    director_id = data["director"]["agent_id"]
+    director_id = data["director"]["member_id"]
 
     pane_id = "%17"
-    agent = broker.register_agent(
+    member = broker.register_member(
         fleet_id=sid,
         name="capture-target",
         description="member to capture from",
-        placement=_member_placement(director_id, pane_id),
+        placement=_member_placement(pane_id),
     )
     # Stringify ids here: this module feeds them only into CLI argv (which must
-    # be strings under ``--fleet-id``/``--agent-id`` ``type=int``) and never
+    # be strings under ``--fleet-id``/``--member-id`` ``type=int``) and never
     # compares them as integers.
-    return str(sid), str(director_id), str(agent["agent_id"]), pane_id, runner
+    return str(sid), str(director_id), str(member["member_id"]), pane_id, runner
 
 
 def _record_run(monkeypatch, *, returns: str = "") -> list[list[str]]:

@@ -34,7 +34,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Placeholder convention
 
-Angle-bracket tokens are placeholders, **not** shell variables — substitute the literal integer ids (the placeholder / `permissions.allow` rule is canonical in the `cafleet` skill § Placeholder convention). Your ids: `<fleet-id>` (from `cafleet fleet create`), `<director-agent-id>` (your own), `<member-id>` (from `cafleet member list`), `<command>` (only when dispatching via `cafleet member exec`).
+Angle-bracket tokens are placeholders, **not** shell variables — substitute the literal integer ids (the placeholder / `permissions.allow` rule is canonical in the `cafleet` skill § Placeholder convention). Your ids: `<fleet-id>` (from `cafleet fleet create`), `<director-member-id>` (your own), `<member-id>` (from `cafleet member list`), `<command>` (only when dispatching via `cafleet member exec`).
 
 ## Director-only primitives
 

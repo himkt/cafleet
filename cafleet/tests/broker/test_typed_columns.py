@@ -14,16 +14,16 @@ from cafleet.broker import _shared, messaging
 from cafleet.db.models import Base, Task
 from tests.broker._helpers import (
     _create_fleet,
-    _register_agent,
-    _setup_three_agents,
-    _setup_two_agents,
+    _register_member,
+    _setup_three_members,
+    _setup_two_members,
 )
 
 REQUIRED_TASK_KEYS = {
     "task_id",
     "context_id",
-    "from_agent_id",
-    "to_agent_id",
+    "from_member_id",
+    "to_member_id",
     "type",
     "created_at",
     "status_state",
@@ -42,14 +42,14 @@ def _assert_flat_typed_shape(d: dict, *, expect_type: str | None = None) -> None
 
 
 def test_send_message__unicast_returns_flat_typed_envelope():
-    sid, sender, recipient = _setup_two_agents()
+    sid, sender, recipient = _setup_two_members()
     result = broker.send_message(sid, sender, recipient, "Did the API change?")
     task = result["task"]
 
     assert set(task.keys()) == REQUIRED_TASK_KEYS
     assert task["type"] == "unicast"
-    assert task["from_agent_id"] == sender
-    assert task["to_agent_id"] == recipient
+    assert task["from_member_id"] == sender
+    assert task["to_member_id"] == recipient
     assert task["context_id"] == recipient
     assert task["text"] == "Did the API change?"
     assert task["status_state"] == "input_required"
@@ -76,15 +76,15 @@ def test_send_message__origin_task_id_default_and_propagate(origin_in, origin_ou
 
 
 def test_broadcast_message__summary_envelope_shape():
-    sid, sender, _b, _c = _setup_three_agents()
+    sid, sender, _b, _c = _setup_three_members()
     [result] = broker.broadcast_message(sid, sender, "Attention all")
     summary = result["task"]
 
     assert set(summary.keys()) == REQUIRED_TASK_KEYS
     assert summary["type"] == "broadcast_summary"
-    assert summary["from_agent_id"] == sender
+    assert summary["from_member_id"] == sender
     assert summary["context_id"] == sender
-    assert summary["to_agent_id"] is None
+    assert summary["to_member_id"] is None
     assert summary["status_state"] == "completed"
     assert "Broadcast sent" in summary["text"]
     assert isinstance(result["recipients"], int)
@@ -92,7 +92,7 @@ def test_broadcast_message__summary_envelope_shape():
 
 
 def test_broadcast_message__delivery_task_shape_and_origin_link():
-    sid, sender, b_id, _c = _setup_three_agents()
+    sid, sender, b_id, _c = _setup_three_members()
     [result] = broker.broadcast_message(sid, sender, "delivery body")
     summary_id = result["task"]["task_id"]
 
@@ -103,7 +103,7 @@ def test_broadcast_message__delivery_task_shape_and_origin_link():
 
 
 def test_poll_tasks__returns_flat_typed_task_dicts():
-    sid, sender, recipient = _setup_two_agents()
+    sid, sender, recipient = _setup_two_members()
     broker.send_message(sid, sender, recipient, "first")
     broker.send_message(sid, sender, recipient, "second")
 
@@ -113,7 +113,7 @@ def test_poll_tasks__returns_flat_typed_task_dicts():
         _assert_flat_typed_shape(row, expect_type="unicast")
     assert {r["text"] for r in rows} == {"first", "second"}
 
-    sid2, sender2, _b, _c = _setup_three_agents()
+    sid2, sender2, _b, _c = _setup_three_members()
     broker.broadcast_message(sid2, sender2, "broadcast body")
     sender_tasks = broker.poll_tasks(sender2)
     assert "broadcast_summary" not in [t["type"] for t in sender_tasks]
@@ -124,7 +124,7 @@ def test_poll_tasks__returns_flat_typed_task_dicts():
     [("ack", "completed"), ("cancel", "canceled")],
 )
 def test_ack_and_cancel__transition_and_round_trip(action, expected_state):
-    sid, sender, recipient = _setup_two_agents()
+    sid, sender, recipient = _setup_two_members()
     sent = broker.send_message(sid, sender, recipient, f"round trip {action}")
     tid = sent["task"]["task_id"]
 
@@ -152,7 +152,7 @@ def test_ack_and_cancel__transition_and_round_trip(action, expected_state):
 
 @pytest.mark.parametrize("api", ["list_inbox", "list_sent", "list_timeline"])
 def test_list_apis__no_metadata_wrapping_and_filter_broadcast_summary(api):
-    sid, sender, _b, _c = _setup_three_agents()
+    sid, sender, _b, _c = _setup_three_members()
     broker.send_message(sid, sender, _b, "direct body")
     broker.broadcast_message(sid, sender, "broadcast body")
 
@@ -192,7 +192,7 @@ def test_task_table_and_model__text_column_present_task_json_absent():
     assert hasattr(Task, "text")
     assert not hasattr(Task, "task_json")
 
-    sid, sender, recipient = _setup_two_agents()
+    sid, sender, recipient = _setup_two_members()
     sent = broker.send_message(sid, sender, recipient, "via send_message body")
     sm = _shared.get_sync_sessionmaker()
     with sm() as s:
@@ -206,12 +206,12 @@ def test_task_table_and_model__text_column_present_task_json_absent():
     # Cross-fleet boundary check (subsumes test_get_task__rejects_task_not_in_fleet
     # & test_read_task__returns_none_for_missing_task)
     other = _create_fleet()
-    other_sender = _register_agent(other["fleet_id"], name="outsider-sender")
-    other_recipient = _register_agent(other["fleet_id"], name="outsider-recipient")
+    other_sender = _register_member(other["fleet_id"], name="outsider-sender")
+    other_recipient = _register_member(other["fleet_id"], name="outsider-recipient")
     foreign_sent = broker.send_message(
         other["fleet_id"],
-        other_sender["agent_id"],
-        other_recipient["agent_id"],
+        other_sender["member_id"],
+        other_recipient["member_id"],
         "elsewhere",
     )
     with pytest.raises(ValueError, match="not found"):

@@ -72,14 +72,14 @@ def test_fleet_id_flag_flows_into_broker__send_passes_fleet_id_to_broker(
     def fake_send_message(*args, **kwargs):
         captured["args"] = args
         captured["kwargs"] = kwargs
-        sender = args[1] if len(args) > 1 else kwargs.get("agent_id")
-        recipient = args[2] if len(args) > 2 else kwargs.get("to")
+        sender = args[1] if len(args) > 1 else kwargs.get("from_member_id")
+        recipient = args[2] if len(args) > 2 else kwargs.get("to_member_id")
         return {
             "task": {
                 "task_id": 5000,
                 "context_id": recipient,
-                "from_agent_id": sender,
-                "to_agent_id": recipient,
+                "from_member_id": sender,
+                "to_member_id": recipient,
                 "type": "unicast",
                 "created_at": "2026-01-01T00:00:00+00:00",
                 "status_state": "input_required",
@@ -90,11 +90,11 @@ def test_fleet_id_flag_flows_into_broker__send_passes_fleet_id_to_broker(
         }
 
     monkeypatch.setattr(broker, "send_message", fake_send_message)
-    monkeypatch.setattr(broker, "verify_agent_fleet", lambda *a, **k: True)
+    monkeypatch.setattr(broker, "verify_member_fleet", lambda *a, **k: True)
 
     sid = 100
-    aid = 200
-    bid = 300
+    from_id = 200
+    to_id = 300
     result = db_runner.invoke(
         cli,
         [
@@ -102,10 +102,10 @@ def test_fleet_id_flag_flows_into_broker__send_passes_fleet_id_to_broker(
             "send",
             "--fleet-id",
             str(sid),
-            "--agent-id",
-            str(aid),
-            "--to",
-            str(bid),
+            "--from-member-id",
+            str(from_id),
+            "--to-member-id",
+            str(to_id),
             "--text",
             "hi",
         ],
@@ -161,24 +161,24 @@ def test_fleet_id_rejected_where_not_required__fleet_create_rejects_in_both_posi
 
 
 def _create_fleet_via_cli(runner: CliRunner) -> tuple[int, int]:
-    """Run ``fleet create --json`` and return (fleet_id, administrator_agent_id)."""
+    """Run ``fleet create --json`` and return (fleet_id, administrator_member_id)."""
     result = runner.invoke(cli, ["fleet", "create", "--name", "flag-test", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
-    return data["fleet_id"], data["administrator_agent_id"]
+    return data["fleet_id"], data["administrator_member_id"]
 
 
-def _fetch_agent_status(db_file, agent_id: str) -> tuple[str, str | None]:
-    """Return (status, deregistered_at) for a given agent_id via raw SQLite."""
+def _fetch_member_status(db_file, member_id: str) -> tuple[str, str | None]:
+    """Return (status, deregistered_at) for a given member_id via raw SQLite."""
     conn = sqlite3.connect(str(db_file))
     try:
         row = conn.execute(
-            "SELECT status, deregistered_at FROM agents WHERE agent_id = ?",
-            (agent_id,),
+            "SELECT status, deregistered_at FROM members WHERE member_id = ?",
+            (member_id,),
         ).fetchone()
     finally:
         conn.close()
-    assert row is not None, f"agent {agent_id} not found"
+    assert row is not None, f"member {member_id} not found"
     return row[0], row[1]
 
 
@@ -225,11 +225,11 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_message_is_use
 
 
 @pytest.mark.usefixtures("_mock_tmux_for_fleet_create")
-def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_nonzero(
+def test_deregister_administrator_cli_guard__cli_deregister_unknown_member_exits_nonzero(
     db_runner,
 ):
     fleet_id, _admin_id = _create_fleet_via_cli(db_runner)
-    bogus_agent_id = 999999
+    bogus_member_id = 999999
 
     result = db_runner.invoke(
         cli,
@@ -239,11 +239,11 @@ def test_deregister_administrator_cli_guard__cli_deregister_unknown_agent_exits_
             "--fleet-id",
             str(fleet_id),
             "--member-id",
-            str(bogus_agent_id),
+            str(bogus_member_id),
         ],
     )
     assert result.exit_code == 1, result.output
-    assert f"Agent {bogus_agent_id} not found" in (result.output or "")
+    assert f"Member {bogus_member_id} not found" in (result.output or "")
 
 
 @pytest.mark.usefixtures("_mock_tmux_for_fleet_create")
@@ -264,15 +264,14 @@ def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_act
             str(admin_id),
         ],
     )
-    status, deregistered_at = _fetch_agent_status(db_file, admin_id)
+    status, deregistered_at = _fetch_member_status(db_file, admin_id)
     assert status == "active"
     assert deregistered_at is None
 
 
-def test_old_surface_removed__session_flag_and_group_no_longer_parse(db_runner):
-    """Regression guard: the pre-rename ``--session-id`` flag and ``session``
-    command group are gone — Click rejects both (testing the absence, not a
-    deprecation shim)."""
+def test_old_surface_removed__session_flag_and_group_rejected(db_runner):
+    """Absence guard: no ``--session-id`` flag and no ``session`` command group
+    exist — Click rejects both."""
     flag = db_runner.invoke(cli, ["--session-id", "100", "fleet", "list"])
     assert flag.exit_code == 2
     assert "no such option" in (flag.output or "").lower()
@@ -282,10 +281,10 @@ def test_old_surface_removed__session_flag_and_group_no_longer_parse(db_runner):
     assert "no such command" in (group.output or "").lower()
 
 
-def test_old_surface_removed__global_fleet_id_no_longer_parses(db_runner):
-    """Regression guard: ``--fleet-id`` is no longer a global option, so the old
-    surface (flag before the subcommand) is rejected by Click with its standard
-    'no such option' error (exit 2)."""
+def test_old_surface_removed__global_fleet_id_rejected(db_runner):
+    """Absence guard: ``--fleet-id`` is a per-subcommand option only — Click
+    rejects the flag in the global position with its standard 'no such option'
+    error (exit 2)."""
     result = db_runner.invoke(cli, ["--fleet-id", "100", "member", "list"])
     assert result.exit_code == 2, result.output
     assert "no such option" in (result.output or "").lower()

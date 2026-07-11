@@ -1,5 +1,5 @@
 import type {
-  AgentsResponse,
+  MembersResponse,
   TimelineResponse,
   FleetListItem,
   MonitorConfig,
@@ -42,32 +42,32 @@ export async function listFleets(): Promise<FleetListItem[]> {
   return request<FleetListItem[]>("/fleets");
 }
 
-export async function getAgents(): Promise<AgentsResponse> {
-  return request<AgentsResponse>("/agents");
+export async function getMembers(): Promise<MembersResponse> {
+  return request<MembersResponse>("/members");
 }
 
 export async function fetchTimeline(): Promise<TimelineResponse> {
   return request<TimelineResponse>("/timeline");
 }
 
-export async function fetchInbox(agentId: number): Promise<TimelineResponse> {
-  return request<TimelineResponse>(`/agents/${agentId}/inbox`);
+export async function fetchInbox(memberId: number): Promise<TimelineResponse> {
+  return request<TimelineResponse>(`/members/${memberId}/inbox`);
 }
 
-export async function fetchSent(agentId: number): Promise<TimelineResponse> {
-  return request<TimelineResponse>(`/agents/${agentId}/sent`);
+export async function fetchSent(memberId: number): Promise<TimelineResponse> {
+  return request<TimelineResponse>(`/members/${memberId}/sent`);
 }
 
 export async function sendMessage(
-  fromAgentId: number,
-  toAgentId: number | "*",
+  fromMemberId: number,
+  toMemberId: number | "*",
   text: string,
 ): Promise<void> {
   await request<unknown>("/messages/send", {
     method: "POST",
     body: JSON.stringify({
-      from_agent_id: fromAgentId,
-      to_agent_id: toAgentId,
+      from_member_id: fromMemberId,
+      to_member_id: toMemberId,
       text,
     }),
   });
@@ -77,11 +77,11 @@ export async function getMonitor(): Promise<MonitorRuntime> {
   return request<MonitorRuntime>("/monitor");
 }
 
-export async function updateAgentMonitor(
-  agentId: number,
+export async function updateMemberMonitor(
+  memberId: number,
   patch: { interval_seconds?: number; enabled?: boolean },
 ): Promise<MonitorConfig> {
-  return request<MonitorConfig>(`/agents/${agentId}/monitor`, {
+  return request<MonitorConfig>(`/members/${memberId}/monitor`, {
     method: "PATCH",
     body: JSON.stringify(patch),
   });

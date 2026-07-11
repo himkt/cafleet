@@ -1,4 +1,4 @@
-"""``cafleet member`` — multiplexer-backed member agent commands (Director only)."""
+"""``cafleet member`` — multiplexer-backed member commands (Director only)."""
 
 import contextlib
 import os
@@ -9,13 +9,15 @@ import click
 from cafleet import broker, output
 from cafleet.broker import _shared
 from cafleet.cli._helpers import (
-    director_member_options,
     ensure_multiplexer_or_die,
     ensure_skills_current,
     fleet_id_option,
+    from_member_id_option,
     full_flag,
+    member_id_option,
     quiet_flag,
     text_body_options,
+    to_member_id_option,
 )
 from cafleet.cli._text_input import read_text_input, substitute_spawn_placeholders
 from cafleet.coding_agent import CODING_AGENTS
@@ -24,7 +26,7 @@ from cafleet.multiplexer import MultiplexerError, resolve_multiplexer
 
 @click.group()
 def member():
-    """Manage multiplexer-backed member agents (Director only)."""
+    """Manage multiplexer-backed members (Director only)."""
     ensure_skills_current()
 
 
@@ -60,61 +62,85 @@ def _load_authorized_member(
     *,
     allow_missing_placement: bool = False,
 ) -> tuple[dict, dict | None]:
-    """Resolve a fleet-scoped member's agent + placement.
+    """Resolve a fleet-scoped member's registry row + placement.
 
-    The only boundary is fleet isolation: ``broker.get_agent(member_id,
-    fleet_id)`` returns ``None`` for a ``member_id`` that is not an active agent
-    of ``fleet_id``, so a cross-fleet / unknown / inactive target raises "not
-    found". There is no caller-auth check — any active in-fleet agent is a
-    valid target. An in-fleet agent without a placement row raises the
+    The only boundary is fleet isolation: ``broker.get_member(member_id,
+    fleet_id)`` returns ``None`` for a ``member_id`` that is not an active
+    member of ``fleet_id``, so a cross-fleet / unknown / inactive target raises
+    "not found". There is no caller-auth check — any active in-fleet member is
+    a valid target. An in-fleet member without a placement row raises the
     placement-missing error, unless the caller opts in via
     ``allow_missing_placement`` (``member show`` and ``member delete`` do —
     both resolve a placementless target successfully and receive
     ``placement=None``). Pane-id presence is NOT checked here — delete
     tolerates a pending placement while the pane verbs reject it.
 
-    Callers MUST use ``target["agent_id"]``, since reassigning the
+    Callers MUST use ``target["member_id"]``, since reassigning the
     ``member_id`` local param does not propagate to the caller.
     """
     try:
-        target = broker.get_agent(member_id, fleet_id)
+        target = broker.get_member(member_id, fleet_id)
     except Exception as exc:
         raise click.ClickException(f"failed to fetch member: {exc}") from exc
     if target is None:
-        raise click.ClickException(f"Agent {member_id} not found")
+        raise click.ClickException(f"Member {member_id} not found")
     placement = target["placement"]
     if placement is None and not allow_missing_placement:
         raise click.ClickException(
-            f"agent {member_id} has no placement row; it was not "
+            f"member {member_id} has no placement row; it was not "
             f"spawned via `cafleet member create`."
         )
     return target, placement
 
 
-def _deregister_with_warning(new_agent_id: int, *, fleet_id: int) -> None:
+def _deregister_with_warning(new_member_id: int, *, fleet_id: int) -> None:
     """Best-effort deregister; emit warning to stderr if it fails."""
     try:
-        broker.deregister_agent(new_agent_id)
+        broker.deregister_member(new_member_id)
     except Exception as drop_exc:
         click.echo(
-            f"WARNING: rollback deregister failed — agent {new_agent_id} is "
+            f"WARNING: rollback deregister failed — member {new_member_id} is "
             f"orphaned in the registry. Run `cafleet member delete "
-            f"--fleet-id {fleet_id} --member-id {new_agent_id}` manually to clean up. "
-            f"Cause: {drop_exc}",
+            f"--fleet-id {fleet_id} --member-id {new_member_id}` manually to "
+            f"clean up. Cause: {drop_exc}",
             err=True,
         )
 
 
-def _rollback_register(new_agent_id: int, *, fleet_id: int, reason: str) -> NoReturn:
-    """Best-effort deregister of a just-created agent, then raise ClickException."""
-    _deregister_with_warning(new_agent_id, fleet_id=fleet_id)
-    raise click.ClickException(f"{reason}. Rolled back registration of {new_agent_id}.")
+def _rollback_register(new_member_id: int, *, fleet_id: int, reason: str) -> NoReturn:
+    """Best-effort deregister of a just-created member, then raise ClickException."""
+    _deregister_with_warning(new_member_id, fleet_id=fleet_id)
+    raise click.ClickException(
+        f"{reason}. Rolled back registration of {new_member_id}."
+    )
+
+
+def _resolve_director_or_die(fleet_id: int) -> int:
+    """Auto-resolve the fleet's root Director id, first thing in ``member create``.
+
+    A fleet has exactly one root Director, back-filled by ``create_fleet``, so
+    no override flag exists. The error polarity follows the §185 table: an
+    unknown fleet is a usage error (exit 2); a soft-deleted fleet or a
+    mid-bootstrap-corrupted fleet row is an application error (exit 1).
+    """
+    fleet = broker.get_fleet(fleet_id)
+    if fleet is None:
+        raise click.UsageError(f"Fleet '{fleet_id}' not found.")
+    if fleet["deleted_at"] is not None:
+        raise click.ClickException(f"fleet {fleet_id} is deleted")
+    director_member_id = fleet["director_member_id"]
+    if director_member_id is None:
+        raise click.ClickException(
+            f"fleet {fleet_id} has no root Director recorded; "
+            f"re-create the fleet with 'cafleet fleet create'."
+        )
+    return director_member_id
 
 
 def _resolve_coding_agent(
     coding_agent: str | None,
     role: str,
-    director_agent_id: int,
+    director_member_id: int,
     fleet_id: int,
 ) -> str:
     """Resolve the backend for a new member.
@@ -129,24 +155,24 @@ def _resolve_coding_agent(
     if role != "monitor":
         return "claude"
     try:
-        director = broker.get_agent(director_agent_id, fleet_id)
+        director = broker.get_member(director_member_id, fleet_id)
     except Exception as exc:  # broker/DB failure — surface, do not mask
         raise click.ClickException(
             f"cannot resolve the monitor's coding agent: failed to fetch "
-            f"Director {director_agent_id}: {exc}. "
+            f"Director {director_member_id}: {exc}. "
             f"Re-run with an explicit --coding-agent."
         ) from exc
     if director is None:
         raise click.ClickException(
             f"cannot resolve the monitor's coding agent: Director "
-            f"{director_agent_id} not found in fleet {fleet_id}. "
+            f"{director_member_id} not found in fleet {fleet_id}. "
             f"Re-run with an explicit --coding-agent."
         )
     placement = director["placement"]
     if placement is None:
         raise click.ClickException(
             f"cannot resolve the monitor's coding agent: Director "
-            f"{director_agent_id} has no placement row recording its backend. "
+            f"{director_member_id} has no placement row recording its backend. "
             f"Re-run with an explicit --coding-agent."
         )
     return placement["coding_agent"]
@@ -154,7 +180,6 @@ def _resolve_coding_agent(
 
 @member.command("create")
 @fleet_id_option
-@click.option("--agent-id", type=int, required=True, help="Director's agent ID")
 @click.option("--name", required=True, help="Member name")
 @click.option("--description", required=True, help="Member description")
 @click.option(
@@ -185,7 +210,6 @@ def _resolve_coding_agent(
 @click.pass_context
 def member_create(
     ctx,
-    agent_id,
     name,
     description,
     coding_agent,
@@ -195,10 +219,16 @@ def member_create(
     text_file,
     full,
 ):
-    """Register a new member and spawn its pane."""
+    """Register a new member and spawn its pane (Director auto-resolved)."""
     fleet_id = ctx.obj["fleet_id"]
 
-    coding_agent = _resolve_coding_agent(coding_agent, role, agent_id, fleet_id)
+    # Director auto-discovery runs first thing: the resolved id feeds the
+    # monitor's backend inheritance and the spawn-prompt substitution.
+    director_member_id = _resolve_director_or_die(fleet_id)
+
+    coding_agent = _resolve_coding_agent(
+        coding_agent, role, director_member_id, fleet_id
+    )
 
     agent = CODING_AGENTS[coding_agent]
 
@@ -209,8 +239,8 @@ def member_create(
 
     # Resolve the body up front (xor / required / empty / file surfaces raise
     # before any registration or multiplexer side effect). Placeholder
-    # substitution is deferred until after register_agent, since {agent_id} needs
-    # the new id.
+    # substitution is deferred until after register_member, since {member_id}
+    # needs the new id.
     body = read_text_input(text, text_file)
 
     try:
@@ -222,12 +252,11 @@ def member_create(
         raise click.ClickException(str(exc)) from exc
 
     try:
-        result = broker.register_agent(
+        result = broker.register_member(
             fleet_id,
             name,
             description,
             placement={
-                "director_agent_id": agent_id,
                 "backend": mux.name,
                 "mux_session": director_ctx.session,
                 "mux_window_id": director_ctx.window_id,
@@ -237,19 +266,20 @@ def member_create(
             kind=_shared.MONITORING_MEMBER_KIND if role == "monitor" else None,
         )
     except click.ClickException:
-        # The one-monitoring-member-per-fleet guard raises ClickException with a
-        # user-facing message; surface it verbatim rather than wrapping it.
+        # The one-monitoring-member-per-fleet and root-Director invariant guards
+        # raise ClickException with a user-facing message; surface it verbatim
+        # rather than wrapping it.
         raise
     except Exception as exc:
         raise click.ClickException(f"register failed: {exc}") from exc
-    new_agent_id = result["agent_id"]
+    new_member_id = result["member_id"]
 
     try:
         prompt = substitute_spawn_placeholders(
             body,
             fleet_id=fleet_id,
-            agent_id=new_agent_id,
-            director_agent_id=agent_id,
+            member_id=new_member_id,
+            director_member_id=director_member_id,
             coding_agent=coding_agent,
         )
     except (click.UsageError, click.ClickException):
@@ -257,7 +287,7 @@ def member_create(
         # unknown-placeholder UsageError) reaches the operator. Wrapping via
         # _rollback_register would prepend "prompt resolution failed:" and
         # downgrade UsageError exit 2 → ClickException exit 1.
-        _deregister_with_warning(new_agent_id, fleet_id=fleet_id)
+        _deregister_with_warning(new_member_id, fleet_id=fleet_id)
         raise
 
     spawn_command = agent.build_spawn_argv(prompt, display_name=name, model=model)
@@ -272,20 +302,20 @@ def member_create(
         )
     except MultiplexerError as exc:
         _rollback_register(
-            new_agent_id,
+            new_member_id,
             fleet_id=fleet_id,
             reason=f"split_window failed: {exc}",
         )
 
     try:
-        placement_view = broker.update_placement_pane_id(new_agent_id, pane_id)
+        placement_view = broker.update_placement_pane_id(new_member_id, pane_id)
     except Exception as exc:
         # Pane is alive but the registration row is dangling; /exit the pane
-        # and roll back the agent so the caller can retry cleanly.
+        # and roll back the member so the caller can retry cleanly.
         with contextlib.suppress(MultiplexerError):
             mux.send_exit(target_pane_id=pane_id, ignore_missing=True)
         _rollback_register(
-            new_agent_id,
+            new_member_id,
             fleet_id=fleet_id,
             reason=f"placement update failed: {exc}",
         )
@@ -293,7 +323,7 @@ def member_create(
         with contextlib.suppress(MultiplexerError):
             mux.send_exit(target_pane_id=pane_id, ignore_missing=True)
         _rollback_register(
-            new_agent_id,
+            new_member_id,
             fleet_id=fleet_id,
             reason="placement row vanished before pane-id patch",
         )
@@ -307,7 +337,7 @@ def member_create(
 
 @member.command("delete")
 @fleet_id_option
-@director_member_options
+@member_id_option
 @click.option(
     "--force",
     "-f",
@@ -318,11 +348,11 @@ def member_create(
 )
 @click.pass_context
 def member_delete(ctx, member_id, force):
-    """Deregister a member agent and close its tmux pane."""
+    """Deregister a member and close its tmux pane."""
     fleet_id = ctx.obj["fleet_id"]
 
     fleet = broker.get_fleet(fleet_id)
-    if fleet is not None and member_id == fleet["director_agent_id"]:
+    if fleet is not None and member_id == fleet["director_member_id"]:
         raise click.ClickException(
             "cannot deregister the root Director; use 'cafleet fleet delete' instead"
         )
@@ -332,7 +362,7 @@ def member_delete(ctx, member_id, force):
         member_id,
         allow_missing_placement=True,
     )
-    member_id = target["agent_id"]
+    member_id = target["member_id"]
     pane_id = placement["mux_pane_id"] if placement is not None else None
 
     if pane_id is None:
@@ -425,7 +455,7 @@ def _deregister_or_die(member_id: int) -> None:
     ``deregister failed:`` wrapping.
     """
     try:
-        broker.deregister_agent(member_id)
+        broker.deregister_member(member_id)
     except click.ClickException:
         raise
     except Exception as exc:
@@ -442,18 +472,18 @@ def _emit_member_delete_output(
     if ctx.obj["json_output"]:
         click.echo(
             output.format_json(
-                {"agent_id": member_id, "pane_status": pane_status},
+                {"member_id": member_id, "pane_status": pane_status},
             )
         )
     elif header is not None:
         click.echo(header)
-        click.echo(f"  agent_id:  {member_id}")
-        click.echo(f"  pane_id:   {pane_status}")
+        click.echo(f"  member_id:  {member_id}")
+        click.echo(f"  pane_id:    {pane_status}")
 
 
 @member.command("show")
 @fleet_id_option
-@director_member_options
+@member_id_option
 @click.option(
     "--full",
     "full",
@@ -463,7 +493,7 @@ def _emit_member_delete_output(
 )
 @click.pass_context
 def member_show(ctx, member_id, full):
-    """Show one agent's detail (registry read; no tmux required)."""
+    """Show one member's detail (registry read; no tmux required)."""
     fleet_id = ctx.obj["fleet_id"]
     target, _placement = _load_authorized_member(
         fleet_id,
@@ -473,7 +503,7 @@ def member_show(ctx, member_id, full):
     if ctx.obj["json_output"]:
         click.echo(output.format_json(target))
     else:
-        click.echo(output.format_agent(target, full=full))
+        click.echo(output.format_member_detail(target, full=full))
 
 
 @member.command("list")
@@ -487,19 +517,19 @@ def member_show(ctx, member_id, full):
 )
 @click.option(
     "--all",
-    "all_agents",
+    "all_members",
     is_flag=True,
     default=False,
-    help="List every active agent of the fleet.",
+    help="List every active registry entry of the fleet.",
 )
 @click.pass_context
-def member_list(ctx, activity, all_agents):
-    """List the fleet's members; --all lists every active agent of the fleet."""
+def member_list(ctx, activity, all_members):
+    """List the fleet's members; --all lists every active registry entry."""
     fleet_id = ctx.obj["fleet_id"]
-    if all_agents and activity:
+    if all_members and activity:
         raise click.UsageError("--all and --activity are mutually exclusive.")
     try:
-        if all_agents:
+        if all_members:
             rows = broker.list_roster(fleet_id)
         elif activity:
             rows = broker.list_members_with_activity(fleet_id)
@@ -511,7 +541,7 @@ def member_list(ctx, activity, all_agents):
         raise click.ClickException(str(exc)) from exc
     if ctx.obj["json_output"]:
         click.echo(output.format_json(rows))
-    elif all_agents:
+    elif all_members:
         click.echo(output.format_member_roster(rows))
     elif activity:
         click.echo(output.format_member_list_activity(rows))
@@ -521,7 +551,7 @@ def member_list(ctx, activity, all_agents):
 
 @member.command("capture")
 @fleet_id_option
-@director_member_options
+@member_id_option
 @click.option(
     "--lines",
     "--tail",
@@ -547,7 +577,7 @@ def member_capture(ctx, member_id, lines, ansi):
         fleet_id,
         member_id,
     )
-    member_id = target["agent_id"]
+    member_id = target["member_id"]
     pane_id = _require_member_pane(placement, member_id, "capture")
 
     try:
@@ -562,7 +592,7 @@ def member_capture(ctx, member_id, lines, ansi):
         click.echo(
             output.format_json(
                 {
-                    "member_agent_id": member_id,
+                    "member_id": member_id,
                     "pane_id": pane_id,
                     "lines": lines,
                     "content": content,
@@ -578,7 +608,7 @@ def member_capture(ctx, member_id, lines, ansi):
 
 @member.command("exec")
 @fleet_id_option
-@director_member_options
+@member_id_option
 @click.argument("command")
 @click.pass_context
 def member_exec(ctx, member_id, command):
@@ -597,7 +627,7 @@ def member_exec(ctx, member_id, command):
         fleet_id,
         member_id,
     )
-    member_id = target["agent_id"]
+    member_id = target["member_id"]
     pane_id = _require_member_pane(placement, member_id, "exec")
 
     try:
@@ -609,7 +639,7 @@ def member_exec(ctx, member_id, command):
         click.echo(
             output.format_json(
                 {
-                    "member_agent_id": member_id,
+                    "member_id": member_id,
                     "pane_id": pane_id,
                     "command": command,
                 },
@@ -623,7 +653,7 @@ def member_exec(ctx, member_id, command):
 
 @member.command("ping")
 @fleet_id_option
-@director_member_options
+@member_id_option
 @quiet_flag
 @click.pass_context
 def member_ping(ctx, member_id, quiet):
@@ -636,14 +666,14 @@ def member_ping(ctx, member_id, quiet):
         fleet_id,
         member_id,
     )
-    member_id = target["agent_id"]
+    member_id = target["member_id"]
     pane_id = _require_member_pane(placement, member_id, "ping")
 
     try:
         ok = mux.send_poll_trigger(
             target_pane_id=pane_id,
             fleet_id=fleet_id,
-            agent_id=member_id,
+            member_id=member_id,
         )
     except MultiplexerError as exc:
         raise click.ClickException(f"send failed: {exc}") from exc
@@ -657,7 +687,7 @@ def member_ping(ctx, member_id, quiet):
         click.echo(
             output.format_json(
                 {
-                    "member_agent_id": member_id,
+                    "member_id": member_id,
                     "pane_id": pane_id,
                 },
             )
@@ -672,16 +702,11 @@ def member_ping(ctx, member_id, quiet):
 
 @member.command("nudge")
 @fleet_id_option
-@click.option(
-    "--agent-id",
-    type=int,
-    required=True,
-    help="Sender's agent ID (the acting member, typically the monitoring member).",
-)
-@director_member_options
+@from_member_id_option
+@to_member_id_option
 @text_body_options("Re-engage summary (inline).")
 @click.pass_context
-def member_nudge(ctx, agent_id, member_id, text, text_file):
+def member_nudge(ctx, from_member_id, to_member_id, text, text_file):
     """Re-engage a member (typically the Director) with an ACKable task + preview."""
     fleet_id = ctx.obj["fleet_id"]
 
@@ -692,14 +717,16 @@ def member_nudge(ctx, agent_id, member_id, text, text_file):
     body = read_text_input(text, text_file)
 
     # Resolve the target FIRST (fleet-isolation only): a cross-fleet / unknown /
-    # inactive --member-id raises "Agent <id> not found" here, before the send
-    # path runs. This also makes send_message's own destination ValueError
+    # inactive --to-member-id raises "Member <id> not found" here, before the
+    # send path runs. This also makes send_message's own destination ValueError
     # unreachable in the nudge path — only its sender check can still fire.
-    target, placement = _load_authorized_member(fleet_id, member_id)
-    member_id = target["agent_id"]
+    target, placement = _load_authorized_member(fleet_id, to_member_id)
+    to_member_id = target["member_id"]
 
     try:
-        result = broker.send_message(fleet_id, agent_id, to=member_id, text=body)
+        result = broker.send_message(
+            fleet_id, from_member_id, to=to_member_id, text=body
+        )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -711,7 +738,7 @@ def member_nudge(ctx, agent_id, member_id, text, text_file):
         click.echo(
             output.format_json(
                 {
-                    "member_agent_id": member_id,
+                    "member_id": to_member_id,
                     "pane_id": pane_id,
                     "task_id": task_id,
                     "notification_sent": notification_sent,

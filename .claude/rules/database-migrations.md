@@ -12,7 +12,7 @@ mise //cafleet:makemigration "short description of the change"
 
 - Run `cafleet setup db` (or `cafleet setup`) first so the DB is at head — `--autogenerate` requires it.
 - The message becomes the migration docstring and the filename slug.
-- `env.py`'s `process_revision_directives` hook mints the next sequential id, so the file lands as `000N_<slug>.py`, matching the chain and the `test_nine_migration_revisions_exist` snapshot guard. Raw `alembic revision` mints a random hex id and breaks both.
+- `env.py`'s `process_revision_directives` hook mints the next sequential id, so the file lands as `000N_<slug>.py`, matching the chain and the chain-guard snapshot in `tests/db/test_alembic_smoke.py`. Raw `alembic revision` mints a random hex id and breaks both.
 
 ## Review and hand-edit the generated migration
 
@@ -23,4 +23,4 @@ mise //cafleet:makemigration "short description of the change"
 
 ## Update the chain guard
 
-After adding a migration, update `tests/db/test_alembic_smoke.py::test_nine_migration_revisions_exist` — bump the expected count and add the new revision id plus its `down_revision` link. That snapshot keeps the chain sequential and linear.
+After adding a migration, update the chain-guard test in `tests/db/test_alembic_smoke.py` (currently `test_single_initial_migration_revision_exists`, asserting the single fresh initial revision `0001` with `down_revision = None`) — bump the expected count, rename the test to match the new chain length, and add the new revision id plus its `down_revision` link. That snapshot keeps the chain sequential and linear.

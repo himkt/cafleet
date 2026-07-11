@@ -1,6 +1,6 @@
 # Coordination Protocol
 
-Mechanics for inter-agent coordination. The design document is the substantive communication medium; `cafleet message send --text` carries only a single-line **verb + pointer** poke. Substantive content (feedback, reports, escalation reasons, review items) lives in inline `COMMENT(role)` markers in the design doc — except for source-anchored review findings, which are annotated in the source file at `<file>:<line>` because that is where the finding lives.
+Mechanics for inter-member coordination. The design document is the substantive communication medium; `cafleet message send --text` carries only a single-line **verb + pointer** poke. Substantive content (feedback, reports, escalation reasons, review items) lives in inline `COMMENT(role)` markers in the design doc — except for source-anchored review findings, which are annotated in the source file at `<file>:<line>` because that is where the finding lives.
 
 **Scope.** The verb + pointer schema applies to the create and execute workflows. Two exchanges are **exempt** and ride as free-form multi-line bodies: the create workflow's **Step-2 clarification exchange** (the Drafter's clarifying questions + the Director's user-answers relay, before the design doc exists), and the interview workflow's Director-Analyzer messages (which share only the inline `COMMENT(claude)` marker convention — the Analyzer's question-list deliverable is a multi-line payload).
 

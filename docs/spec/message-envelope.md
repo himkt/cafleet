@@ -21,9 +21,9 @@ Field decisions:
 | Field | Default | `--full` |
 |---|---|---|
 | `task_id` | rendered as `id` (full integer) | rendered as `task_id` |
-| `from_agent_id` | rendered as `from` (full integer) | rendered as `from_agent_id` |
-| `to_agent_id` | omitted (the recipient's own poll already establishes `to == self`) | included |
-| `context_id` | omitted (always equals `to_agent_id` for delivery rows; equals broadcaster for summary rows) | included |
+| `from_member_id` | rendered as `from` (full integer) | rendered as `from_member_id` |
+| `to_member_id` | omitted (the recipient's own poll already establishes `to == self`) | included |
+| `context_id` | omitted (always equals `to_member_id` for delivery rows; equals broadcaster for summary rows) | included |
 | `status_timestamp` | rendered as `ts` | rendered as `status_timestamp` |
 | `text` | included, truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix | included, untruncated |
 | `type` | omitted when `"unicast"` (the default); rendered as `kind` when `"broadcast_summary"` | rendered as `type` |
@@ -44,21 +44,21 @@ CLI JSON output is governed by the `--json` flag:
 
 A poll result with one unicast delivery (id `42`, from `7`, body `"build OK"`).
 
-**Default (`cafleet --json message poll --agent-id <my-agent-id>`)**:
+**Default (`cafleet --json message poll --member-id <my-member-id>`)**:
 
 ```json
 [{"id":42,"from":7,"ts":"2026-05-05T05:42:11.123456+00:00","text":"build OK"}]
 ```
 
-**`--full` (`cafleet --json message poll --agent-id <my-agent-id> --full`)**:
+**`--full` (`cafleet --json message poll --member-id <my-member-id> --full`)**:
 
 ```json
 [
   {
     "task_id": 42,
     "context_id": 3,
-    "from_agent_id": 7,
-    "to_agent_id": 3,
+    "from_member_id": 7,
+    "to_member_id": 3,
     "type": "unicast",
     "created_at": "2026-05-05T05:42:11.123456+00:00",
     "status_state": "input_required",
@@ -84,7 +84,7 @@ build OK
 
 Optional segments `| kind:<kind>` and `| origin:<id>` are appended to line 1 when the task is a broadcast summary (`type != "unicast"`) or has a non-NULL `origin_task_id`, respectively. The body line is omitted entirely when the resulting body is the empty string.
 
-`--full` switches to a variable-length labeled block — one field per line (`id`, `state`, `from`, `to`, `type`, `text`), with the `to:` line omitted for broadcast-summary rows (`to_agent_id IS NULL`) and the `text:` line omitted when the body is empty. So a fresh unicast delivery prints six lines, while a broadcast-summary row with no recipient prints fewer. Text mode omits the `text:` line entirely only when the resulting body is the empty string (deliveries explicitly sent with an empty body). Broadcast summary rows are NOT empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. Body truncation (the `…` suffix at `CAFLEET_MAX_TEXT_LEN` codepoints) is documented in [cli-options.md](cli-options.md#message-body-truncation).
+`--full` switches to a variable-length labeled block — one field per line (`id`, `state`, `from`, `to`, `type`, `text`), with the `to:` line omitted for broadcast-summary rows (`to_member_id IS NULL`) and the `text:` line omitted when the body is empty. So a fresh unicast delivery prints six lines, while a broadcast-summary row with no recipient prints fewer. Text mode omits the `text:` line entirely only when the resulting body is the empty string (deliveries explicitly sent with an empty body). Broadcast summary rows are NOT empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. Body truncation (the `…` suffix at `CAFLEET_MAX_TEXT_LEN` codepoints) is documented in [cli-options.md](cli-options.md#message-body-truncation).
 
 ## Flag cross-reference
 

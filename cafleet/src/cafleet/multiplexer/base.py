@@ -104,7 +104,7 @@ class Multiplexer(Protocol):
         """Return the set of every live pane id across the multiplexer server.
 
         The per-tick liveness query for ``cafleet monitor``: one call resolves
-        pane liveness for every agent in a tick (e.g. ``tmux list-panes -a``).
+        pane liveness for every member in a tick (e.g. ``tmux list-panes -a``).
 
         Returns:
             A set of pane ids (e.g. ``{"%0", "%7"}``).
@@ -147,14 +147,14 @@ class Multiplexer(Protocol):
         ...
 
     def send_poll_trigger(
-        self, *, target_pane_id: str, fleet_id: int, agent_id: int
+        self, *, target_pane_id: str, fleet_id: int, member_id: int
     ) -> bool:
         """Keystroke a ``cafleet message poll`` shortcut into the pane.
 
         Args:
-            target_pane_id: Pane id of the agent to nudge.
+            target_pane_id: Pane id of the member to nudge.
             fleet_id: Fleet id embedded in the keystroked command.
-            agent_id: Recipient agent id embedded in the keystroked
+            member_id: Recipient member id embedded in the keystroked
                 command.
 
         Returns:
@@ -164,14 +164,14 @@ class Multiplexer(Protocol):
         ...
 
     def send_wake_trigger(
-        self, *, target_pane_id: str, due_agents: list[dict], director_agent_id: int
+        self, *, target_pane_id: str, due_members: list[dict], director_member_id: int
     ) -> bool:
         """Keystroke a single-line *wake nudge* into the monitoring member's pane.
 
         Unlike :meth:`send_poll_trigger` (a bare ``cafleet … message poll`` the
         Director receives), this carries an instruction to run the monitoring
         member's capture-classify-reengage routine. The nudge **names** each
-        freshly-due agent (``<role> <id> (<name>)``) and the Director id as the
+        freshly-due member (``<role> <id> (<name>)``) and the Director id as the
         standing inspect-and-re-engage target, so the monitoring member inspects
         exactly those panes plus the Director. The wake nudge does **not** lead
         with an ``Esc`` safeguard — only :meth:`send_poll_trigger` (via
@@ -183,10 +183,10 @@ class Multiplexer(Protocol):
 
         Args:
             target_pane_id: Pane id of the monitoring member to nudge.
-            due_agents: The freshly-due watched agents to name, each a target
-                dict carrying ``agent_id``, ``name``, and ``is_director``.
-            director_agent_id: The Director's agent id, named in every payload as
-                the standing inspect-and-re-engage target.
+            due_members: The freshly-due watched members to name, each a target
+                dict carrying ``member_id``, ``name``, and ``is_director``.
+            director_member_id: The Director's member id, named in every payload
+                as the standing inspect-and-re-engage target.
 
         Returns:
             ``True`` if the keystroke landed; ``False`` if the pane is dead or
@@ -213,7 +213,7 @@ class Multiplexer(Protocol):
         Args:
             target_pane_id: Recipient pane id.
             task_id: Task id of the delivered message.
-            sender_id: Sender's agent id.
+            sender_id: Sender's member id.
             ts: Status timestamp string included in the header.
             text: Message body (caller is responsible for truncation).
 

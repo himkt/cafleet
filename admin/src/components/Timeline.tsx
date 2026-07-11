@@ -1,7 +1,7 @@
 import { useState, useLayoutEffect, useRef, useCallback } from "react";
 import type { ReactNode } from "react";
 import { Inbox } from "lucide-react";
-import type { TimelineMessage, TimelineEntry, Agent } from "../types";
+import type { TimelineMessage, TimelineEntry, Member } from "../types";
 import { fetchTimeline } from "../api";
 import { useRefreshKeyLoad } from "../hooks/useRefreshKeyLoad";
 import { entrySortKey } from "../timeline";
@@ -10,7 +10,7 @@ import EmptyState from "./EmptyState";
 import Skeleton from "./Skeleton";
 
 interface TimelineProps {
-  agents: Agent[];
+  members: Member[];
   refreshKey: number;
 }
 
@@ -87,7 +87,7 @@ function TimelineSkeleton() {
   );
 }
 
-export default function Timeline({ agents, refreshKey }: TimelineProps) {
+export default function Timeline({ members, refreshKey }: TimelineProps) {
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -151,7 +151,7 @@ export default function Timeline({ agents, refreshKey }: TimelineProps) {
       <TimelineMessageComponent
         key={entryKey(entry)}
         entry={entry}
-        agents={agents}
+        members={members}
       />,
     );
   }

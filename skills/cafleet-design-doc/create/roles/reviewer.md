@@ -27,13 +27,13 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Placeholder convention
 
-Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are placeholders, **not** shell variables — substitute the literal ids from your spawn prompt; the rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
+Angle-bracket tokens (`<fleet-id>`, `<my-member-id>`, `<director-member-id>`) are placeholders, **not** shell variables — substitute the literal ids from your spawn prompt; the rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
 
 ## Communication Protocol
 
 You do NOT speak to the user directly; all feedback goes through the Director via the broker. Poll your inbox, `cafleet message ack` each assignment, then read the doc and report via `cafleet message send` — command shapes in the `cafleet` skill core and your spawn prompt.
 
-**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md): single-line `<verb> (<pointer>)` body, findings in inline `COMMENT(reviewer): [TAG] <body>` markers at the affected section (never in the cafleet body). Report `complete (doc) — N issues` after a review pass, or `approved (doc)` when all quality criteria are met (see § *Approval Signal*).
+**Coordination Protocol**: Inter-member cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md): single-line `<verb> (<pointer>)` body, findings in inline `COMMENT(reviewer): [TAG] <body>` markers at the affected section (never in the cafleet body). Report `complete (doc) — N issues` after a review pass, or `approved (doc)` when all quality criteria are met (see § *Approval Signal*).
 
 ## Review Process
 
@@ -67,4 +67,4 @@ Aim for thoroughness that makes re-review unnecessary. A review that catches all
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-agent-id>` (sends the backend exit keystroke, waits up to 15 s). When the exit keystroke arrives your `claude` process exits immediately — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.
+The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` (sends the backend exit keystroke, waits up to 15 s). When the exit keystroke arrives your `claude` process exits immediately — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.

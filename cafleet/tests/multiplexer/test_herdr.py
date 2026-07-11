@@ -558,7 +558,7 @@ def test_send_poll_trigger__esc_then_poll_command(monkeypatch, herdr_run):
     captured, set_returns = herdr_run
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/herdr")
     monkeypatch.setattr("time.sleep", lambda _s: None)
-    result = _herdr.send_poll_trigger(target_pane_id="wG:p1", fleet_id=24, agent_id=88)
+    result = _herdr.send_poll_trigger(target_pane_id="wG:p1", fleet_id=24, member_id=88)
     assert result is True
     # Leading esc safeguard, then the poll command via pane run (atomic submit).
     assert captured == [
@@ -568,7 +568,7 @@ def test_send_poll_trigger__esc_then_poll_command(monkeypatch, herdr_run):
             "pane",
             "run",
             "wG:p1",
-            "cafleet message poll --fleet-id 24 --agent-id 88",
+            "cafleet message poll --fleet-id 24 --member-id 88",
         ],
     ]
 
@@ -577,7 +577,7 @@ def test_send_poll_trigger__herdr_missing_returns_false(monkeypatch, herdr_run):
     captured, _set_returns = herdr_run
     monkeypatch.setattr("shutil.which", lambda _: None)
     assert (
-        _herdr.send_poll_trigger(target_pane_id="wG:p1", fleet_id=24, agent_id=88)
+        _herdr.send_poll_trigger(target_pane_id="wG:p1", fleet_id=24, member_id=88)
         is False
     )
     assert captured == []
@@ -589,7 +589,7 @@ def test_send_poll_trigger__herdr_error_returns_false(monkeypatch, herdr_run):
     monkeypatch.setattr("time.sleep", lambda _s: None)
     set_returns(HerdrError("herdr command failed: server unreachable"))
     assert (
-        _herdr.send_poll_trigger(target_pane_id="wG:p1", fleet_id=24, agent_id=88)
+        _herdr.send_poll_trigger(target_pane_id="wG:p1", fleet_id=24, member_id=88)
         is False
     )
 
@@ -602,15 +602,15 @@ def test_send_wake_trigger__no_esc_single_pane_run(monkeypatch, herdr_run):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/herdr")
     result = _herdr.send_wake_trigger(
         target_pane_id="wG:p1",
-        due_agents=[
+        due_members=[
             {
-                "agent_id": 332,
+                "member_id": 332,
                 "name": "Director",
                 "is_director": True,
                 "wake_reasons": ["interval"],
             }
         ],
-        director_agent_id=332,
+        director_member_id=332,
     )
     assert result is True
     # No leading esc — the monitoring member's own pane is never on a prompt.
@@ -619,8 +619,8 @@ def test_send_wake_trigger__no_esc_single_pane_run(monkeypatch, herdr_run):
     assert argv[:4] == ["herdr", "pane", "run", "wG:p1"]
     assert "esc" not in argv
     payload = argv[4]
-    assert payload.startswith("[monitor] wake: 1 agent due")
-    # The due agent is named ``<role> <id> (<name>) [<reasons>]``.
+    assert payload.startswith("[monitor] wake: 1 member due")
+    # The due member is named ``<role> <id> (<name>) [<reasons>]``.
     assert "director 332 (Director) [interval]" in payload
     assert "(332)" in payload
 
@@ -630,24 +630,24 @@ def test_send_wake_trigger__sanitizes_name_metacharacters(monkeypatch, herdr_run
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/herdr")
     _herdr.send_wake_trigger(
         target_pane_id="wG:p1",
-        due_agents=[
+        due_members=[
             {
-                "agent_id": 332,
+                "member_id": 332,
                 "name": "Director",
                 "is_director": True,
                 "wake_reasons": ["interval"],
             },
             {
-                "agent_id": 336,
+                "member_id": 336,
                 "name": "evil\r\nname\there`$(id)|whoami",
                 "is_director": False,
                 "wake_reasons": ["stall-check"],
             },
         ],
-        director_agent_id=332,
+        director_member_id=332,
     )
     payload = captured[0][4]
-    assert payload.startswith("[monitor] wake: 2 agents due")
+    assert payload.startswith("[monitor] wake: 2 members due")
     # Single-line + no shell metacharacters survive the sanitizer.
     assert "\n" not in payload
     assert "\r" not in payload

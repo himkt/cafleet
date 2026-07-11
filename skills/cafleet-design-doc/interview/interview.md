@@ -36,12 +36,12 @@ Interview-specific: place each `COMMENT(claude)` marker on its own line immediat
 
 ## Architecture
 
-The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns one short-lived Analyzer via `cafleet member create`. The Analyzer is torn down BEFORE the interview rounds begin; the Director then runs the rounds (and writes annotations) on its own. All Analyzer coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
+The Director is the root member of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns one short-lived Analyzer via `cafleet member create`. The Analyzer is torn down BEFORE the interview rounds begin; the Director then runs the rounds (and writes annotations) on its own. All Analyzer coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
 
 ```
 User
  +-- Director (main Claude -- cafleet fleet create, cafleet member create, drives Q&A, writes annotations)
-      +-- Analyzer (member agent -- spawned in tmux pane; returns question list; terminated)
+      +-- Analyzer (member -- spawned in tmux pane; returns question list; terminated)
 ```
 
 ## Prerequisites
@@ -106,7 +106,7 @@ In resume mode where Step 2 IS run, parse the JSON array from the existing `inte
 cafleet fleet create --name "design-doc-interview-{slug}" --json
 ```
 
-Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids.
+Capture `fleet_id` and `director.member_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids.
 
 #### 2b. Spawn the monitoring member (first-in)
 
@@ -124,7 +124,7 @@ Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt 
 
 **Gate**: do not spawn the Analyzer until the monitoring member's `ready: monitor live` handshake (2b) has arrived.
 
-Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (the skeleton's identity lines carry the CLI's four `{fleet_id}` / `{director_agent_id}` / `{agent_id}` / `{coding_agent}` placeholders, rendered to literals by `cafleet member create` at spawn; `[INSERT …]` markers rendered by the Director first, leaving no stray single braces other than the four identity placeholders):
+Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (the skeleton's identity lines carry the CLI's four `{fleet_id}` / `{director_member_id}` / `{member_id}` / `{coding_agent}` placeholders, rendered to literals by `cafleet member create` at spawn; `[INSERT …]` markers rendered by the Director first, leaving no stray single braces other than the four identity placeholders):
 
 | Slot | Analyzer |
 |---|---|
@@ -137,17 +137,17 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 Render the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` per the 2c audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> \
      --name "Analyzer" \
      --description "Reads the design doc and generates a numbered question list" \
      --text-file ${BASE}/.prompts/analyzer-<UTC-compact>.md
    ```
 
-   Parse `agent_id` from the JSON response and substitute it for `<analyzer-agent-id>` in every subsequent command.
+   Parse `member_id` from the JSON response and substitute it for `<analyzer-member-id>` in every subsequent command.
 
 #### 2e. Wait for the Analyzer's question list
 
-Poll `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id> --full` until the Analyzer's reply arrives. **The `--full` flag is required**: `cafleet message poll` truncates each message body to 200 codepoints + `…` by default, which would silently mangle the Analyzer's numbered question list. Acknowledge with `cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>`.
+Poll `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id> --full` until the Analyzer's reply arrives. **The `--full` flag is required**: `cafleet message poll` truncates each message body to 200 codepoints + `…` by default, which would silently mangle the Analyzer's numbered question list. Acknowledge with `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --task-id <task-id>`.
 
 The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and wait again with `cafleet message poll --full`. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
 

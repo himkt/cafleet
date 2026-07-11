@@ -6,7 +6,7 @@ icon: lucide/cpu
 
 cafleet supports three coding-agent binaries inside member panes: `claude`
 (Claude Code, the default), `codex` (OpenAI Codex CLI), and `opencode`
-(opencode.ai). The backend is selected per agent with
+(opencode.ai). The backend is selected per member with
 `--coding-agent {claude,codex,opencode}`, and mixed-backend teams are allowed:
 a single Director may spawn all three in the same fleet with no broker-level
 differences. The value is recorded in the placement's `coding_agent` column.
@@ -33,9 +33,9 @@ trade-offs are specified on the backend reference pages:
 
 The cafleet CLI works unchanged from any backend pane. Identity reaches a
 member through its spawn prompt: `cafleet member create` renders the four
-identity placeholders — `{fleet_id}`, `{agent_id}`, `{director_agent_id}`, and
-`{coding_agent}` — to literals, so the member reads its ids as plain text
-lines (e.g. `FLEET ID: 1`, `YOUR AGENT ID: 4`) and passes them explicitly on
+identity placeholders — `{fleet_id}`, `{member_id}`, `{director_member_id}`,
+and `{coding_agent}` — to literals, so the member reads its ids as plain text
+lines (e.g. `FLEET ID: 1`, `YOUR MEMBER ID: 4`) and passes them explicitly on
 every command. The only environment variable forwarded into the pane is
 `CAFLEET_DATABASE_URL`. claude panes load the Claude Code skills directly,
 while codex and opencode panes read the cafleet skill files by absolute path.

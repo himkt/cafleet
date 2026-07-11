@@ -1,6 +1,6 @@
 # Design Doc Create (CAFleet Edition)
 
-Create high-quality design documents using a three-role team orchestrated via the CAFleet message broker: Director (orchestrator), Drafter (writes the document), and Reviewer (critically reviews drafts). Every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline. The team iterates through an internal quality loop before presenting a polished draft to the user.
+Create high-quality design documents using a three-role team orchestrated via the CAFleet message broker: Director (orchestrator), Drafter (writes the document), and Reviewer (critically reviews drafts). Every inter-member message is persisted in SQLite and visible in the admin WebUI timeline. The team iterates through an internal quality loop before presenting a polished draft to the user.
 
 ## Required reading
 
@@ -20,14 +20,14 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
 | **Director** | Main Claude | Register with CAFleet fleet, spawn members via `cafleet member create`, relay user answers, enforce clarification gate, orchestrate internal quality loop, present polished draft to user | Write the document, review it in detail | [roles/director.md](roles/director.md) |
-| **Drafter** | Member agent (claude) | Ask clarifying questions (via Director relay), read target codebase, write and revise the design document | Communicate with user directly (goes through Director), review own work | [roles/drafter.md](roles/drafter.md) |
-| **Reviewer** | Member agent (claude) | Critically review drafts for rule compliance, readability, completeness, correctness | Write the document, communicate with user | [roles/reviewer.md](roles/reviewer.md) |
+| **Drafter** | Member (claude) | Ask clarifying questions (via Director relay), read target codebase, write and revise the design document | Communicate with user directly (goes through Director), review own work | [roles/drafter.md](roles/drafter.md) |
+| **Reviewer** | Member (claude) | Critically review drafts for rule compliance, readability, completeness, correctness | Write the document, communicate with user | [roles/reviewer.md](roles/reviewer.md) |
 
 ## Additional resources
 
 - For the document template, see: [../reference/template.md](../reference/template.md)
 - For section guidelines and quality standards, see: [../reference/guidelines.md](../reference/guidelines.md)
-- For the inter-agent coordination protocol (verb + pointer schema, `COMMENT(role)` markers), see: [../reference/coordination.md](../reference/coordination.md)
+- For the inter-member coordination protocol (verb + pointer schema, `COMMENT(role)` markers), see: [../reference/coordination.md](../reference/coordination.md)
 
 ## Coordination Protocol
 
@@ -40,13 +40,13 @@ Two skill-specific notes layer on top of that canonical protocol:
 
 ## Architecture
 
-The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns both the Drafter and Reviewer via `cafleet member create`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
+The Director is the root member of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns both the Drafter and Reviewer via `cafleet member create`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
 
 ```
 User
  +-- Director (main Claude -- cafleet fleet create, cafleet member create, orchestrates cycle)
-      +-- Drafter (member agent -- spawned in tmux pane; writes the design document)
-      +-- Reviewer (member agent -- spawned in tmux pane; critically reviews the draft)
+      +-- Drafter (member -- spawned in tmux pane; writes the design document)
+      +-- Reviewer (member -- spawned in tmux pane; critically reviews the draft)
 ```
 
 ## Prerequisites
@@ -84,18 +84,18 @@ Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt. The audit-
 
 Load the `cafleet` skill; its `reference/supervision.md` governance is § Required reading above.
 
-#### 1a. Establish a CAFleet fleet and capture the root Director's `agent_id`
+#### 1a. Establish a CAFleet fleet and capture the root Director's `member_id`
 
 `cafleet fleet create` (which must be run inside a tmux or herdr session) atomically creates the fleet and registers a root Director bound to the current multiplexer pane. Use `--json` so both IDs are machine-parseable:
 
 ```bash
 cafleet fleet create --name "design-doc-create-{slug}" --json
-# → { "fleet_id": <int>, "administrator_agent_id": <int>, "director": { "agent_id": <int>, "name": "Director", "placement": {...} } }
+# → { "fleet_id": <int>, "administrator_member_id": <int>, "director": { "member_id": <int>, "name": "Director", "placement": {...} } }
 ```
 
-Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids.
+Capture `fleet_id` and `director.member_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids.
 
-If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `agent_id` instead of creating a new fleet — the root Director from `fleet create` is the team lead.
+If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `member_id` instead of creating a new fleet — the root Director from `fleet create` is the team lead.
 
 #### 1b. Spawn the monitoring member (first-in)
 
@@ -118,7 +118,7 @@ Substitute these absolute paths into the spawn prompts below.
 
 **Gate**: do not spawn the Drafter until the monitoring member's `ready: monitor live` handshake (1b) has arrived.
 
-**Drafter spawn prompt** — render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below. The skeleton's identity lines carry the CLI's four `{fleet_id}` / `{director_agent_id}` / `{agent_id}` / `{coding_agent}` placeholders, rendered to literals by `cafleet member create` at spawn; the `[INSERT …]` markers (`[INSERT DOC PATH]`, `[INSERT USER'S ORIGINAL REQUEST]`, `[INSERT abs path to roles/drafter.md]`) are rendered by the Director first (leave no stray single braces other than the four identity placeholders; double any literal brace as `{{` / `}}`). Keep the prompt under ~2 KB (path-by-reference). Use the normal-mode column by default; the resume-mode column when Step 0 detected resume mode.
+**Drafter spawn prompt** — render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below. The skeleton's identity lines carry the CLI's four `{fleet_id}` / `{director_member_id}` / `{member_id}` / `{coding_agent}` placeholders, rendered to literals by `cafleet member create` at spawn; the `[INSERT …]` markers (`[INSERT DOC PATH]`, `[INSERT USER'S ORIGINAL REQUEST]`, `[INSERT abs path to roles/drafter.md]`) are rendered by the Director first (leave no stray single braces other than the four identity placeholders; double any literal brace as `{{` / `}}`). Keep the prompt under ~2 KB (path-by-reference). Use the normal-mode column by default; the resume-mode column when Step 0 detected resume mode.
 
 | Slot | Drafter (normal mode) | Drafter (resume mode) |
 |---|---|---|
@@ -131,13 +131,13 @@ Substitute these absolute paths into the spawn prompts below.
 Render the prompt to `${BASE}/.prompts/drafter-<UTC-compact>.md` per the Step 1c two-step audit-file pattern (both normal and resume modes — the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> \
      --name "Drafter" \
      --description "Writes and revises the design document" \
      --text-file ${BASE}/.prompts/drafter-<UTC-compact>.md
    ```
 
-   Parse `agent_id` from the JSON response and substitute it for `<drafter-agent-id>` in every subsequent command.
+   Parse `member_id` from the JSON response and substitute it for `<drafter-member-id>` in every subsequent command.
 
 #### 1e. Spawn the Reviewer
 
@@ -154,13 +154,13 @@ Render the prompt to `${BASE}/.prompts/drafter-<UTC-compact>.md` per the Step 1c
 Render the prompt to `${BASE}/.prompts/reviewer-<UTC-compact>.md` per the Step 1c two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> \
      --name "Reviewer" \
      --description "Critically reviews drafts for rule compliance and quality" \
      --text-file ${BASE}/.prompts/reviewer-<UTC-compact>.md
    ```
 
-   Parse `agent_id` from the JSON response and substitute it for `<reviewer-agent-id>` in every subsequent command.
+   Parse `member_id` from the JSON response and substitute it for `<reviewer-member-id>` in every subsequent command.
 
 #### 1f. Verify members are live
 
@@ -176,18 +176,18 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 
 > **Clarification Exemption**: Director-to-Drafter messages during this step are exempt from the verb + pointer schema documented in [the Coordination Protocol section above](#coordination-protocol). At clarification time the design doc does not yet exist (the Drafter is forbidden from creating any file before clarifying), so there is no in-doc target for `COMMENT(claude)` markers — the user-answer relay rides as a free-form multi-line cafleet body. From Step 3 onward (once the initial draft exists) every message falls back under the schema.
 
-1. Wait for the Drafter's clarifying questions. The broker's inline-preview keystroke on the Drafter's `message send`, and your own periodic `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`, will surface the Drafter's message once it arrives.
-2. `cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>` each received message after reading it.
+1. Wait for the Drafter's clarifying questions. The broker's inline-preview keystroke on the Drafter's `message send`, and your own periodic `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id>`, will surface the Drafter's message once it arrives.
+2. `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --task-id <task-id>` each received message after reading it.
 3. Relay the questions to the user via {decision_surface}. If {decision_surface} caps how many questions it shows at once (your overlay states the cap) and the number exceeds it, split them into multiple sequential calls to relay all questions without omission.
 4. Relay the user's answers back to the Drafter (free-form, per the Clarification Exemption above):
    ```bash
-   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
-     --to <drafter-agent-id> --text "User answers: ..."
+   cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
+     --to-member-id <drafter-member-id> --text "User answers: ..."
    ```
 5. **Gate check**: If the Drafter produces a draft without prior questions, reject it and instruct them to ask first (also free-form, per the Clarification Exemption):
    ```bash
-   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
-     --to <drafter-agent-id> --text "Stop — you must send clarifying questions before drafting. Discard the draft and send questions first."
+   cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
+     --to-member-id <drafter-member-id> --text "Stop — you must send clarifying questions before drafting. Discard the draft and send questions first."
    ```
    A focused confirmation round counts as valid clarification.
 
@@ -197,14 +197,14 @@ Enter this step after the Drafter reports `complete (doc)`, **or immediately** w
 
 1. **Route to Reviewer**. The Reviewer reads `${DOC_PATH}` directly; no path needs to be embedded in the cafleet body.
    ```bash
-   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
-     --to <reviewer-agent-id> --text "ready (doc)"
+   cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
+     --to-member-id <reviewer-member-id> --text "ready (doc)"
    ```
-2. **Wait** for the Reviewer's response via `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`. Round-1 fresh review arrives as `complete (doc) — N issues`; approval arrives as `approved (doc)`. Each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design doc — the Director does NOT relay the finding text in cafleet.
+2. **Wait** for the Reviewer's response via `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id>`. Round-1 fresh review arrives as `complete (doc) — N issues`; approval arrives as `approved (doc)`. Each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design doc — the Director does NOT relay the finding text in cafleet.
 3. **On feedback**: Route the Drafter to address the markers in-doc:
    ```bash
-   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
-     --to <drafter-agent-id> --text "ready (doc)"
+   cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
+     --to-member-id <drafter-member-id> --text "ready (doc)"
    ```
 4. Wait for the Drafter's `addressed (doc)` reply (revisions resolve the `COMMENT(reviewer)` markers), then loop back to step 1 (re-route to Reviewer with `ready (doc)`).
 5. Repeat until the Reviewer explicitly signals `approved (doc)`.
@@ -230,8 +230,8 @@ Process the user's selection:
   1. **Immediately** scan the document with Grep for `COMMENT(` markers — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
   2. **If markers are found**: Route the Drafter to read and resolve the markers in-doc with `ready (doc)` — no marker content is quoted in the cafleet body:
      ```bash
-     cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
-       --to <drafter-agent-id> --text "ready (doc)"
+     cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
+       --to-member-id <drafter-member-id> --text "ready (doc)"
      ```
      After the Drafter replies `addressed (doc)` and removes the markers, verify with Grep that no `COMMENT(` markers remain. Then re-enter the quality loop (Step 3) and re-present (Step 4).
   3. **If no markers are found**: Explain the COMMENT marker convention to the user — markers follow the pattern `# COMMENT(username): feedback` placed directly in the design document file. Show the file path so the user can edit it. Then re-prompt with the same three-option pattern (Approve / Scan for COMMENT markers / built-in Other).
@@ -246,8 +246,8 @@ No round limit — loop continues until approved or aborted.
 
 1. Instruct the Drafter to finalize. The Drafter's role definition spells out the finalize checklist (set Status to Approved, refresh Last Updated, bump the Progress header field if present, verify implementation steps are actionable); the cafleet body is just the verb + pointer poke:
    ```bash
-   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
-     --to <drafter-agent-id> --text "ready (doc)"
+   cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
+     --to-member-id <drafter-member-id> --text "ready (doc)"
    ```
    Wait for the Drafter's `addressed (doc)` confirmation.
 

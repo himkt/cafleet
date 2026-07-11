@@ -9,7 +9,7 @@ that the fleet's dedicated **monitoring member** runs as a background task in
 its own pane. It supplies the **heartbeat** a Director needs to supervise its
 team: a plain loop, not agent reasoning, that scans the **watched set** (the
 root Director and every ordinary member, each on its own interval) and, when at
-least one watched agent is due, wakes the monitoring member once by keystroking
+least one watched member is due, wakes the monitoring member once by keystroking
 into its pane. While the loop runs it spends no model tokens, and because it is
 just a backgrounded command it works identically on any backend. One monitor
 and one monitoring member per fleet; there is no `monitor stop` — stop the
@@ -23,11 +23,11 @@ the Director's job, defined in the `/cafleet` skill's
 
 | Layer | Owns | Lives in |
 |---|---|---|
-| Heartbeat (the *when*) | which watched agents are due; the wake keystroke into the monitoring member | the `cafleet monitor` loop |
+| Heartbeat (the *when*) | which watched members are due; the wake keystroke into the monitoring member | the `cafleet monitor` loop |
 | Facilitation (the *what*) | poll → ACK → dispatch → health-check → escalate | the Director, per `/cafleet` `reference/supervision.md` |
 
 The loop's only keystroke is a **wake nudge** into the monitoring member's own
-pane, naming each due agent as `<role> <id> (<name>) [<reasons>]` (reasons:
+pane, naming each due member as `<role> <id> (<name>) [<reasons>]` (reasons:
 `interval`, `status:done`, `stall-check`) plus the Director as the standing
 inspect target. It never keystrokes a watched pane, and because the monitoring
 member's pane is never parked on a permission prompt, the wake nudge does not
@@ -39,14 +39,14 @@ lead with `Esc` — unlike the message-delivery preview and `cafleet member ping
 Enrollment covers the **root Director** (default interval **180 s**) and
 **every ordinary member** (default **720 s**). The monitoring member itself is
 not enrolled — it is the watcher — and neither are the write-only
-Administrator or placementless agents. A watched agent is flagged only when it
-is enabled, its pane is alive, and its interval has elapsed since its last
-wake-dispatch (`last_ping_at`); the stamp written for each interval-due agent
-prevents a wake-storm while the watcher is still working (a stall-check-only
-due agent keeps its `last_ping_at` untouched — only its stall baseline
-advances).
+Administrator or placementless registry rows. A watched member is flagged only
+when it is enabled, its pane is alive, and its interval has elapsed since its
+last wake-dispatch (`last_ping_at`); the stamp written for each interval-due
+member prevents a wake-storm while the watcher is still working (a
+stall-check-only due member keeps its `last_ping_at` untouched — only its stall
+baseline advances).
 
-On the **herdr** backend a watched agent is additionally due when its native
+On the **herdr** backend a watched member is additionally due when its native
 agent status transitions into `done`; a transition into `blocked` (awaiting a
 user answer) never wakes the watcher. This trigger augments, never replaces,
 the interval trigger and does not exist on tmux — see
@@ -57,15 +57,15 @@ the interval trigger and does not exist on tmux — see
 The monitoring member is a single, dedicated coding-agent member — spawned
 first-in with `cafleet member create --role monitor` (the Director passes
 `--model haiku`) — that launches `cafleet monitor start` as a background task
-in its own pane and applies LLM judgment to the watched agents' state. It is
-identified by `agent_card_json.cafleet.kind == "monitoring-member"`; a second
+in its own pane and applies LLM judgment to the watched members' state. It is
+identified by `member_card_json.cafleet.kind == "monitoring-member"`; a second
 `--role monitor` spawn is rejected.
 
 On each wake it runs a routine bounded to two read/act commands — read-only
 `cafleet member capture` and `cafleet member nudge`:
 
-1. **Read the due agents named in the wake nudge** — that list is
-   authoritative; those agents, plus the Director, are who it inspects.
+1. **Read the due members named in the wake nudge** — that list is
+   authoritative; those members, plus the Director, are who it inspects.
 2. **Capture each named pane** (always also the Director's) and classify it
    from the capture content only, first match wins:
 
@@ -82,11 +82,11 @@ On each wake it runs a routine bounded to two read/act commands — read-only
    misjudged `awaiting_user` destroys the user's pending prompt.
 3. **Keep one stall baseline per pane** — the capture from that pane's last
    stall-check wake, replaced unconditionally on every stall-check wake.
-4. **Re-engage the Director** via `cafleet member nudge` when a due agent is
+4. **Re-engage the Director** via `cafleet member nudge` when a due member is
    `stalled` or `finished` — **unless the Director's own pane is
    `awaiting_user`**, in which case send nothing this wake: the nudge's
    keystroke leads with `Esc` and would cancel the Director's pending prompt.
-   The suppressed report re-surfaces on the agent's next wake.
+   The suppressed report re-surfaces on the member's next wake.
 
 Observation spans the Director and every due member, but actuation is
 Director-only: the monitoring member never keystrokes ordinary members —
@@ -101,9 +101,9 @@ all member-driving routes back through the Director.
 | Stall-check interval | `240s` | `monitor_stall_interval` / `CAFLEET_MONITOR_STALL_INTERVAL` (`0` disables) |
 | Scan tick | `5s` | `monitor start --tick N` (per run) |
 
-The monitor scans once per **tick** and an agent only comes due at a tick
+The monitor scans once per **tick** and a member only comes due at a tick
 boundary, so the tick is the floor on interval precision — set it smaller than
-the smallest interval you care about. Per-agent intervals are editable via
+the smallest interval you care about. Per-member intervals are editable via
 `cafleet monitor config` or the admin WebUI. Stall detection runs on its own
 independent cadence: a stall-check wake compares the pane's capture against its
 previous stall-check baseline, so two unchanged observations one interval apart
@@ -139,7 +139,7 @@ stop the background task (a clean stop clears the runtime row) before deleting
 it. `fleet delete` needs no stop step — the loop's next tick sees the
 soft-deleted fleet and self-terminates.
 
-Per-agent schedule (`interval_seconds`, `enabled`, `last_ping_at`) is persisted
+Per-member schedule (`interval_seconds`, `enabled`, `last_ping_at`) is persisted
 in `monitor_config`, so cadence resumes across a restart — see
 [Data model](../spec/data-model.md) for the two backing tables and
 [CLI options](../spec/cli-options.md#cafleet-monitor) for the command surface.

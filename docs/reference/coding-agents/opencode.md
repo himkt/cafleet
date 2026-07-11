@@ -10,10 +10,10 @@ For the multi-backend overview and selection rules, see the [Coding agents](../.
 
 ## Overview
 
-An opencode member is a cafleet member whose `agent_placements.coding_agent` value is `"opencode"`. The Director selects the backend at `member create` time:
+An opencode member is a cafleet member whose `member_placements.coding_agent` value is `"opencode"`. The Director selects the backend at `member create` time:
 
 ```bash
-cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> \
   --name Opencode-A --description "<one-sentence purpose>" --coding-agent opencode \
   --text "<spawn prompt>"
 ```
@@ -48,7 +48,7 @@ Skip-if-exists means a CAFleet upgrade that improves the deny-list (e.g. a new w
 
 ```bash
 rm ~/.opencode/agents/cafleet.md
-cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> \
   --name Opencode-Refresh --description "preset refresh" --coding-agent opencode \
   --text "<spawn prompt>"
 ```
@@ -109,7 +109,7 @@ Gated on local install of `opencode`. Run from inside a tmux or herdr session. T
     # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
     # Note the fleet and Director ids — the steps below use 1 and 2.
 
-    cafleet member create --fleet-id 1 --agent-id 2 \
+    cafleet member create --fleet-id 1 \
       --name Opencode-Smoke --description "opencode smoke member" --coding-agent opencode \
       --text "You are Opencode-Smoke. Reply hello when polled."
     # Expect: ~/.opencode/agents/cafleet.md is materialized with the
@@ -118,8 +118,8 @@ Gated on local install of `opencode`. Run from inside a tmux or herdr session. T
     cafleet member list --fleet-id 1 --all
     # Expect: backend column shows 'opencode' for the smoke member.
 
-    cafleet message send --fleet-id 1 --agent-id 2 \
-      --to 4 --text "ping"
+    cafleet message send --fleet-id 1 --from-member-id 2 \
+      --to-member-id 4 --text "ping"
     # Expect: the opencode pane receives the inline preview and the member ack-loops.
 
     cafleet member exec --fleet-id 1 \
