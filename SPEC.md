@@ -1823,8 +1823,9 @@ The shared literal-then-Enter primitive (used by `send_exit`,
    permission prompt so the trailing `Enter` cannot blind-confirm it.
 2. Run `tmux send-keys -t <target_pane_id> -l <payload>` — `-l` types the literal
    payload (single argv element, never shell-interpolated).
-3. Sleep `_SUBMIT_DELAY` (`0.12`s) — **unconditionally**, so codex
-   bracketed-paste finalizes and opencode slash-autocomplete settles.
+3. Sleep `_SUBMIT_DELAY` (`1.0`s) — **unconditionally**, so the Enter clears
+   codex's post-paste Enter-suppression window and opencode slash-autocomplete
+   settles.
 4. Run `tmux send-keys -t <target_pane_id> Enter` — submits.
 
 An embedded `\n` in `payload` is a **soft** newline within the single keystroke
@@ -1930,18 +1931,24 @@ Each method's herdr realization:
   pipe.
 - **`send_inline_preview(...) -> bool`** — best-effort. `herdr pane send-keys
   <id> esc`, then `herdr pane send-text <id> "<2-line payload>"` (raw, no Enter —
-  the embedded newline is literal), then a single `herdr pane send-keys <id>
-  enter`, keeping the tmux contract of "one submit for the whole 2-line payload".
+  the embedded newline is literal), then a sleep of `_SUBMIT_DELAY` (`1.0`s),
+  then a single `herdr pane send-keys <id> enter`, keeping the tmux contract of
+  "one submit for the whole 2-line payload".
 - **`send_bash_command(*, target_pane_id, command)`** — `herdr pane run <id> "!
   <command>"`.
 - **`capture_pane(*, target_pane_id, lines=20) -> str`** — `herdr pane read <id>
   --source recent-unwrapped --lines <lines>`.
 
-**No `_SUBMIT_DELAY`.** herdr `pane run` submits text **and** Enter atomically, so
-the tmux 0.12 s literal-then-Enter delay has no herdr analog — the herdr backend
-omits it. The `esc_first` safeguard maps to a discrete `herdr pane send-keys
-<id> esc` before the payload on exactly the paths that use it today
-(`send_poll_trigger`, `send_inline_preview`).
+**`_SUBMIT_DELAY` (`1.0`s).** herdr `pane run` submits text **and** Enter
+atomically, so the run-based paths (`send_poll_trigger`, `send_wake_trigger`,
+`send_bash_command`, `send_exit`) carry no submit delay. `send_inline_preview`
+is the one herdr path built from a separate `pane send-text` + `pane send-keys
+enter` pair, and it sleeps `_SUBMIT_DELAY` between them: codex classifies the
+fast-injected payload as a paste and absorbs an Enter arriving within its
+post-paste suppression window, which would otherwise leave the preview stuck in
+the recipient's composer. The `esc_first` safeguard maps to a discrete `herdr
+pane send-keys <id> esc` before the payload on exactly the paths that use it
+today (`send_poll_trigger`, `send_inline_preview`).
 
 #### `AgentStateAware` capability (herdr only)
 

@@ -19,10 +19,13 @@ _PANE_GONE_MARKERS = ("can't find pane", "no such pane")
 
 
 # Sleep between literal-text ``send-keys -l`` and following ``send-keys Enter``
-# so the codex TUI's bracketed-paste finalises and opencode's slash-command
-# autocomplete popup settles before submit (applied unconditionally to keep
-# the helpers backend-agnostic).
-_SUBMIT_DELAY = 0.12
+# so the payload submits instead of the Enter being absorbed: codex classifies
+# the fast-typed payload as a paste and suppresses an Enter arriving within its
+# ~120ms post-paste window, and opencode's slash-command autocomplete popup
+# needs to settle before submit. 1.0s clears the codex window with margin for a
+# busy event loop reading the burst late (applied unconditionally to keep the
+# helpers backend-agnostic).
+_SUBMIT_DELAY = 1.0
 
 # Sleep after a leading ``send-keys Escape`` (the opt-in ``esc_first`` safeguard)
 # so the agent dismisses a pending permission-approval prompt and the pane

@@ -686,6 +686,31 @@ def test_send_inline_preview__esc_send_text_enter(monkeypatch, herdr_run):
     ]
 
 
+def test_send_inline_preview__submit_delay_between_send_text_and_enter(
+    monkeypatch, herdr_run
+):
+    """codex classifies the fast-injected payload as a paste and absorbs an
+    Enter arriving within its post-paste suppression window, leaving the
+    preview stuck in the composer. The submit delay between ``send-text`` and
+    ``enter`` clears that window: Esc settles first, then the submit delay."""
+    captured, _set_returns = herdr_run
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/herdr")
+    sleeps: list[float] = []
+    monkeypatch.setattr("time.sleep", lambda secs: sleeps.append(secs))
+    result = _herdr.send_inline_preview(
+        target_pane_id="wG:p1",
+        task_id=7,
+        sender_id=42,
+        ts="2026-07-06T00:00:00+00:00",
+        text="hello there",
+    )
+    assert result is True
+    assert sleeps == [
+        multiplexer_herdr._ESC_SETTLE_DELAY,
+        multiplexer_herdr._SUBMIT_DELAY,
+    ]
+
+
 def test_send_inline_preview__sanitizes_body_newlines(monkeypatch, herdr_run):
     captured, _set_returns = herdr_run
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/herdr")
