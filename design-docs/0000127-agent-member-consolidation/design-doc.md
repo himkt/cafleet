@@ -92,7 +92,7 @@ Chain guard: `tests/db/test_alembic_smoke.py::test_single_initial_migration_revi
 | `_shared.derive_agent_kind` / `agent_is_active_in_fleet` | `derive_member_kind` / `member_is_active_in_fleet` |
 | `monitor.enroll_agent` / `delete_agent_monitor_row` | `enroll_member` / `delete_member_monitor_row` |
 | `agent_id` params/keys throughout `broker/` (messaging, queries, monitor), `output/`, `webui/` | `member_id` |
-| `multiplexer/`: the keystroked poll payload `cafleet message poll --fleet-id {fleet_id} --agent-id {agent_id}` (`tmux.py`, `herdr.py`) and the `send_poll_trigger` / `send_monitor_report` signatures (`agent_id`, `due_agents` rows, `director_agent_id` — `base.py`) | `--member-id` in the payload; `member_id` / `due_members` / `director_member_id` |
+| `multiplexer/`: the keystroked poll payload `cafleet message poll --fleet-id {fleet_id} --agent-id {agent_id}` (`tmux.py`, `herdr.py`) and the `send_poll_trigger` / `send_wake_trigger` signatures (`agent_id`, `due_agents` rows, `director_agent_id` — `base.py`) | `--member-id` in the payload; `member_id` / `due_members` / `director_member_id` |
 | `monitor/loop.py`: `fleet["director_agent_id"]`, `target["agent_id"]`, `_last_agent_status` | `fleet["director_member_id"]`, `target["member_id"]`, `_last_member_status` |
 | `output.format_agent` | `output.format_member_detail` (the existing `format_member` — the `member create` result renderer — keeps its name) |
 
@@ -199,7 +199,7 @@ Per the removal rule: after this lands, the repository reads as if the registry 
 | `docs/reference/coding-agents/*`, `docs/api/coding-agent.md` | registry tokens inside spawn examples only (boundary-straddlers) |
 | `skills/cafleet/` | `SKILL.md`, `roles/*` , `reference/director.md` (spawn skeleton), `reference/cli.md`, `exec-routing.md`, `supervision.md`, `broadcast.md`, `recovery.md`, `output-flags.md`, coding-agent overlays' registry tokens |
 | `skills/cafleet-design-doc/`, `skills/cafleet-research/`, `skills/skill-author/` | spawn prompts, poll/send/ack command shapes, identity-line conventions |
-| `.claude/rules/` | `bash-tool.md` (command shapes, `<my-agent-id>` placeholders → `<my-member-id>`), `commands.md` ("fleet-id / member-id CLI design" phrasing), `database-migrations.md` (re-point its chain-guard reference to the renamed 2-revision test) |
+| `.claude/rules/` | `bash-tool.md` (command shapes, `<my-agent-id>` placeholders → `<my-member-id>`), `commands.md` ("fleet-id / member-id CLI design" phrasing), `database-migrations.md` (re-point its chain-guard reference to the single-revision chain guard over the fresh `0001`) |
 
 
 

@@ -41,7 +41,7 @@ The Director is the root member of a CAFleet fleet — bootstrapped automaticall
 ```
 User
  +-- Director (main Claude -- cafleet fleet create, cafleet member create, drives Q&A, writes annotations)
-      +-- Analyzer (member agent -- spawned in tmux pane; returns question list; terminated)
+      +-- Analyzer (member -- spawned in tmux pane; returns question list; terminated)
 ```
 
 ## Prerequisites

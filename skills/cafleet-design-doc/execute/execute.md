@@ -20,10 +20,10 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
 | **Director** | Main Claude | Register with CAFleet, spawn members via `cafleet member create`, validate doc, assign steps, review tests against design doc, review implementation code for quality and compliance, commit after each phase, escalation arbitration, orchestrate TDD cycle | Write code, write tests | [roles/director.md](roles/director.md) |
-| **Programmer** | Member agent | Implement code to pass tests, run tests, report results via `cafleet message send`, escalate test defects to Director, update design doc checkboxes and Progress counter | Write or modify tests, commit code, communicate with user directly | [roles/programmer.md](roles/programmer.md) |
-| **Tester** | Member agent | Read design doc, write unit tests per step, fix tests based on Director feedback, report to Director via `cafleet message send` | Write implementation code, commit code, communicate with user directly | [roles/tester.md](roles/tester.md) |
-| **Verifier** | Member agent (optional) | E2E/integration testing, tool discovery, evidence collection (screenshots, logs, output), failure reporting with suggested fixes | Write code, write tests, commit, communicate with user directly | [roles/verifier.md](roles/verifier.md) |
-| **Reviewer** | Member agent (spawned at Step 5 only) | Fresh post-implementation review: read the design doc and the full branch diff, run read-only mise checks to verify claims, write `COMMENT(reviewer): [TAG]` markers, signal `complete (doc) — N issues` / `approved (doc)` | Write or modify implementation or test code, commit, communicate with user directly | [roles/reviewer.md](roles/reviewer.md) |
+| **Programmer** | Member | Implement code to pass tests, run tests, report results via `cafleet message send`, escalate test defects to Director, update design doc checkboxes and Progress counter | Write or modify tests, commit code, communicate with user directly | [roles/programmer.md](roles/programmer.md) |
+| **Tester** | Member | Read design doc, write unit tests per step, fix tests based on Director feedback, report to Director via `cafleet message send` | Write implementation code, commit code, communicate with user directly | [roles/tester.md](roles/tester.md) |
+| **Verifier** | Member (optional) | E2E/integration testing, tool discovery, evidence collection (screenshots, logs, output), failure reporting with suggested fixes | Write code, write tests, commit, communicate with user directly | [roles/verifier.md](roles/verifier.md) |
+| **Reviewer** | Member (spawned at Step 5 only) | Fresh post-implementation review: read the design doc and the full branch diff, run read-only mise checks to verify claims, write `COMMENT(reviewer): [TAG]` markers, signal `complete (doc) — N issues` / `approved (doc)` | Write or modify implementation or test code, commit, communicate with user directly | [roles/reviewer.md](roles/reviewer.md) |
 
 ## Additional resources
 
@@ -47,10 +47,10 @@ The Director is the root member of a CAFleet fleet — bootstrapped automaticall
 ```
 User
  +-- Director (main Claude -- cafleet fleet create, cafleet member create, orchestrates TDD cycle)
-      +-- Programmer (member agent -- implements code to pass tests)
-      +-- Tester (member agent -- writes unit tests per step)
-      +-- Verifier (member agent, optional -- E2E/integration testing)
-      +-- Reviewer (member agent, spawned at Step 5 only -- fresh post-implementation review)
+      +-- Programmer (member -- implements code to pass tests)
+      +-- Tester (member -- writes unit tests per step)
+      +-- Verifier (member, optional -- E2E/integration testing)
+      +-- Reviewer (member, spawned at Step 5 only -- fresh post-implementation review)
 ```
 
 ## Prerequisites

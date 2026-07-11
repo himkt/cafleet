@@ -33,7 +33,7 @@ Angle-bracket tokens (`<fleet-id>`, `<my-member-id>`, `<director-member-id>`) ar
 
 You do NOT speak to the user directly; all feedback goes through the Director via the broker. Poll your inbox, `cafleet message ack` each assignment, then read the doc and report via `cafleet message send` — command shapes in the `cafleet` skill core and your spawn prompt.
 
-**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md): single-line `<verb> (<pointer>)` body, findings in inline `COMMENT(reviewer): [TAG] <body>` markers at the affected section (never in the cafleet body). Report `complete (doc) — N issues` after a review pass, or `approved (doc)` when all quality criteria are met (see § *Approval Signal*).
+**Coordination Protocol**: Inter-member cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md): single-line `<verb> (<pointer>)` body, findings in inline `COMMENT(reviewer): [TAG] <body>` markers at the affected section (never in the cafleet body). Report `complete (doc) — N issues` after a review pass, or `approved (doc)` when all quality criteria are met (see § *Approval Signal*).
 
 ## Review Process
 

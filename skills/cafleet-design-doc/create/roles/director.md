@@ -41,7 +41,7 @@ Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks 
 
 All Director-to-member messages use the CAFleet message broker. The Director stores each member's `member_id` at spawn time (from the `cafleet --json member create` response) and substitutes it literally for `<member-id>` as the `--to-member-id` target.
 
-**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema — single-line `<verb> (<pointer>)` poke; substantive content (Reviewer findings, Drafter spec questions, Director arbitration) in inline `COMMENT(role)` markers in the design document. Canonical mechanics + the Step-2 clarification exemption (your "User answers: …" relay rides free-form before the doc exists): [../../reference/coordination.md](../../reference/coordination.md).
+**Coordination Protocol**: Inter-member cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema — single-line `<verb> (<pointer>)` poke; substantive content (Reviewer findings, Drafter spec questions, Director arbitration) in inline `COMMENT(role)` markers in the design document. Canonical mechanics + the Step-2 clarification exemption (your "User answers: …" relay rides free-form before the doc exists): [../../reference/coordination.md](../../reference/coordination.md).
 
 **Sending a task to a member:**
 ```bash

@@ -33,7 +33,7 @@ Angle-bracket tokens (`<fleet-id>`, `<my-member-id>`, `<director-member-id>`) ar
 
 You do NOT speak to the user directly; all findings go through the Director via the broker. Poll your inbox, `cafleet message ack` each assignment, then review and report via `cafleet message send` — command shapes in the `cafleet` skill core and your spawn prompt.
 
-**Coordination Protocol**: Inter-agent cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md): single-line `<verb> (<pointer>)` body, findings in inline `COMMENT(reviewer): [TAG] <body>` markers at the affected pointer (never in the cafleet body).
+**Coordination Protocol**: Inter-member cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md): single-line `<verb> (<pointer>)` body, findings in inline `COMMENT(reviewer): [TAG] <body>` markers at the affected pointer (never in the cafleet body).
 
 **Do NOT:** write or modify implementation or test code — your only edits are `COMMENT(reviewer)` markers; commit or run git write operations; communicate with the user directly; spawn subagents.
 
