@@ -178,7 +178,7 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 > **Clarification Exemption**: Director-to-Drafter messages during this step are exempt from the verb + pointer schema documented in [the Coordination Protocol section above](#coordination-protocol). At clarification time the design doc does not yet exist (the Drafter is forbidden from creating any file before clarifying), so there is no in-doc target for `COMMENT(claude)` markers — the user-answer relay rides as a free-form multi-line cafleet body. From Step 3 onward (once the initial draft exists) every message falls back under the schema.
 
 1. Wait for the Drafter's clarifying questions. The broker's inline-preview keystroke on the Drafter's `message send`, and your own periodic `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id>`, will surface the Drafter's message once it arrives.
-2. `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --task-id <task-id>` each received message after reading it.
+2. `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --message-id <message-id>` each received message after reading it.
 3. Relay the questions to the user via {decision_surface}. If {decision_surface} caps how many questions it shows at once (your overlay states the cap) and the number exceeds it, split them into multiple sequential calls to relay all questions without omission.
 4. Relay the user's answers back to the Drafter (free-form, per the Clarification Exemption above):
    ```bash

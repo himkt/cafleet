@@ -30,7 +30,7 @@ Before your first action other than these Reads, Read every file in the **Load-b
 |------|------------------|------------------------------|
 | [`reference/exec-routing.md`](reference/exec-routing.md) | route a Bash-denied command to the Director | the dispatch shape — you stall or fabricate command output |
 | [`reference/recovery.md`](reference/recovery.md) | tear down or recover a member / fleet (also the Shutdown Protocol) | the first-out teardown order — you orphan panes / leak the fleet |
-| [`reference/cli.md`](reference/cli.md) § *Broadcast* | broadcast to the fleet or thread via `origin_task_id` | the broadcast send/ack semantics — your fan-out misfires or double-acks |
+| [`reference/cli.md`](reference/cli.md) § *Broadcast* | broadcast to the fleet or thread via `origin_message_id` | the broadcast send/ack semantics — your fan-out misfires or double-acks |
 
 **On-demand — Read only when you need that capability:**
 
@@ -105,9 +105,9 @@ In every example, substitute the literal integer ids printed by `cafleet fleet c
 - `<my-member-id>` — your own id, read from the literal `YOUR MEMBER ID:` line in your spawn prompt
 - `<director-member-id>` — the Director's id (in your spawn prompt if you are a member)
 - `<target-member-id>` — the recipient of a unicast message
-- `<task-id>` — the task id printed by `message poll` / `message send`
+- `<message-id>` — the message id printed by `message poll` / `message send`
 
-Every id input (`--fleet-id`, `--member-id`, `--from-member-id`, `--to-member-id`, `--task-id`) is a DB-assigned integer (typically 1–4 digits), passed in full — no prefix resolution. A non-integer fails with Click's standard not-a-valid-integer error (exit 2).
+Every id input (`--fleet-id`, `--member-id`, `--from-member-id`, `--to-member-id`, `--message-id`) is a DB-assigned integer (typically 1–4 digits), passed in full — no prefix resolution. A non-integer fails with Click's standard not-a-valid-integer error (exit 2).
 
 ## Soliciting user reactions
 
@@ -132,8 +132,8 @@ cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id> [--full]
 
 ## Acknowledge (ACK)
 
-Moves a task from `input_required` to `completed`. `--task-id` required.
+Moves a message from `input_required` to `completed`. `--message-id` required.
 
 ```bash
-cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --message-id <message-id>
 ```

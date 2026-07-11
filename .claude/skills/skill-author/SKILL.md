@@ -324,10 +324,10 @@ The phrasing deliberately omits parentheses so a parser does not misinterpret it
 After acting on a polled message, the recipient MUST `cafleet message ack` it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle, polluting the recipient's context with stale work.
 
 ```bash
-cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --message-id <message-id>
 ```
 
-The `<task-id>` is the full id returned by `cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id> --full --json`. The default text-mode poll output truncates the body; pass `--full` when you need the untruncated envelope.
+The `<message-id>` is the full id returned by `cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id> --full --json`. The default text-mode poll output truncates the body; pass `--full` when you need the untruncated envelope.
 
 ---
 

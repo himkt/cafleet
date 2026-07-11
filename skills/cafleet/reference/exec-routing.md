@@ -31,7 +31,7 @@ On a member's denial-fallback request: read it (`cafleet message poll` / `messag
 ```bash
 cafleet member exec --fleet-id <fleet-id> --member-id <member-id> "<command>"
 cafleet member ping --fleet-id <fleet-id> --member-id <member-id>
-cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --message-id <message-id>
 ```
 
 The `member ping` is required — `member exec` only stages the bang output; the ping advances the member's turn so it consumes the output (see [`reference/director.md`](director.md#member-exec) § Required follow-up).

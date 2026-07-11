@@ -38,7 +38,7 @@ Returns non-soft-deleted fleets (`deleted_at IS NULL`) with member counts, order
 
 ### GET /api/members — List Members
 
-Returns the selected fleet's roster via `list_roster(include_task_holders=True)`: every active registry entry plus deregistered members that still own tasks (so their message history stays inspectable). Every row carries a `kind` discriminator so the frontend can locate the root Director without matching on its name.
+Returns the selected fleet's roster via `list_roster(include_message_holders=True)`: every active registry entry plus deregistered members that still own messages (so their message history stays inspectable). Every row carries a `kind` discriminator so the frontend can locate the root Director without matching on its name.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -175,7 +175,7 @@ member is not in the fleet or not enrolled. 400 for a missing or non-integer
 
 ### GET /api/members/{member_id}/inbox — Inbox Messages
 
-Returns messages received by the member (`context_id = member_id`), excluding `broadcast_summary` type tasks. Ordered newest first. Consumed by the member detail view's **Inbox** tab in the admin WebUI.
+Returns messages received by the member (`owner_member_id = member_id`), excluding `broadcast_summary` type messages. Ordered newest first. Consumed by the member detail view's **Inbox** tab in the admin WebUI.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -185,7 +185,7 @@ Returns messages received by the member (`context_id = member_id`), excluding `b
 {
   "messages": [
     {
-      "task_id": 42,
+      "message_id": 42,
       "from_member_id": 4,
       "from_member_name": "Member A",
       "to_member_id": 5,
@@ -194,16 +194,16 @@ Returns messages received by the member (`context_id = member_id`), excluding `b
       "status": "input_required",
       "created_at": "2026-03-29T10:00:00+00:00",
       "status_timestamp": "2026-03-29T10:00:00+00:00",
-      "origin_task_id": null,
+      "origin_message_id": null,
       "body": "Hello, Member B!"
     }
   ]
 }
 ```
 
-All message endpoints (inbox, sent, timeline) share the same row formatter, so the field set is identical to `GET /api/timeline` — including `status_timestamp` and `origin_task_id` (see the timeline section below for their semantics).
+All message endpoints (inbox, sent, timeline) share the same row formatter, so the field set is identical to `GET /api/timeline` — including `status_timestamp` and `origin_message_id` (see the timeline section below for their semantics).
 
-The `body` field is the task's `text` column.
+The `body` field is the message's `text` column.
 
 **Row cap**: none — the endpoint returns every matching row. The member detail view truncates client-side to the 200 most recent rows per tab.
 
@@ -211,7 +211,7 @@ The `body` field is the task's `text` column.
 
 ### GET /api/members/{member_id}/sent — Sent Messages
 
-Returns messages sent by the member (single SQL query against `tasks` filtered by `from_member_id` and ordered by `status_timestamp DESC`, served by `idx_tasks_from_member_status_ts`), excluding `broadcast_summary` type tasks. Ordered newest first. Consumed by the member detail view's **Sent** tab in the admin WebUI.
+Returns messages sent by the member (single SQL query against `messages` filtered by `from_member_id` and ordered by `status_timestamp DESC`, served by `idx_messages_from_member_status_ts`), excluding `broadcast_summary` type messages. Ordered newest first. Consumed by the member detail view's **Sent** tab in the admin WebUI.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -219,11 +219,11 @@ Same response format (and row-cap behavior) as inbox.
 
 ### GET /api/timeline — Unified Fleet Timeline
 
-Returns up to 200 most-recent non-`broadcast_summary` tasks for the selected fleet, newest first. Consumed by the Discord-style admin dashboard, which groups delivery rows sharing an `origin_task_id` into a single broadcast entry client-side.
+Returns up to 200 most-recent non-`broadcast_summary` messages for the selected fleet, newest first. Consumed by the Discord-style admin dashboard, which groups delivery rows sharing an `origin_message_id` into a single broadcast entry client-side.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
-Fleet scoping is reached through the `tasks.from_member_id → members.member_id → members.fleet_id` join. Only tasks whose **sender** belongs to the header fleet are returned; cross-fleet tasks are invisible.
+Fleet scoping is reached through the `messages.from_member_id → members.member_id → members.fleet_id` join. Only messages whose **sender** belongs to the header fleet are returned; cross-fleet messages are invisible.
 
 **Response** (200 OK):
 
@@ -231,7 +231,7 @@ Fleet scoping is reached through the `tasks.from_member_id → members.member_id
 {
   "messages": [
     {
-      "task_id": 50,
+      "message_id": 50,
       "from_member_id": 4,
       "from_member_name": "Claude-A",
       "to_member_id": 5,
@@ -240,7 +240,7 @@ Fleet scoping is reached through the `tasks.from_member_id → members.member_id
       "status": "input_required",
       "created_at": "2026-04-11T10:00:00+00:00",
       "status_timestamp": "2026-04-11T10:00:00+00:00",
-      "origin_task_id": null,
+      "origin_message_id": null,
       "body": "Please review PR #42"
     }
   ]
@@ -253,16 +253,16 @@ Fleet scoping is reached through the `tasks.from_member_id → members.member_id
 
 **Exclusions**: Rows with `type == "broadcast_summary"` are filtered out of the response. The summary row is not needed for the UI; the grouping convention below lets the frontend reconstruct broadcasts from their delivery rows alone.
 
-**Broadcast grouping**: Every row carries an `origin_task_id` field:
+**Broadcast grouping**: Every row carries an `origin_message_id` field:
 
-| Case | `origin_task_id` |
+| Case | `origin_message_id` |
 |---|---|
 | Unicast delivery | `null` |
-| Broadcast delivery | The broadcast's summary task id (shared across all N delivery rows in the same broadcast) |
+| Broadcast delivery | The broadcast's summary message id (shared across all N delivery rows in the same broadcast) |
 
-The client groups rows by `origin_task_id` (non-null rows sharing a value form one broadcast entry; null rows are standalone unicast entries). Each broadcast entry's sort key is the `MIN(created_at)` of its rows — stable, so a broadcast never drifts when a lagging recipient ACKs.
+The client groups rows by `origin_message_id` (non-null rows sharing a value form one broadcast entry; null rows are standalone unicast entries). Each broadcast entry's sort key is the `MIN(created_at)` of its rows — stable, so a broadcast never drifts when a lagging recipient ACKs.
 
-**ACK timestamps**: Per-recipient ACK time is read from the `status_timestamp` of a `completed` delivery row. Delivery tasks make exactly one state transition over their lifetime (`input_required → completed` on ACK), so for `status == "completed"` rows `status_timestamp` IS the ACK moment. If this invariant is ever broken by a future change, the timeline will silently show wrong ACK times until a dedicated `acknowledged_at` column is added. See [Data model](data-model.md) § ACK timestamp inference.
+**ACK timestamps**: Per-recipient ACK time is read from the `status_timestamp` of a `completed` delivery row. Delivery messages make exactly one state transition over their lifetime (`input_required → completed` on ACK), so for `status == "completed"` rows `status_timestamp` IS the ACK moment. If this invariant is ever broken by a future change, the timeline will silently show wrong ACK times until a dedicated `acknowledged_at` column is added. See [Data model](data-model.md) § ACK timestamp inference.
 
 ### POST /api/messages/send — Send Message
 
@@ -286,7 +286,7 @@ X-Fleet-Id: <fleet_id>
 
 **Unicast** (`to_member_id` is an integer): the server verifies both the sender and the destination belong to the caller's fleet and that the destination is active.
 
-**Broadcast** (`to_member_id == "*"`): the server skips destination validation (no specific recipient to verify) and fans out to every active member in the fleet except the sender, plus a summary task. The sender is still required to be active and in the caller's fleet. The response's `task_id` is the summary task's id.
+**Broadcast** (`to_member_id == "*"`): the server skips destination validation (no specific recipient to verify) and fans out to every active member in the fleet except the sender, plus a summary message. The sender is still required to be active and in the caller's fleet. The response's `message_id` is the summary message's id.
 
 **Sender identity**: The Admin WebUI always submits `from_member_id = director.member_id` (the fleet's root Director). The endpoint itself is sender-agnostic — it accepts any active member in the fleet — but no UI path lets the operator pick a different sender.
 
@@ -294,7 +294,7 @@ X-Fleet-Id: <fleet_id>
 
 ```json
 {
-  "task_id": 42,
+  "message_id": 42,
   "status": "input_required"
 }
 ```

@@ -129,7 +129,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | role-file | `roles/presentation.md` |
 | cafleet-load purpose + EXTRA SKILL LOADS | `for the broker primitives and bash-via-Director routing`; additionally Read the `../reference/slidev.md` page (Slidev authoring layouts + rules) + `../reference/visualization.md` (if the report includes data that would render better as a chart) |
 | CONTEXT LINES | `TASK: Create a Slidev presentation from the approved research report.` / `REPORT: [INSERT <folder>/report.md]` / `RESEARCHER FILES: [INSERT <folder>/[0-9][0-9]-research-*.md]` / `LANGUAGE: [INSERT language detected from report.md]` / `FIGURE BASE: [INSERT <folder>]` (substitute literally for the FIGURE_BASE / BASE placeholders in `../reference/visualization.md`) / `OUTPUT: [INSERT <folder>/slide.md]` |
-| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `<task-id>` and `cafleet message ack … --task-id <task-id>`, then act) |
+| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `<message-id>` and `cafleet message ack … --message-id <message-id>`, then act) |
 | start cue (verbatim) | `When complete, send the file path to the Director via cafleet message send.` |
 
 Render the prompt to `${BASE}/.prompts/presentation-<UTC-compact>.md` per the 1c two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
@@ -183,7 +183,7 @@ cafleet message send --fleet-id [fleet-id] --from-member-id [director-member-id]
   --text "transcript revisions: [FLOW] ... / [TIMING] ... / ..."
 ```
 
-Each polled inbound message MUST be `ack`ed via `cafleet message ack --fleet-id [fleet-id] --member-id [director-member-id] --task-id <task-id>` after acting on it.
+Each polled inbound message MUST be `ack`ed via `cafleet message ack --fleet-id [fleet-id] --member-id [director-member-id] --message-id <message-id>` after acting on it.
 
 Once the slide deck is finalized, send the finalized slide structure to the Transcript member for 1:1 realignment.
 

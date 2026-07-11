@@ -34,7 +34,7 @@ subcommand rejects it with `No such option`.
 | `message poll` | Fetch un-acked incoming messages | yes | `--member-id` | [message poll](#message-poll) |
 | `message ack` | Acknowledge a received message | yes | `--member-id` | [message ack](#message-ack) |
 | `message cancel` | Retract an un-acked sent message | yes | `--member-id` | [message cancel](#message-cancel) |
-| `message show` | Show one task | yes | `--member-id` | [message show](#message-show) |
+| `message show` | Show one message | yes | `--member-id` | [message show](#message-show) |
 | `member create` | Register a member and spawn its coding-agent pane | yes | none (Director auto-resolved) | [member create](#member-create) |
 | `member delete` | Tear down a member's pane (when one exists) and deregister it | yes | `--member-id` | [member delete](#member-delete) |
 | `member show` | Show one member's detail | yes | `--member-id` | [member show](#member-show) |
@@ -75,8 +75,8 @@ it:
 
 | Subcommand | Default behavior | `--full` behavior |
 |---|---|---|
-| `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…`; compact rendered envelope. | Untruncated `text`; the full typed-column task dict in `--json`, the verbose labeled block in text mode (see [Message envelope](./message-envelope.md#text-mode)). |
-| `message broadcast` | One-line summary (`broadcast id=<id> recipients=<N> delivered=<k>`). | The single `broadcast_summary` task rendered as the full verbose envelope. Never per-recipient envelopes or a `recipient_ids` list. |
+| `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…`; compact rendered envelope. | Untruncated `text`; the full typed-column message dict in `--json`, the verbose labeled block in text mode (see [Message envelope](./message-envelope.md#text-mode)). |
+| `message broadcast` | One-line summary (`broadcast id=<id> recipients=<N> delivered=<k>`). | The single `broadcast_summary` message rendered as the full verbose envelope. Never per-recipient envelopes or a `recipient_ids` list. |
 | `member show` | Compact one-line row `<member_id> <name> <status>`. | Labeled block with `kind`, `skills`, and the placement sub-block. Text mode only — JSON is the unprojected broker dict regardless. |
 | `member create` | One compact line: `<member_id> <name> backend=<coding_agent> pane=<pane_id>`. | The 6-line `Member registered and spawned.` block. |
 
@@ -126,7 +126,7 @@ strings, and matching also depends on the canonical flag order (see
 ## Member ID (`--member-id`) {#member-id}
 
 `--member-id` is a per-subcommand option typed `int` (as are
-`--from-member-id`, `--to-member-id`, and `--task-id`; each rejects a
+`--from-member-id`, `--to-member-id`, and `--message-id`; each rejects a
 non-integer with Click's standard invalid-integer error, exit 2). Ids are
 DB-assigned integers, typically 1–4 digits, pasted in full — there is no
 prefix resolution. `--member-id` always names **the member in question**: the
@@ -180,7 +180,7 @@ This applies to CLI emit sites only — FastAPI `/api/*` responses
 ([webui-api.md](./webui-api.md)) and `member capture` content are untouched.
 A `--quiet` flag on `cafleet message send`, `cafleet message ack`, and
 `cafleet member ping` suppresses the normal output and prints only the bare
-`task_id` (the target member id for `ping`), for shell capture.
+`message_id` (the target member id for `ping`), for shell capture.
 
 ## `cafleet setup` — Onboarding and Schema Management {#cafleet-setup}
 
@@ -215,11 +215,14 @@ Upgraded from <old_rev> to <head>.                           # behind head
 Already at head (<head>); nothing to do.                     # at head
 ```
 
-It refuses two states, exiting 1:
+It refuses three states, exiting 1 — the third fires when a database stamped
+at head (on a non-empty chain) has no `messages` table, i.e. a pre-rename (v4)
+database reached via `CAFLEET_DATABASE_URL`:
 
 ```
 Error: DB has existing tables but no alembic_version. Run `alembic stamp head` manually if you are sure the schema matches.
 Error: DB schema is at revision <rev> which is unknown to this version of cafleet. Refusing to downgrade automatically.
+Error: DB at <url> is at head (<head>) but has no 'messages' table — it is a pre-rename (v4) database. Point CAFLEET_DATABASE_URL at a fresh database file (default: cafleet_v5.db).
 ```
 
 `setup db` never records `skill_installs` rows (schema only).
@@ -323,7 +326,7 @@ when active).
 
 Soft-deletes the fleet in one transaction: stamps `deleted_at`, deregisters
 every active member (root Director included), and removes their placement rows;
-tasks are untouched. Prints `Deleted fleet <fleet_id>. Deregistered N members.`
+messages are untouched. Prints `Deleted fleet <fleet_id>. Deregistered N members.`
 and is idempotent (`Deregistered 0 members.` on re-run). Unknown `fleet_id`
 exits 1 with `Error: fleet 'X' not found.`. Member panes are **not** closed —
 run `cafleet member delete` per member first for a clean teardown.
@@ -385,14 +388,14 @@ The envelope schema is canonical in
 [Message envelope](./message-envelope.md); truncation and `--full` are
 canonical [above](#message-body-truncation). Text output is the subcommand's
 acknowledgement line (`Message sent.` / `Message acknowledged.` /
-`Task canceled.`) followed by the compact rendered envelope; `message show`
+`Message canceled.`) followed by the compact rendered envelope; `message show`
 prints the envelope alone. Behavior detail:
 [`send_message`](../api/broker.md#cafleet.broker.send_message),
 [`broadcast_message`](../api/broker.md#cafleet.broker.broadcast_message),
-[`poll_tasks`](../api/broker.md#cafleet.broker.poll_tasks),
-[`ack_task`](../api/broker.md#cafleet.broker.ack_task),
-[`cancel_task`](../api/broker.md#cafleet.broker.cancel_task),
-[`get_task`](../api/broker.md#cafleet.broker.get_task).
+[`poll_messages`](../api/broker.md#cafleet.broker.poll_messages),
+[`ack_message`](../api/broker.md#cafleet.broker.ack_message),
+[`cancel_message`](../api/broker.md#cafleet.broker.cancel_message),
+[`get_message`](../api/broker.md#cafleet.broker.get_message).
 
 ### `message send`
 
@@ -412,7 +415,7 @@ prints the envelope alone. Behavior detail:
 | `--text` / `--text-file` | one of | Message body, as on `message send`. |
 | `--full` | no | See [`--full` semantics](#full-semantics). |
 
-Default text output is `broadcast id=<task_id> recipients=<N> delivered=<k>`,
+Default text output is `broadcast id=<message_id> recipients=<N> delivered=<k>`,
 where `k` counts the best-effort inline previews that landed. `--json` carries
 both `recipients` and `delivered`.
 
@@ -431,7 +434,7 @@ an empty inbox prints `No messages found.`.
 | Flag | Required | Notes |
 |---|---|---|
 | `--member-id` | yes | Recipient acknowledging the message (recipient-only). |
-| `--task-id` | yes | Task to acknowledge. |
+| `--message-id` | yes | Message to acknowledge. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
 
 ### `message cancel`
@@ -439,7 +442,7 @@ an empty inbox prints `No messages found.`.
 | Flag | Required | Notes |
 |---|---|---|
 | `--member-id` | yes | Sender retracting the message (sender-only). |
-| `--task-id` | yes | Task to cancel. |
+| `--message-id` | yes | Message to cancel. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
 
 ### `message show`
@@ -447,7 +450,7 @@ an empty inbox prints `No messages found.`.
 | Flag | Required | Notes |
 |---|---|---|
 | `--member-id` | yes | The acting member (fleet-membership gate). |
-| `--task-id` | yes | Task to fetch. |
+| `--message-id` | yes | Message to fetch. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
 
 ## `cafleet member` — Member Lifecycle + Pane Interaction {#cafleet-member}
@@ -566,10 +569,10 @@ Text output renders one row per member with `member_id`, `name`, `kind`
 (`director` / `monitor` / `member`), `backend`, `pane_id`, and `idle` columns.
 A placementless row renders `-` in its placement cells (`backend`, `pane_id`);
 a placed row whose pane id is not yet patched renders `(pending)` in
-`pane_id`. `idle` is the wall-time since the member's most recent task
+`pane_id`. `idle` is the wall-time since the member's most recent message
 activity — the latest of `last_sent` (most recent outgoing message) and
 `last_recv` (most recent delivery), broadcast summaries excluded — humanized
-as `Ns` / `Nm` / `Nh`, `-` when the member has no task activity.
+as `Ns` / `Nm` / `Nh`, `-` when the member has no message activity.
 
 `--json` returns one dict per row with `member_id`, `name`, `kind`,
 `placement` (the placement sub-dict, `null` for a placementless row), and the

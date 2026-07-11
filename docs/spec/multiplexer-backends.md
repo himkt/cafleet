@@ -87,7 +87,7 @@ preview into the recipient's pane immediately after persisting a message, so
 the recipient's coding agent consumes it as a fresh user-turn input:
 
 ```text
-[cafleet msg <task_id> from <sender_id> <ts>]
+[cafleet msg <message_id> from <sender_id> <ts>]
 <text-truncated-to-CAFLEET_MAX_TEXT_LEN>
 ```
 
@@ -107,7 +107,7 @@ sequenceDiagram
     participant Recipient
 
     Sender->>Broker: cafleet message send --to-member-id <recipient-id> --text <body>
-    Broker->>DB: INSERT tasks (status=input_required)
+    Broker->>DB: INSERT messages (status=input_required)
     Broker->>DB: SELECT placement.mux_pane_id
     DB-->>Broker: pane_id
     Broker->>Pane: keystroke inline preview
@@ -117,7 +117,7 @@ sequenceDiagram
 
 The recipient pane is resolved from `member_placements` by `member_id` alone,
 so Member → Director notifications work automatically. The recipient acks via
-`cafleet message ack --task-id <task_id>` once it has consumed the message.
+`cafleet message ack --message-id <message_id>` once it has consumed the message.
 Body truncation in the preview (`…` at `CAFLEET_MAX_TEXT_LEN` codepoints) is
 documented in [CLI options](cli-options.md#message-body-truncation).
 
