@@ -60,8 +60,8 @@ the `fleet create` and `member create` commands require one.
     1 director=2 admin=3
     ```
 
-    The line carries the fleet id (`1`), the root Director's agent id (`2`), and
-    the built-in Administrator's agent id (`3`). If it scrolls away, run
+    The line carries the fleet id (`1`), the root Director's member id (`2`), and
+    the built-in Administrator's member id (`3`). If it scrolls away, run
     `cafleet fleet list` — it re-prints the fleet id and the Director id (the
     `DIRECTOR` column).
 
@@ -71,7 +71,6 @@ the `fleet create` and `member create` commands require one.
 
     ```bash
     cafleet member create --fleet-id 1 \
-      --agent-id 2 \
       --name "demo-member" \
       --description "Demo member" \
       --text "You are demo-member. Reply hello when polled."
@@ -83,7 +82,6 @@ the `fleet create` and `member create` commands require one.
 
     ```bash
     cafleet member create --fleet-id 1 \
-      --agent-id 2 \
       --name "reviewer" \
       --description "Reviewer member" \
       --text "You are reviewer. Reply hello when polled."
@@ -93,7 +91,7 @@ the `fleet create` and `member create` commands require one.
     5 reviewer backend=claude pane=%8
     ```
 
-    List the fleet's agents — the new members' ids (`4` and `5`) appear
+    List the fleet's roster — the new members' ids (`4` and `5`) appear
     alongside the Director and the Administrator:
 
     ```bash
@@ -101,20 +99,20 @@ the `fleet create` and `member create` commands require one.
     ```
 
     ```
-    4 agents:
-      agent_id  name           status  kind           backend  session  window_id  pane_id  created_at
-      --------  -------------  ------  -------------  -------  -------  ---------  -------  --------------------
-      2         Director       active  director       claude   main     @3         %0       2026-04-15T10:00:00+00:00
-      3         Administrator  active  administrator  -        -        -          -        -
-      4         demo-member    active  member         claude   main     @3         %7       2026-04-15T10:01:00+00:00
-      5         reviewer       active  member         claude   main     @3         %8       2026-04-15T10:02:00+00:00
+    4 members:
+      member_id  name           status  kind           backend  session  window_id  pane_id  created_at
+      ---------  -------------  ------  -------------  -------  -------  ---------  -------  --------------------
+      2          Director       active  director       claude   main     @3         %0       2026-04-15T10:00:00+00:00
+      3          Administrator  active  administrator  -        -        -          -        -
+      4          demo-member    active  member         claude   main     @3         %7       2026-04-15T10:01:00+00:00
+      5          reviewer       active  member         claude   main     @3         %8       2026-04-15T10:02:00+00:00
     ```
 
     Send a message between the members — `demo-member` (`4`) messages
     `reviewer` (`5`):
 
     ```bash
-    cafleet message send --fleet-id 1 --agent-id 4 --to 5 --text "hi"
+    cafleet message send --fleet-id 1 --from-member-id 4 --to-member-id 5 --text "hi"
     ```
 
     ```
@@ -137,7 +135,7 @@ the `fleet create` and `member create` commands require one.
     ```
 
     ```
-    Deleted fleet 1. Deregistered 2 agents.
+    Deleted fleet 1. Deregistered 2 members.
     ```
 
 Where to go next:

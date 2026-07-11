@@ -11,8 +11,8 @@
 `--json` switches CLI output from text to JSON: compact single-line encoding (no whitespace; non-ASCII like the `…` suffix emitted as UTF-8), cheap to pipe into `jq` from a Director loop.
 
 ```bash
-cafleet --json message poll --fleet-id <fleet-id> --agent-id <m>
-cafleet --json message poll --fleet-id <fleet-id> --agent-id <m> --full
+cafleet --json message poll --fleet-id <fleet-id> --member-id <m>
+cafleet --json message poll --fleet-id <fleet-id> --member-id <m> --full
 ```
 
 ## `CAFLEET_MAX_TEXT_LEN`

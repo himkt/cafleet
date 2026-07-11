@@ -42,13 +42,14 @@ optional capability Protocol, `AgentStateAware`, that only the herdr backend
 implements — the base `Multiplexer` Protocol stays clean and tmux implements
 nothing new.
 
-On the herdr backend the monitor loop point-reads each watched agent's native
-status per tick and flags it due when the status transitions into `done` — the
-sole wake-on-status state (`_WAKE_ON_STATUS = ("done",)`) — in addition to the
-interval and stall-check triggers. A transition into `blocked` is recorded but
-never flags a wake: a blocked agent is awaiting a user answer and must not be
-woken about. On the tmux backend the capability is absent, so agents come due
-by interval and stall-check only. No DB column backs the native status; the
+On the herdr backend the monitor loop point-reads each watched member's native
+agent status per tick and flags it due when the status transitions into `done`
+— the sole wake-on-status state (`_WAKE_ON_STATUS = ("done",)`) — in addition
+to the interval and stall-check triggers. A transition into `blocked` is
+recorded but never flags a wake: a blocked member is awaiting a user answer and
+must not be woken about. On the tmux backend the capability is absent, so
+members come due by interval and stall-check only. No DB column backs the
+native status; the
 last-seen state lives only in the running loop's memory. See
 [Monitoring](../concepts/monitoring.md).
 
@@ -89,7 +90,7 @@ sequenceDiagram
     participant Pane
     participant Recipient
 
-    Sender->>Broker: cafleet message send --to <recipient-id> --text <body>
+    Sender->>Broker: cafleet message send --to-member-id <recipient-id> --text <body>
     Broker->>DB: INSERT tasks (status=input_required)
     Broker->>DB: SELECT placement.mux_pane_id
     DB-->>Broker: pane_id
@@ -98,8 +99,8 @@ sequenceDiagram
     Recipient->>DB: message ack → status=completed
 ```
 
-The recipient pane is resolved from `agent_placements` by `agent_id` alone, so
-Member → Director notifications work automatically. The recipient acks via
+The recipient pane is resolved from `member_placements` by `member_id` alone,
+so Member → Director notifications work automatically. The recipient acks via
 `cafleet message ack --task-id <task_id>` once it has consumed the message.
 Body truncation in the preview (`…` at `CAFLEET_MAX_TEXT_LEN` codepoints) is
 documented in [CLI options](cli-options.md#message-body-truncation).

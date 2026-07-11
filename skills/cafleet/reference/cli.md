@@ -4,15 +4,15 @@ Read this file for the broker CLI surface beyond the core identity / poll / send
 
 ## Environment variables
 
-CLI env vars (all `CAFLEET_`-prefixed): `CAFLEET_DATABASE_URL` (SQLite URL; default `~/.local/share/cafleet/cafleet.db`, use an absolute path when overriding — `~` is not expanded), `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` (`cafleet server` defaults `127.0.0.1` / `8000`), `CAFLEET_MAX_TEXT_LEN` (body-truncation limit, default `200` — see [`reference/output-flags.md`](output-flags.md)).
+CLI env vars (all `CAFLEET_`-prefixed): `CAFLEET_DATABASE_URL` (SQLite URL; default `~/.local/share/cafleet/cafleet_v3.db`, use an absolute path when overriding — `~` is not expanded), `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` (`cafleet server` defaults `127.0.0.1` / `8000`), `CAFLEET_MAX_TEXT_LEN` (body-truncation limit, default `200` — see [`reference/output-flags.md`](output-flags.md)).
 
 ## Global Options
 
-`--json` and `--version` are top-level options (precede the subcommand name); `--agent-id` and `--fleet-id` are per-subcommand options (after the subcommand name). Putting one in the wrong position fails with `No such option`.
+`--json` and `--version` are top-level options (precede the subcommand name); `--member-id` and `--fleet-id` are per-subcommand options (after the subcommand name). Putting one in the wrong position fails with `No such option`.
 
 ```bash
 cafleet --json member list --fleet-id <fleet-id> --all
-cafleet --json message poll --fleet-id <fleet-id> --agent-id <my-agent-id>
+cafleet --json message poll --fleet-id <fleet-id> --member-id <my-member-id>
 ```
 
 `cafleet --version` prints `cafleet <version>` and exits 0 without `--fleet-id`.
@@ -26,7 +26,7 @@ Three backends — `claude` (default), `codex`, `opencode` — chosen per member
 Retract a sent message that has not been acknowledged yet (sender-only). `--task-id` required.
 
 ```bash
-cafleet message cancel --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
+cafleet message cancel --fleet-id <fleet-id> --member-id <my-member-id> --task-id <task-id>
 ```
 
 ## Show (Get Task)
@@ -34,19 +34,19 @@ cafleet message cancel --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id 
 Fetch one task by id. `--task-id` required; `--full` for the untruncated envelope.
 
 ```bash
-cafleet message show --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
+cafleet message show --fleet-id <fleet-id> --member-id <my-member-id> --task-id <task-id>
 ```
 
-## List Agents
+## List Members
 
-`member list --all` returns every active agent of the fleet (root Director, Administrator, monitoring member, ordinary members, placementless rows); `member show --member-id <target-agent-id>` fetches one. Both are registry reads — no tmux required.
+`member list --all` returns every active registry entry of the fleet (root Director, Administrator, monitoring member, ordinary members, placementless rows); `member show --member-id <target-member-id>` fetches one. Both are registry reads — no tmux required.
 
 ```bash
 cafleet member list --fleet-id <fleet-id> --all
-cafleet member show --fleet-id <fleet-id> --member-id <target-agent-id>
+cafleet member show --fleet-id <fleet-id> --member-id <target-member-id>
 ```
 
-`member list --all` renders the `N agents:` table with a `kind` column (`director` / `administrator` / `monitor` / `member`) and `-` placement cells for placementless rows. `member show` default output is the one-line row `<id> <name> <status>`; `--full` gives the labeled block (`description` truncated to 60 codepoints, `kind`, `skills`, placement sub-block) — text mode only. See [`reference/output-flags.md`](output-flags.md).
+`member list --all` renders the `N members:` table with a `kind` column (`director` / `administrator` / `monitor` / `member`) and `-` placement cells for placementless rows. `member show` default output is the one-line row `<id> <name> <status>`; `--full` gives the labeled block (`description` truncated to 60 codepoints, `kind`, `skills`, placement sub-block) — text mode only. See [`reference/output-flags.md`](output-flags.md).
 
 ## Doctor
 
@@ -59,10 +59,10 @@ cafleet --json doctor
 
 ## Deregister
 
-`cafleet member delete` is the single teardown for any agent: it closes the pane when one exists and soft-deletes the registration; a placementless or pending-placement target is a pure registry soft-delete (no tmux required).
+`cafleet member delete` is the single teardown for any member: it closes the pane when one exists and soft-deletes the registration; a placementless or pending-placement target is a pure registry soft-delete (no tmux required).
 
 ```bash
-cafleet member delete --fleet-id <fleet-id> --member-id <target-agent-id>
+cafleet member delete --fleet-id <fleet-id> --member-id <target-member-id>
 ```
 
 The root Director and the built-in Administrator cannot be deregistered (both exit 1 — see [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages)). Use `cafleet fleet delete --fleet-id <fleet-id>` for fleet teardown.
@@ -71,10 +71,10 @@ The root Director and the built-in Administrator cannot be deregistered (both ex
 
 ```bash
 cafleet fleet delete --fleet-id <fleet-id>
-# → Deleted fleet <fleet-id>. Deregistered N agents.
+# → Deleted fleet <fleet-id>. Deregistered N members.
 ```
 
-Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters every active agent, deletes placement rows; tasks preserved; idempotent). It does **not** close member panes — run `cafleet member delete` per member first, in the [`reference/recovery.md`](recovery.md) Shutdown order. Full behavior: [`cli-options.md`](../../../docs/spec/cli-options.md#fleet-delete).
+Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters every active member, deletes placement rows; tasks preserved; idempotent). It does **not** close member panes — run `cafleet member delete` per member first, in the [`reference/recovery.md`](recovery.md) Shutdown order. Full behavior: [`cli-options.md`](../../../docs/spec/cli-options.md#fleet-delete).
 
 ## Typical Workflow
 
@@ -83,7 +83,7 @@ Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters ever
 1. **Create a fleet** (if none exists):
    ```bash
    cafleet fleet create --name "my-project"
-   # text: line 1 <fleet-id>, line 2 <root-director-agent-id>; --json for the nested shape
+   # text: line 1 <fleet-id>, line 2 <root-director-member-id>; --json for the nested shape
    ```
    Must run inside a tmux or herdr session (else exits 1 with `Error: cafleet fleet create must be run inside a tmux or herdr session`, writes nothing).
 
@@ -95,4 +95,4 @@ Messages are tasks with three states: **input_required** (delivered, awaiting AC
 
 ## Error Handling
 
-Errors print to stderr and exit non-zero; `cafleet --json <cmd>` emits them machine-parseably. The most common: missing `--fleet-id` (`Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`, exit 1), missing `--agent-id` (`Error: Missing option '--agent-id'.`, exit 2), and `member *` commands outside a supported multiplexer session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages).
+Errors print to stderr and exit non-zero; `cafleet --json <cmd>` emits them machine-parseably. The most common: missing `--fleet-id` (`Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`, exit 1), missing `--member-id` (`Error: Missing option '--member-id'.`, exit 2), and `member *` commands outside a supported multiplexer session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages).

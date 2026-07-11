@@ -15,8 +15,8 @@ Most denials are a wrong flag, wrong path, or an unnecessary command — fix or 
 
 1. Send a plain CAFleet message to the Director:
    ```bash
-   cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
-     --to <director-agent-id> \
+   cafleet message send --fleet-id <fleet-id> --from-member-id <my-member-id> \
+     --to-member-id <director-member-id> \
      --text "Need to run: <command>. My harness denied it (<reason if known>)."
    ```
 2. **Wait** for the Director's `member exec` dispatch to land in your pane; the bang-shortcut output appears in your next-turn context.
@@ -31,7 +31,7 @@ On a member's denial-fallback request: read it (`cafleet message poll` / `messag
 ```bash
 cafleet member exec --fleet-id <fleet-id> --member-id <member-id> "<command>"
 cafleet member ping --fleet-id <fleet-id> --member-id <member-id>
-cafleet message ack --fleet-id <fleet-id> --agent-id <director-agent-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --task-id <task-id>
 ```
 
 The `member ping` is required — `member exec` only stages the bang output; the ping advances the member's turn so it consumes the output (see [`reference/director.md`](director.md#member-exec) § Required follow-up).

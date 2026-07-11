@@ -12,7 +12,7 @@ The WebUI does not require authentication. Fleet-scoped endpoints require an `X-
 
 | Header | Purpose |
 |---|---|
-| `X-Fleet-Id: <fleet_id>` | Required on fleet-scoped endpoints (agents, inbox, sent, timeline, send). The header value is the integer fleet id (sent as a string over HTTP; the backend coerces it with `int(...)` and returns 400 if it is not an integer). The backend verifies the fleet exists in the `fleets` table. |
+| `X-Fleet-Id: <fleet_id>` | Required on fleet-scoped endpoints (members, inbox, sent, timeline, send). The header value is the integer fleet id (sent as a string over HTTP; the backend coerces it with `int(...)` and returns 400 if it is not an integer). The backend verifies the fleet exists in the `fleets` table. |
 
 No server-side session cookies. The SPA stores the active fleet_id client-side via hash-based routing and sends it in the X-Fleet-Id header on each request.
 
@@ -20,7 +20,7 @@ No server-side session cookies. The SPA stores the active fleet_id client-side v
 
 ### GET /api/fleets — List Fleets
 
-Returns non-soft-deleted fleets (`deleted_at IS NULL`) with agent counts, ordered newest-first by `created_at DESC, fleet_id ASC`. No headers required.
+Returns non-soft-deleted fleets (`deleted_at IS NULL`) with member counts, ordered newest-first by `created_at DESC, fleet_id ASC`. No headers required.
 
 **Response** (200 OK):
 
@@ -28,17 +28,17 @@ Returns non-soft-deleted fleets (`deleted_at IS NULL`) with agent counts, ordere
 [
   {
     "fleet_id": 1,
-    "director_agent_id": 2,
+    "director_member_id": 2,
     "name": "PR-42 review",
     "created_at": "2026-04-12T10:00:00+00:00",
-    "agent_count": 3
+    "member_count": 3
   }
 ]
 ```
 
-### GET /api/agents — List Agents
+### GET /api/members — List Members
 
-Returns agents belonging to the selected fleet. Every agent carries a `kind` discriminator so the frontend can locate the built-in Administrator without matching on its name.
+Returns the selected fleet's roster via `list_roster(include_task_holders=True)`: every active registry entry plus deregistered members that still own tasks (so their message history stays inspectable). Every row carries a `kind` discriminator so the frontend can locate the built-in Administrator without matching on its name.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -46,69 +46,72 @@ Returns agents belonging to the selected fleet. Every agent carries a `kind` dis
 
 ```json
 {
-  "agents": [
+  "members": [
     {
-      "agent_id": 2,
+      "member_id": 2,
       "name": "Director",
       "description": "Root Director for this fleet",
       "status": "active",
       "registered_at": "2026-04-15T09:59:00+00:00",
-      "kind": "user",
+      "kind": "director",
       "monitor": {"interval_seconds": 180, "last_ping_at": null, "enabled": true}
     },
     {
-      "agent_id": 3,
+      "member_id": 3,
       "name": "Administrator",
-      "description": "Built-in administrator agent for fleet 1",
+      "description": "Built-in administrator for fleet 1",
       "status": "active",
       "registered_at": "2026-04-15T10:00:00+00:00",
-      "kind": "builtin-administrator",
+      "kind": "administrator",
       "monitor": null
     },
     {
-      "agent_id": 4,
+      "member_id": 4,
       "name": "monitor",
       "description": "Monitoring member: owns the heartbeat",
       "status": "active",
       "registered_at": "2026-04-15T10:05:00+00:00",
-      "kind": "user",
+      "kind": "monitor",
       "monitor": null
     },
     {
-      "agent_id": 5,
+      "member_id": 5,
       "name": "alice",
       "description": "Ordinary member",
       "status": "active",
       "registered_at": "2026-04-15T10:06:00+00:00",
-      "kind": "user",
+      "kind": "member",
       "monitor": {"interval_seconds": 720, "last_ping_at": null, "enabled": true}
     }
   ]
 }
 ```
 
-**`monitor` field**: each agent carries its folded monitoring schedule —
+**`monitor` field**: each member carries its folded monitoring schedule —
 `{"interval_seconds": int, "last_ping_at": str|null, "enabled": bool}` — or
-`null` when the agent is not enrolled (the unenrolled watcher, the
-Administrator, deregistered agents, and agents without a placement all carry
+`null` when the member is not enrolled (the unenrolled watcher, the
+Administrator, deregistered members, and members without a placement all carry
 `monitor: null`). Folding the schedule into the list lets the SPA render every
-agent's schedule without an extra request per agent. Which agents are enrolled
-— the watched set — is defined in [Monitoring](../concepts/monitoring.md).
+member's schedule without an extra request per member. Which members are
+enrolled — the watched set — is defined in
+[Monitoring](../concepts/monitoring.md).
 
-**`kind` values**:
+**`kind` values** — the unified 4-value vocabulary:
 
 | Value | Meaning |
 |---|---|
-| `"builtin-administrator"` | The fleet's built-in Administrator agent. Exactly one per fleet. Derived from `agent_card_json.cafleet.kind == "builtin-administrator"`. |
-| `"user"` | Any other agent (human-registered, spawned member, etc.). |
+| `"director"` | The fleet's root Director (`member_id == fleets.director_member_id`). Exactly one per fleet. |
+| `"administrator"` | The fleet's built-in Administrator. Exactly one per fleet. Derived from `member_card_json.cafleet.kind == "builtin-administrator"`. |
+| `"monitor"` | The fleet's dedicated monitoring member. Derived from `member_card_json.cafleet.kind == "monitoring-member"`. |
+| `"member"` | Any other (ordinary) member. |
 
-The discriminator is derived at read time from the stored agent card; there is no dedicated column. See [data-model.md](./data-model.md) for the Administrator's full definition.
+The discriminator is derived at read time — the fleets join supplies "is this the root Director" and the stored member card supplies the special-kind marker; there is no dedicated column. See [data-model.md](./data-model.md) for the Administrator's full definition.
 
 ### GET /api/monitor — Fleet Monitor Runtime
 
 Returns the liveness of the fleet's `cafleet monitor` process, derived from the
 `monitor_runtime` heartbeat (true even when the process died silently). Lets the
-agents page show a "monitor running / stopped" indicator so an inert schedule
+members page show a "monitor running / stopped" indicator so an inert schedule
 does not mislead. See [Monitoring](../concepts/monitoring.md).
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
@@ -134,9 +137,9 @@ at). Launching the loop is CLI-only (`cafleet monitor start`, run as a
 background task); there is no `POST`/`DELETE` counterpart here and no
 `monitor stop` command — stop the background task to stop the loop.
 
-### GET /api/agents/{agent_id}/monitor — Agent Monitor Config
+### GET /api/members/{member_id}/monitor — Member Monitor Config
 
-Returns one agent's monitoring schedule.
+Returns one member's monitoring schedule.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -150,16 +153,16 @@ Returns one agent's monitoring schedule.
 }
 ```
 
-**Errors**: 404 (`detail: "Agent not enrolled"`) when the agent is not in the
+**Errors**: 404 (`detail: "Member not enrolled"`) when the member is not in the
 fleet or not enrolled (the monitoring member, Administrator, deregistered,
 placementless). 400 for a missing or non-integer `X-Fleet-Id`; 404
 (`detail: "Fleet not found"`) for an unknown fleet. The SPA reads the folded
-`monitor` field on `GET /api/agents` instead of calling this endpoint per agent —
-it exists for CLI/API parity.
+`monitor` field on `GET /api/members` instead of calling this endpoint per
+member — it exists for CLI/API parity.
 
-### PATCH /api/agents/{agent_id}/monitor — Edit Agent Monitor Config
+### PATCH /api/members/{member_id}/monitor — Edit Member Monitor Config
 
-Updates an agent's interval and/or enabled flag and returns the new config.
+Updates a member's interval and/or enabled flag and returns the new config.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -176,13 +179,13 @@ the same lower bound the CLI `--interval` (`click.IntRange(min=1)`) enforces.
 **Response** (200 OK): the updated config, same shape as the `GET` above.
 
 **Errors**: 422 on an invalid body (e.g. `interval_seconds < 1`, wrong type) —
-FastAPI/Pydantic validation. 404 (`detail: "Agent not enrolled"`) when the agent
-is not in the fleet or not enrolled. 400 for a missing or non-integer
+FastAPI/Pydantic validation. 404 (`detail: "Member not enrolled"`) when the
+member is not in the fleet or not enrolled. 400 for a missing or non-integer
 `X-Fleet-Id`; 404 (`detail: "Fleet not found"`) for an unknown fleet.
 
-### GET /api/agents/{agent_id}/inbox — Inbox Messages
+### GET /api/members/{member_id}/inbox — Inbox Messages
 
-Returns messages received by the agent (`context_id = agent_id`), excluding `broadcast_summary` type tasks. Ordered newest first. Consumed by the agent detail view's **Inbox** tab in the admin WebUI.
+Returns messages received by the member (`context_id = member_id`), excluding `broadcast_summary` type tasks. Ordered newest first. Consumed by the member detail view's **Inbox** tab in the admin WebUI.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -193,16 +196,16 @@ Returns messages received by the agent (`context_id = agent_id`), excluding `bro
   "messages": [
     {
       "task_id": 42,
-      "from_agent_id": 4,
-      "from_agent_name": "Agent A",
-      "to_agent_id": 5,
-      "to_agent_name": "Agent B",
+      "from_member_id": 4,
+      "from_member_name": "Member A",
+      "to_member_id": 5,
+      "to_member_name": "Member B",
       "type": "unicast",
       "status": "input_required",
       "created_at": "2026-03-29T10:00:00+00:00",
       "status_timestamp": "2026-03-29T10:00:00+00:00",
       "origin_task_id": null,
-      "body": "Hello, Agent B!"
+      "body": "Hello, Member B!"
     }
   ]
 }
@@ -212,13 +215,13 @@ All message endpoints (inbox, sent, timeline) share the same row formatter, so t
 
 The `body` field is the task's `text` column.
 
-**Row cap**: none — the endpoint returns every matching row. The agent detail view truncates client-side to the 200 most recent rows per tab.
+**Row cap**: none — the endpoint returns every matching row. The member detail view truncates client-side to the 200 most recent rows per tab.
 
 **Status values**: `input_required` (Pending), `completed` (Acknowledged), `canceled` (Canceled).
 
-### GET /api/agents/{agent_id}/sent — Sent Messages
+### GET /api/members/{member_id}/sent — Sent Messages
 
-Returns messages sent by the agent (single SQL query against `tasks` filtered by `from_agent_id` and ordered by `status_timestamp DESC`, served by `idx_tasks_from_agent_status_ts`), excluding `broadcast_summary` type tasks. Ordered newest first. Consumed by the agent detail view's **Sent** tab in the admin WebUI.
+Returns messages sent by the member (single SQL query against `tasks` filtered by `from_member_id` and ordered by `status_timestamp DESC`, served by `idx_tasks_from_member_status_ts`), excluding `broadcast_summary` type tasks. Ordered newest first. Consumed by the member detail view's **Sent** tab in the admin WebUI.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -230,7 +233,7 @@ Returns up to 200 most-recent non-`broadcast_summary` tasks for the selected fle
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
-Fleet scoping is reached through the `tasks.from_agent_id → agents.agent_id → agents.fleet_id` join. Only tasks whose **sender** belongs to the header fleet are returned; cross-fleet tasks are invisible.
+Fleet scoping is reached through the `tasks.from_member_id → members.member_id → members.fleet_id` join. Only tasks whose **sender** belongs to the header fleet are returned; cross-fleet tasks are invisible.
 
 **Response** (200 OK):
 
@@ -239,10 +242,10 @@ Fleet scoping is reached through the `tasks.from_agent_id → agents.agent_id �
   "messages": [
     {
       "task_id": 50,
-      "from_agent_id": 4,
-      "from_agent_name": "Claude-A",
-      "to_agent_id": 5,
-      "to_agent_name": "reviewer-bot",
+      "from_member_id": 4,
+      "from_member_name": "Claude-A",
+      "to_member_id": 5,
+      "to_member_name": "reviewer-bot",
       "type": "unicast",
       "status": "input_required",
       "created_at": "2026-04-11T10:00:00+00:00",
@@ -273,7 +276,7 @@ The client groups rows by `origin_task_id` (non-null rows sharing a value form o
 
 ### POST /api/messages/send — Send Message
 
-Sends a message from a same-fleet active agent. Supports both unicast (`to_agent_id=<int>`) and broadcast (`to_agent_id="*"`).
+Sends a message from a same-fleet active member. Supports both unicast (`to_member_id=<int>`) and broadcast (`to_member_id="*"`).
 
 **Request**:
 
@@ -283,19 +286,19 @@ X-Fleet-Id: <fleet_id>
 
 ```json
 {
-  "from_agent_id": 3,
-  "to_agent_id": 4,
+  "from_member_id": 3,
+  "to_member_id": 4,
   "text": "Hello!"
 }
 ```
 
-`to_agent_id` accepts an integer (unicast) or the string `"*"` (broadcast). `from_agent_id` is always an integer.
+`to_member_id` accepts an integer (unicast) or the string `"*"` (broadcast). `from_member_id` is always an integer.
 
-**Unicast** (`to_agent_id` is an integer): the server verifies both the sender and the destination belong to the caller's fleet and that the destination is active.
+**Unicast** (`to_member_id` is an integer): the server verifies both the sender and the destination belong to the caller's fleet and that the destination is active.
 
-**Broadcast** (`to_agent_id == "*"`): the server skips destination validation (no specific recipient to verify) and fans out to every active agent in the fleet (except the built-in Administrator, which is filtered out of the recipient set at the broker layer) plus a summary task. The sender is still required to be active and in the caller's fleet; the sender MAY be the Administrator. The response's `task_id` is the summary task's id.
+**Broadcast** (`to_member_id == "*"`): the server skips destination validation (no specific recipient to verify) and fans out to every active member in the fleet (except the built-in Administrator, which is filtered out of the recipient set at the broker layer) plus a summary task. The sender is still required to be active and in the caller's fleet; the sender MAY be the Administrator. The response's `task_id` is the summary task's id.
 
-**Sender identity**: The Admin WebUI always submits `from_agent_id = administrator.agent_id` (the fleet's built-in Administrator). The endpoint itself is sender-agnostic — it accepts any active agent in the fleet — but no UI path lets the operator pick a different sender.
+**Sender identity**: The Admin WebUI always submits `from_member_id = administrator.member_id` (the fleet's built-in Administrator). The endpoint itself is sender-agnostic — it accepts any active member in the fleet — but no UI path lets the operator pick a different sender.
 
 **Response** (200 OK):
 
@@ -307,9 +310,9 @@ X-Fleet-Id: <fleet_id>
 ```
 
 **Errors**:
-- 422: Missing or invalid request-body fields (`from_agent_id`, `to_agent_id`, or `text`) — FastAPI/Pydantic validation on the request model.
-- 400: `from_agent_id` is not an active agent in the caller's fleet (`from_agent not in fleet`). A missing or non-integer `X-Fleet-Id` header is also 400 — see [Request Headers](#request-headers).
-- 404 — two cases, each with its own `detail` string: the destination `to_agent_id` does not resolve to an active agent in the fleet (unknown, cross-fleet, or deregistered) → `Agent not found`; an unknown `X-Fleet-Id` fleet → `Fleet not found`.
+- 422: Missing or invalid request-body fields (`from_member_id`, `to_member_id`, or `text`) — FastAPI/Pydantic validation on the request model.
+- 400: `from_member_id` is not an active member in the caller's fleet (`from_member not in fleet`). A missing or non-integer `X-Fleet-Id` header is also 400 — see [Request Headers](#request-headers).
+- 404 — two cases, each with its own `detail` string: the destination `to_member_id` does not resolve to an active member in the fleet (unknown, cross-fleet, or deregistered) → `Member not found`; an unknown `X-Fleet-Id` fleet → `Fleet not found`.
 
 ## Error Format
 

@@ -11,11 +11,12 @@ behavior detail lives on the docstring of its broker function in the
 
 ## Subcommand summary
 
-One row per subcommand. "Identity flag" is the per-subcommand option naming the
-acting agent (requester or Director/sender, spelled `--agent-id`) or the target
-member (spelled `--member-id`). In the `--fleet-id` column, **yes** means the
-flag is a required per-subcommand option; **no** means the subcommand rejects
-it with `No such option`.
+One row per subcommand. "Identity flags" are the per-subcommand options naming
+members: `--member-id` names **the member in question** on single-member
+commands, and two-party commands name both parties as `--from-member-id`
+(sender) + `--to-member-id` (recipient/target). In the `--fleet-id` column,
+**yes** means the flag is a required per-subcommand option; **no** means the
+subcommand rejects it with `No such option`.
 
 | Subcommand | Purpose | `--fleet-id` | Identity flag | Section |
 |---|---|---|---|---|
@@ -27,24 +28,24 @@ it with `No such option`.
 | `fleet create` | Create a fleet with its root Director and Administrator | no | none | [fleet create](#fleet-create) |
 | `fleet list` | List non-deleted fleets | no | none | [fleet list](#fleet-list) |
 | `fleet show` | Show one fleet (soft-deleted included) | yes | none | [fleet show](#fleet-show) |
-| `fleet delete` | Soft-delete a fleet and deregister its agents | yes | none | [fleet delete](#fleet-delete) |
-| `message send` | Send a unicast message | yes | `--agent-id` (requester) | [message send](#message-send) |
-| `message broadcast` | Broadcast a message to all fleet agents | yes | `--agent-id` (requester) | [message broadcast](#message-broadcast) |
-| `message poll` | Fetch un-acked incoming messages | yes | `--agent-id` (requester) | [message poll](#message-poll) |
-| `message ack` | Acknowledge a received message | yes | `--agent-id` (requester) | [message ack](#message-ack) |
-| `message cancel` | Retract an un-acked sent message | yes | `--agent-id` (requester) | [message cancel](#message-cancel) |
-| `message show` | Show one task | yes | `--agent-id` (requester) | [message show](#message-show) |
-| `member create` | Register a member and spawn its coding-agent pane | yes | `--agent-id` (Director) | [member create](#member-create) |
-| `member delete` | Tear down a member's pane (when one exists) and deregister it | yes | `--member-id` (target) | [member delete](#member-delete) |
-| `member show` | Show one agent's detail | yes | `--member-id` (target) | [member show](#member-show) |
-| `member list` | List the fleet's members (every active agent with `--all`) | yes | none | [member list](#member-list) |
-| `member capture` | Capture the tail of a member's pane | yes | `--member-id` (target) | [member capture](#member-capture) |
-| `member exec` | Dispatch a shell command into a member's pane | yes | `--member-id` (target) | [member exec](#member-exec) |
-| `member ping` | Inject an inbox-poll keystroke into a member's pane | yes | `--member-id` (target) | [member ping](#member-ping) |
-| `member nudge` | Deliver an ACKable task + inline preview to a member | yes | `--agent-id` (sender) + `--member-id` (target) | [member nudge](#member-nudge) |
+| `fleet delete` | Soft-delete a fleet and deregister its members | yes | none | [fleet delete](#fleet-delete) |
+| `message send` | Send a unicast message | yes | `--from-member-id` (sender) + `--to-member-id` (recipient) | [message send](#message-send) |
+| `message broadcast` | Broadcast a message to all fleet members | yes | `--from-member-id` (sender) | [message broadcast](#message-broadcast) |
+| `message poll` | Fetch un-acked incoming messages | yes | `--member-id` | [message poll](#message-poll) |
+| `message ack` | Acknowledge a received message | yes | `--member-id` | [message ack](#message-ack) |
+| `message cancel` | Retract an un-acked sent message | yes | `--member-id` | [message cancel](#message-cancel) |
+| `message show` | Show one task | yes | `--member-id` | [message show](#message-show) |
+| `member create` | Register a member and spawn its coding-agent pane | yes | none (Director auto-resolved) | [member create](#member-create) |
+| `member delete` | Tear down a member's pane (when one exists) and deregister it | yes | `--member-id` | [member delete](#member-delete) |
+| `member show` | Show one member's detail | yes | `--member-id` | [member show](#member-show) |
+| `member list` | List the fleet's members (every active registry entry with `--all`) | yes | none | [member list](#member-list) |
+| `member capture` | Capture the tail of a member's pane | yes | `--member-id` | [member capture](#member-capture) |
+| `member exec` | Dispatch a shell command into a member's pane | yes | `--member-id` | [member exec](#member-exec) |
+| `member ping` | Inject an inbox-poll keystroke into a member's pane | yes | `--member-id` | [member ping](#member-ping) |
+| `member nudge` | Deliver an ACKable task + inline preview to a member | yes | `--from-member-id` (sender) + `--to-member-id` (target) | [member nudge](#member-nudge) |
 | `monitor start` | Run the per-fleet scheduler loop in-process (launch as a background task) | yes | none | [monitor start](#monitor-start) |
-| `monitor status` | Show monitor liveness and the per-agent schedule | yes | none | [monitor status](#monitor-status) |
-| `monitor config` | Show or edit an agent's monitor schedule | yes | `--agent-id` | [monitor config](#monitor-config) |
+| `monitor status` | Show monitor liveness and the per-member schedule | yes | none | [monitor status](#monitor-status) |
+| `monitor config` | Show or edit a member's monitor schedule | yes | `--member-id` | [monitor config](#monitor-config) |
 
 ## Option Source Matrix
 
@@ -55,8 +56,8 @@ Each parameter has exactly one input source:
 | Fleet ID | `--fleet-id <int>` per-subcommand option (placed after the subcommand name) |
 | Database URL | `CAFLEET_DATABASE_URL` env var (optional) — see [config](../api/config.md) for its default and the absolute-path requirement. |
 | Multiplexer backend | `CAFLEET_MULTIPLEXER` env var (optional) — unset ⇒ auto-detect. See [Multiplexer backends](multiplexer-backends.md#backend-selection). |
-| Agent ID | `--agent-id <int>` subcommand option |
-| Member ID | `--member-id <int>` subcommand option (the target member on `member *` lifecycle verbs) |
+| Member ID | `--member-id <int>` subcommand option (the member in question) |
+| Sender / recipient member IDs | `--from-member-id <int>` / `--to-member-id <int>` on two-party subcommands |
 | JSON output | `--json` global flag |
 
 ## Global Options
@@ -78,8 +79,8 @@ it:
 |---|---|---|
 | `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…`; compact rendered envelope. | Untruncated `text`; the full typed-column task dict in `--json`, the verbose labeled block in text mode (see [Message envelope](./message-envelope.md#text-mode)). |
 | `message broadcast` | One-line summary (`broadcast id=<id> recipients=<N> delivered=<k>`). | The single `broadcast_summary` task rendered as the full verbose envelope. Never per-recipient envelopes or a `recipient_ids` list. |
-| `member show` | Compact one-line row `<agent_id> <name> <status>`. | Labeled block with `kind`, `skills`, and the placement sub-block. Text mode only — JSON is the unprojected broker dict regardless. |
-| `member create` | One compact line: `<agent_id> <name> backend=<coding_agent> pane=<pane_id>`. | The 6-line `Member registered and spawned.` block. |
+| `member show` | Compact one-line row `<member_id> <name> <status>`. | Labeled block with `kind`, `skills`, and the placement sub-block. Text mode only — JSON is the unprojected broker dict regardless. |
+| `member create` | One compact line: `<member_id> <name> backend=<coding_agent> pane=<pane_id>`. | The 6-line `Member registered and spawned.` block. |
 
 ## Fleet ID (`--fleet-id`) {#fleet-id}
 
@@ -87,27 +88,29 @@ it:
 after the subcommand name (the canonical position). It is required with no
 environment default: a spawned member reads its fleet id from the `FLEET ID:`
 line rendered into its spawn prompt and passes it as a literal flag on every
-command. Agents pass the literal integer — never a shell variable — because
+command. Members pass the literal integer — never a shell variable — because
 Claude Code's `permissions.allow` matches Bash invocations as literal command
 strings, and matching also depends on the canonical flag order (see
 [`permissions.allow` coverage](#permissionsallow-coverage)).
 
-## Agent ID (`--agent-id`) {#agent-id}
-
-`--agent-id` is a per-subcommand option typed `int` (as are `--to`,
-`--member-id`, and `--task-id`; each rejects a non-integer with Click's
-standard invalid-integer error, exit 2). Ids are DB-assigned integers,
-typically 1–4 digits, pasted in full — there is no prefix resolution.
-**Polarity is per-command**: `--agent-id` names the calling agent (requester)
-on every `message *` command, the acting Director on `member create`, and the
-sender on `member nudge`.
-
 ## Member ID (`--member-id`) {#member-id}
 
-`--member-id` names the **target member** on `member delete`, `show`,
-`capture`, `exec`, `ping`, and `nudge`. The target must be an active agent of
-`--fleet-id`; the pane-touching verbs additionally require a placement row —
-see [Member targeting and key delivery](#member-targeting-and-key-delivery).
+`--member-id` is a per-subcommand option typed `int` (as are
+`--from-member-id`, `--to-member-id`, and `--task-id`; each rejects a
+non-integer with Click's standard invalid-integer error, exit 2). Ids are
+DB-assigned integers, typically 1–4 digits, pasted in full — there is no
+prefix resolution. `--member-id` always names **the member in question**: the
+requester on `message poll` / `ack` / `cancel` / `show`, the target on
+`member delete` / `show` / `capture` / `exec` / `ping`, and the enrolled
+member on `monitor config`.
+
+## Sender and recipient (`--from-member-id`, `--to-member-id`) {#from-to-member-id}
+
+Two-party commands name both parties: `--from-member-id` is the sender
+(`message send`, `message broadcast`, `member nudge`) and `--to-member-id` is
+the recipient/target (`message send`, `member nudge`). A pane-touching target
+must be an active member of `--fleet-id` with a placement row — see
+[Member targeting and key delivery](#member-targeting-and-key-delivery).
 
 ## `permissions.allow` coverage
 
@@ -119,7 +122,7 @@ allow-listed subcommand:
   order does not match and prompts.
 - **`member exec` is excluded** so it stays under `permissions.ask` — its
   positional command body is operator-controlled.
-- **Each subcommand an agent runs with `--json` needs a companion pattern**,
+- **Each subcommand a member runs with `--json` needs a companion pattern**,
   because `--json` precedes the subcommand name and breaks the prefix:
   `Bash(cafleet --json <grp> <cmd> --fleet-id *)`.
 
@@ -144,7 +147,7 @@ per-subcommand option) to disable truncation; it composes orthogonally with
 
 | Variable | Settings field | Default | Notes |
 |---|---|---|---|
-| `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Also bounds the broker's inline-preview truncation. `agent.description` truncation uses a separate hard-coded 60-codepoint limit. |
+| `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Also bounds the broker's inline-preview truncation. `member.description` truncation uses a separate hard-coded 60-codepoint limit. |
 
 This applies to CLI emit sites only — FastAPI `/api/*` responses
 ([webui-api.md](./webui-api.md)) and `member capture` content are untouched.
@@ -256,11 +259,11 @@ Administrator atomically — see [data-model.md](./data-model.md). Default
 output is one compact line carrying the three ids:
 
 ```
-<fleet_id> director=<director_agent_id> admin=<administrator_agent_id>
+<fleet_id> director=<director_member_id> admin=<administrator_member_id>
 ```
 
 `--json` returns the fleet dict with a nested `director` (including its
-`placement`) and a top-level `administrator_agent_id`.
+`placement`) and a top-level `administrator_member_id`.
 
 ### `fleet list`
 
@@ -269,7 +272,7 @@ output is one compact line carrying the three ids:
 | `--json` | no | Output as JSON |
 
 Lists all non-soft-deleted fleets. Text output renders `FLEET_ID`, `DIRECTOR`,
-`NAME`, `AGENTS`, `CREATED_AT` columns; each row exposes `director_agent_id`
+`NAME`, `MEMBERS`, `CREATED_AT` columns; each row exposes `director_member_id`
 so the Director's id can be recovered after `fleet create` output scrolls
 away.
 
@@ -292,9 +295,9 @@ when active).
 | `--fleet-id` | yes | The fleet to delete |
 
 Soft-deletes the fleet in one transaction: stamps `deleted_at`, deregisters
-every active agent (root Director included), and removes their placement rows;
-tasks are untouched. Prints `Deleted fleet <fleet_id>. Deregistered N agents.`
-and is idempotent (`Deregistered 0 agents.` on re-run). Unknown `fleet_id`
+every active member (root Director included), and removes their placement rows;
+tasks are untouched. Prints `Deleted fleet <fleet_id>. Deregistered N members.`
+and is idempotent (`Deregistered 0 members.` on re-run). Unknown `fleet_id`
 exits 1 with `Error: fleet 'X' not found.`. Member panes are **not** closed —
 run `cafleet member delete` per member first for a clean teardown.
 
@@ -347,8 +350,10 @@ bundled WebUI dist directory does not exist, the app warns on stderr
 
 ## `cafleet message` — Message Broker
 
-All six subcommands require `--fleet-id`, name the requester with
-`--agent-id`, and run behind the [stale-skills guard](#stale-skills-guard).
+All six subcommands require `--fleet-id`, name the acting member
+(`--from-member-id` on `send` / `broadcast`, `--member-id` on `poll` / `ack` /
+`cancel` / `show`), and run behind the
+[stale-skills guard](#stale-skills-guard).
 The envelope schema is canonical in
 [Message envelope](./message-envelope.md); truncation and `--full` are
 canonical [above](#message-body-truncation). Text output is the subcommand's
@@ -366,8 +371,8 @@ prints the envelope alone. Behavior detail:
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Sender (requester). |
-| `--to` | yes | Recipient agent id. |
+| `--from-member-id` | yes | Sender. |
+| `--to-member-id` | yes | Recipient member id. |
 | `--text` | no | Inline message body. Exactly one of `--text` / `--text-file`. |
 | `--text-file` | no | Path to a UTF-8 file whose contents are the body (`-` = stdin); use it for bodies that would exceed the shell's `ARG_MAX`. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
@@ -376,7 +381,7 @@ prints the envelope alone. Behavior detail:
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Broadcaster (requester). |
+| `--from-member-id` | yes | Broadcaster (sender). |
 | `--text` / `--text-file` | one of | Message body, as on `message send`. |
 | `--full` | no | See [`--full` semantics](#full-semantics). |
 
@@ -388,17 +393,17 @@ both `recipients` and `delivered`.
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Recipient whose inbox is fetched. |
+| `--member-id` | yes | Recipient whose inbox is fetched. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
 
-Returns only un-acked (`input_required`) deliveries addressed to the agent;
+Returns only un-acked (`input_required`) deliveries addressed to the member;
 an empty inbox prints `No messages found.`.
 
 ### `message ack`
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Recipient acknowledging the message (recipient-only). |
+| `--member-id` | yes | Recipient acknowledging the message (recipient-only). |
 | `--task-id` | yes | Task to acknowledge. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
 
@@ -406,7 +411,7 @@ an empty inbox prints `No messages found.`.
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | Sender retracting the message (sender-only). |
+| `--member-id` | yes | Sender retracting the message (sender-only). |
 | `--task-id` | yes | Task to cancel. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
 
@@ -414,20 +419,20 @@ an empty inbox prints `No messages found.`.
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | The acting agent (fleet-membership gate). |
+| `--member-id` | yes | The acting member (fleet-membership gate). |
 | `--task-id` | yes | Task to fetch. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
 
 ## `cafleet member` — Member Lifecycle + Pane Interaction {#cafleet-member}
 
-The `cafleet member` subgroup owns the agent lifecycle: `create` registers a
+The `cafleet member` subgroup owns the member lifecycle: `create` registers a
 member **and** spawns its coding-agent pane; `delete` tears it down; `capture`
 / `exec` / `ping` / `nudge` inspect or keystroke an existing member's pane;
 `show` and `list` are registry reads (no multiplexer requirement). All run
 behind the [stale-skills guard](#stale-skills-guard). Behavior detail:
-[`register_agent`](../api/broker.md#cafleet.broker.register_agent),
-[`deregister_agent`](../api/broker.md#cafleet.broker.deregister_agent),
-[`get_agent`](../api/broker.md#cafleet.broker.get_agent),
+[`register_member`](../api/broker.md#cafleet.broker.register_member),
+[`deregister_member`](../api/broker.md#cafleet.broker.deregister_member),
+[`get_member`](../api/broker.md#cafleet.broker.get_member),
 [`list_members`](../api/broker.md#cafleet.broker.list_members),
 [`list_members_with_activity`](../api/broker.md#cafleet.broker.list_members_with_activity),
 [`list_roster`](../api/broker.md#cafleet.broker.list_roster).
@@ -437,7 +442,7 @@ behind the [stale-skills guard](#stale-skills-guard). Behavior detail:
 Resolution rules shared by the `--member-id` verbs:
 
 1. A cross-fleet, unknown, or inactive `--member-id` resolves to "not found"
-   (exit 1, `Error: Agent <member-id> not found`). Any active in-fleet agent
+   (exit 1, `Error: Member <member-id> not found`). Any active in-fleet member
    (the root Director included) is a valid target; there is no caller-auth
    check beyond fleet membership.
 2. No placement row → exit 1 (see [Error Messages](#error-messages)) — except
@@ -448,16 +453,19 @@ Resolution rules shared by the `--member-id` verbs:
 Key sequences are delivered **literally** (`send-keys` with `shell=False`) —
 shell meta, key names, and multi-byte characters all arrive as plain
 characters. Common exit codes: `0` dispatch success; `1` multiplexer
-unavailable, agent not found, missing placement, pending placement, or a
+unavailable, member not found, missing placement, pending placement, or a
 `send-keys` failure; `2` per-subcommand argument/validation errors.
 
 ### `member create` {#member-create}
 
-Register a member agent **and** spawn its coding-agent pane.
+Register a member **and** spawn its coding-agent pane. It takes no identity
+flag: the acting Director is auto-resolved from `fleets.director_member_id`
+first thing, before registration (the resolved id also feeds the monitor's
+backend inheritance and the spawn-prompt substitution). A fleet has exactly
+one root Director by construction, so no override flag exists.
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | The acting Director's agent ID. |
 | `--name` | yes | Display name — see [Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals) for pane-title behavior. |
 | `--description` | yes | One-sentence purpose. |
 | `--coding-agent` | no | One of `claude` (default for ordinary members), `codex`, or `opencode`; a `--role monitor` member inherits the Director's backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. |
@@ -477,19 +485,19 @@ reference pages: [Claude members](../reference/coding-agents/claude.md),
 #### Spawn-prompt substitution
 
 `cafleet member create` runs `str.format` over the resolved prompt body,
-substituting exactly four placeholders: `{fleet_id}`, `{agent_id}` (the
-member's own newly-allocated id), `{director_agent_id}`, and `{coding_agent}`.
+substituting exactly four placeholders: `{fleet_id}`, `{member_id}` (the
+member's own newly-allocated id), `{director_member_id}`, and `{coding_agent}`.
 Identity reaches the spawned member as literals rendered into its prompt; the
 only environment variable forwarded into the pane is `CAFLEET_DATABASE_URL`.
 A literal brace must be doubled (`{{` / `}}`); an unknown placeholder or
-malformed brace expression exits 2 and rolls back the just-registered agent
+malformed brace expression exits 2 and rolls back the just-registered member
 (see [Error Messages](#error-messages)).
 
 The spawn always creates the pane without stealing focus (tmux
 `split-window -d`): the Director's pane and active window stay active. Default
-output is the compact line `<agent_id> <name> backend=<coding_agent>
+output is the compact line `<member_id> <name> backend=<coding_agent>
 pane=<pane_id>` (`pane` renders `(pending)` until the pane id is patched onto
-the placement); `--json` returns the agent dict with its `placement`.
+the placement); `--json` returns the member dict with its `placement`.
 
 ### `member delete` {#member-delete}
 
@@ -498,7 +506,7 @@ the placement); `--json` returns the agent dict with its `placement`.
 | `--member-id` | yes | The member to delete (target). |
 | `--force` / `-f` | no | Skip the graceful close wait: immediately kill-pane the target, then deregister. Exit 0 even if the pane was already gone. |
 
-Tears down the target's pane (when one exists) and soft-deletes the agent.
+Tears down the target's pane (when one exists) and soft-deletes the member.
 Targeting the root Director or the Administrator is blocked (see
 [Error Messages](#error-messages)). A placementless or pending-placement
 delete is a pure registry soft-delete and succeeds outside a multiplexer.
@@ -506,20 +514,20 @@ The default pane path sends the backend exit keystroke and waits for the pane
 to close (poll every 500 ms, 15.0 s timeout); on timeout it prints the pane
 buffer tail (last 80 lines) on stderr with a recovery hint and exits **2** —
 re-run, or escalate with `--force`. Success output is a `Member deleted.`
-header plus `agent_id:` / `pane_id:` lines; JSON is `{agent_id, pane_status}`.
+header plus `member_id:` / `pane_id:` lines; JSON is `{member_id, pane_status}`.
 
 ### `member show` {#member-show}
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--member-id` | yes | Any active in-fleet agent — placed or placementless (root Director and Administrator included). |
+| `--member-id` | yes | Any active in-fleet registry entry — placed or placementless (root Director and Administrator included). |
 | `--full` | no | Text mode only — see [`--full` semantics](#full-semantics). |
 
 Registry read — no multiplexer requirement. Default text is the compact
-one-line row `<agent_id> <name> <status>`; `--full` renders the labeled block
+one-line row `<member_id> <name> <status>`; `--full` renders the labeled block
 with `kind`, `skills`, and the placement sub-block (`placement:   none` when
 placementless; `None` fields render `-`). `--json` returns the broker
-`get_agent` dict unchanged regardless of `--full`. `kind` is one of
+`get_member` dict unchanged regardless of `--full`. `kind` is one of
 `director`, `administrator`, `monitor`, or `member`.
 
 ### `member list` {#member-list}
@@ -527,10 +535,10 @@ placementless; `None` fields render `-`). `--json` returns the broker
 | Flag | Required | Notes |
 |---|---|---|
 | `--activity` | no | Aggregate per-member activity timestamps from `tasks`. Mutually exclusive with `--all`. |
-| `--all` | no | List every active agent of the fleet (adds a `kind` column), not just members. Mutually exclusive with `--activity`. |
+| `--all` | no | List every active registry entry of the fleet (adds a `kind` column), not just ordinary members. Mutually exclusive with `--activity`. |
 
 No identity flag. Default output is a placement table over every **member**
-(agents with a placement row; the root Director is excluded); an empty roster
+(placed registry rows other than the root Director); an empty roster
 prints `0 members.`; a pending placement renders `(pending)`. `--json` returns
 the rows unprojected.
 
@@ -549,7 +557,7 @@ excluded), and `idle` (wall-time since the latest of `last_sent` /
 | `--lines` / `--tail` | no | Number of trailing lines to capture (default: **20**). |
 | `--ansi` / `--no-ansi` | no | Default `--no-ansi` strips ANSI escapes and cleans carriage-return redraws; `--ansi` emits the raw capture. |
 
-JSON: `{member_agent_id, pane_id, lines, content}`; text emits the content
+JSON: `{member_id, pane_id, lines, content}`; text emits the content
 with no trailing newline.
 
 ### `member exec` {#member-exec}
@@ -566,12 +574,12 @@ bash-via-Director fallback protocol, canonical in the cafleet skill's
 | *(positional `COMMAND`)* | yes | Single shell command; leading/trailing whitespace stripped before dispatch. Pipes, `&&`, `;`, `$(...)`, and backticks are forwarded opaquely. Empty (after strip) or newline-containing commands exit 2. |
 
 Text output: `Sent bash command '<command>' to member <name> (<pane_id>).`;
-JSON: `{member_agent_id, pane_id, command}`.
+JSON: `{member_id, pane_id, command}`.
 
 ### `member ping` {#member-ping}
 
 Re-pokes a member's inbox: keystrokes `Esc` → `cafleet message poll
---fleet-id <fleet-id> --agent-id <member-id>` → `Enter` into the target's pane
+--fleet-id <fleet-id> --member-id <member-id>` → `Enter` into the target's pane
 (the leading `Esc` is the permission-prompt safeguard — see
 [Push notifications](multiplexer-backends.md#esc-safeguard)). The manual
 re-poke for a pane that missed the broker's automatic on-delivery
@@ -585,7 +593,7 @@ operator-controlled body — which is why `member ping` sits in
 | `--quiet` | no | Print only the bare member id, for shell capture. |
 
 Text: `Pinged member <name> (<pane_id>) — poll keystroke dispatched.`; JSON:
-`{member_agent_id, pane_id}`. A keystroke non-delivery exits 1.
+`{member_id, pane_id}`. A keystroke non-delivery exits 1.
 
 ### `member nudge` {#member-nudge}
 
@@ -597,21 +605,21 @@ no-ops.
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | The **sender** (typically the monitoring member), persisted as `from_agent_id`. |
-| `--member-id` | yes | The **target** member (typically the Director). |
+| `--from-member-id` | yes | The **sender** (typically the monitoring member), persisted as `from_member_id`. |
+| `--to-member-id` | yes | The **target** member (typically the Director). |
 | `--text` / `--text-file` | one of | The re-engage summary, as on `message send`. |
 
 Text output reports the queued `task_id` and whether the preview landed
 (`… — task <task_id> queued, Esc-safeguarded preview dispatched.` / `… — no
 pane; task <task_id> queued.` / `… queued; inline preview not delivered.`).
-JSON: `{member_agent_id, pane_id, task_id, notification_sent}`. Exit 1 when
+JSON: `{member_id, pane_id, task_id, notification_sent}`. Exit 1 when
 the target resolution or the broker send path rejects; exit 2 on `--text` /
 `--text-file` validation.
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 
 The per-fleet scheduler that wakes the monitoring member whenever a watched
-agent is due. All three subcommands require `--fleet-id` and run behind the
+member is due. All three subcommands require `--fleet-id` and run behind the
 [stale-skills guard](#stale-skills-guard). The conceptual model is canonical
 on the [Monitoring](../concepts/monitoring.md) concepts page; there is no
 `monitor stop` — stop the monitoring member's background task. Behavior
@@ -630,8 +638,8 @@ detail:
 
 Runs the loop **in-process** (the monitoring member launches it as a
 background task in its own pane; the loop blocks the task and writes to its
-stdout — one `<iso-ts> due agent <id> (<name>) [<reasons>] -> wake monitor`
-line per due agent). On startup it runs the multiplexer precondition guard,
+stdout — one `<iso-ts> due member <id> (<name>) [<reasons>] -> wake monitor`
+line per due member). On startup it runs the multiplexer precondition guard,
 atomically claims the single-instance `monitor_runtime` row, and installs
 `SIGTERM`/`SIGINT` handlers (a clean stop clears the row). If the fleet has no
 monitoring member, it warns on stderr and runs anyway. Exit `0` on clean exit;
@@ -641,15 +649,15 @@ errors.
 ### `monitor status`
 
 No flags beyond `--fleet-id`. Reports runtime liveness derived from the DB
-heartbeat (true even when the process died silently) plus the watched-agent
+heartbeat (true even when the process died silently) plus the watched-member
 schedule table:
 
 ```
 monitor: running (pid 4821, last tick 2s ago, tick 5s, started 2026-06-13T04:50:00+00:00)
-  agent_id  name         role      interval  last_ping  enabled  pending
-  --------  -----------  --------  --------  ---------  -------  -------
-  2         Director      director  180s      8s ago     yes      1
-  5         alice         member    720s      -          yes      0
+  member_id  name         role      interval  last_ping  enabled  pending
+  ---------  -----------  --------  --------  ---------  -------  -------
+  2          Director      director  180s      8s ago     yes      1
+  5          alice         member    720s      -          yes      0
 ```
 
 The monitoring member is not enrolled and never shows in the table. When no
@@ -660,14 +668,14 @@ monitor is running the first line reads `monitor: stopped`. JSON keeps
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | The enrolled, in-fleet agent whose schedule is shown or edited. |
+| `--member-id` | yes | The enrolled, in-fleet member whose schedule is shown or edited. |
 | `--interval` | no | New ping interval in seconds (`click.IntRange(min=1)`). |
-| `--enable` / `--disable` | no | Enable or disable monitoring for the agent. Mutually exclusive. |
+| `--enable` / `--disable` | no | Enable or disable monitoring for the member. Mutually exclusive. |
 
 With no edit flag, prints the current config; with an edit flag, applies and
 prints the new config. Text:
-`agent 5: interval 720s, enabled, last_ping 2026-06-13T04:51:00` (`-` when
-never pinged). Exits 1 for a not-in-fleet or not-enrolled agent.
+`member 5: interval 720s, enabled, last_ping 2026-06-13T04:51:00` (`-` when
+never pinged). Exits 1 for a not-in-fleet or not-enrolled member.
 
 ## Error Messages
 
@@ -677,24 +685,27 @@ never pinged). Exits 1 for a not-in-fleet or not-enrolled agent.
 | Any `fleet` / `member` / `message` / `monitor` command with a recorded `skill_installs` version differing from the runtime CLI version | `Error: stale skills detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup skill' to reinstall` (exit 1; see [Stale-skills guard](#stale-skills-guard)) |
 | `setup skill` when the `skill_installs` table is missing | `Error: the database schema is missing or outdated; run 'cafleet setup' or 'cafleet setup db' first` (exit 1) |
 | Missing `--fleet-id` on a fleet-scoped subcommand | `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` (exit 1) |
-| Missing `--agent-id` | `Error: Missing option '--agent-id'.` (exit 2) |
+| Missing `--member-id` | `Error: Missing option '--member-id'.` (exit 2) |
 | `fleet create` with no `--name` | `Error: Missing option '--name'.` (exit 2) |
 | `fleet create` run outside a supported multiplexer | `Error: cafleet fleet create must be run inside a tmux or herdr session` (exit 1; no DB writes) |
 | `fleet delete` on unknown fleet_id | `Error: fleet 'X' not found.` (exit 1) |
+| `member create` against an unknown `--fleet-id` | `Error: Fleet '<fleet-id>' not found.` (exit 2; Director auto-discovery runs first thing) |
 | `member create` into a soft-deleted fleet | `Error: fleet X is deleted` (exit 1) |
+| `member create` when the fleet row has no `director_member_id` recorded (mid-bootstrap corruption) | `Error: fleet <fleet-id> has no root Director recorded; re-create the fleet with 'cafleet fleet create'.` (exit 1) |
+| `member create` (with a placement) when the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` (exit 1; the `register_member` invariant guard) |
 | `member delete` against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 1) |
-| `member delete` against the Administrator's `agent_id` | `Error: Administrator cannot be deregistered` (exit 1) |
+| `member delete` against the Administrator's `member_id` | `Error: Administrator cannot be deregistered` (exit 1) |
 | `member delete` default path when the pane does not close within 15.0 s | `Error: pane <pane> did not close within 15.0s after /exit.` (exit 2; pane tail printed on stderr) |
 | `member list` with both `--all` and `--activity` | `Error: --all and --activity are mutually exclusive.` (exit 2) |
-| `message send` / `message poll` / `message ack` / `message cancel` / `message show` with an `--agent-id` that is not a member of `--fleet-id` | `Error: agent <id> is not a member of fleet <fleet-id>.` (exit 1) — the fleet-membership gate runs before any read/write operation, and also fires for an unknown `--agent-id`. |
+| `message send` / `message broadcast` / `message poll` / `message ack` / `message cancel` / `message show` with an acting member id (`--member-id` / `--from-member-id`) that is not in `--fleet-id` | `Error: member <member-id> is not in fleet <fleet-id>.` (exit 1) — the fleet-membership gate runs before any read/write operation, and also fires for an unknown id. |
 | `member exec` with missing positional `COMMAND` | `Error: Missing argument 'COMMAND'.` (exit 2) |
 | `member exec ""` (empty / whitespace-only) | `Error: command may not be empty.` (exit 2) |
 | `member exec` with `\n` or `\r` | `Error: command may not contain newlines.` (exit 2) |
 | `member capture` / `member exec` / `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to <capture|exec|ping>.` (exit 1) |
 | `member ping` when the keystroke fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
-| `member show` / `member capture` / `member exec` / `member ping` / `member nudge` with a cross-fleet / unknown / inactive `--member-id` | `Error: Agent <member-id> not found` (exit 1) |
-| `member capture` / `member exec` / `member ping` / `member nudge` on an in-fleet `--member-id` with no placement row | ``Error: agent <member-id> has no placement row; it was not spawned via `cafleet member create`.`` (exit 1) |
-| `member nudge` whose `--agent-id` (sender) is rejected by the broker send path | `Error: <sender ValueError from the broker send path>` (exit 1) |
+| `member show` / `member capture` / `member exec` / `member ping` / `member nudge` with a cross-fleet / unknown / inactive target member id | `Error: Member <member-id> not found` (exit 1) |
+| `member capture` / `member exec` / `member ping` / `member nudge` on an in-fleet target with no placement row | ``Error: member <member-id> has no placement row; it was not spawned via `cafleet member create`.`` (exit 1) |
+| `member nudge` whose `--from-member-id` (sender) is rejected by the broker send path | `Error: <sender ValueError from the broker send path>` (exit 1) |
 | Any `--text` / `--text-file` command (`message send`, `message broadcast`, `member nudge`, `member create`) with neither flag | `Error: Provide exactly one of --text or --text-file.` (exit 2) |
 | Any `--text` / `--text-file` command with both flags | `Error: --text and --text-file are mutually exclusive.` (exit 2) |
 | `--text` empty or whitespace-only | `Error: text may not be empty.` (exit 2) |
@@ -704,12 +715,12 @@ never pinged). Exits 1 for a not-in-fleet or not-enrolled agent.
 | `--text-file <path>` to an unreadable file | `Error: --text-file <path>: file is not readable.` (exit 1) |
 | `--text-file <path>` to a file containing invalid UTF-8 | `Error: --text-file <path>: file is not valid UTF-8.` (exit 1) |
 | `member create --coding-agent opencode --model` with a value violating the `<provider-id>/<model-id>` format | `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` (exit 2; fires before any side effect) |
-| `member create` with an unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {agent_id}, {director_agent_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` (exit 2; the just-registered agent is rolled back) |
-| `member create` with a malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` (exit 2; the just-registered agent is rolled back) |
-| `member create --role monitor` when the fleet already has an active monitoring member | `Error: fleet <id> already has an active monitoring member (agent <existing-id>); only one is allowed.` (exit 1) |
+| `member create` with an unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` (exit 2; the just-registered member is rolled back) |
+| `member create` with a malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` (exit 2; the just-registered member is rolled back) |
+| `member create --role monitor` when the fleet already has an active monitoring member | `Error: fleet <id> already has an active monitoring member (member <existing-id>); only one is allowed.` (exit 1) |
 | `member create --role monitor` with `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the monitor's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
 | `member create --role monitor` with `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the monitor's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
 | `monitor start` for a fleet that already has a live monitor | `Error: monitor already running for fleet <id>` (exit 1) |
 | `monitor start` / `monitor status` against an unknown or soft-deleted fleet | `Error: fleet <id> not found` (exit 1) |
 | `monitor config` with both `--enable` and `--disable` | `Error: --enable and --disable are mutually exclusive.` (exit 2) |
-| `monitor config` against an agent not in the fleet or not enrolled | `Error: agent <id> is not enrolled in monitoring for fleet <fleet-id>.` (exit 1) |
+| `monitor config` against a member not in the fleet or not enrolled | `Error: member <id> is not enrolled in monitoring for fleet <fleet-id>.` (exit 1) |

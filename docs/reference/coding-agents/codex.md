@@ -10,10 +10,10 @@ For the multi-backend overview and selection rules, see the [Coding agents](../.
 
 ## Overview
 
-A codex member is a cafleet member whose `agent_placements.coding_agent` value is `"codex"`. The Director selects the backend at `member create` time:
+A codex member is a cafleet member whose `member_placements.coding_agent` value is `"codex"`. The Director selects the backend at `member create` time:
 
 ```bash
-cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> \
   --name Codex-A --description "<one-sentence purpose>" --coding-agent codex \
   --text "<spawn prompt>"
 ```
@@ -33,7 +33,7 @@ codex --ask-for-approval never --sandbox workspace-write <prompt>
 - `--model <m>` is appended immediately before the prompt when `cafleet member create --model <m>` is supplied (e.g. `codex --ask-for-approval never --sandbox workspace-write --model gpt-5.4-mini <prompt>`). Any string passes through verbatim — the codex binary itself rejects unknown models, so newly released models work without a cafleet release. Example models (not enforced by cafleet): `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`. When the flag is omitted, no model tokens are emitted and codex uses the model set in its configuration.
 
 > [!IMPORTANT]
-> Codex's `--sandbox workspace-write` blocks writes outside the workspace, including cafleet's default SQLite DB at `~/.local/share/cafleet/cafleet_v2.db`. Operators must add the cafleet DB directory to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads, such as `~/.codex/config.toml`:
+> Codex's `--sandbox workspace-write` blocks writes outside the workspace, including cafleet's default SQLite DB at `~/.local/share/cafleet/cafleet_v3.db`. Operators must add the cafleet DB directory to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads, such as `~/.codex/config.toml`:
 >
 > ```toml
 > [sandbox_workspace_write]
@@ -82,18 +82,18 @@ Gated on local install of both `claude` and `codex` binaries. Run from inside a 
     # Expect: a '<fleet_id> director=<director_id> admin=<admin_id>' line.
     # Note the fleet and Director ids — the steps below use 1 and 2.
 
-    cafleet member create --fleet-id 1 --agent-id 2 \
+    cafleet member create --fleet-id 1 \
       --name Claude-Smoke --description "claude smoke member" --coding-agent claude \
       --text "You are Claude-Smoke. Reply hello when polled."
-    cafleet member create --fleet-id 1 --agent-id 2 \
+    cafleet member create --fleet-id 1 \
       --name Codex-Smoke --description "codex smoke member" --coding-agent codex \
       --text "You are Codex-Smoke. Reply hello when polled."
 
     cafleet member list --fleet-id 1 --all
     # Expect: two member rows, backend column shows 'claude' and 'codex' respectively.
 
-    cafleet message send --fleet-id 1 --agent-id 2 \
-      --to 5 --text "ping"
+    cafleet message send --fleet-id 1 --from-member-id 2 \
+      --to-member-id 5 --text "ping"
     # Expect: the codex pane receives the 2-line inline preview and the member ack-loops correctly.
 
     cafleet member exec --fleet-id 1 \

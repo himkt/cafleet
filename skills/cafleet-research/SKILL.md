@@ -8,7 +8,7 @@ description: >-
   graph, figure, or data visualization (visualization reference); or to author
   slides with the custom Slidev theme (slidev reference). Always invoke this
   skill and route into the matching workflow, orchestrated as a CAFleet team.
-  Members in agent teams load this skill by its name cafleet-research via their
+  Members in member teams load this skill by its name cafleet-research via their
   backend's skill-loader.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet, TaskStop
 ---
@@ -17,7 +17,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, Agent, 
 
 This skill is the umbrella for research and presentation media: two CAFleet-native **orchestration workflows** (research report, presentation) plus two load-on-demand utility **reference pages** (matplotlib visualization, the custom Slidev theme). It is a dispatcher — route to the matching workflow body to run a team, or read a reference page for a standalone utility.
 
-**Teammates in agent teams** that need this skill load it by its name `cafleet-research` via their backend's skill-loader — never by reading the skill files directly.
+**Teammates in member teams** that need this skill load it by its name `cafleet-research` via their backend's skill-loader — never by reading the skill files directly.
 
 ## Required reading
 

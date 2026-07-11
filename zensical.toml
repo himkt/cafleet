@@ -1,6 +1,6 @@
 [project]
 site_name = "CAFleet"
-site_description = "Message broker and agent registry for coding agents."
+site_description = "Message broker and member registry for coding agents."
 site_author = "himkt"
 site_url = "https://himkt.github.io/cafleet/"
 copyright = "Copyright © 2026 himkt"

@@ -10,7 +10,7 @@ This rule fires every time you reach for the Bash tool as a CAFleet team member.
 
 Any of the following signals means you are a member subject to this rule:
 
-- Your spawn prompt names a Director / `director_agent_id` / refers to you as a "member" / "teammate" of a CAFleet team.
+- Your spawn prompt names a Director / `director_member_id` / refers to you as a "member" / "teammate" of a CAFleet team.
 - The status line at the bottom of your pane shows `⏵⏵ don't ask on`.
 - Your spawn prompt instructs you to wait for the Director's instructions via `cafleet ... message poll`.
 
@@ -18,7 +18,7 @@ Any of the following signals means you are a member subject to this rule:
 
 1. **Run it.** Use the Bash tool directly. Permission prompts auto-resolve. No prefix, no routing.
 2. **Process the output** as your next-turn context.
-3. **Reply to the Director** via `cafleet message send --fleet-id <s> --agent-id <my-id> --to <director-id> --text "..."` if a reply is expected.
+3. **Reply to the Director** via `cafleet message send --fleet-id <s> --from-member-id <my-id> --to-member-id <director-id> --text "..."` if a reply is expected.
 
 You take a single action — invoke Bash — instead of the previous "send a CAFleet message and wait" routing.
 
@@ -42,8 +42,8 @@ You take a single action — invoke Bash — instead of the previous "send a CAF
 The operator has already asked you to run the command. The Director is your fallback when your harness can't run it. Take the single action:
 
 ```bash
-cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> \
-  --to <director-agent-id> \
+cafleet message send --fleet-id <fleet-id> --from-member-id <my-member-id> \
+  --to-member-id <director-member-id> \
   --text "Please run \`<command>\` for me — my Bash tool denied it (<denial reason if known>)."
 ```
 
@@ -55,9 +55,9 @@ If the `cafleet message send` itself is also denied by the harness, surface that
 
 When you offer the operator a list of options ("(1) you run it via `!`, (2) route through Director, (3) skip"), you push a routing decision back to the operator that they already implicitly answered by asking you to run the command. They wanted it run. Routing is implementation. The bash-via-Director protocol exists precisely to handle the harness-denied case without operator interaction.
 
-## If `<fleet-id>` / `<my-agent-id>` / `<director-agent-id>` are missing
+## If `<fleet-id>` / `<my-member-id>` / `<director-member-id>` are missing
 
-The CLI renders these into your spawn prompt as literal `FLEET ID:` / `YOUR AGENT ID:` / `DIRECTOR AGENT ID:` lines. They should already be in your context. If they are genuinely missing, say so explicitly and ask the operator. Do **not** guess UUIDs.
+The CLI renders these into your spawn prompt as literal `FLEET ID:` / `YOUR MEMBER ID:` / `DIRECTOR MEMBER ID:` lines. They should already be in your context. If they are genuinely missing, say so explicitly and ask the operator. Do **not** guess UUIDs.
 
 ## Why this rule is associated with the Bash tool
 
@@ -67,7 +67,7 @@ The Bash tool is the entry point for every shell-execution request. If you can p
 
 If you are the **Director** (not a member), this rule applies in reverse only when a member auto-routes a denied command to you.
 
-For the **inbox-poll-only nudge case** (the monitoring loop wants the member to re-check its inbox after a missed broker auto-fire, or after a long idle window), the Director's primitive is `cafleet member ping`. It carries no message — its action is fixed (it injects `Esc` + `cafleet message poll --fleet-id <s> --agent-id <m>` + Enter into the member's pane via the existing `tmux.send_poll_trigger` helper; the leading `Esc` is the permission-prompt safeguard, inherited because `send_poll_trigger` passes `esc_first=True`) — so it is pre-approved in `permissions.allow` and fires without a per-call confirmation prompt:
+For the **inbox-poll-only nudge case** (the monitoring loop wants the member to re-check its inbox after a missed broker auto-fire, or after a long idle window), the Director's primitive is `cafleet member ping`. It carries no message — its action is fixed (it injects `Esc` + `cafleet message poll --fleet-id <s> --member-id <m>` + Enter into the member's pane via the existing `tmux.send_poll_trigger` helper; the leading `Esc` is the permission-prompt safeguard, inherited because `send_poll_trigger` passes `esc_first=True`) — so it is pre-approved in `permissions.allow` and fires without a per-call confirmation prompt:
 
 ```bash
 cafleet member ping --fleet-id <fleet-id> \
@@ -82,4 +82,4 @@ cafleet member exec --fleet-id <fleet-id> \
   "<command>"
 ```
 
-See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full shell-dispatch protocol, serialization rules, and the cross-fleet boundary (a `--member-id` outside `--fleet-id` returns "not found"; there is no caller-auth check — any agent in the fleet is a valid target).
+See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full shell-dispatch protocol, serialization rules, and the cross-fleet boundary (a `--member-id` outside `--fleet-id` returns "not found"; there is no caller-auth check — any member in the fleet is a valid target).

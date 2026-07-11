@@ -3,7 +3,7 @@
 Send a message to every active recipient in the fleet (except the sender and the built-in Administrator). Returns a single `broadcast_summary` envelope to the caller.
 
 ```bash
-cafleet message broadcast --fleet-id <fleet-id> --agent-id <my-agent-id> \
+cafleet message broadcast --fleet-id <fleet-id> --from-member-id <my-member-id> \
   --text "Build failed on main branch"
 ```
 
@@ -22,7 +22,7 @@ broadcast id=<id> recipients=<N> delivered=<k>
 Recipients ack their own delivery row exactly like a unicast message; the summary row is a sender-side artifact and is not acked by recipients:
 
 ```bash
-cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --task-id <task-id>
 ```
 
 For the row schema, the `"Broadcast sent to N recipients"` summary string, and `origin_task_id` grouping/threading, see [`docs/spec/data-model.md`](../../../docs/spec/data-model.md#broadcast-grouping) and [`docs/spec/message-envelope.md`](../../../docs/spec/message-envelope.md).

@@ -37,7 +37,7 @@ Use this pattern when:
 
 - The work needs **parallelism that the harness cannot provide on its own** — multiple members drafting in parallel, multiple researchers investigating sub-topics, multiple verifiers running on different slide ranges.
 - The work needs **role specialization** — Director / Drafter / Reviewer / Programmer / Tester are roles that justify separate processes with separate role files.
-- The work needs **persistent inter-agent memory** — the broker stores every message in SQLite and the audit-file path under `${BASE}/prompts/` is a permanent record.
+- The work needs **persistent inter-member memory** — the broker stores every message in SQLite and the audit-file path under `${BASE}/prompts/` is a permanent record.
 
 Do **not** use this pattern when:
 
@@ -82,7 +82,7 @@ The Director creates the fleet inside a tmux pane:
 cafleet --json fleet create --name "<fleet-name>"
 ```
 
-The CLI atomically (1) creates a `fleets` row, (2) registers a root Director agent bound to the current tmux pane, (3) seeds a built-in Administrator agent. Capture both `fleet_id` and `director.agent_id` from the JSON response and substitute them as **literal id strings** into every subsequent `cafleet ...` call.
+The CLI atomically (1) creates a `fleets` row, (2) registers a root Director bound to the current tmux pane, (3) seeds a built-in Administrator. Capture both `fleet_id` and `director.member_id` from the JSON response and substitute them as **literal id strings** into every subsequent `cafleet ...` call.
 
 Never store these IDs in shell variables (`export FLEET=...`). The Claude Code harness's `permissions.allow` matches Bash invocations as literal command strings; an exported shell variable you reference yourself breaks the literal match and forces per-invocation permission prompts that interrupt the agent loop.
 
@@ -103,24 +103,24 @@ The monitoring member runs one of two idle-nudge routines (both spawn the monito
 
 For each member you spawn, follow the **two-step render-to-file pattern**:
 
-1. **Render the spawn prompt locally**. Substitute every `[INSERT …]` marker with the concrete value, and keep the four `{fleet_id}` / `{agent_id}` / `{director_agent_id}` / `{coding_agent}` identity placeholders as written — `cafleet member create` runs `str.format` over the prompt at spawn and renders them to literals (§ 3.2). Any literal brace in the prompt body must be doubled (`{{` / `}}`) to survive `.format()`; leave no other stray single braces. By the time you write the file, every `[INSERT …]` marker must be replaced with its concrete literal value.
+1. **Render the spawn prompt locally**. Substitute every `[INSERT …]` marker with the concrete value, and keep the four `{fleet_id}` / `{member_id}` / `{director_member_id}` / `{coding_agent}` identity placeholders as written — `cafleet member create` runs `str.format` over the prompt at spawn and renders them to literals (§ 3.2). Any literal brace in the prompt body must be doubled (`{{` / `}}`) to survive `.format()`; leave no other stray single braces. By the time you write the file, every `[INSERT …]` marker must be replaced with its concrete literal value.
 
 2. **Write the rendered text** to `${BASE}/prompts/<role>-<UTC-compact>.md` where `<UTC-compact>` is `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")` (Python). Create `${BASE}/prompts/` on first write via `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`. On same-second collisions, append `_2`, `_3`, … to the filename until it is unique — never overwrite. **The pre-spawn file IS the audit artifact.** There is no second post-spawn re-render; the file is both the CLI input and the permanent record of what was spawned, carrying the four `{...}` identity placeholders pre-substitution (which is expected).
 
-3. **Spawn with `--text-file`** pointing at the absolute path of the rendered file:
+3. **Spawn with `--text-file`** pointing at the absolute path of the rendered file (the acting Director is auto-resolved from the fleet row — no identity flag):
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> \
      --name "<member-name>" \
      --description "<one-sentence purpose>" \
      --text-file ${BASE}/prompts/<role>-<UTC-compact>.md
    ```
 
-   Capture the printed `agent_id` from the JSON response and substitute it for the member's id in every subsequent `cafleet ...` call **the Director** makes that targets it. (The member itself learns its own id from the literal `YOUR AGENT ID:` line the CLI rendered into its prompt — § 3.2.)
+   Capture the printed `member_id` from the JSON response and substitute it for the member's id in every subsequent `cafleet ...` call **the Director** makes that targets it. (The member itself learns its own id from the literal `YOUR MEMBER ID:` line the CLI rendered into its prompt — § 3.2.)
 
 #### Why the two-step pattern instead of inline `--text`?
 
-`cafleet member create` accepts the spawn prompt either inline via `--text` or via `--text-file <abs path>`. The inline `--text` form passes the prompt to `tmux split-window` as a single positional argument; tmux fails with `command too long` once the shell-quoted prompt grows past a few KB, and cafleet rolls back the agent registration. Real role files are typically 5–15 KB and the spawn prompt that includes them often pushes well past 20 KB. `--text-file` reads the file inside the cafleet process and writes the text to the new pane through a separate path that is not size-limited.
+`cafleet member create` accepts the spawn prompt either inline via `--text` or via `--text-file <abs path>`. The inline `--text` form passes the prompt to `tmux split-window` as a single positional argument; tmux fails with `command too long` once the shell-quoted prompt grows past a few KB, and cafleet rolls back the member registration. Real role files are typically 5–15 KB and the spawn prompt that includes them often pushes well past 20 KB. `--text-file` reads the file inside the cafleet process and writes the text to the new pane through a separate path that is not size-limited.
 
 Use `--text-file` always. The inline `--text` form exists only as the documented fallback when `${BASE}` is `<unset>` and the audit-file write is impossible (see § 4).
 
@@ -140,7 +140,7 @@ When the work is done, the Director MUST tear down in this exact order:
 
 1. **Stop the monitoring member first.** There is no `monitor stop` command — message the monitoring member to stop its `cafleet monitor start` background task (the task-stop delivers SIGTERM/SIGINT, so the loop runs its `finally` and clears its runtime row), wait for its confirmation, then `cafleet member delete` the monitoring member **first**, before any ordinary member. A tick that keystrokes into a tearing-down pane races the delete path.
 2. **`cafleet member delete --member-id <id>`** for every remaining (ordinary) member. This sends the backend exit keystroke to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` per member.
-3. **`cafleet fleet delete --fleet-id <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active agent in the fleet (root Director + Administrator + remaining members), and physically deletes every associated `agent_placements` row. Tasks are preserved. `fleet delete` makes any still-running loop self-terminate on its next tick, so step 1 is belt-and-suspenders.
+3. **`cafleet fleet delete --fleet-id <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active member in the fleet (root Director + Administrator + remaining members), and physically deletes every associated `member_placements` row. Tasks are preserved. `fleet delete` makes any still-running loop self-terminate on its next tick, so step 1 is belt-and-suspenders.
 
 Order matters. Stop the monitoring member's monitor and delete it before the ordinary members so a tick cannot keystroke into a tearing-down pane or race the delete path. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
 
@@ -160,8 +160,8 @@ Load these skills at startup:
 - <other skills as needed>
 
 FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
+DIRECTOR MEMBER ID: {director_member_id}
+YOUR MEMBER ID: {member_id}
 BASE: [INSERT abs BASE path the Director resolved via the `cafleet` skill's `reference/base-dir.md`]
 CODING AGENT: {coding_agent}
 
@@ -176,31 +176,31 @@ There is no `COMMUNICATION PROTOCOL` command-example block: the member learns th
 
 ```
 FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
+DIRECTOR MEMBER ID: {director_member_id}
+YOUR MEMBER ID: {member_id}
 BASE: <abs task-folder path>
 CODING AGENT: {coding_agent}
 ```
 
-These lines are the member's grounding identity. The brace tokens are the CLI's `str.format` placeholders — `cafleet member create` renders each to a literal at spawn (§ 3.2), so the member reads e.g. `FLEET ID: 7` / `YOUR AGENT ID: 11` and substitutes those integers into its `cafleet ...` commands. The `BASE:` line is the resolved task-scoped BASE the Director computed in § 2.1 — the member uses this verbatim and MUST NOT re-resolve BASE on its own (members that re-resolve risk drift from the Director's resolved BASE). The `CODING AGENT:` line names the member's backend so it can read its overlay (§ 8).
+These lines are the member's grounding identity. The brace tokens are the CLI's `str.format` placeholders — `cafleet member create` renders each to a literal at spawn (§ 3.2), so the member reads e.g. `FLEET ID: 7` / `YOUR MEMBER ID: 11` and substitutes those integers into its `cafleet ...` commands. The `BASE:` line is the resolved task-scoped BASE the Director computed in § 2.1 — the member uses this verbatim and MUST NOT re-resolve BASE on its own (members that re-resolve risk drift from the Director's resolved BASE). The `CODING AGENT:` line names the member's backend so it can read its overlay (§ 8).
 
 ### 3.2 Identity via `str.format` substitution
 
 `cafleet member create` runs `str.format` over the resolved spawn prompt, substituting exactly four placeholders to literals at spawn time:
 
 - **`{fleet_id}`** — the spawned member's fleet id.
-- **`{agent_id}`** — the spawned member's **own** id, allocated by cafleet during the spawn (so the Director cannot know it at render time — this is exactly why the spawn prompt carries the placeholder rather than a Director-rendered literal; only the CLI can fill it).
-- **`{director_agent_id}`** — the spawned member's Director id.
+- **`{member_id}`** — the spawned member's **own** id, allocated by cafleet during the spawn (so the Director cannot know it at render time — this is exactly why the spawn prompt carries the placeholder rather than a Director-rendered literal; only the CLI can fill it).
+- **`{director_member_id}`** — the spawned member's Director id.
 - **`{coding_agent}`** — the resolved backend name (`claude` / `codex` / `opencode`).
 
-An unknown placeholder raises a `UsageError` listing the four supported names; a malformed brace expression raises the "double literal braces" `UsageError` (both exit 2, with the just-registered agent rolled back). **Any literal brace in prompt text must be doubled** (`{{` / `}}`) to survive `.format()`.
+An unknown placeholder raises a `UsageError` listing the four supported names; a malformed brace expression raises the "double literal braces" `UsageError` (both exit 2, with the just-registered member rolled back). **Any literal brace in prompt text must be doubled** (`{{` / `}}`) to survive `.format()`.
 
 This substitution is the **sole** identity-delivery mechanism — no identity environment variable is injected into the pane (the only forwarded env var is `CAFLEET_DATABASE_URL`). The member takes the literal integers from its prompt's identity lines and passes them explicitly:
 
-- a poll is `cafleet message poll --fleet-id <fleet-id> --agent-id <my-agent-id>`;
-- a self-attributed send is `cafleet message send --fleet-id <fleet-id> --agent-id <my-agent-id> --to <director-agent-id> --text "..."`.
+- a poll is `cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id>`;
+- a self-attributed send is `cafleet message send --fleet-id <fleet-id> --from-member-id <my-member-id> --to-member-id <director-member-id> --text "..."`.
 
-A Director may *also* embed the literal `fleet_id` and `director_agent_id` (which it knows at render time) directly instead of the placeholders; the member's own id always comes from the CLI-rendered `{agent_id}`. The `cafleet` skill documents the convention for spawned members.
+A Director may *also* embed the literal `fleet_id` and `director_member_id` (which it knows at render time) directly instead of the placeholders; the member's own id always comes from the CLI-rendered `{member_id}`. The `cafleet` skill documents the convention for spawned members.
 
 ### 3.3 The `[INSERT ...]` render-time substitution rules
 
@@ -259,7 +259,7 @@ This protocol is the single most-violated rule in past CAFleet-orchestrated skil
 
 ## 5. Coordination protocol summary
 
-Inter-agent communication uses the **verb + pointer** schema. This is the longest section in this guide because it is the most easily miswired surface.
+Inter-member communication uses the **verb + pointer** schema. This is the longest section in this guide because it is the most easily miswired surface.
 
 ### 5.1 The cafleet message body shape
 
@@ -323,10 +323,10 @@ The phrasing deliberately omits parentheses so a parser does not misinterpret it
 After acting on a polled message, the recipient MUST `cafleet message ack` it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle, polluting the recipient's context with stale work.
 
 ```bash
-cafleet message ack --fleet-id <fleet-id> --agent-id <my-agent-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --task-id <task-id>
 ```
 
-The `<task-id>` is the full id returned by `cafleet --json message poll --fleet-id <fleet-id> --agent-id <my-agent-id> --full`. The default text-mode poll output truncates the body; pass `--full` when you need the untruncated envelope.
+The `<task-id>` is the full id returned by `cafleet --json message poll --fleet-id <fleet-id> --member-id <my-member-id> --full`. The default text-mode poll output truncates the body; pass `--full` when you need the untruncated envelope.
 
 ---
 
@@ -358,7 +358,7 @@ The skill's task convention is `researches/pr-<pr-number>` (PR summaries are res
 
 ```bash
 cafleet --json fleet create --name "summarize-pr-1234"
-# → {"fleet_id": 7, "director": {"agent_id": 8}, "administrator_agent_id": 9}
+# → {"fleet_id": 7, "director": {"member_id": 8}, "administrator_member_id": 9}
 ```
 
 Substitute `7` and `8` literally into every subsequent call the Director makes.
@@ -369,11 +369,11 @@ Like every CAFleet-orchestrated skill, `summarize-pr` spawns a dedicated monitor
 
 ```bash
 # First member create: the monitoring member (canonical conditional-nudge routine).
-cafleet --json member create --fleet-id 7 --agent-id 8 \
+cafleet --json member create --fleet-id 7 \
   --name "monitor" --description "Monitoring member: owns the heartbeat" \
   --role monitor --model sonnet \
   --text-file /repo/researches/pr-1234/prompts/monitor-20260516T003300Z.md
-# → {"agent_id": 10, ...}
+# → {"member_id": 10, ...}
 ```
 
 Wait for the monitoring member's `ready: monitor live` handshake before spawning the Summarizer (first-in gate).
@@ -391,8 +391,8 @@ Load these skills at startup:
 - the cafleet skill — for the broker primitives and bash-via-Director routing
 
 FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
+DIRECTOR MEMBER ID: {director_member_id}
+YOUR MEMBER ID: {member_id}
 BASE: /repo/researches/pr-1234
 CODING AGENT: {coding_agent}
 
@@ -409,28 +409,28 @@ The Director writes this rendered text to `/repo/researches/pr-1234/prompts/summ
 ### Spawn the Summarizer
 
 ```bash
-cafleet --json member create --fleet-id 7 --agent-id 8 \
+cafleet --json member create --fleet-id 7 \
   --name "summarizer" \
   --description "Digests a PR diff into a 200-word risk summary" \
   --text-file /repo/researches/pr-1234/prompts/summarizer-20260516T003344Z.md
-# → {"agent_id": 11, ...}
+# → {"member_id": 11, ...}
 ```
 
-Capture `11` as the Summarizer's id for the rest of the run (the Summarizer itself reads its own id from the `YOUR AGENT ID: 11` line the CLI rendered into its prompt).
+Capture `11` as the Summarizer's id for the rest of the run (the Summarizer itself reads its own id from the `YOUR MEMBER ID: 11` line the CLI rendered into its prompt).
 
 ### Coordination
 
 The Summarizer reads the diff, writes the summary, and sends (from inside its pane, using the literal ids from its prompt):
 
 ```bash
-cafleet message send --fleet-id 7 --agent-id 11 --to 8 \
+cafleet message send --fleet-id 7 --from-member-id 11 --to-member-id 8 \
   --text "complete (doc) — summary 198 words, 3 risk areas"
 ```
 
 The Director polls, acks, reads `${BASE}/summary.md`, presents it to the user via `AskUserQuestion`. If the user approves, the Director tears down. If the user requests revisions, the Director sends:
 
 ```bash
-cafleet message send --fleet-id 7 --agent-id 8 --to 11 \
+cafleet message send --fleet-id 7 --from-member-id 8 --to-member-id 11 \
   --text "ready (doc)"
 ```
 
@@ -470,7 +470,7 @@ Fix: every message you act on, ack it. Acking moves the task from `INPUT_REQUIRE
 
 ### 7.2 Inlining role-file content into the spawn prompt
 
-Symptom: `cafleet member create` exits non-zero with `Error: tmux split-window failed: command too long`, the agent registration is rolled back, no member pane appears.
+Symptom: `cafleet member create` exits non-zero with `Error: tmux split-window failed: command too long`, the member registration is rolled back, no member pane appears.
 
 Fix: use `--text-file` (always) and reference the role file by absolute path inside the spawn prompt, not by inlining the content.
 
@@ -512,7 +512,7 @@ Fix: the **first** `cafleet member create` is the `--role monitor` monitoring me
 
 ### 7.9 Leaving stray single braces in the spawn prompt
 
-Symptom: `cafleet member create` exits 2 with `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {agent_id}, {director_agent_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` or `Error: Malformed custom prompt: ...`, and the just-registered agent is rolled back.
+Symptom: `cafleet member create` exits 2 with `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` or `Error: Malformed custom prompt: ...`, and the just-registered member is rolled back.
 
 Fix: the only single-brace tokens allowed in a spawn prompt are the four identity placeholders. Double every literal brace (`{{` / `}}`) — including braces inside code snippets or JSON examples the prompt quotes.
 

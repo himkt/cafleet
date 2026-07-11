@@ -152,4 +152,4 @@ On a re-check request (delivered via `cafleet message send`), repeat the full Pe
 The Director's batch teardown is a two-step explicit handshake, not a pre-exit hook:
 
 1. The Director sends a `CLOSE:` message via `cafleet message send`. Run `bun run agent-browser --session vr-batch-[start] close` to release the browser daemon for this batch, then reply `closed` via `cafleet message send` so the Director knows it is safe to delete you.
-2. After your `closed` confirmation, the Director runs `cafleet member delete` on your `agent_id`, which sends the backend exit keystroke and waits up to 15 s for your `claude` process to exit. No additional commands run after the exit keystroke arrives — the close handshake in step 1 is the only reliable point at which the browser daemon is released.
+2. After your `closed` confirmation, the Director runs `cafleet member delete` on your `member_id`, which sends the backend exit keystroke and waits up to 15 s for your `claude` process to exit. No additional commands run after the exit keystroke arrives — the close handshake in step 1 is the only reliable point at which the browser daemon is released.

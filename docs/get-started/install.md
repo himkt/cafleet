@@ -69,7 +69,7 @@ first fleet-scoped command errors with
 `cafleet setup`, `cafleet doctor`, and `cafleet server` stay runnable so you
 can always repair; `cafleet doctor` reports the recorded per-home versions.
 
-The default database lives at `~/.local/share/cafleet/cafleet_v2.db`. Override
+The default database lives at `~/.local/share/cafleet/cafleet_v3.db`. Override
 with the `CAFLEET_DATABASE_URL` environment variable — use an absolute path,
 since SQLAlchemy does not expand `~` in SQLite URLs.
 
@@ -77,7 +77,7 @@ since SQLAlchemy does not expand `~` in SQLite URLs.
 
     The schema half migrates in place: re-running `cafleet setup` (or
     `cafleet setup db`) after an upgrade applies any pending migrations and
-    preserves all existing data, including fleets, agents, and the full
+    preserves all existing data, including fleets, members, and the full
     message history. It refuses to auto-downgrade a database that is ahead
     of the bundled head revision, and refuses an unversioned database that
     already contains tables it does not recognize (the error suggests

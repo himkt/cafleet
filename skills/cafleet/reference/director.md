@@ -1,23 +1,23 @@
 # tmux-backed member commands (`cafleet member *`)
 
-Reference page for the Director-only lifecycle and pane-interaction commands — `member create`, `member delete`, `member list` (with `--activity`), `member capture`, `member exec`, `member ping`, `member nudge`. All run inside a tmux or herdr session, scoped to the per-subcommand `--fleet-id`. `member create` takes `--agent-id` (the spawning Director, validated to equal the fleet root); every other lifecycle verb identifies its **target** by `--member-id`; `member nudge` additionally takes `--agent-id` (the sender, typically the monitoring member).
+Reference page for the Director-only lifecycle and pane-interaction commands — `member create`, `member delete`, `member list` (with `--activity`), `member capture`, `member exec`, `member ping`, `member nudge`. All run inside a tmux or herdr session, scoped to the per-subcommand `--fleet-id`. `member create` takes **no identity flag** — the CLI auto-resolves the spawning Director from `fleets.director_member_id`; every other lifecycle verb identifies its **target** by `--member-id`; `member nudge` names both parties (`--from-member-id` the sender, typically the monitoring member; `--to-member-id` the target).
 
 Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/exec-routing.md`.
 
 ## Member Create
 
-Register a new member agent and spawn a coding-agent pane in the Director's own tmux window. The command atomically registers the agent, creates a placement row, renders the spawn prompt, spawns the pane, and patches the placement with the real pane ID.
+Register a new member and spawn a coding-agent pane in the Director's own tmux window. The command auto-resolves the Director from the fleet row, atomically registers the member, creates a placement row, renders the spawn prompt, spawns the pane, and patches the placement with the real pane ID.
 
 ```bash
-cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> \
   --name Claude-B --description "Reviewer for PR #42" \
   --text-file /abs/path/to/<BASE>/.prompts/claude-b-20260514T145000Z.md
 
-cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> \
   --name Codex-A --description "Reviewer for PR #42" --coding-agent codex \
   --text-file /abs/path/to/<BASE>/.prompts/codex-a-20260514T145000Z.md
 
-cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+cafleet member create --fleet-id <fleet-id> \
   --name monitor --description "Monitoring member: owns the heartbeat" \
   --role monitor --model {monitor_model} \
   --text-file /abs/path/to/<BASE>/.prompts/monitor-20260514T145000Z.md
@@ -25,12 +25,11 @@ cafleet member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--agent-id` | yes | The Director's agent ID |
-| `--name` | yes | Display name of the new member. **Reserved name — `Administrator`**: every fleet is auto-seeded with one built-in `Administrator` (marked `agent_card_json.cafleet.kind == "builtin-administrator"`, protected against deregister and Director placement); do NOT name a member that. |
+| `--name` | yes | Display name of the new member. **Reserved name — `Administrator`**: every fleet is auto-seeded with one built-in `Administrator` (marked `member_card_json.cafleet.kind == "builtin-administrator"`, protected against deregister); do NOT name a member that. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; also recorded as `placement.coding_agent`. When omitted, an ordinary member defaults to `claude`; a `--role monitor` member inherits **your** (the spawning Director's) backend from your placement row, so the monitoring member runs on the same backend it watches. An explicit value always wins. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent. The `opencode` backend materializes its agent preset on first spawn. |
 | `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend and lists a per-backend example; the *Available models per backend* tables below list the common models for each backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
-| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `agent_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop watches the Director and members on their own intervals and wakes the monitoring member when one is due — see [`reference/supervision.md`](supervision.md)). An ordinary `--role member` with a pane IS enrolled. The LLM is still set by `--model` (the Director passes the monitor model `{monitor_model}`); the backend is inherited from your placement row when `--coding-agent` is omitted (see the `--coding-agent` row). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see [`roles/monitor.md`](../roles/monitor.md) for the canonical prompt and first-in/first-out lifecycle. |
+| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `member_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop watches the Director and members on their own intervals and wakes the monitoring member when one is due — see [`reference/supervision.md`](supervision.md)). An ordinary `--role member` with a pane IS enrolled. The LLM is still set by `--model` (the Director passes the monitor model `{monitor_model}`); the backend is inherited from your placement row when `--coding-agent` is omitted (see the `--coding-agent` row). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see [`roles/monitor.md`](../roles/monitor.md) for the canonical prompt and first-in/first-out lifecycle. |
 | `--text` | no | Inline spawn prompt. Mutually exclusive with `--text-file`; exactly one of the two is required. |
 | `--text-file` | no | Path to a UTF-8 file used as the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Mutually exclusive with `--text`; exactly one of the two is required. Path/file errors are catalogued in [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 
@@ -99,7 +98,7 @@ Intelligence ranking within the Zen catalog: `gpt-5.5-pro` highest, then `gpt-5.
 
 The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`; the Zen catalog above is normalized to the `opencode/` gateway prefix, and the direct-provider examples elsewhere in `director.md` / `coding-agents.md` stay valid.
 
-**Identity substitution (`str.format`)**: the four-placeholder `str.format` render (and the brace-doubling rule) is canonical in the cafleet [`SKILL.md`](../SKILL.md) § *Spawned-member identity via `str.format` substitution*. Director-side deltas: an unknown placeholder raises a `UsageError` listing the four supported names, a malformed brace expression raises the distinct "double literal braces" `UsageError`, and both (exit 2) roll back the just-registered agent.
+**Identity substitution (`str.format`)**: the four-placeholder `str.format` render (and the brace-doubling rule) is canonical in the cafleet [`SKILL.md`](../SKILL.md) § *Spawned-member identity via `str.format` substitution*. Director-side deltas: an unknown placeholder raises a `UsageError` listing the four supported names, a malformed brace expression raises the distinct "double literal braces" `UsageError`, and both (exit 2) roll back the just-registered member.
 
 **Spawn prompt size limit**: cafleet passes the prompt to `tmux split-window` as one positional argument, so a large inline prompt fails with `tmux command failed: command too long` (and rolls back the registration) past a few KB. Use `--text-file` for every templated identity block + role-file-by-path prompt; inline `--text "<prompt>"` stays first-class for trivial one-line ad-hoc spawns.
 
@@ -123,8 +122,8 @@ Load these skills at startup:
 ‹EXTRA SKILL LOADS›
 
 FLEET ID: {fleet_id}
-DIRECTOR AGENT ID: {director_agent_id}
-YOUR AGENT ID: {agent_id}
+DIRECTOR MEMBER ID: {director_member_id}
+YOUR MEMBER ID: {member_id}
 BASE: [INSERT abs BASE path]
 CODING AGENT: {coding_agent}
 ‹CONTEXT LINES›
@@ -134,7 +133,7 @@ CODING AGENT: {coding_agent}
 ‹START CUE›
 ```
 
-Rendering is **two-stage**: the Director substitutes the values it already knows as literals before the call (`BASE`, the absolute role-file path, the cafleet-load purpose phrase), then the CLI substitutes the four identity placeholders shown in the skeleton above (`{agent_id}` is the member's own newly-allocated id, which only the CLI can fill). The Director must leave **no stray single braces** other than those four. After spawn the member sees literal labeled lines — `FLEET ID: 24`, `DIRECTOR AGENT ID: 84`, `YOUR AGENT ID: 88`, `CODING AGENT: claude` — and uses those integers on every `cafleet` command. There is no `COMMUNICATION PROTOCOL` command-example block: the member learns poll/send/ack command shapes from the `cafleet` skill and its role file. The `CODING AGENT:` line keeps the spawned binary and the overlay selector in lockstep for every role, the monitoring member included (its `--coding-agent` is omitted at spawn, so the CLI records — and `{coding_agent}` renders — the backend inherited from the Director's placement row; see [`roles/monitor.md`](../roles/monitor.md)). The member reads its overlay `coding-agent/<name>.md` deterministically from this line and resolves it onto the base — materializing each `{placeholder}` to its overlay value (or the documented default) and applying each bound note before emitting, per the cafleet `SKILL.md` § *Resolve your overlay*.
+Rendering is **two-stage**: the Director substitutes the values it already knows as literals before the call (`BASE`, the absolute role-file path, the cafleet-load purpose phrase), then the CLI substitutes the four identity placeholders shown in the skeleton above (`{member_id}` is the member's own newly-allocated id, which only the CLI can fill). The Director must leave **no stray single braces** other than those four. After spawn the member sees literal labeled lines — `FLEET ID: 24`, `DIRECTOR MEMBER ID: 84`, `YOUR MEMBER ID: 88`, `CODING AGENT: claude` — and uses those integers on every `cafleet` command. There is no `COMMUNICATION PROTOCOL` command-example block: the member learns poll/send/ack command shapes from the `cafleet` skill and its role file. The `CODING AGENT:` line keeps the spawned binary and the overlay selector in lockstep for every role, the monitoring member included (its `--coding-agent` is omitted at spawn, so the CLI records — and `{coding_agent}` renders — the backend inherited from the Director's placement row; see [`roles/monitor.md`](../roles/monitor.md)). The member reads its overlay `coding-agent/<name>.md` deterministically from this line and resolves it onto the base — materializing each `{placeholder}` to its overlay value (or the documented default) and applying each bound note before emitting, per the cafleet `SKILL.md` § *Resolve your overlay*.
 
 Per-role delta slots (each consuming skill's spawn section fills these):
 
@@ -168,14 +167,14 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 
 ## Member Delete
 
-The CLI sends the backend exit keystroke, waits for the pane to close (15 s timeout), then deregisters and rebalances the layout; on timeout it exits 2 with the pane buffer tail on stderr (no deregister). `--force` / `-f` skips the wait and kill-panes immediately (exit 0 even if the pane was already gone). A member with a pending placement (no pane yet) is a plain registry soft-delete, and so is a placementless agent — `member delete` handles both without touching tmux.
+The CLI sends the backend exit keystroke, waits for the pane to close (15 s timeout), then deregisters and rebalances the layout; on timeout it exits 2 with the pane buffer tail on stderr (no deregister). `--force` / `-f` skips the wait and kill-panes immediately (exit 0 even if the pane was already gone). A member with a pending placement (no pane yet) is a plain registry soft-delete, and so is a placementless registry row — `member delete` handles both without touching tmux.
 
 ```bash
 cafleet member delete --fleet-id <fleet-id> --member-id <member-id>
 cafleet member delete --fleet-id <fleet-id> --member-id <member-id> --force
 ```
 
-Fleet-isolation only: a `--member-id` outside `--fleet-id` exits 1 (`Error: Agent <member-id> not found`); deleting the root Director stays blocked by the root-Director guard. Exit codes and the timeout output shape: [`cli-options.md`](../../../docs/spec/cli-options.md#member-delete).
+Fleet-isolation only: a `--member-id` outside `--fleet-id` exits 1 (`Error: Member <member-id> not found`); deleting the root Director stays blocked by the root-Director guard. Exit codes and the timeout output shape: [`cli-options.md`](../../../docs/spec/cli-options.md#member-delete).
 
 ## Member List (with `--activity`)
 
@@ -184,11 +183,11 @@ cafleet member list --fleet-id <fleet-id>
 cafleet member list --fleet-id <fleet-id> --activity
 ```
 
-The base list shows each member (an agent with a placement row; the root Director is excluded) with its placement columns (`agent_id`, `name`, `status`, `backend`, `session`, `window_id`, `pane_id`; a pending placement renders `(pending)`). `--activity` instead shows `last_sent` / `last_recv` / `last_ack` / `idle` aggregated from `tasks` (output shape in [`cli-options.md`](../../../docs/spec/cli-options.md#member-list-activity-output)). Use `--activity` for routine supervision ticks instead of capturing every member every tick — capture is reserved for the cases the activity columns flag.
+The base list shows each member (a placed registry row other than the root Director) with its placement columns (`member_id`, `name`, `status`, `backend`, `session`, `window_id`, `pane_id`; a pending placement renders `(pending)`). `--activity` instead shows `last_sent` / `last_recv` / `last_ack` / `idle` aggregated from `tasks` (output shape in [`cli-options.md`](../../../docs/spec/cli-options.md#member-list-activity-output)). Use `--activity` for routine supervision ticks instead of capturing every member every tick — capture is reserved for the cases the activity columns flag.
 
 ## Member Capture
 
-Capture the last N lines of a member's pane buffer (read-only). `--lines` defaults `20` (`--tail` is an accepted alias); `--ansi` / `--no-ansi` (default) strips ANSI escapes and de-fragments carriage returns. Output is the raw buffer in text mode, `{member_agent_id, pane_id, lines, content}` in JSON.
+Capture the last N lines of a member's pane buffer (read-only). `--lines` defaults `20` (`--tail` is an accepted alias); `--ansi` / `--no-ansi` (default) strips ANSI escapes and de-fragments carriage returns. Output is the raw buffer in text mode, `{member_id, pane_id, lines, content}` in JSON.
 
 ```bash
 cafleet member capture --fleet-id <fleet-id> --member-id <member-id>
@@ -223,15 +222,15 @@ cafleet member ping --fleet-id <fleet-id> --member-id <member-id>
 
 ## Member Nudge (re-engage the Director)
 
-The monitoring member's purpose-built re-engage primitive for waking the Director when its capture-and-classify routine reports a `stalled`/`finished` agent (or classifies the Director's own pane `finished` with un-acked work). Unlike `member ping` (a pure poll keystroke), `member nudge` **persists an ACKable broker task** (so the Director's facilitation loop sees an inbox item naming what needs attention) **and** fires the hardened, `Esc`-safeguarded inline preview into the target's pane — the same persist + preview effect as a monitoring-member `cafleet message send --to <director>`, just the named interface over it.
+The monitoring member's purpose-built re-engage primitive for waking the Director when its capture-and-classify routine reports a `stalled`/`finished` member (or classifies the Director's own pane `finished` with un-acked work). Unlike `member ping` (a pure poll keystroke), `member nudge` **persists an ACKable broker task** (so the Director's facilitation loop sees an inbox item naming what needs attention) **and** fires the hardened, `Esc`-safeguarded inline preview into the target's pane — the same persist + preview effect as a monitoring-member `cafleet message send --to-member-id <director>`, just the named interface over it.
 
 ```bash
 cafleet member nudge --fleet-id <fleet-id> \
-  --agent-id <monitoring-member-id> --member-id <director-agent-id> \
+  --from-member-id <monitoring-member-id> --to-member-id <director-member-id> \
   --text "<re-engage summary>"
 ```
 
-The **target** is `--member-id` (typically the root Director, fleet-isolation resolution) and the **sender** is `--agent-id` (typically the monitoring member, persisted as the task's `from_agent_id`); `--text` is the summary (empty rejected, exit 2; exactly one of `--text` / `--text-file`). A target with no live pane is tolerated (the task still persists). Because `--text` is agent-controlled, it sits in `permissions.allow`. Full surface: [`cli-options.md`](../../../docs/spec/cli-options.md#member-nudge).
+The **target** is `--to-member-id` (typically the root Director, fleet-isolation resolution) and the **sender** is `--from-member-id` (typically the monitoring member, persisted as the task's `from_member_id`); `--text` is the summary (empty rejected, exit 2; exactly one of `--text` / `--text-file`). A target with no live pane is tolerated (the task still persists). Because `--text` is member-controlled, it sits in `permissions.allow`. Full surface: [`cli-options.md`](../../../docs/spec/cli-options.md#member-nudge).
 
 ## Cross-references
 

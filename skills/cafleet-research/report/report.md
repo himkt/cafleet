@@ -37,7 +37,7 @@ The skill writes its working folder to `<CWD>/researches/<topic-slug>/` (one fol
 
 ## Architecture
 
-The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns every member via `cafleet member create --fleet-id [fleet-id] --agent-id [director-agent-id]`. All inter-agent coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered push notifications) and {task_coord}.
+The Director is the root member of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns every member via `cafleet member create --fleet-id [fleet-id]` (the Director is auto-resolved from the fleet row). All inter-member coordination flows through the CAFleet message broker (`cafleet message send` + auto-delivered push notifications) and {task_coord}.
 
 ```text
 User
@@ -49,7 +49,7 @@ User
 
 Members cannot talk to the user directly — the Director always relays. Members cannot talk to each other directly either — Manager requests are always mediated by the Director (Manager → Director → Scout/Researcher, and Scout/Researcher → Director → Manager).
 
-> **Literal-integer-id flag rule** — substitute the integer ids printed by `cafleet fleet create` and `cafleet member create` directly into every `cafleet ...` call (the harness matches Bash invocations as literal command strings). Never store IDs in shell variables. `--fleet-id` and `--agent-id` are per-subcommand options (placed AFTER the subcommand name). See the `cafleet` skill for the full convention.
+> **Literal-integer-id flag rule** — substitute the integer ids printed by `cafleet fleet create` and `cafleet member create` directly into every `cafleet ...` call (the harness matches Bash invocations as literal command strings). Never store IDs in shell variables. `--fleet-id` and the member-identity options (`--member-id`, `--from-member-id`, `--to-member-id`) are per-subcommand options (placed AFTER the subcommand name). See the `cafleet` skill for the full convention.
 
 ## Process
 
@@ -78,7 +78,7 @@ Run `cafleet doctor` to confirm the Director is inside a tmux or herdr session w
 cafleet --json fleet create --name "research-[topic-slug]"
 ```
 
-Capture `fleet_id` and `director.agent_id` from the response. Treat `fleet_id` as `[fleet-id]` and `director.agent_id` as `[director-agent-id]` for the rest of this skill.
+Capture `fleet_id` and `director.member_id` from the response. Treat `fleet_id` as `[fleet-id]` and `director.member_id` as `[director-member-id]` for the rest of this skill.
 
 ### Step 1: Supervision Model (Director — spawn the monitoring member first)
 
@@ -116,7 +116,7 @@ The Director references each role definition by its **absolute path** in the spa
 
 Substitute these absolute paths into the spawn prompts below.
 
-> **Spawn mechanics**: path-by-reference is required because `cafleet member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The CLI runs `str.format` over the prompt, rendering the four `{fleet_id}` / `{director_agent_id}` / `{agent_id}` / `{coding_agent}` identity placeholders to literals at spawn — double any literal brace as `{{` / `}}` and leave no other stray single braces. **Two-step audit file**: write the rendered prompt to `${BASE}/.prompts/<role>-<UTC-compact>.md` before `cafleet member create --text-file <abs path>` — the pre-spawn file is both the CLI input and the permanent audit artifact. The placeholders-pre-substitution note and the `${BASE} == <unset>` guarded-skip + inline fallback are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files*.
+> **Spawn mechanics**: path-by-reference is required because `cafleet member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The CLI runs `str.format` over the prompt, rendering the four `{fleet_id}` / `{director_member_id}` / `{member_id}` / `{coding_agent}` identity placeholders to literals at spawn — double any literal brace as `{{` / `}}` and leave no other stray single braces. **Two-step audit file**: write the rendered prompt to `${BASE}/.prompts/<role>-<UTC-compact>.md` before `cafleet member create --text-file <abs path>` — the pre-spawn file is both the CLI input and the permanent audit artifact. The placeholders-pre-substitution note and the `${BASE} == <unset>` guarded-skip + inline fallback are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files*.
 
 #### 2c. Spawn the Manager
 
@@ -136,13 +136,13 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 Render the prompt to `${BASE}/.prompts/manager-<UTC-compact>.md` per the 2b two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
+   cafleet --json member create --fleet-id [fleet-id] \
      --name "manager" \
      --description "Compiles the research report" \
      --text-file ${BASE}/.prompts/manager-<UTC-compact>.md
    ```
 
-   Capture the printed `agent_id` and substitute it for `[manager-agent-id]` in every subsequent `cafleet` call that targets the Manager.
+   Capture the printed `member_id` and substitute it for `[manager-member-id]` in every subsequent `cafleet` call that targets the Manager.
 
 ### Step 3: Knowledge Bootstrapping — Scout Phase (Director, on Manager's request)
 
@@ -164,13 +164,13 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 Render the prompt to `${BASE}/.prompts/<scout-name>-<UTC-compact>.md` per the 2b two-step audit-file pattern (use `scout` for a single Scout, `scout-1`/`scout-2`/… for multiple; `<scout-name>` is the lowercased `--name`), then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
+   cafleet --json member create --fleet-id [fleet-id] \
      --name "scout-<NN>" \
      --description "Landscape scout" \
      --text-file ${BASE}/.prompts/scout-<NN>-<UTC-compact>.md
    ```
 
-   Capture the printed `agent_id` for each Scout and substitute it into subsequent `cafleet message send` calls targeting that Scout.
+   Capture the printed `member_id` for each Scout and substitute it into subsequent `cafleet message send` calls targeting that Scout.
 
 **Scout-Manager loop (relayed through Director):**
 
@@ -215,7 +215,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 Render the prompt to `${BASE}/.prompts/researcher-<NN>-<UTC-compact>.md` per the 2b two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id [fleet-id] --agent-id [director-agent-id] \
+   cafleet --json member create --fleet-id [fleet-id] \
      --name "researcher-NN" \
      --description "Researcher for sub-topic <slug>" \
      --text-file ${BASE}/.prompts/researcher-NN-<UTC-compact>.md
@@ -230,12 +230,12 @@ When the Manager delivers the compiled `report.md`:
 1. The Director reads `${OUTPUT_DIR}/report.md` and reviews it critically against the checklist in [roles/director.md](roles/director.md).
 2. The Director sends tagged feedback to the Manager:
    ```bash
-   cafleet message send --fleet-id [fleet-id] --agent-id [director-agent-id] \
-     --to [manager-agent-id] \
+   cafleet message send --fleet-id [fleet-id] --from-member-id [director-member-id] \
+     --to-member-id [manager-member-id] \
      --text "review feedback round <N>: [FACTUAL ERROR] ... / [GAP] ... / ..."
    ```
 3. The Manager revises the report (requesting additional Researchers from the Director as needed) and sends a completion message back via `cafleet message send`.
-4. Each polled inbound message MUST be `ack`ed via `cafleet message ack --fleet-id [fleet-id] --agent-id [director-agent-id] --task-id [task-id]` after acting on it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle.
+4. Each polled inbound message MUST be `ack`ed via `cafleet message ack --fleet-id [fleet-id] --member-id [director-member-id] --task-id [task-id]` after acting on it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle.
 5. Repeat until the Director judges quality is sufficient. Aim for 2–3 rounds maximum.
 
 If the Manager asks the Director a question that is really a user decision (e.g. language choice, scope trade-off), the Director MUST relay via {decision_surface} and pass the user's verbatim answer back via `cafleet message send`. Never decide on the user's behalf.

@@ -1,6 +1,6 @@
 # Design Doc Execute (CAFleet Edition)
 
-Implement features based on a design document using up to five roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), Verifier (E2E/integration testing), and Reviewer (fresh post-implementation review). Every inter-agent message is persisted in SQLite and visible in the admin WebUI timeline. The Director judges which members to spawn based on the nature of the implementation tasks. For each step, the Tester writes unit tests first, the Director reviews and approves them, then the Programmer implements code to pass the tests. The Director also reviews the Programmer's implementation for code quality and design doc compliance before committing. After all TDD steps, the Verifier performs E2E/integration verification (Phase D) if spawned. When every Implementation task and Success Criterion is complete, Step 5 spawns a fresh Reviewer member that reviews the full branch diff and drives a review-and-revise loop with the implementing members until it approves. Step 6 presents the Reviewer-approved change to the user (admin) for approval, Step 7 pushes the feature branch and opens a PR, and Step 8 finalizes, commits the completion marker, pushes it (when the branch is tracked on origin), and tears the team down.
+Implement features based on a design document using up to five roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), Verifier (E2E/integration testing), and Reviewer (fresh post-implementation review). Every inter-member message is persisted in SQLite and visible in the admin WebUI timeline. The Director judges which members to spawn based on the nature of the implementation tasks. For each step, the Tester writes unit tests first, the Director reviews and approves them, then the Programmer implements code to pass the tests. The Director also reviews the Programmer's implementation for code quality and design doc compliance before committing. After all TDD steps, the Verifier performs E2E/integration verification (Phase D) if spawned. When every Implementation task and Success Criterion is complete, Step 5 spawns a fresh Reviewer member that reviews the full branch diff and drives a review-and-revise loop with the implementing members until it approves. Step 6 presents the Reviewer-approved change to the user (admin) for approval, Step 7 pushes the feature branch and opens a PR, and Step 8 finalizes, commits the completion marker, pushes it (when the branch is tracked on origin), and tears the team down.
 
 ## Required reading
 
@@ -29,7 +29,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 - For the document template, see: [../reference/template.md](../reference/template.md)
 - For section guidelines and quality standards, see: [../reference/guidelines.md](../reference/guidelines.md)
-- For the inter-agent coordination protocol (verb + pointer schema, `COMMENT(role)` markers), see: [../reference/coordination.md](../reference/coordination.md)
+- For the inter-member coordination protocol (verb + pointer schema, `COMMENT(role)` markers), see: [../reference/coordination.md](../reference/coordination.md)
 
 ## Coordination Protocol
 
@@ -42,7 +42,7 @@ Two skill-specific notes layer on top of that canonical protocol:
 
 ## Architecture
 
-The Director is the root agent of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns each needed member via `cafleet member create`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
+The Director is the root member of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns each needed member via `cafleet member create`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
 
 ```
 User
@@ -149,18 +149,18 @@ Before registering with CAFleet:
 
 Load the `cafleet` skill; its `reference/supervision.md` governance is § Required reading above.
 
-#### 3a. Establish a CAFleet fleet and capture the root Director's `agent_id`
+#### 3a. Establish a CAFleet fleet and capture the root Director's `member_id`
 
 `cafleet fleet create` (which must be run inside a tmux or herdr session) atomically creates the fleet and registers a root Director bound to the current multiplexer pane. Use `--json` so both IDs are machine-parseable:
 
 ```bash
 cafleet fleet create --name "design-doc-execute-{slug}" --json
-# → { "fleet_id": <int>, "administrator_agent_id": <int>, "director": { "agent_id": <int>, "name": "Director", "placement": {...} } }
+# → { "fleet_id": <int>, "administrator_member_id": <int>, "director": { "member_id": <int>, "name": "Director", "placement": {...} } }
 ```
 
-Capture `fleet_id` and `director.agent_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-agent-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids. Remember: `--fleet-id` and `--agent-id` are per-subcommand options that go **after** the subcommand name.
+Capture `fleet_id` and `director.member_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids. Remember: `--fleet-id` and the member-identity options (`--member-id`, `--from-member-id`, `--to-member-id`) are per-subcommand options that go **after** the subcommand name.
 
-If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `agent_id` instead of creating a new fleet — the root Director from `fleet create` is the team lead.
+If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `member_id` instead of creating a new fleet — the root Director from `fleet create` is the team lead.
 
 #### 3b. Spawn the monitoring member (first-in)
 
@@ -188,7 +188,7 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 
 #### 3e. Spawn each member via `cafleet member create`
 
-Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below. The skeleton's identity lines carry the CLI's four `{fleet_id}` / `{director_agent_id}` / `{agent_id}` / `{coding_agent}` placeholders, rendered to literals by `cafleet member create` at spawn; the `[INSERT …]` markers (`[INSERT DESIGN DOC PATH]`, `[INSERT abs path to roles/<role>.md]`) are rendered by the Director first (leave no stray single braces other than the four identity placeholders; double any literal brace as `{{` / `}}`). All three roles load `cafleet` + `cafleet-design-doc` and take `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` as their only context line; each delta below gives the role's title, role-file, IMPORTANT lines (verbatim), and start cue.
+Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below. The skeleton's identity lines carry the CLI's four `{fleet_id}` / `{director_member_id}` / `{member_id}` / `{coding_agent}` placeholders, rendered to literals by `cafleet member create` at spawn; the `[INSERT …]` markers (`[INSERT DESIGN DOC PATH]`, `[INSERT abs path to roles/<role>.md]`) are rendered by the Director first (leave no stray single braces other than the four identity placeholders; double any literal brace as `{{` / `}}`). All three roles load `cafleet` + `cafleet-design-doc` and take `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` as their only context line; each delta below gives the role's title, role-file, IMPORTANT lines (verbatim), and start cue.
 
 > **Spawn-prompt audit file (two-step pattern)**: render each spawn prompt and **write** it to `${BASE}/.prompts/<role>-<UTC-compact>.md` before invoking `cafleet member create --text-file <abs path>` — the pre-spawn file is both the CLI input and the permanent audit artifact. The `<UTC-compact>` format, the same-second collision rule, the identity-placeholders-pre-substitution note, and the `${BASE} == <unset>` guarded-skip + inline-fallback branch are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files*.
 
@@ -204,13 +204,13 @@ Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/
 Render the prompt to `${BASE}/.prompts/programmer-<UTC-compact>.md` per the 3e two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> \
      --name "Programmer" \
      --description "Implements code to pass tests per step" \
      --text-file ${BASE}/.prompts/programmer-<UTC-compact>.md
    ```
 
-   Parse `agent_id` from the JSON response and substitute it for `<programmer-agent-id>` in every subsequent command.
+   Parse `member_id` from the JSON response and substitute it for `<programmer-member-id>` in every subsequent command.
 
 **Tester spawn prompt** (skeleton + delta; if needed):
 
@@ -224,13 +224,13 @@ Render the prompt to `${BASE}/.prompts/programmer-<UTC-compact>.md` per the 3e t
 Render the prompt to `${BASE}/.prompts/tester-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> \
      --name "Tester" \
      --description "Writes unit tests per step" \
      --text-file ${BASE}/.prompts/tester-<UTC-compact>.md
    ```
 
-   Parse `agent_id` from the JSON response and substitute it for `<tester-agent-id>` in every subsequent command.
+   Parse `member_id` from the JSON response and substitute it for `<tester-member-id>` in every subsequent command.
 
 **Verifier spawn prompt (if needed):**
 
@@ -246,13 +246,13 @@ Render the prompt to `${BASE}/.prompts/tester-<UTC-compact>.md` per the 3e two-s
 Render the prompt to `${BASE}/.prompts/verifier-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> \
      --name "Verifier" \
      --description "E2E/integration testing and evidence collection" \
      --text-file ${BASE}/.prompts/verifier-<UTC-compact>.md
    ```
 
-   Parse `agent_id` from the JSON response and substitute it for `<verifier-agent-id>` in every subsequent command.
+   Parse `member_id` from the JSON response and substitute it for `<verifier-member-id>` in every subsequent command.
 
 #### 3f. Verify members are live
 
@@ -274,10 +274,10 @@ For each step in the design document:
 
 1. **Assign**: Send the Tester a verb + pointer poke. The Tester reads the step description and specification directly from the design document at the pointer.
    ```bash
-   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
-     --to <tester-agent-id> --text "ready (paragraph-Implementation > Step N)"
+   cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
+     --to-member-id <tester-member-id> --text "ready (paragraph-Implementation > Step N)"
    ```
-2. **Wait for the Tester's `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear)** via `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (per the pointer-marker pairing rule in the Coordination Protocol section above); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via {decision_surface}, write the answer back as `COMMENT(claude): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
+2. **Wait for the Tester's `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear)** via `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id>`. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (per the pointer-marker pairing rule in the Coordination Protocol section above); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via {decision_surface}, write the answer back as `COMMENT(claude): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
 3. **Review tests** against the design doc. If issues are found, write `COMMENT(director): <issue>` markers at `paragraph-Implementation > Step N` (matching the cafleet pointer per the pointer-marker pairing rule in the Coordination Protocol section above) and reply `ready (paragraph-Implementation > Step N)`; the Tester resolves the markers and replies `addressed (paragraph-Implementation > Step N)`. Repeat until satisfied.
 4. **Commit tests** (separate commands, do NOT chain with `&&`). Recover the per-test file list directly via git (`git status` / `git diff --stat` / `git log --name-only`) — the Tester does not embed file lists in cafleet bodies under the verb + pointer schema.
    - `git add <test-files>`
@@ -287,10 +287,10 @@ For each step in the design document:
 
 1. **Assign**: Send the Programmer a verb + pointer poke. The Programmer reads the step spec at the pointer and locates the Tester's freshly-committed test files via git (`git log <base>..HEAD --name-only -- '**/test_*' '**/tests/**'`); the prior Tester `complete (...) — N tests` summary went Tester → Director, not Tester → Programmer.
    ```bash
-   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
-     --to <programmer-agent-id> --text "ready (paragraph-Implementation > Step N)"
+   cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
+     --to-member-id <programmer-member-id> --text "ready (paragraph-Implementation > Step N)"
    ```
-2. **Wait for the Programmer's `complete (paragraph-Implementation > Step N)`** via `cafleet message poll --fleet-id <fleet-id> --agent-id <director-agent-id>`. On `escalating (paragraph-Implementation > Step N)` (suspected test defect), see the **Escalation Protocol (Test Defect)** at the end of Step 4; the rationale lives in a `COMMENT(programmer)` marker at the pointer, not in the cafleet body.
+2. **Wait for the Programmer's `complete (paragraph-Implementation > Step N)`** via `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id>`. On `escalating (paragraph-Implementation > Step N)` (suspected test defect), see the **Escalation Protocol (Test Defect)** at the end of Step 4; the rationale lives in a `COMMENT(programmer)` marker at the pointer, not in the cafleet body.
 3. **Programmer updates design doc**: Checkboxes, timestamps, and Progress counter.
 
 #### Phase C: Code Review (Director)
@@ -321,8 +321,8 @@ If the Verifier was spawned, assign verification:
 
 1. Send the Verifier a verb + pointer poke — the Verifier reads the design document and the completed Implementation paragraphs directly at the pointer:
    ```bash
-   cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> \
-     --to <verifier-agent-id> --text "ready (doc)"
+   cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
+     --to-member-id <verifier-member-id> --text "ready (doc)"
    ```
 2. The Verifier discovers tools, executes E2E verification, captures evidence, and writes each fail / suggested-fix as a `COMMENT(verifier): <category> <body>` marker (category = impl bug / test gap / spec issue). Marker location MUST match the cafleet pointer used to report the failure — for per-step `escalating (paragraph-Implementation > Step N)` reports, the paired `COMMENT(verifier)` marker lives at the SAME `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in the Coordination Protocol section above). On overall success the Verifier sends a single `complete (doc)`; on failures the Verifier sends one `escalating (paragraph-Implementation > Step N)` per affected step.
 3. **Route failures** by reading the standing `COMMENT(verifier)` markers and dispatching with `ready (paragraph-Implementation > Step N)`: impl-bug markers → Programmer, test-gap markers → Tester, spec-issue markers → Director resolves directly via `COMMENT(director)` arbitration (or escalates to the user via {decision_surface} if a product decision is needed).
@@ -362,25 +362,25 @@ This is the first and only time the Reviewer exists in the fleet (never in the S
 Render the spawn prompt to `${BASE}/.prompts/reviewer-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with your overlay's resolved `{reviewer_model}` value:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> --agent-id <director-agent-id> \
+   cafleet --json member create --fleet-id <fleet-id> \
      --name "Reviewer" \
      --description "Fresh post-implementation review" \
      --model {reviewer_model} \
      --text-file ${BASE}/.prompts/reviewer-<UTC-compact>.md
    ```
 
-   Parse `agent_id` from the JSON response and substitute it for `<reviewer-agent-id>` in every subsequent command. Verify `status: active` via `cafleet member list --fleet-id <fleet-id>` before assigning.
+   Parse `member_id` from the JSON response and substitute it for `<reviewer-member-id>` in every subsequent command. Verify `status: active` via `cafleet member list --fleet-id <fleet-id>` before assigning.
 
 #### Review loop
 
-1. **Assign**: `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <reviewer-agent-id> --text "ready (doc)"`.
+1. **Assign**: `cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> --to-member-id <reviewer-member-id> --text "ready (doc)"`.
 2. **Review pass** (Reviewer): reads the design doc, reads the full branch diff (`git diff <base-branch>...HEAD` — the base branch name is a spawn-prompt context line), and may run `mise //cafleet:test`, `mise //cafleet:lint`, and the other read-only mise tasks to verify claims (read-execute scope). Findings land as `COMMENT(reviewer): [TAG] <body>` markers — source-anchored findings in the source/test file at `<file>:<line>`, spec-level findings at the affected design-doc paragraph. The Reviewer then sends `complete (doc) — N issues`, or `approved (doc)` when no substantive issues remain.
 3. **Route** (Director) — by marker location:
 
    | Marker location | Owner | Route |
    |:--|:--|:--|
-   | Test file (`**/test_*.py`, `**/*_test.py`, `**/tests/**`) | Tester — or the Programmer when no Tester was spawned (Programmer-only composition) | `ready (<file>:<line>)` to `<tester-agent-id>` (fallback: `<programmer-agent-id>`) |
-   | Any other source file | Programmer | `ready (<file>:<line>)` to `<programmer-agent-id>` |
+   | Test file (`**/test_*.py`, `**/*_test.py`, `**/tests/**`) | Tester — or the Programmer when no Tester was spawned (Programmer-only composition) | `ready (<file>:<line>)` to `<tester-member-id>` (fallback: `<programmer-member-id>`) |
+   | Any other source file | Programmer | `ready (<file>:<line>)` to `<programmer-member-id>` |
    | Design doc | Director | Resolves directly: apply the spec change, remove the marker; no cafleet route (escalate to the user via {decision_surface} only when a product decision is needed) |
 
    The routed member fixes the target, removes the `COMMENT(reviewer)` marker as part of the fix, re-runs tests, and replies `addressed (<file>:<line>)`.
@@ -419,8 +419,8 @@ See [roles/director.md](roles/director.md) for user interaction rules (COMMENT h
 
 When the user selects "Scan for COMMENT markers": scan changed files for `COMMENT(` markers. Classify by file location (see [roles/director.md](roles/director.md)) and route via the verb + pointer schema:
 - Design-doc `COMMENT(...)` markers → Director resolves directly (apply spec change, remove marker; no cafleet route).
-- Source-file `COMMENT(...)` markers → `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <programmer-agent-id> --text "ready (<file>:<line>)"`. The Programmer reads the marker at the source pointer, fixes the source, removes the marker, and replies `addressed (<file>:<line>)`.
-- Test-file `COMMENT(...)` markers → `cafleet message send --fleet-id <fleet-id> --agent-id <director-agent-id> --to <tester-agent-id> --text "ready (<file>:<line>)"`. The Tester reads, fixes, removes the marker, and replies `addressed (<file>:<line>)`.
+- Source-file `COMMENT(...)` markers → `cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> --to-member-id <programmer-member-id> --text "ready (<file>:<line>)"`. The Programmer reads the marker at the source pointer, fixes the source, removes the marker, and replies `addressed (<file>:<line>)`.
+- Test-file `COMMENT(...)` markers → `cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> --to-member-id <tester-member-id> --text "ready (<file>:<line>)"`. The Tester reads, fixes, removes the marker, and replies `addressed (<file>:<line>)`.
 
 When the user provides free-form text: interpret intent per [roles/director.md](roles/director.md) rules.
 

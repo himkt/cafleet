@@ -13,10 +13,10 @@ by Alembic, bundled inside the `cafleet` wheel and applied via
 no separate database daemon to operate, monitor, or back up — the database is
 a single file.
 
-The default database path is `~/.local/share/cafleet/cafleet_v2.db` (XDG state
+The default database path is `~/.local/share/cafleet/cafleet_v3.db` (XDG state
 directory), expanded once at config load time. Override with the
 `CAFLEET_DATABASE_URL` environment variable, e.g.
-`sqlite:////var/lib/cafleet/cafleet_v2.db`; see [config](../api/config.md) for the
+`sqlite:////var/lib/cafleet/cafleet_v3.db`; see [config](../api/config.md) for the
 full `CAFLEET_*` variable set.
 
 **Concurrency**: `PRAGMA busy_timeout=5000` lets SQLite retry for up to 5 s
@@ -26,7 +26,7 @@ short single-statement transactions and concurrent polling is read-only.
 ## Relational model
 
 Every routing and indexed field is a typed column; the only JSON `TEXT` blob is
-`agents.agent_card_json`. See [data model](../spec/data-model.md) for the full
+`members.member_card_json`. See [data model](../spec/data-model.md) for the full
 schema.
 
 ## Schema management
@@ -39,7 +39,7 @@ revision, preserving existing data (message history included), so it is
 idempotent and safe to re-run after every upgrade. It refuses to
 auto-downgrade a database that is ahead of the bundled head, and refuses an
 unversioned database with tables it does not recognize. Without the schema,
-the first request fails with `OperationalError: no such table: agents`.
+the first request fails with `OperationalError: no such table: members`.
 
 ## Skills-install recording
 
@@ -57,15 +57,15 @@ after a CLI upgrade. `cafleet doctor` reports the per-home detail. See
 
 ## No physical cleanup
 
-Deregistered agents and their tasks remain in the database forever. There is
+Deregistered members and their tasks remain in the database forever. There is
 no background cleanup loop. Active query paths filter `status='active'` so
 dead rows are invisible to normal traffic; the WebUI is the only consumer
-that surfaces deregistered agents (so their inbox history can be inspected).
+that surfaces deregistered members (so their inbox history can be inspected).
 
 ## contextId convention
 
-The broker sets `contextId = recipient_agent_id` on every delivery Task, so
+The broker sets `contextId = recipient_member_id` on every delivery Task, so
 recipients discover their inbox by polling for tasks whose `context_id` equals
-their own agent id — trading per-conversation grouping for the simple
+their own member id — trading per-conversation grouping for the simple
 fire-and-forget inbox discovery that suits coding agents. `contextId` is an
 opaque routing key.

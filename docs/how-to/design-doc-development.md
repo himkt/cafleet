@@ -44,7 +44,7 @@ folder holds real examples produced by this loop.
 
 ## Watch the team work
 
-Every inter-agent message is persisted in SQLite, so you can follow the
+Every inter-member message is persisted in SQLite, so you can follow the
 team's coordination live: open the WebUI timeline for the team's fleet —
 see [Use the admin WebUI](use-the-webui.md).
 

@@ -7,7 +7,7 @@ description: >-
   (interview workflow); or to implement or execute a design doc (execute workflow
   → TDD team). Also the standardized format spec — consult the template and
   guidelines when editing a design doc. Always invoke this skill and route into
-  the matching workflow, orchestrated as a CAFleet team. Teammates in agent teams
+  the matching workflow, orchestrated as a CAFleet team. Teammates in member teams
   load this skill by its name cafleet-design-doc via their backend's
   skill-loader.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, AskUserQuestion
@@ -17,7 +17,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, AskUser
 
 This skill is the umbrella for the full design-document lifecycle: the standardized **format spec** plus three CAFleet-native **orchestration workflows** (create, validate/interview, implement/execute). It is a dispatcher — consult a reference page for the format, or route to the matching workflow body to run a team.
 
-**Teammates in agent teams** must always load this skill by its name `cafleet-design-doc` via their backend's skill-loader — never by reading the skill files directly.
+**Teammates in member teams** must always load this skill by its name `cafleet-design-doc` via their backend's skill-loader — never by reading the skill files directly.
 
 ## Required reading
 
@@ -35,7 +35,7 @@ Before routing into a workflow or consulting a reference page, Read your overlay
 |------|------|
 | [reference/template.md](reference/template.md) | you are writing or checking a doc against the standard structure |
 | [reference/guidelines.md](reference/guidelines.md) | you need section guidelines, quality standards, or formatting rules |
-| [reference/coordination.md](reference/coordination.md) | you need the inter-agent verb + pointer + `COMMENT(role)` schema |
+| [reference/coordination.md](reference/coordination.md) | you need the inter-member verb + pointer + `COMMENT(role)` schema |
 
 Each workflow body (create / interview / execute) carries its own Required-reading block for the team it runs — base-dir, supervision, and coordination are gated there, not on this dispatch surface.
 

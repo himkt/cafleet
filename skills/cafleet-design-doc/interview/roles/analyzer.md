@@ -28,7 +28,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Placeholder convention
 
-Angle-bracket tokens (`<fleet-id>`, `<my-agent-id>`, `<director-agent-id>`) are placeholders, **not** shell variables — substitute the literal ids from your spawn prompt; the rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
+Angle-bracket tokens (`<fleet-id>`, `<my-member-id>`, `<director-member-id>`) are placeholders, **not** shell variables — substitute the literal ids from your spawn prompt; the rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
 
 ## Communication Protocol
 
@@ -87,4 +87,4 @@ Rules:
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-agent-id>` (sends the backend exit keystroke, waits up to 15 s). When the exit keystroke arrives your `claude` process exits immediately — nothing is required of you.
+The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` (sends the backend exit keystroke, waits up to 15 s). When the exit keystroke arrives your `claude` process exits immediately — nothing is required of you.
