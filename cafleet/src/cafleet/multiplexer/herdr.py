@@ -426,27 +426,6 @@ class HerdrMultiplexer:
             raise HerdrError(f"herdr pane get missing {exc} field") from exc
         return pane.get("agent_status") or None
 
-    def wait_agent_status(
-        self, *, target_pane_id: str, status: str, timeout_ms: int
-    ) -> bool:
-        try:
-            _run(
-                [
-                    "herdr",
-                    "wait",
-                    "agent-status",
-                    target_pane_id,
-                    "--status",
-                    status,
-                    "--timeout",
-                    str(timeout_ms),
-                ],
-                timeout=timeout_ms / 1000 + 5,
-            )
-        except HerdrError:
-            return False
-        return True
-
     def _send_esc(self, target_pane_id: str) -> None:
         _run(["herdr", "pane", "send-keys", target_pane_id, "esc"], timeout=5)
         time.sleep(_ESC_SETTLE_DELAY)

@@ -50,10 +50,9 @@ def _record_run(monkeypatch, *, returns: str = "") -> list[list[str]]:
     [
         ("default_no_flag_is_20", [], ["-S", "-20"]),
         ("explicit_lines_overrides_default", ["--lines", "150"], ["-S", "-150"]),
-        ("tail_alias_forwards_to_lines", ["--tail", "55"], ["-S", "-55"]),
     ],
 )
-def test_member_capture__default_lines_and_flag_aliases(
+def test_member_capture__default_lines_and_explicit_flag(
     bootstrapped_member, monkeypatch, scenario, extra_args, expected_argv_suffix
 ):
     sid, _director_id, member_id, _pane_id, runner = bootstrapped_member

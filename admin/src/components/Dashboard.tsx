@@ -82,10 +82,8 @@ export default function Dashboard({
     }
   }, [memberId, detailMember, closeDetail]);
 
-  const administrator =
-    members.find((m) => m.kind === "administrator") ?? null;
-  const senderId =
-    administrator?.status === "active" ? administrator.member_id : null;
+  const director = members.find((m) => m.kind === "director") ?? null;
+  const senderId = director?.status === "active" ? director.member_id : null;
 
   return (
     <div className="h-screen flex flex-col bg-surface">
@@ -96,7 +94,7 @@ export default function Dashboard({
         }}
         fleetName={fleetName ?? String(fleetId)}
         onBack={onBack}
-        sendingAsAdministrator={senderId !== null}
+        sendingAsDirector={senderId !== null}
         monitorRunning={monitor === null ? null : monitor.running}
       />
 
@@ -107,15 +105,14 @@ export default function Dashboard({
             <div className="flex items-start gap-2 border-b border-danger/30 bg-danger-soft px-4 py-2 text-sm text-danger">
               <TriangleAlert size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
               <p>
-                This fleet has no Administrator. Send is disabled.
-                Fleets created under an older schema lack the built-in
-                Administrator; create a fresh fleet with
+                This fleet has no active root Director. Send is disabled.
+                Every send goes out as the fleet&apos;s root Director, so a
+                fleet whose Director row is missing or deregistered cannot
+                message; create a fresh fleet with
                 <code className="mx-1 rounded bg-danger/15 px-1 font-mono">
                   cafleet fleet create
                 </code>
-                — schema migrations preserve existing data but never backfill
-                the Administrator. If the Administrator was manually deleted,
-                contact the operator.
+                or contact the operator.
               </p>
             </div>
           )}

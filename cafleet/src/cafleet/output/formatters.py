@@ -107,18 +107,14 @@ def format_fleet_create(data: dict, *, full: bool = False) -> str:
     """Render the fleet-create result as text.
 
     ``full=False`` (default): 1-line compact form
-    ``<fleet_id> director=<id> admin=<id>``.
-    ``full=True``: 7-line block (fleet_id + director_member_id on
+    ``<fleet_id> director=<id>``.
+    ``full=True``: 6-line block (fleet_id + director_member_id on
     their own lines, plus ``name``, ``created_at``, ``director_name``,
-    ``pane``, ``administrator``).
+    ``pane``).
     """
     director = data["director"]
     if not full:
-        return (
-            f"{data['fleet_id']} "
-            f"director={director['member_id']} "
-            f"admin={data['administrator_member_id']}"
-        )
+        return f"{data['fleet_id']} director={director['member_id']}"
     placement = director["placement"]
     lines = [
         str(data["fleet_id"]),
@@ -127,7 +123,6 @@ def format_fleet_create(data: dict, *, full: bool = False) -> str:
         f"created_at:       {data['created_at']}",
         f"director_name:    {director['name']}",
         f"pane:             {placement['mux_session']}:{placement['mux_window_id']}:{placement['mux_pane_id']}",
-        f"administrator:    {data['administrator_member_id']}",
     ]
     return "\n".join(lines)
 
@@ -155,47 +150,6 @@ def format_member(data: dict, *, full: bool = False) -> str:
         f"  window_id: {placement['mux_window_id']}",
     ]
     return "\n".join(lines)
-
-
-_MEMBER_ID_COLUMN_WIDTH = 14
-
-
-def format_member_list_activity(members: list) -> str:
-    """Render the activity-augmented member roster as text.
-
-    One row per member with the four activity proxies —
-    ``last_sent`` / ``last_recv`` / ``last_ack`` / ``idle``. Timestamps are
-    rendered as ``HH:MM:SS`` (the time portion of the ISO string);
-    ``idle`` is humanized to ``Ns`` / ``Nm`` / ``Nh``.
-    """
-    if not members:
-        return "0 members."
-    count = len(members)
-    lines = [f"{count} member{'s' if count > 1 else ''}:"]
-    header = "  member_id       name      status  last_sent  last_recv  last_ack   idle"
-    sep = "  --------------  --------  ------  ---------  ---------  ---------  -----"
-    lines.append(header)
-    lines.append(sep)
-    for m in members:
-        member_id = str(m["member_id"])
-        lines.append(
-            f"  {member_id:<{_MEMBER_ID_COLUMN_WIDTH}}  {m['name']:<8}  "
-            f"{m['status']:<6}  "
-            f"{_format_iso_hms(m['last_sent']):<9}  "
-            f"{_format_iso_hms(m['last_recv']):<9}  "
-            f"{_format_iso_hms(m['last_ack']):<9}  "
-            f"{_format_idle(m['idle'])}"
-        )
-    return "\n".join(lines)
-
-
-def _format_iso_hms(iso_ts: str | None) -> str:
-    if iso_ts is None:
-        return "-"
-    try:
-        return iso_ts.split("T")[1][:8]
-    except (IndexError, AttributeError):
-        return "-"
 
 
 def _format_idle(seconds: int | None) -> str:
@@ -264,67 +218,30 @@ def format_monitor_config(cfg: dict) -> str:
     )
 
 
-def format_member_roster(members: list) -> str:
-    """Render the ``member list --all`` roster as text.
+def format_member_list(members: list) -> str:
+    """Render the single ``member list`` table as text.
 
-    One row per active registry entry of the fleet with a ``kind`` column;
-    every placement cell renders ``-`` for a placementless row, and a placed
-    row with no pane yet renders ``(pending)`` in ``pane_id`` (matching
-    :func:`format_member_list`).
+    One row per active registry entry of the fleet with ``member_id``,
+    ``name``, ``kind``, ``backend``, ``pane_id``, and humanized ``idle``
+    columns; a placementless row renders ``-`` in the ``backend`` and
+    ``pane_id`` cells, and a placed row with no pane yet renders
+    ``(pending)`` in ``pane_id``.
     """
     if not members:
         return "0 members."
     count = len(members)
     lines = [f"{count} member{'s' if count > 1 else ''}:"]
-    lines.append(
-        "  member_id  name           status  kind           backend  session  "
-        "window_id  pane_id  created_at"
-    )
-    lines.append(
-        "  ---------  -------------  ------  -------------  -------  -------  "
-        "---------  -------  --------------------"
-    )
+    lines.append("  member_id  name           kind      backend   pane_id  idle")
+    lines.append("  ---------  -------------  --------  --------  -------  ----")
     for m in members:
         placement = m["placement"]
         if placement is None:
-            backend = session_name = window_id = pane = created_at = "-"
+            backend = pane = "-"
         else:
             backend = placement["coding_agent"]
-            session_name = placement["mux_session"]
-            window_id = placement["mux_window_id"]
             pane = placement["mux_pane_id"] or "(pending)"
-            created_at = placement["created_at"]
         lines.append(
-            f"  {str(m['member_id']):<9}  {m['name']:<13}  {m['status']:<6}  "
-            f"{m['kind']:<13}  {backend:<7}  {session_name:<7}  "
-            f"{window_id:<9}  {pane:<7}  {created_at}"
-        )
-    return "\n".join(lines)
-
-
-def format_member_list(members: list) -> str:
-    if not members:
-        return "0 members."
-    count = len(members)
-    lines = [f"{count} member{'s' if count > 1 else ''}:"]
-    header = "  member_id       name      status  backend  session  window_id  pane_id  created_at"
-    sep = (
-        "  --------------  --------  ------  -------  -------  ---------  -------  "
-        "--------------------"
-    )
-    lines.append(header)
-    lines.append(sep)
-    for m in members:
-        placement = m["placement"]
-        pane_display = placement["mux_pane_id"] or "(pending)"
-        member_id = str(m["member_id"])
-        lines.append(
-            f"  {member_id:<{_MEMBER_ID_COLUMN_WIDTH}}  {m['name']:<8}  "
-            f"{m['status']:<6}  "
-            f"{placement['coding_agent']:<7}  "
-            f"{placement['mux_session']:<7}  "
-            f"{placement['mux_window_id']:<9}  "
-            f"{pane_display:<7}  "
-            f"{placement['created_at']}"
+            f"  {str(m['member_id']):<9}  {m['name']:<13}  {m['kind']:<8}  "
+            f"{backend:<8}  {pane:<7}  {_format_idle(m['idle'])}"
         )
     return "\n".join(lines)

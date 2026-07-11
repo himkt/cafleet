@@ -26,13 +26,11 @@ def _fleet_create_data(
     fleet_id=7000,
     director_member_id=8000,
     name="my-project",
-    administrator_member_id=9000,
 ) -> dict:
     return {
         "fleet_id": fleet_id,
         "name": name,
         "created_at": "2026-04-16T08:50:00+00:00",
-        "administrator_member_id": administrator_member_id,
         "director": {
             "member_id": director_member_id,
             "name": "Director",
@@ -103,11 +101,9 @@ def test_format_member_detail__full_layout_has_labels_and_more_lines():
 
 def test_format_fleet_create__compact_shape_and_default_kwarg():
     rendered = output.format_fleet_create(_fleet_create_data(), full=False)
-    assert "\n" not in rendered
-    # Compact form renders the full integer ids (no prefix slicing).
-    assert "7000" in rendered
-    assert "director=8000" in rendered
-    assert "admin=9000" in rendered
+    # Compact form is exactly `<fleet_id> director=<member_id>` (full integer
+    # ids, no prefix slicing).
+    assert rendered == "7000 director=8000"
     data = _fleet_create_data()
     assert output.format_fleet_create(data) == output.format_fleet_create(
         data, full=False
@@ -117,8 +113,8 @@ def test_format_fleet_create__compact_shape_and_default_kwarg():
 def test_format_fleet_create__full_layout_has_labels_and_more_lines():
     full = output.format_fleet_create(_fleet_create_data(), full=True)
     compact = output.format_fleet_create(_fleet_create_data(), full=False)
-    assert full.count("\n") >= 6
-    for needle in ("director_name", "administrator", "pane"):
+    assert full.count("\n") >= 5
+    for needle in ("director_name", "pane"):
         assert needle in full
     assert full.count("\n") > compact.count("\n")
 

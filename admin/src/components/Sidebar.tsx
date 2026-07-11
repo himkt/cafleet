@@ -30,11 +30,6 @@ function MemberRow({
     >
       <MemberAvatar member={member} size="sm" />
       <span className="min-w-0 flex-1 truncate">{member.name}</span>
-      {member.kind === "administrator" && (
-        <span className="shrink-0 rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">
-          Admin
-        </span>
-      )}
       {member.monitor !== null && (
         <span
           title={

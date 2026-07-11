@@ -1,7 +1,7 @@
 # Aggressive Simplification: Drop the Administrator, Consolidate CLI, Docs, and Skills
 
 **Status**: Approved
-**Progress**: 28/50 tasks complete
+**Progress**: 42/52 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -12,7 +12,7 @@ Shrink the repository along five axes without losing fundamental features: delet
 
 - [ ] The admin WebUI is fully intact: `admin/`, `cafleet/src/cafleet/webui/`, `cafleet/tests/webui/`, and `cafleet/src/cafleet/cli/server.py` exist; `cafleet server --help` exits 0; `fastapi` and `uvicorn` remain in `cafleet/pyproject.toml` and `uv.lock`; `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` remain as settings; the WebUI docs (`docs/how-to/use-the-webui.md`, `docs/spec/webui-api.md`, SPEC.md §WebUI, README pitch/bullet) are restored
 - [ ] `cafleet fleet create` seeds exactly one built-in member (the root Director) and its output carries no administrator field; the member `kind` taxonomy is exactly `director` / `monitor` / `member`; the WebUI sends as the root Director (per § B *WebUI sender model*) and its rebuilt bundle carries no administrator branch
-- [ ] Alembic migration `0002` deregisters legacy `builtin-administrator` rows; the chain is linear `0001 → 0002` and the chain-guard test in `tests/db/test_alembic_smoke.py` asserts it
+- [ ] The default `db_path` is `cafleet_v4.db` (legacy `cafleet_v3` databases are abandoned wholesale — no data migration); `db/alembic/versions/` contains exactly one fresh initial migration `0001` with `down_revision = None`, regenerated via `mise //cafleet:makemigration` after all implementation finished; the chain-guard test in `tests/db/test_alembic_smoke.py` asserts it; no live surface mentions `cafleet_v3`
 - [ ] `cafleet member nudge` no longer exists; re-engagement is documented as `cafleet message send`
 - [ ] `cafleet member list` has a single output shape (no `--activity` / `--all` flags, both fail with Click's `No such option`, exit 2): every active registry entry with `kind` and `idle` columns; the WebUI `/members` endpoint still serves roster rows (`description` / `status` / `registered_at`) via the retained `broker.list_roster`
 - [ ] `cafleet member capture --tail` fails with `No such option` (exit 2); `--lines` works unchanged
@@ -72,22 +72,11 @@ The Administrator is seeded per fleet, has no pane, is excluded from monitoring 
 | `broker/_shared.py` | delete `ADMINISTRATOR_KIND` and `is_administrator`; delete `_card_kind` if it has no remaining caller; `derive_member_kind` collapses to the 3-value taxonomy `director` / `monitor` / `member` |
 | `broker/__init__.py` | drop the `ADMINISTRATOR_KIND` export |
 
-**Migration `0002`** (generated via `mise //cafleet:makemigration`, then hand-edited to a pure data migration since there is no schema diff):
+**Fresh database + regenerated initial migration (user decision, mid-execution — supersedes the earlier migration-`0002` data migration)**: legacy `builtin-administrator` rows are abandoned wholesale instead of migrated. The default database file name bumps in `config.py` (`db_path`: `cafleet_v3.db` → `cafleet_v4.db`, field + docstring), so every install starts a **fresh, empty** database (no data is copied from v3 — user decision); the old `cafleet_v3.db` file is simply left behind. All existing migration scripts under `cafleet/src/cafleet/db/alembic/versions/` are deleted (including the superseded `0002` generated earlier this cycle), and **after all implementation finishes** (Step 9) a single fresh initial migration is regenerated against the final models: `cafleet setup db` (creates the fresh `cafleet_v4` DB at empty head) → `mise //cafleet:makemigration "initial schema"` (mints `0001`, `down_revision = None`) → `cafleet setup db` (applies it). The chain-guard test keeps asserting the single fresh initial revision `0001`. The filename sweep covers `tests/db/test_init.py` (default-URL test), `docs/concepts/storage.md`, `docs/get-started/install.md`, `docs/reference/coding-agents/codex.md`, `skills/cafleet/reference/cli.md`, and the SPEC.md configuration rows.
 
-```python
-def upgrade() -> None:
-    now = datetime.now(UTC).isoformat()
-    op.execute(
-        "UPDATE members SET status='deregistered', deregistered_at='" + now + "' "
-        "WHERE status='active' "
-        "AND json_extract(member_card_json, '$.cafleet.kind') = 'builtin-administrator'"
-    )
+**Execution sequencing (live-broker constraint)**: `cafleet` is installed editable from this repo, so the `config.py` bump takes effect for the running implementation fleet the moment it is saved — pointing every member's broker at the empty v4 DB and severing team communication (observed live; the bump was reverted to restore comms). The bump therefore lands **only in Step 9, applied Director-side, after the implementation fleet has been torn down**: the `config.py` change is the last code edit, followed immediately by the § B regeneration sequence and the final gates. `tests/db/test_init.py` (expecting v4) stays red until that moment — an accepted extension of the Steps 6–8 red window. The post-implementation Reviewer loop runs on a **new fleet created against the fresh v4 DB** (`cafleet setup` initializes it).
 
-def downgrade() -> None:
-    """Data cleanup is not reversible; downgrade is a no-op."""
-```
-
-Legacy administrator rows had no placement and no monitor enrollment, so no other table needs touching. Update the chain-guard test per `.claude/rules/database-migrations.md`: expected count 2, revision `0002` with `down_revision = "0001"`.
+Legacy administrator rows had no placement and no monitor enrollment, so no other table needs touching. The chain-guard test per `.claude/rules/database-migrations.md` keeps asserting the single fresh initial revision `0001` with `down_revision = None` (regenerated at Step 9).
 
 ### C. CLI and code consolidation
 
@@ -217,24 +206,25 @@ The Step 5 code deletion staged under the original scope was fully reverted in t
 
 ### Step 6: code — Administrator removal
 
-- [ ] `broker/fleets.py`: delete the administrator seeding block and the `administrator_member_id` return field; update the docstring <!-- completed: -->
-- [ ] `broker/members.py`: delete the deregister guard; collapse the enrollment exclusion to the monitoring-member check (`list_roster` and its `include_task_holders` parameter stay — WebUI provider) <!-- completed: -->
-- [ ] `broker/messaging.py`: drop the administrator condition from the broadcast recipient query <!-- completed: -->
-- [ ] `broker/_shared.py`: delete `ADMINISTRATOR_KIND` / `is_administrator` (and `_card_kind` if uncalled); collapse `derive_member_kind` to 3 values; `broker/__init__.py`: drop the export <!-- completed: -->
-- [ ] `output/formatters.py` `format_fleet_create`: compact `<fleet_id> director=<member_id>`; full block loses the administrator line <!-- completed: -->
-- [ ] Rework the WebUI sender model per § B: `admin/src/{Dashboard,MessageInput,MemberAvatar,Sidebar,MemberDetail}.tsx` + `types.ts` switch from the administrator to the director kind; rebuild via `mise //admin:build` <!-- completed: -->
-- [ ] Generate migration `0002` (`mise //cafleet:makemigration "deregister builtin administrator members"`), hand-edit to the pure data migration in § B (no-op downgrade) <!-- completed: -->
-- [ ] Update the chain-guard test in `tests/db/test_alembic_smoke.py`: 2 revisions, `0002.down_revision == "0001"`, rename the test <!-- completed: -->
+- [x] `broker/fleets.py`: delete the administrator seeding block and the `administrator_member_id` return field; update the docstring <!-- completed: 2026-07-11T11:55 -->
+- [x] `broker/members.py`: delete the deregister guard; collapse the enrollment exclusion to the monitoring-member check (`list_roster` and its `include_task_holders` parameter stay — WebUI provider) <!-- completed: 2026-07-11T11:55 -->
+- [x] `broker/messaging.py`: drop the administrator condition from the broadcast recipient query <!-- completed: 2026-07-11T11:55 -->
+- [x] `broker/_shared.py`: delete `ADMINISTRATOR_KIND` / `is_administrator` (and `_card_kind` if uncalled); collapse `derive_member_kind` to 3 values; `broker/__init__.py`: drop the export <!-- completed: 2026-07-11T11:55 -->
+- [x] `output/formatters.py` `format_fleet_create`: compact `<fleet_id> director=<member_id>`; full block loses the administrator line <!-- completed: 2026-07-11T11:55 -->
+- [x] Rework the WebUI sender model per § B: `admin/src/{Dashboard,MessageInput,MemberAvatar,Sidebar,MemberDetail}.tsx` + `types.ts` switch from the administrator to the director kind; rebuild via `mise //admin:build` <!-- completed: 2026-07-11T11:55 -->
+- [x] Sweep the DB filename to `cafleet_v4.db` in `docs/concepts/storage.md`, `docs/get-started/install.md`, `docs/reference/coding-agents/codex.md`, `skills/cafleet/reference/cli.md`, SPEC.md configuration rows (the `config.py` bump itself is deferred to Step 9 per § B *Execution sequencing*) <!-- completed: 2026-07-11T12:15 -->
+- [ ] Delete every existing migration script under `cafleet/src/cafleet/db/alembic/versions/` (including the superseded `0002` generated earlier this cycle); the fresh initial `0001` is regenerated at Step 9 per § B <!-- completed: -->
+- [ ] Chain-guard test in `tests/db/test_alembic_smoke.py` keeps asserting the single fresh initial revision `0001` with `down_revision = None`; `tests/db/test_init.py` default-URL test moves to `cafleet_v4.db` <!-- completed: -->
 
 ### Step 7: code — CLI consolidation
 
-- [ ] Delete `member_nudge` from `cli/member.py` <!-- completed: -->
-- [ ] Broker: implement the single `list_members(fleet_id)` (all active registry entries + kind + placement + activity fields); delete `list_members_with_activity`; keep `list_roster` (WebUI provider); update `broker/__init__.py` <!-- completed: -->
-- [ ] `cli/member.py` `member list`: drop `--activity` / `--all` and the mutual-exclusion check; emit the single shape <!-- completed: -->
-- [ ] `output/formatters.py`: one `format_member_list` (columns per § C2); delete `format_member_list_activity` (and `format_member_roster` only if the CLI was its last caller) <!-- completed: -->
-- [ ] `cli/member.py` `member capture`: drop the `--tail` alias <!-- completed: -->
-- [ ] `multiplexer/base.py` + `multiplexer/herdr.py`: delete `wait_agent_status` <!-- completed: -->
-- [ ] Inline `client_command`: delete the decorator from `cli/_helpers.py`; rewrite the six `message` subcommands as plain functions with byte-identical CLI behavior <!-- completed: -->
+- [x] Delete `member_nudge` from `cli/member.py` <!-- completed: 2026-07-11T12:35 -->
+- [x] Broker: implement the single `list_members(fleet_id)` (all active registry entries + kind + placement + activity fields); delete `list_members_with_activity`; keep `list_roster` (WebUI provider); update `broker/__init__.py` <!-- completed: 2026-07-11T12:35 -->
+- [x] `cli/member.py` `member list`: drop `--activity` / `--all` and the mutual-exclusion check; emit the single shape <!-- completed: 2026-07-11T12:35 -->
+- [x] `output/formatters.py`: one `format_member_list` (columns per § C2); delete `format_member_list_activity` (and `format_member_roster` only if the CLI was its last caller) <!-- completed: 2026-07-11T12:35 -->
+- [x] `cli/member.py` `member capture`: drop the `--tail` alias <!-- completed: 2026-07-11T12:35 -->
+- [x] `multiplexer/base.py` + `multiplexer/herdr.py`: delete `wait_agent_status` <!-- completed: 2026-07-11T12:35 -->
+- [x] Inline `client_command`: delete the decorator from `cli/_helpers.py`; rewrite the six `message` subcommands as plain functions with byte-identical CLI behavior <!-- completed: 2026-07-11T12:35 -->
 
 ### Step 8: tests
 
@@ -245,10 +235,11 @@ The Step 5 code deletion staged under the original scope was fully reverted in t
 
 ### Step 9: verification
 
+- [ ] Finalize the DB bump per § B *Execution sequencing* (Director-side, after the implementation fleet teardown): apply the `config.py` `db_path` bump to `cafleet_v4.db`, then `cafleet setup db` (fresh v4) → `mise //cafleet:makemigration "initial schema"` (fresh `0001`, `down_revision = None`) → `cafleet setup db` (applies it); chain-guard and `test_init.py` pass <!-- completed: -->
 - [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format` pass <!-- completed: -->
 - [ ] `mise //:docs-build` passes (nav has no dead pages; WebUI pages restored) <!-- completed: -->
 - [ ] `mise //cafleet:build` succeeds; `cafleet server --help` exits 0 (WebUI intact) <!-- completed: -->
-- [ ] Full-repo grep confirms no live mention of: Administrator, `member nudge`, `--activity`, `member list --all`, `--tail`, `wait_agent_status`, `client_command` (historical `design-docs/**` excluded); WebUI mentions are present again where restored <!-- completed: -->
+- [ ] Full-repo grep confirms no live mention of: Administrator, `member nudge`, `--activity`, `member list --all`, `--tail`, `wait_agent_status`, `client_command`, `cafleet_v3` (historical `design-docs/**` excluded); WebUI mentions are present again where restored <!-- completed: -->
 
 ---
 
@@ -260,3 +251,5 @@ The Step 5 code deletion staged under the original scope was fully reverted in t
 | 2026-07-11 | Reviewer round 1: accurate `member nudge` delta rationale; `member list` drops the constant `status` column and records the `description`/`registered_at` JSON drop; corrected `template.md` inbound links; test enumeration extended (`test_server.py`, `test_text_input.py`, `test_typed_columns.py`, `test_loop.py` stub); Steps 5–8 declared one atomic block; added `.claude/settings.json` `mise //admin*` cleanup; dropped the no-op `update-readme` sweep |
 | 2026-07-11 | **Scope revision (user, mid-execution)**: the admin WebUI stays. Axis A becomes a restoration spec (Step 5 reverts the landed WebUI doc/spec/README sweeps; the staged WebUI code deletion was reverted uncommitted). Broker WebUI dependencies (`queries.py`, `get_member_names`, `list_monitor_configs`, `list_roster`) stay; C2 keeps `list_roster` as the WebUI provider; F keeps `tests/webui/` and `test_server.py`. Success criteria and Steps 5/8/9 rewritten accordingly; task total 50 → 49 |
 | 2026-07-11 | **Arbitration (user)**: post-Administrator WebUI sender model = the root Director. § B gains the *WebUI sender model* spec (frontend rework + `mise //admin:build` rebuild as a new Step 6 task, `tests/webui/` sender-model update in Step 8); task total 49 → 50 |
+| 2026-07-11 | **Migration approach revision (user, mid-execution)**: fresh database instead of a data migration — `db_path` bumps `cafleet_v3.db` → `cafleet_v4.db`, all existing migration scripts are deleted (incl. the superseded `0002`), and a single fresh initial `0001` is regenerated via `mise //cafleet:makemigration` after all implementation (Step 9). § B, SC #3, Step 6, and Step 9 rewritten; task total 50 → 52 |
+| 2026-07-11 | **Sequencing arbitration (user: "create from fresh")**: no v3→v4 data copy. The editable install makes the `config.py` bump instantly fatal to the live implementation fleet's broker, so the bump moves out of Step 6 into Step 9 (Director-side, post-teardown); § B gains *Execution sequencing*; `test_init.py` red window accepted through Step 9; the Reviewer loop runs on a new fleet against the fresh v4 DB |

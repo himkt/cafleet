@@ -99,73 +99,43 @@ def test_broadcast_message__delivery_shape_and_origin_link():
 
 
 @pytest.mark.parametrize(
-    ("scenario", "expected_text", "extra_assertion"),
+    ("scenario", "expected_text"),
     [
-        ("no_other_members", "Broadcast sent to 0 recipients", None),
-        (
-            "admin_exclusion_from_user_broadcast",
-            "Broadcast sent to 3 recipients",
-            "admin_excluded",
-        ),
-        (
-            "admin_broadcast_reaches_all",
-            "Broadcast sent to 3 recipients",
-            "admin_reaches_all",
-        ),
-        (
-            "bootstrap_fleet_admin_reaches_only_director",
-            "Broadcast sent to 1 recipients",
-            "only_director",
-        ),
+        ("bootstrap_only_director_reaches_none", "Broadcast sent to 0 recipients"),
+        ("member_broadcast_reaches_all_but_sender", "Broadcast sent to 3 recipients"),
+        ("director_broadcast_reaches_members", "Broadcast sent to 2 recipients"),
     ],
 )
-def test_broadcast_message__recipient_selection_matrix(
-    scenario, expected_text, extra_assertion
-):
-    if scenario == "no_other_members":
-        fleet = _create_fleet()
-        sid = fleet["fleet_id"]
-        lone = _register_member(sid, name="lonely")
-        # Also need to subtract administrator + director from the recipient pool —
-        # they are auto-seeded. So "Broadcast sent to N" depends on how many remain.
-        # In bootstrap-only fleet admin sends → reaches director (1).
-        # Here we have lone + admin + director; lone broadcasts; admin excluded; director receives.
-        result = broker.broadcast_message(sid, lone["member_id"], "Anyone?")
-        assert result[0]["task"]["type"] == "broadcast_summary"
-        # Director gets the message.
-        director_tasks = broker.poll_tasks(fleet["director"]["member_id"])
-        assert len(director_tasks) == 1
-        return
-
+def test_broadcast_message__recipient_selection_matrix(scenario, expected_text):
+    # A broadcast reaches every active member of the fleet except the sender.
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    admin_id = fleet["administrator_member_id"]
     director_id = fleet["director"]["member_id"]
 
-    if scenario == "admin_exclusion_from_user_broadcast":
+    if scenario == "bootstrap_only_director_reaches_none":
+        result = broker.broadcast_message(sid, director_id, "anybody?")
+        assert result[0]["task"]["type"] == "broadcast_summary"
+        assert result[0]["task"]["text"] == expected_text
+    elif scenario == "member_broadcast_reaches_all_but_sender":
         sender = _register_member(sid, name="sender")
         user_a = _register_member(sid, name="user-a")
         user_b = _register_member(sid, name="user-b")
         result = broker.broadcast_message(sid, sender["member_id"], "hey")
         assert result[0]["task"]["text"] == expected_text
-        admin_unicasts = [
-            t for t in broker.poll_tasks(admin_id) if t["type"] == "unicast"
+        sender_unicasts = [
+            t for t in broker.poll_tasks(sender["member_id"]) if t["type"] == "unicast"
         ]
-        assert admin_unicasts == []
+        assert sender_unicasts == []
         assert len(broker.poll_tasks(user_a["member_id"])) == 1
         assert len(broker.poll_tasks(user_b["member_id"])) == 1
-    elif scenario == "admin_broadcast_reaches_all":
+        assert len(broker.poll_tasks(director_id)) == 1
+    else:  # director_broadcast_reaches_members
         user_a = _register_member(sid, name="user-a")
         user_b = _register_member(sid, name="user-b")
-        result = broker.broadcast_message(sid, admin_id, "hello from admin")
+        result = broker.broadcast_message(sid, director_id, "hello team")
         assert result[0]["task"]["text"] == expected_text
         assert len(broker.poll_tasks(user_a["member_id"])) == 1
         assert len(broker.poll_tasks(user_b["member_id"])) == 1
-        assert len(broker.poll_tasks(director_id)) == 1
-    else:  # bootstrap_fleet_admin_reaches_only_director
-        result = broker.broadcast_message(sid, admin_id, "anybody?")
-        assert result[0]["task"]["text"] == expected_text
-        assert len(broker.poll_tasks(director_id)) == 1
 
 
 # --- poll_tasks ----------------------------------------------------------

@@ -65,7 +65,7 @@ interface AppHeaderProps {
   /** Breadcrumb tail (fleet name or id). Presence switches `Fleets` into a link. */
   fleetName?: string;
   onBack?: () => void;
-  sendingAsAdministrator?: boolean;
+  sendingAsDirector?: boolean;
   /** Monitor liveness for the fleet; `null` until the first fetch resolves. */
   monitorRunning?: boolean | null;
 }
@@ -75,7 +75,7 @@ export default function AppHeader({
   onRefresh,
   fleetName,
   onBack,
-  sendingAsAdministrator = false,
+  sendingAsDirector = false,
   monitorRunning = null,
 }: AppHeaderProps) {
   return (
@@ -107,9 +107,9 @@ export default function AppHeader({
         </nav>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        {sendingAsAdministrator && (
+        {sendingAsDirector && (
           <span className="hidden text-sm text-text-muted sm:inline">
-            Sending as <span className="font-medium text-text">Administrator</span>
+            Sending as <span className="font-medium text-text">Director</span>
           </span>
         )}
         <MonitorIndicator running={monitorRunning} />

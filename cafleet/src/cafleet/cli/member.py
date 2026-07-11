@@ -12,13 +12,11 @@ from cafleet.cli._helpers import (
     ensure_multiplexer_or_die,
     ensure_skills_current,
     fleet_id_option,
-    from_member_id_option,
     full_flag,
     json_flag,
     member_id_option,
     quiet_flag,
     text_body_options,
-    to_member_id_option,
 )
 from cafleet.cli._text_input import read_text_input, substitute_spawn_placeholders
 from cafleet.coding_agent import CODING_AGENTS
@@ -454,8 +452,8 @@ def member_delete(ctx, member_id, force, json_output):
 def _deregister_or_die(member_id: int) -> None:
     """Deregister, surfacing the broker's own guards verbatim.
 
-    The root-Director and Administrator guards raise ``ClickException``
-    subclasses with user-facing messages; only unexpected failures get the
+    The root-Director guard raises a ``ClickException``
+    subclass with a user-facing message; only unexpected failures get the
     ``deregister failed:`` wrapping.
     """
     try:
@@ -513,44 +511,19 @@ def member_show(ctx, member_id, full, json_output):
 
 @member.command("list")
 @fleet_id_option
-@click.option(
-    "--activity",
-    "activity",
-    is_flag=True,
-    default=False,
-    help="Show per-member activity columns.",
-)
-@click.option(
-    "--all",
-    "all_members",
-    is_flag=True,
-    default=False,
-    help="List every active registry entry of the fleet.",
-)
 @json_flag
 @click.pass_context
-def member_list(ctx, activity, all_members, json_output):
-    """List the fleet's members; --all lists every active registry entry."""
+def member_list(ctx, json_output):
+    """List every active registry entry of the fleet."""
     fleet_id = ctx.obj["fleet_id"]
-    if all_members and activity:
-        raise click.UsageError("--all and --activity are mutually exclusive.")
     try:
-        if all_members:
-            rows = broker.list_roster(fleet_id)
-        elif activity:
-            rows = broker.list_members_with_activity(fleet_id)
-        else:
-            rows = broker.list_members(fleet_id)
+        rows = broker.list_members(fleet_id)
     except click.ClickException:
         raise
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
     if json_output:
         click.echo(output.format_json(rows))
-    elif all_members:
-        click.echo(output.format_member_roster(rows))
-    elif activity:
-        click.echo(output.format_member_list_activity(rows))
     else:
         click.echo(output.format_member_list(rows))
 
@@ -560,12 +533,11 @@ def member_list(ctx, activity, all_members, json_output):
 @member_id_option
 @click.option(
     "--lines",
-    "--tail",
     "lines",
     type=int,
     default=20,
     show_default=True,
-    help="Lines to capture (alias: --tail).",
+    help="Lines to capture.",
 )
 @click.option(
     "--ansi/--no-ansi",
@@ -706,66 +678,4 @@ def member_ping(ctx, member_id, quiet, json_output):
     else:
         click.echo(
             f"Pinged member {target['name']} ({pane_id}) — poll keystroke dispatched."
-        )
-
-
-@member.command("nudge")
-@fleet_id_option
-@from_member_id_option
-@to_member_id_option
-@text_body_options("Re-engage summary (inline).")
-@json_flag
-@click.pass_context
-def member_nudge(ctx, from_member_id, to_member_id, text, text_file, json_output):
-    """Re-engage a member (typically the Director) with an ACKable task + preview."""
-    fleet_id = ctx.obj["fleet_id"]
-
-    ensure_multiplexer_or_die()
-
-    # The shared helper enforces xor + required + empty-body rejection (the old
-    # ``if not text.strip()`` check is subsumed) and reads --text-file / stdin.
-    body = read_text_input(text, text_file)
-
-    # Resolve the target FIRST (fleet-isolation only): a cross-fleet / unknown /
-    # inactive --to-member-id raises "Member <id> not found" here, before the
-    # send path runs. This also makes send_message's own destination ValueError
-    # unreachable in the nudge path — only its sender check can still fire.
-    target, placement = _load_authorized_member(fleet_id, to_member_id)
-    to_member_id = target["member_id"]
-
-    try:
-        result = broker.send_message(
-            fleet_id, from_member_id, to=to_member_id, text=body
-        )
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
-
-    task_id = result["task"]["task_id"]
-    notification_sent = result["notification_sent"]
-    pane_id = placement["mux_pane_id"]
-
-    if json_output:
-        click.echo(
-            output.format_json(
-                {
-                    "member_id": to_member_id,
-                    "pane_id": pane_id,
-                    "task_id": task_id,
-                    "notification_sent": notification_sent,
-                },
-            )
-        )
-    elif notification_sent:
-        click.echo(
-            f"Nudged {target['name']} ({pane_id}) — task {task_id} queued, "
-            f"Esc-safeguarded preview dispatched."
-        )
-    elif pane_id is None:
-        click.echo(f"Nudged {target['name']} — no pane; task {task_id} queued.")
-    else:
-        # Pane present but the best-effort preview did not land (tmux binary
-        # missing, self-send, or a send failure) — the task still persisted.
-        click.echo(
-            f"Nudged {target['name']} ({pane_id}) — task {task_id} queued; "
-            f"inline preview not delivered."
         )

@@ -51,20 +51,10 @@ def _fleet_rows(db_path) -> list[tuple]:
         conn.close()
 
 
-def _member_rows(db_path) -> list[tuple]:
-    conn = sqlite3.connect(str(db_path))
-    try:
-        return conn.execute(
-            "SELECT member_id, fleet_id, name, status FROM members"
-        ).fetchall()
-    finally:
-        conn.close()
-
-
 def test_fleet_create_text_output__compact_default_emits_fleet_id_and_full_ids(
     db_file, mock_tmux_ok
 ):
-    """Default text output is 1 line: ``<fleet_id> director=<id> admin=<id>``."""
+    """Default text output is 1 line: ``<fleet_id> director=<id>``."""
     runner = CliRunner()
     result = runner.invoke(cli, ["fleet", "create", "--name", "boot"])
     assert result.exit_code == 0, result.output
@@ -73,20 +63,19 @@ def test_fleet_create_text_output__compact_default_emits_fleet_id_and_full_ids(
     assert "\n" not in out, f"compact output must be 1 line; got:\n{result.output}"
 
     parts = out.split()
-    assert len(parts) == 3
+    assert len(parts) == 2
     sid = parts[0]
     assert sid.isdigit()
     assert parts[1].startswith("director=")
-    assert parts[2].startswith("admin=")
 
     rows = _fleet_rows(db_file)
     assert any(str(r[0]) == sid for r in rows)
 
 
-def test_fleet_create_text_output__full_flag_emits_verbose_7_line_layout(
+def test_fleet_create_text_output__full_flag_emits_verbose_6_line_layout(
     db_file, mock_tmux_ok
 ):
-    """``--full`` emits the verbose 7-line layout with field labels."""
+    """``--full`` emits the verbose 6-line layout with field labels."""
     runner = CliRunner()
     result = runner.invoke(
         cli, ["fleet", "create", "--name", "bootstrap-check", "--full"]
@@ -97,7 +86,6 @@ def test_fleet_create_text_output__full_flag_emits_verbose_7_line_layout(
     assert "name:" in text
     assert "director_name:" in text
     assert "pane:" in text
-    assert "administrator:" in text
 
     assert "Director" in text
     assert "bootstrap-check" in text
@@ -108,51 +96,13 @@ def test_fleet_create_text_output__full_flag_emits_verbose_7_line_layout(
     )
 
 
-def test_fleet_create_text_output__full_administrator_line_references_seeded_administrator(
-    db_file, mock_tmux_ok
-):
-    runner = CliRunner()
-    result = runner.invoke(cli, ["fleet", "create", "--name", "boot", "--full"])
-    assert result.exit_code == 0
-
-    admin_line = next(
-        (
-            ln.strip()
-            for ln in result.output.splitlines()
-            if ln.strip().lower().startswith("administrator")
-        ),
-        None,
-    )
-    assert admin_line is not None
-    admin_id = None
-    for token in admin_line.replace(":", " ").split():
-        if token.isdigit():
-            admin_id = int(token)
-            break
-    assert admin_id is not None
-
-    rows = _member_rows(db_file)
-    matches = [r for r in rows if r[0] == admin_id]
-    assert len(matches) == 1
-    assert matches[0][2] == "Administrator"
-
-
 def test_fleet_create_json_output__top_level_keys(db_file, mock_tmux_ok):
     runner = CliRunner()
     result = runner.invoke(cli, ["fleet", "create", "--name", "boot", "--json"])
     assert result.exit_code == 0, result.output
 
     data = json.loads(result.output)
-    for key in (
-        "fleet_id",
-        "name",
-        "created_at",
-        "administrator_member_id",
-        "director",
-    ):
-        assert key in data
-
-    assert isinstance(data["administrator_member_id"], int)
+    assert set(data) == {"fleet_id", "name", "created_at", "director"}
 
 
 def test_fleet_create_json_output__director_sub_dict(db_file, mock_tmux_ok):
@@ -242,16 +192,6 @@ def test_fleet_create_json_output__name_propagates_to_json(db_file, mock_tmux_ok
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["name"] == "json-name"
-
-
-def test_fleet_create_json_output__administrator_and_director_are_distinct_ids(
-    db_file, mock_tmux_ok
-):
-    runner = CliRunner()
-    result = runner.invoke(cli, ["fleet", "create", "--name", "boot", "--json"])
-    assert result.exit_code == 0
-    data = json.loads(result.output)
-    assert data["administrator_member_id"] != data["director"]["member_id"]
 
 
 def test_fleet_create_outside_tmux__fails_with_specific_error_and_exit_1(

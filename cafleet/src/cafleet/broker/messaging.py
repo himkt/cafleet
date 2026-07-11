@@ -175,10 +175,9 @@ def send_message(fleet_id: int, member_id: int, to: int | str, text: str) -> dic
 
 
 def broadcast_message(fleet_id: int, member_id: int, text: str) -> list[dict]:
-    """Fan out one delivery task per active non-admin peer plus a sender summary.
+    """Fan out one delivery task per active peer plus a sender summary.
 
-    Administrators are excluded at the SQL layer via ``json_extract`` so the
-    card blob stays in the database; they are write-only identities. Every
+    Every
     delivery row shares the same ``origin_task_id`` (the summary's task id)
     so receivers can thread back to the original broadcast.
 
@@ -208,7 +207,6 @@ def broadcast_message(fleet_id: int, member_id: int, text: str) -> list[dict]:
                     Member.fleet_id == fleet_id,
                     Member.status == "active",
                     Member.member_id != member_id,
-                    _shared.CARD_KIND_SQL != _shared.ADMINISTRATOR_KIND,
                 )
             ).scalars()
         )

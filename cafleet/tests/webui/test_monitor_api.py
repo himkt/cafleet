@@ -10,9 +10,9 @@ applies.
 
 The watched set is the root Director (180 s) + every ordinary member (720 s),
 so each folds a non-null ``monitor`` object; the dedicated monitoring member is
-the unenrolled watcher and the Administrator has no placement, so both fold
-``null``. No API/SPA code change is required for the edit surface — the
-enrollment flip alone drives the folded field (§8).
+the unenrolled watcher, so it folds ``null``. No API/SPA code change is
+required for the edit surface — the enrollment flip alone drives the folded
+field (§8).
 """
 
 import os
@@ -113,7 +113,6 @@ def test_get_members__monitor_field_folded(api_db, client):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["member_id"]
-    admin_id = fleet["administrator_member_id"]
     member_id = _register_member(fleet, name="alice")
     watcher_id = _register_monitoring_member(fleet, pane_id="%7")["member_id"]
 
@@ -122,8 +121,8 @@ def test_get_members__monitor_field_folded(api_db, client):
     members = {m["member_id"]: m for m in resp.json()["members"]}
 
     # the watched set folds a non-null monitor: the root Director @180 and every
-    # ordinary member @720. The monitoring member is the unenrolled watcher and
-    # the Administrator has no placement, so both fold null.
+    # ordinary member @720. The monitoring member is the unenrolled watcher, so
+    # it folds null.
     assert members[director_id]["monitor"] is not None
     assert members[director_id]["monitor"]["enabled"] is True
     assert members[director_id]["monitor"]["interval_seconds"] == 180
@@ -131,7 +130,6 @@ def test_get_members__monitor_field_folded(api_db, client):
     assert members[member_id]["monitor"]["enabled"] is True
     assert members[member_id]["monitor"]["interval_seconds"] == 720
     assert members[watcher_id]["monitor"] is None
-    assert members[admin_id]["monitor"] is None
 
 
 # --- GET /api/members/{id}/monitor ------------------------------------------
@@ -172,15 +170,6 @@ def test_get_member_monitor__404_for_monitoring_member_not_enrolled(api_db, clie
     watcher_id = _register_monitoring_member(fleet, pane_id="%7")["member_id"]
 
     resp = client.get(f"/api/members/{watcher_id}/monitor", headers=_headers(sid))
-    assert resp.status_code == 404, resp.text
-
-
-def test_get_member_monitor__404_for_administrator_not_enrolled(api_db, client):
-    fleet = _create_fleet()
-    sid = fleet["fleet_id"]
-    admin_id = fleet["administrator_member_id"]
-
-    resp = client.get(f"/api/members/{admin_id}/monitor", headers=_headers(sid))
     assert resp.status_code == 404, resp.text
 
 
@@ -228,12 +217,13 @@ def test_patch_member_monitor__422_on_interval_below_one(api_db, client):
 
 
 def test_patch_member_monitor__404_on_not_enrolled(api_db, client):
+    # the monitoring member is the unenrolled watcher → its monitor edit 404s
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    admin_id = fleet["administrator_member_id"]
+    watcher_id = _register_monitoring_member(fleet, pane_id="%7")["member_id"]
 
     resp = client.patch(
-        f"/api/members/{admin_id}/monitor",
+        f"/api/members/{watcher_id}/monitor",
         headers=_headers(sid),
         json={"interval_seconds": 30},
     )

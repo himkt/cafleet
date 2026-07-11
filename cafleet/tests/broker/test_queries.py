@@ -20,22 +20,21 @@ def test_list_roster__active_shape_required_keys_and_fleet_scope():
     _register_member(sid, name="active-2")
 
     result = broker.list_roster(sid, include_task_holders=True)
-    assert len(result) == 4
+    assert len(result) == 3
     assert {a["name"] for a in result} == {
         "active-1",
         "active-2",
         "Director",
-        "Administrator",
     }
     entry = result[0]
     for key in ("member_id", "name", "description", "status", "registered_at"):
         assert key in entry
     assert entry["status"] == "active"
 
-    # Newly-created fleet lists exactly Director + Administrator.
+    # Newly-created fleet lists exactly the root Director.
     bare = _create_fleet()
     bare_result = broker.list_roster(bare["fleet_id"], include_task_holders=True)
-    assert {a["name"] for a in bare_result} == {"Director", "Administrator"}
+    assert {a["name"] for a in bare_result} == {"Director"}
 
     # Scoped per fleet.
     other = _create_fleet()
@@ -62,24 +61,24 @@ def test_list_roster__deregistered_with_or_without_tasks():
 @pytest.mark.parametrize(
     ("scenario", "expected_kind"),
     [
-        ("administrator", "administrator"),
+        ("director", "director"),
         ("user_member", "member"),
     ],
 )
 def test_get_member__kind_field(scenario, expected_kind):
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    if scenario == "administrator":
-        member_id = fleet["administrator_member_id"]
+    if scenario == "director":
+        member_id = fleet["director"]["member_id"]
     else:
         member_id = _register_member(sid, name="regular")["member_id"]
     result = broker.get_member(member_id, sid)
     assert result["kind"] == expected_kind
 
-    # Every roster entry carries the unified 4-value kind.
+    # Every roster entry carries the unified 3-value kind.
     all_entries = broker.list_roster(sid, include_task_holders=True)
     for entry in all_entries:
-        assert entry["kind"] in {"director", "administrator", "monitor", "member"}
+        assert entry["kind"] in {"director", "monitor", "member"}
 
 
 # --- list_inbox ---------------------------------------------------------

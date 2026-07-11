@@ -122,7 +122,7 @@ export default function MessageInput({
 
   const activeMembers = members.filter((m) => m.status === "active");
   const recipientMembers = activeMembers.filter(
-    (m) => m.kind !== "administrator",
+    (m) => m.member_id !== senderId,
   );
 
   const disabled = !senderId || activeMembers.length === 0;
@@ -368,7 +368,7 @@ export default function MessageInput({
           onBlur={handleBlur}
           placeholder={
             disabled
-              ? "Administrator unavailable — messaging disabled"
+              ? "Director unavailable — messaging disabled"
               : "@member or @all message..."
           }
           disabled={disabled || sending}

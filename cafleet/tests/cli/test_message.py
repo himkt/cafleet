@@ -421,3 +421,36 @@ def test_message_cancel_auth_check__accepts_valid_member(
     assert result.exit_code == 0, result.output
     assert verify_calls == [(member_id, fleet_id)]
     assert cancel_calls == [(member_id, task_id)]
+
+
+# --- broker-error wrapping: an unexpected broker exception surfaces as a
+# clean exit-1 error message (its text verbatim, no traceback). ---
+
+
+def test_message_show_broker_error__wrapped_as_exit_one_verbatim(
+    runner, fleet_id, member_id, task_id, monkeypatch
+):
+    monkeypatch.setattr(broker, "verify_member_fleet", lambda _m, _s: True)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("boom!")
+
+    monkeypatch.setattr(broker, "get_task", boom)
+
+    result = runner.invoke(
+        cli,
+        [
+            "message",
+            "show",
+            "--fleet-id",
+            str(fleet_id),
+            "--member-id",
+            str(member_id),
+            "--task-id",
+            str(task_id),
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    out = result.output or ""
+    assert "boom!" in out
+    assert "Traceback" not in out

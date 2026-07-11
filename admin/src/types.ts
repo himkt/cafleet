@@ -14,7 +14,7 @@ export interface Member {
   description: string;
   status: "active" | "deregistered";
   registered_at: string;
-  kind: "director" | "administrator" | "monitor" | "member";
+  kind: "director" | "monitor" | "member";
   monitor: MonitorConfig | null;
 }
 

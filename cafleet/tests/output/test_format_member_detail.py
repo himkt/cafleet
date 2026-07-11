@@ -60,9 +60,9 @@ def test_format_member_detail_full__placementless_block_exact_layout():
     rendered = output.format_member_detail(
         _member(
             member_id=3,
-            name="Administrator",
-            description="Built-in administrator member for fleet 1",
-            kind="administrator",
+            name="standalone",
+            description="Placementless member",
+            kind="member",
             placement=None,
         ),
         full=True,
@@ -70,10 +70,10 @@ def test_format_member_detail_full__placementless_block_exact_layout():
     assert rendered == "\n".join(
         [
             "  member_id:   3",
-            "  name:        Administrator",
-            "  description: Built-in administrator member for fleet 1",
+            "  name:        standalone",
+            "  description: Placementless member",
             "  status:      active",
-            "  kind:        administrator",
+            "  kind:        member",
             "  skills:      -",
             "  placement:   none",
         ]

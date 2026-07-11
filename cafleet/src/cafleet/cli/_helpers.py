@@ -1,12 +1,9 @@
 """Shared decorators and guards for CLI subcommands."""
 
-import functools
 import importlib.metadata
-from collections.abc import Callable
 
 import click
 
-from cafleet import broker, output
 from cafleet.broker.skill_installs import (
     list_skill_installs,
     skill_installs_table_exists,
@@ -130,55 +127,3 @@ fleet_id_option = click.option(
     expose_value=False,
     help="Fleet ID (integer); required for this subcommand.",
 )
-
-
-def client_command(
-    *,
-    requires_member_fleet: bool = False,
-    member_kwarg: str = "member_id",
-    text_formatter: Callable[..., str],
-):
-    """Subsume the boilerplate blocks shared by the ``message`` subcommands.
-
-    ``member_kwarg`` names the acting-member kwarg the fleet gate reads —
-    ``member_id`` for the single-member commands, ``from_member_id`` for the
-    two-party senders. JSON output goes through ``render_tasks_in_result`` +
-    ``truncate_task_text``; the text formatter is called as
-    ``text_formatter(result, full=, quiet=)``.
-    """
-
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(ctx, *args, **kwargs):
-            fleet_id = ctx.obj["fleet_id"]
-            try:
-                if requires_member_fleet:
-                    member_id = kwargs.get(member_kwarg)
-                    if member_id is None:
-                        raise click.ClickException(
-                            f"client_command(requires_member_fleet=True) but no "
-                            f"'{member_kwarg}' kwarg was passed. Check the "
-                            f"@click.option declaration on this command."
-                        )
-                    if not broker.verify_member_fleet(member_id, fleet_id):
-                        raise click.ClickException(
-                            f"member {member_id} is not in fleet {fleet_id}."
-                        )
-                result = func(ctx, *args, **kwargs)
-                full = kwargs["full"]
-                output.truncate_task_text(result, full=full)
-                rendered = output.render_tasks_in_result(result, full=full)
-                if kwargs["json_output"]:
-                    click.echo(output.format_json(rendered))
-                else:
-                    extra = {"quiet": kwargs["quiet"]} if "quiet" in kwargs else {}
-                    click.echo(text_formatter(result, full=full, **extra))
-            except click.ClickException:
-                raise
-            except Exception as exc:
-                raise click.ClickException(str(exc)) from exc
-            return result
-
-        return wrapper
-
-    return decorator

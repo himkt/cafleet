@@ -13,10 +13,10 @@ by Alembic, bundled inside the `cafleet` wheel and applied via
 no separate database daemon to operate, monitor, or back up — the database is
 a single file.
 
-The default database path is `~/.local/share/cafleet/cafleet_v3.db` (XDG state
+The default database path is `~/.local/share/cafleet/cafleet_v4.db` (XDG state
 directory), expanded once at config load time. Override with the
 `CAFLEET_DATABASE_URL` environment variable, e.g.
-`sqlite:////var/lib/cafleet/cafleet_v3.db`; see [config](../api/config.md) for the
+`sqlite:////var/lib/cafleet/cafleet_v4.db`; see [config](../api/config.md) for the
 full `CAFLEET_*` variable set.
 
 **Concurrency**: `PRAGMA busy_timeout=5000` lets SQLite retry for up to 5 s

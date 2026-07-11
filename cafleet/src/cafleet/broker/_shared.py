@@ -1,6 +1,5 @@
 """Cross-submodule helpers and session context managers for the broker package."""
 
-import json
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
@@ -9,7 +8,6 @@ from sqlalchemy import exists, func, select
 from cafleet.db.engine import get_sync_sessionmaker
 from cafleet.db.models import Member, Task
 
-ADMINISTRATOR_KIND = "builtin-administrator"
 MONITORING_MEMBER_KIND = "monitoring-member"
 
 TASK_COLUMNS = tuple(Task.__table__.columns.keys())
@@ -37,41 +35,14 @@ def write_session():
         yield session
 
 
-def _card_kind(member_card_json: str | None) -> str | None:
-    """Extract ``$.cafleet.kind`` from a card, or None on any malformation.
-
-    Guards against invalid JSON, a non-object top level, and a null / non-object
-    ``cafleet`` value — every malformed shape resolves to a non-match (None)
-    rather than raising ``AttributeError``.
-    """
-    if not member_card_json:
-        return None
-    try:
-        card = json.loads(member_card_json)
-    except ValueError:
-        return None
-    if not isinstance(card, dict):
-        return None
-    cafleet = card.get("cafleet")
-    if not isinstance(cafleet, dict):
-        return None
-    return cafleet.get("kind")
-
-
-def is_administrator(member_card_json: str | None) -> bool:
-    return _card_kind(member_card_json) == ADMINISTRATOR_KIND
-
-
 def derive_member_kind(is_root_director: bool, card_kind: str | None) -> str:
-    """Collapse a member to its 4-value ``kind``.
+    """Collapse a member to its 3-value ``kind``.
 
-    ``card_kind`` values that match neither builtin constant (including the
-    SQL-coalesced ``""``) fall through to ``member``.
+    ``card_kind`` values that do not match the monitoring-member constant
+    (including the SQL-coalesced ``""``) fall through to ``member``.
     """
     if is_root_director:
         return "director"
-    if card_kind == ADMINISTRATOR_KIND:
-        return "administrator"
     if card_kind == MONITORING_MEMBER_KIND:
         return "monitor"
     return "member"

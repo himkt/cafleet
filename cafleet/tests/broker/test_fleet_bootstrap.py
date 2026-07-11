@@ -7,7 +7,6 @@ import pytest
 
 from cafleet import broker
 from cafleet.broker import fleets
-from cafleet.broker._shared import is_administrator
 from cafleet.db.models import (
     Fleet as FleetModel,
 )
@@ -36,14 +35,7 @@ def _bootstrap(name=None, ctx=None, coding_agent="claude", backend="tmux"):
 
 def test_bootstrap__top_level_envelope_and_director_subdict(director_context):
     result = _bootstrap(name="bootstrap-1", ctx=director_context)
-    for key in (
-        "fleet_id",
-        "name",
-        "created_at",
-        "administrator_member_id",
-        "director",
-    ):
-        assert key in result
+    assert set(result) == {"fleet_id", "name", "created_at", "director"}
     director = result["director"]
     for key in ("member_id", "name", "description", "registered_at", "placement"):
         assert key in director
@@ -66,7 +58,7 @@ def test_bootstrap__placement_matches_director_context_and_records_coding_agent(
     assert "created_at" in placement
 
 
-def test_bootstrap__db_rows_for_fleet_director_administrator_placement(
+def test_bootstrap__db_rows_for_fleet_director_placement(
     broker_session, director_context
 ):
     result = _bootstrap(ctx=director_context)
@@ -82,22 +74,17 @@ def test_bootstrap__db_rows_for_fleet_director_administrator_placement(
     assert fleet_rows[0].director_member_id == result["director"]["member_id"]
     assert fleet_rows[0].deleted_at is None
 
-    assert len(member_rows) == 2
-    by_name = {r.name: r for r in member_rows}
-    assert by_name["Director"].status == "active"
-    assert by_name["Administrator"].status == "active"
-    assert by_name["Director"].member_id == result["director"]["member_id"]
-    assert by_name["Administrator"].member_id == result["administrator_member_id"]
-    assert is_administrator(by_name["Administrator"].member_card_json)
-    assert not is_administrator(by_name["Director"].member_card_json)
+    # Bootstrap seeds exactly one built-in member: the root Director.
+    assert len(member_rows) == 1
+    director_row = member_rows[0]
+    assert director_row.name == "Director"
+    assert director_row.status == "active"
+    assert director_row.member_id == result["director"]["member_id"]
 
     assert len(placement_rows) == 1
     placement = placement_rows[0]
     assert placement.member_id == result["director"]["member_id"]
     assert placement.mux_pane_id == director_context.pane_id
-
-    # Administrator.registered_at == fleets.created_at.
-    assert by_name["Administrator"].registered_at == fleet_rows[0].created_at
 
 
 @pytest.mark.parametrize("name", ["hello-world", None])
@@ -107,7 +94,6 @@ def test_bootstrap__name_handling_and_unique_ids(director_context, name):
     assert r1["name"] == name
     assert r1["fleet_id"] != r2["fleet_id"]
     assert r1["director"]["member_id"] != r2["director"]["member_id"]
-    assert r1["administrator_member_id"] != r2["administrator_member_id"]
 
 
 def test_bootstrap__atomic_rollback_on_failure(
@@ -137,9 +123,11 @@ def test_delete_fleet__soft_deletes_deregisters_and_drops_placement(
 ):
     result = _bootstrap(ctx=director_context)
     sid = result["fleet_id"]
-    admin_id = result["administrator_member_id"]
     director_id = result["director"]["member_id"]
-    sent = broker.send_message(sid, admin_id, director_id, "audit me")
+    member = broker.register_member(
+        fleet_id=sid, name="auditor", description="audit member"
+    )
+    sent = broker.send_message(sid, member["member_id"], director_id, "audit me")
     task_id = sent["task"]["task_id"]
 
     ret = broker.delete_fleet(sid)
@@ -155,7 +143,7 @@ def test_delete_fleet__soft_deletes_deregisters_and_drops_placement(
         tasks = s.query(Task).all()
     assert fleet_row.deleted_at is not None
     assert statuses["Director"] == "deregistered"
-    assert statuses["Administrator"] == "deregistered"
+    assert statuses["auditor"] == "deregistered"
     assert placement_count == 0
     # Tasks preserved across soft-delete.
     assert any(t.task_id == task_id for t in tasks)
@@ -166,7 +154,7 @@ def test_delete_fleet__idempotent_rerun_returns_zero(director_context):
     sid = result["fleet_id"]
     first = broker.delete_fleet(sid)
     second = broker.delete_fleet(sid)
-    assert first["deregistered_count"] == 2
+    assert first["deregistered_count"] == 1
     assert second["deregistered_count"] == 0
 
 

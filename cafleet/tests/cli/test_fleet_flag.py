@@ -1,7 +1,6 @@
 """Tests for the per-subcommand ``cafleet <subcommand> --fleet-id <int>`` CLI option."""
 
 import json
-import sqlite3
 
 import pytest
 from click.testing import CliRunner
@@ -160,75 +159,18 @@ def test_fleet_id_rejected_where_not_required__fleet_create_rejects_in_both_posi
     assert "no such option" in (per_subcommand.output or "").lower()
 
 
-def _create_fleet_via_cli(runner: CliRunner) -> tuple[int, int]:
-    """Run ``fleet create --json`` and return (fleet_id, administrator_member_id)."""
+def _create_fleet_via_cli(runner: CliRunner) -> int:
+    """Run ``fleet create --json`` and return the fleet_id."""
     result = runner.invoke(cli, ["fleet", "create", "--name", "flag-test", "--json"])
     assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
-    return data["fleet_id"], data["administrator_member_id"]
-
-
-def _fetch_member_status(db_file, member_id: str) -> tuple[str, str | None]:
-    """Return (status, deregistered_at) for a given member_id via raw SQLite."""
-    conn = sqlite3.connect(str(db_file))
-    try:
-        row = conn.execute(
-            "SELECT status, deregistered_at FROM members WHERE member_id = ?",
-            (member_id,),
-        ).fetchone()
-    finally:
-        conn.close()
-    assert row is not None, f"member {member_id} not found"
-    return row[0], row[1]
+    return json.loads(result.output)["fleet_id"]
 
 
 @pytest.mark.usefixtures("_mock_tmux_for_fleet_create")
-def test_deregister_administrator_cli_guard__cli_deregister_admin_exits_nonzero(
+def test_member_delete_cli__unknown_member_exits_nonzero(
     db_runner,
 ):
-    fleet_id, admin_id = _create_fleet_via_cli(db_runner)
-
-    result = db_runner.invoke(
-        cli,
-        [
-            "member",
-            "delete",
-            "--fleet-id",
-            str(fleet_id),
-            "--member-id",
-            str(admin_id),
-        ],
-    )
-    assert result.exit_code == 1, result.output
-
-
-@pytest.mark.usefixtures("_mock_tmux_for_fleet_create")
-def test_deregister_administrator_cli_guard__cli_deregister_admin_message_is_user_friendly(
-    db_runner,
-):
-    fleet_id, admin_id = _create_fleet_via_cli(db_runner)
-
-    result = db_runner.invoke(
-        cli,
-        [
-            "member",
-            "delete",
-            "--fleet-id",
-            str(fleet_id),
-            "--member-id",
-            str(admin_id),
-        ],
-    )
-    out = result.output or ""
-    assert "Administrator cannot be deregistered" in out
-    assert "Traceback" not in out
-
-
-@pytest.mark.usefixtures("_mock_tmux_for_fleet_create")
-def test_deregister_administrator_cli_guard__cli_deregister_unknown_member_exits_nonzero(
-    db_runner,
-):
-    fleet_id, _admin_id = _create_fleet_via_cli(db_runner)
+    fleet_id = _create_fleet_via_cli(db_runner)
     bogus_member_id = 999999
 
     result = db_runner.invoke(
@@ -244,29 +186,6 @@ def test_deregister_administrator_cli_guard__cli_deregister_unknown_member_exits
     )
     assert result.exit_code == 1, result.output
     assert f"Member {bogus_member_id} not found" in (result.output or "")
-
-
-@pytest.mark.usefixtures("_mock_tmux_for_fleet_create")
-def test_deregister_administrator_cli_guard__cli_deregister_admin_leaves_row_active(
-    db_runner, tmp_path
-):
-    db_file = tmp_path / "cafleet.db"
-    fleet_id, admin_id = _create_fleet_via_cli(db_runner)
-
-    db_runner.invoke(
-        cli,
-        [
-            "member",
-            "delete",
-            "--fleet-id",
-            str(fleet_id),
-            "--member-id",
-            str(admin_id),
-        ],
-    )
-    status, deregistered_at = _fetch_member_status(db_file, admin_id)
-    assert status == "active"
-    assert deregistered_at is None
 
 
 def test_old_surface_removed__session_flag_and_group_rejected(db_runner):

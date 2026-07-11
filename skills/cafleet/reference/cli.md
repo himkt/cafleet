@@ -4,7 +4,7 @@ Read this file for the broker CLI surface beyond the core identity / poll / send
 
 ## Environment variables
 
-CLI env vars (all `CAFLEET_`-prefixed): `CAFLEET_DATABASE_URL` (SQLite URL; default `~/.local/share/cafleet/cafleet_v3.db`, use an absolute path when overriding — `~` is not expanded), `CAFLEET_MAX_TEXT_LEN` (body-truncation limit, default `200` — see § *Output flags* below).
+CLI env vars (all `CAFLEET_`-prefixed): `CAFLEET_DATABASE_URL` (SQLite URL; default `~/.local/share/cafleet/cafleet_v4.db`, use an absolute path when overriding — `~` is not expanded), `CAFLEET_MAX_TEXT_LEN` (body-truncation limit, default `200` — see § *Output flags* below).
 
 ## Global Options
 

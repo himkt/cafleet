@@ -2,7 +2,7 @@
 
 Covers per-member enrollment-on-registration (the root Director @180 at
 ``create_fleet``, every ordinary member @720 at ``register_member``; the
-monitoring member and the Administrator stay unenrolled), the
+monitoring member stays unenrolled), the
 ``monitoring-member`` kind marker, the ``find_monitoring_member`` watcher lookup,
 cleanup-on-teardown, per-member config edits, the per-tick scan
 (``list_monitor_targets`` over the watched Director + members, with no
@@ -46,9 +46,8 @@ def _iso_now() -> str:
 # --- enrollment on registration -------------------------------------------
 
 
-def test_enroll_on_create__director_enrolled_180_administrator_not():
-    # this design: create_fleet enrolls the root Director @180; the Administrator
-    # has no placement and stays unenrolled.
+def test_enroll_on_create__director_enrolled_180():
+    # this design: create_fleet enrolls the root Director @180.
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
 
@@ -57,8 +56,6 @@ def test_enroll_on_create__director_enrolled_180_administrator_not():
     assert director_cfg["interval_seconds"] == 180
     assert director_cfg["enabled"] is True
     assert director_cfg["last_ping_at"] is None
-
-    assert broker.get_monitor_config(sid, fleet["administrator_member_id"]) is None
 
 
 def test_enroll_on_register__ordinary_member_enrolled_720():
@@ -255,11 +252,12 @@ def test_update_monitor_config__unknown_member_raises():
         broker.update_monitor_config(fleet["fleet_id"], 999999, interval_seconds=30)
 
 
-def test_update_monitor_config__not_enrolled_administrator_raises():
+def test_update_monitor_config__not_enrolled_monitoring_member_raises():
     fleet = _create_fleet()
+    watcher = _register_monitoring_member(fleet, name="watcher")
     with pytest.raises(click.ClickException):
         broker.update_monitor_config(
-            fleet["fleet_id"], fleet["administrator_member_id"], enabled=False
+            fleet["fleet_id"], watcher["member_id"], enabled=False
         )
 
 
