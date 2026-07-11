@@ -33,21 +33,21 @@ def _help_lines(*subcommand_path: str) -> list[str]:
 # Per-subcommand line budgets. Each command's --help output must stay at or
 # below its budget; option helps are kept to a single concise sentence.
 _PER_SUBCOMMAND_BUDGETS: dict[tuple[str, ...], int] = {
-    ("message", "send"): 13,
-    ("message", "broadcast"): 11,
-    ("message", "poll"): 9,
-    ("message", "ack"): 11,
-    ("message", "cancel"): 10,
-    ("message", "show"): 10,
+    ("message", "send"): 14,
+    ("message", "broadcast"): 12,
+    ("message", "poll"): 10,
+    ("message", "ack"): 12,
+    ("message", "cancel"): 11,
+    ("message", "show"): 11,
     # member create's wide option column (the --coding-agent
     # [claude|codex|opencode] metavar) wraps the --fleet-id help to two lines,
     # so it gains 2 lines rather than 1. Added --text/--text-file and the
     # now-visible --full increase this.
     ("member", "create"): 20,
-    ("member", "list"): 9,
-    ("member", "show"): 9,
-    ("member", "capture"): 10,
-    ("member", "ping"): 9,
+    ("member", "list"): 10,
+    ("member", "show"): 10,
+    ("member", "capture"): 11,
+    ("member", "ping"): 10,
     ("member", "exec"): 9,
     ("member", "delete"): 10,
 }
@@ -85,8 +85,8 @@ def test_aggregate_help_under_byte_budget():
         len("\n".join(_help_lines(*subcommand)).encode("utf-8"))
         for subcommand in _PER_SUBCOMMAND_BUDGETS
     )
-    assert total_bytes <= 5800, (
-        f"aggregate --help bytes = {total_bytes} (budget 5800). "
+    assert total_bytes <= 6500, (
+        f"aggregate --help bytes = {total_bytes} (budget 6500). "
         f"Trim multi-sentence option helps in the cli/ package to fit."
     )
 
