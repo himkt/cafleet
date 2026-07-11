@@ -10,12 +10,12 @@ The DB entity that carries broker messages is still named `tasks` (an A2A-protoc
 
 ## Success Criteria
 
-- [ ] The schema defines a `messages` table with `message_id`, `owner_member_id`, `origin_message_id` columns and `idx_messages_*` indexes; no `tasks` table, `task_id` column, or `idx_tasks_*` index exists anywhere in `cafleet/src/`.
-- [ ] `cafleet message ack` / `cancel` / `show` accept `--message-id`; `--task-id` fails with Click's standard "No such option" error (hard break, no alias).
-- [ ] CLI `--json` output, the WebUI API, and the admin frontend use `message_id` / `origin_message_id` keys; the admin UI builds and renders against the renamed keys.
-- [ ] The default database file is `cafleet_v5.db`; the Alembic chain is a single regenerated `0001` revision and the chain-guard test in `tests/db/test_alembic_smoke.py` passes.
-- [ ] No identifier spelled `task` / `Task` / `task_id` remains in `cafleet/src/` or `admin/src/`; SPEC.md, `docs/`, all `skills/` trees (`cafleet`, `cafleet-design-doc`, `cafleet-research`), and `.claude/skills/skill-author/` carry no `tasks`-table / `task_id` / `--task-id` / `<task-id>` / `[task-id]` mention.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint`, and `mise //admin:build` all pass.
+- [x] The schema defines a `messages` table with `message_id`, `owner_member_id`, `origin_message_id` columns and `idx_messages_*` indexes; no `tasks` table, `task_id` column, or `idx_tasks_*` index exists anywhere in `cafleet/src/`.
+- [x] `cafleet message ack` / `cancel` / `show` accept `--message-id`; `--task-id` fails with Click's standard "No such option" error (hard break, no alias).
+- [x] CLI `--json` output, the WebUI API, and the admin frontend use `message_id` / `origin_message_id` keys; the admin UI builds and renders against the renamed keys.
+- [x] The default database file is `cafleet_v5.db`; the Alembic chain is a single regenerated `0001` revision and the chain-guard test in `tests/db/test_alembic_smoke.py` passes.
+- [x] No identifier spelled `task` / `Task` / `task_id` remains in `cafleet/src/` or `admin/src/`; SPEC.md, `docs/`, all `skills/` trees (`cafleet`, `cafleet-design-doc`, `cafleet-research`), and `.claude/skills/skill-author/` carry no `tasks`-table / `task_id` / `--task-id` / `<task-id>` / `[task-id]` mention.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint`, and `mise //admin:build` all pass.
 
 ---
 
