@@ -18,7 +18,7 @@ from cafleet.cli.setup import setup as setup_command
 )
 @click.pass_context
 def cli(ctx, json_output):
-    """CAFleet — CLI for the message broker and agent registry."""
+    """CAFleet — CLI for the message broker and member registry."""
     ctx.ensure_object(dict)
     ctx.obj["json_output"] = json_output
 

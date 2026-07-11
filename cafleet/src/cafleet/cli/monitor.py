@@ -17,6 +17,7 @@ from cafleet.cli._helpers import (
     ensure_multiplexer_or_die,
     ensure_skills_current,
     fleet_id_option,
+    member_id_option,
 )
 from cafleet.monitor import DEFAULT_TICK_SECONDS, loop
 
@@ -105,9 +106,7 @@ def monitor_status(ctx: click.Context) -> None:
 
 @monitor.command("config")
 @fleet_id_option
-@click.option(
-    "--member-id", "member_id", type=int, required=True, help="Target member."
-)
+@member_id_option
 @click.option(
     "--interval",
     "interval",

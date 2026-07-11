@@ -590,7 +590,7 @@ def test_flag_native_status_due__already_interval_due_keeps_only_interval_reason
 
 
 def test_flag_native_status_due__dead_or_pending_pane_skipped():
-    """Agents with no pane (pending) or a dead pane are never point-read."""
+    """Members with no pane (pending) or a dead pane are never point-read."""
     mux = _FakeStateMux(set(), {})
     targets = [
         _native_target(5, pane_id=None),
@@ -832,7 +832,7 @@ def test_flag_stall_check_due__disabled_target_skipped(monkeypatch):
 
 
 def test_flag_stall_check_due__dead_or_pending_pane_skipped(monkeypatch):
-    """Agents with no pane (pending) or a dead pane are never stall-check flagged."""
+    """Members with no pane (pending) or a dead pane are never stall-check flagged."""
     monkeypatch.setattr(settings, "monitor_stall_interval", 240)
     targets = [
         _native_target(5, pane_id=None),

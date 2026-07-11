@@ -17,4 +17,4 @@ cafleet --json message poll --fleet-id <fleet-id> --member-id <m> --full
 
 ## `CAFLEET_MAX_TEXT_LEN`
 
-Environment variable controlling body truncation in the rendered envelope; default `200` codepoints, suffix the single codepoint `…` (U+2026). Separate hard-coded caps apply to `agent.description` (`60`) and metadata strings (`80`); `--full` bypasses all three. See [`cli-options.md`](../../../docs/spec/cli-options.md#message-body-truncation).
+Environment variable controlling body truncation in the rendered envelope; default `200` codepoints, suffix the single codepoint `…` (U+2026). Separate hard-coded caps apply to `member.description` (`60`) and metadata strings (`80`); `--full` bypasses all three. See [`cli-options.md`](../../../docs/spec/cli-options.md#message-body-truncation).
