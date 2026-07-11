@@ -130,27 +130,29 @@ def test_format_member_detail_full__description_truncated_at_60(
         assert expected_absent_in_render not in rendered
 
 
-def test_truncate_task_text__full_true_bypasses_and_default_uses_settings(monkeypatch):
+def test_truncate_message_text__full_true_bypasses_and_default_uses_settings(
+    monkeypatch,
+):
     # full=True bypasses regardless of settings.
     monkeypatch.setattr("cafleet.config.settings.max_text_len", 10)
-    task = {
-        "task_id": 1,
-        "context_id": 20,
+    message = {
+        "message_id": 1,
+        "owner_member_id": 20,
         "from_member_id": 10,
         "to_member_id": 20,
         "type": "unicast",
         "created_at": "2026-05-05T12:00:00.000000+00:00",
         "status_state": "input_required",
         "status_timestamp": "2026-05-05T12:00:00.000000+00:00",
-        "origin_task_id": None,
+        "origin_message_id": None,
         "text": "a" * 500,
     }
-    output.truncate_task_text(task, full=True)
-    assert task["text"] == "a" * 500
+    output.truncate_message_text(message, full=True)
+    assert message["text"] == "a" * 500
 
     # Default uses settings.max_text_len.
     monkeypatch.setattr("cafleet.config.settings.max_text_len", 20)
-    task2 = dict(task)
-    task2["text"] = "a" * 100
-    output.truncate_task_text(task2, full=False)
-    assert task2["text"] == "a" * 20 + "…"
+    message2 = dict(message)
+    message2["text"] = "a" * 100
+    output.truncate_message_text(message2, full=False)
+    assert message2["text"] == "a" * 20 + "…"

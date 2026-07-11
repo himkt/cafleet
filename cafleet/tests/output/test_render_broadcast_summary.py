@@ -19,18 +19,18 @@ def test_broadcast_summary__exactly_typed_column_keys_no_recipient_ids_no_metada
     _register_member(sid, "recipient-b")
 
     [result] = broker.broadcast_message(sid, sender["member_id"], "hi all")
-    summary = result["task"]
+    summary = result["message"]
 
     expected_keys = {
-        "task_id",
-        "context_id",
+        "message_id",
+        "owner_member_id",
         "from_member_id",
         "to_member_id",
         "type",
         "created_at",
         "status_state",
         "status_timestamp",
-        "origin_task_id",
+        "origin_message_id",
         "text",
     }
     extra = set(summary.keys()) - expected_keys
@@ -47,6 +47,6 @@ def test_broadcast_summary__wrapper_count_and_text_describes_recipient_count():
     [result] = broker.broadcast_message(sid, sender["member_id"], "hi all")
     assert isinstance(result["recipients"], int)
     assert isinstance(result["delivered"], int)
-    summary_text = result["task"]["text"]
+    summary_text = result["message"]["text"]
     assert summary_text.startswith("Broadcast sent to ")
     assert "recipients" in summary_text

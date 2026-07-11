@@ -41,7 +41,7 @@ def test_send_inline_preview__happy_path_envelope_body_and_submit(monkeypatch):
     ts = "2026-05-05T12:00:00.123456+00:00"
     result = _tmux.send_inline_preview(
         target_pane_id="%9",
-        task_id=1234,
+        message_id=1234,
         sender_id=5678,
         ts=ts,
         text=body,
@@ -86,7 +86,7 @@ def test_send_inline_preview__esc_first_full_sequence(monkeypatch):
 
     result = _tmux.send_inline_preview(
         target_pane_id="%4",
-        task_id=7,
+        message_id=7,
         sender_id=8,
         ts="2026-06-15T00:00:00+00:00",
         text="body",
@@ -117,7 +117,7 @@ def test_send_inline_preview__newline_soft_insert_single_submit(monkeypatch):
 
     _tmux.send_inline_preview(
         target_pane_id="%4",
-        task_id=11,
+        message_id=11,
         sender_id=22,
         ts="2026-06-15T00:00:00+00:00",
         text="single line body",
@@ -177,7 +177,7 @@ def test_send_inline_preview__failure_modes_return_false(
     monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
     result = _tmux.send_inline_preview(
         target_pane_id="%7",
-        task_id=1234,
+        message_id=1234,
         sender_id=5678,
         ts="2026-05-05T12:00:00.000000+00:00",
         text="body",

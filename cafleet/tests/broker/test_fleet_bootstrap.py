@@ -13,7 +13,7 @@ from cafleet.db.models import (
 from cafleet.db.models import (
     Member,
     MemberPlacement,
-    Task,
+    Message,
 )
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 
@@ -128,7 +128,7 @@ def test_delete_fleet__soft_deletes_deregisters_and_drops_placement(
         fleet_id=sid, name="auditor", description="audit member"
     )
     sent = broker.send_message(sid, member["member_id"], director_id, "audit me")
-    task_id = sent["task"]["task_id"]
+    message_id = sent["message"]["message_id"]
 
     ret = broker.delete_fleet(sid)
     assert ret["deregistered_count"] == 2
@@ -140,13 +140,13 @@ def test_delete_fleet__soft_deletes_deregisters_and_drops_placement(
             for r in s.query(Member).filter(Member.fleet_id == sid).all()
         }
         placement_count = s.query(MemberPlacement).count()
-        tasks = s.query(Task).all()
+        messages = s.query(Message).all()
     assert fleet_row.deleted_at is not None
     assert statuses["Director"] == "deregistered"
     assert statuses["auditor"] == "deregistered"
     assert placement_count == 0
-    # Tasks preserved across soft-delete.
-    assert any(t.task_id == task_id for t in tasks)
+    # Messages preserved across soft-delete.
+    assert any(m.message_id == message_id for m in messages)
 
 
 def test_delete_fleet__idempotent_rerun_returns_zero(director_context):
