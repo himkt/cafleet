@@ -1,7 +1,7 @@
 # Rename the `tasks` table to `messages` (end-to-end)
 
 **Status**: Approved
-**Progress**: 20/27 tasks complete
+**Progress**: 21/27 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -156,7 +156,7 @@ Documentation-first order applies (per `.claude/rules/documentation-maintenance.
 
 ### Step 4: CLI
 
-- [ ] Update `cli/message.py`: `--message-id` on `ack` / `cancel` / `show`, echo/JSON keys <!-- completed: -->
+- [x] Update `cli/message.py`: `--message-id` on `ack` / `cancel` / `show`, echo/JSON keys <!-- completed: 2026-07-12T01:05 -->
 
 ### Step 5: WebUI and admin frontend
 
