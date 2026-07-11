@@ -1823,8 +1823,9 @@ The shared literal-then-Enter primitive (used by `send_exit`,
    permission prompt so the trailing `Enter` cannot blind-confirm it.
 2. Run `tmux send-keys -t <target_pane_id> -l <payload>` — `-l` types the literal
    payload (single argv element, never shell-interpolated).
-3. Sleep `_SUBMIT_DELAY` (`0.12`s) — **unconditionally**, so codex
-   bracketed-paste finalizes and opencode slash-autocomplete settles.
+3. Sleep `_SUBMIT_DELAY` (`1.0`s) — **unconditionally**, so the Enter clears
+   codex's post-paste Enter-suppression window and opencode slash-autocomplete
+   settles.
 4. Run `tmux send-keys -t <target_pane_id> Enter` — submits.
 
 An embedded `\n` in `payload` is a **soft** newline within the single keystroke
