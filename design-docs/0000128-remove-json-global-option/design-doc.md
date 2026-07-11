@@ -1,7 +1,7 @@
 # Remove `--json` from the Global Option Surface
 
 **Status**: Approved
-**Progress**: 6/26 tasks complete
+**Progress**: 9/26 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -114,9 +114,9 @@ Documentation lands first, per `.claude/rules/documentation-maintenance.md`. `RE
 
 ### Step 2: `SPEC.md`
 
-- [ ] Replace the global `--json` context-object definition (lines 840-841) and the emit branch (line 932) with the shared per-subcommand `json_flag` specification <!-- completed: -->
-- [ ] Update the per-command surfaces: `doctor` (line 939), the local-OR-global rule (lines 991-992), `fleet create/list/show` (lines 1000-1008), and the message-vs-fleet dual-path paragraphs (lines 1463-1467, 2691) — the dual path collapses to one uniform per-subcommand flag <!-- completed: -->
-- [ ] Update the CLI checklist entries (lines 2802-2832) to trailing per-subcommand `--json` and delete the "dual path retained" note (line 2916) <!-- completed: -->
+- [x] Replace the global `--json` context-object definition (lines 840-841) and the emit branch (line 932) with the shared per-subcommand `json_flag` specification <!-- completed: 2026-07-11T08:52 -->
+- [x] Update the per-command surfaces: `doctor` (line 939), the local-OR-global rule (lines 991-992), `fleet create/list/show` (lines 1000-1008), and the message-vs-fleet dual-path paragraphs (lines 1463-1467, 2691) — the dual path collapses to one uniform per-subcommand flag <!-- completed: 2026-07-11T08:52 -->
+- [x] Update the CLI checklist entries (lines 2802-2832) to trailing per-subcommand `--json` and delete the "dual path retained" note (line 2916) <!-- completed: 2026-07-11T08:52 -->
 
 ### Step 3: Skills
 

@@ -835,13 +835,13 @@ section gives the per-command semantics. Exit codes are §7.2; application error
 #### Global options & top-level group
 
 The top-level command is `cafleet`, group help `CAFleet — CLI for the message
-broker and member registry.`. Two options live before any subcommand:
+broker and member registry.`. One option lives before any subcommand:
 
-- `--json` — a global boolean flag, default `false`, stored on a shared context
-  object every handler can read (distinct from the local `--json` some
-  subcommands also declare).
 - `--version` — prints `cafleet <version>` and exits 0, short-circuiting before
   subcommand dispatch, so it **bypasses** the `--fleet-id` requirement.
+
+Any other pre-subcommand option — including `--json` — is the parser's
+unknown-option usage error (`No such option`, exit 2).
 
 #### The `--fleet-id` required option
 
@@ -866,6 +866,15 @@ unknown-option error (exit 2).
 
 - `--full` — boolean, default `false`. On `member show`, `member create`,
   `fleet create`, and every `message` subcommand.
+- `--json` — boolean, default `false`, dest `json_output`, help `Output in
+  JSON format.`; a shared per-subcommand flag (declaration `json_flag` in
+  `cli/_helpers.py`), canonically written **trailing**, after all other flags.
+  On every `message` subcommand; `member create` / `delete` / `show` / `list` /
+  `capture` / `exec` / `ping` / `nudge`; `monitor status` / `config`;
+  `fleet create` / `list` / `show`; and `doctor`. Emits compact single-line
+  JSON instead of text; composes with `--full` (truncation is applied to the
+  result before the json-vs-text fork); `--quiet` is a text-only shortcut,
+  ignored in the JSON branch.
 - `--member-id` — required integer naming **the member in question**, one
   meaning everywhere: the requester on `message poll` / `ack` / `cancel` /
   `show`, the target on `member delete` / `show` / `capture` / `exec` / `ping`,
@@ -929,14 +938,14 @@ invocation, in order:
 3. **Handler call.**
 4. **Render** — route the result through task truncation + task-list rendering
    (with `full`).
-5. **Emit branch** — if global `--json`, emit compact JSON; else call the text
-   renderer with `full`.
+5. **Emit branch** — if the subcommand's `--json` flag was passed, emit compact
+   JSON; else call the text renderer with `full`.
 6. **Exception wrap** — re-raise an application/usage error unchanged; wrap any
    other exception as an application error (exit 1) carrying its message.
 
 #### `doctor`
 
-Only global `--json`. Resolves the active backend via `resolve_multiplexer()`
+Only the shared `--json` flag. Resolves the active backend via `resolve_multiplexer()`
 (re-wrapping a `MultiplexerError` as an application error, exit 1), ensures it is
 available (`ensure_available()`), discovers the pane context
 (`context_discovery()`), and reads the backend's presence env var (`TMUX` for
@@ -988,8 +997,8 @@ the stale-skills guard — it reports instead of blocking.
 
 #### `fleet` group
 
-Does **not** use `client_command`. Each subcommand with a local `--json` flag
-emits JSON when **either** the local flag **or** global `--json` is set.
+Does **not** use `client_command`. `fleet create`, `fleet list`, and
+`fleet show` take the shared `--json` flag and emit JSON when it is set.
 
 `fleet create` and `fleet list` do **not** take `--fleet-id`; `fleet show` and
 `fleet delete` take the **required `--fleet-id` option** like every other
@@ -997,15 +1006,15 @@ fleet-scoped command (§6.3 `--fleet-id`).
 
 - **create** — `--name` (string, **required**; no `--name` → Click usage error
   `Missing option '--name'.`, exit 2), `--coding-agent` (choice over the
-  coding-agent names, default `claude`, shown in help), `--json` (local),
+  coding-agent names, default `claude`, shown in help), `--json` (shared),
   `--full` (documented). Requires a supported multiplexer: on a `MultiplexerError`
   → application error `cafleet fleet create must be run inside a tmux or herdr
   session` (exit 1, no DB writes).
-- **list** — `--json` (local). Empty → `No fleets found.`; else a header plus
+- **list** — `--json` (shared). Empty → `No fleets found.`; else a header plus
   one formatted row per fleet (five columns: FLEET_ID / DIRECTOR / NAME / MEMBERS
   left-padded 40 / 40 / 20 / 8, then a trailing unpadded CREATED_AT; nullable
   cells fall back to empty strings).
-- **show** — `--fleet-id` (integer, required) + local `--json`. Not found →
+- **show** — `--fleet-id` (integer, required) + the shared `--json`. Not found →
   application error `fleet '<fleet_id>' not found.`. Text: `fleet_id`, `name`,
   `created_at`, plus a `deleted_at:` line when soft-deleted (soft-deleted rows
   are returned intentionally).
@@ -1461,12 +1470,11 @@ WebUI (which reuses the JSON serialization but bypasses truncation). This module
 sets no exit codes. (`doctor` output is produced by the CLI, §6.3, not here.)
 
 The text-vs-JSON selection is the CLI's: `--full` and `--json` are **documented**
-flags (Q5 hidden-flag cleanup). The `--json` emit path is **not** unified — the
-`message` group emits JSON via the global `--json` through
-`client_command`, the `member` group emits it per-handler off the same global
-flag, while the `fleet` group keeps its own local `--json` flag OR-ed
-with the global one and its own emit path (§7.3). The single absent glyph below
-and the compact-JSON rules apply to both paths.
+flags (Q5 hidden-flag cleanup). Every JSON-capable subcommand takes the one
+shared per-subcommand `--json` flag (§6.3): the `message` group branches on it
+inside `client_command`, while the `member`, `monitor`, `fleet`, and `doctor`
+handlers branch on it per-handler with their own emit sites (§7.3). The single
+absent glyph below and the compact-JSON rules apply to every path.
 
 #### Two-layer architecture
 
@@ -2688,8 +2696,8 @@ distinct forms with **two different provenances**:
 ### 7.3 Output / JSON / truncation
 
 Output formatting is specified in §6.4. The cross-cutting choices: the CLI selects
-text-vs-JSON (global `--json`, or a local `--json` OR-ed with the global one in
-`fleet *`) and full-vs-compact (documented `--full`); the WebUI bypasses `truncate_*`
+text-vs-JSON (the shared per-subcommand `--json` flag, §6.3) and full-vs-compact
+(documented `--full`); the WebUI bypasses `truncate_*`
 (raw broker results) but its JSON serialization still preserves key order and raw
 UTF-8 (no ASCII escaping).
 
@@ -2814,15 +2822,15 @@ required-ness, documented-vs-hidden status, output shapes, and exit codes. Every
 interaction flag is now **documented** (there are no hidden flags). Per-command
 option semantics are in §6.3.
 
-**Global:** `--json` (before subcommand), `--version` (`cafleet <version>`,
-exit 0, bypasses `--fleet-id`).
+**Global:** `--version` (`cafleet <version>`, exit 0, bypasses `--fleet-id`).
+The shared trailing `--json` flag (§6.3) is listed per row below.
 
 **Top-level:**
 
 - [ ] `cafleet setup` (bare group invocation: no options; runs db half then skills half)
 - [ ] `cafleet setup db` (no options; db migration only; prints the created/upgraded/already-at-head line)
 - [ ] `cafleet setup skill` (`--agent` multiple: claude/codex/opencode; pre-flight requires `skill_installs` table)
-- [ ] `cafleet doctor` (global `--json` only; emits tmux block + skills-install report)
+- [ ] `cafleet doctor` (`--json`; emits tmux block + skills-install report)
 - [ ] `cafleet server` (`--host`=settings.broker_host, `--port`=settings.broker_port)
 
 **`fleet`:**
@@ -2834,29 +2842,29 @@ exit 0, bypasses `--fleet-id`).
 
 **`member`:**
 
-- [ ] `cafleet member create` (no identity flag — Director auto-resolved; `--name`, `--description`, `--coding-agent`, `--model`, `--role`=member, `--text` / `--text-file` xor-required, `--full`)
-- [ ] `cafleet member delete` (`--member-id` target, `--force`/`-f`; placementless target → registry soft-delete, exit 0)
-- [ ] `cafleet member show` (`--member-id` target, `--full`)
-- [ ] `cafleet member list` (`--activity`, `--all`; mutually exclusive)
-- [ ] `cafleet member capture` (`--member-id`, `--lines`=**20** / `--tail` alias, `--ansi`/`--no-ansi`)
-- [ ] `cafleet member exec` (`--member-id`, positional `command`)
-- [ ] `cafleet member ping` (`--member-id`, `--quiet`)
-- [ ] `cafleet member nudge` (`--from-member-id` sender, `--to-member-id` target, `--text` / `--text-file` xor-required)
+- [ ] `cafleet member create` (no identity flag — Director auto-resolved; `--name`, `--description`, `--coding-agent`, `--model`, `--role`=member, `--text` / `--text-file` xor-required, `--full`, `--json`)
+- [ ] `cafleet member delete` (`--member-id` target, `--force`/`-f`, `--json`; placementless target → registry soft-delete, exit 0)
+- [ ] `cafleet member show` (`--member-id` target, `--full`, `--json`)
+- [ ] `cafleet member list` (`--activity`, `--all` — mutually exclusive; `--json`)
+- [ ] `cafleet member capture` (`--member-id`, `--lines`=**20** / `--tail` alias, `--ansi`/`--no-ansi`, `--json`)
+- [ ] `cafleet member exec` (`--member-id`, positional `command`, `--json`)
+- [ ] `cafleet member ping` (`--member-id`, `--quiet`, `--json`)
+- [ ] `cafleet member nudge` (`--from-member-id` sender, `--to-member-id` target, `--text` / `--text-file` xor-required, `--json`)
 
 **`message`:**
 
-- [ ] `cafleet message send` (`--from-member-id` sender, `--to-member-id` recipient, `--text` / `--text-file` xor-required, `--full`)
-- [ ] `cafleet message broadcast` (`--from-member-id`, `--text` / `--text-file` xor-required, `--full`)
-- [ ] `cafleet message poll` (`--member-id`, `--full`)
-- [ ] `cafleet message ack` (`--member-id`, `--task-id`, `--full`)
-- [ ] `cafleet message cancel` (`--member-id`, `--task-id`, `--full`)
-- [ ] `cafleet message show` (`--member-id`, `--task-id`, `--full`)
+- [ ] `cafleet message send` (`--from-member-id` sender, `--to-member-id` recipient, `--text` / `--text-file` xor-required, `--full`, `--json`)
+- [ ] `cafleet message broadcast` (`--from-member-id`, `--text` / `--text-file` xor-required, `--full`, `--json`)
+- [ ] `cafleet message poll` (`--member-id`, `--full`, `--json`)
+- [ ] `cafleet message ack` (`--member-id`, `--task-id`, `--full`, `--json`)
+- [ ] `cafleet message cancel` (`--member-id`, `--task-id`, `--full`, `--json`)
+- [ ] `cafleet message show` (`--member-id`, `--task-id`, `--full`, `--json`)
 
 **`monitor`:**
 
 - [ ] `cafleet monitor start` (`--tick`≥1=5)
-- [ ] `cafleet monitor status`
-- [ ] `cafleet monitor config` (`--member-id`, `--interval`≥1, `--enable`/`--disable`)
+- [ ] `cafleet monitor status` (`--json`)
+- [ ] `cafleet monitor config` (`--member-id`, `--interval`≥1, `--enable`/`--disable`, `--json`)
 
 Every `member *`, `message *`, and `monitor *` command, plus `fleet
 show` and `fleet delete`, takes the **required `--fleet-id` option** (integer);
@@ -2913,8 +2921,6 @@ The decisions that shape this surface (full rationale in the design doc):
   `{member_id}` / `{director_member_id}` / `{coding_agent}` placeholder
   substitution; no identity environment variable is injected.
 - **Single absent glyph** (§6.4): ASCII `-` everywhere.
-- **`--json` dual path retained** (§7.3): the `member`/`message` global path and
-  the `fleet` local-flag path are not unified.
 
 ### Per-module clarifications
 
