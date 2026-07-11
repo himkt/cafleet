@@ -8,22 +8,22 @@ export interface MonitorRuntime {
   running: boolean;
 }
 
-export interface Agent {
-  agent_id: number;
+export interface Member {
+  member_id: number;
   name: string;
   description: string;
   status: "active" | "deregistered";
   registered_at: string;
-  kind: "builtin-administrator" | "user";
+  kind: "director" | "administrator" | "monitor" | "member";
   monitor: MonitorConfig | null;
 }
 
 export interface TimelineMessage {
   task_id: number;
-  from_agent_id: number;
-  from_agent_name: string;
-  to_agent_id: number;
-  to_agent_name: string;
+  from_member_id: number;
+  from_member_name: string;
+  to_member_id: number;
+  to_member_name: string;
   status: "input_required" | "completed" | "canceled";
   created_at: string;
   origin_task_id: number | null;
@@ -35,8 +35,8 @@ export type TimelineEntry =
   | { kind: "unicast"; message: TimelineMessage }
   | { kind: "broadcast"; rows: TimelineMessage[]; sortKey: string };
 
-export interface AgentsResponse {
-  agents: Agent[];
+export interface MembersResponse {
+  members: Member[];
 }
 
 export interface TimelineResponse {
@@ -47,5 +47,5 @@ export interface FleetListItem {
   fleet_id: number;
   name: string | null;
   created_at: string;
-  agent_count: number;
+  member_count: number;
 }

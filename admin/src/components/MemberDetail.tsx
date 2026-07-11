@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { Activity, Inbox, X } from "lucide-react";
 import { Tabs } from "radix-ui";
-import type { Agent, TimelineMessage } from "../types";
-import { fetchInbox, fetchSent, updateAgentMonitor } from "../api";
+import type { Member, TimelineMessage } from "../types";
+import { fetchInbox, fetchSent, updateMemberMonitor } from "../api";
 import { useRefreshKeyLoad } from "../hooks/useRefreshKeyLoad";
 import { formatDateTime } from "../format";
-import AgentAvatar from "./AgentAvatar";
+import MemberAvatar from "./MemberAvatar";
 import EmptyState from "./EmptyState";
 import Skeleton from "./Skeleton";
 
@@ -67,8 +67,8 @@ function MessageList({
           <div className="flex flex-wrap items-baseline gap-1.5 text-xs">
             <span className="font-medium text-text-muted">
               {direction === "inbox"
-                ? `from ${row.from_agent_name}`
-                : `to ${row.to_agent_name}`}
+                ? `from ${row.from_member_name}`
+                : `to ${row.to_member_name}`}
             </span>
             <StatusChip status={row.status} />
             <span className="ml-auto text-text-faint">
@@ -93,13 +93,13 @@ const TAB_TRIGGER_CLASS =
   "border-b-2 border-transparent px-3 py-1.5 text-sm text-text-muted hover:text-text focus-visible:outline-2 focus-visible:outline-accent data-[state=active]:border-accent data-[state=active]:font-medium data-[state=active]:text-text";
 
 function MonitoringSection({
-  agent,
+  member,
   onChanged,
 }: {
-  agent: Agent;
+  member: Member;
   onChanged: () => void;
 }) {
-  const monitor = agent.monitor;
+  const monitor = member.monitor;
   const monitorInterval = monitor?.interval_seconds ?? null;
   const [intervalInput, setIntervalInput] = useState(
     monitorInterval !== null ? String(monitorInterval) : "",
@@ -108,11 +108,11 @@ function MonitoringSection({
   const [error, setError] = useState<string | null>(null);
 
   // Re-sync the input only when the polled interval value changes (or when
-  // switching agents) — keying on the scalar, not the per-poll object identity,
+  // switching members) — keying on the scalar, not the per-poll object identity,
   // so a 5 s refresh never clobbers an in-progress edit.
   useEffect(() => {
     if (monitorInterval !== null) setIntervalInput(String(monitorInterval));
-  }, [monitorInterval, agent.agent_id]);
+  }, [monitorInterval, member.member_id]);
 
   if (monitor === null) return null;
 
@@ -125,7 +125,7 @@ function MonitoringSection({
     setBusy(true);
     setError(null);
     try {
-      await updateAgentMonitor(agent.agent_id, { interval_seconds: n });
+      await updateMemberMonitor(member.member_id, { interval_seconds: n });
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update interval.");
@@ -138,7 +138,7 @@ function MonitoringSection({
     setBusy(true);
     setError(null);
     try {
-      await updateAgentMonitor(agent.agent_id, { enabled: !monitor.enabled });
+      await updateMemberMonitor(member.member_id, { enabled: !monitor.enabled });
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to toggle monitoring.");
@@ -208,19 +208,19 @@ function MonitoringSection({
   );
 }
 
-interface AgentDetailProps {
-  agent: Agent;
+interface MemberDetailProps {
+  member: Member;
   refreshKey: number;
   onClose: () => void;
   onChanged: () => void;
 }
 
-export default function AgentDetail({
-  agent,
+export default function MemberDetail({
+  member,
   refreshKey,
   onClose,
   onChanged,
-}: AgentDetailProps) {
+}: MemberDetailProps) {
   const [inbox, setInbox] = useState<TimelineMessage[]>([]);
   const [sent, setSent] = useState<TimelineMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -229,17 +229,17 @@ export default function AgentDetail({
     setInbox([]);
     setSent([]);
     setLoading(true);
-  }, [agent.agent_id]);
+  }, [member.member_id]);
 
   // Refetches ride Dashboard's refreshKey bumps (5 s poll / manual Refresh /
   // post-send) via useRefreshKeyLoad instead of a second polling loop; the
   // hook's in-flight guard absorbs bumps landing during a slow fetch, and its
-  // `load` dep triggers the reload when the agent switches.
+  // `load` dep triggers the reload when the member switches.
   const load = useCallback(async () => {
     try {
       const [inboxData, sentData] = await Promise.all([
-        fetchInbox(agent.agent_id),
-        fetchSent(agent.agent_id),
+        fetchInbox(member.member_id),
+        fetchSent(member.member_id),
       ]);
       // The endpoints are unbounded; keep ROW_CAP + 1 rows so the
       // "Showing the 200 most recent" footer still knows about the overflow.
@@ -250,7 +250,7 @@ export default function AgentDetail({
     } finally {
       setLoading(false);
     }
-  }, [agent.agent_id]);
+  }, [member.member_id]);
 
   useRefreshKeyLoad(load, refreshKey);
 
@@ -267,31 +267,31 @@ export default function AgentDetail({
   return (
     <aside className="flex w-96 shrink-0 flex-col border-l border-border bg-surface-raised">
       <div className="flex items-start gap-3 border-b border-border p-4">
-        <AgentAvatar agent={agent} size="lg" />
+        <MemberAvatar member={member} size="lg" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <h2 className="truncate text-base font-semibold">{agent.name}</h2>
+            <h2 className="truncate text-base font-semibold">{member.name}</h2>
             <span
               className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
-                agent.status === "active"
+                member.status === "active"
                   ? "bg-success-soft text-success"
                   : "bg-surface-hover text-text-muted"
               }`}
             >
-              {agent.status === "active" ? "Active" : "Deregistered"}
+              {member.status === "active" ? "Active" : "Deregistered"}
             </span>
-            {agent.kind === "builtin-administrator" && (
+            {member.kind === "administrator" && (
               <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">
                 Admin
               </span>
             )}
           </div>
-          {agent.description && (
-            <p className="mt-1 text-sm text-text-muted">{agent.description}</p>
+          {member.description && (
+            <p className="mt-1 text-sm text-text-muted">{member.description}</p>
           )}
           <p className="mt-1 font-mono text-xs text-text-faint">
-            #{agent.agent_id} · registered{" "}
-            {new Date(agent.registered_at).toLocaleString()}
+            #{member.member_id} · registered{" "}
+            {new Date(member.registered_at).toLocaleString()}
           </p>
         </div>
         <button
@@ -305,13 +305,17 @@ export default function AgentDetail({
         </button>
       </div>
 
-      {/* key by agent_id so switching agents remounts the section and resets
-          its transient busy/error/interval-input state (no leak across agents). */}
-      <MonitoringSection key={agent.agent_id} agent={agent} onChanged={onChanged} />
+      {/* key by member_id so switching members remounts the section and resets
+          its transient busy/error/interval-input state (no leak across members). */}
+      <MonitoringSection
+        key={member.member_id}
+        member={member}
+        onChanged={onChanged}
+      />
 
       <Tabs.Root defaultValue="inbox" className="flex min-h-0 flex-1 flex-col">
         <Tabs.List
-          aria-label="Agent messages"
+          aria-label="Member messages"
           className="flex shrink-0 gap-1 border-b border-border px-4"
         >
           <Tabs.Trigger value="inbox" className={TAB_TRIGGER_CLASS}>

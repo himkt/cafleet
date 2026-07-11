@@ -1,117 +1,122 @@
-import type { Agent } from "../types";
-import AgentAvatar from "./AgentAvatar";
+import type { Member } from "../types";
+import MemberAvatar from "./MemberAvatar";
 
 interface SidebarProps {
-  agents: Agent[];
-  onSelectAgent: (agentId: number) => void;
+  members: Member[];
+  onSelectMember: (memberId: number) => void;
 }
 
-function byRegisteredAt(a: Agent, b: Agent): number {
+function byRegisteredAt(a: Member, b: Member): number {
   return a.registered_at.localeCompare(b.registered_at);
 }
 
-function AgentRow({
-  agent,
+function MemberRow({
+  member,
   dimmed,
   onSelect,
 }: {
-  agent: Agent;
+  member: Member;
   dimmed: boolean;
-  onSelect: (agentId: number) => void;
+  onSelect: (memberId: number) => void;
 }) {
   return (
     <button
       type="button"
-      onClick={() => onSelect(agent.agent_id)}
-      title={agent.name}
+      onClick={() => onSelect(member.member_id)}
+      title={member.name}
       className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent ${
         dimmed ? "opacity-50" : ""
       }`}
     >
-      <AgentAvatar agent={agent} size="sm" />
-      <span className="min-w-0 flex-1 truncate">{agent.name}</span>
-      {agent.kind === "builtin-administrator" && (
+      <MemberAvatar member={member} size="sm" />
+      <span className="min-w-0 flex-1 truncate">{member.name}</span>
+      {member.kind === "administrator" && (
         <span className="shrink-0 rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">
           Admin
         </span>
       )}
-      {agent.monitor !== null && (
+      {member.monitor !== null && (
         <span
           title={
-            agent.monitor.enabled
-              ? `Monitoring every ${agent.monitor.interval_seconds}s`
+            member.monitor.enabled
+              ? `Monitoring every ${member.monitor.interval_seconds}s`
               : "Monitoring disabled"
           }
           className={`shrink-0 rounded px-1 py-0.5 font-mono text-[10px] ${
-            agent.monitor.enabled
+            member.monitor.enabled
               ? "bg-surface-hover text-text-muted"
               : "bg-surface-hover text-text-faint line-through"
           }`}
         >
-          {agent.monitor.enabled ? `${agent.monitor.interval_seconds}s` : "off"}
+          {member.monitor.enabled ? `${member.monitor.interval_seconds}s` : "off"}
         </span>
       )}
       <span
         aria-hidden="true"
         className={`size-2 shrink-0 rounded-full ${
-          agent.status === "active" ? "bg-success" : "bg-text-faint"
+          member.status === "active" ? "bg-success" : "bg-text-faint"
         }`}
       />
     </button>
   );
 }
 
-interface AgentGroupProps {
+interface MemberGroupProps {
   heading: string;
-  agents: Agent[];
+  members: Member[];
   dimmed: boolean;
-  onSelectAgent: (agentId: number) => void;
+  onSelectMember: (memberId: number) => void;
 }
 
-function AgentGroup({ heading, agents, dimmed, onSelectAgent }: AgentGroupProps) {
-  if (agents.length === 0) return null;
+function MemberGroup({
+  heading,
+  members,
+  dimmed,
+  onSelectMember,
+}: MemberGroupProps) {
+  if (members.length === 0) return null;
   return (
     <div className="px-2 pt-3 pb-1">
       <h3 className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-text-faint">
         {heading}
       </h3>
-      {agents.map((a) => (
-        <AgentRow
-          key={a.agent_id}
-          agent={a}
+      {members.map((m) => (
+        <MemberRow
+          key={m.member_id}
+          member={m}
           dimmed={dimmed}
-          onSelect={onSelectAgent}
+          onSelect={onSelectMember}
         />
       ))}
     </div>
   );
 }
 
-export default function Sidebar({ agents, onSelectAgent }: SidebarProps) {
-  const active = agents
-    .filter((a) => a.status === "active")
+export default function Sidebar({ members, onSelectMember }: SidebarProps) {
+  const active = members
+    .filter((m) => m.status === "active")
     .sort(byRegisteredAt);
-  const deregistered = agents
-    .filter((a) => a.status === "deregistered")
+  const deregistered = members
+    .filter((m) => m.status === "deregistered")
     .sort(byRegisteredAt);
 
   return (
     <aside className="w-60 shrink-0 overflow-y-auto border-r border-border">
-      <AgentGroup
+      <MemberGroup
         heading="Active"
-        agents={active}
+        members={active}
         dimmed={false}
-        onSelectAgent={onSelectAgent}
+        onSelectMember={onSelectMember}
       />
-      <AgentGroup
+      <MemberGroup
         heading="Deregistered"
-        agents={deregistered}
+        members={deregistered}
         dimmed={true}
-        onSelectAgent={onSelectAgent}
+        onSelectMember={onSelectMember}
       />
-      {agents.length === 0 && (
+      {members.length === 0 && (
         <p className="p-3 text-xs text-text-faint">
-          No agents registered in this fleet. Use the{" "}
+          No members registered in this fleet. Use the{" "}
           <code className="font-mono text-text-muted">cafleet member create</code>{" "}
           CLI to add one.
         </p>

@@ -1,5 +1,5 @@
 import { Zap } from "lucide-react";
-import type { Agent } from "../types";
+import type { Member } from "../types";
 
 const PALETTE = [
   "bg-avatar-1",
@@ -30,16 +30,16 @@ const ICON_SIZES: Record<AvatarSize, number> = {
   lg: 20,
 };
 
-interface AgentAvatarProps {
-  agent: Pick<Agent, "agent_id" | "name" | "kind">;
+interface MemberAvatarProps {
+  member: Pick<Member, "member_id" | "name" | "kind">;
   size?: AvatarSize;
 }
 
-export default function AgentAvatar({ agent, size = "md" }: AgentAvatarProps) {
-  const isAdministrator = agent.kind === "builtin-administrator";
+export default function MemberAvatar({ member, size = "md" }: MemberAvatarProps) {
+  const isAdministrator = member.kind === "administrator";
   const colorClass = isAdministrator
     ? "bg-accent text-accent-fg"
-    : `${PALETTE[agent.agent_id % PALETTE.length]} text-white`;
+    : `${PALETTE[member.member_id % PALETTE.length]} text-white`;
   return (
     <span
       aria-hidden="true"
@@ -48,7 +48,7 @@ export default function AgentAvatar({ agent, size = "md" }: AgentAvatarProps) {
       {isAdministrator ? (
         <Zap size={ICON_SIZES[size]} fill="currentColor" />
       ) : (
-        agent.name.slice(0, 2)
+        member.name.slice(0, 2)
       )}
     </span>
   );

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { Agent } from "./types";
-import { setFleetId, getAgents, listFleets } from "./api";
+import type { Member } from "./types";
+import { setFleetId, getMembers, listFleets } from "./api";
 import FleetPicker from "./components/FleetPicker";
 import Dashboard from "./components/Dashboard";
 import Skeleton from "./components/Skeleton";
@@ -8,14 +8,14 @@ import Skeleton from "./components/Skeleton";
 interface Route {
   kind: "fleets" | "dashboard";
   fleetId?: string;
-  agentId?: string;
+  memberId?: string;
 }
 
 function parseHash(): Route {
   const hash = window.location.hash.replace(/^#\/?/, "");
-  const match = hash.match(/^fleets\/([^/]+)\/agents(?:\/([^/]+))?/);
+  const match = hash.match(/^fleets\/([^/]+)\/members(?:\/([^/]+))?/);
   if (match) {
-    return { kind: "dashboard", fleetId: match[1], agentId: match[2] };
+    return { kind: "dashboard", fleetId: match[1], memberId: match[2] };
   }
   return { kind: "fleets" };
 }
@@ -26,7 +26,7 @@ function navigate(hash: string): void {
 
 export default function App() {
   const [route, setRoute] = useState<Route>(parseHash);
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
   const [fleetName, setFleetName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const loadedFleetIdRef = useRef<string | null>(null);
@@ -46,10 +46,10 @@ export default function App() {
 
     // Entering a different fleet's dashboard: drop the previous fleet's
     // state before any network await so it can never render against the new
-    // fleet id. Same-fleet route changes (e.g. opening the agent detail
+    // fleet id. Same-fleet route changes (e.g. opening the member detail
     // panel) keep their data and skip the skeleton.
     if (loadedFleetIdRef.current !== route.fleetId) {
-      setAgents([]);
+      setMembers([]);
       setFleetName(null);
       setLoading(true);
     }
@@ -69,9 +69,9 @@ export default function App() {
         setFleetName(fleet.name);
 
         setFleetId(Number(route.fleetId));
-        const data = await getAgents();
+        const data = await getMembers();
         if (cancelled) return;
-        setAgents(data.agents);
+        setMembers(data.members);
         loadedFleetIdRef.current = route.fleetId ?? null;
       } catch {
         if (!cancelled) {
@@ -93,11 +93,11 @@ export default function App() {
     async (sid: number, name: string | null) => {
       setFleetId(sid);
       try {
-        const data = await getAgents();
-        setAgents(data.agents);
+        const data = await getMembers();
+        setMembers(data.members);
         setFleetName(name);
         loadedFleetIdRef.current = String(sid);
-        navigate(`/fleets/${sid}/agents`);
+        navigate(`/fleets/${sid}/members`);
       } catch {
         setFleetId(null);
       }
@@ -107,7 +107,7 @@ export default function App() {
 
   const handleBack = useCallback(() => {
     setFleetId(null);
-    setAgents([]);
+    setMembers([]);
     navigate("/fleets");
   }, []);
 
@@ -136,8 +136,8 @@ export default function App() {
       <Dashboard
         fleetId={Number(route.fleetId)}
         fleetName={fleetName}
-        agentId={route.agentId}
-        initialAgents={agents}
+        memberId={route.memberId}
+        initialMembers={members}
         onBack={handleBack}
       />
     );

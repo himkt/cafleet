@@ -1,7 +1,7 @@
 # Agent → Member Consolidation, Uniform Identity Flags, and Director Auto-Discovery
 
 **Status**: Approved
-**Progress**: 24/28 tasks complete
+**Progress**: 26/28 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -249,8 +249,8 @@ Per the removal rule: after this lands, the repository reads as if the registry 
 
 ### Step 5: WebUI and admin frontend
 
-- [ ] Rename `webui/api.py` routes to `/members/...`, response wrapper and JSON keys, unified roster kind via `list_roster(include_task_holders=True)` <!-- completed: -->
-- [ ] Rename admin frontend types, API client, and components (`MemberAvatar`, `MemberDetail`, key references); regenerate the bundle with `mise //admin:build` <!-- completed: -->
+- [x] Rename `webui/api.py` routes to `/members/...`, response wrapper and JSON keys, unified roster kind via `list_roster(include_task_holders=True)` <!-- completed: 2026-07-11T03:45 -->
+- [x] Rename admin frontend types, API client, and components (`MemberAvatar`, `MemberDetail`, key references); regenerate the bundle with `mise //admin:build` <!-- completed: 2026-07-11T03:45 -->
 
 ### Step 6: Tests and verification
 

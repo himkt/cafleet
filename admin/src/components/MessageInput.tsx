@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { LoaderCircle, Send, Users } from "lucide-react";
-import type { Agent } from "../types";
+import type { Member } from "../types";
 import { sendMessage } from "../api";
-import AgentAvatar from "./AgentAvatar";
+import MemberAvatar from "./MemberAvatar";
 
 interface MessageInputProps {
   senderId: number | null;
-  agents: Agent[];
+  members: Member[];
   onSent: () => void;
 }
 
@@ -20,7 +20,7 @@ function parseError(error: string): ParseResult {
   return { to: 0, body: "", error };
 }
 
-function parseInput(raw: string, recipients: Agent[]): ParseResult {
+function parseInput(raw: string, recipients: Member[]): ParseResult {
   const mentionRe = /^@([A-Za-z0-9_-]+)(?:\s|$)/;
   const mentions: string[] = [];
   let rest = raw.trimStart();
@@ -33,7 +33,7 @@ function parseInput(raw: string, recipients: Agent[]): ParseResult {
   }
 
   if (mentions.length === 0) {
-    return parseError("Start the message with @<agent> or @all");
+    return parseError("Start the message with @<member> or @all");
   }
 
   const hasAll = mentions.some((m) => m.toLowerCase() === "all");
@@ -58,23 +58,23 @@ function parseInput(raw: string, recipients: Agent[]): ParseResult {
 
   const slug = nonAll[0];
   const matched = recipients.filter(
-    (a) => slugify(a.name) === slug.toLowerCase(),
+    (m) => slugify(m.name) === slug.toLowerCase(),
   );
 
   if (matched.length === 0) {
-    return parseError(`No active agent named '@${slug}'`);
+    return parseError(`No active member named '@${slug}'`);
   }
   if (matched.length > 1) {
     return parseError(`Ambiguous mention '@${slug}'`);
   }
   if (!body) return parseError("Message body is empty");
 
-  return { to: matched[0].agent_id, body, error: null };
+  return { to: matched[0].member_id, body, error: null };
 }
 
 type MentionCandidate =
   | { kind: "virtual"; label: string }
-  | { kind: "agent"; agent: Agent };
+  | { kind: "member"; member: Member };
 
 interface MentionState {
   query: string;
@@ -95,7 +95,7 @@ function detectMention(text: string, cursor: number): MentionState | null {
 
 export default function MessageInput({
   senderId,
-  agents,
+  members,
   onSent,
 }: MessageInputProps) {
   const [input, setInput] = useState("");
@@ -120,12 +120,12 @@ export default function MessageInput({
     return () => clearClosePopoverTimeout();
   }, []);
 
-  const activeAgents = agents.filter((a) => a.status === "active");
-  const userAgents = activeAgents.filter(
-    (a) => a.kind !== "builtin-administrator",
+  const activeMembers = members.filter((m) => m.status === "active");
+  const recipientMembers = activeMembers.filter(
+    (m) => m.kind !== "administrator",
   );
 
-  const disabled = !senderId || activeAgents.length === 0;
+  const disabled = !senderId || activeMembers.length === 0;
 
   const candidates: MentionCandidate[] = useMemo(() => {
     if (mention === null) return [];
@@ -134,12 +134,14 @@ export default function MessageInput({
     if ("all".startsWith(q)) {
       list.push({ kind: "virtual", label: "all" });
     }
-    const matchedAgents = userAgents
-      .filter((a) => slugify(a.name).startsWith(q))
+    const matchedMembers = recipientMembers
+      .filter((m) => slugify(m.name).startsWith(q))
       .sort((a, b) => a.name.localeCompare(b.name));
-    list.push(...matchedAgents.map((agent) => ({ kind: "agent" as const, agent })));
+    list.push(
+      ...matchedMembers.map((member) => ({ kind: "member" as const, member })),
+    );
     return list.slice(0, 6);
-  }, [mention, userAgents]);
+  }, [mention, recipientMembers]);
 
   const popoverOpen = candidates.length > 0;
 
@@ -204,7 +206,8 @@ export default function MessageInput({
       setMention(null);
       return;
     }
-    const slug = candidate.kind === "virtual" ? candidate.label : slugify(candidate.agent.name);
+    const slug =
+      candidate.kind === "virtual" ? candidate.label : slugify(candidate.member.name);
     const replacement = `@${slug} `;
     // Scan right from the `@` to find the actual end of the mention token
     // so a caret inside the token (e.g. `@al|x`) still rewrites the full
@@ -228,7 +231,7 @@ export default function MessageInput({
 
   const submitForm = async () => {
     if (disabled || !senderId) return;
-    const parsed = parseInput(input, userAgents);
+    const parsed = parseInput(input, recipientMembers);
     if (parsed.error) {
       setError(parsed.error);
       return;
@@ -314,10 +317,13 @@ export default function MessageInput({
             const key =
               candidate.kind === "virtual"
                 ? `virtual:${candidate.label}`
-                : `agent:${candidate.agent.agent_id}`;
+                : `member:${candidate.member.member_id}`;
             const slug =
-              candidate.kind === "virtual" ? candidate.label : slugify(candidate.agent.name);
-            const display = candidate.kind === "virtual" ? candidate.label : candidate.agent.name;
+              candidate.kind === "virtual"
+                ? candidate.label
+                : slugify(candidate.member.name);
+            const display =
+              candidate.kind === "virtual" ? candidate.label : candidate.member.name;
             const selected = idx === selectedIndex;
             return (
               <button
@@ -333,8 +339,8 @@ export default function MessageInput({
                   selected ? "bg-accent-soft" : ""
                 }`}
               >
-                {candidate.kind === "agent" ? (
-                  <AgentAvatar agent={candidate.agent} size="sm" />
+                {candidate.kind === "member" ? (
+                  <MemberAvatar member={candidate.member} size="sm" />
                 ) : (
                   <span
                     aria-hidden="true"
@@ -363,7 +369,7 @@ export default function MessageInput({
           placeholder={
             disabled
               ? "Administrator unavailable — messaging disabled"
-              : "@agent or @all message..."
+              : "@member or @all message..."
           }
           disabled={disabled || sending}
           className="max-h-36 flex-1 resize-none overflow-y-auto whitespace-pre-wrap bg-transparent text-sm outline-none placeholder:text-text-faint disabled:opacity-50"
