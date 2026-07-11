@@ -69,11 +69,11 @@ def test_member_list_no_activity_flag__omits_activity_keys(bootstrapped_team):
     result = runner.invoke(
         cli,
         [
-            "--json",
             "member",
             "list",
             "--fleet-id",
             str(sid),
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -94,11 +94,11 @@ def test_member_list__scoped_by_fleet_id_lists_members_excludes_root(bootstrappe
     result = runner.invoke(
         cli,
         [
-            "--json",
             "member",
             "list",
             "--fleet-id",
             str(sid),
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -117,12 +117,12 @@ def test_member_list_activity_flag__json_emits_activity_keys(bootstrapped_team):
     result = runner.invoke(
         cli,
         [
-            "--json",
             "member",
             "list",
             "--fleet-id",
             str(sid),
             "--activity",
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -145,12 +145,12 @@ def test_member_list_activity_flag__none_for_silent_members(bootstrapped_team):
     result = runner.invoke(
         cli,
         [
-            "--json",
             "member",
             "list",
             "--fleet-id",
             str(sid),
             "--activity",
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -176,12 +176,12 @@ def test_member_list_activity_flag__activity_visible_after_send(bootstrapped_tea
     result = runner.invoke(
         cli,
         [
-            "--json",
             "member",
             "list",
             "--fleet-id",
             str(sid),
             "--activity",
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output

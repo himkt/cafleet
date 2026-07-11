@@ -164,7 +164,7 @@ def test_doctor_text_no_install_recorded(runner, mock_tmux_ok, registry_db, stat
 
 
 def test_doctor_json_output__json_output_shape(runner, mock_tmux_ok):
-    result = runner.invoke(cli, ["--json", "doctor"])
+    result = runner.invoke(cli, ["doctor", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data == {
@@ -189,7 +189,7 @@ def test_doctor_json_skills_installs(runner, mock_tmux_ok, registry_db):
     _seed_install(registry_db, "codex", "0.0.1", TS_STALE)
     _seed_install(registry_db, "claude", RUNTIME_VERSION, TS_CURRENT)
 
-    result = runner.invoke(cli, ["--json", "doctor"])
+    result = runner.invoke(cli, ["doctor", "--json"])
 
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
@@ -210,3 +210,16 @@ def test_doctor_json_skills_installs(runner, mock_tmux_ok, registry_db):
             },
         ],
     }
+
+
+# --------------------------------------------------------------------------- #
+# regression guard — pre-subcommand --json no longer parses                    #
+# --------------------------------------------------------------------------- #
+
+
+def test_pre_subcommand_json__no_longer_parses(runner):
+    """The relocated ``--json`` is a per-subcommand flag; a pre-subcommand use
+    on the root group is an unknown option (Click ``No such option``, exit 2)."""
+    result = runner.invoke(cli, ["--json", "doctor"])
+    assert result.exit_code == 2, result.output
+    assert "No such option: --json" in result.output

@@ -53,12 +53,11 @@ def _list(runner, sid, *extra):
     return runner.invoke(
         cli,
         [
-            *(("--json",) if "--json" in extra else ()),
             "member",
             "list",
             "--fleet-id",
             str(sid),
-            *(a for a in extra if a != "--json"),
+            *extra,
         ],
     )
 

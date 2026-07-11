@@ -268,7 +268,7 @@ def test_monitor_status__json_shape(fleet):
     member_id = _register_ordinary_member(sid)["member_id"]
     _seed_runtime(db_file, sid, os.getpid())
 
-    result = runner.invoke(cli, ["--json", "monitor", "status", "--fleet-id", str(sid)])
+    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid), "--json"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
@@ -300,7 +300,7 @@ def test_monitor_status__json_shape(fleet):
 def test_monitor_status__not_running_when_no_runtime(fleet):
     db_file, runner, data = fleet
     sid = data["fleet_id"]
-    result = runner.invoke(cli, ["--json", "monitor", "status", "--fleet-id", str(sid)])
+    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid), "--json"])
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["runtime"]["running"] is False
@@ -317,7 +317,7 @@ def test_monitor_status__labels_director_and_member_roles(fleet):
     member_id = _register_ordinary_member(sid)["member_id"]
     _seed_runtime(db_file, sid, os.getpid())
 
-    result = runner.invoke(cli, ["--json", "monitor", "status", "--fleet-id", str(sid)])
+    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid), "--json"])
     assert result.exit_code == 0, result.output
     roles = {m["member_id"]: m["role"] for m in json.loads(result.output)["members"]}
     assert roles[director_id] == "director"
@@ -335,7 +335,7 @@ def test_monitor_status__last_ping_age_rendered(fleet):
     pinged = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
     broker.record_pings([member_id], pinged)
 
-    result = runner.invoke(cli, ["--json", "monitor", "status", "--fleet-id", str(sid)])
+    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid), "--json"])
     assert result.exit_code == 0, result.output
     members = {m["member_id"]: m for m in json.loads(result.output)["members"]}
     assert members[member_id]["last_ping_at"] == pinged
@@ -366,7 +366,7 @@ def test_monitor_status__stale_row_reports_not_running_with_nulls(fleet):
     stale = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     _seed_runtime(db_file, sid, os.getpid(), last_tick_at=stale)
 
-    result = runner.invoke(cli, ["--json", "monitor", "status", "--fleet-id", str(sid)])
+    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid), "--json"])
 
     assert result.exit_code == 0, result.output
     runtime = json.loads(result.output)["runtime"]

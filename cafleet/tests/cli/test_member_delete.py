@@ -177,7 +177,6 @@ def _invoke_json(runner, fleet_id, *extra_args):
     return runner.invoke(
         cli,
         [
-            "--json",
             "member",
             "delete",
             "--fleet-id",
@@ -185,6 +184,7 @@ def _invoke_json(runner, fleet_id, *extra_args):
             "--member-id",
             str(MEMBER_ID),
             *extra_args,
+            "--json",
         ],
     )
 

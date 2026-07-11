@@ -176,7 +176,7 @@ def test_truncation__poll_show_send_json_output(
         monkeypatch, subcommand, fleet_id, member_id, other_member_id, task_id
     )
     full_args = args + (["--full"] if full else [])
-    result = runner.invoke(cli, ["--json", *full_args])
+    result = runner.invoke(cli, [*full_args, "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     task = payload[0] if shape == "list" else payload["task"]
@@ -191,8 +191,8 @@ def test_truncation__non_text_fields_byte_identical_between_default_and_full(
     args, shape = _setup_subcommand(
         monkeypatch, subcommand, fleet_id, member_id, other_member_id, task_id
     )
-    default_res = runner.invoke(cli, ["--json", *args])
-    full_res = runner.invoke(cli, ["--json", *args, "--full"])
+    default_res = runner.invoke(cli, [*args, "--json"])
+    full_res = runner.invoke(cli, [*args, "--full", "--json"])
     assert default_res.exit_code == 0, default_res.output
     assert full_res.exit_code == 0, full_res.output
     if shape == "list":
@@ -231,7 +231,7 @@ def test_truncation__broadcast_summary_emitted_verbatim(
     if full:
         args.append("--full")
     if output_mode == "json":
-        result = runner.invoke(cli, ["--json", *args])
+        result = runner.invoke(cli, [*args, "--json"])
     else:
         result = runner.invoke(cli, args)
     assert result.exit_code == 0, result.output
@@ -273,13 +273,13 @@ def test_truncation__poll_list_of_three_tasks_each_truncated(
     result = runner.invoke(
         cli,
         [
-            "--json",
             "message",
             "poll",
             "--fleet-id",
             str(fleet_id),
             "--member-id",
             str(member_id),
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output
