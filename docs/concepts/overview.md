@@ -36,7 +36,7 @@ flowchart LR
     Server --> WebUIAPI["webui/api.py"]
     WebUIAPI --> Broker
     Monitor["monitor loop<br/>(per-fleet heartbeat, member background task)"] --> Broker
-    Broker --> DB[(SQLite<br/>fleets / members / tasks / member_placements<br/>monitor_config / monitor_runtime / skill_installs)]
+    Broker --> DB[(SQLite<br/>fleets / members / messages / member_placements<br/>monitor_config / monitor_runtime / skill_installs)]
     subgraph Multiplexer["tmux / herdr"]
         PaneA["coding-agent pane"]
         PaneB["monitoring member pane"]

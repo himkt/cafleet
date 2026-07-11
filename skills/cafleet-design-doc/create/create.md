@@ -254,4 +254,4 @@ No round limit — loop continues until approved or aborted.
 
 2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then Drafter and Reviewer (each call blocks 15 s; on the 15 s timeout (exit 2) use `member capture` + your overlay's decision-prompt recovery or `--force`); `cafleet member list` to verify only the root Director's row remains; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
 
-The fleet row is soft-deleted and `tasks` are preserved so the message trail remains inspectable in the broker database.
+The fleet row is soft-deleted and `messages` rows are preserved so the message trail remains inspectable in the broker database.
