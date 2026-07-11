@@ -112,11 +112,11 @@ def test_truncate_text__suffix_is_horizontal_ellipsis_u2026_and_multibyte_safe()
         ("61_truncated", "w" * 61, "w" * 60 + "…", "w" * 61),
     ],
 )
-def test_format_agent_full__description_truncated_at_60(
+def test_format_member_detail_full__description_truncated_at_60(
     scenario, description, expected_present_in_render, expected_absent_in_render
 ):
-    agent = {
-        "agent_id": 123,
+    member = {
+        "member_id": 123,
         "name": "Claude-B",
         "description": description,
         "status": "active",
@@ -124,7 +124,7 @@ def test_format_agent_full__description_truncated_at_60(
         "skills": [],
         "placement": None,
     }
-    rendered = output.format_agent(agent, full=True)
+    rendered = output.format_member_detail(member, full=True)
     assert expected_present_in_render in rendered
     if expected_absent_in_render:
         assert expected_absent_in_render not in rendered
@@ -136,8 +136,8 @@ def test_truncate_task_text__full_true_bypasses_and_default_uses_settings(monkey
     task = {
         "task_id": 1,
         "context_id": 20,
-        "from_agent_id": 10,
-        "to_agent_id": 20,
+        "from_member_id": 10,
+        "to_member_id": 20,
         "type": "unicast",
         "created_at": "2026-05-05T12:00:00.000000+00:00",
         "status_state": "input_required",

@@ -1,7 +1,8 @@
 """Tests for the ``client_command`` decorator.
 
 ``cli/_helpers.py`` provides a shared decorator ``client_command`` that subsumes
-optional ``--agent-id``-belongs-to-fleet validation, broker-error wrapping, and
+optional ``--member-id``-belongs-to-fleet validation (``member_kwarg`` names the
+acting-member kwarg the fleet gate reads), broker-error wrapping, and
 JSON-vs-text output branching. The per-subcommand ``fleet_id_option`` decorator
 enforces the ``--fleet-id`` requirement (custom message, ``type=int``) and stashes
 the value into ``ctx.obj["fleet_id"]``.
@@ -38,17 +39,31 @@ def _simple(ctx, full):
     return {"hello": "world"}
 
 
-@_test_cli.command("agent-bound")
+@_test_cli.command("member-bound")
 @fleet_id_option
-@click.option("--agent-id", required=True)
+@click.option("--member-id", "member_id", type=int, required=True)
 @click.option("--full", is_flag=True, default=False)
 @click.pass_context
 @client_command(
-    requires_agent_fleet=True,
+    requires_member_fleet=True,
     text_formatter=lambda r, *, full=False: f"TEXT:{r}",
 )
-def _agent_bound(ctx, agent_id, full):
-    return {"ok": True, "agent_id": agent_id}
+def _member_bound(ctx, member_id, full):
+    return {"ok": True, "member_id": member_id}
+
+
+@_test_cli.command("sender-bound")
+@fleet_id_option
+@click.option("--from-member-id", "from_member_id", type=int, required=True)
+@click.option("--full", is_flag=True, default=False)
+@click.pass_context
+@client_command(
+    requires_member_fleet=True,
+    member_kwarg="from_member_id",
+    text_formatter=lambda r, *, full=False: f"TEXT:{r}",
+)
+def _sender_bound(ctx, from_member_id, full):
+    return {"ok": True, "from_member_id": from_member_id}
 
 
 @_test_cli.command("raises")
@@ -70,14 +85,14 @@ def test_fleet_id_guard__missing_fleet_id_raises_click_exception(runner):
     assert "fleet-id" in result.output.lower() or "is required" in result.output
 
 
-def test_requires_agent_fleet__false_does_not_call_verify(runner, monkeypatch):
+def test_requires_member_fleet__false_does_not_call_verify(runner, monkeypatch):
     verify_calls = []
 
-    def fake_verify(aid, sid):
-        verify_calls.append((aid, sid))
+    def fake_verify(mid, sid):
+        verify_calls.append((mid, sid))
         return True
 
-    monkeypatch.setattr(broker, "verify_agent_fleet", fake_verify)
+    monkeypatch.setattr(broker, "verify_member_fleet", fake_verify)
 
     result = runner.invoke(
         _test_cli,
@@ -87,50 +102,74 @@ def test_requires_agent_fleet__false_does_not_call_verify(runner, monkeypatch):
     assert verify_calls == []
 
 
-def test_requires_agent_fleet__true_calls_verify_and_raises_on_false(
+def test_requires_member_fleet__true_calls_verify_and_raises_on_false(
     runner, monkeypatch
 ):
     verify_calls = []
 
-    def fake_verify(aid, sid):
-        verify_calls.append((aid, sid))
+    def fake_verify(mid, sid):
+        verify_calls.append((mid, sid))
         return False
 
-    monkeypatch.setattr(broker, "verify_agent_fleet", fake_verify)
+    monkeypatch.setattr(broker, "verify_member_fleet", fake_verify)
 
     result = runner.invoke(
         _test_cli,
         [
-            "agent-bound",
+            "member-bound",
             "--fleet-id",
             "1",
-            "--agent-id",
-            "agent-1",
+            "--member-id",
+            "7",
         ],
     )
     assert result.exit_code != 0
-    assert "not a member of fleet" in result.output
-    assert verify_calls == [("agent-1", 1)]
+    assert "member 7 is not in fleet 1." in result.output
+    assert verify_calls == [(7, 1)]
 
 
-def test_requires_agent_fleet__true_proceeds_when_verify_returns_true(
+def test_requires_member_fleet__true_proceeds_when_verify_returns_true(
     runner, monkeypatch
 ):
-    monkeypatch.setattr(broker, "verify_agent_fleet", lambda _a, _s: True)
+    monkeypatch.setattr(broker, "verify_member_fleet", lambda _m, _s: True)
 
     result = runner.invoke(
         _test_cli,
         [
-            "agent-bound",
+            "member-bound",
             "--fleet-id",
             "1",
-            "--agent-id",
-            "agent-1",
+            "--member-id",
+            "7",
         ],
     )
     assert result.exit_code == 0, result.output
     assert "TEXT:" in result.output
-    assert "agent-1" in result.output
+    assert "7" in result.output
+
+
+def test_requires_member_fleet__member_kwarg_reads_from_member_id(runner, monkeypatch):
+    verify_calls = []
+
+    def fake_verify(mid, sid):
+        verify_calls.append((mid, sid))
+        return False
+
+    monkeypatch.setattr(broker, "verify_member_fleet", fake_verify)
+
+    result = runner.invoke(
+        _test_cli,
+        [
+            "sender-bound",
+            "--fleet-id",
+            "1",
+            "--from-member-id",
+            "9",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "member 9 is not in fleet 1." in result.output
+    assert verify_calls == [(9, 1)]
 
 
 def test_broker_error_wrapping__runtime_error_wrapped_as_click_exception(runner):

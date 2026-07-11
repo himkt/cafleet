@@ -1,6 +1,6 @@
 """CLI tests for ``cafleet member list --all`` (design 0000116).
 
-``--all`` lists every active agent of the fleet — root Director,
+``--all`` lists every active registry entry of the fleet — root Director,
 Administrator, monitoring member, ordinary members, placementless rows —
 with a ``kind`` column. The default (no ``--all``) output keeps today's
 members-only view untouched, and ``--all`` is mutually exclusive with
@@ -21,7 +21,7 @@ from tests.broker._helpers import _member_placement
 def bootstrapped_roster(_mock_tmux_for_fleet_create):
     """Fresh fleet + monitoring member + one ordinary member.
 
-    The roster is exactly 4 active agents: root Director (placed),
+    The roster is exactly 4 active registry entries: root Director (placed),
     Administrator (placementless), monitor, and alice. Returns
     ``(sid, director_id, admin_id, monitor_id, alice_id, runner)``.
     """
@@ -30,23 +30,23 @@ def bootstrapped_roster(_mock_tmux_for_fleet_create):
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
     sid = data["fleet_id"]
-    director_id = data["director"]["agent_id"]
-    admin_id = data["administrator_agent_id"]
+    director_id = data["director"]["member_id"]
+    admin_id = data["administrator_member_id"]
 
-    monitor = broker.register_agent(
+    monitor = broker.register_member(
         fleet_id=sid,
         name="monitor",
         description="Dedicated monitoring member",
-        placement=_member_placement(director_id, "%5"),
+        placement=_member_placement("%5"),
         kind="monitoring-member",
     )
-    alice = broker.register_agent(
+    alice = broker.register_member(
         fleet_id=sid,
         name="alice",
         description="Ordinary member",
-        placement=_member_placement(director_id, "%7"),
+        placement=_member_placement("%7"),
     )
-    return sid, director_id, admin_id, monitor["agent_id"], alice["agent_id"], runner
+    return sid, director_id, admin_id, monitor["member_id"], alice["member_id"], runner
 
 
 def _list(runner, sid, *extra):
@@ -66,13 +66,13 @@ def _list(runner, sid, *extra):
 # --- --all: full roster with kind derivation ---
 
 
-def test_member_list_all__json_lists_every_active_agent_with_kind(
+def test_member_list_all__json_lists_every_active_member_with_kind(
     bootstrapped_roster,
 ):
     sid, director_id, admin_id, monitor_id, alice_id, runner = bootstrapped_roster
     result = _list(runner, sid, "--all", "--json")
     assert result.exit_code == 0, result.output
-    rows = {row["agent_id"]: row for row in json.loads(result.output)}
+    rows = {row["member_id"]: row for row in json.loads(result.output)}
     assert set(rows) == {director_id, admin_id, monitor_id, alice_id}
     assert rows[director_id]["kind"] == "director"
     assert rows[admin_id]["kind"] == "administrator"
@@ -84,11 +84,11 @@ def test_member_list_all__json_row_shape_and_null_placement(bootstrapped_roster)
     sid, director_id, admin_id, _monitor_id, alice_id, runner = bootstrapped_roster
     result = _list(runner, sid, "--all", "--json")
     assert result.exit_code == 0, result.output
-    rows = {row["agent_id"]: row for row in json.loads(result.output)}
+    rows = {row["member_id"]: row for row in json.loads(result.output)}
 
     for row in rows.values():
         assert set(row) == {
-            "agent_id",
+            "member_id",
             "name",
             "description",
             "status",
@@ -100,7 +100,7 @@ def test_member_list_all__json_row_shape_and_null_placement(bootstrapped_roster)
     assert rows[admin_id]["placement"] is None
     # Placed rows keep the placement sub-dict.
     assert rows[alice_id]["placement"]["mux_pane_id"] == "%7"
-    assert rows[director_id]["placement"]["director_agent_id"] is None
+    assert rows[director_id]["placement"]["mux_pane_id"] == "%0"
 
 
 def test_member_list_all__text_header_kind_column_and_dash_cells(
@@ -111,8 +111,8 @@ def test_member_list_all__text_header_kind_column_and_dash_cells(
     assert result.exit_code == 0, result.output
     out = result.output
 
-    assert "4 agents:" in out
-    header = next(line for line in out.splitlines() if "agent_id" in line)
+    assert "4 members:" in out
+    header = next(line for line in out.splitlines() if "member_id" in line)
     assert "kind" in header
     # Placementless rows render "-" in every placement column.
     admin_line = next(line for line in out.splitlines() if "Administrator" in line)
@@ -163,7 +163,7 @@ def test_member_list_default__members_only_shape_unchanged(bootstrapped_roster):
     result = _list(runner, sid, "--json")
     assert result.exit_code == 0, result.output
     rows = json.loads(result.output)
-    listed_ids = {row["agent_id"] for row in rows}
+    listed_ids = {row["member_id"] for row in rows}
     assert listed_ids == {monitor_id, alice_id}
     assert director_id not in listed_ids
     assert admin_id not in listed_ids
@@ -177,6 +177,5 @@ def test_member_list_default__text_header_and_columns_unchanged(bootstrapped_ros
     assert result.exit_code == 0, result.output
     out = result.output
     assert "2 members:" in out
-    assert "agents:" not in out
-    header = next(line for line in out.splitlines() if "agent_id" in line)
+    header = next(line for line in out.splitlines() if "member_id" in line)
     assert "kind" not in header

@@ -2,7 +2,7 @@
 
 ``should_ping(target, now)`` is a pure function of a scan-row dict and a
 tz-aware ``now``, so these tests need neither tmux nor the DB. The scan rows are
-the watched agents — the root Director (180 s) and every ordinary member
+the watched members — the root Director (180 s) and every ordinary member
 (720 s); the monitoring member is the unenrolled watcher and never appears here.
 ``is_director`` is retained for ``monitor status`` labeling but ``should_ping``
 is role-agnostic: enabled + live pane + interval elapsed ⇒ due.
@@ -19,7 +19,7 @@ def _target(**overrides):
     """A watched ordinary-member target (@720). ``should_ping`` ignores
     ``is_director``; the role flag is overridden in the Director-interval case."""
     base = {
-        "agent_id": 1,
+        "member_id": 1,
         "name": "x",
         "is_director": False,
         "pane_id": "%1",
@@ -42,14 +42,14 @@ def test_should_ping__due_after_interval_with_empty_inbox():
 
 
 def test_should_ping__pinged_regardless_of_pending_count():
-    # pending_count never gates the decision (R2): a zero-inbox watched agent is
+    # pending_count never gates the decision (R2): a zero-inbox watched member is
     # still pinged once due
     assert should_ping(_target(pending_count=0), _NOW) is True
     assert should_ping(_target(pending_count=5), _NOW) is True
 
 
 def test_should_ping__not_due_skipped():
-    # the interval gate still applies — a not-yet-due agent is skipped
+    # the interval gate still applies — a not-yet-due member is skipped
     target = _target(last_ping_at=(_NOW - timedelta(seconds=30)).isoformat())
     assert should_ping(target, _NOW) is False
 

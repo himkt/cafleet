@@ -1,8 +1,8 @@
 """CLI tests for ``cafleet member show`` (design 0000116).
 
 ``member show`` is a pure registry read: it takes a bare ``--member-id``
-target (no requester ``--agent-id``, no fleet-membership gate), requires no
-tmux, and renders detail for any active in-fleet agent — placed or
+target (no requester identity flag, no fleet-membership gate), requires no
+tmux, and renders detail for any active in-fleet member — placed or
 placementless, root Director and Administrator included.
 """
 
@@ -22,7 +22,7 @@ def bootstrapped_fleet(_mock_tmux_for_fleet_create):
     """Fresh fleet + one placed member + the monitoring member.
 
     Returns ``(sid, director_id, admin_id, alice_id, monitor_id, runner)``.
-    Members are registered via ``broker.register_agent`` (internal machinery)
+    Members are registered via ``broker.register_member`` (internal machinery)
     so no real tmux pane is spawned.
     """
     runner = CliRunner()
@@ -30,23 +30,23 @@ def bootstrapped_fleet(_mock_tmux_for_fleet_create):
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
     sid = data["fleet_id"]
-    director_id = data["director"]["agent_id"]
-    admin_id = data["administrator_agent_id"]
+    director_id = data["director"]["member_id"]
+    admin_id = data["administrator_member_id"]
 
-    alice = broker.register_agent(
+    alice = broker.register_member(
         fleet_id=sid,
         name="alice",
         description="Test member",
-        placement=_member_placement(director_id, "%10"),
+        placement=_member_placement("%10"),
     )
-    monitor = broker.register_agent(
+    monitor = broker.register_member(
         fleet_id=sid,
         name="monitor",
         description="Dedicated monitoring member",
-        placement=_member_placement(director_id, "%11"),
+        placement=_member_placement("%11"),
         kind="monitoring-member",
     )
-    return sid, director_id, admin_id, alice["agent_id"], monitor["agent_id"], runner
+    return sid, director_id, admin_id, alice["member_id"], monitor["member_id"], runner
 
 
 def _show(runner, sid, member_id, *extra):
@@ -89,7 +89,7 @@ def test_member_show__unknown_target_exits_one_not_found(bootstrapped_fleet):
     sid, _d, _a, _al, _m, runner = bootstrapped_fleet
     result = _show(runner, sid, 999999)
     assert result.exit_code == 1, result.output
-    assert "Error: Agent 999999 not found" in (result.output or "")
+    assert "Error: Member 999999 not found" in (result.output or "")
 
 
 def test_member_show__cross_fleet_target_exits_one_not_found(bootstrapped_fleet):
@@ -101,15 +101,15 @@ def test_member_show__cross_fleet_target_exits_one_not_found(bootstrapped_fleet)
 
     result = _show(runner, other_sid, alice_id)
     assert result.exit_code == 1, result.output
-    assert f"Error: Agent {alice_id} not found" in (result.output or "")
+    assert f"Error: Member {alice_id} not found" in (result.output or "")
 
 
 def test_member_show__inactive_target_exits_one_not_found(bootstrapped_fleet):
     sid, _d, _a, alice_id, _m, runner = bootstrapped_fleet
-    assert broker.deregister_agent(alice_id) is True
+    assert broker.deregister_member(alice_id) is True
     result = _show(runner, sid, alice_id)
     assert result.exit_code == 1, result.output
-    assert f"Error: Agent {alice_id} not found" in (result.output or "")
+    assert f"Error: Member {alice_id} not found" in (result.output or "")
 
 
 # --- --full text: labeled block ---
@@ -120,9 +120,9 @@ def test_member_show__full_block_placementless_administrator(bootstrapped_fleet)
     result = _show(runner, sid, admin_id, "--full")
     assert result.exit_code == 0, result.output
     out = result.output
-    assert f"  agent_id:    {admin_id}" in out
+    assert f"  member_id:   {admin_id}" in out
     assert "  name:        Administrator" in out
-    assert f"  description: Built-in administrator agent for fleet {sid}" in out
+    assert f"  description: Built-in administrator for fleet {sid}" in out
     assert "  status:      active" in out
     assert "  kind:        administrator" in out
     assert "  skills:      -" in out
@@ -134,43 +134,40 @@ def test_member_show__full_block_root_director_placement_sub_block(bootstrapped_
     result = _show(runner, sid, director_id, "--full")
     assert result.exit_code == 0, result.output
     out = result.output
-    assert f"  agent_id:    {director_id}" in out
+    assert f"  member_id:   {director_id}" in out
     assert "  name:        Director" in out
     assert "  description: Root Director for this fleet" in out
     assert "  status:      active" in out
     assert "  kind:        director" in out
     assert "  skills:      -" in out
     assert "  placement:\n" in out
-    # The root Director's placement has a NULL director_agent_id → "-".
-    assert "    director_agent_id: -" in out
-    assert "    backend:           claude" in out
-    assert "    session:           main" in out
-    assert "    window_id:         @3" in out
-    assert "    pane_id:           %0" in out
-    assert "    created_at:        " in out
+    assert "    backend:    claude" in out
+    assert "    session:    main" in out
+    assert "    window_id:  @3" in out
+    assert "    pane_id:    %0" in out
+    assert "    created_at: " in out
     assert "  placement:   none" not in out
 
 
-def test_member_show__full_block_member_kind_and_director_id(bootstrapped_fleet):
-    sid, director_id, _a, alice_id, _m, runner = bootstrapped_fleet
+def test_member_show__full_block_member_kind_and_pane(bootstrapped_fleet):
+    sid, _director_id, _a, alice_id, _m, runner = bootstrapped_fleet
     result = _show(runner, sid, alice_id, "--full")
     assert result.exit_code == 0, result.output
     out = result.output
     assert "  kind:        member" in out
-    assert f"    director_agent_id: {director_id}" in out
-    assert "    pane_id:           %10" in out
+    assert "    pane_id:    %10" in out
 
 
-# --- --json: the broker get_agent dict, unprojected ---
+# --- --json: the broker get_member dict, unprojected ---
 
 
 def test_member_show__json_shape_placed_member(bootstrapped_fleet):
-    sid, director_id, _a, alice_id, _m, runner = bootstrapped_fleet
+    sid, _director_id, _a, alice_id, _m, runner = bootstrapped_fleet
     result = _show(runner, sid, alice_id, "--json")
     assert result.exit_code == 0, result.output
     row = json.loads(result.output)
     assert set(row) == {
-        "agent_id",
+        "member_id",
         "name",
         "description",
         "status",
@@ -179,12 +176,11 @@ def test_member_show__json_shape_placed_member(bootstrapped_fleet):
         "skills",
         "placement",
     }
-    assert row["agent_id"] == alice_id
+    assert row["member_id"] == alice_id
     assert row["name"] == "alice"
     assert row["status"] == "active"
     assert row["kind"] == "member"
     assert row["skills"] == []
-    assert row["placement"]["director_agent_id"] == director_id
     assert row["placement"]["coding_agent"] == "claude"
     assert row["placement"]["mux_pane_id"] == "%10"
 
@@ -194,7 +190,7 @@ def test_member_show__json_placementless_is_null_placement(bootstrapped_fleet):
     result = _show(runner, sid, admin_id, "--json")
     assert result.exit_code == 0, result.output
     row = json.loads(result.output)
-    assert row["agent_id"] == admin_id
+    assert row["member_id"] == admin_id
     assert row["kind"] == "administrator"
     assert row["placement"] is None
 

@@ -23,9 +23,9 @@ def test_format_ping_age_real_age_unchanged():
 def _never_pinged_payload():
     return {
         "runtime": {"running": False},
-        "agents": [
+        "members": [
             {
-                "agent_id": 7,
+                "member_id": 7,
                 "name": "member-a",
                 "role": "member",
                 "interval_seconds": 720,
@@ -37,8 +37,8 @@ def _never_pinged_payload():
     }
 
 
-def test_format_monitor_status_no_em_dash_for_never_pinged_agent():
+def test_format_monitor_status_no_em_dash_for_never_pinged_member():
     rendered = format_monitor_status(_never_pinged_payload())
-    # The never-pinged agent's row is rendered (guards against a vacuous check).
+    # The never-pinged member's row is rendered (guards against a vacuous check).
     assert "member-a" in rendered
     assert _EM_DASH not in rendered

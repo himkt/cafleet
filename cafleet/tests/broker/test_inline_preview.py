@@ -32,28 +32,27 @@ def poll_trigger_call_count(monkeypatch):
     return counter
 
 
-def _register_member(fleet_id, name, director_id, pane):
-    return broker.register_agent(
+def _register_placed_member(fleet_id, name, pane):
+    return broker.register_member(
         fleet_id=fleet_id,
         name=name,
         description=f"{name} description",
-        placement=_member_placement(director_id, pane),
+        placement=_member_placement(pane),
     )
 
 
-def _setup_two_agents():
+def _setup_two_members():
     s = _create_fleet()
     sid = s["fleet_id"]
-    director_id = s["director"]["agent_id"]
-    sender = _register_member(sid, "sender", director_id, "%1")
-    recipient = _register_member(sid, "recipient", director_id, "%2")
-    return sid, sender["agent_id"], recipient["agent_id"]
+    sender = _register_placed_member(sid, "sender", "%1")
+    recipient = _register_placed_member(sid, "recipient", "%2")
+    return sid, sender["member_id"], recipient["member_id"]
 
 
 def test_send_message__auto_fire_invokes_inline_preview_with_full_kwargs(
     inline_preview_calls,
 ):
-    sid, sender, recipient = _setup_two_agents()
+    sid, sender, recipient = _setup_two_members()
     result = broker.send_message(sid, sender, recipient, "Did the API change?")
     assert len(inline_preview_calls) == 1
     call = inline_preview_calls[0]
@@ -73,7 +72,7 @@ def test_send_message__sequential_sends_produce_distinct_previews_no_poll_trigge
     inline_preview_calls,
     poll_trigger_call_count,
 ):
-    sid, sender, recipient = _setup_two_agents()
+    sid, sender, recipient = _setup_two_members()
     broker.send_message(sid, sender, recipient, "msg1")
     broker.send_message(sid, sender, recipient, "msg2")
     broker.send_message(sid, sender, recipient, "msg3")
@@ -91,7 +90,7 @@ def test_inline_preview_failure__message_persisted_and_notification_flag_false(
     monkeypatch.setattr(
         TmuxMultiplexer, "send_inline_preview", lambda self, *_a, **_k: False
     )
-    sid, sender, recipient = _setup_two_agents()
+    sid, sender, recipient = _setup_two_members()
     sent = broker.send_message(sid, sender, recipient, "delivered despite tmux down")
     assert sent["notification_sent"] is False
     [polled] = broker.poll_tasks(recipient)
@@ -111,7 +110,7 @@ def test_inline_preview_failure__subsequent_sends_still_attempt_preview(
         return False
 
     monkeypatch.setattr(TmuxMultiplexer, "send_inline_preview", stub)
-    sid, sender, recipient = _setup_two_agents()
+    sid, sender, recipient = _setup_two_members()
     broker.send_message(sid, sender, recipient, "first")
     broker.send_message(sid, sender, recipient, "second")
     broker.send_message(sid, sender, recipient, "third")
@@ -125,26 +124,25 @@ def test_inline_preview_failure__subsequent_sends_still_attempt_preview(
 )
 def test_send_message__skip_conditions(inline_preview_calls, scenario):
     if scenario == "self_send":
-        sid, sender, _recipient = _setup_two_agents()
+        sid, sender, _recipient = _setup_two_members()
         broker.send_message(sid, sender, sender, "self")
     else:
         s = _create_fleet()
         sid = s["fleet_id"]
-        director_id = s["director"]["agent_id"]
-        sender = _register_member(sid, "sender", director_id, "%1")
-        recipient = broker.register_agent(
+        sender = _register_placed_member(sid, "sender", "%1")
+        recipient = broker.register_member(
             fleet_id=sid,
             name="lonely",
             description="no placement",
         )
         sent = broker.send_message(
             sid,
-            sender["agent_id"],
-            recipient["agent_id"],
+            sender["member_id"],
+            recipient["member_id"],
             "to placement-less peer",
         )
         # Message still landed in queue.
-        [polled] = broker.poll_tasks(recipient["agent_id"])
+        [polled] = broker.poll_tasks(recipient["member_id"])
         assert polled["task_id"] == sent["task"]["task_id"]
     # In both scenarios the preview is skipped.
     assert inline_preview_calls == []
@@ -154,7 +152,7 @@ def test_send_message__auto_fire_never_calls_send_poll_trigger_on_success(
     inline_preview_calls,
     poll_trigger_call_count,
 ):
-    sid, sender, recipient = _setup_two_agents()
+    sid, sender, recipient = _setup_two_members()
     broker.send_message(sid, sender, recipient, "hello")
     assert poll_trigger_call_count["n"] == 0
 
@@ -179,7 +177,7 @@ def test_send_message__real_inline_preview_keystroke_is_esc_first(monkeypatch):
         lambda args, **_kw: captured.append(list(args)) or "",
     )
 
-    sid, sender, recipient = _setup_two_agents()  # recipient pane is "%2"
+    sid, sender, recipient = _setup_two_members()  # recipient pane is "%2"
     result = broker.send_message(sid, sender, recipient, "cancel it (Esc)")
     assert result["notification_sent"] is True
 

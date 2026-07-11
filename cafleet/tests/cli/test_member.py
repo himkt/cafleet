@@ -17,11 +17,12 @@ import sys
 
 import pytest
 from click.testing import CliRunner
+from sqlalchemy import delete, update
 
 from cafleet import broker
 from cafleet.broker import _shared
 from cafleet.cli import cli
-from cafleet.db.models import Agent
+from cafleet.db.models import Member, MemberPlacement
 from cafleet.multiplexer import MultiplexerContext as DirectorContext
 from cafleet.multiplexer import tmux as multiplexer_tmux
 
@@ -32,7 +33,7 @@ def bootstrapped_fleet(_mock_tmux_for_fleet_create):
     create = runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
-    return data["fleet_id"], data["director"]["agent_id"], runner
+    return data["fleet_id"], data["director"]["member_id"], runner
 
 
 @pytest.fixture
@@ -68,7 +69,6 @@ def stub_coding_agent_binaries(monkeypatch):
 def _invoke_member_create(
     runner: CliRunner,
     fleet_id: int,
-    director_id: int,
     *,
     coding_agent: str = "claude",
     text: str | None = None,
@@ -89,8 +89,6 @@ def _invoke_member_create(
             "create",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
-            str(director_id),
             "--name",
             name,
             "--description",
@@ -125,7 +123,7 @@ def test_member_create__neither_flag_is_usage_error(
     # Removing the default template makes a bare `member create` (neither flag)
     # a usage error resolved by the shared helper — no spawn.
     fleet_id, director_id, runner = bootstrapped_fleet
-    result = _invoke_member_create(runner, fleet_id, director_id)
+    result = _invoke_member_create(runner, fleet_id)
     assert result.exit_code == 2, result.output
     assert "Provide exactly one of --text or --text-file." in result.output
     assert split_window_recorder == []
@@ -139,9 +137,7 @@ def test_member_create__positional_prompt_no_longer_parses(
     # `member create` takes no positional argument — a bare positional after
     # the options is a parse error.
     fleet_id, director_id, runner = bootstrapped_fleet
-    result = _invoke_member_create(
-        runner, fleet_id, director_id, positional="hello positional"
-    )
+    result = _invoke_member_create(runner, fleet_id, positional="hello positional")
     assert result.exit_code == 2, result.output
     assert "extra argument" in result.output.lower()
     assert split_window_recorder == []
@@ -159,7 +155,6 @@ def test_member_create__text_and_text_file_mutually_exclusive(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text="hello inline",
         text_file=str(prompt_path),
     )
@@ -178,15 +173,14 @@ def test_member_create__inline_text_substitutes_placeholders(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
-        text="agent={agent_id} director={director_agent_id}",
+        text="member={member_id} director={director_member_id}",
         json_output=True,
     )
     assert result.exit_code == 0, result.output
-    new_id = json.loads(result.output)["agent_id"]
+    new_id = json.loads(result.output)["member_id"]
     assert (
         split_window_recorder[0]["command"][-1]
-        == f"agent={new_id} director={director_id}"
+        == f"member={new_id} director={director_id}"
     )
 
 
@@ -201,7 +195,7 @@ def test_member_create__text_file_relative_path_accepted(
     fleet_id, director_id, runner = bootstrapped_fleet
     (tmp_path / "prompt.md").write_text("relative body", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    result = _invoke_member_create(runner, fleet_id, director_id, text_file="prompt.md")
+    result = _invoke_member_create(runner, fleet_id, text_file="prompt.md")
     assert result.exit_code == 0, result.output
     assert split_window_recorder[0]["command"][-1] == "relative body"
 
@@ -216,7 +210,6 @@ def test_member_create__text_file_dash_reads_stdin(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text_file="-",
         stdin=b"spawn body from stdin",
     )
@@ -272,7 +265,6 @@ def test_member_create__text_file_error_variants(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text_file=str(target),
     )
     assert result.exit_code == expected_exit, result.output
@@ -298,7 +290,6 @@ def test_member_create__text_file_not_readable_exits_with_message(
         result = _invoke_member_create(
             runner,
             fleet_id,
-            director_id,
             text_file=str(unreadable_file),
         )
         assert result.exit_code == 1, result.output
@@ -330,7 +321,6 @@ def test_member_create__text_file_preserves_whitespace_verbatim(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text_file=str(prompt_path),
     )
     assert result.exit_code == 0, result.output
@@ -351,7 +341,6 @@ def test_member_create__backend_spawn_argv_shape(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         coding_agent=coding_agent,
         text_file=str(prompt_path),
         name=f"Member-{coding_agent}",
@@ -388,7 +377,6 @@ def test_member_create__codex_placement_records_codex(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         coding_agent="codex",
         text="hello",
         name="Codex-Member",
@@ -411,7 +399,6 @@ def test_member_create__binary_missing_exits_with_backend_specific_message(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         coding_agent=coding_agent,
         text="hello",
         name=coding_agent.capitalize(),
@@ -430,7 +417,6 @@ def test_member_create__model_claude_tokens_between_name_and_prompt(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text="hello",
         name="Drafter",
         model="sonnet",
@@ -457,7 +443,6 @@ def test_member_create__model_codex_tokens_between_sandbox_and_prompt(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         coding_agent="codex",
         text="hello",
         name="Codex-Member",
@@ -490,7 +475,6 @@ def test_member_create__model_opencode_tokens_before_prompt_pair(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         coding_agent="opencode",
         text="hello",
         name="OC-Member",
@@ -522,7 +506,6 @@ def test_member_create__no_model_flag_emits_no_model_token(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         coding_agent=coding_agent,
         text="hello",
         name="Plain-Member",
@@ -542,7 +525,6 @@ def test_member_create__claude_codex_empty_model_passes_through(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         coding_agent=coding_agent,
         text="hello",
         name="Empty-Model",
@@ -563,7 +545,6 @@ def test_member_create__opencode_invalid_model_exits_2_with_no_side_effects(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         coding_agent="opencode",
         text="hello",
         name="Rejected-Member",
@@ -576,7 +557,7 @@ def test_member_create__opencode_invalid_model_exits_2_with_no_side_effects(
     )
     # Validation precedes registration and any tmux call: nothing to roll back.
     assert split_window_recorder == []
-    names = [agent["name"] for agent in broker.list_roster(fleet_id)]
+    names = [member["name"] for member in broker.list_roster(fleet_id)]
     assert "Rejected-Member" not in names
 
 
@@ -592,7 +573,6 @@ def test_member_create__opencode_invalid_model_wins_over_missing_binary(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         coding_agent="opencode",
         text="hello",
         name="Rejected-Member",
@@ -613,7 +593,6 @@ def test_member_create__claude_default_injects_dontask_permission_mode(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text="hello",
         name="Drafter",
     )
@@ -632,9 +611,9 @@ def test_member_create__claude_default_injects_dontask_permission_mode(
 # --- member create --role (design 0000090 §5) ------------------------------
 
 
-def _read_agent_card(new_agent_id: int) -> dict:
+def _read_member_card(new_member_id: int) -> dict:
     with _shared.read_session() as s:
-        return json.loads(s.get(Agent, new_agent_id).agent_card_json)
+        return json.loads(s.get(Member, new_member_id).member_card_json)
 
 
 def test_member_create__role_monitor_sets_kind_not_enrolled(
@@ -646,17 +625,16 @@ def test_member_create__role_monitor_sets_kind_not_enrolled(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text="hello",
         name="Watcher",
         role="monitor",
         json_output=True,
     )
     assert result.exit_code == 0, result.output
-    new_id = json.loads(result.output)["agent_id"]
+    new_id = json.loads(result.output)["member_id"]
 
-    # the kind marker is written into the agent card …
-    assert _read_agent_card(new_id)["cafleet"]["kind"] == "monitoring-member"
+    # the kind marker is written into the member card …
+    assert _read_member_card(new_id)["cafleet"]["kind"] == "monitoring-member"
     # … but the monitoring member is the unenrolled watcher (no monitor_config row)
     assert broker.get_monitor_config(fleet_id, new_id) is None
 
@@ -670,17 +648,16 @@ def test_member_create__role_member_enrolls_720(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text="hello",
         name="Ordinary",
         role="member",
         json_output=True,
     )
     assert result.exit_code == 0, result.output
-    new_id = json.loads(result.output)["agent_id"]
+    new_id = json.loads(result.output)["member_id"]
 
     # an ordinary member carries no kind marker and is enrolled @720
-    assert "cafleet" not in _read_agent_card(new_id)
+    assert "cafleet" not in _read_member_card(new_id)
     cfg = broker.get_monitor_config(fleet_id, new_id)
     assert cfg is not None
     assert cfg["interval_seconds"] == 720
@@ -696,14 +673,13 @@ def test_member_create__default_role_is_member_enrolled_720(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text="hello",
         name="Plain",
         json_output=True,
     )
     assert result.exit_code == 0, result.output
-    new_id = json.loads(result.output)["agent_id"]
-    assert "cafleet" not in _read_agent_card(new_id)
+    new_id = json.loads(result.output)["member_id"]
+    assert "cafleet" not in _read_member_card(new_id)
     cfg = broker.get_monitor_config(fleet_id, new_id)
     assert cfg is not None
     assert cfg["interval_seconds"] == 720
@@ -718,7 +694,6 @@ def test_member_create__second_role_monitor_rejected(
     first = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text="hi",
         name="Watcher-1",
         role="monitor",
@@ -729,7 +704,6 @@ def test_member_create__second_role_monitor_rejected(
     second = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text="hi",
         name="Watcher-2",
         role="monitor",
@@ -748,7 +722,6 @@ def test_member_create__invalid_role_choice_rejected(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text="hi",
         name="Bad-Role",
         role="director",
@@ -796,9 +769,9 @@ def _invoke_member_nudge(
             "nudge",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
+            "--from-member-id",
             str(sender_id),
-            "--member-id",
+            "--to-member-id",
             str(target_id),
         ]
     )
@@ -811,15 +784,13 @@ def _invoke_member_nudge(
     return runner.invoke(cli, args)
 
 
-def _create_member(
-    runner: CliRunner, fleet_id: int, director_id: int, name: str
-) -> int:
-    """Create an ordinary member via the CLI; return its agent id (pane %42)."""
+def _create_member(runner: CliRunner, fleet_id: int, name: str) -> int:
+    """Create an ordinary member via the CLI; return its member id (pane %42)."""
     result = _invoke_member_create(
-        runner, fleet_id, director_id, text="hi", name=name, json_output=True
+        runner, fleet_id, text="hi", name=name, json_output=True
     )
     assert result.exit_code == 0, result.output
-    return json.loads(result.output)["agent_id"]
+    return json.loads(result.output)["member_id"]
 
 
 def test_member_nudge__persists_unicast_task_and_fires_preview(
@@ -829,7 +800,7 @@ def test_member_nudge__persists_unicast_task_and_fires_preview(
     inline_preview_recorder,
 ):
     fleet_id, director_id, runner = bootstrapped_fleet
-    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    sender_id = _create_member(runner, fleet_id, "Watcher")
 
     # The monitoring member nudges the Director (a valid target with pane %0).
     result = _invoke_member_nudge(
@@ -842,7 +813,7 @@ def test_member_nudge__persists_unicast_task_and_fires_preview(
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["member_agent_id"] == director_id
+    assert payload["member_id"] == director_id
     assert payload["notification_sent"] is True
     task_id = payload["task_id"]
 
@@ -850,8 +821,8 @@ def test_member_nudge__persists_unicast_task_and_fires_preview(
     task = broker.get_task(fleet_id, task_id)["task"]
     assert task["type"] == "unicast"
     assert task["status_state"] == "input_required"
-    assert task["from_agent_id"] == sender_id
-    assert task["to_agent_id"] == director_id
+    assert task["from_member_id"] == sender_id
+    assert task["to_member_id"] == director_id
     assert task["text"] == "2 un-acked items; alice stalled"
 
     # The hardened inline preview fired exactly once into the target's pane.
@@ -870,8 +841,8 @@ def test_member_nudge__persisted_task_is_ackable_by_recipient(
     inline_preview_recorder,
 ):
     fleet_id, director_id, runner = bootstrapped_fleet
-    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
-    target_id = _create_member(runner, fleet_id, director_id, "Target")
+    sender_id = _create_member(runner, fleet_id, "Watcher")
+    target_id = _create_member(runner, fleet_id, "Target")
 
     result = _invoke_member_nudge(
         runner, fleet_id, sender_id, target_id, "re-engage please", json_output=True
@@ -899,9 +870,9 @@ def test_member_nudge__text_file_body_reaches_target(
     # member nudge gains the same --text-file input as the other commands; the
     # file body is delivered verbatim (no placeholder substitution).
     fleet_id, director_id, runner = bootstrapped_fleet
-    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    sender_id = _create_member(runner, fleet_id, "Watcher")
     body_file = tmp_path / "nudge.md"
-    body_file.write_text("long re-engage body {agent_id}", encoding="utf-8")
+    body_file.write_text("long re-engage body {member_id}", encoding="utf-8")
 
     result = _invoke_member_nudge(
         runner,
@@ -914,8 +885,8 @@ def test_member_nudge__text_file_body_reaches_target(
     assert result.exit_code == 0, result.output
     task_id = json.loads(result.output)["task_id"]
     task = broker.get_task(fleet_id, task_id)["task"]
-    # Verbatim — the {agent_id} token is NOT substituted for nudge bodies.
-    assert task["text"] == "long re-engage body {agent_id}"
+    # Verbatim — the {member_id} token is NOT substituted for nudge bodies.
+    assert task["text"] == "long re-engage body {member_id}"
 
 
 def test_member_nudge__stdin_body_reaches_target(
@@ -925,7 +896,7 @@ def test_member_nudge__stdin_body_reaches_target(
     inline_preview_recorder,
 ):
     fleet_id, director_id, runner = bootstrapped_fleet
-    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    sender_id = _create_member(runner, fleet_id, "Watcher")
 
     result = _invoke_member_nudge(
         runner,
@@ -950,13 +921,13 @@ def test_member_nudge__target_not_found_exits_1(
     scenario,
 ):
     fleet_id, director_id, runner = bootstrapped_fleet
-    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    sender_id = _create_member(runner, fleet_id, "Watcher")
 
     if scenario == "unknown":
         target_id = 999999
     elif scenario == "inactive":
-        target_id = _create_member(runner, fleet_id, director_id, "Gone")
-        broker.deregister_agent(target_id)
+        target_id = _create_member(runner, fleet_id, "Gone")
+        broker.deregister_member(target_id)
     else:  # cross_fleet
         other = broker.create_fleet(
             name=None,
@@ -966,13 +937,13 @@ def test_member_nudge__target_not_found_exits_1(
             coding_agent="claude",
             backend="tmux",
         )
-        target_id = broker.register_agent(
+        target_id = broker.register_member(
             fleet_id=other["fleet_id"], name="outsider", description="cross-fleet"
-        )["agent_id"]
+        )["member_id"]
 
     result = _invoke_member_nudge(runner, fleet_id, sender_id, target_id, "hello")
     assert result.exit_code == 1, result.output
-    assert f"Agent {target_id} not found" in result.output
+    assert f"Member {target_id} not found" in result.output
     # No preview fired — resolution rejects the target before the send path.
     assert inline_preview_recorder == []
 
@@ -986,7 +957,7 @@ def test_member_nudge__empty_text_rejected_exit_2(
     text,
 ):
     fleet_id, director_id, runner = bootstrapped_fleet
-    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    sender_id = _create_member(runner, fleet_id, "Watcher")
     result = _invoke_member_nudge(runner, fleet_id, sender_id, director_id, text)
     assert result.exit_code == 2, result.output
     assert "text may not be empty." in result.output
@@ -1001,7 +972,7 @@ def test_member_nudge__empty_text_file_rejected_exit_1(
     inline_preview_recorder,
 ):
     fleet_id, director_id, runner = bootstrapped_fleet
-    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    sender_id = _create_member(runner, fleet_id, "Watcher")
     empty_file = tmp_path / "empty.md"
     empty_file.write_bytes(b"")
     result = _invoke_member_nudge(
@@ -1019,7 +990,7 @@ def test_member_nudge__neither_flag_rejected_exit_2(
     inline_preview_recorder,
 ):
     fleet_id, director_id, runner = bootstrapped_fleet
-    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    sender_id = _create_member(runner, fleet_id, "Watcher")
     result = _invoke_member_nudge(runner, fleet_id, sender_id, director_id)
     assert result.exit_code == 2, result.output
     assert "Provide exactly one of --text or --text-file." in result.output
@@ -1034,7 +1005,7 @@ def test_member_nudge__both_flags_rejected_exit_2(
     inline_preview_recorder,
 ):
     fleet_id, director_id, runner = bootstrapped_fleet
-    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    sender_id = _create_member(runner, fleet_id, "Watcher")
     body_file = tmp_path / "nudge.md"
     body_file.write_text("file body", encoding="utf-8")
     result = _invoke_member_nudge(
@@ -1057,21 +1028,20 @@ def test_member_nudge__no_pane_target_still_queues_task(
     inline_preview_recorder,
 ):
     fleet_id, director_id, runner = bootstrapped_fleet
-    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    sender_id = _create_member(runner, fleet_id, "Watcher")
     # A target with a placement row but no pane yet (mux_pane_id=None).
-    no_pane_id = broker.register_agent(
+    no_pane_id = broker.register_member(
         fleet_id=fleet_id,
         name="PendingPane",
         description="placement but no pane",
         placement={
-            "director_agent_id": director_id,
             "backend": "tmux",
             "mux_session": "main",
             "mux_window_id": "@3",
             "mux_pane_id": None,
             "coding_agent": "claude",
         },
-    )["agent_id"]
+    )["member_id"]
 
     result = _invoke_member_nudge(
         runner, fleet_id, sender_id, no_pane_id, "queued anyway", json_output=True
@@ -1095,7 +1065,7 @@ def test_member_nudge__text_output_happy_and_no_pane_variants(
     inline_preview_recorder,
 ):
     fleet_id, director_id, runner = bootstrapped_fleet
-    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    sender_id = _create_member(runner, fleet_id, "Watcher")
 
     # Happy path (target has pane %0): the dispatched-preview line.
     ok = _invoke_member_nudge(runner, fleet_id, sender_id, director_id, "wake up")
@@ -1104,19 +1074,18 @@ def test_member_nudge__text_output_happy_and_no_pane_variants(
     assert "queued" in ok.output
 
     # No-pane target: the queued-without-pane variant.
-    no_pane_id = broker.register_agent(
+    no_pane_id = broker.register_member(
         fleet_id=fleet_id,
         name="PendingPane",
         description="placement but no pane",
         placement={
-            "director_agent_id": director_id,
             "backend": "tmux",
             "mux_session": "main",
             "mux_window_id": "@3",
             "mux_pane_id": None,
             "coding_agent": "claude",
         },
-    )["agent_id"]
+    )["member_id"]
     no_pane = _invoke_member_nudge(
         runner, fleet_id, sender_id, no_pane_id, "still queued"
     )
@@ -1140,7 +1109,7 @@ def test_member_nudge__real_preview_keystroke_is_esc_first(
     character is typed and the trailing Enter can never confirm it. Mirrors
     tests/broker/test_inline_preview.py::test_send_message__real_inline_preview_keystroke_is_esc_first."""
     fleet_id, director_id, runner = bootstrapped_fleet
-    sender_id = _create_member(runner, fleet_id, director_id, "Watcher")
+    sender_id = _create_member(runner, fleet_id, "Watcher")
 
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
     monkeypatch.setattr("time.sleep", lambda _secs: None)
@@ -1213,7 +1182,7 @@ def make_bootstrapped_fleet(tmp_path, monkeypatch, _mock_tmux_for_fleet_create):
         create = runner.invoke(cli, args)
         assert create.exit_code == 0, create.output
         data = json.loads(create.output)
-        return data["fleet_id"], data["director"]["agent_id"], runner
+        return data["fleet_id"], data["director"]["member_id"], runner
 
     return _make
 
@@ -1232,7 +1201,6 @@ def test_member_create__role_monitor_inherits_director_backend(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text="CODING AGENT: {coding_agent}",
         name="Watcher",
         role="monitor",
@@ -1263,8 +1231,6 @@ def test_member_create__role_monitor_explicit_coding_agent_wins(
             "create",
             "--fleet-id",
             str(fleet_id),
-            "--agent-id",
-            str(director_id),
             "--name",
             "Watcher",
             "--description",
@@ -1293,7 +1259,6 @@ def test_member_create__role_member_omitted_flag_stays_claude(
     result = _invoke_member_create(
         runner,
         fleet_id,
-        director_id,
         text="hello",
         name="Ordinary",
         role="member",
@@ -1309,16 +1274,17 @@ def test_member_create__role_monitor_fail_loud_missing_placement(
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
-    # A Director with an agent row but NO placement row is unresolvable: exit 1
-    # with the "has no placement row" message and no spawn.
+    # A Director whose placement row is gone (corruption) is unresolvable for
+    # monitor backend inheritance: exit 1 with the "has no placement row"
+    # message and no spawn.
     fleet_id, director_id, runner = bootstrapped_fleet
-    no_placement_id = broker.register_agent(
-        fleet_id, "NoPlacement", "active agent without a placement row"
-    )["agent_id"]
+    with _shared.write_session() as s:
+        s.execute(
+            delete(MemberPlacement).where(MemberPlacement.member_id == director_id)
+        )
     result = _invoke_member_create(
         runner,
         fleet_id,
-        no_placement_id,
         text="hello",
         name="Watcher",
         role="monitor",
@@ -1333,13 +1299,19 @@ def test_member_create__role_monitor_fail_loud_director_not_found(
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
-    # An --agent-id pointing at no active agent exercises the director-is-None
-    # branch: exit 1 with the "not found in fleet" message and no spawn.
+    # An auto-resolved Director that is no longer active (corruption) exercises
+    # the director-is-None branch: exit 1 with the "not found in fleet" message
+    # and no spawn.
     fleet_id, director_id, runner = bootstrapped_fleet
+    with _shared.write_session() as s:
+        s.execute(
+            update(Member)
+            .where(Member.member_id == director_id)
+            .values(status="deregistered")
+        )
     result = _invoke_member_create(
         runner,
         fleet_id,
-        999999,
         text="hello",
         name="Watcher",
         role="monitor",

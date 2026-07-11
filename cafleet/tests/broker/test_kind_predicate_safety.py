@@ -31,7 +31,7 @@ def test_kind_predicate_returns_false_on_non_object_cafleet(predicate, card):
 
 @pytest.mark.parametrize("predicate", _PREDICATES)
 def test_kind_predicate_returns_false_on_missing_or_empty_cafleet(predicate):
-    assert predicate('{"name": "agent"}') is False
+    assert predicate('{"name": "member"}') is False
     assert predicate('{"cafleet": {}}') is False
 
 

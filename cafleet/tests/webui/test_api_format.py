@@ -15,10 +15,10 @@ def _autouse_broker(broker_session):
 
 _EXPECTED_KEYS = {
     "task_id",
-    "from_agent_id",
-    "from_agent_name",
-    "to_agent_id",
-    "to_agent_name",
+    "from_member_id",
+    "from_member_name",
+    "to_member_id",
+    "to_member_name",
     "type",
     "status",
     "created_at",
@@ -28,20 +28,20 @@ _EXPECTED_KEYS = {
 }
 
 
-def _two_agents():
+def _two_members():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    a = broker.register_agent(fleet_id=sid, name="alpha", description="A")
-    b = broker.register_agent(fleet_id=sid, name="beta", description="B")
-    return sid, a["agent_id"], b["agent_id"]
+    a = broker.register_member(fleet_id=sid, name="alpha", description="A")
+    b = broker.register_member(fleet_id=sid, name="beta", description="B")
+    return sid, a["member_id"], b["member_id"]
 
 
 def _typed_column_row(**overrides) -> dict:
     base = {
         "task_id": 1,
         "context_id": 22,
-        "from_agent_id": 11,
-        "to_agent_id": 22,
+        "from_member_id": 11,
+        "to_member_id": 22,
         "type": "unicast",
         "status_state": "input_required",
         "created_at": "2026-04-30T01:00:00+00:00",
@@ -56,11 +56,11 @@ def _typed_column_row(**overrides) -> dict:
 def test_format_messages__empty_rows_skips_lookup(monkeypatch):
     calls = []
 
-    def fake_get_agent_names(ids):
+    def fake_get_member_names(ids):
         calls.append(list(ids))
         return {}
 
-    monkeypatch.setattr(api.broker, "get_agent_names", fake_get_agent_names)
+    monkeypatch.setattr(api.broker, "get_member_names", fake_get_member_names)
     assert _format_messages([]) == []
     assert calls == []
 
@@ -69,21 +69,21 @@ def test_format_messages__shape_field_mapping_and_batched_lookup(monkeypatch):
     rows = [
         _typed_column_row(
             task_id=2,
-            from_agent_id=101,
-            to_agent_id=102,
+            from_member_id=101,
+            to_member_id=102,
             status_state="completed",
             origin_task_id=999,
             text="timeline body",
         ),
-        _typed_column_row(task_id=3, from_agent_id=101, to_agent_id=103),
+        _typed_column_row(task_id=3, from_member_id=101, to_member_id=103),
     ]
     lookup_calls = []
 
-    def fake_get_agent_names(ids):
+    def fake_get_member_names(ids):
         lookup_calls.append(set(ids))
         return {101: "alpha", 102: "beta", 103: "gamma"}
 
-    monkeypatch.setattr(api.broker, "get_agent_names", fake_get_agent_names)
+    monkeypatch.setattr(api.broker, "get_member_names", fake_get_member_names)
 
     result = _format_messages(rows)
     # Batched: one lookup with the full id set.
@@ -96,15 +96,15 @@ def test_format_messages__shape_field_mapping_and_batched_lookup(monkeypatch):
     # Field mapping.
     first = result[0]
     assert first["task_id"] == 2
-    assert first["from_agent_id"] == 101
-    assert first["from_agent_name"] == "alpha"
-    assert first["to_agent_id"] == 102
-    assert first["to_agent_name"] == "beta"
+    assert first["from_member_id"] == 101
+    assert first["from_member_name"] == "alpha"
+    assert first["to_member_id"] == 102
+    assert first["to_member_name"] == "beta"
     assert first["type"] == "unicast"
     assert first["status"] == "completed"
     assert first["origin_task_id"] == 999
     assert first["body"] == "timeline body"
-    assert result[1]["to_agent_name"] == "gamma"
+    assert result[1]["to_member_name"] == "gamma"
 
 
 @pytest.mark.parametrize(
@@ -112,7 +112,7 @@ def test_format_messages__shape_field_mapping_and_batched_lookup(monkeypatch):
     [("inbox", "snapshot body"), ("timeline", "timeline snapshot")],
 )
 def test_format_messages__end_to_end_against_real_broker(source, expected_body):
-    sid, sender, recipient = _two_agents()
+    sid, sender, recipient = _two_members()
     broker.send_message(sid, sender, recipient, expected_body)
     if source == "inbox":
         rows = broker.list_inbox(recipient)
@@ -122,10 +122,10 @@ def test_format_messages__end_to_end_against_real_broker(source, expected_body):
     assert len(result) == 1
     msg = result[0]
     assert set(msg.keys()) == _EXPECTED_KEYS
-    assert msg["from_agent_id"] == sender
-    assert msg["from_agent_name"] == "alpha"
-    assert msg["to_agent_id"] == recipient
-    assert msg["to_agent_name"] == "beta"
+    assert msg["from_member_id"] == sender
+    assert msg["from_member_name"] == "alpha"
+    assert msg["to_member_id"] == recipient
+    assert msg["to_member_name"] == "beta"
     assert msg["type"] == "unicast"
     assert msg["status"] == "input_required"
     assert msg["body"] == expected_body

@@ -16,8 +16,8 @@ from cafleet import output
 def _typed_task(
     *,
     task_id: int = 101,
-    from_agent_id: int = 202,
-    to_agent_id: int = 303,
+    from_member_id: int = 202,
+    to_member_id: int = 303,
     context_id: int | None = None,
     text: str = "the body",
     type_: str = "unicast",
@@ -28,9 +28,9 @@ def _typed_task(
 ) -> dict:
     return {
         "task_id": task_id,
-        "context_id": context_id if context_id is not None else to_agent_id,
-        "from_agent_id": from_agent_id,
-        "to_agent_id": to_agent_id,
+        "context_id": context_id if context_id is not None else to_member_id,
+        "from_member_id": from_member_id,
+        "to_member_id": to_member_id,
         "type": type_,
         "created_at": created_at,
         "status_state": status_state,
@@ -43,7 +43,7 @@ def _typed_task(
 def test_render_task__compact_typical_unicast_shape():
     task = _typed_task(
         task_id=42,
-        from_agent_id=7,
+        from_member_id=7,
         status_timestamp="2026-04-01T08:09:10.111213+00:00",
         text="the actual body content",
     )
@@ -59,7 +59,7 @@ def test_render_task__compact_typical_unicast_shape():
 @pytest.mark.parametrize(
     "forbidden_key",
     [
-        "to_agent_id",
+        "to_member_id",
         "context_id",
         "status_state",
         "created_at",
@@ -109,7 +109,7 @@ def test_render_task__compact_kind_and_origin_present_only_when_meaningful(
 
 @pytest.mark.parametrize(
     "long_form_key",
-    ["to_agent_id", "context_id", "status_state", "task_id", "text"],
+    ["to_member_id", "context_id", "status_state", "task_id", "text"],
 )
 def test_render_task__full_preserves_long_form_keys(long_form_key):
     task = _typed_task()
@@ -139,7 +139,7 @@ def test_format_json__compact_no_whitespace_and_round_trips():
 def test_format_task__compact_two_lines_with_expected_fields(line, needle):
     task = _typed_task(
         task_id=42,
-        from_agent_id=7,
+        from_member_id=7,
         status_timestamp="2026-04-01T08:09:10.111213+00:00",
         text="the body of the message",
     )
@@ -172,33 +172,33 @@ def five_task_fixture() -> list[dict]:
     return [
         _typed_task(
             task_id=1001,
-            from_agent_id=11,
+            from_member_id=11,
             text="Did the API schema change?",
             type_="unicast",
         ),
         _typed_task(
             task_id=1002,
-            from_agent_id=22,
+            from_member_id=22,
             text="Yes — see migration 0042.",
             type_="unicast",
         ),
         _typed_task(
             task_id=1003,
-            from_agent_id=44,
+            from_member_id=44,
             text="Build failed on main branch.",
             type_="unicast",
             origin_task_id=summary_id,
         ),
         _typed_task(
             task_id=1004,
-            from_agent_id=44,
+            from_member_id=44,
             text="Build failed on main branch.",
             type_="unicast",
             origin_task_id=summary_id,
         ),
         _typed_task(
             task_id=summary_id,
-            from_agent_id=44,
+            from_member_id=44,
             text="Broadcast sent to 2 recipients",
             type_="broadcast_summary",
             origin_task_id=summary_id,
@@ -211,10 +211,9 @@ def test_budget__compact_slim_json_smaller_than_compact_full(five_task_fixture):
     """Compact slim (projected ``render_task``) JSON stays materially smaller
     than the compact full (untruncated typed-column) JSON for the same fixture.
 
-    With integer ids the gap narrows versus the UUID era (ids are short by
-    construction, so the slim projection no longer saves on id length); the
-    remaining savings come from dropping several typed columns and one of the
-    two timestamps. The budget is recalibrated to ≤ 55% accordingly."""
+    Integer ids are short by construction, so the slim projection saves nothing
+    on id length; the savings come from dropping several typed columns and one
+    of the two timestamps. The budget is ≤ 55% accordingly."""
     compact_full = output.format_json(five_task_fixture)
     compact_slim = output.format_json(
         [output.render_task(t, full=False) for t in five_task_fixture]

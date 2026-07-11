@@ -1,9 +1,9 @@
-"""Regression tests: previously-hidden flags are visible and documented (design 0000118, items 3.4 + 3.5).
+"""Regression tests: the shared operator flags are visible and documented (design 0000118, items 3.4 + 3.5).
 
 ``--full`` / ``--quiet`` (shared ``full_flag`` / ``quiet_flag``), ``--activity``
-(``member list``), and ``--ansi/--no-ansi`` (``member capture``) drop
-``hidden=True`` and carry help text, so they appear in the relevant ``--help``
-output. The Click param carries ``hidden is False`` and a non-empty ``help``.
+(``member list``), and ``--ansi/--no-ansi`` (``member capture``) are visible
+and carry help text, so they appear in the relevant ``--help`` output. The
+Click param carries ``hidden is False`` and a non-empty ``help``.
 """
 
 import pytest
@@ -11,7 +11,7 @@ from click.testing import CliRunner
 
 from cafleet.cli import cli
 
-# (command path, Click param name) for every flag unhidden by this step.
+# (command path, Click param name) for every flag covered by this guard.
 _UNHIDDEN_FLAGS = [
     (("message", "send"), "full"),
     (("message", "send"), "quiet"),

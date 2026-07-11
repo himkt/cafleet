@@ -13,7 +13,7 @@ from cafleet.multiplexer.tmux import TmuxError, TmuxMultiplexer
 from tests.cli._member_helpers import (
     MEMBER_ID,
     PANE_ID,
-    _agent,
+    _member,
     _placement,
 )
 
@@ -38,7 +38,7 @@ def call_log() -> list[tuple]:
 @pytest.fixture(autouse=True)
 def _stub_get_fleet(monkeypatch):
     """``member_delete``'s early root-guard calls ``broker.get_fleet``; stub it so
-    the guard passes through (``director_agent_id`` != ``MEMBER_ID``) without
+    the guard passes through (``director_member_id`` != ``MEMBER_ID``) without
     touching the real DB. The root-delete-guard tests override this to make the
     guard fire."""
     monkeypatch.setattr(
@@ -49,7 +49,7 @@ def _stub_get_fleet(monkeypatch):
             "name": None,
             "created_at": "2026-05-05T00:00:00+00:00",
             "deleted_at": None,
-            "director_agent_id": 11,
+            "director_member_id": 11,
         },
     )
 
@@ -110,10 +110,10 @@ def deregister_recorder(monkeypatch, call_log):
 
     def fake(member_id):
         calls.append(member_id)
-        call_log.append(("deregister_agent", member_id))
+        call_log.append(("deregister_member", member_id))
         return True
 
-    monkeypatch.setattr(broker, "deregister_agent", fake)
+    monkeypatch.setattr(broker, "deregister_member", fake)
     return calls
 
 
@@ -198,7 +198,7 @@ def test_happy_path__call_ordering_send_exit_then_wait_then_deregister(
     send_exit_recorder,
     wait_for_pane_gone_recorder,
 ):
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: _member())
     wait_for_pane_gone_recorder.state["return_value"] = True
 
     result = _invoke(runner, fleet_id)
@@ -208,7 +208,7 @@ def test_happy_path__call_ordering_send_exit_then_wait_then_deregister(
     assert names == [
         "send_exit",
         "wait_for_pane_gone",
-        "deregister_agent",
+        "deregister_member",
     ]
 
     assert send_exit_recorder == [{"target_pane_id": PANE_ID, "ignore_missing": True}]
@@ -220,21 +220,21 @@ def test_happy_path__call_ordering_send_exit_then_wait_then_deregister(
     assert f"{PANE_ID} (closed)" in out
 
 
-def test_happy_path__json_output_returns_agent_id_and_pane_status(
+def test_happy_path__json_output_returns_member_id_and_pane_status(
     runner,
     fleet_id,
     monkeypatch,
     deregister_recorder,
     wait_for_pane_gone_recorder,
 ):
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: _member())
     wait_for_pane_gone_recorder.state["return_value"] = True
 
     result = _invoke_json(runner, fleet_id)
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
     assert data == {
-        "agent_id": MEMBER_ID,
+        "member_id": MEMBER_ID,
         "pane_status": f"{PANE_ID} (closed)",
     }
 
@@ -249,7 +249,7 @@ def test_pane_already_gone__pane_already_gone_first_poll_yields_happy_path(
     wait_for_pane_gone_recorder,
     capture_pane_recorder,
 ):
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: _member())
     wait_for_pane_gone_recorder.state["return_value"] = True
 
     result = _invoke(runner, fleet_id)
@@ -262,7 +262,7 @@ def test_pane_already_gone__pane_already_gone_first_poll_yields_happy_path(
     assert names == [
         "send_exit",
         "wait_for_pane_gone",
-        "deregister_agent",
+        "deregister_member",
     ]
 
     assert deregister_recorder == [MEMBER_ID]
@@ -284,7 +284,7 @@ def test_timeout__timeout_exits_two_with_tail_and_recovery_hint(
     wait_for_pane_gone_recorder,
     capture_pane_recorder,
 ):
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: _member())
     wait_for_pane_gone_recorder.state["return_value"] = False
     capture_pane_recorder.state["return_value"] = "STUCK_BUFFER_TAIL"
 
@@ -302,7 +302,7 @@ def test_timeout__timeout_exits_two_with_tail_and_recovery_hint(
     assert select_layout_recorder == []
 
     names = [name for (name, *_) in call_log]
-    assert "deregister_agent" not in names
+    assert "deregister_member" not in names
     assert "select_layout" not in names
     assert names == [
         "send_exit",
@@ -319,7 +319,7 @@ def test_timeout__timeout_json_output_pane_status(
     wait_for_pane_gone_recorder,
     capture_pane_recorder,
 ):
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: _member())
     wait_for_pane_gone_recorder.state["return_value"] = False
     capture_pane_recorder.state["return_value"] = "STUCK_BUFFER_TAIL"
 
@@ -327,7 +327,7 @@ def test_timeout__timeout_json_output_pane_status(
     assert result.exit_code == 2, result.output
     data = json.loads(result.stdout)
     assert data == {
-        "agent_id": MEMBER_ID,
+        "member_id": MEMBER_ID,
         "pane_status": f"{PANE_ID} (timeout)",
     }
 
@@ -341,7 +341,7 @@ def test_timeout__capture_failure_still_exits_two(
     wait_for_pane_gone_recorder,
     capture_pane_recorder,
 ):
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: _member())
     wait_for_pane_gone_recorder.state["return_value"] = False
     capture_pane_recorder.state["side_effect"] = TmuxError(
         "capture-pane failed: pane is dead"
@@ -371,7 +371,7 @@ def test_force__force_kills_pane_then_deregisters(
     kill_pane_recorder,
     wait_for_pane_gone_recorder,
 ):
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: _member())
 
     result = _invoke(runner, fleet_id, "--force")
     assert result.exit_code == 0, result.output
@@ -385,7 +385,7 @@ def test_force__force_kills_pane_then_deregisters(
     names = [name for (name, *_) in call_log]
     assert names == [
         "kill_pane",
-        "deregister_agent",
+        "deregister_member",
     ]
 
     out = result.output
@@ -401,7 +401,7 @@ def test_force__force_short_flag_works(
     send_exit_recorder,
     kill_pane_recorder,
 ):
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: _member())
 
     result = _invoke(runner, fleet_id, "-f")
     assert result.exit_code == 0, result.output
@@ -416,13 +416,13 @@ def test_force__force_json_output_pane_status_killed(
     deregister_recorder,
     kill_pane_recorder,
 ):
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: _member())
 
     result = _invoke_json(runner, fleet_id, "--force")
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
     assert data == {
-        "agent_id": MEMBER_ID,
+        "member_id": MEMBER_ID,
         "pane_status": f"{PANE_ID} (killed)",
     }
 
@@ -440,8 +440,8 @@ def test_pending_placement_force__force_with_pending_placement_skips_all_tmux(
 ):
     monkeypatch.setattr(
         broker,
-        "get_agent",
-        lambda *_a, **_kw: _agent(placement=_placement(mux_pane_id=None)),
+        "get_member",
+        lambda *_a, **_kw: _member(placement=_placement(mux_pane_id=None)),
     )
 
     result = _invoke(runner, fleet_id, "--force")
@@ -454,31 +454,31 @@ def test_pending_placement_force__force_with_pending_placement_skips_all_tmux(
     assert wait_for_pane_gone_recorder.calls == []
 
     names = [name for (name, *_) in call_log]
-    assert names == ["deregister_agent"]
+    assert names == ["deregister_member"]
 
 
-def test_authorization_boundary__missing_agent_exits_one(
+def test_authorization_boundary__missing_member_exits_one(
     runner, fleet_id, monkeypatch, deregister_recorder
 ):
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: None)
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: None)
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
     assert str(MEMBER_ID) in out
     assert "failed to fetch member" not in out
-    assert f"Error: Agent {MEMBER_ID} not found" in out
+    assert f"Error: Member {MEMBER_ID} not found" in out
     assert deregister_recorder == []
 
 
 def test_authorization_boundary__fetch_db_error_surfaces_failed_to_fetch_wording(
     runner, fleet_id, monkeypatch, deregister_recorder
 ):
-    """Symmetric guard: real ``get_agent`` failures surface as ClickException."""
+    """Symmetric guard: real ``get_member`` failures surface as ClickException."""
 
     def boom(*_a, **_kw):
         raise RuntimeError("db connection lost")
 
-    monkeypatch.setattr(broker, "get_agent", boom)
+    monkeypatch.setattr(broker, "get_member", boom)
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 1
     out = result.output or ""
@@ -499,7 +499,9 @@ def test_placementless__soft_delete_succeeds_without_pane_mutation(
 ):
     """A placementless target is a pure registry soft-delete: exit 0, no tmux
     pane mutation, ``pane_status`` ``(no placement)``."""
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent(placement=None))
+    monkeypatch.setattr(
+        broker, "get_member", lambda *_a, **_kw: _member(placement=None)
+    )
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 0, result.output
 
@@ -508,7 +510,7 @@ def test_placementless__soft_delete_succeeds_without_pane_mutation(
     assert kill_pane_recorder == []
     assert wait_for_pane_gone_recorder.calls == []
     names = [name for (name, *_) in call_log]
-    assert names == ["deregister_agent"]
+    assert names == ["deregister_member"]
 
     out = result.output
     assert "Member deleted." in out
@@ -519,12 +521,14 @@ def test_placementless__soft_delete_succeeds_without_pane_mutation(
 def test_placementless__json_pane_status_no_placement(
     runner, fleet_id, monkeypatch, deregister_recorder
 ):
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent(placement=None))
+    monkeypatch.setattr(
+        broker, "get_member", lambda *_a, **_kw: _member(placement=None)
+    )
     result = _invoke_json(runner, fleet_id)
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
     assert data == {
-        "agent_id": MEMBER_ID,
+        "member_id": MEMBER_ID,
         "pane_status": "(no placement)",
     }
 
@@ -534,12 +538,14 @@ def test_administrator_guard__broker_error_surfaces_verbatim(
 ):
     """The broker's Administrator guard reaches the operator verbatim (no
     ``deregister failed:`` wrapping), exit 1."""
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent(placement=None))
+    monkeypatch.setattr(
+        broker, "get_member", lambda *_a, **_kw: _member(placement=None)
+    )
 
     def guard(_member_id):
         raise click.ClickException("Administrator cannot be deregistered")
 
-    monkeypatch.setattr(broker, "deregister_agent", guard)
+    monkeypatch.setattr(broker, "deregister_member", guard)
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     out = result.output or ""
@@ -557,7 +563,9 @@ def test_tmux_relaxation__placementless_delete_succeeds_without_tmux(
     """The tmux guard fires only on the pane-teardown paths — a placementless
     delete is a pure registry operation and works outside tmux."""
     monkeypatch.setattr(TmuxMultiplexer, "ensure_available", _tmux_unavailable)
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent(placement=None))
+    monkeypatch.setattr(
+        broker, "get_member", lambda *_a, **_kw: _member(placement=None)
+    )
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 0, result.output
     assert deregister_recorder == [MEMBER_ID]
@@ -570,8 +578,8 @@ def test_tmux_relaxation__pending_placement_delete_succeeds_without_tmux(
     monkeypatch.setattr(TmuxMultiplexer, "ensure_available", _tmux_unavailable)
     monkeypatch.setattr(
         broker,
-        "get_agent",
-        lambda *_a, **_kw: _agent(placement=_placement(mux_pane_id=None)),
+        "get_member",
+        lambda *_a, **_kw: _member(placement=_placement(mux_pane_id=None)),
     )
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 0, result.output
@@ -584,7 +592,7 @@ def test_tmux_relaxation__live_pane_delete_still_requires_tmux(
     """A live-pane teardown still needs tmux: unavailable tmux fails the
     delete before any deregister."""
     monkeypatch.setattr(TmuxMultiplexer, "ensure_available", _tmux_unavailable)
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: _member())
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 1, result.output
     assert "tmux binary not found" in (result.output or "")
@@ -597,8 +605,8 @@ def test_pending_placement__pending_pane_id_skips_send_exit(
     """Pending placements still deregister but skip the pane ``/exit``."""
     monkeypatch.setattr(
         broker,
-        "get_agent",
-        lambda *_a, **_kw: _agent(placement=_placement(mux_pane_id=None)),
+        "get_member",
+        lambda *_a, **_kw: _member(placement=_placement(mux_pane_id=None)),
     )
     result = _invoke(runner, fleet_id)
     assert result.exit_code == 0, result.output
@@ -617,7 +625,7 @@ def test_tmux_error_on_send_exit__send_exit_failure_now_exits_one_with_recovery_
     The wording points operators at `cafleet doctor` and `--force`, with no
     raw tmux command exposed.
     """
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: _member())
 
     def fake_send_exit(self, **_kw):
         raise TmuxError("send-keys failed: pane is dead")
@@ -642,7 +650,7 @@ def test_tmux_error_on_wait_for_pane_gone__exits_one_with_backend_name(
     """A MultiplexerError while waiting for the pane to close is a hard exit-1,
     surfaced with the resolved backend name (``{mux.name}`` = tmux in the test
     env) and the target pane id. The member is not deregistered."""
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: _member())
     monkeypatch.setattr(TmuxMultiplexer, "send_exit", lambda self, **_kw: None)
 
     def fake_wait(self, **_kw):
@@ -673,7 +681,7 @@ def test_root_director__rejected_before_any_tmux_pane_mutation(
     """``member delete --member-id <root-director-id>`` is rejected with the
     root-Director error BEFORE any tmux pane mutation.
 
-    The downstream ``broker.deregister_agent`` root-guard fires only AFTER
+    The downstream ``broker.deregister_member`` root-guard fires only AFTER
     ``send_exit`` / ``kill_pane``, so without the early guard a root delete
     would inject ``/exit`` into (or kill) the Director's own pane before
     failing. This regression pins the early guard: no ``send_exit`` /
@@ -688,10 +696,10 @@ def test_root_director__rejected_before_any_tmux_pane_mutation(
             "name": None,
             "created_at": "2026-05-05T00:00:00+00:00",
             "deleted_at": None,
-            "director_agent_id": MEMBER_ID,
+            "director_member_id": MEMBER_ID,
         },
     )
-    monkeypatch.setattr(broker, "get_agent", lambda *_a, **_kw: _agent())
+    monkeypatch.setattr(broker, "get_member", lambda *_a, **_kw: _member())
 
     result = _invoke(runner, fleet_id, *extra_args)
     assert result.exit_code != 0, result.output
@@ -706,4 +714,4 @@ def test_root_director__rejected_before_any_tmux_pane_mutation(
     names = [name for (name, *_) in call_log]
     assert "send_exit" not in names
     assert "kill_pane" not in names
-    assert "deregister_agent" not in names
+    assert "deregister_member" not in names

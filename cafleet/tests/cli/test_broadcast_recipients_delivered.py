@@ -9,7 +9,7 @@ import pytest
 from click.testing import CliRunner
 
 from cafleet.cli import cli
-from tests.broker._helpers import _create_fleet, _register_agent
+from tests.broker._helpers import _create_fleet, _register_member
 
 
 @pytest.fixture
@@ -19,9 +19,9 @@ def runner():
 
 def test_broadcast_cli_prints_recipients_and_delivered(runner):
     sid = _create_fleet()["fleet_id"]
-    sender = _register_agent(sid, "sender")
-    _register_agent(sid, "recipient-a")
-    _register_agent(sid, "recipient-b")
+    sender = _register_member(sid, "sender")
+    _register_member(sid, "recipient-a")
+    _register_member(sid, "recipient-b")
 
     result = runner.invoke(
         cli,
@@ -30,8 +30,8 @@ def test_broadcast_cli_prints_recipients_and_delivered(runner):
             "broadcast",
             "--fleet-id",
             str(sid),
-            "--agent-id",
-            str(sender["agent_id"]),
+            "--from-member-id",
+            str(sender["member_id"]),
             "--text",
             "hi all",
         ],

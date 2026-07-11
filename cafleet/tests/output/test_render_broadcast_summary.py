@@ -3,7 +3,7 @@
 import pytest
 
 from cafleet import broker
-from tests.broker._helpers import _create_fleet, _register_agent
+from tests.broker._helpers import _create_fleet, _register_member
 
 
 @pytest.fixture(autouse=True)
@@ -14,18 +14,18 @@ def _autouse_broker(broker_session):
 def test_broadcast_summary__exactly_typed_column_keys_no_recipient_ids_no_metadata():
     s = _create_fleet()
     sid = s["fleet_id"]
-    sender = _register_agent(sid, "sender")
-    _register_agent(sid, "recipient-a")
-    _register_agent(sid, "recipient-b")
+    sender = _register_member(sid, "sender")
+    _register_member(sid, "recipient-a")
+    _register_member(sid, "recipient-b")
 
-    [result] = broker.broadcast_message(sid, sender["agent_id"], "hi all")
+    [result] = broker.broadcast_message(sid, sender["member_id"], "hi all")
     summary = result["task"]
 
     expected_keys = {
         "task_id",
         "context_id",
-        "from_agent_id",
-        "to_agent_id",
+        "from_member_id",
+        "to_member_id",
         "type",
         "created_at",
         "status_state",
@@ -40,11 +40,11 @@ def test_broadcast_summary__exactly_typed_column_keys_no_recipient_ids_no_metada
 def test_broadcast_summary__wrapper_count_and_text_describes_recipient_count():
     s = _create_fleet()
     sid = s["fleet_id"]
-    sender = _register_agent(sid, "sender")
-    _register_agent(sid, "recipient-a")
-    _register_agent(sid, "recipient-b")
+    sender = _register_member(sid, "sender")
+    _register_member(sid, "recipient-a")
+    _register_member(sid, "recipient-b")
 
-    [result] = broker.broadcast_message(sid, sender["agent_id"], "hi all")
+    [result] = broker.broadcast_message(sid, sender["member_id"], "hi all")
     assert isinstance(result["recipients"], int)
     assert isinstance(result["delivered"], int)
     summary_text = result["task"]["text"]

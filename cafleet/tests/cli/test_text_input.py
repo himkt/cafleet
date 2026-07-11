@@ -204,20 +204,20 @@ def test_read_text_input__empty_stdin_raises_click_exception(monkeypatch, raw):
 
 _SUB_KWARGS = {
     "fleet_id": 11,
-    "agent_id": 22,
-    "director_agent_id": 33,
+    "member_id": 22,
+    "director_member_id": 33,
     "coding_agent": "claude",
 }
 
 
 def test_substitute__all_four_placeholders_substituted():
     body = (
-        "fleet={fleet_id} agent={agent_id} "
-        "director={director_agent_id} ca={coding_agent}"
+        "fleet={fleet_id} member={member_id} "
+        "director={director_member_id} ca={coding_agent}"
     )
     result = substitute_spawn_placeholders(body, **_SUB_KWARGS)
-    assert result == "fleet=11 agent=22 director=33 ca=claude"
-    for raw in ("{fleet_id}", "{agent_id}", "{director_agent_id}", "{coding_agent}"):
+    assert result == "fleet=11 member=22 director=33 ca=claude"
+    for raw in ("{fleet_id}", "{member_id}", "{director_member_id}", "{coding_agent}"):
         assert raw not in result
 
 
@@ -239,8 +239,8 @@ def test_substitute__unknown_placeholder_raises_usage_error_listing_supported():
     message = str(exc_info.value)
     for needle in (
         "{fleet_id}",
-        "{agent_id}",
-        "{director_agent_id}",
+        "{member_id}",
+        "{director_member_id}",
         "{coding_agent}",
     ):
         assert needle in message
@@ -250,7 +250,7 @@ def test_substitute__unknown_placeholder_raises_usage_error_listing_supported():
     ("scenario", "body"),
     [
         ("unmatched_brace", "hello {unclosed"),
-        ("attribute_access", "hello {agent_id.foo}"),
+        ("attribute_access", "hello {member_id.foo}"),
     ],
 )
 def test_substitute__malformed_prompt_raises_usage_error(scenario, body):

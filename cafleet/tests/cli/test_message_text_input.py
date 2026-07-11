@@ -5,8 +5,7 @@ Both commands drop ``required=True`` on ``--text``, gain ``--text-file``, and
 resolve the body through the shared ``read_text_input`` helper (no placeholder
 substitution — that is ``member create``-only). The body is passed verbatim to
 ``broker.send_message`` / ``broker.broadcast_message``. Empty-body rejection is
-uniform across inline / file / stdin — this tightens the two commands, which
-previously accepted an empty ``--text`` (an accepted breaking change).
+uniform across inline / file / stdin.
 """
 
 import pytest
@@ -16,7 +15,7 @@ from cafleet import broker
 from cafleet.cli import cli
 
 FLEET_ID = 100
-AGENT_ID = 200
+MEMBER_ID = 200
 TO_ID = 300
 TASK_ID = 400
 
@@ -28,17 +27,17 @@ def runner():
 
 @pytest.fixture(autouse=True)
 def _stub_verify(monkeypatch):
-    # ``message send`` gates on verify_agent_fleet; stub it True so the only
+    # ``message send`` gates on verify_member_fleet; stub it True so the only
     # error surface exercised here is the shared text-input helper.
-    monkeypatch.setattr(broker, "verify_agent_fleet", lambda *_a, **_k: True)
+    monkeypatch.setattr(broker, "verify_member_fleet", lambda *_a, **_k: True)
 
 
 def _task_payload(text):
     return {
         "task_id": TASK_ID,
         "context_id": TO_ID,
-        "from_agent_id": AGENT_ID,
-        "to_agent_id": TO_ID,
+        "from_member_id": MEMBER_ID,
+        "to_member_id": TO_ID,
         "type": "unicast",
         "created_at": "2026-05-01T00:00:00+00:00",
         "status_state": "input_required",
@@ -84,9 +83,9 @@ def _send_args(*extra):
         "send",
         "--fleet-id",
         str(FLEET_ID),
-        "--agent-id",
-        str(AGENT_ID),
-        "--to",
+        "--from-member-id",
+        str(MEMBER_ID),
+        "--to-member-id",
         str(TO_ID),
         *extra,
     ]
@@ -98,8 +97,8 @@ def _broadcast_args(*extra):
         "broadcast",
         "--fleet-id",
         str(FLEET_ID),
-        "--agent-id",
-        str(AGENT_ID),
+        "--from-member-id",
+        str(MEMBER_ID),
         *extra,
     ]
 
@@ -140,14 +139,13 @@ def test_send__inline_text_still_reaches_broker(runner, send_recorder):
 
 def test_send__body_not_placeholder_substituted(runner, send_recorder):
     # Only member create substitutes; message send passes the body verbatim.
-    result = runner.invoke(cli, _send_args("--text", "hi {agent_id}"))
+    result = runner.invoke(cli, _send_args("--text", "hi {member_id}"))
     assert result.exit_code == 0, result.output
-    assert _body_of(send_recorder[0]) == "hi {agent_id}"
+    assert _body_of(send_recorder[0]) == "hi {member_id}"
 
 
 @pytest.mark.parametrize("empty", ["", "   ", "\t"])
 def test_send__empty_inline_text_rejected(runner, send_recorder, empty):
-    # Breaking change (§1): empty --text is now rejected (was previously accepted).
     result = runner.invoke(cli, _send_args("--text", empty))
     assert result.exit_code == 2, result.output
     assert "text may not be empty." in result.output

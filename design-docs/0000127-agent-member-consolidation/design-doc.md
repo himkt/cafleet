@@ -1,7 +1,7 @@
 # Agent → Member Consolidation, Uniform Identity Flags, and Director Auto-Discovery
 
 **Status**: Approved
-**Progress**: 26/28 tasks complete
+**Progress**: 29/29 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -228,7 +228,7 @@ Per the removal rule: after this lands, the repository reads as if the registry 
 - [x] Bump the default DB filename to `cafleet_v3.db` in `config.py` (`_default_database_url` factory and both docstrings) <!-- completed: 2026-07-11T03:17 -->
 - [x] Update `db/models.py`: `Member` / `MemberPlacement`, renamed columns and indexes, `director_agent_id` column + `idx_placements_director` deleted <!-- completed: 2026-07-11T03:17 -->
 - [x] Delete `db/alembic/versions/0001_initial_schema.py` and regenerate the fresh initial `0001` via `mise //cafleet:makemigration "initial schema"` from the renamed models; review per `database-migrations.md` <!-- completed: 2026-07-11T03:17 -->
-- [ ] Restore the chain-guard test in `tests/db/test_alembic_smoke.py` to the single-revision assertion over the fresh `0001` and remove the now-obsolete migration-0002 upgrade suite <!-- completed: -->
+- [x] Restore the chain-guard test in `tests/db/test_alembic_smoke.py` to the single-revision assertion over the fresh `0001` and remove the now-obsolete migration-0002 upgrade suite <!-- completed: 2026-07-11T07:12 -->
 
 ### Step 3: Broker
 
@@ -254,9 +254,9 @@ Per the removal rule: after this lands, the repository reads as if the registry 
 
 ### Step 6: Tests and verification
 
-- [ ] Sweep `tests/broker/`, `tests/cli/`, `tests/output/`, `tests/webui/`, `tests/db/`, `tests/multiplexer/`, `tests/monitor/`, `tests/coding_agent/` to the renamed flags, functions, keys, and error strings <!-- completed: -->
+- [x] Sweep `tests/broker/`, `tests/cli/`, `tests/output/`, `tests/webui/`, `tests/db/`, `tests/multiplexer/`, `tests/monitor/`, `tests/coding_agent/` to the renamed flags, functions, keys, and error strings <!-- completed: 2026-07-11T07:12 -->
 
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format` all pass <!-- completed: -->
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format` all pass <!-- completed: 2026-07-11T07:12 -->
 
 ---
 

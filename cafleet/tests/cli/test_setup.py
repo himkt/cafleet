@@ -221,7 +221,7 @@ def test_bare_setup_runs_both_halves_and_records_rows(homes, registry_db, monkey
     result = _run_setup()
 
     assert result.exit_code == 0, result.output
-    assert {"fleets", "agents", "skill_installs"} <= _table_names(registry_db)
+    assert {"fleets", "members", "skill_installs"} <= _table_names(registry_db)
     assert _installed_skill_dirs(homes["claude"]) == set(SKILL_DIR_NAMES)
     assert _installed_skill_dirs(homes["opencode"]) == set(SKILL_DIR_NAMES)
     assert not homes["codex"].exists()

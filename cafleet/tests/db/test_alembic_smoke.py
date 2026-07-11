@@ -168,7 +168,7 @@ def test_member_placements_table_created_by_migration(alembic_upgraded_db):
         ):
             assert cols[name]["nullable"] is False
 
-        # backend backfills existing rows to 'tmux' (matching their provenance)
+        # backend defaults to 'tmux'
         assert "tmux" in str(cols["backend"]["default"])
 
         assert insp.get_indexes("member_placements") == []

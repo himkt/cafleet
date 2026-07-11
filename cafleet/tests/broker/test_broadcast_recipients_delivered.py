@@ -13,16 +13,16 @@ N and k diverge.
 """
 
 from cafleet import broker
-from tests.broker._helpers import _create_fleet, _register_agent
+from tests.broker._helpers import _create_fleet, _register_member
 
 
 def test_broadcast_result_carries_separate_recipients_and_delivered():
     sid = _create_fleet()["fleet_id"]
-    sender = _register_agent(sid, "sender")
-    _register_agent(sid, "recipient-a")
-    _register_agent(sid, "recipient-b")
+    sender = _register_member(sid, "sender")
+    _register_member(sid, "recipient-a")
+    _register_member(sid, "recipient-b")
 
-    [result] = broker.broadcast_message(sid, sender["agent_id"], "hi all")
+    [result] = broker.broadcast_message(sid, sender["member_id"], "hi all")
 
     assert result["recipients"] == 3
     assert result["delivered"] == 1
@@ -32,9 +32,9 @@ def test_broadcast_result_carries_separate_recipients_and_delivered():
 
 def test_broadcast_result_drops_legacy_notifications_sent_count_key():
     sid = _create_fleet()["fleet_id"]
-    sender = _register_agent(sid, "sender")
-    _register_agent(sid, "recipient-a")
+    sender = _register_member(sid, "sender")
+    _register_member(sid, "recipient-a")
 
-    [result] = broker.broadcast_message(sid, sender["agent_id"], "hi all")
+    [result] = broker.broadcast_message(sid, sender["member_id"], "hi all")
 
     assert "notifications_sent_count" not in result

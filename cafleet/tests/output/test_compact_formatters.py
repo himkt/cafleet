@@ -3,15 +3,15 @@
 from cafleet import output
 
 
-def _agent(
+def _member(
     *,
-    agent_id=12345,
+    member_id=12345,
     name="Claude-B",
     description="Reviewer for PR #42",
     status="active",
 ) -> dict:
     return {
-        "agent_id": agent_id,
+        "member_id": member_id,
         "name": name,
         "description": description,
         "status": status,
@@ -24,17 +24,17 @@ def _agent(
 def _fleet_create_data(
     *,
     fleet_id=7000,
-    director_agent_id=8000,
+    director_member_id=8000,
     name="my-project",
-    administrator_agent_id=9000,
+    administrator_member_id=9000,
 ) -> dict:
     return {
         "fleet_id": fleet_id,
         "name": name,
         "created_at": "2026-04-16T08:50:00+00:00",
-        "administrator_agent_id": administrator_agent_id,
+        "administrator_member_id": administrator_member_id,
         "director": {
-            "agent_id": director_agent_id,
+            "member_id": director_member_id,
             "name": "Director",
             "placement": {
                 "mux_session": "main",
@@ -48,14 +48,14 @@ def _fleet_create_data(
 
 def _member_data(
     *,
-    agent_id=12345,
+    member_id=12345,
     name="Claude-B",
     pane_id="%7",
     window_id="@3",
     coding_agent="claude",
 ) -> dict:
     return {
-        "agent_id": agent_id,
+        "member_id": member_id,
         "name": name,
         "placement": {
             "mux_pane_id": pane_id,
@@ -65,14 +65,14 @@ def _member_data(
     }
 
 
-def test_format_agent__compact_shape_and_default_kwarg():
-    agent = _agent(
-        agent_id=12345,
+def test_format_member_detail__compact_shape_and_default_kwarg():
+    member = _member(
+        member_id=12345,
         name="Claude-B",
         status="active",
         description="A very wordy description we don't want in lists",
     )
-    rendered = output.format_agent(agent, full=False)
+    rendered = output.format_member_detail(member, full=False)
     assert "\n" not in rendered
     assert "12345" in rendered
     assert "Claude-B" in rendered
@@ -80,14 +80,16 @@ def test_format_agent__compact_shape_and_default_kwarg():
     # Description is dropped in compact form.
     assert "A very wordy description" not in rendered
     # Default kwarg matches full=False.
-    assert output.format_agent(_agent()) == output.format_agent(_agent(), full=False)
+    assert output.format_member_detail(_member()) == output.format_member_detail(
+        _member(), full=False
+    )
 
 
-def test_format_agent__full_layout_has_labels_and_more_lines():
-    full = output.format_agent(_agent(), full=True)
-    compact = output.format_agent(_agent(), full=False)
+def test_format_member_detail__full_layout_has_labels_and_more_lines():
+    full = output.format_member_detail(_member(), full=True)
+    compact = output.format_member_detail(_member(), full=False)
     for needle in (
-        "agent_id:",
+        "member_id:",
         "name:",
         "description:",
         "status:",
@@ -123,7 +125,7 @@ def test_format_fleet_create__full_layout_has_labels_and_more_lines():
 
 def test_format_member__compact_shape_and_default_kwarg():
     rendered = output.format_member(
-        _member_data(agent_id=12345, name="Claude-B"),
+        _member_data(member_id=12345, name="Claude-B"),
         full=False,
     )
     assert "\n" not in rendered
@@ -137,7 +139,7 @@ def test_format_member__full_layout_has_labels_and_more_lines():
     full = output.format_member(_member_data(), full=True)
     compact = output.format_member(_member_data(), full=False)
     assert full.count("\n") >= 5
-    for needle in ("agent_id:", "name:", "backend:", "pane_id:", "window_id:"):
+    for needle in ("member_id:", "name:", "backend:", "pane_id:", "window_id:"):
         assert needle in full
     assert full.count("\n") > compact.count("\n")
 
