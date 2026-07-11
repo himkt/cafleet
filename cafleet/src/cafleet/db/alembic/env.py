@@ -27,8 +27,8 @@ def _use_sequential_revision_id(context, revision, directives) -> None:
     """Mint zero-padded sequential revision ids (0001, 0002, …) instead of
     Alembic's default random hex, so ``alembic revision [--autogenerate]``
     produces ``000N_<slug>.py`` that matches the hand-authored chain and the
-    ``test_nine_migration_revisions_exist`` snapshot guard. Generate migrations
-    via ``mise //cafleet:makemigration``."""
+    chain-guard snapshot in ``tests/db/test_alembic_smoke.py``. Generate
+    migrations via ``mise //cafleet:makemigration``."""
     if not directives:
         return
     head = ScriptDirectory.from_config(context.config).get_current_head()
