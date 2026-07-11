@@ -304,7 +304,7 @@ class HerdrMultiplexer:
             "stall-check capture, classify unknown. Never re-engage a pane "
             "classified awaiting_user: when the Director is awaiting_user, send "
             "nothing this wake, whatever the other panes show. Otherwise re-engage "
-            "the Director via cafleet member nudge when a due member is stalled or "
+            "the Director via cafleet message send when a due member is stalled or "
             "finished, or the Director is finished with un-acked work."
         )
 

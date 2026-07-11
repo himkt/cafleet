@@ -73,7 +73,7 @@ def _send_literal_then_enter(
         # blindly confirm it. Applied wherever the target pane MAY be parked on
         # such a prompt: ``send_poll_trigger`` (``cafleet member ping`` — a
         # member that might be on a prompt) and ``send_inline_preview`` (every
-        # inbound ``message send`` / ``broadcast`` / ``member nudge`` — any
+        # inbound ``message send`` / ``broadcast`` — any
         # recipient, the Director included). It is NOT applied where a leading
         # ``Esc`` would mis-fire — ``send_exit`` (``Esc`` before ``/exit``) and
         # ``send_bash_command`` (``Esc`` before ``! <cmd>``) — nor where the pane
@@ -280,7 +280,7 @@ class TmuxMultiplexer:
             "stall-check capture, classify unknown. Never re-engage a pane "
             "classified awaiting_user: when the Director is awaiting_user, send "
             "nothing this wake, whatever the other panes show. Otherwise re-engage "
-            "the Director via cafleet member nudge when a due member is stalled or "
+            "the Director via cafleet message send when a due member is stalled or "
             "finished, or the Director is finished with un-acked work."
         )
         return _best_effort_send(target_pane_id=target_pane_id, payload=payload)
