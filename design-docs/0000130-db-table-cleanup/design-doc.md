@@ -86,7 +86,7 @@ The regenerated chain reuses revision id `0001`, so a pre-existing v4 database r
 | Multiplexer | `multiplexer/base.py`, `multiplexer/tmux.py`, `multiplexer/herdr.py` | Inline-preview identifiers referencing the message row |
 | CLI | `cli/message.py` | `--message-id` on `ack` / `cancel` / `show`; echo/JSON key `result["message"]["message_id"]` |
 | WebUI | `webui/api.py` | `_format_messages` output keys `message_id` / `origin_message_id`; the `POST /api/messages/send` response body's raw `task_id` key (lines 180 and 189, outside `_format_messages`) → `message_id` |
-| Admin | `admin/src/types.ts`, `components/Timeline.tsx`, `components/MemberDetail.tsx`, `components/ReactionBar.tsx` | Renamed keys; `mise //admin:build` regenerates the committed `webui/dist` bundle |
+| Admin | `admin/src/types.ts`, `components/Timeline.tsx`, `components/MemberDetail.tsx`, `components/ReactionBar.tsx` | Renamed keys; `mise //admin:build` regenerates the gitignored `webui/dist` bundle |
 | Tests | ~24 files under `cafleet/tests/` | Fixtures, assertions, test names (e.g. `test_list_inbox__filters_broadcast_summary_and_context_id_scope`), and the file rename `tests/output/test_render_task.py` → `test_render_message.py` |
 
 ### Documentation surface
@@ -162,7 +162,7 @@ Documentation-first order applies (per `.claude/rules/documentation-maintenance.
 
 - [x] Update `webui/api.py`: `_format_messages` output keys and the `POST /api/messages/send` response body's `task_id` key (lines 180, 189) <!-- completed: 2026-07-12T01:08 -->
 - [x] Update `admin/src/types.ts`, `Timeline.tsx`, `MemberDetail.tsx`, `ReactionBar.tsx` <!-- completed: 2026-07-12T01:08 -->
-- [x] Run `mise //admin:build` to regenerate the committed `webui/dist` bundle <!-- completed: 2026-07-12T01:08 -->
+- [x] Run `mise //admin:build` to regenerate the gitignored `webui/dist` bundle <!-- completed: 2026-07-12T01:08 -->
 
 ### Step 6: Test sweep and verification
 
