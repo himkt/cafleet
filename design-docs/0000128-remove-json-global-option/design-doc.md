@@ -10,12 +10,12 @@ The `cafleet` CLI defines `--json` as a global option on the root click group, p
 
 ## Success Criteria
 
-- [ ] Any pre-subcommand use (e.g. `cafleet --json doctor`) fails with Click's standard `No such option: --json` error, exit 2
-- [ ] Every subcommand in the § *Flag surface* table accepts a trailing `--json` and emits the same JSON it emitted under the global flag (compact single-line, UTF-8, identical shape)
-- [ ] `--full` / `--quiet` composition is unchanged: truncation is applied before the json-vs-text fork; `--quiet` remains text-only
-- [ ] No live surface (source, tests, `SPEC.md`, `docs/`, `skills/`, `.claude/`) mentions a global `--json`; `docs/spec/cli-options.md` no longer documents companion `Bash(cafleet --json ...)` permission patterns
-- [ ] A regression guard asserts the pre-subcommand position no longer parses (exit 2, `No such option`)
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass
+- [x] Any pre-subcommand use (e.g. `cafleet --json doctor`) fails with Click's standard `No such option: --json` error, exit 2
+- [x] Every subcommand in the § *Flag surface* table accepts a trailing `--json` and emits the same JSON it emitted under the global flag (compact single-line, UTF-8, identical shape)
+- [x] `--full` / `--quiet` composition is unchanged: truncation is applied before the json-vs-text fork; `--quiet` remains text-only
+- [x] No live surface (source, tests, `SPEC.md`, `docs/`, `skills/`, `.claude/`) mentions a global `--json`; `docs/spec/cli-options.md` no longer documents companion `Bash(cafleet --json ...)` permission patterns
+- [x] A regression guard asserts the pre-subcommand position no longer parses (exit 2, `No such option`)
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass
 
 ---
 
