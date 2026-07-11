@@ -1,7 +1,7 @@
 # Agent → Member Consolidation, Uniform Identity Flags, and Director Auto-Discovery
 
 **Status**: Approved
-**Progress**: 18/28 tasks complete
+**Progress**: 24/28 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -240,12 +240,12 @@ Per the removal rule: after this lands, the repository reads as if the registry 
 
 ### Step 4: CLI
 
-- [ ] Replace flag declarations in `cli/_helpers.py` (`member_id_option`, `from_member_id_option`, `to_member_id_option`) and apply the per-command table across `cli/message.py`, `cli/member.py`, `cli/monitor.py` <!-- completed: -->
-- [ ] `member create`: Director auto-resolution with the § #185 error table; placement dict without a director id <!-- completed: -->
-- [ ] Rename spawn placeholders to `{member_id}` / `{director_member_id}` in `cli/_text_input.py` including the unknown-placeholder error text <!-- completed: -->
-- [ ] Rename registry ids in `multiplexer/` (poll-trigger payload `--member-id` in `tmux.py` / `herdr.py`; `send_poll_trigger` / `send_monitor_report` signatures incl. `due_members`) and `monitor/loop.py` (`director_member_id`, `member_id`, `_last_member_status`) <!-- completed: -->
-- [ ] Update `output/` formatters: `format_member_detail`, renamed labels and result-dict keys (`member_id`, `director_member_id`, `administrator_member_id`, `from_member_id` / `to_member_id`) <!-- completed: -->
-- [ ] Add the removed-spelling regression guard (`--agent-id` / `--to` no longer parse) alongside the existing `test_agent_group_removed.py` <!-- completed: -->
+- [x] Replace flag declarations in `cli/_helpers.py` (`member_id_option`, `from_member_id_option`, `to_member_id_option`) and apply the per-command table across `cli/message.py`, `cli/member.py`, `cli/monitor.py` <!-- completed: 2026-07-11T03:40 -->
+- [x] `member create`: Director auto-resolution with the § #185 error table; placement dict without a director id <!-- completed: 2026-07-11T03:40 -->
+- [x] Rename spawn placeholders to `{member_id}` / `{director_member_id}` in `cli/_text_input.py` including the unknown-placeholder error text <!-- completed: 2026-07-11T03:40 -->
+- [x] Rename registry ids in `multiplexer/` (poll-trigger payload `--member-id` in `tmux.py` / `herdr.py`; `send_poll_trigger` / `send_wake_trigger` signatures incl. `due_members`) and `monitor/loop.py` (`director_member_id`, `member_id`, `_last_member_status`) <!-- completed: 2026-07-11T03:40 -->
+- [x] Update `output/` formatters: `format_member_detail`, renamed labels and result-dict keys (`member_id`, `director_member_id`, `administrator_member_id`, `from_member_id` / `to_member_id`) <!-- completed: 2026-07-11T03:40 -->
+- [x] Add the removed-spelling regression guard (`--agent-id` / `--to` no longer parse) alongside the existing `test_agent_group_removed.py` <!-- completed: 2026-07-11T03:40 -->
 
 ### Step 5: WebUI and admin frontend
 

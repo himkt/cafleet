@@ -1,10 +1,10 @@
 """Output rendering and formatting shared by the CLI and WebUI."""
 
 from cafleet.output.formatters import (
-    format_agent,
     format_fleet_create,
     format_indexed_list,
     format_member,
+    format_member_detail,
     format_member_list,
     format_member_list_activity,
     format_member_roster,
@@ -30,7 +30,7 @@ __all__ = [
     "render_tasks_in_result",
     "format_task",
     "format_indexed_list",
-    "format_agent",
+    "format_member_detail",
     "format_fleet_create",
     "format_member",
     "format_member_list",

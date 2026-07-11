@@ -121,7 +121,7 @@ def _best_effort_send(
 
 
 def _sanitize_wake_name(name: str) -> str:
-    """Neutralize the sequences in a user-controlled agent name that would break
+    """Neutralize the sequences in a user-controlled member name that would break
     the wake nudge's guarantees, before the name is interpolated into the payload:
 
     * CR/LF/tab → U+23CE (⏎), preserving the single-line guarantee.
@@ -229,7 +229,7 @@ class TmuxMultiplexer:
         )
 
     def send_poll_trigger(
-        self, *, target_pane_id: str, fleet_id: int, agent_id: int
+        self, *, target_pane_id: str, fleet_id: int, member_id: int
     ) -> bool:
         """Best-effort Esc-safeguarded ``cafleet ... message poll`` keystroke.
 
@@ -238,17 +238,17 @@ class TmuxMultiplexer:
         the trailing ``Enter``. The Director's manual ``cafleet member ping``
         reuses this helper, inheriting the safeguard for free.
         """
-        payload = f"cafleet message poll --fleet-id {fleet_id} --agent-id {agent_id}"
+        payload = f"cafleet message poll --fleet-id {fleet_id} --member-id {member_id}"
         return _best_effort_send(
             target_pane_id=target_pane_id, payload=payload, esc_first=True
         )
 
     def send_wake_trigger(
-        self, *, target_pane_id: str, due_agents: list[dict], director_agent_id: int
+        self, *, target_pane_id: str, due_members: list[dict], director_member_id: int
     ) -> bool:
         """Best-effort wake nudge for the monitoring member's pane.
 
-        Carries a single-line instruction that **names** each due agent
+        Carries a single-line instruction that **names** each due member
         (``<role> <id> (<name>) [<reasons>]``) and the Director id, directing the
         monitoring member to classify each pane on the five-state taxonomy and
         re-engage the Director — distinct from the poll command
@@ -257,30 +257,30 @@ class TmuxMultiplexer:
         member. No leading ``Escape``: the target is the monitoring member's own
         pane, which runs a read-only routine under ``dontAsk`` and is never
         parked on a permission-approval prompt, so an ``Esc`` would merely
-        self-interrupt an in-progress routine. User-controlled agent names are
+        self-interrupt an in-progress routine. User-controlled member names are
         sanitized (CR/LF/tab → U+23CE) to preserve the single-line shape, and the
         payload carries no backtick, no ``$(…)`` command substitution, and no
         pipe, so it is safe in the monitoring member's coding-agent input box. The
         payload is byte-identical to the herdr backend's.
         """
-        noun = "agent" if len(due_agents) == 1 else "agents"
+        noun = "member" if len(due_members) == 1 else "members"
         due_list = ", ".join(
-            f"{'director' if t['is_director'] else 'member'} {t['agent_id']} "
+            f"{'director' if t['is_director'] else 'member'} {t['member_id']} "
             f"({_sanitize_wake_name(t['name'])}) [{','.join(t['wake_reasons'])}]"
-            for t in due_agents
+            for t in due_members
         )
         payload = (
-            f"[monitor] wake: {len(due_agents)} {noun} due — {due_list}. "
+            f"[monitor] wake: {len(due_members)} {noun} due — {due_list}. "
             f"Capture each named pane read-only, with the Director pane "
-            f"({director_agent_id}) always inspected. From capture content only, "
+            f"({director_member_id}) always inspected. From capture content only, "
             "classify each pane in this precedence order: awaiting_user, unknown, "
-            "finished, stalled, working. For an agent tagged stall-check, compare "
+            "finished, stalled, working. For a member tagged stall-check, compare "
             "its capture against your previous stall-check capture of that pane, "
             "then keep the new capture as that pane's baseline; with no previous "
             "stall-check capture, classify unknown. Never re-engage a pane "
             "classified awaiting_user: when the Director is awaiting_user, send "
             "nothing this wake, whatever the other panes show. Otherwise re-engage "
-            "the Director via cafleet member nudge when a due agent is stalled or "
+            "the Director via cafleet member nudge when a due member is stalled or "
             "finished, or the Director is finished with un-acked work."
         )
         return _best_effort_send(target_pane_id=target_pane_id, payload=payload)
@@ -357,7 +357,7 @@ class TmuxMultiplexer:
         """Return the set of all live pane ids across the tmux server.
 
         ``tmux list-panes -a -F '#{pane_id}'`` lists every pane on the server
-        (all sessions), so one call resolves pane liveness for every agent in a
+        (all sessions), so one call resolves pane liveness for every member in a
         monitor tick. The 5 s timeout (consistent with the other tmux helpers)
         keeps a hung tmux from blocking the monitor loop indefinitely.
         """

@@ -80,13 +80,13 @@ def substitute_spawn_placeholders(
     body: str,
     *,
     fleet_id: int,
-    agent_id: int,
-    director_agent_id: int,
+    member_id: int,
+    director_member_id: int,
     coding_agent: str | None,
 ) -> str:
     """Run ``str.format`` on a spawn prompt (``member create`` only).
 
-    Substitutes ``{fleet_id}`` / ``{agent_id}`` / ``{director_agent_id}`` /
+    Substitutes ``{fleet_id}`` / ``{member_id}`` / ``{director_member_id}`` /
     ``{coding_agent}``; a custom prompt keeps a literal brace by doubling it
     (``{{`` / ``}}``). An unknown placeholder or a malformed brace expression is
     a ``UsageError`` (exit 2).
@@ -94,15 +94,15 @@ def substitute_spawn_placeholders(
     try:
         return body.format(
             fleet_id=fleet_id,
-            agent_id=agent_id,
-            director_agent_id=director_agent_id,
+            member_id=member_id,
+            director_member_id=director_member_id,
             coding_agent=coding_agent,
         )
     except KeyError as exc:
         raise click.UsageError(
             f"Unknown placeholder {exc} in custom prompt. "
-            "Supported placeholders: {fleet_id}, {agent_id}, "
-            "{director_agent_id}, {coding_agent}. "
+            "Supported placeholders: {fleet_id}, {member_id}, "
+            "{director_member_id}, {coding_agent}. "
             "Double literal braces ({{, }}) to keep them as text."
         ) from exc
     except (ValueError, IndexError, AttributeError) as exc:

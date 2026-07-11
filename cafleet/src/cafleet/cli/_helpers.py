@@ -58,7 +58,27 @@ quiet_flag = click.option(
 )
 
 
-agent_id_option = click.option("--agent-id", type=int, required=True, help="Agent ID")
+member_id_option = click.option(
+    "--member-id",
+    "member_id",
+    type=int,
+    required=True,
+    help="Member ID (the member in question)",
+)
+from_member_id_option = click.option(
+    "--from-member-id",
+    "from_member_id",
+    type=int,
+    required=True,
+    help="Sender's member ID",
+)
+to_member_id_option = click.option(
+    "--to-member-id",
+    "to_member_id",
+    type=int,
+    required=True,
+    help="Recipient member ID",
+)
 
 
 def text_body_options(text_help: str):
@@ -79,12 +99,6 @@ def text_body_options(text_help: str):
         return click.option("--text", "text", default=None, help=text_help)(func)
 
     return decorator
-
-
-def director_member_options(func):
-    return click.option(
-        "--member-id", type=int, required=True, help="Target member's agent ID"
-    )(func)
 
 
 def _fleet_id_callback(
@@ -113,13 +127,17 @@ fleet_id_option = click.option(
 
 def client_command(
     *,
-    requires_agent_fleet: bool = False,
+    requires_member_fleet: bool = False,
+    member_kwarg: str = "member_id",
     text_formatter: Callable[..., str],
 ):
     """Subsume the boilerplate blocks shared by the ``message`` subcommands.
 
-    JSON output goes through ``render_tasks_in_result`` + ``truncate_task_text``;
-    the text formatter is called as ``text_formatter(result, full=, quiet=)``.
+    ``member_kwarg`` names the acting-member kwarg the fleet gate reads —
+    ``member_id`` for the single-member commands, ``from_member_id`` for the
+    two-party senders. JSON output goes through ``render_tasks_in_result`` +
+    ``truncate_task_text``; the text formatter is called as
+    ``text_formatter(result, full=, quiet=)``.
     """
 
     def decorator(func):
@@ -127,17 +145,17 @@ def client_command(
         def wrapper(ctx, *args, **kwargs):
             fleet_id = ctx.obj["fleet_id"]
             try:
-                if requires_agent_fleet:
-                    agent_id = kwargs.get("agent_id")
-                    if agent_id is None:
+                if requires_member_fleet:
+                    member_id = kwargs.get(member_kwarg)
+                    if member_id is None:
                         raise click.ClickException(
-                            "client_command(requires_agent_fleet=True) but no "
-                            "'agent_id' kwarg was passed. Check the @click.option "
-                            "declaration on this command."
+                            f"client_command(requires_member_fleet=True) but no "
+                            f"'{member_kwarg}' kwarg was passed. Check the "
+                            f"@click.option declaration on this command."
                         )
-                    if not broker.verify_agent_fleet(agent_id, fleet_id):
+                    if not broker.verify_member_fleet(member_id, fleet_id):
                         raise click.ClickException(
-                            f"agent {agent_id} is not a member of fleet {fleet_id}."
+                            f"member {member_id} is not in fleet {fleet_id}."
                         )
                 result = func(ctx, *args, **kwargs)
                 full = kwargs["full"]
