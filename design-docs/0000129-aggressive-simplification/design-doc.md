@@ -1,10 +1,8 @@
 # Aggressive Simplification: Drop the Administrator, Consolidate CLI, Docs, and Skills
 
 **Status**: Approved
-**Progress**: 49/52 tasks complete
+**Progress**: 52/52 tasks complete
 **Last Updated**: 2026-07-11
-
-COMMENT(claude): Review dimension added by the user — verify NO feature/capability is dropped anywhere in this branch. Breaking changes to CLI shape are acceptable; loss of functionality is not. For every removal in §§ B/C/D/E/F confirm the capability survives somewhere: member nudge → message send (same persist + Esc-safeguarded preview); the three member-list variants → the single shape (activity columns folded in; description/registered_at/session/window still available via member show and the JSON placement); --tail → --lines; Administrator sender → WebUI sends as the root Director (Send still works end to end); client_command → six plain functions with byte-identical CLI behavior; wait_agent_status had no caller (agent_status untouched); merged docs/skill pages are content-preserving. Flag any removal whose capability has no surviving home as [GAP].
 
 ## Overview
 
@@ -14,7 +12,7 @@ Shrink the repository along five axes without losing fundamental features: delet
 
 - [x] The admin WebUI is fully intact: `admin/`, `cafleet/src/cafleet/webui/`, `cafleet/tests/webui/`, and `cafleet/src/cafleet/cli/server.py` exist; `cafleet server --help` exits 0; `fastapi` and `uvicorn` remain in `cafleet/pyproject.toml` and `uv.lock`; `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` remain as settings; the WebUI docs (`docs/how-to/use-the-webui.md`, `docs/spec/webui-api.md`, SPEC.md §WebUI, README pitch/bullet) are restored
 - [x] `cafleet fleet create` seeds exactly one built-in member (the root Director) and its output carries no administrator field; the member `kind` taxonomy is exactly `director` / `monitor` / `member`; the WebUI sends as the root Director (per § B *WebUI sender model*) and its rebuilt bundle carries no administrator branch
-- [ ] The default `db_path` is `cafleet_v4.db` (legacy `cafleet_v3` databases are abandoned wholesale — no data migration); `db/alembic/versions/` contains exactly one fresh initial migration `0001` with `down_revision = None`, regenerated via `mise //cafleet:makemigration` after all implementation finished; the chain-guard test in `tests/db/test_alembic_smoke.py` asserts it; no live surface mentions `cafleet_v3`
+- [x] The default `db_path` is `cafleet_v4.db` (legacy `cafleet_v3` databases are abandoned wholesale — no data migration); `db/alembic/versions/` contains exactly one fresh initial migration `0001` with `down_revision = None`, regenerated via `mise //cafleet:makemigration` after all implementation finished; the chain-guard test in `tests/db/test_alembic_smoke.py` asserts it; no live surface mentions `cafleet_v3`
 - [x] `cafleet member nudge` no longer exists; re-engagement is documented as `cafleet message send`
 - [x] `cafleet member list` has a single output shape (no `--activity` / `--all` flags, both fail with Click's `No such option`, exit 2): every active registry entry with `kind` and `idle` columns; the WebUI `/members` endpoint still serves roster rows (`description` / `status` / `registered_at`) via the retained `broker.list_roster`
 - [x] `cafleet member capture --tail` fails with `No such option` (exit 2); `--lines` works unchanged
@@ -24,7 +22,7 @@ Shrink the repository along five axes without losing fundamental features: delet
 - [x] Skill micro-pages are merged with no content loss: `skills/cafleet/reference/{output-flags,broadcast}.md` → `reference/cli.md`; `skills/cafleet-design-doc/reference/template.md` → `reference/guidelines.md`; `skills/cafleet-research/reference/slidev/techniques/*.md` → `reference/slidev.md`; no dangling relative links remain in `skills/` or `docs/`
 - [x] `docs/concepts/multiplexer-backends.md` is folded into `docs/spec/multiplexer-backends.md`; the zensical nav has no removed pages
 - [x] SPEC.md, `docs/spec/`, and `docs/api/` all remain as surfaces (per user decision) and are content-accurate after the removals and the WebUI restoration
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //:docs-build` pass
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //:docs-build` pass
 
 ---
 
@@ -237,11 +235,11 @@ The Step 5 code deletion staged under the original scope was fully reverted in t
 
 ### Step 9: verification
 
-- [ ] Finalize the DB bump per § B *Execution sequencing* (Director-side, after the implementation fleet teardown): apply the `config.py` `db_path` bump to `cafleet_v4.db`. The committed regenerated `0001` (with its `.claude/rules/database-migrations.md` hand-edit review reapplied) is **final** — do NOT re-run `mise //cafleet:makemigration` (with `0001` present it would mint an empty `0002` and break the chain guard). Verify only: `cafleet setup db` brings the fresh v4 DB to head (`0001`) cleanly; chain-guard and `test_init.py` pass <!-- completed: -->
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format` pass <!-- completed: -->
+- [x] Finalize the DB bump per § B *Execution sequencing* (Director-side, after the implementation fleet teardown): apply the `config.py` `db_path` bump to `cafleet_v4.db`. The committed regenerated `0001` (with its `.claude/rules/database-migrations.md` hand-edit review reapplied) is **final** — do NOT re-run `mise //cafleet:makemigration` (with `0001` present it would mint an empty `0002` and break the chain guard). Verify only: `cafleet setup db` brings the fresh v4 DB to head (`0001`) cleanly; chain-guard and `test_init.py` pass <!-- completed: 2026-07-11T12:38 -->
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format` pass <!-- completed: 2026-07-11T12:38 -->
 - [x] `mise //:docs-build` passes (nav has no dead pages; WebUI pages restored) <!-- completed: 2026-07-11T12:09 -->
 - [x] `mise //cafleet:build` succeeds; `cafleet server --help` exits 0 (WebUI intact) <!-- completed: 2026-07-11T12:09 -->
-- [ ] Full-repo grep confirms no live mention of: Administrator, `member nudge`, `--activity`, `member list --all`, `--tail`, `wait_agent_status`, `client_command`, `cafleet_v3` (historical `design-docs/**` excluded); WebUI mentions are present again where restored <!-- completed: -->
+- [x] Full-repo grep confirms no live mention of: Administrator, `member nudge`, `--activity`, `member list --all`, `--tail`, `wait_agent_status`, `client_command`, `cafleet_v3` (historical `design-docs/**` excluded); WebUI mentions are present again where restored <!-- completed: 2026-07-11T12:38 -->
 
 ---
 
