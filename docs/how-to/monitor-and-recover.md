@@ -71,13 +71,13 @@ differ.
 
     ```
     5 members:
-      member_id  name      kind      backend  pane_id  idle
-      ---------  --------  --------  -------  -------  ----
-      2          Director  director  claude   %0       6s
-      3          monitor   monitor   claude   %6       -
-      4          alice     member    claude   %7       14m
-      5          bob       member    claude   %8       2m
-      6          carol     member    claude   %9       6s
+      member_id  name           kind      backend   pane_id  idle
+      ---------  -------------  --------  --------  -------  ----
+      2          Director       director  claude    %0       6s
+      3          monitor        monitor   claude    %6       -
+      4          alice          member    claude    %7       14m
+      5          bob            member    claude    %8       2m
+      6          carol          member    claude    %9       6s
     ```
 
     Inspect the quiet member — prints the last 20 lines of the pane buffer with

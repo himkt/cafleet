@@ -1,7 +1,7 @@
 # Aggressive Simplification: Drop the WebUI and Administrator, Consolidate CLI, Docs, and Skills
 
 **Status**: Approved
-**Progress**: 8/50 tasks complete
+**Progress**: 12/50 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -188,10 +188,10 @@ Steps 5–8 form one atomic implementation block: each code deletion in Steps 5�
 
 ### Step 2: `SPEC.md`
 
-- [ ] Delete the WebUI module spec (§6.8), the `server` command surface, and the `broker_host` / `broker_port` configuration rows; prune WebUI mentions elsewhere (e.g. `max_text_len` notes, checklists) <!-- completed: -->
-- [ ] Remove the Administrator: fleet bootstrap (single built-in Director), `fleet create` output shapes, kind taxonomy (3 values), broadcast recipient rule, deregister guard error string <!-- completed: -->
-- [ ] Remove `member nudge` (command surface, checklist rows, member-lifecycle sentence); rewrite `member list` to the single shape; drop the `--tail` alias; drop `wait_agent_status` from the multiplexer capability spec; update the `message` subcommand spec if it names `client_command` internals <!-- completed: -->
-- [ ] Update the broker module spec: `queries.py` gone (`get_task` lives in `messaging.py`), `get_member_names` / `list_monitor_configs` / `list_roster` / `list_members_with_activity` gone, single `list_members` documented <!-- completed: -->
+- [x] Delete the WebUI module spec (§6.8), the `server` command surface, and the `broker_host` / `broker_port` configuration rows; prune WebUI mentions elsewhere (e.g. `max_text_len` notes, checklists) <!-- completed: 2026-07-11T10:20 -->
+- [x] Remove the Administrator: fleet bootstrap (single built-in Director), `fleet create` output shapes, kind taxonomy (3 values), broadcast recipient rule, deregister guard error string <!-- completed: 2026-07-11T10:20 -->
+- [x] Remove `member nudge` (command surface, checklist rows, member-lifecycle sentence); rewrite `member list` to the single shape; drop the `--tail` alias; drop `wait_agent_status` from the multiplexer capability spec; update the `message` subcommand spec if it names `client_command` internals <!-- completed: 2026-07-11T10:20 -->
+- [x] Update the broker module spec: `queries.py` gone (`get_task` lives in `messaging.py`), `get_member_names` / `list_monitor_configs` / `list_roster` / `list_members_with_activity` gone, single `list_members` documented <!-- completed: 2026-07-11T10:20 -->
 
 ### Step 3: README, CLAUDE.md, rules
 

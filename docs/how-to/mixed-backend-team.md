@@ -110,12 +110,12 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
 
     ```
     4 members:
-      member_id  name      kind      backend   pane_id  idle
-      ---------  --------  --------  --------  -------  ----
-      2          Director  director  claude    %0       -
-      3          alice     member    claude    %7       -
-      4          bob       member    codex     %8       -
-      5          carol     member    opencode  %9       -
+      member_id  name           kind      backend   pane_id  idle
+      ---------  -------------  --------  --------  -------  ----
+      2          Director       director  claude    %0       -
+      3          alice          member    claude    %7       -
+      4          bob            member    codex     %8       -
+      5          carol          member    opencode  %9       -
     ```
 
     Message each member — repeat with `--to-member-id 4` and `--to-member-id 5`;

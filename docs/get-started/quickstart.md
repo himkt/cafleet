@@ -100,11 +100,11 @@ the `fleet create` and `member create` commands require one.
 
     ```
     3 members:
-      member_id  name         kind      backend  pane_id  idle
-      ---------  -----------  --------  -------  -------  ----
-      2          Director     director  claude   %0       -
-      3          demo-member  member    claude   %7       -
-      4          reviewer     member    claude   %8       -
+      member_id  name           kind      backend   pane_id  idle
+      ---------  -------------  --------  --------  -------  ----
+      2          Director       director  claude    %0       -
+      3          demo-member    member    claude    %7       -
+      4          reviewer       member    claude    %8       -
     ```
 
     Send a message between the members — `demo-member` (`3`) messages
