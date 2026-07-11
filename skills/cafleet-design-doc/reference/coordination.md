@@ -64,7 +64,7 @@ Constraints:
 | Single line | The body MUST be a single line. No literal newlines. |
 | Summary cap | The optional summary SHOULD fit on one terminal line; aim for ≤ 80 codepoints. |
 | Enumeration cap | The summary MUST NOT enumerate more than 3 items. Longer enumerations belong in a `COMMENT(role)` marker at the pointer. |
-| No payloads | The summary is for human readability in the admin WebUI timeline; substantive content (reasoning, file lists beyond 3, multi-paragraph reports) MUST go in a `COMMENT(role)` marker. |
+| No payloads | The summary is for human readability in the broker timeline; substantive content (reasoning, file lists beyond 3, multi-paragraph reports) MUST go in a `COMMENT(role)` marker. |
 
 Examples:
 

@@ -30,16 +30,15 @@ Before your first action other than these Reads, Read every file in the **Load-b
 |------|------------------|------------------------------|
 | [`reference/exec-routing.md`](reference/exec-routing.md) | route a Bash-denied command to the Director | the dispatch shape — you stall or fabricate command output |
 | [`reference/recovery.md`](reference/recovery.md) | tear down or recover a member / fleet (also the Shutdown Protocol) | the first-out teardown order — you orphan panes / leak the fleet |
-| [`reference/broadcast.md`](reference/broadcast.md) | broadcast to the fleet or thread via `origin_task_id` | the broadcast send/ack semantics — your fan-out misfires or double-acks |
+| [`reference/cli.md`](reference/cli.md) § *Broadcast* | broadcast to the fleet or thread via `origin_task_id` | the broadcast send/ack semantics — your fan-out misfires or double-acks |
 
 **On-demand — Read only when you need that capability:**
 
 | Read | When |
 |------|------|
-| [`reference/cli.md`](reference/cli.md) | you need a CLI subcommand beyond send/poll/ack — global options, coding-agent backends, `message cancel` / `show`, `member show` / `member list --all`, `doctor`, `fleet delete`, the typical workflow |
-| [`reference/output-flags.md`](reference/output-flags.md) | you need `--full` / `--json` opt-back-in semantics or `CAFLEET_MAX_TEXT_LEN` |
+| [`reference/cli.md`](reference/cli.md) | you need a CLI subcommand beyond send/poll/ack — global options, output flags (`--full` / `--json` opt-back-in semantics, `CAFLEET_MAX_TEXT_LEN`), coding-agent backends, `message cancel` / `show` / `broadcast`, `member show` / `member list`, `doctor`, `fleet delete`, the typical workflow |
 
-Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`member create` / `member delete` / `member list --activity` / `member capture` / `member exec` / `member ping` / `member nudge`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
+Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`member create` / `member delete` / `member list` / `member capture` / `member exec` / `member ping`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
 
 Exhaustive per-subcommand flags, exit codes, and error strings live in [`docs/spec/cli-options.md`](../../docs/spec/cli-options.md).
 
@@ -71,9 +70,9 @@ Used only when your overlay omits a token or your backend is unknown. Each defau
 
 Every `cafleet` invocation that touches members or messages is **fleet-scoped** — it carries `--fleet-id` — and most additionally carry a member-identity flag with exactly one meaning per spelling:
 
-- `--fleet-id <int>` — per-subcommand (placed **after** the subcommand name), required on every `member *` / `message *` / `monitor *` subcommand plus `fleet show` / `fleet delete`. There is **no environment default**; a missing value exits 1 with the shared callback error naming `cafleet fleet create`. Rejected with `No such option` on `setup` / `fleet create` / `fleet list` / `server` / `doctor`.
+- `--fleet-id <int>` — per-subcommand (placed **after** the subcommand name), required on every `member *` / `message *` / `monitor *` subcommand plus `fleet show` / `fleet delete`. There is **no environment default**; a missing value exits 1 with the shared callback error naming `cafleet fleet create`. Rejected with `No such option` on `setup` / `fleet create` / `fleet list` / `doctor`.
 - `--member-id <int>` — **the member in question**: the requester on `message poll` / `ack` / `cancel` / `show`, the target on `member delete` / `show` / `capture` / `exec` / `ping`, and the member whose schedule is shown/edited on `monitor config`.
-- `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient/target** on `message send` and `member nudge`; `message broadcast` takes the sender only. (`member create` takes **no** identity flag — the Director is auto-resolved from the fleet row; `member list`, `monitor start` / `monitor status`, and the `fleet *` commands take none either.)
+- `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient** on `message send`; `message broadcast` takes the sender only. (`member create` takes **no** identity flag — the Director is auto-resolved from the fleet row; `member list`, `monitor start` / `monitor status`, and the `fleet *` commands take none either.)
 
 In the Director's own commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet member create` — never your own exported shell variables. `permissions.allow` matches Bash invocations as fixed strings, so an ad-hoc `export FLEET_ID=…; --fleet-id $FLEET_ID` breaks the match and forces prompts. See [`cli-options.md`](../../docs/spec/cli-options.md#fleet-id) for the rationale and [`permissions.allow` coverage](../../docs/spec/cli-options.md#permissionsallow-coverage) for the pattern set.
 
@@ -88,7 +87,7 @@ In the Director's own commands, substitute the literal ids printed by `cafleet f
 
 An author writes the spawn prompt with those brace placeholders; after spawn the member reads its identity as literal labeled lines (e.g. `FLEET ID: 24`, `YOUR MEMBER ID: 88`). **Any literal brace in prompt text must be doubled** (`{{` / `}}`) to survive `.format()`; an unknown placeholder or a malformed brace expression is a `UsageError` (exit 2). No identity environment variable is injected into the pane — the member takes the literal ids from its prompt and passes them explicitly: a poll is `cafleet message poll --fleet-id 24 --member-id 88`; a self-attributed send is `cafleet message send --fleet-id 24 --from-member-id 88 --to-member-id <director-member-id> --text "..."`.
 
-CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT`, `CAFLEET_MAX_TEXT_LEN`) are catalogued in [`reference/cli.md`](reference/cli.md) § Environment variables.
+CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL` and `CAFLEET_MAX_TEXT_LEN`) are catalogued in [`reference/cli.md`](reference/cli.md) § Environment variables.
 
 ## Team supervision
 
@@ -121,7 +120,7 @@ cafleet message send --fleet-id <fleet-id> --from-member-id <my-member-id> \
   --to-member-id <target-member-id> --text "Did the API schema change?"
 ```
 
-`--to-member-id` (recipient id) is required, plus exactly one of `--text` (inline body) or `--text-file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`); the delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview by default. `--full` per [`reference/output-flags.md`](reference/output-flags.md). After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast` / `member nudge`), caught on the next manual `message poll` or a Director `cafleet member ping` if missed; full mechanics in [`multiplexer-backends.md`](../../docs/spec/multiplexer-backends.md#push-notifications).
+`--to-member-id` (recipient id) is required, plus exactly one of `--text` (inline body) or `--text-file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`); the delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview by default. `--full` per [`reference/cli.md`](reference/cli.md) § *Output flags*. After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast`), caught on the next manual `message poll` or a Director `cafleet member ping` if missed; full mechanics in [`multiplexer-backends.md`](../../docs/spec/multiplexer-backends.md#push-notifications).
 
 ## Poll (Check Inbox)
 

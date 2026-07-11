@@ -1,6 +1,6 @@
 # tmux-backed member commands (`cafleet member *`)
 
-Reference page for the Director-only lifecycle and pane-interaction commands — `member create`, `member delete`, `member list` (with `--activity`), `member capture`, `member exec`, `member ping`, `member nudge`. All run inside a tmux or herdr session, scoped to the per-subcommand `--fleet-id`. `member create` takes **no identity flag** — the CLI auto-resolves the spawning Director from `fleets.director_member_id`; every other lifecycle verb identifies its **target** by `--member-id`; `member nudge` names both parties (`--from-member-id` the sender, typically the monitoring member; `--to-member-id` the target).
+Reference page for the Director-only lifecycle and pane-interaction commands — `member create`, `member delete`, `member list`, `member capture`, `member exec`, `member ping`. All run inside a tmux or herdr session, scoped to the per-subcommand `--fleet-id` (`member list` and `member show` are registry reads with no multiplexer requirement). `member create` takes **no identity flag** — the CLI auto-resolves the spawning Director from `fleets.director_member_id`; every other lifecycle verb identifies its **target** by `--member-id`.
 
 Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/exec-routing.md`.
 
@@ -25,7 +25,7 @@ cafleet member create --fleet-id <fleet-id> \
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--name` | yes | Display name of the new member. **Reserved name — `Administrator`**: every fleet is auto-seeded with one built-in `Administrator` (marked `member_card_json.cafleet.kind == "builtin-administrator"`, protected against deregister); do NOT name a member that. |
+| `--name` | yes | Display name of the new member. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; also recorded as `placement.coding_agent`. When omitted, an ordinary member defaults to `claude`; a `--role monitor` member inherits **your** (the spawning Director's) backend from your placement row, so the monitoring member runs on the same backend it watches. An explicit value always wins. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent. The `opencode` backend materializes its agent preset on first spawn. |
 | `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend and lists a per-backend example; the *Available models per backend* tables below list the common models for each backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
@@ -102,7 +102,7 @@ The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode`
 
 **Spawn prompt size limit**: cafleet passes the prompt to `tmux split-window` as one positional argument, so a large inline prompt fails with `tmux command failed: command too long` (and rolls back the registration) past a few KB. Use `--text-file` for every templated identity block + role-file-by-path prompt; inline `--text "<prompt>"` stays first-class for trivial one-line ad-hoc spawns.
 
-**Long or multi-line message bodies**: the same `ARG_MAX` cliff applies to `message send` / `message broadcast` / `member nudge` — a long or multi-line body MUST be passed via `--text-file` (or `--text-file -` for stdin), never inline `--text`. This rule is canonical in [`reference/supervision.md`](supervision.md) § Communication Model.
+**Long or multi-line message bodies**: the same `ARG_MAX` cliff applies to `message send` / `message broadcast` — a long or multi-line body MUST be passed via `--text-file` (or `--text-file -` for stdin), never inline `--text`. This rule is canonical in [`reference/supervision.md`](supervision.md) § Communication Model.
 
 Keep the prompt body focused (the skeleton below): the member loads its role file via `Read` on its first turn, so path-by-reference to the stable in-skill role docs is safe.
 
@@ -176,18 +176,17 @@ cafleet member delete --fleet-id <fleet-id> --member-id <member-id> --force
 
 Fleet-isolation only: a `--member-id` outside `--fleet-id` exits 1 (`Error: Member <member-id> not found`); deleting the root Director stays blocked by the root-Director guard. Exit codes and the timeout output shape: [`cli-options.md`](../../../docs/spec/cli-options.md#member-delete).
 
-## Member List (with `--activity`)
+## Member List
 
 ```bash
 cafleet member list --fleet-id <fleet-id>
-cafleet member list --fleet-id <fleet-id> --activity
 ```
 
-The base list shows each member (a placed registry row other than the root Director) with its placement columns (`member_id`, `name`, `status`, `backend`, `session`, `window_id`, `pane_id`; a pending placement renders `(pending)`). `--activity` instead shows `last_sent` / `last_recv` / `last_ack` / `idle` aggregated from `tasks` (output shape in [`cli-options.md`](../../../docs/spec/cli-options.md#member-list-activity-output)). Use `--activity` for routine supervision ticks instead of capturing every member every tick — capture is reserved for the cases the activity columns flag.
+One output shape: every **active** registry entry of the fleet (the root Director, the monitoring member, ordinary members, placementless rows), one row each with `member_id`, `name`, `kind` (`director` / `monitor` / `member`), `backend`, `pane_id` (a pending placement renders `(pending)`; placementless rows render `-` placement cells), and `idle` — the humanized wall-time since the member's most recent task activity (`Ns`/`Nm`/`Nh`, `-` when none). `--json` adds the underlying `last_sent` / `last_recv` / `last_ack` timestamps (output shape in [`cli-options.md`](../../../docs/spec/cli-options.md#member-list)). Use the `idle` column for routine supervision ticks instead of capturing every member every tick — capture is reserved for the cases the idle column flags.
 
 ## Member Capture
 
-Capture the last N lines of a member's pane buffer (read-only). `--lines` defaults `20` (`--tail` is an accepted alias); `--ansi` / `--no-ansi` (default) strips ANSI escapes and de-fragments carriage returns. Output is the raw buffer in text mode, `{member_id, pane_id, lines, content}` in JSON.
+Capture the last N lines of a member's pane buffer (read-only). `--lines` defaults `20`; `--ansi` / `--no-ansi` (default) strips ANSI escapes and de-fragments carriage returns. Output is the raw buffer in text mode, `{member_id, pane_id, lines, content}` in JSON.
 
 ```bash
 cafleet member capture --fleet-id <fleet-id> --member-id <member-id>
@@ -220,21 +219,9 @@ Keystrokes **`Esc` → `cafleet … message poll` → `Enter`** into a member's 
 cafleet member ping --fleet-id <fleet-id> --member-id <member-id>
 ```
 
-## Member Nudge (re-engage the Director)
-
-The monitoring member's purpose-built re-engage primitive for waking the Director when its capture-and-classify routine reports a `stalled`/`finished` member (or classifies the Director's own pane `finished` with un-acked work). Unlike `member ping` (a pure poll keystroke), `member nudge` **persists an ACKable broker task** (so the Director's facilitation loop sees an inbox item naming what needs attention) **and** fires the hardened, `Esc`-safeguarded inline preview into the target's pane — the same persist + preview effect as a monitoring-member `cafleet message send --to-member-id <director>`, just the named interface over it.
-
-```bash
-cafleet member nudge --fleet-id <fleet-id> \
-  --from-member-id <monitoring-member-id> --to-member-id <director-member-id> \
-  --text "<re-engage summary>"
-```
-
-The **target** is `--to-member-id` (typically the root Director, fleet-isolation resolution) and the **sender** is `--from-member-id` (typically the monitoring member, persisted as the task's `from_member_id`); `--text` is the summary (empty rejected, exit 2; exactly one of `--text` / `--text-file`). A target with no live pane is tolerated (the task still persists). Because `--text` is member-controlled, it sits in `permissions.allow`. Full surface: [`cli-options.md`](../../../docs/spec/cli-options.md#member-nudge).
-
 ## Cross-references
 
-- For broadcast send/ack semantics, see [`reference/broadcast.md`](broadcast.md).
+- For broadcast send/ack semantics, see [`reference/cli.md`](cli.md) § *Broadcast*.
 - For the bash-via-Director fallback protocol, see [`reference/exec-routing.md`](exec-routing.md).
 - For crash/disconnect/idle recovery flows including the Shutdown Protocol, see [`reference/recovery.md`](recovery.md).
-- For `--full` / `--json` opt-back-in semantics, see [`reference/output-flags.md`](output-flags.md).
+- For `--full` / `--json` opt-back-in semantics, see [`reference/cli.md`](cli.md) § *Output flags*.

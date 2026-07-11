@@ -84,7 +84,7 @@ Step 5 (cleanup) is autonomous — no user prompt.
 
 ### Step 1: Bootstrap CAFleet Fleet & Spawn Presentation + Transcript (Director)
 
-Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The fleet runs a dedicated monitoring member (the **first** `cafleet member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the Director via `cafleet member nudge`; the Director does **not** run `cafleet monitor` itself. Gate the Presentation/Transcript spawns on the monitoring member's `ready: monitor live` handshake (first-in) — see 1b.
+Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The fleet runs a dedicated monitoring member (the **first** `cafleet member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the Director via `cafleet message send`; the Director does **not** run `cafleet monitor` itself. Gate the Presentation/Transcript spawns on the monitoring member's `ready: monitor live` handshake (first-in) — see 1b.
 
 #### 1a. Environment precheck and fleet bootstrap
 
@@ -95,7 +95,7 @@ cafleet fleet create --name "present-[topic-slug]" --json
 
 `cafleet doctor` confirms the Director is inside a tmux or herdr session (a hard requirement of `cafleet member create`). On non-zero exit, abort and surface the error to the user — do NOT attempt raw `tmux` probes as a workaround.
 
-`cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current tmux pane, and seeds the built-in Administrator. Capture `fleet_id` and `director.member_id` from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
+`cafleet fleet create` atomically creates the fleet and registers a root Director bound to the current tmux pane. Capture `fleet_id` and `director.member_id` from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
 
 #### 1b. Spawn the monitoring member (first-in)
 

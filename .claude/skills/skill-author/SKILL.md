@@ -82,7 +82,7 @@ The Director creates the fleet inside a tmux pane:
 cafleet fleet create --name "<fleet-name>" --json
 ```
 
-The CLI atomically (1) creates a `fleets` row, (2) registers a root Director bound to the current tmux pane, (3) seeds a built-in Administrator. Capture both `fleet_id` and `director.member_id` from the JSON response and substitute them as **literal id strings** into every subsequent `cafleet ...` call.
+The CLI atomically (1) creates a `fleets` row and (2) registers a root Director bound to the current tmux pane. Capture both `fleet_id` and `director.member_id` from the JSON response and substitute them as **literal id strings** into every subsequent `cafleet ...` call.
 
 Never store these IDs in shell variables (`export FLEET=...`). The Claude Code harness's `permissions.allow` matches Bash invocations as literal command strings; an exported shell variable you reference yourself breaks the literal match and forces per-invocation permission prompts that interrupt the agent loop.
 
@@ -92,7 +92,7 @@ If the user is not inside a tmux session, `cafleet fleet create` exits 1 with `E
 
 CAFleet members do not auto-poll. The broker delivers a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview` keystroke; that preview is the trigger that wakes the recipient. If the keystroke is missed (pane buffered, recipient mid-Bash, etc.), the message just sits in `INPUT_REQUIRED` until the recipient runs `cafleet message poll` themselves.
 
-Every CAFleet-orchestrated skill runs a dedicated **monitoring member** — it is a session-level requirement, not a per-skill choice. The Director NEVER runs `cafleet monitor start` itself. Instead, the **first** `cafleet member create` in the fleet is a dedicated monitoring member spawned with `--role monitor --model sonnet`; it runs `cafleet monitor start` as a background task in its own pane and reports `ready: monitor live`, which **gates the first ordinary `member create`** (first-in). The monitor loop wakes **only** the monitoring member; on each wake the monitoring member captures the Director's pane, judges it active vs idle, and re-engages an idle Director on demand via `cafleet member nudge` (which persists an ACKable broker task **and** fires the hardened, `Esc`-safeguarded inline preview). The Director is never keystroked by the loop. The `cafleet` skill's `roles/monitor.md` documents the monitoring member's canonical spawn prompt and the first-in / first-out lifecycle (the heartbeat mechanism itself lives in `reference/supervision.md`); the heartbeat is identical on any backend (claude, codex, opencode).
+Every CAFleet-orchestrated skill runs a dedicated **monitoring member** — it is a session-level requirement, not a per-skill choice. The Director NEVER runs `cafleet monitor start` itself. Instead, the **first** `cafleet member create` in the fleet is a dedicated monitoring member spawned with `--role monitor --model sonnet`; it runs `cafleet monitor start` as a background task in its own pane and reports `ready: monitor live`, which **gates the first ordinary `member create`** (first-in). The monitor loop wakes **only** the monitoring member; on each wake the monitoring member captures the Director's pane, judges it active vs idle, and re-engages an idle Director on demand via `cafleet message send` (which persists an ACKable broker task **and** fires the hardened, `Esc`-safeguarded inline preview). The Director is never keystroked by the loop. The `cafleet` skill's `roles/monitor.md` documents the monitoring member's canonical spawn prompt and the first-in / first-out lifecycle (the heartbeat mechanism itself lives in `reference/supervision.md`); the heartbeat is identical on any backend (claude, codex, opencode).
 
 The monitoring member runs one of two idle-nudge routines (both spawn the monitoring member; the difference is only *when* it nudges the idle Director):
 
@@ -141,7 +141,7 @@ When the work is done, the Director MUST tear down in this exact order:
 
 1. **Stop the monitoring member first.** There is no `monitor stop` command — message the monitoring member to stop its `cafleet monitor start` background task (the task-stop delivers SIGTERM/SIGINT, so the loop runs its `finally` and clears its runtime row), wait for its confirmation, then `cafleet member delete` the monitoring member **first**, before any ordinary member. A tick that keystrokes into a tearing-down pane races the delete path.
 2. **`cafleet member delete --member-id <id>`** for every remaining (ordinary) member. This sends the backend exit keystroke to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` per member.
-3. **`cafleet fleet delete --fleet-id <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active member in the fleet (root Director + Administrator + remaining members), and physically deletes every associated `member_placements` row. Tasks are preserved. `fleet delete` makes any still-running loop self-terminate on its next tick, so step 1 is belt-and-suspenders.
+3. **`cafleet fleet delete --fleet-id <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active member in the fleet (root Director + remaining members), and physically deletes every associated `member_placements` row. Tasks are preserved. `fleet delete` makes any still-running loop self-terminate on its next tick, so step 1 is belt-and-suspenders.
 
 Order matters. Stop the monitoring member's monitor and delete it before the ordinary members so a tick cannot keystroke into a tearing-down pane or race the delete path. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
 
@@ -359,7 +359,7 @@ The skill's task convention is `researches/pr-<pr-number>` (PR summaries are res
 
 ```bash
 cafleet fleet create --name "summarize-pr-1234" --json
-# → {"fleet_id": 7, "director": {"member_id": 8}, "administrator_member_id": 9}
+# → {"fleet_id": 7, "director": {"member_id": 8}}
 ```
 
 Substitute `7` and `8` literally into every subsequent call the Director makes.

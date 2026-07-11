@@ -1,7 +1,7 @@
 # Aggressive Simplification: Drop the WebUI and Administrator, Consolidate CLI, Docs, and Skills
 
 **Status**: Approved
-**Progress**: 17/50 tasks complete
+**Progress**: 23/50 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -204,12 +204,13 @@ Steps 5–8 form one atomic implementation block: each code deletion in Steps 5�
 
 ### Step 4: skills
 
-- [ ] `skills/cafleet`: merge `reference/output-flags.md` + `reference/broadcast.md` into `reference/cli.md`; delete both files; retarget every inbound link (SKILL.md tables, role files, `reference/*.md`, other skills, `docs/` if any) <!-- completed: -->
-- [ ] `skills/cafleet`: sweep nudge → `message send` in `SKILL.md`, `roles/{director,monitor}.md`, `reference/{supervision,cli,exec-routing,recovery,director}.md`; rewrite `reference/director.md` § Member List and `reference/recovery.md` heuristics to the single `member list` output; sweep Administrator from `reference/cli.md` roster description <!-- completed: -->
-- [ ] `skills/cafleet-design-doc`: merge `reference/template.md` into `reference/guidelines.md`; delete the file; retarget inbound links (`SKILL.md` On-demand table, `create/create.md`, `interview/interview.md`, `execute/execute.md`); sweep nudge/WebUI/Administrator mentions (`reference/coordination.md` "admin WebUI timeline" → "broker timeline") <!-- completed: -->
-- [ ] `skills/cafleet-research`: merge `reference/slidev/techniques/*.md` into `reference/slidev.md`; delete the directory; retarget inbound links; sweep nudge mentions in `report/report.md`, `presentation/presentation.md`, both `roles/director.md` <!-- completed: -->
-- [ ] `.claude/skills/skill-author/SKILL.md`: sweep removed features (nudge, Administrator, member-list flags) <!-- completed: -->
-- [ ] Verify no dangling relative links remain in `skills/` and `docs/` (grep for the deleted filenames) <!-- completed: -->
+
+- [x] `skills/cafleet`: merge `reference/output-flags.md` + `reference/broadcast.md` into `reference/cli.md`; delete both files; retarget every inbound link (SKILL.md tables, role files, `reference/*.md`, other skills, `docs/` if any) <!-- completed: 2026-07-11T11:00 -->
+- [x] `skills/cafleet`: sweep nudge → `message send` in `SKILL.md`, `roles/{director,monitor}.md`, `reference/{supervision,cli,exec-routing,recovery,director}.md`; rewrite `reference/director.md` § Member List and `reference/recovery.md` heuristics to the single `member list` output; sweep Administrator from `reference/cli.md` roster description <!-- completed: 2026-07-11T10:55 -->
+- [x] `skills/cafleet-design-doc`: merge `reference/template.md` into `reference/guidelines.md`; delete the file; retarget inbound links (`SKILL.md` On-demand table, `create/create.md`, `interview/interview.md`, `execute/execute.md`); sweep nudge/WebUI/Administrator mentions (`reference/coordination.md` "admin WebUI timeline" → "broker timeline") <!-- completed: 2026-07-11T11:00 -->
+- [x] `skills/cafleet-research`: merge `reference/slidev/techniques/*.md` into `reference/slidev.md`; delete the directory; retarget inbound links; sweep nudge mentions in `report/report.md`, `presentation/presentation.md`, both `roles/director.md` <!-- completed: 2026-07-11T11:00 -->
+- [x] `.claude/skills/skill-author/SKILL.md`: sweep removed features (nudge, Administrator, member-list flags) <!-- completed: 2026-07-11T11:00 -->
+- [x] Verify no dangling relative links remain in `skills/` and `docs/` (grep for the deleted filenames) <!-- completed: 2026-07-11T11:00 -->
 
 ### Step 5: code — WebUI removal
 

@@ -24,8 +24,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Additional resources
 
-- For the document template, see: [../reference/template.md](../reference/template.md)
-- For section guidelines and quality standards, see: [../reference/guidelines.md](../reference/guidelines.md)
+- For the document template, section guidelines, and quality standards, see: [../reference/guidelines.md](../reference/guidelines.md)
 - Output of the create workflow is the input to this skill; this skill's `COMMENT(claude)` markers are consumed by the create workflow's resume mode.
 
 ## Coordination Protocol
@@ -36,7 +35,7 @@ Interview-specific: place each `COMMENT(claude)` marker on its own line immediat
 
 ## Architecture
 
-The Director is the root member of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns one short-lived Analyzer via `cafleet member create`. The Analyzer is torn down BEFORE the interview rounds begin; the Director then runs the rounds (and writes annotations) on its own. All Analyzer coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
+The Director is the root member of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns one short-lived Analyzer via `cafleet member create`. The Analyzer is torn down BEFORE the interview rounds begin; the Director then runs the rounds (and writes annotations) on its own. All Analyzer coordination goes through the persistent message queue — every message is persisted in SQLite and auditable.
 
 ```
 User

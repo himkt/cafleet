@@ -1,6 +1,6 @@
 # Design Doc Execute (CAFleet Edition)
 
-Implement features based on a design document using up to five roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), Verifier (E2E/integration testing), and Reviewer (fresh post-implementation review). Every inter-member message is persisted in SQLite and visible in the admin WebUI timeline. The Director judges which members to spawn based on the nature of the implementation tasks. For each step, the Tester writes unit tests first, the Director reviews and approves them, then the Programmer implements code to pass the tests. The Director also reviews the Programmer's implementation for code quality and design doc compliance before committing. After all TDD steps, the Verifier performs E2E/integration verification (Phase D) if spawned. When every Implementation task and Success Criterion is complete, Step 5 spawns a fresh Reviewer member that reviews the full branch diff and drives a review-and-revise loop with the implementing members until it approves. Step 6 presents the Reviewer-approved change to the user (admin) for approval, Step 7 pushes the feature branch and opens a PR, and Step 8 finalizes, commits the completion marker, pushes it (when the branch is tracked on origin), and tears the team down.
+Implement features based on a design document using up to five roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), Verifier (E2E/integration testing), and Reviewer (fresh post-implementation review). Every inter-member message is persisted in SQLite and auditable. The Director judges which members to spawn based on the nature of the implementation tasks. For each step, the Tester writes unit tests first, the Director reviews and approves them, then the Programmer implements code to pass the tests. The Director also reviews the Programmer's implementation for code quality and design doc compliance before committing. After all TDD steps, the Verifier performs E2E/integration verification (Phase D) if spawned. When every Implementation task and Success Criterion is complete, Step 5 spawns a fresh Reviewer member that reviews the full branch diff and drives a review-and-revise loop with the implementing members until it approves. Step 6 presents the Reviewer-approved change to the user (admin) for approval, Step 7 pushes the feature branch and opens a PR, and Step 8 finalizes, commits the completion marker, pushes it (when the branch is tracked on origin), and tears the team down.
 
 ## Required reading
 
@@ -27,8 +27,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Additional resources
 
-- For the document template, see: [../reference/template.md](../reference/template.md)
-- For section guidelines and quality standards, see: [../reference/guidelines.md](../reference/guidelines.md)
+- For the document template, section guidelines, and quality standards, see: [../reference/guidelines.md](../reference/guidelines.md)
 - For the inter-member coordination protocol (verb + pointer schema, `COMMENT(role)` markers), see: [../reference/coordination.md](../reference/coordination.md)
 
 ## Coordination Protocol
@@ -42,7 +41,7 @@ Two skill-specific notes layer on top of that canonical protocol:
 
 ## Architecture
 
-The Director is the root member of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns each needed member via `cafleet member create`. All coordination goes through the persistent message queue — every message is auditable via the admin WebUI.
+The Director is the root member of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns each needed member via `cafleet member create`. All coordination goes through the persistent message queue — every message is persisted in SQLite and auditable.
 
 ```
 User
@@ -155,7 +154,7 @@ Load the `cafleet` skill; its `reference/supervision.md` governance is § Requir
 
 ```bash
 cafleet fleet create --name "design-doc-execute-{slug}" --json
-# → { "fleet_id": <int>, "administrator_member_id": <int>, "director": { "member_id": <int>, "name": "Director", "placement": {...} } }
+# → { "fleet_id": <int>, "director": { "member_id": <int>, "name": "Director", "placement": {...} } }
 ```
 
 Capture `fleet_id` and `director.member_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids. Remember: `--fleet-id` and the member-identity options (`--member-id`, `--from-member-id`, `--to-member-id`) are per-subcommand options that go **after** the subcommand name.
@@ -436,7 +435,7 @@ No round limit — the loop continues until the user approves or aborts.
 
 1. Update design document Status to "Aborted", add Changelog entry. Place a `COMMENT(director): aborting — finalize and stand by` marker near the top of the doc body (above the Overview section — `Status:` is bold metadata, not a heading, so it is not a valid `paragraph-` target). Notify any still-live members with a single `cafleet message send --fleet-id <fleet-id> ... --text "ready (doc)"` per member so they read the marker and stand by.
 2. Commit (separate commands): `git add <design-doc>` then `git commit -m "docs: mark design doc as aborted"`
-3. Follow Shutdown Protocol (Step 8: stop the monitoring member's `monitor start` background task, then delete the monitoring member first and the remaining members, and run `cafleet fleet delete --fleet-id <fleet-id>` to tear down the fleet and sweep the root Director + Administrator).
+3. Follow Shutdown Protocol (Step 8: stop the monitoring member's `monitor start` background task, then delete the monitoring member first and the remaining members, and run `cafleet fleet delete --fleet-id <fleet-id>` to tear down the fleet and sweep the root Director).
 
 ### Step 7: Push & Create PR (Director)
 

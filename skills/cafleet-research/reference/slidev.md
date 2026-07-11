@@ -77,7 +77,7 @@ After generating all slides, check every slide:
 
 ### Discipline
 
-- **1-2 colored elements per slide max**; **color for data, not decoration** — only color the specific number or keyword. The full semantic-color palette (green = positive, red = negative, blue = neutral, orange = caution, purple = critical) + decision flow is canonical in [`slidev/techniques/formatting.md`](slidev/techniques/formatting.md) § Color Discipline.
+- **1-2 colored elements per slide max**; **color for data, not decoration** — only color the specific number or keyword. The full semantic-color palette (green = positive, red = negative, blue = neutral, orange = caution, purple = critical) + decision flow is canonical in § *Color Discipline* below.
 
 ## Figures
 
@@ -109,16 +109,266 @@ Auto-rendered: top-level = filled blue circle, nested = hollow. `bullets-sm` has
 - Body ↔ References must be two-way consistent, contiguous, no duplicates
 - Add References slide(s) at end listing only cited sources
 
-## Techniques
+## Two-Column Layouts
 
-On-demand — Read a technique page only when the slide you are authoring needs it:
+The `two-cols` layout splits slide content into two columns with a shared header. Use it for comparisons, text+image pairs, text+code combinations, and side-by-side data.
 
-| Read | When |
-|------|------|
-| `slidev/techniques/two-column-layouts.md` | you are building a two-column slide |
-| `slidev/techniques/formatting.md` | you need Admonition / Highlight / font-size formatting (or the Color-Discipline palette) |
-| `slidev/techniques/math-formulas.md` | the slide carries math formulas |
-| /slidev (stock `v-click` / `v-clicks` / line-range highlighting) | you need code animations |
+### When to Use
+
+| Scenario | Example |
+|----------|---------|
+| Comparisons | Before vs After, Pros vs Cons |
+| Text + Code | Explanation on left, code on right |
+| Text + Image | Description on left, diagram on right |
+| Data + Analysis | Table on left, interpretation on right |
+
+### Syntax
+
+```md
+---
+layout: two-cols
+columns: "1:1"
+---
+
+:: header ::
+
+# Slide Title
+
+:: left ::
+
+Left column content here.
+
+:: right ::
+
+Right column content here.
+```
+
+#### Frontmatter
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `columns` | String | `'1:1'` | Column ratio using colon notation |
+
+#### Slots
+
+| Slot | Purpose |
+|------|---------|
+| `:: header ::` | Slide title (rendered with left border accent) |
+| `:: left ::` | Left column content |
+| `:: right ::` | Right column content |
+
+### Column Ratios
+
+The `columns` prop accepts a colon-separated ratio that maps to CSS grid `fr` units.
+
+| Ratio | Left Width | Right Width | Best For |
+|-------|-----------|------------|----------|
+| `1:1` | 50% | 50% | Equal comparisons |
+| `2:1` | 67% | 33% | Main content + sidebar |
+| `1:2` | 33% | 67% | Sidebar + main content |
+| `3:2` | 60% | 40% | Slightly wider left |
+| `2:3` | 40% | 60% | Slightly wider right |
+
+### Two-Column Tips
+
+- Use `2:1` or `1:2` when one column has significantly more content
+- Keep content balanced — avoid one column being much taller than the other
+- Headers span the full width, so use them for context that applies to both columns
+- Tables, bullet lists, and code blocks all work inside columns
+
+## Formatting Components
+
+`<Admonition>` callout boxes, `<Highlight>` inline emphasis, and per-slide `fontSize` control. For Slidev syntax, refer to /slidev — do not read Slidev's upstream source files directly.
+
+### Admonition
+
+The `<Admonition>` component creates colored callout boxes for highlighting key information, using a left-border accent style consistent with the theme.
+
+#### Types
+
+| Type | Border/Title Color | Background | Use For |
+|------|-------------------|------------|---------|
+| `note` | Blue (`--c-primary`) | Blue-50 | General information, context, background |
+| `important` | Purple (`--c-important`) | Purple-50 | Critical points, must-know items |
+| `tip` | Green (`--c-positive`) | Green-50 | Best practices, recommendations, shortcuts |
+| `warning` | Orange (`--c-accent`) | Orange-50 | Potential issues, caveats, gotchas |
+| `caution` | Red (`--c-negative`) | Red-50 | Risks, dangers, breaking changes, deprecations |
+| `formula` | Blue (`--c-primary`) | Blue-50 | Mathematical formulas, definitions, equations (larger content font) |
+
+#### Admonition Syntax
+
+```md
+<Admonition type="tip" title="Performance Tip">
+
+Use lazy loading for images below the fold.
+
+</Admonition>
+```
+
+Always leave a blank line after the opening tag and before the closing tag for markdown content to render correctly.
+
+#### Admonition Props
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `type` | String | `'note'` | One of: `note`, `important`, `tip`, `warning`, `caution`, `formula` |
+| `title` | String | Auto from type | Box title text. Defaults to capitalized type name |
+
+The `formula` type has a larger content font size (`1rem` vs `0.85rem`) for better readability of KaTeX-rendered math. All display math (`$$...$$`) must be wrapped in `<Admonition type="formula">` — see § *Math Formulas with KaTeX* below.
+
+#### When to use Admonitions vs alternatives
+
+`<Admonition>` for multi-line titled callouts (`type="formula"` for math/definitions needing prominence); `<Highlight type="...">` for inline semantic emphasis within a sentence (see § Highlight); `.bg-primary-light` for a light paragraph highlight without a title.
+
+### Highlight
+
+The `<Highlight>` component applies a marker-style background + colored text to inline content. Use it to visually emphasize key terms, numbers, or short phrases within a sentence.
+
+#### Highlight Types
+
+| Type | Background | Text Color | Use For |
+|------|-----------|------------|---------|
+| `primary` | Blue tint | Blue (`--c-primary`) | Key terms, important numbers, default |
+| `positive` | Green tint | Green (`--c-positive`) | Positive trends, growth, improvements |
+| `negative` | Red tint | Red (`--c-negative`) | Negative trends, decline, risks |
+| `accent` | Orange tint | Orange (`--c-accent`) | Warnings, items needing attention |
+| `important` | Purple tint | Purple (`--c-important`) | Critical points, must-know items |
+
+#### Highlight Syntax
+
+```md
+Revenue grew <Highlight type="positive">+99.3%</Highlight> year-over-year
+```
+
+#### Highlight Props
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `type` | String | `'primary'` | One of: `primary`, `positive`, `negative`, `accent`, `important` |
+
+#### Color Discipline
+
+Every colored element must have a semantic reason for its color. Never use color for decoration.
+
+| Color | Semantic | When to use | Example |
+|-------|----------|-------------|---------|
+| `positive` (green) | Good news | Growth, improvement, achievement, gain | Revenue +93%, adoption 84% |
+| `negative` (red) | Bad news | Decline, risk, vulnerability, loss, stagnation | Vulnerability 45%, -19% slower |
+| `primary` (blue) | Neutral key metric | Quantities without positive/negative connotation | Context window 1M tokens, 5 product forms |
+| `accent` (orange) | Caution / noteworthy | Transitional states, mixed signals, items needing attention | -4% (improved but unreliable) |
+| `important` (purple) | Critical / structural | Must-know points that don't fit other categories | — |
+
+**Decision flow**: Ask "is this good or bad for the audience?" → Good: `positive`. Bad: `negative`. Neither: `primary`. Mixed/uncertain: `accent`.
+
+#### Usage Rules
+
+Always use `<Highlight>` for colored emphasis. Do NOT use `<span class="c-...">` utility classes for inline emphasis — they exist for theme internals only.
+
+1. **All colored numbers and keywords use `<Highlight>`.** No exceptions. This keeps visual weight consistent across slides.
+2. **Max 3 per slide.** More than 3 highlights dilute attention. If a slide needs more, move data to a table or chart instead.
+3. **`<Highlight>` + `**bold**` is redundant** — Highlight already applies `font-weight: 600`.
+
+### Font Size Control
+
+When text is too long and would wrap at an awkward position, use the `fontSize` prop in the slide frontmatter to adjust font size for that slide. Any valid CSS font-size value is accepted (`"18px"`, `"0.9em"`, `"1rem"`, etc.).
+
+```md
+---
+layout: bullets
+fontSize: "18px"
+---
+```
+
+#### Supported Layouts (per-layout defaults)
+
+| Layout | Default | Affects |
+|--------|---------|---------|
+| `cover` | `"22px"` | Content/subtitle (`p`), not `h1` |
+| `bullets` | `"18px"` | Bullet items (`li`) |
+| `bullets-sm` | `"14px"` | Bullet items (`li`) |
+| `blank` | `""` (inherit) | All content via inheritance |
+| `two-cols` | `""` (inherit) | Both columns via inheritance |
+
+#### When to use vs split the slide
+
+Use `fontSize` when a bullet wraps mid-word, a slide has 4-7 slightly-too-long bullets, or a `blank` / `bullets-sm` slide is borderline overflowing. **Split the slide instead** when content fundamentally exceeds one slide's capacity (more than 7 bullets even at reduced size, or multiple tables/diagrams).
+
+**Priority order when text overflows**: (1) shorten text; (2) `fontSize` prop; (3) split into multiple slides (last resort).
+
+## Math Formulas with KaTeX
+
+KaTeX is a built-in Slidev feature — no theme changes or plugins needed. Use it for equations, formal notation, and mathematical expressions in slides.
+
+### Inline Formulas
+
+Wrap formulas in single dollar signs `$...$` for inline rendering within text.
+
+```md
+The Pythagorean theorem states that $a^2 + b^2 = c^2$ for right triangles.
+```
+
+### Display (Block) Formulas
+
+**All display math (`$$...$$`) must be wrapped in `<Admonition type="formula">`.**
+
+This ensures visual consistency and makes equations stand out from surrounding text. Only inline math (`$...$`) within sentences and math inside table cells remain unwrapped.
+
+```md
+<Admonition type="formula" title="Summation">
+
+$$\sum_{i=1}^{n} x_i = x_1 + x_2 + \cdots + x_n$$
+
+</Admonition>
+```
+
+### Common Patterns
+
+For KaTeX syntax — superscripts/subscripts, fractions, Greek letters, operators, matrices — refer to /slidev. KaTeX is stock Slidev; only the theme-specific wrapping rule below is custom.
+
+### Slide Examples
+
+#### Formula-Heavy Slide
+
+```md
+---
+layout: blank
+---
+
+## Gradient Descent
+
+<Admonition type="formula" title="パラメータ更新則">
+
+$$\theta_{t+1} = \theta_t - \eta \nabla J(\theta_t)$$
+
+</Admonition>
+
+Where:
+- $\theta_t$ — parameters at step $t$
+- $\eta$ — learning rate
+- $\nabla J(\theta_t)$ — gradient of the loss function
+```
+
+### Formula Admonition Rules
+
+The wrapping rule (§ Display (Block) Formulas above) admits exactly these exceptions; the `formula` type uses a larger content font (`1rem`) for math readability (full Admonition details in § *Admonition* above):
+
+| Math Type | Treatment |
+|-----------|-----------|
+| Display math (`$$...$$`) | **Always** wrap in `<Admonition type="formula">` |
+| Inline math (`$...$`) in text | Keep inline, no admonition |
+| Math in table cells | Keep inline, no admonition |
+
+Group multiple related display formulas in a **single** `<Admonition type="formula">` to save vertical space; add brief labels inside when formulas serve different roles. Title by context — a named technique (`title="Scaled Dot-Product Attention"`), a definition (`title="Definition: Cross-Entropy Loss"`), or the equation's role.
+
+### Math Tips
+
+- Use the `blank` layout for formula-heavy slides; keep formulas readable at projection size (avoid deeply nested expressions).
+- Add `fontSize: "18px"` to slides with a formula admonition + table or multiple admonitions.
+- Combine with `v-click` to reveal formulas progressively.
+
+## Code animations
+
+For stock `v-click` / `v-clicks` / line-range highlighting, refer to /slidev.
 
 ## Autonomous slide generation
 

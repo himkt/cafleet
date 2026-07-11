@@ -14,7 +14,7 @@ CAFleet members spawned via `cafleet member create` do not act autonomously. The
 
 Supervision happens over the CAFleet message broker: the Director `cafleet message send`s a member → the broker keystrokes a 2-line inline preview into the member's pane (it processes the preview as a fresh user-turn; the full body is fetched via `cafleet message poll`) → the member acts and replies via `cafleet message send` → the broker keystrokes that reply into the Director's pane, which the Director ACKs (`cafleet message ack`). The inline-preview mechanics are canonical in [`SKILL.md`](../SKILL.md) § Send and [`multiplexer-backends.md`](../../../docs/spec/multiplexer-backends.md#push-notifications).
 
-**Long or multi-line bodies.** `message send` / `message broadcast` / `member nudge` accept a `--text-file <path>` (or `--text-file -` for stdin) alternative to inline `--text`. A long or multi-line body MUST be passed via `--text-file`, never inline `--text`, so it never lands on the command line and hits the shell's `ARG_MAX` limit. Short one-line bodies stay fine inline with `--text`.
+**Long or multi-line bodies.** `message send` / `message broadcast` accept a `--text-file <path>` (or `--text-file -` for stdin) alternative to inline `--text`. A long or multi-line body MUST be passed via `--text-file`, never inline `--text`, so it never lands on the command line and hits the shell's `ARG_MAX` limit. Short one-line bodies stay fine inline with `--text`.
 
 **Facilitation cue (load-bearing).** The monitor loop does **not** wake the Director (it wakes only the monitoring member — firing whenever a watched member is due on its own interval; see § The monitor heartbeat). When the Director is re-engaged on demand (§ The monitor heartbeat defines the two channels), **treat each such re-engagement as the cue to run the entire 5-step facilitation loop** (poll → ACK → dispatch → health-check → escalate), NOT to read the inbox and stop.
 
@@ -30,7 +30,7 @@ Each tick the loop scans the **watched set** — the root Director (default **18
 
 See [`SKILL.md`](../SKILL.md) and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring/) for the full command surface and policy. **The monitoring member — not the Director — runs `cafleet monitor start`** (see § Monitor Lifecycle).
 
-**The Director is never woken by the loop.** It is re-engaged only on demand: by the monitoring member's nudge (`cafleet member nudge`, which persists an ACKable broker task **and** fires the `Esc`-safeguarded inline preview, when the routine reports a `stalled`/`finished` member or classifies the Director's own pane `finished` with un-acked work — but **never** when the Director's pane is `awaiting_user`), and by the broker's inline-preview keystroke on every inbound `cafleet message send`. The nudge's leading `Esc` exists to stop the trailing `Enter` from blindly *confirming* a prompt; a pending `AskUserQuestion` is protected because the monitoring member never nudges an `awaiting_user` pane at all — by policy, not by the keystroke. When woken by one of those, the Director runs the entire 5-step facilitation loop (poll → ACK → dispatch → health-check → escalate), not just an inbox read. The monitor decides only *when* to wake the monitoring member; this file defines *what* the Director does once re-engaged.
+**The Director is never woken by the loop.** It is re-engaged only on demand: by the monitoring member's report (`cafleet message send`, which persists an ACKable broker task **and** fires the `Esc`-safeguarded inline preview, when the routine reports a `stalled`/`finished` member or classifies the Director's own pane `finished` with un-acked work — but **never** when the Director's pane is `awaiting_user`), and by the broker's inline-preview keystroke on every other inbound `cafleet message send`. The preview's leading `Esc` exists to stop the trailing `Enter` from blindly *confirming* a prompt; a pending `AskUserQuestion` is protected because the monitoring member never re-engages an `awaiting_user` pane at all — by policy, not by the keystroke. When woken by one of those, the Director runs the entire 5-step facilitation loop (poll → ACK → dispatch → health-check → escalate), not just an inbox read. The monitor decides only *when* to wake the monitoring member; this file defines *what* the Director does once re-engaged.
 
 ### How ordinary members are woken
 
@@ -175,7 +175,7 @@ CAFleet members never talk to the user directly — the Director relays. This is
 - Decide on the user's behalf, even when the answer looks obvious.
 - Batch multiple members' questions into a single user prompt unless they are genuinely the same decision.
 - Summarize or paraphrase the user's answer when relaying — pass it through.
-- Print a fenced `bash` block of a pane command (`member exec` / `member ping` / `member nudge`) for the user to paste — invoke any such primitive via the Director's own Bash tool; the coding agent's per-call permission prompt is the consent surface.
+- Print a fenced `bash` block of a pane command (`member exec` / `member ping`) for the user to paste — invoke any such primitive via the Director's own Bash tool; the coding agent's per-call permission prompt is the consent surface.
 
 ## Cleanup Protocol
 
