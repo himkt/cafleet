@@ -75,7 +75,7 @@ Run `cafleet doctor` to confirm the Director is inside a tmux or herdr session w
 `cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current tmux pane, and seeds the built-in Administrator. Capture both integer ids from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
 
 ```bash
-cafleet --json fleet create --name "research-[topic-slug]"
+cafleet fleet create --name "research-[topic-slug]" --json
 ```
 
 Capture `fleet_id` and `director.member_id` from the response. Treat `fleet_id` as `[fleet-id]` and `director.member_id` as `[director-member-id]` for the rest of this skill.
@@ -136,10 +136,11 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 Render the prompt to `${BASE}/.prompts/manager-<UTC-compact>.md` per the 2b two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id [fleet-id] \
+   cafleet member create --fleet-id [fleet-id] \
      --name "manager" \
      --description "Compiles the research report" \
-     --text-file ${BASE}/.prompts/manager-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/manager-<UTC-compact>.md \
+     --json
    ```
 
    Capture the printed `member_id` and substitute it for `[manager-member-id]` in every subsequent `cafleet` call that targets the Manager.
@@ -164,10 +165,11 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 Render the prompt to `${BASE}/.prompts/<scout-name>-<UTC-compact>.md` per the 2b two-step audit-file pattern (use `scout` for a single Scout, `scout-1`/`scout-2`/… for multiple; `<scout-name>` is the lowercased `--name`), then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id [fleet-id] \
+   cafleet member create --fleet-id [fleet-id] \
      --name "scout-<NN>" \
      --description "Landscape scout" \
-     --text-file ${BASE}/.prompts/scout-<NN>-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/scout-<NN>-<UTC-compact>.md \
+     --json
    ```
 
    Capture the printed `member_id` for each Scout and substitute it into subsequent `cafleet message send` calls targeting that Scout.
@@ -215,10 +217,11 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 Render the prompt to `${BASE}/.prompts/researcher-<NN>-<UTC-compact>.md` per the 2b two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id [fleet-id] \
+   cafleet member create --fleet-id [fleet-id] \
      --name "researcher-NN" \
      --description "Researcher for sub-topic <slug>" \
-     --text-file ${BASE}/.prompts/researcher-NN-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/researcher-NN-<UTC-compact>.md \
+     --json
    ```
 
    The Director repeats this step whenever the Manager requests additional Researchers (coverage gaps, failed investigations, revision-driven re-research). Any new Researcher must first have a task created by the Manager; the Director includes the `taskId` in the spawn prompt.

@@ -51,11 +51,11 @@ Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks 
 
 ## Communication Protocol
 
-All Director-to-member messages use the CAFleet message broker. The Director stores each member's `member_id` at spawn time (from the `cafleet --json member create` response) and substitutes it literally for `<member-id>` as the `--to-member-id` target.
+All Director-to-member messages use the CAFleet message broker. The Director stores each member's `member_id` at spawn time (from the `cafleet member create … --json` response) and substitutes it literally for `<member-id>` as the `--to-member-id` target.
 
 **Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* + § *Director Per-File Detail Recovery* for the verb + pointer schema, role taxonomy, marker rules, and git-plumbing recovery commands. The Verifier's **Phase 1 tool-discovery** message is exempt from the schema (one-time discovery payload).
 
-Send tasks to members via `cafleet message send` (a push notification keystrokes the message into the member's pane), poll your inbox with `cafleet --json message poll`, ACK each task, and inspect a stalled member with `cafleet member capture --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
+Send tasks to members via `cafleet message send` (a push notification keystrokes the message into the member's pane), poll your inbox with `cafleet message poll … --json`, ACK each task, and inspect a stalled member with `cafleet member capture --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
 
 ## Escalation Protocol
 

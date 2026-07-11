@@ -1,7 +1,7 @@
 # Remove `--json` from the Global Option Surface
 
 **Status**: Approved
-**Progress**: 9/26 tasks complete
+**Progress**: 14/26 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -120,11 +120,11 @@ Documentation lands first, per `.claude/rules/documentation-maintenance.md`. `RE
 
 ### Step 3: Skills
 
-- [ ] `skills/cafleet/reference/cli.md`: rewrite the "`--json` and `--version` are top-level options" rule (`--version` stays top-level; `--json` becomes per-subcommand, trailing) and update every example (lines 14-15, 57, 86, 90, 98) <!-- completed: -->
-- [ ] `skills/cafleet/reference/output-flags.md`: retitle "`--json` (global, machine-parseable)" to per-subcommand and move the flag to trailing position in both examples <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/`: update `cafleet --json fleet create` / `--json member create` / `--json message poll` invocations to trailing position in `create/create.md`, `execute/execute.md`, `interview/interview.md`, and the create/execute `roles/director.md` files <!-- completed: -->
-- [ ] `skills/cafleet-research/`: same sweep in `report/report.md`, `presentation/presentation.md`, and both `roles/director.md` files <!-- completed: -->
-- [ ] `.claude/skills/skill-author/SKILL.md`: same sweep (lines 82, 113, 329, 360, 372, 412) <!-- completed: -->
+- [x] `skills/cafleet/reference/cli.md`: rewrite the "`--json` and `--version` are top-level options" rule (`--version` stays top-level; `--json` becomes per-subcommand, trailing) and update every example (lines 14-15, 57, 86, 90, 98) <!-- completed: 2026-07-11T09:02 -->
+- [x] `skills/cafleet/reference/output-flags.md`: retitle "`--json` (global, machine-parseable)" to per-subcommand and move the flag to trailing position in both examples <!-- completed: 2026-07-11T09:02 -->
+- [x] `skills/cafleet-design-doc/`: update `cafleet --json fleet create` / `--json member create` / `--json message poll` invocations to trailing position in `create/create.md`, `execute/execute.md`, `interview/interview.md`, and the create/execute `roles/director.md` files <!-- completed: 2026-07-11T09:02 -->
+- [x] `skills/cafleet-research/`: same sweep in `report/report.md`, `presentation/presentation.md`, and both `roles/director.md` files <!-- completed: 2026-07-11T09:02 -->
+- [x] `.claude/skills/skill-author/SKILL.md`: same sweep (lines 82, 113, 329, 360, 372, 412) <!-- completed: 2026-07-11T09:00 -->
 
 ### Step 4: Code (`cafleet/src/cafleet/cli/`)
 

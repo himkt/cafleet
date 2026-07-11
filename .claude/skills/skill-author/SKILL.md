@@ -79,7 +79,7 @@ When CWD has no `.git` ancestor (typical when CWD is `$HOME` or under `$HOME/.cl
 The Director creates the fleet inside a tmux pane:
 
 ```bash
-cafleet --json fleet create --name "<fleet-name>"
+cafleet fleet create --name "<fleet-name>" --json
 ```
 
 The CLI atomically (1) creates a `fleets` row, (2) registers a root Director bound to the current tmux pane, (3) seeds a built-in Administrator. Capture both `fleet_id` and `director.member_id` from the JSON response and substitute them as **literal id strings** into every subsequent `cafleet ...` call.
@@ -110,10 +110,11 @@ For each member you spawn, follow the **two-step render-to-file pattern**:
 3. **Spawn with `--text-file`** pointing at the absolute path of the rendered file (the acting Director is auto-resolved from the fleet row — no identity flag):
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> \
+   cafleet member create --fleet-id <fleet-id> \
      --name "<member-name>" \
      --description "<one-sentence purpose>" \
-     --text-file ${BASE}/prompts/<role>-<UTC-compact>.md
+     --text-file ${BASE}/prompts/<role>-<UTC-compact>.md \
+     --json
    ```
 
    Capture the printed `member_id` from the JSON response and substitute it for the member's id in every subsequent `cafleet ...` call **the Director** makes that targets it. (The member itself learns its own id from the literal `YOUR MEMBER ID:` line the CLI rendered into its prompt — § 3.2.)
@@ -326,7 +327,7 @@ After acting on a polled message, the recipient MUST `cafleet message ack` it. U
 cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --task-id <task-id>
 ```
 
-The `<task-id>` is the full id returned by `cafleet --json message poll --fleet-id <fleet-id> --member-id <my-member-id> --full`. The default text-mode poll output truncates the body; pass `--full` when you need the untruncated envelope.
+The `<task-id>` is the full id returned by `cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id> --full --json`. The default text-mode poll output truncates the body; pass `--full` when you need the untruncated envelope.
 
 ---
 
@@ -357,7 +358,7 @@ The skill's task convention is `researches/pr-<pr-number>` (PR summaries are res
 ### Fleet bootstrap
 
 ```bash
-cafleet --json fleet create --name "summarize-pr-1234"
+cafleet fleet create --name "summarize-pr-1234" --json
 # → {"fleet_id": 7, "director": {"member_id": 8}, "administrator_member_id": 9}
 ```
 
@@ -369,10 +370,11 @@ Like every CAFleet-orchestrated skill, `summarize-pr` spawns a dedicated monitor
 
 ```bash
 # First member create: the monitoring member (canonical conditional-nudge routine).
-cafleet --json member create --fleet-id 7 \
+cafleet member create --fleet-id 7 \
   --name "monitor" --description "Monitoring member: owns the heartbeat" \
   --role monitor --model sonnet \
-  --text-file /repo/researches/pr-1234/prompts/monitor-20260516T003300Z.md
+  --text-file /repo/researches/pr-1234/prompts/monitor-20260516T003300Z.md \
+  --json
 # → {"member_id": 10, ...}
 ```
 
@@ -409,10 +411,11 @@ The Director writes this rendered text to `/repo/researches/pr-1234/prompts/summ
 ### Spawn the Summarizer
 
 ```bash
-cafleet --json member create --fleet-id 7 \
+cafleet member create --fleet-id 7 \
   --name "summarizer" \
   --description "Digests a PR diff into a 200-word risk summary" \
-  --text-file /repo/researches/pr-1234/prompts/summarizer-20260516T003344Z.md
+  --text-file /repo/researches/pr-1234/prompts/summarizer-20260516T003344Z.md \
+  --json
 # → {"member_id": 11, ...}
 ```
 
