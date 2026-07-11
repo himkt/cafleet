@@ -63,7 +63,7 @@ function MessageList({
   return (
     <div className="divide-y divide-border">
       {visible.map((row) => (
-        <div key={row.task_id} className="px-4 py-2.5">
+        <div key={row.message_id} className="px-4 py-2.5">
           <div className="flex flex-wrap items-baseline gap-1.5 text-xs">
             <span className="font-medium text-text-muted">
               {direction === "inbox"

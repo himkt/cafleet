@@ -19,14 +19,14 @@ export interface Member {
 }
 
 export interface TimelineMessage {
-  task_id: number;
+  message_id: number;
   from_member_id: number;
   from_member_name: string;
   to_member_id: number;
   to_member_name: string;
   status: "input_required" | "completed" | "canceled";
   created_at: string;
-  origin_task_id: number | null;
+  origin_message_id: number | null;
   status_timestamp: string;
   body: string;
 }

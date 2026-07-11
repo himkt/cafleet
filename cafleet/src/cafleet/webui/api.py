@@ -55,7 +55,7 @@ def _format_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     member_names = broker.get_member_names(list(member_ids))
     return [
         {
-            "task_id": row["task_id"],
+            "message_id": row["message_id"],
             "from_member_id": row["from_member_id"],
             "from_member_name": member_names[row["from_member_id"]],
             "to_member_id": row["to_member_id"],
@@ -64,7 +64,7 @@ def _format_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "status": row["status_state"],
             "created_at": row["created_at"],
             "status_timestamp": row["status_timestamp"],
-            "origin_task_id": row["origin_task_id"],
+            "origin_message_id": row["origin_message_id"],
             "body": row["text"],
         }
         for row in rows
@@ -91,7 +91,7 @@ def list_fleets():
 
 @webui_router.get("/members")
 def list_members(fleet_id: int = Depends(get_webui_fleet)):
-    members = broker.list_roster(fleet_id, include_task_holders=True)
+    members = broker.list_roster(fleet_id, include_message_holders=True)
     configs = {c["member_id"]: c for c in broker.list_monitor_configs(fleet_id)}
     for member in members:
         cfg = configs.get(member["member_id"])
@@ -176,8 +176,8 @@ def send_message(
 
     if body.to_member_id == "*":
         result = broker.broadcast_message(fleet_id, body.from_member_id, body.text)
-        summary = result[0]["task"]
-        return {"task_id": summary["task_id"], "status": summary["status_state"]}
+        summary = result[0]["message"]
+        return {"message_id": summary["message_id"], "status": summary["status_state"]}
 
     if broker.get_member(body.to_member_id, fleet_id) is None:
         raise HTTPException(status_code=404, detail="Member not found")
@@ -185,5 +185,5 @@ def send_message(
     result = broker.send_message(
         fleet_id, body.from_member_id, body.to_member_id, body.text
     )
-    task = result["task"]
-    return {"task_id": task["task_id"], "status": task["status_state"]}
+    message = result["message"]
+    return {"message_id": message["message_id"], "status": message["status_state"]}

@@ -16,8 +16,8 @@ interface TimelineProps {
 
 function entryKey(entry: TimelineEntry): string {
   return entry.kind === "unicast"
-    ? String(entry.message.task_id)
-    : `bcast:${entry.rows[0].origin_task_id ?? entry.rows[0].task_id}`;
+    ? String(entry.message.message_id)
+    : `bcast:${entry.rows[0].origin_message_id ?? entry.rows[0].message_id}`;
 }
 
 function groupMessages(msgs: TimelineMessage[]): TimelineEntry[] {
@@ -25,15 +25,15 @@ function groupMessages(msgs: TimelineMessage[]): TimelineEntry[] {
   const singletons: TimelineEntry[] = [];
 
   for (const m of msgs) {
-    if (!m.origin_task_id) {
+    if (!m.origin_message_id) {
       singletons.push({ kind: "unicast", message: m });
       continue;
     }
-    const existing = groups.get(m.origin_task_id);
+    const existing = groups.get(m.origin_message_id);
     if (existing) {
       existing.push(m);
     } else {
-      groups.set(m.origin_task_id, [m]);
+      groups.set(m.origin_message_id, [m]);
     }
   }
 

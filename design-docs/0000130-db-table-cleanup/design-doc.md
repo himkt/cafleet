@@ -1,7 +1,7 @@
 # Rename the `tasks` table to `messages` (end-to-end)
 
 **Status**: Approved
-**Progress**: 21/27 tasks complete
+**Progress**: 24/27 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -160,9 +160,9 @@ Documentation-first order applies (per `.claude/rules/documentation-maintenance.
 
 ### Step 5: WebUI and admin frontend
 
-- [ ] Update `webui/api.py`: `_format_messages` output keys and the `POST /api/messages/send` response body's `task_id` key (lines 180, 189) <!-- completed: -->
-- [ ] Update `admin/src/types.ts`, `Timeline.tsx`, `MemberDetail.tsx`, `ReactionBar.tsx` <!-- completed: -->
-- [ ] Run `mise //admin:build` to regenerate the committed `webui/dist` bundle <!-- completed: -->
+- [x] Update `webui/api.py`: `_format_messages` output keys and the `POST /api/messages/send` response body's `task_id` key (lines 180, 189) <!-- completed: 2026-07-12T01:08 -->
+- [x] Update `admin/src/types.ts`, `Timeline.tsx`, `MemberDetail.tsx`, `ReactionBar.tsx` <!-- completed: 2026-07-12T01:08 -->
+- [x] Run `mise //admin:build` to regenerate the committed `webui/dist` bundle <!-- completed: 2026-07-12T01:08 -->
 
 ### Step 6: Test sweep and verification
 
