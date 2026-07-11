@@ -1,7 +1,7 @@
 # Rename the `tasks` table to `messages` (end-to-end)
 
 **Status**: Approved
-**Progress**: 15/27 tasks complete
+**Progress**: 20/27 tasks complete
 **Last Updated**: 2026-07-11
 
 ## Overview
@@ -148,11 +148,11 @@ Documentation-first order applies (per `.claude/rules/documentation-maintenance.
 
 ### Step 3: Broker, output, multiplexer
 
-- [ ] Rename through `broker/messaging.py` (functions, `owner_member_id` filter + dict keys, `expected_member_field`, docstrings) <!-- completed: -->
-- [ ] Rename through `broker/queries.py` and `broker/_shared.py` (`MESSAGE_COLUMNS`, `read_message`, `list_messages_where`, `get_message`) <!-- completed: -->
-- [ ] Rename through `broker/members.py`, `broker/monitor.py`, `broker/__init__.py` (joins on `Message.owner_member_id`, re-exports) <!-- completed: -->
-- [ ] Rename through `output/render.py` (`render_message`), `output/formatters.py`, `output/__init__.py` <!-- completed: -->
-- [ ] Rename through `multiplexer/base.py`, `multiplexer/tmux.py`, `multiplexer/herdr.py` <!-- completed: -->
+- [x] Rename through `broker/messaging.py` (functions, `owner_member_id` filter + dict keys, `expected_member_field`, docstrings) <!-- completed: 2026-07-12T00:57 -->
+- [x] Rename through `broker/queries.py` and `broker/_shared.py` (`MESSAGE_COLUMNS`, `read_message`, `list_messages_where`, `get_message`) <!-- completed: 2026-07-12T00:57 -->
+- [x] Rename through `broker/members.py`, `broker/monitor.py`, `broker/__init__.py` (joins on `Message.owner_member_id`, re-exports) <!-- completed: 2026-07-12T00:57 -->
+- [x] Rename through `output/render.py` (`render_message`), `output/formatters.py`, `output/__init__.py` <!-- completed: 2026-07-12T00:57 -->
+- [x] Rename through `multiplexer/base.py`, `multiplexer/tmux.py`, `multiplexer/herdr.py` <!-- completed: 2026-07-12T00:57 -->
 
 ### Step 4: CLI
 

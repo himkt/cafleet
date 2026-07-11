@@ -326,13 +326,13 @@ class HerdrMultiplexer:
         self,
         *,
         target_pane_id: str,
-        task_id: int,
+        message_id: int,
         sender_id: int,
         ts: str,
         text: str,
     ) -> bool:
         sanitized_text = text.replace("\r\n", "⏎").replace("\n", "⏎").replace("\r", "⏎")
-        payload = f"[cafleet msg {task_id} from {sender_id} {ts}]\n{sanitized_text}"
+        payload = f"[cafleet msg {message_id} from {sender_id} {ts}]\n{sanitized_text}"
 
         # send-text delivers the raw 2-line payload without submitting; the single
         # trailing enter submits the whole payload as one recipient turn.

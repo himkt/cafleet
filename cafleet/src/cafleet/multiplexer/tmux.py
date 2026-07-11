@@ -292,7 +292,7 @@ class TmuxMultiplexer:
         self,
         *,
         target_pane_id: str,
-        task_id: int,
+        message_id: int,
         sender_id: int,
         ts: str,
         text: str,
@@ -313,7 +313,7 @@ class TmuxMultiplexer:
         # multi-line user body from visually breaking the 2-line framing; it is
         # cosmetic, not submit-safety.
         sanitized_text = text.replace("\r\n", "⏎").replace("\n", "⏎").replace("\r", "⏎")
-        payload = f"[cafleet msg {task_id} from {sender_id} {ts}]\n{sanitized_text}"
+        payload = f"[cafleet msg {message_id} from {sender_id} {ts}]\n{sanitized_text}"
         return _best_effort_send(
             target_pane_id=target_pane_id, payload=payload, esc_first=True
         )

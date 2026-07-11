@@ -198,21 +198,21 @@ class Multiplexer(Protocol):
         self,
         *,
         target_pane_id: str,
-        task_id: int,
+        message_id: int,
         sender_id: int,
         ts: str,
         text: str,
     ) -> bool:
         """Keystroke a 2-line message preview into the recipient's pane.
 
-        The first line carries an ``[cafleet msg <task_id> from <sender_id>
+        The first line carries an ``[cafleet msg <message_id> from <sender_id>
         <ts>]`` header; the second line carries the (possibly truncated)
         body. The recipient's coding agent processes the keystrokes as a
         fresh user-turn input.
 
         Args:
             target_pane_id: Recipient pane id.
-            task_id: Task id of the delivered message.
+            message_id: Message id of the delivered message.
             sender_id: Sender's member id.
             ts: Status timestamp string included in the header.
             text: Message body (caller is responsible for truncation).

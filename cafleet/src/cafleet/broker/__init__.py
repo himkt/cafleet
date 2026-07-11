@@ -12,10 +12,10 @@ from cafleet.broker.members import (
     verify_member_fleet,
 )
 from cafleet.broker.messaging import (
-    ack_task,
+    ack_message,
     broadcast_message,
-    cancel_task,
-    poll_tasks,
+    cancel_message,
+    poll_messages,
     send_message,
 )
 from cafleet.broker.monitor import (
@@ -32,7 +32,7 @@ from cafleet.broker.monitor import (
     record_pings,
     update_monitor_config,
 )
-from cafleet.broker.queries import get_task, list_inbox, list_sent, list_timeline
+from cafleet.broker.queries import get_message, list_inbox, list_sent, list_timeline
 
 __all__ = [
     "create_fleet",
@@ -49,13 +49,13 @@ __all__ = [
     "get_member_names",
     "send_message",
     "broadcast_message",
-    "poll_tasks",
-    "ack_task",
-    "cancel_task",
+    "poll_messages",
+    "ack_message",
+    "cancel_message",
     "list_inbox",
     "list_sent",
     "list_timeline",
-    "get_task",
+    "get_message",
     "find_monitoring_member",
     "get_monitor_config",
     "list_monitor_configs",
