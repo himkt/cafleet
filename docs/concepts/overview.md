@@ -88,5 +88,5 @@ See [Monitoring](monitoring.md).
 ## Design-document orchestration
 
 CAFleet ships design-document skills that coordinate a Director and members
-entirely through `cafleet message send`, so every inter-agent message is
+entirely through `cafleet message send`, so every inter-member message is
 persisted and auditable. See [Quickstart](../get-started/quickstart.md).
