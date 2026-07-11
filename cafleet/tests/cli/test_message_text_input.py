@@ -17,7 +17,7 @@ from cafleet.cli import cli
 FLEET_ID = 100
 MEMBER_ID = 200
 TO_ID = 300
-TASK_ID = 400
+MESSAGE_ID = 400
 
 
 @pytest.fixture
@@ -32,17 +32,17 @@ def _stub_verify(monkeypatch):
     monkeypatch.setattr(broker, "verify_member_fleet", lambda *_a, **_k: True)
 
 
-def _task_payload(text):
+def _message_payload(text):
     return {
-        "task_id": TASK_ID,
-        "context_id": TO_ID,
+        "message_id": MESSAGE_ID,
+        "owner_member_id": TO_ID,
         "from_member_id": MEMBER_ID,
         "to_member_id": TO_ID,
         "type": "unicast",
         "created_at": "2026-05-01T00:00:00+00:00",
         "status_state": "input_required",
         "status_timestamp": "2026-05-01T00:00:00+00:00",
-        "origin_task_id": None,
+        "origin_message_id": None,
         "text": text,
     }
 
@@ -53,7 +53,7 @@ def send_recorder(monkeypatch):
 
     def fake_send(*args, **kwargs):
         calls.append((args, kwargs))
-        return {"task": _task_payload("stored")}
+        return {"message": _message_payload("stored")}
 
     monkeypatch.setattr(broker, "send_message", fake_send)
     return calls
@@ -65,7 +65,9 @@ def broadcast_recorder(monkeypatch):
 
     def fake_broadcast(*args, **kwargs):
         calls.append((args, kwargs))
-        return [{"task": _task_payload("stored"), "recipients": 1, "delivered": 1}]
+        return [
+            {"message": _message_payload("stored"), "recipients": 1, "delivered": 1}
+        ]
 
     monkeypatch.setattr(broker, "broadcast_message", fake_broadcast)
     return calls

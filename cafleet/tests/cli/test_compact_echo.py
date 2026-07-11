@@ -32,43 +32,47 @@ def _stub_verify(monkeypatch):
     monkeypatch.setattr(broker, "verify_member_fleet", lambda *_a, **_k: True)
 
 
-def _typed_task(
+def _typed_message(
     *,
-    task_id: int = 5000,
+    message_id: int = 5000,
     sender: int = 111,
     recipient: int = 222,
     text: str = "short body",
     type_: str = "unicast",
-    origin_task_id: int | None = None,
+    origin_message_id: int | None = None,
     status_state: str = "input_required",
 ) -> dict:
     return {
-        "task_id": task_id,
-        "context_id": recipient,
+        "message_id": message_id,
+        "owner_member_id": recipient,
         "from_member_id": sender,
         "to_member_id": recipient,
         "type": type_,
         "created_at": "2026-05-05T12:00:00.000000+00:00",
         "status_state": status_state,
         "status_timestamp": "2026-05-05T12:00:00.000000+00:00",
-        "origin_task_id": origin_task_id,
+        "origin_message_id": origin_message_id,
         "text": text,
     }
 
 
 def _broadcast_summary_result(*, summary_id=7000, recipient_count=3):
-    summary = _typed_task(
-        task_id=summary_id,
+    summary = _typed_message(
+        message_id=summary_id,
         sender=111,
         recipient=0,
         text=f"Broadcast sent to {recipient_count} recipients",
         type_="broadcast_summary",
-        origin_task_id=summary_id,
+        origin_message_id=summary_id,
         status_state="completed",
     )
     summary["to_member_id"] = None
     return [
-        {"task": summary, "recipients": recipient_count, "delivered": recipient_count}
+        {
+            "message": summary,
+            "recipients": recipient_count,
+            "delivered": recipient_count,
+        }
     ]
 
 
@@ -119,7 +123,7 @@ def _setup_command(monkeypatch, command, fleet_id, member_id):
             broker,
             "send_message",
             lambda *_a, **_k: {
-                "task": _typed_task(text="hello"),
+                "message": _typed_message(text="hello"),
                 "notification_sent": True,
             },
         )
@@ -138,9 +142,9 @@ def _setup_command(monkeypatch, command, fleet_id, member_id):
     if command == "ack":
         monkeypatch.setattr(
             broker,
-            "ack_task",
+            "ack_message",
             lambda *_a, **_k: {
-                "task": _typed_task(text="hello", status_state="completed"),
+                "message": _typed_message(text="hello", status_state="completed"),
             },
         )
         return [
@@ -150,7 +154,7 @@ def _setup_command(monkeypatch, command, fleet_id, member_id):
             str(fleet_id),
             "--member-id",
             str(member_id),
-            "--task-id",
+            "--message-id",
             "5000",
         ]
     # ping
@@ -263,7 +267,9 @@ def test_broadcast_full__multi_line_per_recipient_envelopes(
 
 
 @pytest.mark.parametrize("command", ["send", "ack"])
-def test_quiet__emits_only_task_id(runner, fleet_id, member_id, monkeypatch, command):
+def test_quiet__emits_only_message_id(
+    runner, fleet_id, member_id, monkeypatch, command
+):
     args = _setup_command(monkeypatch, command, fleet_id, member_id) + ["--quiet"]
     result = runner.invoke(cli, args)
     assert result.exit_code == 0, result.output
