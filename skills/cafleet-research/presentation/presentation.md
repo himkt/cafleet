@@ -90,7 +90,7 @@ Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, faci
 
 ```bash
 cafleet doctor
-cafleet --json fleet create --name "present-[topic-slug]"
+cafleet fleet create --name "present-[topic-slug]" --json
 ```
 
 `cafleet doctor` confirms the Director is inside a tmux or herdr session (a hard requirement of `cafleet member create`). On non-zero exit, abort and surface the error to the user — do NOT attempt raw `tmux` probes as a workaround.
@@ -135,10 +135,11 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 Render the prompt to `${BASE}/.prompts/presentation-<UTC-compact>.md` per the 1c two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id [fleet-id] \
+   cafleet member create --fleet-id [fleet-id] \
      --name "presentation" \
      --description "Authors slide.md" \
-     --text-file ${BASE}/.prompts/presentation-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/presentation-<UTC-compact>.md \
+     --json
    ```
 
    Capture the printed `member_id` and substitute it for `[presentation-member-id]` in subsequent `cafleet message send` calls.
@@ -159,10 +160,11 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 Render the prompt to `${BASE}/.prompts/transcript-<UTC-compact>.md` per the 1c two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id [fleet-id] \
+   cafleet member create --fleet-id [fleet-id] \
      --name "transcript" \
      --description "Authors transcript.md" \
-     --text-file ${BASE}/.prompts/transcript-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/transcript-<UTC-compact>.md \
+     --json
    ```
 
    Capture the printed `member_id` and substitute it for `[transcript-member-id]` in subsequent `cafleet message send` calls.
@@ -254,10 +256,11 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 Render the prompt to `${BASE}/.prompts/vr-batch-<start>-<UTC-compact>.md` per the 1c two-step audit-file pattern (`<start>` matches the batch's first-slide index used in `--name`; each VR batch gets its own timestamped file — no overwriting), then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id [fleet-id] \
+   cafleet member create --fleet-id [fleet-id] \
      --name "vr-batch-<start>" \
      --description "Visual Reviewer for slides <start>..<end>" \
-     --text-file ${BASE}/.prompts/vr-batch-<start>-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/vr-batch-<start>-<UTC-compact>.md \
+     --json
    ```
 
    Capture the printed `member_id` as `[vr-batch-member-id]` for subsequent `cafleet message send` / `member delete` calls.

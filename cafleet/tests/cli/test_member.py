@@ -80,21 +80,16 @@ def _invoke_member_create(
     role: str | None = None,
     stdin: bytes | None = None,
 ):
-    args: list[str] = []
-    if json_output:
-        args.append("--json")
-    args.extend(
-        [
-            "member",
-            "create",
-            "--fleet-id",
-            str(fleet_id),
-            "--name",
-            name,
-            "--description",
-            f"{name} for tests",
-        ]
-    )
+    args: list[str] = [
+        "member",
+        "create",
+        "--fleet-id",
+        str(fleet_id),
+        "--name",
+        name,
+        "--description",
+        f"{name} for tests",
+    ]
     if coding_agent != "claude":
         args.extend(["--coding-agent", coding_agent])
     if model is not None:
@@ -105,6 +100,8 @@ def _invoke_member_create(
         args.extend(["--text-file", text_file])
     if text is not None:
         args.extend(["--text", text])
+    if json_output:
+        args.append("--json")
     if positional is not None:
         args.extend(["--", positional])
     if stdin is not None:
@@ -760,25 +757,22 @@ def _invoke_member_nudge(
     json_output: bool = False,
     stdin: bytes | None = None,
 ):
-    args: list[str] = []
-    if json_output:
-        args.append("--json")
-    args.extend(
-        [
-            "member",
-            "nudge",
-            "--fleet-id",
-            str(fleet_id),
-            "--from-member-id",
-            str(sender_id),
-            "--to-member-id",
-            str(target_id),
-        ]
-    )
+    args: list[str] = [
+        "member",
+        "nudge",
+        "--fleet-id",
+        str(fleet_id),
+        "--from-member-id",
+        str(sender_id),
+        "--to-member-id",
+        str(target_id),
+    ]
     if text_file is not None:
         args.extend(["--text-file", text_file])
     if text is not None:
         args.extend(["--text", text])
+    if json_output:
+        args.append("--json")
     if stdin is not None:
         return runner.invoke(cli, args, input=stdin)
     return runner.invoke(cli, args)
@@ -1226,7 +1220,6 @@ def test_member_create__role_monitor_explicit_coding_agent_wins(
     result = runner.invoke(
         cli,
         [
-            "--json",
             "member",
             "create",
             "--fleet-id",
@@ -1241,6 +1234,7 @@ def test_member_create__role_monitor_explicit_coding_agent_wins(
             "claude",
             "--text",
             "hello",
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output

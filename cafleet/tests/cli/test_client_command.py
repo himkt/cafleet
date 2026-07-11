@@ -19,42 +19,42 @@ import pytest
 from click.testing import CliRunner
 
 from cafleet import broker
-from cafleet.cli._helpers import client_command, fleet_id_option
+from cafleet.cli._helpers import client_command, fleet_id_option, json_flag
 
 
 @click.group()
-@click.option("--json", "json_output", is_flag=True, default=False)
-@click.pass_context
-def _test_cli(ctx, json_output):
-    ctx.ensure_object(dict)
-    ctx.obj["json_output"] = json_output
+def _test_cli():
+    pass
 
 
 @_test_cli.command("simple")
 @fleet_id_option
+@json_flag
 @click.option("--full", is_flag=True, default=False)
 @click.pass_context
 @client_command(text_formatter=lambda r, *, full=False: f"TEXT:{r}")
-def _simple(ctx, full):
+def _simple(ctx, full, json_output):
     return {"hello": "world"}
 
 
 @_test_cli.command("member-bound")
 @fleet_id_option
 @click.option("--member-id", "member_id", type=int, required=True)
+@json_flag
 @click.option("--full", is_flag=True, default=False)
 @click.pass_context
 @client_command(
     requires_member_fleet=True,
     text_formatter=lambda r, *, full=False: f"TEXT:{r}",
 )
-def _member_bound(ctx, member_id, full):
+def _member_bound(ctx, member_id, full, json_output):
     return {"ok": True, "member_id": member_id}
 
 
 @_test_cli.command("sender-bound")
 @fleet_id_option
 @click.option("--from-member-id", "from_member_id", type=int, required=True)
+@json_flag
 @click.option("--full", is_flag=True, default=False)
 @click.pass_context
 @client_command(
@@ -62,7 +62,7 @@ def _member_bound(ctx, member_id, full):
     member_kwarg="from_member_id",
     text_formatter=lambda r, *, full=False: f"TEXT:{r}",
 )
-def _sender_bound(ctx, from_member_id, full):
+def _sender_bound(ctx, from_member_id, full, json_output):
     return {"ok": True, "from_member_id": from_member_id}
 
 
@@ -184,7 +184,7 @@ def test_broker_error_wrapping__runtime_error_wrapped_as_click_exception(runner)
 def test_output_branching__json_output_branch_uses_format_json(runner):
     result = runner.invoke(
         _test_cli,
-        ["--json", "simple", "--fleet-id", "1"],
+        ["simple", "--fleet-id", "1", "--json"],
     )
     assert result.exit_code == 0, result.output
     parsed = json.loads(result.output)

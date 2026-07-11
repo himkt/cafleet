@@ -39,7 +39,7 @@ Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks 
 
 ## Communication Protocol
 
-All Director-to-member messages use the CAFleet message broker. The Director stores each member's `member_id` at spawn time (from the `cafleet --json member create` response) and substitutes it literally for `<member-id>` as the `--to-member-id` target.
+All Director-to-member messages use the CAFleet message broker. The Director stores each member's `member_id` at spawn time (from the `cafleet member create … --json` response) and substitutes it literally for `<member-id>` as the `--to-member-id` target.
 
 **Coordination Protocol**: Inter-member cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema — single-line `<verb> (<pointer>)` poke; substantive content (Reviewer findings, Drafter spec questions, Director arbitration) in inline `COMMENT(role)` markers in the design document. Canonical mechanics + the Step-2 clarification exemption (your "User answers: …" relay rides free-form before the doc exists): [../../reference/coordination.md](../../reference/coordination.md).
 
@@ -48,7 +48,7 @@ All Director-to-member messages use the CAFleet message broker. The Director sto
 cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
   --to-member-id <member-id> --text "<instruction>"
 ```
-A push notification keystrokes the message into the member's pane (see the `cafleet` skill § Send). Poll your inbox with `cafleet --json message poll --fleet-id <fleet-id> --member-id <director-member-id>`, ACK each task with `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --task-id <task-id>`, and inspect a stalled member with `cafleet member capture --member-id <member-id> --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
+A push notification keystrokes the message into the member's pane (see the `cafleet` skill § Send). Poll your inbox with `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id> --json`, ACK each task with `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --task-id <task-id>`, and inspect a stalled member with `cafleet member capture --member-id <member-id> --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
 
 ## User Interaction Rules
 

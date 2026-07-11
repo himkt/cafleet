@@ -3,15 +3,14 @@
 import click
 
 from cafleet import broker, output
-from cafleet.cli._helpers import ensure_skills_current, fleet_id_option, full_flag
+from cafleet.cli._helpers import (
+    ensure_skills_current,
+    fleet_id_option,
+    full_flag,
+    json_flag,
+)
 from cafleet.coding_agent import CODING_AGENTS
 from cafleet.multiplexer import MultiplexerError, resolve_multiplexer
-
-_json_flag = click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
-
-
-def _wants_json(ctx: click.Context, as_json: bool) -> bool:
-    return as_json or ctx.obj["json_output"]
 
 
 @click.group()
@@ -30,15 +29,13 @@ def fleet() -> None:
     show_default=True,
     help="Coding-agent binary to spawn / declare for the placement.",
 )
-@_json_flag
 @full_flag
-@click.pass_context
+@json_flag
 def fleet_create(
-    ctx: click.Context,
     name: str,
     coding_agent: str,
-    as_json: bool,
     full: bool,
+    json_output: bool,
 ) -> None:
     """Create a new fleet (must be run inside a tmux or herdr session)."""
     try:
@@ -57,20 +54,19 @@ def fleet_create(
         backend=mux.name,
     )
 
-    if _wants_json(ctx, as_json):
+    if json_output:
         click.echo(output.format_json(result))
     else:
         click.echo(output.format_fleet_create(result, full=full))
 
 
 @fleet.command("list")
-@_json_flag
-@click.pass_context
-def fleet_list(ctx: click.Context, as_json: bool) -> None:
+@json_flag
+def fleet_list(json_output: bool) -> None:
     """List all fleets."""
     rows = broker.list_fleets()
 
-    if _wants_json(ctx, as_json):
+    if json_output:
         click.echo(output.format_json(rows))
     else:
         if not rows:
@@ -89,16 +85,16 @@ def fleet_list(ctx: click.Context, as_json: bool) -> None:
 
 @fleet.command("show")
 @fleet_id_option
-@_json_flag
+@json_flag
 @click.pass_context
-def fleet_show(ctx: click.Context, as_json: bool) -> None:
+def fleet_show(ctx: click.Context, json_output: bool) -> None:
     """Show details of a single fleet."""
     fleet_id = ctx.obj["fleet_id"]
     result = broker.get_fleet(fleet_id)
     if result is None:
         raise click.ClickException(f"fleet '{fleet_id}' not found.")
 
-    if _wants_json(ctx, as_json):
+    if json_output:
         click.echo(output.format_json(result))
     else:
         lines = [

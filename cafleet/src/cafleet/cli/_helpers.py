@@ -56,6 +56,13 @@ quiet_flag = click.option(
     default=False,
     help="Print only the resulting id.",
 )
+json_flag = click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
+    help="Output in JSON format.",
+)
 
 
 member_id_option = click.option(
@@ -161,7 +168,7 @@ def client_command(
                 full = kwargs["full"]
                 output.truncate_task_text(result, full=full)
                 rendered = output.render_tasks_in_result(result, full=full)
-                if ctx.obj["json_output"]:
+                if kwargs["json_output"]:
                     click.echo(output.format_json(rendered))
                 else:
                     extra = {"quiet": kwargs["quiet"]} if "quiet" in kwargs else {}

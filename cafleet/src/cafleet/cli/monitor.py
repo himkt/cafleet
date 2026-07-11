@@ -17,6 +17,7 @@ from cafleet.cli._helpers import (
     ensure_multiplexer_or_die,
     ensure_skills_current,
     fleet_id_option,
+    json_flag,
     member_id_option,
 )
 from cafleet.monitor import DEFAULT_TICK_SECONDS, loop
@@ -66,8 +67,9 @@ def monitor_start(ctx: click.Context, tick: int) -> None:
 
 @monitor.command("status")
 @fleet_id_option
+@json_flag
 @click.pass_context
-def monitor_status(ctx: click.Context) -> None:
+def monitor_status(ctx: click.Context, json_output: bool) -> None:
     """Show monitor liveness plus the per-member schedule table."""
     fleet_id = ctx.obj["fleet_id"]
     _require_live_fleet(fleet_id)
@@ -98,7 +100,7 @@ def monitor_status(ctx: click.Context) -> None:
         )
     payload = {"runtime": runtime, "members": members}
 
-    if ctx.obj["json_output"]:
+    if json_output:
         click.echo(output.format_json(payload))
     else:
         click.echo(output.format_monitor_status(payload))
@@ -120,6 +122,7 @@ def monitor_status(ctx: click.Context) -> None:
 @click.option(
     "--disable", "disable", is_flag=True, default=False, help="Disable monitoring."
 )
+@json_flag
 @click.pass_context
 def monitor_config(
     ctx: click.Context,
@@ -127,6 +130,7 @@ def monitor_config(
     interval: int | None,
     enable: bool,
     disable: bool,
+    json_output: bool,
 ) -> None:
     """Show or edit a member's monitor schedule."""
     fleet_id = ctx.obj["fleet_id"]
@@ -146,7 +150,7 @@ def monitor_config(
             fleet_id, member_id, interval_seconds=interval, enabled=enabled
         )
 
-    if ctx.obj["json_output"]:
+    if json_output:
         click.echo(output.format_json(cfg))
     else:
         click.echo(output.format_monitor_config(cfg))

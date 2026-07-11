@@ -29,7 +29,6 @@ def test_broadcast_json_full_emits_null_to_member_id(runner):
     result = runner.invoke(
         cli,
         [
-            "--json",
             "message",
             "broadcast",
             "--full",
@@ -39,6 +38,7 @@ def test_broadcast_json_full_emits_null_to_member_id(runner):
             str(sender["member_id"]),
             "--text",
             "hi all",
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output

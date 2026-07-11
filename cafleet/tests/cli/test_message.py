@@ -113,7 +113,6 @@ def test_message_show_auth_check__accepts_valid_member(
     result = runner.invoke(
         cli,
         [
-            "--json",
             "message",
             "show",
             "--fleet-id",
@@ -122,6 +121,7 @@ def test_message_show_auth_check__accepts_valid_member(
             str(member_id),
             "--task-id",
             str(task_id),
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -196,13 +196,13 @@ def test_message_poll_auth_check__accepts_valid_member(
     result = runner.invoke(
         cli,
         [
-            "--json",
             "message",
             "poll",
             "--fleet-id",
             str(fleet_id),
             "--member-id",
             str(member_id),
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -312,7 +312,6 @@ def test_message_ack_auth_check__accepts_valid_member(
     result = runner.invoke(
         cli,
         [
-            "--json",
             "message",
             "ack",
             "--fleet-id",
@@ -321,6 +320,7 @@ def test_message_ack_auth_check__accepts_valid_member(
             str(member_id),
             "--task-id",
             str(task_id),
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -407,7 +407,6 @@ def test_message_cancel_auth_check__accepts_valid_member(
     result = runner.invoke(
         cli,
         [
-            "--json",
             "message",
             "cancel",
             "--fleet-id",
@@ -416,6 +415,7 @@ def test_message_cancel_auth_check__accepts_valid_member(
             str(member_id),
             "--task-id",
             str(task_id),
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output

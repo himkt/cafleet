@@ -204,10 +204,11 @@ Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/
 Render the prompt to `${BASE}/.prompts/programmer-<UTC-compact>.md` per the 3e two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> \
+   cafleet member create --fleet-id <fleet-id> \
      --name "Programmer" \
      --description "Implements code to pass tests per step" \
-     --text-file ${BASE}/.prompts/programmer-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/programmer-<UTC-compact>.md \
+     --json
    ```
 
    Parse `member_id` from the JSON response and substitute it for `<programmer-member-id>` in every subsequent command.
@@ -224,10 +225,11 @@ Render the prompt to `${BASE}/.prompts/programmer-<UTC-compact>.md` per the 3e t
 Render the prompt to `${BASE}/.prompts/tester-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> \
+   cafleet member create --fleet-id <fleet-id> \
      --name "Tester" \
      --description "Writes unit tests per step" \
-     --text-file ${BASE}/.prompts/tester-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/tester-<UTC-compact>.md \
+     --json
    ```
 
    Parse `member_id` from the JSON response and substitute it for `<tester-member-id>` in every subsequent command.
@@ -246,10 +248,11 @@ Render the prompt to `${BASE}/.prompts/tester-<UTC-compact>.md` per the 3e two-s
 Render the prompt to `${BASE}/.prompts/verifier-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> \
+   cafleet member create --fleet-id <fleet-id> \
      --name "Verifier" \
      --description "E2E/integration testing and evidence collection" \
-     --text-file ${BASE}/.prompts/verifier-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/verifier-<UTC-compact>.md \
+     --json
    ```
 
    Parse `member_id` from the JSON response and substitute it for `<verifier-member-id>` in every subsequent command.
@@ -362,11 +365,12 @@ This is the first and only time the Reviewer exists in the fleet (never in the S
 Render the spawn prompt to `${BASE}/.prompts/reviewer-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with your overlay's resolved `{reviewer_model}` value:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> \
+   cafleet member create --fleet-id <fleet-id> \
      --name "Reviewer" \
      --description "Fresh post-implementation review" \
      --model {reviewer_model} \
-     --text-file ${BASE}/.prompts/reviewer-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/reviewer-<UTC-compact>.md \
+     --json
    ```
 
    Parse `member_id` from the JSON response and substitute it for `<reviewer-member-id>` in every subsequent command. Verify `status: active` via `cafleet member list --fleet-id <fleet-id>` before assigning.

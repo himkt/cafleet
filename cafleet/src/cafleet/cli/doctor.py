@@ -10,7 +10,7 @@ from cafleet.broker.skill_installs import (
     list_skill_installs,
     skill_installs_table_exists,
 )
-from cafleet.cli._helpers import ensure_multiplexer_or_die
+from cafleet.cli._helpers import ensure_multiplexer_or_die, json_flag
 from cafleet.multiplexer import MultiplexerError
 
 _PRESENCE_ENV = {"tmux": "TMUX", "herdr": "HERDR_ENV"}
@@ -28,8 +28,8 @@ def _skills_report() -> dict:
 
 
 @click.command("doctor")
-@click.pass_context
-def doctor(ctx) -> None:
+@json_flag
+def doctor(json_output: bool) -> None:
     """Print the resolved multiplexer backend, pane identifiers, and skills report."""
     mux = ensure_multiplexer_or_die()
 
@@ -42,7 +42,7 @@ def doctor(ctx) -> None:
     presence_value = os.environ.get(presence_var, "")
     skills = _skills_report()
 
-    if ctx.obj["json_output"]:
+    if json_output:
         click.echo(
             output.format_json(
                 {

@@ -138,13 +138,13 @@ def test_ping_dispatch__json_output_two_keys(
     result = runner.invoke(
         cli,
         [
-            "--json",
             "member",
             "ping",
             "--fleet-id",
             str(fleet_id),
             "--member-id",
             str(MEMBER_ID),
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output

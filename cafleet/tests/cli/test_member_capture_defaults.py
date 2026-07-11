@@ -194,13 +194,13 @@ def test_member_capture__json_envelope_post_processed_and_lines_default(
     result = runner.invoke(
         cli,
         [
-            "--json",
             "member",
             "capture",
             "--fleet-id",
             sid,
             "--member-id",
             member_id,
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output

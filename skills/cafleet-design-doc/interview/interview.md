@@ -137,10 +137,11 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 Render the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` per the 2c audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> \
+   cafleet member create --fleet-id <fleet-id> \
      --name "Analyzer" \
      --description "Reads the design doc and generates a numbered question list" \
-     --text-file ${BASE}/.prompts/analyzer-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/analyzer-<UTC-compact>.md \
+     --json
    ```
 
    Parse `member_id` from the JSON response and substitute it for `<analyzer-member-id>` in every subsequent command.

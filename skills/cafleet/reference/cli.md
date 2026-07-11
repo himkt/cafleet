@@ -8,11 +8,11 @@ CLI env vars (all `CAFLEET_`-prefixed): `CAFLEET_DATABASE_URL` (SQLite URL; defa
 
 ## Global Options
 
-`--json` and `--version` are top-level options (precede the subcommand name); `--member-id` and `--fleet-id` are per-subcommand options (after the subcommand name). Putting one in the wrong position fails with `No such option`.
+`--version` is the only top-level option (precedes the subcommand name); `--json`, `--member-id`, and `--fleet-id` are per-subcommand options (after the subcommand name — write `--json` trailing, after all other flags). Putting one in the wrong position fails with `No such option`.
 
 ```bash
-cafleet --json member list --fleet-id <fleet-id> --all
-cafleet --json message poll --fleet-id <fleet-id> --member-id <my-member-id>
+cafleet member list --fleet-id <fleet-id> --all --json
+cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id> --json
 ```
 
 `cafleet --version` prints `cafleet <version>` and exits 0 without `--fleet-id`.
@@ -54,7 +54,7 @@ Print the resolved multiplexer backend and the calling pane's session/window/pan
 
 ```bash
 cafleet doctor
-cafleet --json doctor
+cafleet doctor --json
 ```
 
 ## Deregister
@@ -83,11 +83,11 @@ Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters ever
 1. **Create a fleet** (if none exists):
    ```bash
    cafleet fleet create --name "my-project"
-   # text: line 1 <fleet-id>, line 2 <root-director-member-id>; --json for the nested shape
+   # text: line 1 <fleet-id>, line 2 <root-director-member-id>; append --json for the nested shape
    ```
    Must run inside a tmux or herdr session (else exits 1 with `Error: cafleet fleet create must be run inside a tmux or herdr session`, writes nothing).
 
-2. **Discover, send, poll, ack** per the command sections above; use `cafleet --json …` when parsing output. Director-side create/capture/exec/ping/nudge: [`reference/director.md`](director.md); shutdown ordering: [`reference/recovery.md`](recovery.md).
+2. **Discover, send, poll, ack** per the command sections above; append a trailing `--json` when parsing output. Director-side create/capture/exec/ping/nudge: [`reference/director.md`](director.md); shutdown ordering: [`reference/recovery.md`](recovery.md).
 
 ## Message Lifecycle
 
@@ -95,4 +95,4 @@ Messages are tasks with three states: **input_required** (delivered, awaiting AC
 
 ## Error Handling
 
-Errors print to stderr and exit non-zero; `cafleet --json <cmd>` emits them machine-parseably. The most common: missing `--fleet-id` (`Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`, exit 1), missing `--member-id` (`Error: Missing option '--member-id'.`, exit 2), and `member *` commands outside a supported multiplexer session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages).
+Errors print to stderr and exit non-zero; `cafleet <cmd> … --json` emits them machine-parseably. The most common: missing `--fleet-id` (`Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`, exit 1), missing `--member-id` (`Error: Missing option '--member-id'.`, exit 2), and `member *` commands outside a supported multiplexer session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages).

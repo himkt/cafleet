@@ -131,10 +131,11 @@ Substitute these absolute paths into the spawn prompts below.
 Render the prompt to `${BASE}/.prompts/drafter-<UTC-compact>.md` per the Step 1c two-step audit-file pattern (both normal and resume modes — the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> \
+   cafleet member create --fleet-id <fleet-id> \
      --name "Drafter" \
      --description "Writes and revises the design document" \
-     --text-file ${BASE}/.prompts/drafter-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/drafter-<UTC-compact>.md \
+     --json
    ```
 
    Parse `member_id` from the JSON response and substitute it for `<drafter-member-id>` in every subsequent command.
@@ -154,10 +155,11 @@ Render the prompt to `${BASE}/.prompts/drafter-<UTC-compact>.md` per the Step 1c
 Render the prompt to `${BASE}/.prompts/reviewer-<UTC-compact>.md` per the Step 1c two-step audit-file pattern, then spawn with `--text-file`:
 
    ```bash
-   cafleet --json member create --fleet-id <fleet-id> \
+   cafleet member create --fleet-id <fleet-id> \
      --name "Reviewer" \
      --description "Critically reviews drafts for rule compliance and quality" \
-     --text-file ${BASE}/.prompts/reviewer-<UTC-compact>.md
+     --text-file ${BASE}/.prompts/reviewer-<UTC-compact>.md \
+     --json
    ```
 
    Parse `member_id` from the JSON response and substitute it for `<reviewer-member-id>` in every subsequent command.

@@ -100,13 +100,13 @@ def test_exec_dispatch__json_output_three_keys(
     result = runner.invoke(
         cli,
         [
-            "--json",
             "member",
             "exec",
             "--fleet-id",
             str(fleet_id),
             "--member-id",
             str(MEMBER_ID),
+            "--json",
             payload,
         ],
     )

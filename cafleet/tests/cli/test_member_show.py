@@ -53,14 +53,13 @@ def _show(runner, sid, member_id, *extra):
     return runner.invoke(
         cli,
         [
-            *(("--json",) if "--json" in extra else ()),
             "member",
             "show",
             "--fleet-id",
             str(sid),
             "--member-id",
             str(member_id),
-            *(a for a in extra if a != "--json"),
+            *extra,
         ],
     )
 

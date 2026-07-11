@@ -13,14 +13,8 @@ from cafleet.cli.setup import setup as setup_command
 
 @click.group()
 @click.version_option(package_name="cafleet", message="cafleet %(version)s")
-@click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format"
-)
-@click.pass_context
-def cli(ctx, json_output):
+def cli() -> None:
     """CAFleet — CLI for the message broker and member registry."""
-    ctx.ensure_object(dict)
-    ctx.obj["json_output"] = json_output
 
 
 cli.add_command(fleet)

@@ -58,7 +58,7 @@ Each parameter has exactly one input source:
 | Multiplexer backend | `CAFLEET_MULTIPLEXER` env var (optional) — unset ⇒ auto-detect. See [Multiplexer backends](multiplexer-backends.md#backend-selection). |
 | Member ID | `--member-id <int>` subcommand option (the member in question) |
 | Sender / recipient member IDs | `--from-member-id <int>` / `--to-member-id <int>` on two-party subcommands |
-| JSON output | `--json` global flag |
+| JSON output | `--json` per-subcommand option (trailing canonical position — placed after all other flags) |
 
 ## Global Options
 
@@ -66,7 +66,6 @@ Placed **before** the subcommand:
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--json` | no | Emit JSON output. Compact single-line JSON; non-ASCII (like the `…` truncation suffix) is emitted as UTF-8, not escaped. |
 | `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--fleet-id` requirement. |
 
 ### `--full` semantics (cross-subcommand escape hatch) {#full-semantics}
@@ -81,6 +80,38 @@ it:
 | `message broadcast` | One-line summary (`broadcast id=<id> recipients=<N> delivered=<k>`). | The single `broadcast_summary` task rendered as the full verbose envelope. Never per-recipient envelopes or a `recipient_ids` list. |
 | `member show` | Compact one-line row `<member_id> <name> <status>`. | Labeled block with `kind`, `skills`, and the placement sub-block. Text mode only — JSON is the unprojected broker dict regardless. |
 | `member create` | One compact line: `<member_id> <name> backend=<coding_agent> pane=<pane_id>`. | The 6-line `Member registered and spawned.` block. |
+
+## JSON output (`--json`) {#json-output}
+
+`--json` is a shared per-subcommand flag, placed after the subcommand name —
+canonically **trailing**, after all other flags:
+
+```bash
+cafleet message poll --fleet-id 2 --member-id 7 --json
+cafleet message poll --fleet-id 2 --member-id 7 --full --json
+```
+
+It switches the output to compact single-line JSON; non-ASCII (like the `…`
+truncation suffix) is emitted as UTF-8, not escaped. `--json` and `--full`
+are independent and composable — truncation is applied to the result before
+the json-vs-text fork. `--quiet` is a text-only shortcut, ignored in the JSON
+branch. The trailing position keeps JSON invocations inside the existing
+per-subcommand allow patterns (see
+[`permissions.allow` coverage](#permissionsallow-coverage)).
+
+Subcommands accepting `--json`:
+
+| Group | Subcommands |
+|---|---|
+| `message` | `send`, `broadcast`, `poll`, `ack`, `cancel`, `show` |
+| `member` | `create`, `delete`, `show`, `list`, `capture`, `exec`, `ping`, `nudge` |
+| `monitor` | `status`, `config` |
+| `fleet` | `create`, `list`, `show` |
+| (root) | `doctor` |
+
+All other subcommands reject `--json` with Click's standard
+`No such option` error (exit 2) — including the root group itself, so a
+pre-subcommand `cafleet --json <grp> <cmd>` does not parse.
 
 ## Fleet ID (`--fleet-id`) {#fleet-id}
 
@@ -119,17 +150,14 @@ allow-listed subcommand:
 
 - **One pattern per subcommand**, matching the canonical `--fleet-id`-first
   flag order — `Bash(cafleet <grp> <cmd> --fleet-id *)`. A different flag
-  order does not match and prompts.
+  order does not match and prompts. Trailing flags such as
+  [`--json`](#json-output) are covered by the same pattern.
 - **`member exec` is excluded** so it stays under `permissions.ask` — its
   positional command body is operator-controlled.
-- **Each subcommand a member runs with `--json` needs a companion pattern**,
-  because `--json` precedes the subcommand name and breaks the prefix:
-  `Bash(cafleet --json <grp> <cmd> --fleet-id *)`.
 
 ```
 Bash(cafleet message poll --fleet-id *)
 Bash(cafleet member create --fleet-id *)
-Bash(cafleet --json message poll --fleet-id *)
 ```
 
 Apply the patterns to your user-level `~/.claude/settings.json` manually; the
@@ -313,7 +341,7 @@ reported, not fatal.
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--json` | no | Top-level `--json`, written ahead of the subcommand name. |
+| `--json` | no | Output as JSON — trailing per-subcommand flag (see [JSON output](#json-output)). |
 
 ```
 multiplexer:
@@ -648,7 +676,8 @@ errors.
 
 ### `monitor status`
 
-No flags beyond `--fleet-id`. Reports runtime liveness derived from the DB
+No flags beyond `--fleet-id` and the shared [`--json`](#json-output) flag.
+Reports runtime liveness derived from the DB
 heartbeat (true even when the process died silently) plus the watched-member
 schedule table:
 
