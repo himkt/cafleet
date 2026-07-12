@@ -10,15 +10,15 @@ Specify and build a reusable, project-local CAFleet-orchestrated skill at `.clau
 
 ## Success Criteria
 
-- [ ] The skill exists at `.claude/skills/historical-residue-cleanup/` with a `SKILL.md`, `roles/scanner.md`, `roles/reviewer.md`, `reference/rubric.md`, and `reference/patterns.md`, and loads via the Skill tool (its `description` triggers on "clean up historical narration / residue", "remove deprecation notes", "affirmative-writing sweep").
-- [ ] **R1 encoded** — the skill both *removes* existing narration and is *forbidden from introducing* any new narration: every edit it makes reads as a clean present-tense statement of current behavior (no "previously/now/no longer/formerly", no "this replaces X", no "renamed from Y"). Stated as a `SKILL.md` instruction, a `reviewer.md` check, and a rubric rule.
-- [ ] **R2 encoded** — the skill never modifies `design-docs/`, `researches/`, `cafleet/src/cafleet/db/alembic/versions/**`, `cafleet/src/cafleet/webui/dist/**`, or lock files.
-- [ ] **R3 encoded** — the skill sweeps the whole tracked tree minus the R2 exempt set (canonical definition); the enumerated surfaces (`docs/`, `README.md`, `SPEC.md`, `skills/`, `.claude/`, `cafleet/src/`, `cafleet/tests/`, `admin/src/`, root `CLAUDE.md`) are illustrative of the major surfaces, not an exhaustive allow-list.
-- [ ] **R4 encoded** — the skill runs a structured multi-pass sweep plus hand-inspection of every hit, fanned out across scanner members; never a shallow single grep.
-- [ ] The fixed classification rubric (sentinel-test / narration-citation / keep, plus the known-benign class) is specified in `reference/rubric.md` and both role files reference it.
-- [ ] The skill's per-run output is a file→action inventory (grouped tables) + an explicit KEEP list + a "Known-benign sweep matches" subsection, written under the run's task-scoped `${BASE}`.
-- [ ] The worked-example section classifies the current-tree residue correctly against the rubric (proves the rubric on real hits).
-- [ ] Dogfood: invoking the skill (or applying its first-run inventory) against the current tree leaves `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` green, and a re-sweep returns zero unaccounted matches (every remaining hit KEEP-listed or exempt). No live test coverage is lost.
+- [x] The skill exists at `.claude/skills/historical-residue-cleanup/` with a `SKILL.md`, `roles/scanner.md`, `roles/reviewer.md`, `reference/rubric.md`, and `reference/patterns.md`, and loads via the Skill tool (its `description` triggers on "clean up historical narration / residue", "remove deprecation notes", "affirmative-writing sweep").
+- [x] **R1 encoded** — the skill both *removes* existing narration and is *forbidden from introducing* any new narration: every edit it makes reads as a clean present-tense statement of current behavior (no "previously/now/no longer/formerly", no "this replaces X", no "renamed from Y"). Stated as a `SKILL.md` instruction, a `reviewer.md` check, and a rubric rule.
+- [x] **R2 encoded** — the skill never modifies `design-docs/`, `researches/`, `cafleet/src/cafleet/db/alembic/versions/**`, `cafleet/src/cafleet/webui/dist/**`, or lock files.
+- [x] **R3 encoded** — the skill sweeps the whole tracked tree minus the R2 exempt set (canonical definition); the enumerated surfaces (`docs/`, `README.md`, `SPEC.md`, `skills/`, `.claude/`, `cafleet/src/`, `cafleet/tests/`, `admin/src/`, root `CLAUDE.md`) are illustrative of the major surfaces, not an exhaustive allow-list.
+- [x] **R4 encoded** — the skill runs a structured multi-pass sweep plus hand-inspection of every hit, fanned out across scanner members; never a shallow single grep.
+- [x] The fixed classification rubric (sentinel-test / narration-citation / keep, plus the known-benign class) is specified in `reference/rubric.md` and both role files reference it.
+- [x] The skill's per-run output is a file→action inventory (grouped tables) + an explicit KEEP list + a "Known-benign sweep matches" subsection, written under the run's task-scoped `${BASE}`.
+- [x] The worked-example section classifies the current-tree residue correctly against the rubric (proves the rubric on real hits).
+- [x] Dogfood: invoking the skill (or applying its first-run inventory) against the current tree leaves `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` green, and a re-sweep returns zero unaccounted matches (every remaining hit KEEP-listed or exempt). No live test coverage is lost.
 
 ---
 
