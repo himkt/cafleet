@@ -1006,7 +1006,7 @@ fleet-scoped command (§6.3 `--fleet-id`).
   application error `fleet '<fleet_id>' not found.`. Text: `fleet_id`, `name`,
   `created_at`, plus a `deleted_at:` line when soft-deleted (soft-deleted rows
   are returned intentionally).
-- **delete** — `--fleet-id` (integer, required); no `--force`. Prints `Deleted
+- **delete** — `--fleet-id` (integer, required). Prints `Deleted
   fleet <fleet_id>. Deregistered <n> members.`; idempotent (an already-deleted
   fleet reports 0 members).
 

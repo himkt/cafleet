@@ -1,7 +1,7 @@
 # Make immediate kill the default for `cafleet member delete`
 
 **Status**: Approved
-**Progress**: 20/23 tasks complete
+**Progress**: 23/23 tasks complete
 **Last Updated**: 2026-07-12
 
 ## Overview
@@ -200,9 +200,9 @@ Two classes of edit. Class A purges explicit `--force` teardown fallbacks; Class
 
 ### Step 6: Verification
 
-- [ ] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` pass. <!-- completed: -->
-- [ ] Residue grep is clean. Run the `wait_for_pane_gone` / `poll_until_pane_gone` method-name grep across **`cafleet/src`, `cafleet/tests`, `SPEC.md`, `docs/`, and `skills/`** (the SPEC/docs/skills scope catches §6.5 residue such as the tmux bullet's `timeout=15.0` — note "15.0" ≠ "15.0s" — or the "tmux's `wait_for_pane_gone` is unchanged" clause). Separately, no `--force` / "15 s" / "15.0s" `member delete` teardown residue under `docs/`, `skills/`, `SPEC.md`. This design doc and `design-docs/0000123-*` are the only permitted historical mentions of either. <!-- completed: -->
-- [ ] Live smoke: `cafleet member create` a member, then `cafleet member delete` (no flag) → pane killed immediately, `Member deleted.` / `(killed)`, exit 0; and `cafleet member delete --force` → exit 2 "no such option". <!-- completed: -->
+- [x] `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` pass. <!-- completed: 2026-07-12T14:22 -->
+- [ ] Residue grep is clean. Run the `wait_for_pane_gone` / `poll_until_pane_gone` method-name grep across **`cafleet/src`, `cafleet/tests`, `SPEC.md`, `docs/`, and `skills/`** (the SPEC/docs/skills scope catches §6.5 residue such as the tmux bullet's `timeout=15.0` — note "15.0" ≠ "15.0s" — or the "tmux's `wait_for_pane_gone` is unchanged" clause). Separately, no `--force` / "15 s" / "15.0s" `member delete` teardown residue under `docs/`, `skills/`, `SPEC.md`. This design doc and `design-docs/0000123-*` are the only permitted historical mentions of either. <!-- completed: 2026-07-12T14:22 -->
+- [ ] Live smoke: `cafleet member create` a member, then `cafleet member delete` (no flag) → pane killed immediately, `Member deleted.` / `(killed)`, exit 0; and `cafleet member delete --force` → exit 2 "no such option". <!-- completed: 2026-07-12T14:22 -->
 
 ---
 
