@@ -215,14 +215,11 @@ Upgraded from <old_rev> to <head>.                           # behind head
 Already at head (<head>); nothing to do.                     # at head
 ```
 
-It refuses three states, exiting 1 — the third fires when a database stamped
-at head (on a non-empty chain) has no `messages` table, i.e. a pre-rename (v4)
-database reached via `CAFLEET_DATABASE_URL`:
+It refuses two states, exiting 1:
 
 ```
 Error: DB has existing tables but no alembic_version. Run `alembic stamp head` manually if you are sure the schema matches.
 Error: DB schema is at revision <rev> which is unknown to this version of cafleet. Refusing to downgrade automatically.
-Error: DB at <url> is at head (<head>) but has no 'messages' table — it is a pre-rename (v4) database. Point CAFLEET_DATABASE_URL at a fresh database file (default: cafleet_v5.db).
 ```
 
 `setup db` never records `skill_installs` rows (schema only).

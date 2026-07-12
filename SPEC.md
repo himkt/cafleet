@@ -1305,16 +1305,13 @@ Upgraded from <old_rev> to <head>.                           # behind head
 Already at head (<head>); nothing to do.                     # at head
 ```
 
-It refuses three states with an application error (exit 1): a DB with existing
-tables but no `alembic_version` table, a DB whose recorded revision is
-unknown to the bundled migration chain, and a DB already stamped at head (on a
-non-empty chain) that has no `messages` table — a pre-rename (v4) database
-carried over via `CAFLEET_DATABASE_URL`:
+It refuses two states with an application error (exit 1): a DB with existing
+tables but no `alembic_version` table, and a DB whose recorded revision is
+unknown to the bundled migration chain:
 
 ```
 Error: DB has existing tables but no alembic_version. Run `alembic stamp head` manually if you are sure the schema matches.
 Error: DB schema is at revision <rev> which is unknown to this version of cafleet. Refusing to downgrade automatically.
-Error: DB at <url> is at head (<head>) but has no 'messages' table — it is a pre-rename (v4) database. Point CAFLEET_DATABASE_URL at a fresh database file (default: cafleet_v5.db).
 ```
 
 Never touches `skill_installs` rows (the schema migration creates the table
@@ -2734,12 +2731,9 @@ drivername to `sqlite`; (2) extract the DB file path — if empty → applicatio
 error `database URL has no file path`; (3) create the file's parent directory;
 (4) inspect the DB: existing tables but no `alembic_version` → the
 unversioned-DB refusal (§6.3); a recorded revision unknown to the bundled
-chain → the ahead-of-head refusal (§6.3); (5) already at head **and the chain
-is non-empty** (`head_rev is not None`) → verify the connected database
-contains the `messages` table; absent → the stale-schema (pre-rename v4 DB)
-refusal (§6.3); present → print `Already at head (<head>); nothing to do.` and
-stop (an empty DB on an empty chain — `current_rev` and `head_rev` both None —
-is trivially at head and passes through); (6) otherwise upgrade to
+chain → the ahead-of-head refusal (§6.3); (5) already at head
+(`current_rev == head_rev`) → print `Already at head (<head>); nothing to do.`
+and stop; (6) otherwise upgrade to
 head and print the created/upgraded line (§6.3). The driver's engine is
 disposed when the command finishes (success or failure). The same driver runs
 for bare `setup`'s db half and for `setup db` — both print the same lines.

@@ -71,19 +71,6 @@ def run_db_init() -> None:
                     )
 
             if current_rev == head_rev:
-                # The regenerated chain reuses revision id 0001, so a pre-rename
-                # (v4) database reports "at head" while still carrying the old
-                # ``tasks`` schema; fail loudly here instead of letting the
-                # broker crash with ``no such table: messages`` far from the
-                # cause. Scoped to a non-empty chain so an empty DB on an empty
-                # chain (the migration-regeneration transient) passes through.
-                if head_rev is not None and "messages" not in tables:
-                    raise click.ClickException(
-                        f"DB at {sync_url} is at head ({head_rev}) but has no "
-                        "'messages' table — it is a pre-rename (v4) database. "
-                        "Point CAFLEET_DATABASE_URL at a fresh database file "
-                        "(default: cafleet_v5.db)."
-                    )
                 click.echo(f"Already at head ({head_rev}); nothing to do.")
                 return
 

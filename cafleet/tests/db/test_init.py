@@ -189,62 +189,6 @@ def test_setup_db_ahead_errors(tmp_path, monkeypatch):
     assert rows == [("9999_future_revision",)]
 
 
-def test_setup_db_errors_on_stale_pre_rename_schema(tmp_path, monkeypatch):
-    """A pre-rename (v4) database stamped at the reused head ``0001`` is refused.
-
-    The regenerated chain reuses revision id ``0001``, so a v4 file with the old
-    ``tasks`` schema reports "at head" while lacking the ``messages`` table.
-    ``setup db`` must fail loudly at setup time instead of letting the broker
-    later crash with ``no such table: messages`` far from the cause.
-    """
-    db_file = tmp_path / "cafleet_v4.db"
-    monkeypatch.setattr(
-        config.settings,
-        "database_url",
-        f"sqlite+aiosqlite:///{db_file}",
-    )
-
-    conn = sqlite3.connect(str(db_file))
-    try:
-        conn.execute(
-            "CREATE TABLE tasks ("
-            "task_id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "context_id INTEGER NOT NULL, "
-            "from_member_id INTEGER NOT NULL, "
-            "to_member_id INTEGER, "
-            "type VARCHAR NOT NULL, "
-            "created_at VARCHAR NOT NULL, "
-            "status_state VARCHAR NOT NULL, "
-            "status_timestamp VARCHAR NOT NULL, "
-            "origin_task_id INTEGER, "
-            "text VARCHAR NOT NULL)"
-        )
-        conn.execute(
-            "CREATE TABLE alembic_version "
-            "(version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
-        )
-        conn.execute("INSERT INTO alembic_version (version_num) VALUES ('0001')")
-        conn.commit()
-    finally:
-        conn.close()
-
-    from cafleet.cli import cli
-
-    runner = CliRunner()
-    result = runner.invoke(cli, ["setup", "db"])
-
-    assert result.exit_code == 1, result.output
-    assert str(db_file) in result.output
-    assert "CAFLEET_DATABASE_URL" in result.output
-    output_lower = result.output.lower()
-    assert "pre-rename" in output_lower or "v4" in output_lower
-
-    # The stale file is refused, not mutated: old schema intact, no messages table.
-    tables = _table_names(db_file)
-    assert "tasks" in tables
-    assert "messages" not in tables
-
-
 def test_run_db_init_creates_schema_at_head(tmp_path, monkeypatch, capsys):
     """``run_db_init()`` called directly creates the schema at head.
 
