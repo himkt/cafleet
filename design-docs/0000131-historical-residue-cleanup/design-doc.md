@@ -1,6 +1,6 @@
 # 0000131 — Historical-Residue Cleanup Skill (CAFleet-orchestrated)
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 11/11 tasks complete
 **Last Updated**: 2026-07-12
 
@@ -275,3 +275,4 @@ The monitoring member reuses the `cafleet` skill's canonical `roles/monitor.md` 
 |------|---------|
 | 2026-07-12 | Initial draft — specifies the reusable CAFleet-orchestrated cleanup skill; the current-tree residue (Director scan + citation family) is the §8 worked example and Step-6 dogfood target |
 | 2026-07-12 | Reviewer pass: fixed `webui/assets`→`webui/dist` exempt path and audit-render `prompts/`→`.prompts/`; pinned R3 as "whole tracked tree minus R2" (enumerated list illustrative); adopted the cafleet coordination schema with a `scanner` role + `inventory` pointer (`approved (inventory)`); stated one-scanner-owns-a-whole-file; widened the design-number pattern to `0[0-9]{6}`; removed the bare in-prose scanner-marker token; softened the Step-6 dogfood claim |
+| 2026-07-12 | Executed (CAFleet team): authored all 5 skill files (Steps 1–4), dogfooded the §8 inventory on the current tree (Step 6) removing the B1–B4 sentinels and the design-number citation family across ~24 files with no coverage lost. Fresh-reviewer round caught two missed `Design 0000092` docstrings + the `0000072 spine` citation in `SKILL.md` and root-caused the miss to `git grep` needing `-i`/`-P` (hardened `patterns.md`). Verified 998 tests + lint + typecheck green; reviewer `approved (doc)`. PR #192. |
