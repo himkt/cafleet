@@ -253,7 +253,7 @@ After user approval, offer to create a presentation via {decision_surface} (adap
 
 ### Step 8: Finalize & Clean Up (Director)
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then Researchers, any active Scout, and the Manager (each sends the backend exit keystroke and waits 15 s; on the 15 s timeout (exit 2) use `cafleet member capture` + your overlay's decision-prompt recovery, or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id [fleet-id]`; `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.
+Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then Researchers, any active Scout, and the Manager (each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id [fleet-id]`; `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.
 
 ## Spawnable Agents
 

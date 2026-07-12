@@ -203,9 +203,9 @@ Once Step 2 converges on an approved slide deck and transcript, the Director run
 
 **Batched Review Loop** (batch_size=10, fresh Visual Reviewer per batch to avoid context overflow):
 
-Run the loop serially: spawn one VR member via `cafleet member create`, wait for its report, run the fix-and-recheck sub-loop, then run `cafleet member delete` to close the pane (sends the backend exit keystroke, waits up to 15 s). Do not spawn multiple VRs in parallel — fixes from one batch can affect later batches, and parallel agent-browser sessions race on the same Slidev dev server.
+Run the loop serially: spawn one VR member via `cafleet member create`, wait for its report, run the fix-and-recheck sub-loop, then run `cafleet member delete` to close the pane immediately. Do not spawn multiple VRs in parallel — fixes from one batch can affect later batches, and parallel agent-browser sessions race on the same Slidev dev server.
 
-> **Per-batch teardown**: `cafleet member delete` blocks ≈15 s per batch (exit keystroke + tmux layout rebalance) — the documented trade-off for context isolation. `--force` is an escape hatch for stuck panes, not the default.
+> **Per-batch teardown**: `cafleet member delete` kills the pane immediately (kill-pane + tmux layout rebalance) — clean context isolation per batch.
 
 ```
 total_slides = count slides in slide.md

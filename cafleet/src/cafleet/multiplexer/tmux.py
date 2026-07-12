@@ -7,7 +7,6 @@ import time
 from cafleet.multiplexer.base import (
     MultiplexerContext,
     MultiplexerError,
-    poll_until_pane_gone,
 )
 
 
@@ -373,22 +372,4 @@ class TmuxMultiplexer:
         _run_tolerating_pane_gone(
             ["tmux", "kill-pane", "-t", target_pane_id],
             ignore_missing=ignore_missing,
-        )
-
-    def wait_for_pane_gone(
-        self,
-        *,
-        target_pane_id: str,
-        timeout: float = 15.0,
-        interval: float = 0.5,
-    ) -> bool:
-        """Poll ``pane_exists`` until the pane is absent or the timeout elapses.
-
-        Returns True if the pane disappeared, False on timeout. Errors from
-        ``pane_exists`` propagate as TmuxError (caller decides).
-        """
-        return poll_until_pane_gone(
-            lambda: self.pane_exists(target_pane_id=target_pane_id),
-            timeout=timeout,
-            interval=interval,
         )

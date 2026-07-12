@@ -160,7 +160,7 @@ If `cafleet message poll` shows no recent messages from the member, fall back to
 
 If a member is still unresponsive after 2 nudges via `cafleet message send` AND `cafleet member capture` shows no forward progress in the terminal buffer, escalate to the user via {decision_surface} (per [`SKILL.md`](../SKILL.md) § *Soliciting user reactions*) with concrete options (e.g. re-nudge once more / re-spawn the member / drop its task).
 
-The unblock primitives and their ordering — non-intrusive `cafleet message poll` → read-only `cafleet member capture` → authoritative `cafleet message send` → `cafleet member ping` (missed auto-fire / required post-`exec` follow-up) → `cafleet member exec "<cmd>"` (shell dispatch) → `cafleet member delete --force` (last resort, never raw `tmux kill-pane`) → escalate to the user via {decision_surface} — are documented in [`reference/director.md`](director.md), [`reference/recovery.md`](recovery.md), [`reference/exec-routing.md`](exec-routing.md), and the § Quick Reference table below.
+The unblock primitives and their ordering — non-intrusive `cafleet message poll` → read-only `cafleet member capture` → authoritative `cafleet message send` → `cafleet member ping` (missed auto-fire / required post-`exec` follow-up) → `cafleet member exec "<cmd>"` (shell dispatch) → `cafleet member delete` (last resort, kills the pane immediately, never raw `tmux kill-pane`) → escalate to the user via {decision_surface} — are documented in [`reference/director.md`](director.md), [`reference/recovery.md`](recovery.md), [`reference/exec-routing.md`](exec-routing.md), and the § Quick Reference table below.
 
 ## User Delegation Protocol
 

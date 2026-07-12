@@ -153,7 +153,7 @@ The reply must be a flat numbered list following the format specified in [roles/
 
 #### 2f. Tear down the monitoring member and the Analyzer
 
-The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping either alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then the Analyzer (on the 15 s timeout (exit 2) use `member capture` + your overlay's decision-prompt recovery or `--force`); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
+The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping either alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then the Analyzer (each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
 
 #### 2g. Persist the question list to `question.md`
 
