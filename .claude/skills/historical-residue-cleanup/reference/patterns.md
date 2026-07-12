@@ -25,12 +25,18 @@ is illustrative — any tracked file outside the exempt set is swept.
 A convenient exclusion form for a `git grep`:
 
 ```
-git grep -nI -e '<pattern>' -- \
+git grep -nIiP -e '<pattern>' -- \
   ':(exclude)design-docs/**' \
   ':(exclude)cafleet/src/cafleet/db/alembic/versions/**' \
   ':(exclude)cafleet/src/cafleet/webui/dist/**' \
   ':(exclude)*.lock' ':(exclude)uv.lock' ':(exclude)bun.lockb'
 ```
+
+Run every pass with **`-i` and `-P`**. `-i` (case-insensitive) is required — a
+capital-`Design 0000NNN` or `Legacy` citation is missed without it. `-P` (Perl
+regex) is required for the `\b` word-boundary in the design-number pass — plain
+`git grep` ignores `\b` (notably on macOS/BSD), so `\b0[0-9]{6}\b` silently
+matches nothing without `-P`. `-n` prints line numbers; `-I` skips binary files.
 
 ## The pattern passes
 

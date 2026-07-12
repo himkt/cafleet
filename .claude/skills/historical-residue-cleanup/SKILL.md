@@ -155,7 +155,7 @@ bootstrap fleet → spawn monitor first → spawn members → tear down monitor-
 
 ## Per-run output artifact
 
-Under `${BASE}`, the skill produces an `inventory.md` with the 0000072 spine:
+Under `${BASE}`, the skill produces an `inventory.md` with three parts:
 
 - Grouped **file→action inventory** tables (by surface / by rubric class), each row
   = location + quoted text anchor + action.

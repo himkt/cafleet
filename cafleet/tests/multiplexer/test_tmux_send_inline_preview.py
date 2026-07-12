@@ -75,7 +75,7 @@ def test_send_inline_preview__happy_path_envelope_body_and_submit(monkeypatch):
 
 
 def test_send_inline_preview__esc_first_full_sequence(monkeypatch):
-    """Design 0000092 §1: the inline preview now leads with `Escape` so a
+    """The inline preview leads with `Escape` so a
     recipient pane parked on a pending permission-approval prompt dismisses it
     BEFORE any payload character is typed and the trailing Enter can never
     confirm it. Full shape: Escape → settle → `-l <payload>` → submit → Enter,
@@ -106,11 +106,11 @@ def test_send_inline_preview__esc_first_full_sequence(monkeypatch):
 
 
 def test_send_inline_preview__newline_soft_insert_single_submit(monkeypatch):
-    """Design 0000092 §3 / NOTE 2 (anticipated soft-insert branch): the 2-line
+    """Anticipated soft-insert branch: the 2-line
     payload shape is preserved — the envelope/body separator stays a single
     embedded ``\\n`` carried by ONE ``-l`` keystroke, and the message is
     submitted by exactly ONE trailing ``Enter``. The embedded newline does NOT
-    fragment delivery into a second submit; with the §1 leading `Escape`
+    fragment delivery into a second submit; with the leading `Escape`
     guaranteeing the prompt is dismissed first, the 2-line form is safe."""
     captured = _capture_run(monkeypatch)
     monkeypatch.setattr("time.sleep", lambda _secs: None)
