@@ -55,7 +55,7 @@ All Director-to-member messages use the CAFleet message broker. The Director sto
 
 **Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* + § *Director Per-File Detail Recovery* for the verb + pointer schema, role taxonomy, marker rules, and git-plumbing recovery commands. The Verifier's **Phase 1 tool-discovery** message is exempt from the schema (one-time discovery payload).
 
-Send tasks to members via `cafleet message send` (a push notification keystrokes the message into the member's pane), poll your inbox with `cafleet message poll … --json`, ACK each task, and inspect a stalled member with `cafleet member capture --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
+Send tasks to members via `cafleet message send` (a push notification keystrokes the message into the member's pane), poll your inbox with `cafleet message poll … --json`, ACK each message, and inspect a stalled member with `cafleet member capture --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
 
 ## Escalation Protocol
 

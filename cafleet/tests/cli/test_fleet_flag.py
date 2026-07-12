@@ -74,16 +74,16 @@ def test_fleet_id_flag_flows_into_broker__send_passes_fleet_id_to_broker(
         sender = args[1] if len(args) > 1 else kwargs.get("from_member_id")
         recipient = args[2] if len(args) > 2 else kwargs.get("to_member_id")
         return {
-            "task": {
-                "task_id": 5000,
-                "context_id": recipient,
+            "message": {
+                "message_id": 5000,
+                "owner_member_id": recipient,
                 "from_member_id": sender,
                 "to_member_id": recipient,
                 "type": "unicast",
                 "created_at": "2026-01-01T00:00:00+00:00",
                 "status_state": "input_required",
                 "status_timestamp": "2026-01-01T00:00:00+00:00",
-                "origin_task_id": None,
+                "origin_message_id": None,
                 "text": "hi",
             }
         }

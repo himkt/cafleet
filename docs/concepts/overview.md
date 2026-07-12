@@ -20,7 +20,7 @@ each other; members in different fleets are invisible to one another.
 | member | a registry entry spawned by the Director via `cafleet member create`, bound to a multiplexer pane (tmux or herdr) | [Member lifecycle](member-lifecycle.md) |
 | placement | the row linking a member to its multiplexer session/window/pane and backend | [Data model](../spec/data-model.md) |
 | broker | the data-access layer all CLI commands and the WebUI share; writes SQLite directly | Overview (this page) |
-| task / message | one delivered message; lifecycle `input_required → completed/canceled` | [Message envelope](../spec/message-envelope.md) |
+| message | one delivered message; lifecycle `input_required → completed/canceled` | [Message envelope](../spec/message-envelope.md) |
 | inline preview | the 2-line message preview the broker keystrokes into the recipient's pane | [Multiplexer backends](../spec/multiplexer-backends.md#push-notifications) |
 | poll / ack | how a recipient fetches and then confirms consumption of a message | [CLI options](../spec/cli-options.md) |
 | coding-agent backend | the binary in a member pane: `claude`, `codex`, or `opencode` | [Coding agents](coding-agents.md) |
@@ -36,7 +36,7 @@ flowchart LR
     Server --> WebUIAPI["webui/api.py"]
     WebUIAPI --> Broker
     Monitor["monitor loop<br/>(per-fleet heartbeat, member background task)"] --> Broker
-    Broker --> DB[(SQLite<br/>fleets / members / tasks / member_placements<br/>monitor_config / monitor_runtime / skill_installs)]
+    Broker --> DB[(SQLite<br/>fleets / members / messages / member_placements<br/>monitor_config / monitor_runtime / skill_installs)]
     subgraph Multiplexer["tmux / herdr"]
         PaneA["coding-agent pane"]
         PaneB["monitoring member pane"]

@@ -58,7 +58,7 @@ differ.
 ??? example "Expand the walkthrough"
 
     Watch the team — `idle` is the wall-time since the member's most recent
-    task activity (the latest of its most recent outgoing message and its most
+    message activity (the latest of its most recent outgoing message and its most
     recent delivery); `--json` adds the underlying `last_sent` / `last_recv` /
     `last_ack` timestamps. A member whose `idle` keeps growing while the rest
     of the team moves is stalled — `alice` (`4`) below has been quiet for 14

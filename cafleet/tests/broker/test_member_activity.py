@@ -51,7 +51,7 @@ def test_list_members__shape_identity_placement_and_activity_keys():
     assert alice["name"] == "alice"
     assert alice["kind"] == "member"
     assert alice["placement"]["mux_pane_id"] == "%10"
-    # Activity keys present even with no tasks yet.
+    # Activity keys present even with no messages yet.
     for key in ("last_sent", "last_recv", "last_ack", "idle"):
         assert key in alice
         assert alice[key] is None
@@ -64,8 +64,8 @@ def test_list_members__last_sent_and_last_recv_track_most_recent_timestamp():
     rows = broker.list_members(sid)
     alice = next(r for r in rows if r["member_id"] == a)
     bob = next(r for r in rows if r["member_id"] == b)
-    assert alice["last_sent"] == second["task"]["status_timestamp"]
-    assert bob["last_recv"] == second["task"]["status_timestamp"]
+    assert alice["last_sent"] == second["message"]["status_timestamp"]
+    assert bob["last_recv"] == second["message"]["status_timestamp"]
     # last_ack stays None until recipient acks.
     assert bob["last_ack"] is None
 
@@ -73,12 +73,12 @@ def test_list_members__last_sent_and_last_recv_track_most_recent_timestamp():
 def test_list_members__last_ack_tracks_real_acks_only():
     sid, _director_id, a, b, _c = _setup_three_member_team()
     sent = broker.send_message(sid, b, a, "ping")
-    acked = broker.ack_task(a, sent["task"]["task_id"])
+    acked = broker.ack_message(a, sent["message"]["message_id"])
     # Broadcast summary (status_state=completed) must NOT pollute last_ack.
     broker.broadcast_message(sid, a, "team-wide note")
     rows = broker.list_members(sid)
     alice = next(r for r in rows if r["member_id"] == a)
-    assert alice["last_ack"] == acked["task"]["status_timestamp"]
+    assert alice["last_ack"] == acked["message"]["status_timestamp"]
 
 
 @pytest.mark.parametrize("column", ["last_recv", "last_ack"])

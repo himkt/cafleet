@@ -48,7 +48,7 @@ All Director-to-member messages use the CAFleet message broker. The Director sto
 cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
   --to-member-id <member-id> --text "<instruction>"
 ```
-A push notification keystrokes the message into the member's pane (see the `cafleet` skill § Send). Poll your inbox with `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id> --json`, ACK each task with `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --task-id <task-id>`, and inspect a stalled member with `cafleet member capture --member-id <member-id> --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
+A push notification keystrokes the message into the member's pane (see the `cafleet` skill § Send). Poll your inbox with `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id> --json`, ACK each message with `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --message-id <message-id>`, and inspect a stalled member with `cafleet member capture --member-id <member-id> --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
 
 ## User Interaction Rules
 

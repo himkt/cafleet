@@ -30,7 +30,7 @@ Angle-bracket tokens (`<fleet-id>`, `<my-member-id>`, `<director-member-id>`) ar
 
 ## Communication Protocol
 
-You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each task — command shapes in the `cafleet` skill core; your ids are the literal `FLEET ID:` / `YOUR MEMBER ID:` / `DIRECTOR MEMBER ID:` lines in your spawn prompt. The Director may relay verification requests from the Programmer or Tester at any time during development, not just at the end.
+You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each message — command shapes in the `cafleet` skill core; your ids are the literal `FLEET ID:` / `YOUR MEMBER ID:` / `DIRECTOR MEMBER ID:` lines in your spawn prompt. The Director may relay verification requests from the Programmer or Tester at any time during development, not just at the end.
 
 **Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules. **Phase 1 tool-discovery is exempt** from the schema — the inventory is a one-time discovery payload, not iterative coordination, so it rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the interview workflow). Phase 2 verification reports follow the schema.
 

@@ -38,7 +38,7 @@ Use the literal body `ready` (optionally append a brief role recap after `:` —
 cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id>
 ```
 
-If a task is queued, ACK and process it. If the poll is empty and no assigned work is outstanding, **end your turn and go idle** — do not keep the turn alive waiting. The broker's inline preview re-opens your turn when the Director sends work, and the Director's `cafleet member ping` re-pokes you if a preview is missed. **Never set up a repeated wait-then-poll cycle to wait for work** — in any form (a `sleep`-then-`poll` sequence, chained or split across turns; a backgrounded sleep; a self-scheduled wake-up). A single `cafleet message poll` when you have a reason to check now — on wake, or while awaiting a reply you just routed to the Director — is fine; a self-scheduled repeat is not.
+If a message is queued, ACK and process it. If the poll is empty and no assigned work is outstanding, **end your turn and go idle** — do not keep the turn alive waiting. The broker's inline preview re-opens your turn when the Director sends work, and the Director's `cafleet member ping` re-pokes you if a preview is missed. **Never set up a repeated wait-then-poll cycle to wait for work** — in any form (a `sleep`-then-`poll` sequence, chained or split across turns; a backgrounded sleep; a self-scheduled wake-up). A single `cafleet message poll` when you have a reason to check now — on wake, or while awaiting a reply you just routed to the Director — is fine; a self-scheduled repeat is not.
 
 ## The default rule: run shell commands yourself
 

@@ -8,7 +8,7 @@ from sqlalchemy import and_, delete, exists, func, or_, select, update
 
 from cafleet.broker import _shared, monitor
 from cafleet.broker.fleets import get_fleet
-from cafleet.db.models import Fleet, Member, MemberPlacement, Task
+from cafleet.db.models import Fleet, Member, MemberPlacement, Message
 
 
 def register_member(
@@ -329,9 +329,9 @@ def list_members(fleet_id: int) -> list[dict]:
     :func:`cafleet.broker._shared.derive_member_kind`.
 
     ``last_sent`` / ``last_recv`` / ``last_ack`` aggregate ``status_timestamp``
-    over the ``tasks`` table per member. All three filter ``Task.type !=
-    'broadcast_summary'`` (mirrors ``poll_tasks``); broadcast_summary rows
-    land in the broadcaster's own context with ``status_state='completed'``
+    over the ``messages`` table per member. All three filter ``Message.type !=
+    'broadcast_summary'`` (mirrors ``poll_messages``); broadcast_summary rows
+    land in the broadcaster's own inbox with ``status_state='completed'``
     and would otherwise pollute every proxy for the broadcaster.
 
     Args:
@@ -346,28 +346,28 @@ def list_members(fleet_id: int) -> list[dict]:
         or ``None`` when both are ``None``.
     """
     last_sent_sq = (
-        select(func.max(Task.status_timestamp))
+        select(func.max(Message.status_timestamp))
         .where(
-            Task.from_member_id == Member.member_id,
+            Message.from_member_id == Member.member_id,
             _shared.NOT_BROADCAST_SUMMARY,
         )
         .correlate(Member)
         .scalar_subquery()
     )
     last_recv_sq = (
-        select(func.max(Task.status_timestamp))
+        select(func.max(Message.status_timestamp))
         .where(
-            Task.context_id == Member.member_id,
+            Message.owner_member_id == Member.member_id,
             _shared.NOT_BROADCAST_SUMMARY,
         )
         .correlate(Member)
         .scalar_subquery()
     )
     last_ack_sq = (
-        select(func.max(Task.status_timestamp))
+        select(func.max(Message.status_timestamp))
         .where(
-            Task.context_id == Member.member_id,
-            Task.status_state == "completed",
+            Message.owner_member_id == Member.member_id,
+            Message.status_state == "completed",
             _shared.NOT_BROADCAST_SUMMARY,
         )
         .correlate(Member)
@@ -422,7 +422,7 @@ def list_members(fleet_id: int) -> list[dict]:
     ]
 
 
-def list_roster(fleet_id: int, *, include_task_holders: bool = False) -> list[dict]:
+def list_roster(fleet_id: int, *, include_message_holders: bool = False) -> list[dict]:
     """Return the fleet's roster, placed or placementless, with the 3-value kind.
 
     Unlike :func:`list_members`, the roster covers the root Director, the
@@ -430,15 +430,15 @@ def list_roster(fleet_id: int, *, include_task_holders: bool = False) -> list[di
     rows — active rows LEFT OUTER JOINed to their placements. SQL supplies the
     ``fleets`` join (``is_root``) and the card ``kind`` via ``json_extract``;
     :func:`cafleet.broker._shared.derive_member_kind` is the single Python
-    collapse. With ``include_task_holders=True`` (the WebUI roster),
-    deregistered members that still own tasks are also returned, so the
+    collapse. With ``include_message_holders=True`` (the WebUI roster),
+    deregistered members that still own messages are also returned, so the
     audit-relevant deregistered set stays visible.
 
     Args:
         fleet_id: Fleet id to scope the query to.
-        include_task_holders: When ``True``, also return deregistered members
-            that still own tasks (a task exists with ``context_id`` or
-            ``from_member_id`` equal to the member id).
+        include_message_holders: When ``True``, also return deregistered members
+            that still own messages (a message exists with ``owner_member_id``
+            or ``from_member_id`` equal to the member id).
 
     Returns:
         List of dicts each carrying the :func:`list_members` row shape
@@ -447,16 +447,16 @@ def list_roster(fleet_id: int, *, include_task_holders: bool = False) -> list[di
         plus ``kind`` (``director`` / ``monitor`` / ``member``).
     """
     status_filter = Member.status == "active"
-    if include_task_holders:
-        has_tasks = exists().where(
+    if include_message_holders:
+        has_messages = exists().where(
             or_(
-                Task.context_id == Member.member_id,
-                Task.from_member_id == Member.member_id,
+                Message.owner_member_id == Member.member_id,
+                Message.from_member_id == Member.member_id,
             )
         )
         status_filter = or_(
             status_filter,
-            and_(Member.status == "deregistered", has_tasks),
+            and_(Member.status == "deregistered", has_messages),
         )
     stmt = (
         select(

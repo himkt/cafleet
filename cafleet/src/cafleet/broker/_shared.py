@@ -6,13 +6,13 @@ from datetime import UTC, datetime
 from sqlalchemy import exists, func, select
 
 from cafleet.db.engine import get_sync_sessionmaker
-from cafleet.db.models import Member, Task
+from cafleet.db.models import Member, Message
 
 MONITORING_MEMBER_KIND = "monitoring-member"
 
-TASK_COLUMNS = tuple(Task.__table__.columns.keys())
+MESSAGE_COLUMNS = tuple(Message.__table__.columns.keys())
 
-NOT_BROADCAST_SUMMARY = Task.type != "broadcast_summary"
+NOT_BROADCAST_SUMMARY = Message.type != "broadcast_summary"
 
 # Shared SQL expression extracting a member card's ``$.cafleet.kind`` (NULL → "")
 # so a comparison against a non-empty kind constant selects identical rows.
@@ -75,32 +75,32 @@ def member_is_active_in_fleet(session, member_id: int, fleet_id: int) -> bool:
     ).scalar_one()
 
 
-def row_to_task_dict(row) -> dict:
-    return {col: getattr(row, col) for col in TASK_COLUMNS}
+def row_to_message_dict(row) -> dict:
+    return {col: getattr(row, col) for col in MESSAGE_COLUMNS}
 
 
-def read_task(session, task_id: int) -> dict | None:
+def read_message(session, message_id: int) -> dict | None:
     row = session.execute(
-        select(*(getattr(Task, col) for col in TASK_COLUMNS)).where(
-            Task.task_id == task_id
+        select(*(getattr(Message, col) for col in MESSAGE_COLUMNS)).where(
+            Message.message_id == message_id
         )
     ).first()
     if row is None:
         return None
-    return row_to_task_dict(row)
+    return row_to_message_dict(row)
 
 
-def list_tasks_where(
+def list_messages_where(
     *filters,
     status: str | None = None,
 ) -> list[dict]:
     stmt = (
-        select(*(getattr(Task, col) for col in TASK_COLUMNS))
+        select(*(getattr(Message, col) for col in MESSAGE_COLUMNS))
         .where(*filters, NOT_BROADCAST_SUMMARY)
-        .order_by(Task.status_timestamp.desc())
+        .order_by(Message.status_timestamp.desc())
     )
     if status is not None:
-        stmt = stmt.where(Task.status_state == status)
+        stmt = stmt.where(Message.status_state == status)
     with read_session() as session:
         rows = session.execute(stmt).all()
-    return [row_to_task_dict(row) for row in rows]
+    return [row_to_message_dict(row) for row in rows]

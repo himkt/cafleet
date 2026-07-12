@@ -181,7 +181,7 @@ def get_fleet(fleet_id: int) -> dict | None:
 def delete_fleet(fleet_id: int) -> dict:
     """Soft-delete a fleet and deregister its members, in one transaction.
 
-    Tasks are left untouched so audit history survives. Idempotent: re-running
+    Messages are left untouched so audit history survives. Idempotent: re-running
     against an already-deleted row short-circuits on the ``deleted_at IS NULL``
     guard and returns ``deregistered_count=0``.
 

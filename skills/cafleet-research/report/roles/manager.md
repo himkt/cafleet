@@ -34,7 +34,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Communication Protocol
 
-You do NOT speak to the user directly, nor to Scouts/Researchers — all coordination goes through the Director via `cafleet message send` (spawn requests, contradiction flags, completion reports), and you `cafleet message ack` each inbound Director message after acting (command shapes in the `cafleet` skill core + your spawn prompt). The poll `id:` integer is the cafleet message-task id — **distinct from** any harness task-list id used for sub-topic tracking (present only where your backend has a task list). Pane silence is the expected between-turn state — work resumes when a new message arrives.
+You do NOT speak to the user directly, nor to Scouts/Researchers — all coordination goes through the Director via `cafleet message send` (spawn requests, contradiction flags, completion reports), and you `cafleet message ack` each inbound Director message after acting (command shapes in the `cafleet` skill core + your spawn prompt). The poll `id:` integer is the cafleet message id — **distinct from** any harness task-list id used for sub-topic tracking (present only where your backend has a task list). Pane silence is the expected between-turn state — work resumes when a new message arrives.
 
 ## Task-Based Coordination
 

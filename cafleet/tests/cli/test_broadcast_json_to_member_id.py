@@ -43,4 +43,4 @@ def test_broadcast_json_full_emits_null_to_member_id(runner):
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload[0]["task"]["to_member_id"] is None
+    assert payload[0]["message"]["to_member_id"] is None

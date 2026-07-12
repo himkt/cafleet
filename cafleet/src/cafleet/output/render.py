@@ -53,47 +53,47 @@ def truncate_text(
     return value[:effective_limit] + _TRUNCATION_SUFFIX
 
 
-def truncate_task_text(result: Any, *, full: bool) -> Any:
+def truncate_message_text(result: Any, *, full: bool) -> Any:
     if full:
         return result
     items = result if isinstance(result, list) else [result]
     for item in items:
-        task = item.get("task", item) if isinstance(item, dict) else None
-        if not isinstance(task, dict):
+        message = item.get("message", item) if isinstance(item, dict) else None
+        if not isinstance(message, dict):
             continue
-        if "text" in task:
-            task["text"] = truncate_text(task["text"], full=full)
+        if "text" in message:
+            message["text"] = truncate_text(message["text"], full=full)
     return result
 
 
-def render_task(task: dict, *, full: bool = False) -> dict:
-    """Project a typed-column task dict to the compact rendered shape.
+def render_message(message: dict, *, full: bool = False) -> dict:
+    """Project a typed-column message dict to the compact rendered shape.
 
     ``full=True`` returns the typed-column dict unchanged (no projection).
     ``full=False`` (default) returns a new dict with ``id``, ``from``,
     ``ts``, ``text``, plus optional ``kind`` (when ``type`` ≠ ``"unicast"``)
-    and ``origin`` (only when ``origin_task_id`` is non-NULL).
+    and ``origin`` (only when ``origin_message_id`` is non-NULL).
     """
     if full:
-        return task
+        return message
     out: dict = {
-        "id": task["task_id"],
-        "from": task["from_member_id"],
-        "ts": task["status_timestamp"],
-        "text": task["text"],
+        "id": message["message_id"],
+        "from": message["from_member_id"],
+        "ts": message["status_timestamp"],
+        "text": message["text"],
     }
-    if task["type"] != "unicast":
-        out["kind"] = task["type"]
-    if task.get("origin_task_id"):
-        out["origin"] = task["origin_task_id"]
+    if message["type"] != "unicast":
+        out["kind"] = message["type"]
+    if message.get("origin_message_id"):
+        out["origin"] = message["origin_message_id"]
     return out
 
 
-def render_tasks_in_result(result: Any, *, full: bool) -> Any:
-    """Apply ``render_task`` to every task dict in a broker result structure.
+def render_messages_in_result(result: Any, *, full: bool) -> Any:
+    """Apply ``render_message`` to every message dict in a broker result structure.
 
     ``full=True`` returns ``result`` unchanged. Otherwise walks lists,
-    ``{"task": ...}`` envelopes, and bare flat task dicts; returns a new
+    ``{"message": ...}`` envelopes, and bare flat message dicts; returns a new
     structure (does not mutate ``result``).
     """
     if full:
@@ -106,10 +106,14 @@ def render_tasks_in_result(result: Any, *, full: bool) -> Any:
 def _render_item(item: Any) -> Any:
     if not isinstance(item, dict):
         return item
-    if "task" in item and isinstance(item["task"], dict) and "task_id" in item["task"]:
+    if (
+        "message" in item
+        and isinstance(item["message"], dict)
+        and "message_id" in item["message"]
+    ):
         new = dict(item)
-        new["task"] = render_task(item["task"], full=False)
+        new["message"] = render_message(item["message"], full=False)
         return new
-    if "task_id" in item:
-        return render_task(item, full=False)
+    if "message_id" in item:
+        return render_message(item, full=False)
     return item

@@ -23,9 +23,9 @@ from cafleet.db.models import (
     Fleet,
     Member,
     MemberPlacement,
+    Message,
     MonitorConfig,
     MonitorRuntime,
-    Task,
 )
 
 # Role-based enrollment intervals and the liveness window. The ``cafleet.monitor``
@@ -207,10 +207,10 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
     rows, a correlated subquery mirroring ``members.py``.
     """
     pending_sq = (
-        select(func.count(Task.task_id))
+        select(func.count(Message.message_id))
         .where(
-            Task.context_id == Member.member_id,
-            Task.status_state == "input_required",
+            Message.owner_member_id == Member.member_id,
+            Message.status_state == "input_required",
             _shared.NOT_BROADCAST_SUMMARY,
         )
         .correlate(Member)

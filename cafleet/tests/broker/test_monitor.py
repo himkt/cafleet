@@ -19,7 +19,7 @@ import pytest
 
 from cafleet import broker
 from cafleet.broker import _shared
-from cafleet.db.models import Member, MonitorConfig, MonitorRuntime, Task
+from cafleet.db.models import Member, Message, MonitorConfig, MonitorRuntime
 from tests.broker._helpers import (
     _create_fleet,
     _member_placement,
@@ -357,7 +357,7 @@ def test_list_monitor_targets__pending_count_input_required_only():
     # the Director is a watched target too, but has no pending input here
     assert targets[director_id]["pending_count"] == 0
 
-    broker.ack_task(member_id, first["task"]["task_id"])
+    broker.ack_message(member_id, first["message"]["message_id"])
     targets = {t["member_id"]: t for t in broker.list_monitor_targets(sid)}
     assert targets[member_id]["pending_count"] == 2
 
@@ -375,15 +375,15 @@ def test_list_monitor_targets__pending_count_excludes_broadcast_summary(broker_s
     now = _iso_now()
     with broker_session() as s:
         s.add(
-            Task(
-                context_id=member_id,
+            Message(
+                owner_member_id=member_id,
                 from_member_id=director_id,
                 to_member_id=None,
                 type="broadcast_summary",
                 created_at=now,
                 status_state="input_required",
                 status_timestamp=now,
-                origin_task_id=None,
+                origin_message_id=None,
                 text="summary",
             )
         )

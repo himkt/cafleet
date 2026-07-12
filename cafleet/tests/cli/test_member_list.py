@@ -175,8 +175,8 @@ def test_member_list__json_activity_visible_after_send(bootstrapped_roster):
     assert result.exit_code == 0, result.output
     rows = {row["member_id"]: row for row in json.loads(result.output)}
 
-    assert rows[ids["alice"]]["last_sent"] == sent["task"]["status_timestamp"]
-    assert rows[ids["monitor"]]["last_recv"] == sent["task"]["status_timestamp"]
+    assert rows[ids["alice"]]["last_sent"] == sent["message"]["status_timestamp"]
+    assert rows[ids["monitor"]]["last_recv"] == sent["message"]["status_timestamp"]
     assert rows[ids["alice"]]["idle"] is not None
     assert rows[ids["monitor"]]["idle"] is not None
 

@@ -147,7 +147,7 @@ Render the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` per the 2c aud
 
 #### 2e. Wait for the Analyzer's question list
 
-Poll `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id> --full` until the Analyzer's reply arrives. **The `--full` flag is required**: `cafleet message poll` truncates each message body to 200 codepoints + `…` by default, which would silently mangle the Analyzer's numbered question list. Acknowledge with `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --task-id <task-id>`.
+Poll `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id> --full` until the Analyzer's reply arrives. **The `--full` flag is required**: `cafleet message poll` truncates each message body to 200 codepoints + `…` by default, which would silently mangle the Analyzer's numbered question list. Acknowledge with `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --message-id <message-id>`.
 
 The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and wait again with `cafleet message poll --full`. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
 

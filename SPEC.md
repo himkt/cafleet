@@ -38,7 +38,7 @@ detailed rule governs; they are written to agree.
 ## 1. Overview & goals
 
 CAFleet is a message broker and member registry for coding agents. A single
-SQLite database holds fleets, members, their tmux placements, messaging tasks,
+SQLite database holds fleets, members, their tmux placements, messages,
 and a monitor schedule. The `cafleet` CLI is the primary surface: it creates
 fleets, spawns coding-agent members into tmux panes, routes messages between
 them by keystroke-injecting inline previews, and runs a heartbeat loop that
@@ -64,7 +64,7 @@ What is part of the contract (must be reproduced):
   and status/enum string values.
 - **HTTP surface:** every route, method, request/response shape, header
   contract, and status code of the WebUI API.
-- **Observable semantics:** the task status lifecycle, the soft-delete +
+- **Observable semantics:** the message status lifecycle, the soft-delete +
   cascade rules, the monitor claim/heartbeat/clear protocol, the message
   routing and best-effort notification behavior, and the stdout-vs-stderr stream
   choice for each emitted line.
@@ -203,7 +203,7 @@ Edges (who depends on whom):
    `…` suffix, then calls `send_inline_preview` (§6.5) which keystrokes the
    2-line `[cafleet msg …]` payload Esc-first. The multiplexer call is
    **best-effort**: it returns a boolean, never raises, and the broker never
-   rolls back the persisted task on a failed keystroke. Truncation happens
+   rolls back the persisted message on a failed keystroke. Truncation happens
    broker-side; the keystroke mechanics are multiplexer-side.
 2. **CLI ↔ multiplexer ↔ coding-agent member-create.** `cafleet member create`
    (§6.3) sequences: resolve backend → `validate_model` → resolve the prompt
@@ -290,19 +290,19 @@ The unified shapes:
 | `coding_agent` | string | DDL default `"claude"` |
 | `created_at` | string | ISO timestamp |
 
-**Task** (the message/task record)
+**Message** (the message record)
 
 | Field | Type | Notes |
 |---|---|---|
-| `task_id` | integer | PK, AUTOINCREMENT |
-| `context_id` | integer | FK→members, ON DELETE RESTRICT (recipient/owner context) |
+| `message_id` | integer | PK, AUTOINCREMENT |
+| `owner_member_id` | integer | FK→members, ON DELETE RESTRICT (the member whose inbox owns the row) |
 | `from_member_id` | integer | NO FK |
 | `to_member_id` | optional integer | NO FK; nullable — `NULL` on `broadcast_summary` rows (see 5.5) |
 | `type` | enum string | see 5.3 |
 | `created_at` | string | ISO timestamp |
 | `status_state` | enum string | see 5.3 |
 | `status_timestamp` | string | ISO timestamp |
-| `origin_task_id` | optional integer | NO FK; broadcast deliveries point at the summary; summary points at itself |
+| `origin_message_id` | optional integer | NO FK; broadcast deliveries point at the summary; summary points at itself |
 | `text` | string | never truncated at persistence |
 
 **MonitorConfig** (1:1 with Member; `member_id` is PK = FK, not autoincrement)
@@ -339,10 +339,10 @@ Writes are upserts. Rows are written by the skills half of `cafleet setup` and b
 All values are persisted/compared as exact lowercase strings.
 
 - **MemberStatus:** `"active"` | `"deregistered"`.
-- **TaskType:** `"unicast"` | `"broadcast_summary"`. Broadcast fan-out emits ONE
+- **MessageType:** `"unicast"` | `"broadcast_summary"`. Broadcast fan-out emits ONE
   `broadcast_summary` (owned by the sender) + N `unicast` deliveries. There is no
   distinct "broadcast delivery" type — deliveries reuse `unicast`.
-- **TaskStatus:** `"input_required"` | `"completed"` | `"canceled"` (NOTE:
+- **MessageStatus:** `"input_required"` | `"completed"` | `"canceled"` (NOTE:
   `"canceled"` — one `l`).
   - `unicast` is born `input_required`; `broadcast_summary` is born `completed`.
   - ack: `input_required` → `completed` (recipient only).
@@ -371,8 +371,8 @@ not be unified:
 
 A `broadcast_summary` row has no single recipient, so `to_member_id` is
 **nullable** and `broadcast_message` writes **`NULL`** on the summary row. A
-`unicast` task always carries a real recipient id. `get_task` (§6.2) and
-`format_task` (§6.4, verbose mode) test `to_member_id IS NULL` / `is None` to
+`unicast` message always carries a real recipient id. `get_message` (§6.2) and
+`format_message` (§6.4, verbose mode) test `to_member_id IS NULL` / `is None` to
 decide whether to surface the `to:` endpoint, rather than a truthiness check.
 Model `to_member_id` as an **optional/nullable integer**; there is no `0`
 sentinel.
@@ -446,7 +446,7 @@ not a no-op. Both must run on every connection the reimplementation opens.
 
 #### Structural invariants
 
-- **AUTOINCREMENT on exactly three tables** — `fleets`, `members`, `tasks` —
+- **AUTOINCREMENT on exactly three tables** — `fleets`, `members`, `messages` —
   guaranteeing monotonically increasing ids that are never reused. The three 1:1
   child tables (`member_placements`, `monitor_config`, `monitor_runtime`)
   deliberately **do not** use it: each reuses its parent's id (`member_id` /
@@ -466,14 +466,14 @@ not a no-op. Both must run on every connection the reimplementation opens.
   `monitor_config.interval_seconds` → `60`, `monitor_config.enabled` → `1`
   (stored as INTEGER 0/1, a boolean-as-int), `monitor_runtime.tick_seconds` →
   `5`.
-- **No-FK task columns.** `tasks.from_member_id`, `tasks.to_member_id`, and
-  `tasks.origin_task_id` are plain integer columns with **no** FK constraint;
-  only `tasks.context_id` is FK-constrained (ON DELETE RESTRICT).
+- **No-FK message columns.** `messages.from_member_id`, `messages.to_member_id`, and
+  `messages.origin_message_id` are plain integer columns with **no** FK constraint;
+  only `messages.owner_member_id` is FK-constrained (ON DELETE RESTRICT).
 - **JSON-path access.** `member_card_json` is queried via SQLite JSON path
   extraction at `$.cafleet.kind`; the reimplementation must support JSON-path
   extraction over that column.
 - **Soft delete** lives in `fleets.deleted_at` (a non-null timestamp marks the
-  fleet deleted); this layer never physically removes rows. `tasks.text` always
+  fleet deleted); this layer never physically removes rows. `messages.text` always
   stores the full untruncated body — message text is never truncated at
   persistence.
 - All timestamp columns are stored as ISO-8601 text (§5.1);
@@ -483,9 +483,9 @@ not a no-op. Both must run on every connection the reimplementation opens.
 
 **Scope:** the synchronous data-access layer shared by CLI and WebUI; the only
 module that reads/writes the operational tables (fleets, members, placements,
-messaging tasks, monitor schedule/runtime, task queries). Owns
+messages, monitor schedule/runtime, message queries). Owns
 transaction boundaries, the member-kind predicates, soft-delete + cascade, the
-task status lifecycle, and the monitor single-instance claim/heartbeat/clear. It
+message status lifecycle, and the monitor single-instance claim/heartbeat/clear. It
 performs no OS side effects except one best-effort inline-preview keystroke
 during message delivery (§6.5) and one process-liveness probe (signal-0).
 
@@ -552,7 +552,7 @@ documented non-match, not an error mask.
   `deleted_at IS NULL`; if zero rows updated, short-circuit return
   `{deregistered_count: 0}`. Else flip all active members to `deregistered`
   (stamping `deregistered_at`), hard-delete their placements, delete the fleet's
-  monitor rows. **Tasks are never deleted.** Returns `{deregistered_count}`.
+  monitor rows. **Messages are never deleted.** Returns `{deregistered_count}`.
 
 #### Members — registration & lookups
 
@@ -610,57 +610,57 @@ documented non-match, not an error mask.
   JOIN `member_placements`, joined against `fleets` for the `is_root` flag, the
   card kind derived in SQL via `json_extract`, both collapsed by the single
   `derive_member_kind` path (§5.4); plus three
-  correlated per-member aggregates over tasks, all filtered to `type !=
+  correlated per-member aggregates over messages, all filtered to `type !=
   "broadcast_summary"`: `last_sent` (max `status_timestamp` where `from_member_id
-  = member_id`), `last_recv` (where `context_id = member_id`), `last_ack` (where
-  `context_id = member_id` AND `status_state = "completed"`). Then `idle` against
+  = member_id`), `last_recv` (where `owner_member_id = member_id`), `last_ack` (where
+  `owner_member_id = member_id` AND `status_state = "completed"`). Then `idle` against
   a single `now`: take the non-null of `(last_sent, last_recv)`; none → `idle =
   null`; else `most_recent` = lexicographic max of the ISO timestamps, `idle =
   max(0, floor(now − most_recent))` in seconds. Returns `{member_id, name,
   kind, placement, last_sent, last_recv, last_ack, idle}` per row — `kind` is
   the same three values as `get_member`, `placement` is null for placementless
   rows. Backs `member list`.
-- **`list_roster(fleet_id, *, include_task_holders=False)`** — every **active**
+- **`list_roster(fleet_id, *, include_message_holders=False)`** — every **active**
   registry row of the fleet: active rows LEFT OUTER
   JOIN `member_placements`, joined against `fleets` for the `is_root` flag, the
   card kind derived in SQL via `json_extract`, both collapsed by the single
-  `derive_member_kind` path (§5.4). With `include_task_holders=True` (the WebUI
-  roster), deregistered members that still own tasks (a task exists with
-  `context_id = member_id OR from_member_id = member_id`) are also returned, so
+  `derive_member_kind` path (§5.4). With `include_message_holders=True` (the WebUI
+  roster), deregistered members that still own messages (a message exists with
+  `owner_member_id = member_id OR from_member_id = member_id`) are also returned, so
   the audit-relevant deregistered set stays visible. Returns `{member_id, name,
   description, status, registered_at, placement}` per row plus `kind` (the same
   three values as `get_member`), with
   `placement` null for placementless rows. Backs `GET /api/members`
-  (`include_task_holders=True`); it is not a CLI surface.
+  (`include_message_holders=True`); it is not a CLI surface.
 
 #### Messaging
 
-- **`send_message(fleet_id, member_id, to, text)`** — one unicast task + best-
+- **`send_message(fleet_id, member_id, to, text)`** — one unicast message + best-
   effort notify, one write_session. Coerce `to` to int; on failure → value error
   `Invalid destination format: {to}`. If the sender is not active in the fleet →
   value error `Sender member not found or not active in fleet: {member_id}`. Find
   the destination among active members; absent → value error `Destination member
   not found: {to_id}`; in a different fleet → value error `Destination member not
-  in fleet: {to_id}`. Build the unicast task (`context_id = to_id`,
+  in fleet: {to_id}`. Build the unicast message (`owner_member_id = to_id`,
   `from_member_id = member_id`, `to_member_id = to_id`, `type = "unicast"`,
-  `status_state = "input_required"`, `origin_task_id = null`), insert, then
+  `status_state = "input_required"`, `origin_message_id = null`), insert, then
   `notification_sent = _try_notify_recipient(...)`. The persisted row holds the
-  **full untruncated text**. Returns `{task, notification_sent}`.
+  **full untruncated text**. Returns `{message, notification_sent}`.
 - **`broadcast_message(fleet_id, member_id, text)`** — fan out one unicast
   delivery per active peer plus one `broadcast_summary` owned by the
   sender. Sender not active → value error `Sender member not found or not active
   in fleet: {member_id}`. Recipients = active members in the fleet, **excluding
   the sender** (the monitoring member and the
   Director **are** included); let `N` = the count of these recipients. Build the
-  summary (`context_id = member_id`, `from_member_id = member_id`, **`to_member_id =
+  summary (`owner_member_id = member_id`, `from_member_id = member_id`, **`to_member_id =
   NULL`**, `type = "broadcast_summary"`, `status_state = "completed"`, `text =
-  "Broadcast sent to {N} recipients"`), insert it, set its `origin_task_id` to
-  its own `task_id` (self-referential), then insert each delivery with
-  `origin_task_id = summary.task_id`. **After all deliveries are inserted (still
+  "Broadcast sent to {N} recipients"`), insert it, set its `origin_message_id` to
+  its own `message_id` (self-referential), then insert each delivery with
+  `origin_message_id = summary.message_id`. **After all deliveries are inserted (still
   inside the same write_session), call `_try_notify_recipient` once per delivery
   and set `delivered` = the count of those calls that returned `true`** (the sum
   of successful best-effort inline previews; a paneless or self-recipient
-  delivery contributes 0). Returns a **single-element list** `[{task: <summary>,
+  delivery contributes 0). Returns a **single-element list** `[{message: <summary>,
   recipients: N, delivered}]` — `recipients` is the real recipient count `N` and
   `delivered` is the best-effort-preview success count; the two diverge when any
   preview fails to land. The two values are kept as **separate fields** and never
@@ -672,35 +672,35 @@ documented non-match, not an error mask.
   inline-preview keystroke, returning its boolean. Truncation is broker-side.
   The notification never rolls back the insert; the boolean flows only into
   `notification_sent` (unicast) or the broadcast `delivered` count.
-- **`poll_tasks(member_id)`** — un-acked deliveries: `context_id = member_id` AND
+- **`poll_messages(member_id)`** — un-acked deliveries: `owner_member_id = member_id` AND
   `status_state = "input_required"`, `broadcast_summary` excluded, ordered
   `status_timestamp DESC`.
-- **`ack_task` / `cancel_task(member_id, task_id)`** — both transition a task in
-  one write_session. Load; absent → value error `Task {task_id} not found`. If
+- **`ack_message` / `cancel_message(member_id, message_id)`** — both transition a message in
+  one write_session. Load; absent → value error `Message {message_id} not found`. If
   the caller is not the authorized party → permission error. If `status_state`
-  is not `input_required` → value error `Cannot {verb} task in state
+  is not `input_required` → value error `Cannot {verb} message in state
   {status_state}` (verb `ACK` / `cancel`). Set the new state and
-  `status_timestamp = now`. **ack**: authorized = recipient (`context_id`); new
-  state `completed`; permission error `Only the recipient can ACK a task`.
+  `status_timestamp = now`. **ack**: authorized = recipient (`owner_member_id`); new
+  state `completed`; permission error `Only the recipient can ACK a message`.
   **cancel**: authorized = sender (`from_member_id`); new state `canceled`;
-  permission error `Only the sender can cancel a task`. `input_required` is the
-  only state a task may transition from.
+  permission error `Only the sender can cancel a message`. `input_required` is the
+  only state a message may transition from.
 
 #### Queries
 
-- **`list_inbox(member_id)`** — all tasks where `context_id = member_id`, any
+- **`list_inbox(member_id)`** — all messages where `owner_member_id = member_id`, any
   state, `broadcast_summary` excluded, ordered `status_timestamp DESC`.
-- **`list_sent(member_id)`** — all tasks where `from_member_id = member_id`, any
+- **`list_sent(member_id)`** — all messages where `from_member_id = member_id`, any
   state, `broadcast_summary` excluded, ordered `status_timestamp DESC`.
-- **`list_timeline(fleet_id, limit=200)`** — tasks joined to their **sender's**
+- **`list_timeline(fleet_id, limit=200)`** — messages joined to their **sender's**
   member row, filtered to the sender's `fleet_id`, `broadcast_summary` excluded,
   ordered `status_timestamp DESC`, capped at `limit`.
-- **`get_task(fleet_id, task_id)`** — fleet-gated. Load; absent → value error
-  `Task {task_id} not found`. Build the endpoint set `[from_member_id]`,
+- **`get_message(fleet_id, message_id)`** — fleet-gated. Load; absent → value error
+  `Message {message_id} not found`. Build the endpoint set `[from_member_id]`,
   appending `to_member_id` only when it is **non-null** (so a `broadcast_summary`
   row's `NULL` recipient is dropped). If no endpoint member belongs to `fleet_id`
-  → value error `Task
-  {task_id} not found` (**same message** — the out-of-fleet gate is hidden as
+  → value error `Message
+  {message_id} not found` (**same message** — the out-of-fleet gate is hidden as
   not-found).
 
 #### Monitor — schedule CRUD & ping recording
@@ -727,8 +727,8 @@ documented non-match, not an error mask.
 - **`list_monitor_targets(fleet_id)`** — one row per **active, enrolled** member
   (the watched set; the monitoring member is excluded by the monitor_config
   join). Each row: `{member_id, name, is_director, pane_id, interval_seconds,
-  last_ping_at, enabled, pending_count}`, where `pending_count` counts tasks
-  with `context_id = member_id`, `status_state = "input_required"`, `type !=
+  last_ping_at, enabled, pending_count}`, where `pending_count` counts messages
+  with `owner_member_id = member_id`, `status_state = "input_required"`, `type !=
   "broadcast_summary"`.
 
 #### Monitor — runtime claim / heartbeat / clear + liveness
@@ -775,10 +775,10 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
   `status="deregistered"` / `deleted_at` set.
 - Placements and monitor rows (monitor_config, monitor_runtime) **are
   hard-deleted** on cascade.
-- **Tasks are never deleted** — audit history is permanent.
+- **Messages are never deleted** — audit history is permanent.
 - Deregistered members remain visible via `verify_member_fleet`,
   `get_member_names` (both status-agnostic), and
-  `list_roster(include_task_holders=True)` (when they still own tasks); they
+  `list_roster(include_message_holders=True)` (when they still own messages); they
   are hidden from `get_member` and `list_members` (active-only).
 
 #### Contract error strings → exception class → exit code
@@ -803,11 +803,11 @@ HTTP status); permission errors gate authorization. The exit-code policy is
 | `send_message` | value | `Destination member not found: {to_id}` |
 | `send_message` | value | `Destination member not in fleet: {to_id}` |
 | `broadcast_message` | value | `Sender member not found or not active in fleet: {member_id}` |
-| `ack_task` / `cancel_task` | value | `Task {task_id} not found` |
-| `ack_task` / `cancel_task` | value | `Cannot {verb} task in state {status_state}` |
-| `ack_task` | permission | `Only the recipient can ACK a task` |
-| `cancel_task` | permission | `Only the sender can cancel a task` |
-| `get_task` | value | `Task {task_id} not found` (missing and out-of-fleet) |
+| `ack_message` / `cancel_message` | value | `Message {message_id} not found` |
+| `ack_message` / `cancel_message` | value | `Cannot {verb} message in state {status_state}` |
+| `ack_message` | permission | `Only the recipient can ACK a message` |
+| `cancel_message` | permission | `Only the sender can cancel a message` |
+| `get_message` | value | `Message {message_id} not found` (missing and out-of-fleet) |
 
 ### 6.3 CLI
 
@@ -923,7 +923,7 @@ invocation, in order:
    `member <member_id> is not in fleet <fleet_id>.`. **Runs before the handler
    body.**
 3. **Handler call.**
-4. **Render** — route the result through task truncation + task-list rendering
+4. **Render** — route the result through message truncation + message-list rendering
    (with `full`).
 5. **Emit branch** — if the subcommand's `--json` flag was passed, emit compact
    JSON; else call the text renderer with `full`.
@@ -1015,28 +1015,28 @@ fleet-scoped command (§6.3 `--fleet-id`).
 All six follow the shared handler sequence above. Common: the acting member id —
 `--from-member-id` (integer, required — the sender) on `send` / `broadcast`,
 `--member-id` (integer, required) on `poll` / `ack` / `cancel` / `show`;
-`--task-id` (integer, required) on `ack`/`cancel`/`show`; `--full` (documented)
+`--message-id` (integer, required) on `ack`/`cancel`/`show`; `--full` (documented)
 on all; `--quiet` (documented boolean, default `false` — success output is the
-bare `task_id`) on `send` and `ack`.
+bare `message_id`) on `send` and `ack`.
 
 - **send** — also `--to-member-id` (integer, required — the recipient) and the
   shared `--text` / `--text-file` body pair (exactly one required; §6.3
-  [text-body input](#text-body-input)). Fleet-gated; truncates task text.
-  Prints `Message sent.\n` + the formatted task.
+  [text-body input](#text-body-input)). Fleet-gated; truncates message text.
+  Prints `Message sent.\n` + the formatted message.
 - **broadcast** — also the shared `--text` / `--text-file` body pair (exactly
   one required; §6.3 [text-body input](#text-body-input)). **Not** fleet-gated; the
-  result is a list; `--full` → the formatted first task envelope; else `broadcast
-  id=<task_id> recipients=<N> delivered=<k>`, where `<N>` is the result's
+  result is a list; `--full` → the formatted first message envelope; else `broadcast
+  id=<message_id> recipients=<N> delivered=<k>`, where `<N>` is the result's
   `recipients` (the real recipient count, matching `Broadcast sent to {N}
   recipients`) and `<k>` is the result's `delivered` (the count of best-effort
   inline previews that landed). The two diverge when any preview fails to deliver;
   they are reported as **separate fields**, not conflated (the broker computes
   both, §6.2). In JSON mode the result object carries both `recipients` and
   `delivered`.
-- **poll** — fleet-gated; indexed task list; empty `No messages found.`.
-- **ack** — fleet-gated; prefix `Message acknowledged.\n` + the formatted task.
-- **cancel** — fleet-gated; prefix `Task canceled.\n` + the formatted task.
-- **show** — fetches the task within the fleet; text is the formatted task.
+- **poll** — fleet-gated; indexed message list; empty `No messages found.`.
+- **ack** — fleet-gated; prefix `Message acknowledged.\n` + the formatted message.
+- **cancel** — fleet-gated; prefix `Message canceled.\n` + the formatted message.
+- **show** — fetches the message within the fleet; text is the formatted message.
 
 #### `member` group — shared resolution helpers
 
@@ -1421,7 +1421,7 @@ variable is injected into the pane (§7.1).
 
 ### 6.4 Output & Formatting
 
-**Scope:** every line of human/machine output for members, tasks, fleets,
+**Scope:** every line of human/machine output for members, messages, fleets,
 and the monitor. Pure string/structure transformation — no I/O, no DB,
 no network; the only external input is `settings.max_text_len` (default `200`).
 Two consumers depend on these exact shapes: the CLI (which prints them) and the
@@ -1446,16 +1446,16 @@ absent glyph below and the compact-JSON rules apply to every path.
   exact multi-line, column-aligned, ANSI-free terminal strings.
 
 The split is load-bearing: formatters call render functions internally (e.g.
-`format_task` calls `render_task` for compact mode), but render functions never
+`format_message` calls `render_message` for compact mode), but render functions never
 call formatters.
 
 **Render functions:** `strip_ansi(text)`; `format_json(data)`;
-`truncate_text(value, full, limit)`; `truncate_task_text(result, full)`
-(in-place); `render_task(task, full)` → `{id, from, ts, text, kind?, origin?}`;
-`render_tasks_in_result(result, full)` (non-mutating, unwraps `{task: …}`
-envelopes and flat task dicts).
+`truncate_text(value, full, limit)`; `truncate_message_text(result, full)`
+(in-place); `render_message(message, full)` → `{id, from, ts, text, kind?, origin?}`;
+`render_messages_in_result(result, full)` (non-mutating, unwraps `{message: …}`
+envelopes and flat message dicts).
 
-**Formatter functions:** `format_task`; `format_indexed_list`
+**Formatter functions:** `format_message`; `format_indexed_list`
 (joins formatted items with one blank line between, `empty_msg` when empty —
 not numbered); `format_member_detail`; `format_fleet_create`; `format_member`;
 `format_member_list`; `format_monitor_status`;
@@ -1471,7 +1471,7 @@ an idle-seconds humanizer; a ping-age humanizer.
   value is null, or its codepoint length is `<= limit`. Null returns null.
 - The effective limit is `truncate_text`'s explicit `limit` argument when given,
   else `max_text_len` (default `200`, from config) — the **only** config
-  dependency. `truncate_task_text` takes no `limit` and always uses
+  dependency. `truncate_message_text` takes no `limit` and always uses
   `max_text_len`.
 - The **member-description limit is a hardcoded literal `60`**, independent of
   `max_text_len`; `format_member_detail` verbose applies it.
@@ -1487,7 +1487,7 @@ still obey these three rules.
 
 #### The `unicast` suppression sentinel
 
-`render_task` adds a `kind` key **only** when the task's `type` is not the
+`render_message` adds a `kind` key **only** when the message's `type` is not the
 literal `"unicast"`. `unicast` is the default/suppressed type; only non-`unicast`
 types (e.g. `broadcast_summary`) surface a `kind`.
 
@@ -1513,8 +1513,8 @@ the **last** `\r` (CR-redraw defrag: a TUI redraw `prefix\rNEW` keeps only
 
 #### Mutation contract
 
-`truncate_task_text` **mutates its input in place** and returns the same object.
-`render_tasks_in_result` is **non-mutating** (it
+`truncate_message_text` **mutates its input in place** and returns the same object.
+`render_messages_in_result` is **non-mutating** (it
 builds new structures, shallow-copying any envelope). Preserve the distinction; in
 a language with no aliasing concern, preserve the *observable* result.
 
@@ -1522,18 +1522,18 @@ a language with no aliasing concern, preserve the *observable* result.
 
 Every field is read with required access unless marked optional; required access
 **fails loud** on a missing key by design. The truthiness guards on `text` /
-`origin_task_id` mean empty string and `0` are also suppressed, not just null.
+`origin_message_id` mean empty string and `0` are also suppressed, not just null.
 
-- **Task** (`render_task` / `format_task` / `truncate_task_text`): `task_id`
+- **Message** (`render_message` / `format_message` / `truncate_message_text`): `message_id`
   (req), `from_member_id` (req), `status_timestamp` (req, compact),
   `text` (req key for compact, optional for verbose; guarded by truthiness),
   `type` (req; `"unicast"` suppresses `kind`), `status_state` (req, verbose),
   `to_member_id` (optional, nullable; verbose `to:` line only when **non-null** —
-  a `broadcast_summary` row's `NULL` recipient is skipped), `origin_task_id`
-  (optional; `origin` key only when **truthy**). Envelope: a task may be wrapped
-  `{task: {…}}`; `format_task`
+  a `broadcast_summary` row's `NULL` recipient is skipped), `origin_message_id`
+  (optional; `origin` key only when **truthy**). Envelope: a message may be wrapped
+  `{message: {…}}`; `format_message`
   unwraps when the inner value is a dict; the render walker unwraps when it is a
-  dict containing `task_id`.
+  dict containing `message_id`.
 - **Member detail** (`format_member_detail`): `member_id` (req), `name` (req),
   `description` (req, truncated to 60), `status` (req), `kind` (req, verbose),
   `skills` (req, verbose; a compact JSON array, `-` when empty), `placement`
@@ -1576,11 +1576,11 @@ surfaces the resolved multiplexer backend (§6.3).
 
 #### Exact text layouts
 
-`format_task` — **compact** line 1 by concatenation: `[<id> | from:<from> |
+`format_message` — **compact** line 1 by concatenation: `[<id> | from:<from> |
 <ts>]`, with ` | kind:<kind>` inserted before `]` when a `kind` is present and
 ` | origin:<origin>` inserted (after kind) when an `origin` is present; if the
 rendered `text` is truthy a second line holds the body. **Verbose** — aligned
-lines: `  id:    <task_id>`, `  state: <status_state>`, `  from:  <from_member_id>`,
+lines: `  id:    <message_id>`, `  state: <status_state>`, `  from:  <from_member_id>`,
 then `  to:    <to_member_id>` **only when `to_member_id` is non-null**, then `  type:
  <type>` **always**, then `  text:  <text>` **only when `text` is truthy**.
 
@@ -1749,14 +1749,14 @@ Director's `MultiplexerContext` and passes it directly.
   literal-then-Enter, `timeout=5`s, **Esc-first=NO** (an Esc would self-interrupt
   the monitoring member); any error → `false`. The payload carries no backtick, no
   command-substitution sequence, and no pipe.
-- **`send_inline_preview(*, target_pane_id, task_id, sender_id, ts, text) ->
+- **`send_inline_preview(*, target_pane_id, message_id, sender_id, ts, text) ->
   bool`** — best-effort; the broker's inline-preview path (the broker truncates
   `text` first). tmux missing → `false`; cosmetic CR/LF strip on `text`
   (`\r\n`/`\n`/`\r` each → `⏎` U+23CE, **no** tab/backtick/command-substitution
   sanitization here); two-line payload (single `\n` separator intentionally
   kept):
   ```
-  [cafleet msg <task_id> from <sender_id> <ts>]
+  [cafleet msg <message_id> from <sender_id> <ts>]
   <sanitized_text>
   ```
   literal-then-Enter, `timeout=5`s, **Esc-first=YES**, any error → `false`. Under
@@ -2470,8 +2470,8 @@ array**; every other list endpoint wraps in an object (member rows under
 - **`GET /api/fleets`** — unscoped (no `X-Fleet-Id`). Returns the broker fleet
   list **directly as a bare array**.
 - **`GET /api/members`** — fleet-scoped. Returns the roster via
-  `list_roster(include_task_holders=True)` (§6.2) — every active registry row
-  plus deregistered members still owning tasks — each row carrying the
+  `list_roster(include_message_holders=True)` (§6.2) — every active registry row
+  plus deregistered members still owning messages — each row carrying the
   three-value `kind` (§5.4) and a `monitor` field set to the projected monitor
   config when an enrolled config exists, else `null`.
   Response `{"members": [ <member dict> + "monitor": <MonitorConfig>|null, … ]}`.
@@ -2510,17 +2510,17 @@ array**; every other list endpoint wraps in an object (member rows under
   a JSON integer or the exact JSON string `"*"`** (broadcast); anything else
   (e.g. a stringified integer `"5"`) is rejected, not coerced. If `from_member_id`
   is not in the fleet → `400`, detail `from_member not in fleet`. If `"*"`:
-  broadcast, return `{task_id: <summary task_id>, status: <summary
+  broadcast, return `{message_id: <summary message_id>, status: <summary
   status_state>}`. Else: recipient not an **active** member in the fleet →
-  `404`, detail `Member not found`; otherwise send and return `{task_id,
+  `404`, detail `Member not found`; otherwise send and return `{message_id,
   status}`. Both branches:
-  `{task_id: int, status: string}` (`status` = the broker task's `status_state`).
+  `{message_id: int, status: string}` (`status` = the broker message's `status_state`).
   The SPA always submits `from_member_id = director.member_id` (the fleet's
   root Director); the endpoint itself is sender-agnostic.
 
-**`FormattedMessage`** (one element of any `messages` array): `{task_id,
+**`FormattedMessage`** (one element of any `messages` array): `{message_id,
 from_member_id, from_member_name, to_member_id, to_member_name, type, status,
-created_at, status_timestamp, origin_task_id, body}`. Names are resolved by a
+created_at, status_timestamp, origin_message_id, body}`. Names are resolved by a
 single bulk lookup over the union of all `from_member_id`/`to_member_id` values,
 using **direct keyed access** — a missing id is a hard failure (→ 500), never a
 silent fallback. `status` is the renamed `status_state`; `body` the renamed
@@ -2569,7 +2569,7 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 
 | Field | Env var | Type | Default |
 |---|---|---|---|
-| `database_url` | `CAFLEET_DATABASE_URL` | string | `sqlite:///` + `~/.local/share/cafleet/cafleet_v4.db` (home expanded **at startup**) |
+| `database_url` | `CAFLEET_DATABASE_URL` | string | `sqlite:///` + `~/.local/share/cafleet/cafleet_v5.db` (home expanded **at startup**) |
 | `broker_host` | `CAFLEET_BROKER_HOST` | string | `"127.0.0.1"` |
 | `broker_port` | `CAFLEET_BROKER_PORT` | integer (16-bit port) | `8000` |
 | `max_text_len` | `CAFLEET_MAX_TEXT_LEN` | non-negative integer | `200` |
@@ -2588,12 +2588,12 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 - **Default DB URL** expands `~` to `$HOME` **only for the factory default**; a
   user-supplied `CAFLEET_DATABASE_URL` is passed through verbatim (no `~`
   expansion, so a user value must already be absolute). Net default on home
-  `/home/u`: `sqlite:////home/u/.local/share/cafleet/cafleet_v4.db` (four slashes).
+  `/home/u`: `sqlite:////home/u/.local/share/cafleet/cafleet_v5.db` (four slashes).
 - A non-integer `broker_port`/`max_text_len` must **fail loudly at startup** (a
   hard validation error, not a silent default).
 - `max_text_len` truncates only CLI echo + the broker inline-preview keystroke.
   It is **never** applied by the WebUI API (raw broker results) and never
-  truncates the persisted `Task.text` column.
+  truncates the persisted `Message.text` column.
 
 **Spawned-pane environment.** The only environment variable forwarded into a
 spawned member pane is `CAFLEET_DATABASE_URL` (by `member create`'s
@@ -2694,8 +2694,8 @@ AUTOINCREMENT, and the create-order quirk are in §6.1.
 **Indexes (non-unique), at head:**
 
 - `idx_members_fleet_status` on `members(fleet_id, status)`
-- `idx_tasks_context_status_ts` on `tasks(context_id, status_timestamp)`
-- `idx_tasks_from_member_status_ts` on `tasks(from_member_id, status_timestamp)`
+- `idx_messages_owner_member_status_ts` on `messages(owner_member_id, status_timestamp)`
+- `idx_messages_from_member_status_ts` on `messages(from_member_id, status_timestamp)`
 
 **The migration chain.** A single initial revision, `0001` (no predecessor;
 head). It creates the full §5.2 schema in one step, in this order:
@@ -2716,7 +2716,7 @@ head). It creates the full §5.2 schema in one step, in this order:
    default 60, `enabled` default 1; not AUTOINCREMENT.
 6. `monitor_runtime` — PK=FK `fleet_id` ON DELETE RESTRICT, `tick_seconds`
    default 5; not AUTOINCREMENT.
-7. `tasks` (+ `idx_tasks_context_status_ts`, `idx_tasks_from_member_status_ts`)
+7. `messages` (+ `idx_messages_owner_member_status_ts`, `idx_messages_from_member_status_ts`)
    — AUTOINCREMENT.
 
 A fresh DB starts with **no rows in any application table** (only
@@ -2731,8 +2731,9 @@ drivername to `sqlite`; (2) extract the DB file path — if empty → applicatio
 error `database URL has no file path`; (3) create the file's parent directory;
 (4) inspect the DB: existing tables but no `alembic_version` → the
 unversioned-DB refusal (§6.3); a recorded revision unknown to the bundled
-chain → the ahead-of-head refusal (§6.3); (5) already at head → print
-`Already at head (<head>); nothing to do.` and stop; (6) otherwise upgrade to
+chain → the ahead-of-head refusal (§6.3); (5) already at head
+(`current_rev == head_rev`) → print `Already at head (<head>); nothing to do.`
+and stop; (6) otherwise upgrade to
 head and print the created/upgraded line (§6.3). The driver's engine is
 disposed when the command finishes (success or failure). The same driver runs
 for bare `setup`'s db half and for `setup db` — both print the same lines.
@@ -2818,9 +2819,9 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 - [ ] `cafleet message send` (`--from-member-id` sender, `--to-member-id` recipient, `--text` / `--text-file` xor-required, `--full`, `--json`)
 - [ ] `cafleet message broadcast` (`--from-member-id`, `--text` / `--text-file` xor-required, `--full`, `--json`)
 - [ ] `cafleet message poll` (`--member-id`, `--full`, `--json`)
-- [ ] `cafleet message ack` (`--member-id`, `--task-id`, `--full`, `--json`)
-- [ ] `cafleet message cancel` (`--member-id`, `--task-id`, `--full`, `--json`)
-- [ ] `cafleet message show` (`--member-id`, `--task-id`, `--full`, `--json`)
+- [ ] `cafleet message ack` (`--member-id`, `--message-id`, `--full`, `--json`)
+- [ ] `cafleet message cancel` (`--member-id`, `--message-id`, `--full`, `--json`)
+- [ ] `cafleet message show` (`--member-id`, `--message-id`, `--full`, `--json`)
 
 **`monitor`:**
 

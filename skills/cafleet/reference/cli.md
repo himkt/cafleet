@@ -4,7 +4,7 @@ Read this file for the broker CLI surface beyond the core identity / poll / send
 
 ## Environment variables
 
-CLI env vars (all `CAFLEET_`-prefixed): `CAFLEET_DATABASE_URL` (SQLite URL; default `~/.local/share/cafleet/cafleet_v4.db`, use an absolute path when overriding — `~` is not expanded), `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` (`cafleet server` defaults `127.0.0.1` / `8000`), `CAFLEET_MAX_TEXT_LEN` (body-truncation limit, default `200` — see § *Output flags* below).
+CLI env vars (all `CAFLEET_`-prefixed): `CAFLEET_DATABASE_URL` (SQLite URL; default `~/.local/share/cafleet/cafleet_v5.db`, use an absolute path when overriding — `~` is not expanded), `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` (`cafleet server` defaults `127.0.0.1` / `8000`), `CAFLEET_MAX_TEXT_LEN` (body-truncation limit, default `200` — see § *Output flags* below).
 
 ## Global Options
 
@@ -19,11 +19,11 @@ cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id> --json
 
 ## Output flags — `--full` / `--json`
 
-`--full` and `--json` are cafleet's two **independent, composable** output-control flags over its compact default output. `--full` opts back into untruncated, every-field output — it bypasses the truncation caps. `--json` switches the encoding to structured JSON but is **still truncated** unless combined with `--full` (`--full --json` gives untruncated JSON). A separate `--quiet` flag — on `message send`, `message ack`, and `member ping` — prints only the bare `task_id` (the target member id for `ping`) for shell capture.
+`--full` and `--json` are cafleet's two **independent, composable** output-control flags over its compact default output. `--full` opts back into untruncated, every-field output — it bypasses the truncation caps. `--json` switches the encoding to structured JSON but is **still truncated** unless combined with `--full` (`--full --json` gives untruncated JSON). A separate `--quiet` flag — on `message send`, `message ack`, and `member ping` — prints only the bare `message_id` (the target member id for `ping`) for shell capture.
 
 ### `--full` (cross-subcommand escape hatch)
 
-`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch over a single flag covering four overloaded surfaces: `message {send,poll,ack,cancel,show}` → untruncated `text` + the full typed-column envelope; `message broadcast` → the single `broadcast_summary` task rendered verbose (never per-recipient rows or a `recipient_ids` list); `member show` → the labeled block (`kind`, `skills`, placement sub-block) in **text mode only** (JSON is the unprojected broker dict regardless of `--full`); `member create` → the 6-line `Member registered and spawned.` block. Per-surface detail: [`cli-options.md`](../../../docs/spec/cli-options.md#full-semantics).
+`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch over a single flag covering four overloaded surfaces: `message {send,poll,ack,cancel,show}` → untruncated `text` + the full typed-column envelope; `message broadcast` → the single `broadcast_summary` message rendered verbose (never per-recipient rows or a `recipient_ids` list); `member show` → the labeled block (`kind`, `skills`, placement sub-block) in **text mode only** (JSON is the unprojected broker dict regardless of `--full`); `member create` → the 6-line `Member registered and spawned.` block. Per-surface detail: [`cli-options.md`](../../../docs/spec/cli-options.md#full-semantics).
 
 ### `--json` (per-subcommand, machine-parseable)
 
@@ -44,18 +44,18 @@ Three backends — `claude` (default), `codex`, `opencode` — chosen per member
 
 ## Cancel (Retract)
 
-Retract a sent message that has not been acknowledged yet (sender-only). `--task-id` required.
+Retract a sent message that has not been acknowledged yet (sender-only). `--message-id` required.
 
 ```bash
-cafleet message cancel --fleet-id <fleet-id> --member-id <my-member-id> --task-id <task-id>
+cafleet message cancel --fleet-id <fleet-id> --member-id <my-member-id> --message-id <message-id>
 ```
 
-## Show (Get Task)
+## Show (Get Message)
 
-Fetch one task by id. `--task-id` required; `--full` for the untruncated envelope.
+Fetch one message by id. `--message-id` required; `--full` for the untruncated envelope.
 
 ```bash
-cafleet message show --fleet-id <fleet-id> --member-id <my-member-id> --task-id <task-id>
+cafleet message show --fleet-id <fleet-id> --member-id <my-member-id> --message-id <message-id>
 ```
 
 ## Broadcast — `cafleet message broadcast`
@@ -71,9 +71,9 @@ cafleet message broadcast --fleet-id <fleet-id> --from-member-id <my-member-id> 
 |---|---|---|
 | `--text <body>` | exactly one of `--text` / `--text-file` | Inline message body fanned out to every active recipient (except the sender). |
 | `--text-file <path>` | exactly one of `--text` / `--text-file` | Same body read from a UTF-8 file (or `-` for stdin); use it for long or multi-line bodies that would hit the shell's `ARG_MAX`. |
-| `--full` | no | Renders the single `broadcast_summary` task in full; never adds per-recipient rows or a `recipient_ids` list. See § *Output flags* above. |
+| `--full` | no | Renders the single `broadcast_summary` message in full; never adds per-recipient rows or a `recipient_ids` list. See § *Output flags* above. |
 
-The broker writes one delivery row per recipient (each visible via that recipient's `cafleet message poll`) plus one `broadcast_summary` row addressed back to the broadcaster, and returns only that summary task plus two top-level fields: `recipients` (the real recipient count `N`) and `delivered` (how many recipient panes the inline-preview keystroke reached — see [`reference/recovery.md`](recovery.md) for the miss-handling chain). The two diverge when any preview fails to land. Default echo is one line:
+The broker writes one delivery row per recipient (each visible via that recipient's `cafleet message poll`) plus one `broadcast_summary` row addressed back to the broadcaster, and returns only that summary message plus two top-level fields: `recipients` (the real recipient count `N`) and `delivered` (how many recipient panes the inline-preview keystroke reached — see [`reference/recovery.md`](recovery.md) for the miss-handling chain). The two diverge when any preview fails to land. Default echo is one line:
 
 ```
 broadcast id=<id> recipients=<N> delivered=<k>
@@ -82,10 +82,10 @@ broadcast id=<id> recipients=<N> delivered=<k>
 Recipients ack their own delivery row exactly like a unicast message; the summary row is a sender-side artifact and is not acked by recipients:
 
 ```bash
-cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --task-id <task-id>
+cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --message-id <message-id>
 ```
 
-For the row schema, the `"Broadcast sent to N recipients"` summary string, and `origin_task_id` grouping/threading, see [`docs/spec/data-model.md`](../../../docs/spec/data-model.md#broadcast-grouping) and [`docs/spec/message-envelope.md`](../../../docs/spec/message-envelope.md).
+For the row schema, the `"Broadcast sent to N recipients"` summary string, and `origin_message_id` grouping/threading, see [`docs/spec/data-model.md`](../../../docs/spec/data-model.md#broadcast-grouping) and [`docs/spec/message-envelope.md`](../../../docs/spec/message-envelope.md).
 
 ## List Members
 
@@ -96,7 +96,7 @@ cafleet member list --fleet-id <fleet-id>
 cafleet member show --fleet-id <fleet-id> --member-id <target-member-id>
 ```
 
-`member list` renders the `N members:` table with `member_id`, `name`, `kind` (`director` / `monitor` / `member`), `backend`, `pane_id`, and `idle` columns — `-` placement cells for placementless rows, `(pending)` for a placed row with no pane yet, and `idle` humanized (`Ns`/`Nm`/`Nh`, `-` when no task activity); `--json` adds the underlying `last_sent` / `last_recv` / `last_ack` timestamps per row. `member show` default output is the one-line row `<id> <name> <status>`; `--full` gives the labeled block (`description` truncated to 60 codepoints, `kind`, `skills`, placement sub-block) — text mode only. See § *Output flags* above.
+`member list` renders the `N members:` table with `member_id`, `name`, `kind` (`director` / `monitor` / `member`), `backend`, `pane_id`, and `idle` columns — `-` placement cells for placementless rows, `(pending)` for a placed row with no pane yet, and `idle` humanized (`Ns`/`Nm`/`Nh`, `-` when no message activity); `--json` adds the underlying `last_sent` / `last_recv` / `last_ack` timestamps per row. `member show` default output is the one-line row `<id> <name> <status>`; `--full` gives the labeled block (`description` truncated to 60 codepoints, `kind`, `skills`, placement sub-block) — text mode only. See § *Output flags* above.
 
 ## Doctor
 
@@ -124,7 +124,7 @@ cafleet fleet delete --fleet-id <fleet-id>
 # → Deleted fleet <fleet-id>. Deregistered N members.
 ```
 
-Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters every active member, deletes placement rows; tasks preserved; idempotent). It does **not** close member panes — run `cafleet member delete` per member first, in the [`reference/recovery.md`](recovery.md) Shutdown order. Full behavior: [`cli-options.md`](../../../docs/spec/cli-options.md#fleet-delete).
+Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters every active member, deletes placement rows; messages preserved; idempotent). It does **not** close member panes — run `cafleet member delete` per member first, in the [`reference/recovery.md`](recovery.md) Shutdown order. Full behavior: [`cli-options.md`](../../../docs/spec/cli-options.md#fleet-delete).
 
 ## Typical Workflow
 
@@ -141,7 +141,7 @@ Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters ever
 
 ## Message Lifecycle
 
-Messages are tasks with three states: **input_required** (delivered, awaiting ACK) → **completed** (ACKed), or **canceled** (sender retracted before ACK). For broadcast threading (the `origin_task_id` self-reference shape), see § *Broadcast* above.
+A `messages` row moves through three states: **input_required** (delivered, awaiting ACK) → **completed** (ACKed), or **canceled** (sender retracted before ACK). For broadcast threading (the `origin_message_id` self-reference shape), see § *Broadcast* above.
 
 ## Error Handling
 

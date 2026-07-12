@@ -31,7 +31,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Communication Protocol
 
-You do NOT speak to the user directly — all coordination flows through the Director via `cafleet message send` (the structured Visual Review Report), and you `cafleet message ack` each inbound Director message (e.g. a re-check request with a new `ROUND: N` line) after acting (command shapes in the `cafleet` skill core + your spawn prompt; the poll `id:` integer is the `[task-id]`).
+You do NOT speak to the user directly — all coordination flows through the Director via `cafleet message send` (the structured Visual Review Report), and you `cafleet message ack` each inbound Director message (e.g. a re-check request with a new `ROUND: N` line) after acting (command shapes in the `cafleet` skill core + your spawn prompt; the poll `id:` integer is the `[message-id]`).
 
 ## Visual Issue Categories
 

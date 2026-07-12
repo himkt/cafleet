@@ -62,9 +62,9 @@ def test_send_message__auto_fire_invokes_inline_preview_with_full_kwargs(
     )
     assert isinstance(pane_id, str)
     assert pane_id
-    assert kwargs.get("task_id") == result["task"]["task_id"]
+    assert kwargs.get("message_id") == result["message"]["message_id"]
     assert kwargs.get("sender_id") == sender
-    assert kwargs.get("ts") == result["task"]["status_timestamp"]
+    assert kwargs.get("ts") == result["message"]["status_timestamp"]
     assert kwargs.get("text") == "Did the API change?"
 
 
@@ -78,8 +78,8 @@ def test_send_message__sequential_sends_produce_distinct_previews_no_poll_trigge
     broker.send_message(sid, sender, recipient, "msg3")
     assert len(inline_preview_calls) == 3
     assert poll_trigger_call_count["n"] == 0
-    task_ids = [c["kwargs"]["task_id"] for c in inline_preview_calls]
-    assert len(set(task_ids)) == 3
+    message_ids = [c["kwargs"]["message_id"] for c in inline_preview_calls]
+    assert len(set(message_ids)) == 3
     texts = [c["kwargs"]["text"] for c in inline_preview_calls]
     assert texts == ["msg1", "msg2", "msg3"]
 
@@ -93,8 +93,8 @@ def test_inline_preview_failure__message_persisted_and_notification_flag_false(
     sid, sender, recipient = _setup_two_members()
     sent = broker.send_message(sid, sender, recipient, "delivered despite tmux down")
     assert sent["notification_sent"] is False
-    [polled] = broker.poll_tasks(recipient)
-    assert polled["task_id"] == sent["task"]["task_id"]
+    [polled] = broker.poll_messages(recipient)
+    assert polled["message_id"] == sent["message"]["message_id"]
     assert polled["text"] == "delivered despite tmux down"
     # Must NOT fall back to send_poll_trigger.
     assert poll_trigger_call_count["n"] == 0
@@ -142,8 +142,8 @@ def test_send_message__skip_conditions(inline_preview_calls, scenario):
             "to placement-less peer",
         )
         # Message still landed in queue.
-        [polled] = broker.poll_tasks(recipient["member_id"])
-        assert polled["task_id"] == sent["task"]["task_id"]
+        [polled] = broker.poll_messages(recipient["member_id"])
+        assert polled["message_id"] == sent["message"]["message_id"]
     # In both scenarios the preview is skipped.
     assert inline_preview_calls == []
 

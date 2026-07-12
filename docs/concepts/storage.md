@@ -13,10 +13,10 @@ by Alembic, bundled inside the `cafleet` wheel and applied via
 no separate database daemon to operate, monitor, or back up — the database is
 a single file.
 
-The default database path is `~/.local/share/cafleet/cafleet_v4.db` (XDG state
+The default database path is `~/.local/share/cafleet/cafleet_v5.db` (XDG state
 directory), expanded once at config load time. Override with the
 `CAFLEET_DATABASE_URL` environment variable, e.g.
-`sqlite:////var/lib/cafleet/cafleet_v4.db`; see [config](../api/config.md) for the
+`sqlite:////var/lib/cafleet/cafleet_v5.db`; see [config](../api/config.md) for the
 full `CAFLEET_*` variable set.
 
 **Concurrency**: `PRAGMA busy_timeout=5000` lets SQLite retry for up to 5 s
@@ -57,15 +57,15 @@ after a CLI upgrade. `cafleet doctor` reports the per-home detail. See
 
 ## No physical cleanup
 
-Deregistered members and their tasks remain in the database forever. There is
+Deregistered members and their messages remain in the database forever. There is
 no background cleanup loop. Active query paths filter `status='active'` so
 dead rows are invisible to normal traffic; the WebUI is the only consumer
 that surfaces deregistered members (so their inbox history can be inspected).
 
-## contextId convention
+## owner_member_id convention
 
-The broker sets `contextId = recipient_member_id` on every delivery Task, so
-recipients discover their inbox by polling for tasks whose `context_id` equals
-their own member id — trading per-conversation grouping for the simple
-fire-and-forget inbox discovery that suits coding agents. `contextId` is an
-opaque routing key.
+The broker sets `owner_member_id = recipient_member_id` on every delivery
+message, so recipients discover their inbox by polling for messages whose
+`owner_member_id` equals their own member id — trading per-conversation
+grouping for the simple fire-and-forget inbox discovery that suits coding
+agents. `owner_member_id` is an opaque routing key.

@@ -667,7 +667,7 @@ def test_send_inline_preview__esc_send_text_enter(monkeypatch, herdr_run):
     monkeypatch.setattr("time.sleep", lambda _s: None)
     result = _herdr.send_inline_preview(
         target_pane_id="wG:p1",
-        task_id=7,
+        message_id=7,
         sender_id=42,
         ts="2026-07-06T00:00:00+00:00",
         text="hello there",
@@ -699,7 +699,7 @@ def test_send_inline_preview__submit_delay_between_send_text_and_enter(
     monkeypatch.setattr("time.sleep", lambda secs: sleeps.append(secs))
     result = _herdr.send_inline_preview(
         target_pane_id="wG:p1",
-        task_id=7,
+        message_id=7,
         sender_id=42,
         ts="2026-07-06T00:00:00+00:00",
         text="hello there",
@@ -717,7 +717,7 @@ def test_send_inline_preview__sanitizes_body_newlines(monkeypatch, herdr_run):
     monkeypatch.setattr("time.sleep", lambda _s: None)
     _herdr.send_inline_preview(
         target_pane_id="wG:p1",
-        task_id=7,
+        message_id=7,
         sender_id=42,
         ts="2026-07-06T00:00:00+00:00",
         text="line1\nline2\r\nline3",

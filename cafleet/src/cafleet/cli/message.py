@@ -52,14 +52,14 @@ def message_send(
             to_member_id,
             body,
         )
-        output.truncate_task_text(result, full=full)
-        rendered = output.render_tasks_in_result(result, full=full)
+        output.truncate_message_text(result, full=full)
+        rendered = output.render_messages_in_result(result, full=full)
         if json_output:
             click.echo(output.format_json(rendered))
         elif quiet:
-            click.echo(str(result["task"]["task_id"]))
+            click.echo(str(result["message"]["message_id"]))
         else:
-            click.echo("Message sent.\n" + output.format_task(result, full=full))
+            click.echo("Message sent.\n" + output.format_message(result, full=full))
     except click.ClickException:
         raise
     except Exception as exc:
@@ -79,15 +79,15 @@ def message_broadcast(ctx, from_member_id, text, text_file, full, json_output):
     try:
         body = read_text_input(text, text_file)
         result = broker.broadcast_message(fleet_id, from_member_id, body)
-        output.truncate_task_text(result, full=full)
-        rendered = output.render_tasks_in_result(result, full=full)
+        output.truncate_message_text(result, full=full)
+        rendered = output.render_messages_in_result(result, full=full)
         if json_output:
             click.echo(output.format_json(rendered))
         elif full:
-            click.echo(output.format_task(result[0]["task"], full=True))
+            click.echo(output.format_message(result[0]["message"], full=True))
         else:
             click.echo(
-                f"broadcast id={result[0]['task']['task_id']} "
+                f"broadcast id={result[0]['message']['message_id']} "
                 f"recipients={result[0]['recipients']} "
                 f"delivered={result[0]['delivered']}"
             )
@@ -108,16 +108,16 @@ def message_poll(ctx, member_id, full, json_output):
     fleet_id = ctx.obj["fleet_id"]
     try:
         _require_member_in_fleet(member_id, fleet_id)
-        result = broker.poll_tasks(member_id)
-        output.truncate_task_text(result, full=full)
-        rendered = output.render_tasks_in_result(result, full=full)
+        result = broker.poll_messages(member_id)
+        output.truncate_message_text(result, full=full)
+        rendered = output.render_messages_in_result(result, full=full)
         if json_output:
             click.echo(output.format_json(rendered))
         else:
             click.echo(
                 output.format_indexed_list(
                     result,
-                    lambda t: output.format_task(t, full=full),
+                    lambda t: output.format_message(t, full=full),
                     "No messages found.",
                 )
             )
@@ -130,26 +130,26 @@ def message_poll(ctx, member_id, full, json_output):
 @message.command("ack")
 @fleet_id_option
 @member_id_option
-@click.option("--task-id", type=int, required=True, help="Task ID to acknowledge")
+@click.option("--message-id", type=int, required=True, help="Message ID to acknowledge")
 @full_flag
 @quiet_flag
 @json_flag
 @click.pass_context
-def message_ack(ctx, member_id, task_id, full, quiet, json_output):
+def message_ack(ctx, member_id, message_id, full, quiet, json_output):
     """Acknowledge receipt of a message."""
     fleet_id = ctx.obj["fleet_id"]
     try:
         _require_member_in_fleet(member_id, fleet_id)
-        result = broker.ack_task(member_id, task_id)
-        output.truncate_task_text(result, full=full)
-        rendered = output.render_tasks_in_result(result, full=full)
+        result = broker.ack_message(member_id, message_id)
+        output.truncate_message_text(result, full=full)
+        rendered = output.render_messages_in_result(result, full=full)
         if json_output:
             click.echo(output.format_json(rendered))
         elif quiet:
-            click.echo(str(result["task"]["task_id"]))
+            click.echo(str(result["message"]["message_id"]))
         else:
             click.echo(
-                "Message acknowledged.\n" + output.format_task(result, full=full)
+                "Message acknowledged.\n" + output.format_message(result, full=full)
             )
     except click.ClickException:
         raise
@@ -160,22 +160,22 @@ def message_ack(ctx, member_id, task_id, full, quiet, json_output):
 @message.command("cancel")
 @fleet_id_option
 @member_id_option
-@click.option("--task-id", type=int, required=True, help="Task ID to cancel")
+@click.option("--message-id", type=int, required=True, help="Message ID to cancel")
 @full_flag
 @json_flag
 @click.pass_context
-def message_cancel(ctx, member_id, task_id, full, json_output):
+def message_cancel(ctx, member_id, message_id, full, json_output):
     """Cancel (retract) a sent message."""
     fleet_id = ctx.obj["fleet_id"]
     try:
         _require_member_in_fleet(member_id, fleet_id)
-        result = broker.cancel_task(member_id, task_id)
-        output.truncate_task_text(result, full=full)
-        rendered = output.render_tasks_in_result(result, full=full)
+        result = broker.cancel_message(member_id, message_id)
+        output.truncate_message_text(result, full=full)
+        rendered = output.render_messages_in_result(result, full=full)
         if json_output:
             click.echo(output.format_json(rendered))
         else:
-            click.echo("Task canceled.\n" + output.format_task(result, full=full))
+            click.echo("Message canceled.\n" + output.format_message(result, full=full))
     except click.ClickException:
         raise
     except Exception as exc:
@@ -185,22 +185,22 @@ def message_cancel(ctx, member_id, task_id, full, json_output):
 @message.command("show")
 @fleet_id_option
 @member_id_option
-@click.option("--task-id", type=int, required=True, help="Task ID to retrieve")
+@click.option("--message-id", type=int, required=True, help="Message ID to retrieve")
 @full_flag
 @json_flag
 @click.pass_context
-def message_show(ctx, member_id, task_id, full, json_output):
-    """Get details of a specific task."""
+def message_show(ctx, member_id, message_id, full, json_output):
+    """Get details of a specific message."""
     fleet_id = ctx.obj["fleet_id"]
     try:
         _require_member_in_fleet(member_id, fleet_id)
-        result = broker.get_task(fleet_id, task_id)
-        output.truncate_task_text(result, full=full)
-        rendered = output.render_tasks_in_result(result, full=full)
+        result = broker.get_message(fleet_id, message_id)
+        output.truncate_message_text(result, full=full)
+        rendered = output.render_messages_in_result(result, full=full)
         if json_output:
             click.echo(output.format_json(rendered))
         else:
-            click.echo(output.format_task(result, full=full))
+            click.echo(output.format_message(result, full=full))
     except click.ClickException:
         raise
     except Exception as exc:

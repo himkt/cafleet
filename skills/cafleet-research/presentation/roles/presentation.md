@@ -31,7 +31,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Communication Protocol
 
-You do NOT speak to the user directly — all coordination flows through the Director via `cafleet message send` (completion reports, data-accuracy escalations, report-change requests), and you `cafleet message ack` each inbound Director message after acting (command shapes in the `cafleet` skill core + your spawn prompt; the poll `id:` integer is the `[task-id]`). Substitute the literal integer ids from your spawn prompt; never use shell variables.
+You do NOT speak to the user directly — all coordination flows through the Director via `cafleet message send` (completion reports, data-accuracy escalations, report-change requests), and you `cafleet message ack` each inbound Director message after acting (command shapes in the `cafleet` skill core + your spawn prompt; the poll `id:` integer is the `[message-id]`). Substitute the literal integer ids from your spawn prompt; never use shell variables.
 
 ## Layout Selection
 

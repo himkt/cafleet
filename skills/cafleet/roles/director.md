@@ -22,7 +22,7 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 |------|------------------|------------------------------|
 | [`reference/exec-routing.md`](../reference/exec-routing.md) | process a member's denial-fallback request | the `cafleet member exec` dispatch shape, the required `cafleet member ping` follow-up, and serialization (one request at a time, poll order) — the member stalls waiting on `! <command>` output |
 | [`reference/recovery.md`](../reference/recovery.md) | tear down or recover a member / fleet | the 2-stage health check, stalled-member classification, and the first-out Shutdown Protocol order (stop monitor → delete members → verify → `fleet delete`) — you orphan panes / leak the fleet |
-| [`reference/cli.md`](../reference/cli.md) § *Broadcast* | broadcast to the fleet | the fan-out semantics, the `broadcast_summary` envelope, and `origin_task_id` threading — your broadcast misfires |
+| [`reference/cli.md`](../reference/cli.md) § *Broadcast* | broadcast to the fleet | the fan-out semantics, the `broadcast_summary` envelope, and `origin_message_id` threading — your broadcast misfires |
 
 **On-demand — Read only when you need that capability:**
 

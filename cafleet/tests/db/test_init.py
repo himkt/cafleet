@@ -20,10 +20,10 @@ def _table_names(db_path) -> set[str]:
         conn.close()
 
 
-def test_default_database_url_points_at_cafleet_v4_db():
-    """The default registry file is ``~/.local/share/cafleet/cafleet_v4.db``."""
+def test_default_database_url_points_at_cafleet_v5_db():
+    """The default registry file is ``~/.local/share/cafleet/cafleet_v5.db``."""
     url = config._default_database_url()
-    expected = Path("~/.local/share/cafleet/cafleet_v4.db").expanduser()
+    expected = Path("~/.local/share/cafleet/cafleet_v5.db").expanduser()
     assert url == f"sqlite:///{expected}"
 
 
@@ -55,7 +55,7 @@ def test_setup_db_creates_schema(tmp_path, monkeypatch):
     expected = {
         "fleets",
         "members",
-        "tasks",
+        "messages",
         "member_placements",
         "skill_installs",
         "alembic_version",
@@ -82,7 +82,7 @@ def test_setup_db_idempotent(tmp_path, monkeypatch):
     assert first.exit_code == 0, first.output
 
     tables_after_first = _table_names(db_file)
-    expected = {"fleets", "members", "tasks", "member_placements", "alembic_version"}
+    expected = {"fleets", "members", "messages", "member_placements", "alembic_version"}
     assert expected <= tables_after_first
 
     conn = sqlite3.connect(str(db_file))
@@ -215,7 +215,7 @@ def test_run_db_init_creates_schema_at_head(tmp_path, monkeypatch, capsys):
     expected = {
         "fleets",
         "members",
-        "tasks",
+        "messages",
         "member_placements",
         "skill_installs",
         "alembic_version",

@@ -58,11 +58,11 @@ class MemberPlacement(Base):
     created_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
-class Task(Base):
-    __tablename__ = "tasks"
+class Message(Base):
+    __tablename__ = "messages"
 
-    task_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    context_id: Mapped[int] = mapped_column(
+    message_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_member_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("members.member_id", ondelete="RESTRICT"), nullable=False
     )
     from_member_id: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -71,12 +71,20 @@ class Task(Base):
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     status_state: Mapped[str] = mapped_column(String, nullable=False)
     status_timestamp: Mapped[str] = mapped_column(String, nullable=False)
-    origin_task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    origin_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     text: Mapped[str] = mapped_column(String, nullable=False)
 
     __table_args__ = (
-        Index("idx_tasks_context_status_ts", "context_id", "status_timestamp"),
-        Index("idx_tasks_from_member_status_ts", "from_member_id", "status_timestamp"),
+        Index(
+            "idx_messages_owner_member_status_ts",
+            "owner_member_id",
+            "status_timestamp",
+        ),
+        Index(
+            "idx_messages_from_member_status_ts",
+            "from_member_id",
+            "status_timestamp",
+        ),
         {"sqlite_autoincrement": True},
     )
 

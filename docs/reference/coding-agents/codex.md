@@ -33,7 +33,7 @@ codex --ask-for-approval never --sandbox workspace-write <prompt>
 - `--model <m>` is appended immediately before the prompt when `cafleet member create --model <m>` is supplied (e.g. `codex --ask-for-approval never --sandbox workspace-write --model gpt-5.4-mini <prompt>`). Any string passes through verbatim — the codex binary itself rejects unknown models, so newly released models work without a cafleet release. Example models (not enforced by cafleet): `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`. When the flag is omitted, no model tokens are emitted and codex uses the model set in its configuration.
 
 > [!IMPORTANT]
-> Codex's `--sandbox workspace-write` blocks writes outside the workspace, including cafleet's default SQLite DB at `~/.local/share/cafleet/cafleet_v4.db`. Operators must add the cafleet DB directory to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads, such as `~/.codex/config.toml`:
+> Codex's `--sandbox workspace-write` blocks writes outside the workspace, including cafleet's default SQLite DB at `~/.local/share/cafleet/cafleet_v5.db`. Operators must add the cafleet DB directory to `sandbox_workspace_write.writable_roots` in any `config.toml` codex reads, such as `~/.codex/config.toml`:
 >
 > ```toml
 > [sandbox_workspace_write]

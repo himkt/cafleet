@@ -3,11 +3,11 @@
 from collections.abc import Callable
 from typing import Any
 
-from cafleet.output.render import format_json, render_task, truncate_text
+from cafleet.output.render import format_json, render_message, truncate_text
 
 
-def format_task(task: dict, *, full: bool = False) -> str:
-    """Render a task as text.
+def format_message(message: dict, *, full: bool = False) -> str:
+    """Render a message as text.
 
     ``full=False`` (default): 2-line compact render —
     line 1 is ``[<id> | from:<from> | <ts>]`` (with optional
@@ -16,10 +16,10 @@ def format_task(task: dict, *, full: bool = False) -> str:
     ``full=True``: verbose labeled layout that exposes every typed column
     (``id``, ``state``, ``from``, ``to``, ``type``, ``text``).
     """
-    if "task" in task and isinstance(task["task"], dict):
-        task = task["task"]
+    if "message" in message and isinstance(message["message"], dict):
+        message = message["message"]
     if not full:
-        rendered = render_task(task, full=False)
+        rendered = render_message(message, full=False)
         segments = [f"[{rendered['id']} | from:{rendered['from']} | {rendered['ts']}"]
         if "kind" in rendered:
             segments.append(f" | kind:{rendered['kind']}")
@@ -32,15 +32,15 @@ def format_task(task: dict, *, full: bool = False) -> str:
             return f"{line1}\n{body}"
         return line1
     lines = [
-        f"  id:    {task['task_id']}",
-        f"  state: {task['status_state']}",
-        f"  from:  {task['from_member_id']}",
+        f"  id:    {message['message_id']}",
+        f"  state: {message['status_state']}",
+        f"  from:  {message['from_member_id']}",
     ]
-    if task.get("to_member_id") is not None:
-        lines.append(f"  to:    {task['to_member_id']}")
-    lines.append(f"  type:  {task['type']}")
-    if task.get("text"):
-        lines.append(f"  text:  {task['text']}")
+    if message.get("to_member_id") is not None:
+        lines.append(f"  to:    {message['to_member_id']}")
+    lines.append(f"  type:  {message['type']}")
+    if message.get("text"):
+        lines.append(f"  text:  {message['text']}")
     return "\n".join(lines)
 
 
@@ -51,8 +51,8 @@ def format_indexed_list(
 ) -> str:
     """Join formatted items with a single blank line between them.
 
-    Items are not numbered — members reference tasks by ``task_id``, not list
-    index, so index markers would cost tokens without surfacing useful
+    Items are not numbered — members reference messages by ``message_id``, not
+    list index, so index markers would cost tokens without surfacing useful
     information.
     """
     if not items:

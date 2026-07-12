@@ -11,7 +11,7 @@ partitions for tidiness, not security boundaries.
 
 ## Isolation rules
 
-Every operation that reads or writes member / task data enforces fleet
+Every operation that reads or writes member / message data enforces fleet
 boundaries; registration additionally requires a valid, non-soft-deleted
 `fleet_id`. A cross-fleet request produces a **distinct** error:
 `send_message` raises `Destination member not in fleet: {to_id}` when the target

@@ -130,7 +130,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | role-file + ROLE-DEF suffix | `roles/manager.md`; suffix `— accountability, communication protocol, task discipline, file-aggregation rules, pre-compilation verification, revision loop, and shutdown.` |
 | cafleet-load purpose | `for the broker primitives, literal-integer-id flag convention, and bash-via-Director routing` (no extra skills) |
 | CONTEXT LINES | `CURRENT DATE: [INSERT today's date]` / `USER REQUEST: [INSERT user's original request in full]` / `OUTPUT DIRECTORY: [INSERT OUTPUT DIRECTORY]` / `LANGUAGE: [INSERT user's language preference if specified]` |
-| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `[task-id]` and `cafleet message ack … --task-id [task-id]`, then act); plus `You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.` and `The team coordinates sub-topic assignments via {task_coord}.` |
+| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `[message-id]` and `cafleet message ack … --message-id [message-id]`, then act); plus `You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.` and `The team coordinates sub-topic assignments via {task_coord}.` |
 | start cue (verbatim) | `To request Scouts or Researchers, send the Director a cafleet message specifying: role (Scout or Researcher), scope, search angles, and output file path. The Director will spawn them via cafleet member create and relay their completion reports back to you.` + `Your first compiled report will be reviewed critically by the Director. Aim for highest quality on the first attempt.` |
 
 Render the prompt to `${BASE}/.prompts/manager-<UTC-compact>.md` per the 2b two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
@@ -159,7 +159,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | role-file + ROLE-DEF suffix | `roles/scout.md`; suffix `— landscape-mapping focus, communication protocol, output format, and shutdown.` |
 | cafleet-load purpose | `for the broker primitives and bash-via-Director routing` (no extra skills) |
 | CONTEXT LINES | `CURRENT DATE: [INSERT today's date]` / `YOUR ASSIGNMENT: [landscape scope and what areas to map]` / `OUTPUT FILE: [INSERT <resolved-path>/00-scout-<topic>.md]` |
-| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `[task-id]` and `cafleet message ack … --task-id [task-id]`, then act) |
+| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `[message-id]` and `cafleet message ack … --message-id [message-id]`, then act) |
 | start cue (verbatim) | `Write findings to the output file, then send the Director a completion summary. The Director will relay your findings to the Manager.` |
 
 Render the prompt to `${BASE}/.prompts/<scout-name>-<UTC-compact>.md` per the 2b two-step audit-file pattern (use `scout` for a single Scout, `scout-1`/`scout-2`/… for multiple; `<scout-name>` is the lowercased `--name`), then spawn with `--text-file`:
@@ -238,7 +238,7 @@ When the Manager delivers the compiled `report.md`:
      --text "review feedback round <N>: [FACTUAL ERROR] ... / [GAP] ... / ..."
    ```
 3. The Manager revises the report (requesting additional Researchers from the Director as needed) and sends a completion message back via `cafleet message send`.
-4. Each polled inbound message MUST be `ack`ed via `cafleet message ack --fleet-id [fleet-id] --member-id [director-member-id] --task-id [task-id]` after acting on it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle.
+4. Each polled inbound message MUST be `ack`ed via `cafleet message ack --fleet-id [fleet-id] --member-id [director-member-id] --message-id [message-id]` after acting on it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle.
 5. Repeat until the Director judges quality is sufficient. Aim for 2–3 rounds maximum.
 
 If the Manager asks the Director a question that is really a user decision (e.g. language choice, scope trade-off), the Director MUST relay via {decision_surface} and pass the user's verbatim answer back via `cafleet message send`. Never decide on the user's behalf.
