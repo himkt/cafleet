@@ -8,8 +8,6 @@ backends (e.g. a screen-based or in-process fake) can be substituted under
 test or in future host environments.
 """
 
-import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -108,30 +106,6 @@ class Multiplexer(Protocol):
 
         Returns:
             A set of pane ids (e.g. ``{"%0", "%7"}``).
-        """
-        ...
-
-    def wait_for_pane_gone(
-        self,
-        *,
-        target_pane_id: str,
-        timeout: float = 15.0,
-        interval: float = 0.5,
-    ) -> bool:
-        """Block until ``target_pane_id`` disappears or ``timeout`` elapses.
-
-        A backend whose pane outlives its coding agent may realize this as
-        "wait for the agent to exit, then reap the pane" rather than a pure
-        read-only poll.
-
-        Args:
-            target_pane_id: Pane id to watch.
-            timeout: Maximum seconds to wait.
-            interval: Poll interval in seconds.
-
-        Returns:
-            ``True`` if the pane disappeared before ``timeout``, ``False``
-            on timeout.
         """
         ...
 
@@ -269,30 +243,3 @@ class AgentStateAware(Protocol):
             ``None`` when no agent is detected in the pane.
         """
         ...
-
-
-def poll_until_pane_gone(
-    pane_exists_fn: Callable[[], bool],
-    *,
-    timeout: float,
-    interval: float,
-) -> bool:
-    """Generic poll-until-False helper for any Multiplexer's ``wait_for_pane_gone``.
-
-    Args:
-        pane_exists_fn: Zero-arg callable returning whether the pane is
-            still alive.
-        timeout: Maximum seconds to wait.
-        interval: Poll interval in seconds.
-
-    Returns:
-        ``True`` if ``pane_exists_fn`` returned False before ``timeout``,
-        ``False`` on timeout.
-    """
-    deadline = time.monotonic() + timeout
-    while True:
-        if not pane_exists_fn():
-            return True
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(interval)

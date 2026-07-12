@@ -1,7 +1,7 @@
 # Make immediate kill the default for `cafleet member delete`
 
 **Status**: Approved
-**Progress**: 16/23 tasks complete
+**Progress**: 20/23 tasks complete
 **Last Updated**: 2026-07-12
 
 ## Overview
@@ -183,13 +183,13 @@ Two classes of edit. Class A purges explicit `--force` teardown fallbacks; Class
 
 ### Step 3: Code — CLI
 
-- [ ] `cli/member.py` `member_delete`: remove the `--force`/`-f` option + `force` param; delete the graceful branch (send_exit/wait/capture/exit-2); implement the single immediate-kill pane path with the `Member deleted.` / `(killed)` output (Specification §1). Update the docstring to "kill its tmux pane". <!-- completed: -->
+- [x] `cli/member.py` `member_delete`: remove the `--force`/`-f` option + `force` param; delete the graceful branch (send_exit/wait/capture/exit-2); implement the single immediate-kill pane path with the `Member deleted.` / `(killed)` output (Specification §1). Update the docstring to "kill its tmux pane". <!-- completed: 2026-07-12T14:20 -->
 
 ### Step 4: Code — multiplexer removal
 
-- [ ] `multiplexer/base.py`: delete the abstract `wait_for_pane_gone` method and the `poll_until_pane_gone` helper; drop `Callable` / `time` imports if orphaned. <!-- completed: -->
-- [ ] `multiplexer/tmux.py`: delete `wait_for_pane_gone` and the `poll_until_pane_gone` import. <!-- completed: -->
-- [ ] `multiplexer/herdr.py`: delete the `wait_for_pane_gone` override; drop the `time` import if orphaned. Keep `pane_exists` / `agent_status`. <!-- completed: -->
+- [x] `multiplexer/base.py`: delete the abstract `wait_for_pane_gone` method and the `poll_until_pane_gone` helper; drop `Callable` / `time` imports if orphaned. <!-- completed: 2026-07-12T14:20 -->
+- [x] `multiplexer/tmux.py`: delete `wait_for_pane_gone` and the `poll_until_pane_gone` import. <!-- completed: 2026-07-12T14:20 -->
+- [x] `multiplexer/herdr.py`: delete the `wait_for_pane_gone` override; drop the `time` import if orphaned. Keep `pane_exists` / `agent_status`. <!-- completed: 2026-07-12T14:20 -->
 
 ### Step 5: Tests
 

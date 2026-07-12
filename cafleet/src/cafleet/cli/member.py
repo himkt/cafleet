@@ -339,18 +339,10 @@ def member_create(
 @member.command("delete")
 @fleet_id_option
 @member_id_option
-@click.option(
-    "--force",
-    "-f",
-    "force",
-    is_flag=True,
-    default=False,
-    help="Skip /exit; kill-pane immediately.",
-)
 @json_flag
 @click.pass_context
-def member_delete(ctx, member_id, force, json_output):
-    """Deregister a member and close its tmux pane."""
+def member_delete(ctx, member_id, json_output):
+    """Deregister a member and kill its tmux pane."""
     fleet_id = ctx.obj["fleet_id"]
 
     fleet = broker.get_fleet(fleet_id)
@@ -377,76 +369,19 @@ def member_delete(ctx, member_id, force, json_output):
         return
 
     mux = ensure_multiplexer_or_die()
-
-    if force:
-        try:
-            mux.kill_pane(target_pane_id=pane_id, ignore_missing=True)
-        except MultiplexerError as exc:
-            raise click.ClickException(
-                f"kill_pane failed for pane {pane_id}: {exc}. "
-                f"The {mux.name} server may be unreachable. Verify with "
-                f"'cafleet doctor', then re-run the command."
-            ) from exc
-        _deregister_or_die(member_id)
-        pane_status = f"{pane_id} (killed)"
-        _emit_member_delete_output(
-            json_output, member_id, pane_status, header="Member deleted (--force)."
-        )
-        return
-
     try:
-        mux.send_exit(target_pane_id=pane_id, ignore_missing=True)
+        mux.kill_pane(target_pane_id=pane_id, ignore_missing=True)
     except MultiplexerError as exc:
         raise click.ClickException(
-            f"send_exit failed for pane {pane_id}: {exc}. "
+            f"kill_pane failed for pane {pane_id}: {exc}. "
             f"The {mux.name} server may be unreachable. Verify with "
-            f"'cafleet doctor', then re-run 'cafleet member delete', or use "
-            f"'--force' to kill the pane directly."
+            f"'cafleet doctor', then re-run the command."
         ) from exc
-
-    try:
-        gone = mux.wait_for_pane_gone(
-            target_pane_id=pane_id, timeout=15.0, interval=0.5
-        )
-    except MultiplexerError as exc:
-        raise click.ClickException(
-            f"{mux.name} call failed while waiting for pane {pane_id} to close: {exc}"
-        ) from exc
-
-    if gone:
-        _deregister_or_die(member_id)
-        pane_status = f"{pane_id} (closed)"
-        _emit_member_delete_output(
-            json_output, member_id, pane_status, header="Member deleted."
-        )
-        return
-
-    try:
-        tail = mux.capture_pane(target_pane_id=pane_id, lines=80)
-    except MultiplexerError as exc:
-        click.echo(
-            f"Warning: capture_pane failed during timeout handling: {exc}. "
-            f"The timeout error and recovery hint still print.",
-            err=True,
-        )
-        tail = ""
-
-    click.echo(
-        f"Error: pane {pane_id} did not close within 15.0s after /exit.", err=True
+    _deregister_or_die(member_id)
+    pane_status = f"{pane_id} (killed)"
+    _emit_member_delete_output(
+        json_output, member_id, pane_status, header="Member deleted."
     )
-    click.echo(f"--- pane {pane_id} tail (last 80 lines) ---", err=True)
-    click.echo(tail, err=True)
-    click.echo("---", err=True)
-    click.echo(
-        "Recovery: inspect with `cafleet member capture`, then re-run "
-        "`cafleet member delete`. "
-        "Or re-run with `--force` to skip the wait and kill the pane.",
-        err=True,
-    )
-
-    pane_status = f"{pane_id} (timeout)"
-    _emit_member_delete_output(json_output, member_id, pane_status, header=None)
-    ctx.exit(2)
 
 
 def _deregister_or_die(member_id: int) -> None:

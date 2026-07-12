@@ -392,34 +392,6 @@ class HerdrMultiplexer:
             ignore_missing=ignore_missing,
         )
 
-    def wait_for_pane_gone(
-        self,
-        *,
-        target_pane_id: str,
-        timeout: float = 15.0,
-        interval: float = 0.5,
-    ) -> bool:
-        # On herdr a pane hosts a persistent shell: `pane split` creates the shell
-        # and `pane run` types the coding-agent command into it, so /exit returns
-        # the pane to a bare shell rather than closing it (unlike tmux, where the
-        # agent IS the pane's foreground process). Graceful teardown therefore
-        # waits for the agent to exit, then closes the now-shell-only pane. herdr
-        # reports agent_status "unknown" (and drops the `agent` field) once the
-        # agent has exited to the bare shell — the non-live status that means "no
-        # agent process in the pane." agent_status also returns None when the pane
-        # is already gone (pane_not_found teardown race), so the same branch covers
-        # "operator already closed it"; kill_pane with ignore_missing swallows that
-        # race.
-        deadline = time.monotonic() + timeout
-        while True:
-            status = self.agent_status(target_pane_id=target_pane_id)
-            if status is None or status == "unknown":
-                self.kill_pane(target_pane_id=target_pane_id, ignore_missing=True)
-                return True
-            if time.monotonic() >= deadline:
-                return False
-            time.sleep(interval)
-
     def agent_status(self, *, target_pane_id: str) -> str | None:
         # A pane closing between the tick's list_pane_ids and this read is a
         # teardown race, not an error: treat pane_not_found as "no agent".
