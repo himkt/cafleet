@@ -158,7 +158,7 @@ def test_send_message__auto_fire_never_calls_send_poll_trigger_on_success(
 
 
 def test_send_message__real_inline_preview_keystroke_is_esc_first(monkeypatch):
-    """End-to-end through ``broker.send_message`` (design 0000092 §1): with the
+    """End-to-end through ``broker.send_message``: with the
     REAL ``send_inline_preview`` helper in play (no method-level stub), the
     keystroke delivered to the recipient's pane leads with `Escape` so a
     recipient parked on a pending permission-approval prompt dismisses it before

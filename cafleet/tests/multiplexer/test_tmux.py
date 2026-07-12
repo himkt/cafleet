@@ -634,7 +634,7 @@ def test_send_bash_command__argv_and_validation(
         assert captured[1] == ["tmux", "send-keys", "-t", "%5", "Enter"]
 
 
-# --- Esc keystroke safeguard (design 0000090 §1, §2; inverted by 0000092) ------
+# --- Esc keystroke safeguard ------
 
 
 def test_send_literal_then_enter__esc_first_prepends_escape_and_settle(monkeypatch):
@@ -742,8 +742,8 @@ def test_send_wake_trigger__return_branches_and_argv(
     expected_result,
     expect_run_called,
 ):
-    """`send_wake_trigger` mirrors `send_poll_trigger`'s return branches but,
-    after design 0000092 §2, emits NO leading `Escape`: the monitoring member's
+    """`send_wake_trigger` mirrors `send_poll_trigger`'s return branches but
+    emits NO leading `Escape`: the monitoring member's
     own pane (the wake target) is never parked on a permission-approval prompt,
     so the safeguard would be a pointless self-interrupt. The success keystroke
     is the plain `-l <payload>` → `Enter` pair."""
@@ -786,8 +786,7 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     — distinct from the ``cafleet ... message poll`` command the Director receives.
     A crafted user-controlled name carrying CR/LF/tab, a backtick, a ``$(…)``
     command-substitution sequence, and a pipe is sanitized so the single-line
-    guarantee holds and the payload carries no backtick, no ``$(``, and no ``|``
-    (design 0000124)."""
+    guarantee holds and the payload carries no backtick, no ``$(``, and no ``|``."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
     monkeypatch.setattr("time.sleep", lambda _secs: None)
     captured: list[list[str]] = []
@@ -856,7 +855,7 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     # rendering (where the id is not parenthesized).
     assert "(332)" in payload
 
-    # Shell-safety guarantee (design 0000124): no backtick, no ``$(`` command sub,
+    # Shell-safety guarantee: no backtick, no ``$(`` command sub,
     # and no pipe survive into the payload.
     assert "`" not in payload
     assert "$(" not in payload
@@ -973,10 +972,10 @@ def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
 def test_esc_first_false_helpers__never_send_escape(monkeypatch, helper_name, invoke):
     """The two opt-out helpers — `send_exit` and `send_bash_command` — must NOT
     send an `Esc` first. An `Escape` before `/exit` or `! <cmd>` would strip a
-    literal the agent must keep (design 0000092 §1 keystroke-helper inventory).
+    literal the agent must keep.
 
-    `send_inline_preview` is deliberately ABSENT here — after 0000092 §1 it now
-    leads with `Esc` (asserted in test_tmux_send_inline_preview.py)."""
+    `send_inline_preview` is deliberately ABSENT here — it leads with `Esc`
+    (asserted in test_tmux_send_inline_preview.py)."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
     monkeypatch.setattr("time.sleep", lambda _secs: None)
     captured: list[list[str]] = []

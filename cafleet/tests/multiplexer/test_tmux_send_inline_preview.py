@@ -61,7 +61,7 @@ def test_send_inline_preview__happy_path_envelope_body_and_submit(monkeypatch):
         idx = argv.index("-t")
         assert argv[idx + 1] == "%9"
 
-    # After design 0000092 §1 the inline preview leads with `Escape` (the
+    # The inline preview leads with `Escape` (the
     # universal permission-prompt safeguard) and submits with the trailing Enter.
     assert captured[0] == ["tmux", "send-keys", "-t", "%9", "Escape"]
     assert captured[-1] == ["tmux", "send-keys", "-t", "%9", "Enter"]
@@ -201,7 +201,7 @@ def test_send_poll_trigger__keystroke_contract(monkeypatch):
         member_id=7,
     )
     assert ok is True
-    # send_poll_trigger is Esc-first (design 0000090): Escape → -l poll → Enter.
+    # send_poll_trigger is Esc-first: Escape → -l poll → Enter.
     assert len(captured) == 3
     assert captured[0] == ["tmux", "send-keys", "-t", "%5", "Escape"]
     keystroke = captured[1][-1]

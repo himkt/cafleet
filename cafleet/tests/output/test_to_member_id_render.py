@@ -1,4 +1,4 @@
-"""Regression tests for the ``to:`` line in the full message render (design 0000118, item 1.2).
+"""Regression tests for the ``to:`` line in the full message render.
 
 The verbose render surfaces ``to:`` when a recipient is present
 (``to_member_id`` is not ``None``) and omits it for recipient-less rows such as

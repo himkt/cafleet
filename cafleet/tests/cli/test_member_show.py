@@ -1,4 +1,4 @@
-"""CLI tests for ``cafleet member show`` (design 0000116).
+"""CLI tests for ``cafleet member show``.
 
 ``member show`` is a pure registry read: it takes a bare ``--member-id``
 target (no requester identity flag, no fleet-membership gate), requires no

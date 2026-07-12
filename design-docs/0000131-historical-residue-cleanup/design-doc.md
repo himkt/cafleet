@@ -1,7 +1,7 @@
 # 0000131 — Historical-Residue Cleanup Skill (CAFleet-orchestrated)
 
 **Status**: Approved
-**Progress**: 7/11 tasks complete
+**Progress**: 11/11 tasks complete
 **Last Updated**: 2026-07-12
 
 ## Overview
@@ -259,13 +259,13 @@ The monitoring member reuses the `cafleet` skill's canonical `roles/monitor.md` 
 
 ### Step 5: Load + trigger check
 
-- [ ] Confirm the skill loads via the Skill tool and its `description` triggers on the intended phrases (Success Criterion 1); no `{token}` leaks in any user-facing string. <!-- completed: -->
+- [x] Confirm the skill loads via the Skill tool and its `description` triggers on the intended phrases (Success Criterion 1); no `{token}` leaks in any user-facing string. <!-- completed: 2026-07-12T01:58 -->
 
 ### Step 6: Dogfood — first run against the current tree
 
-- [ ] Apply the §8 worked-example inventory to the current tree (rubric a: delete B1–B4 sentinels preserving live coverage; rubric b: reword A1–A2, C1–C5, D1–D8 and the remaining citation-family files; honor the §8e KEEP list and §8f known-benign matches). This validates the rubric, the cleanup edits, and the verification loop, and completes the original cleanup intent; the skill's full orchestration path (fleet bootstrap, scanner fan-out, merge, review-gate) is exercised on subsequent live `/historical-residue-cleanup` runs. <!-- completed: -->
-- [ ] Verify: `mise //cafleet:test` (special attention to B4 and B3), `mise //cafleet:lint`, `mise //cafleet:typecheck` all green. <!-- completed: -->
-- [ ] Re-run the §7 sweep over tracked files outside the exempt set → zero unaccounted matches (every remaining hit KEEP-listed / benign / exempt); confirm no live assertion or runtime behavior was lost and no new narration was introduced (R1). <!-- completed: -->
+- [x] Apply the §8 worked-example inventory to the current tree (rubric a: delete B1–B4 sentinels preserving live coverage; rubric b: reword A1–A2, C1–C5, D1–D8 and the remaining citation-family files; honor the §8e KEEP list and §8f known-benign matches). This validates the rubric, the cleanup edits, and the verification loop, and completes the original cleanup intent; the skill's full orchestration path (fleet bootstrap, scanner fan-out, merge, review-gate) is exercised on subsequent live `/historical-residue-cleanup` runs. <!-- completed: 2026-07-12T02:05 -->
+- [x] Verify: `mise //cafleet:test` (special attention to B4 and B3), `mise //cafleet:lint`, `mise //cafleet:typecheck` all green. <!-- completed: 2026-07-12T02:05 -->
+- [x] Re-run the §7 sweep over tracked files outside the exempt set → zero unaccounted matches (every remaining hit KEEP-listed / benign / exempt); confirm no live assertion or runtime behavior was lost and no new narration was introduced (R1). <!-- completed: 2026-07-12T02:05 -->
 
 ---
 

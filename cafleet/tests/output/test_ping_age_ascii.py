@@ -1,4 +1,4 @@
-"""Regression tests: ping-age placeholder is ASCII '-' (design 0000118, item 4.1).
+"""Regression tests: ping-age placeholder is ASCII '-'.
 
 ``_format_ping_age(None)`` renders the never-pinged placeholder as ASCII ``-``
 (matching the sibling ``_format_idle``), not the EM DASH ``—`` (U+2014). The

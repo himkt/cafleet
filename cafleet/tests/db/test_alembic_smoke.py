@@ -43,10 +43,7 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
             "skill_installs",
             "alembic_version",
         }
-        missing = expected - tables
-        assert not missing
-        assert "api_keys" not in tables
-        assert "tasks" not in tables
+        assert tables == expected
     finally:
         engine.dispose()
 
@@ -252,15 +249,14 @@ def test_messages_table_has_origin_message_id_column(alembic_upgraded_db):
 
         assert "origin_message_id" in cols
 
-        # Must be nullable because unicast + historical rows store NULL
+        # Nullable: a unicast message references no origin, so it stores NULL
         assert cols["origin_message_id"]["nullable"] is True
     finally:
         engine.dispose()
 
 
 def test_messages_to_member_id_is_nullable_after_migration(alembic_upgraded_db):
-    """``messages.to_member_id`` is nullable so broadcast-summary rows persist NULL
-    instead of the ``0`` sentinel."""
+    """``messages.to_member_id`` is nullable so broadcast-summary rows persist NULL."""
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         insp = inspect(engine)

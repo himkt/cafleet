@@ -1,8 +1,7 @@
-"""End-to-end: ``message broadcast`` prints ``recipients=N delivered=k`` (design 0000118, item 2.1).
+"""End-to-end: ``message broadcast`` prints ``recipients=N delivered=k``.
 
 The compact one-line echo surfaces both counts — ``recipients`` (real peer
-count N) and ``delivered`` (previews that landed, k) — rather than the single
-legacy count mislabeled as ``recipients``.
+count N) and ``delivered`` (previews that landed, k).
 """
 
 import pytest

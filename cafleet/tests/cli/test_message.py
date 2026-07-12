@@ -210,50 +210,6 @@ def test_message_poll_auth_check__accepts_valid_member(
     assert poll_calls == [member_id]
 
 
-@pytest.mark.parametrize("removed_flag", ["--since", "--page-size"])
-def test_message_poll__removed_flags_rejected(
-    runner, fleet_id, member_id, removed_flag
-):
-    """``message poll`` takes no ``--since`` / ``--page-size`` options —
-    Click rejects them with its standard 'no such option' error (exit 2)."""
-    result = runner.invoke(
-        cli,
-        [
-            "message",
-            "poll",
-            "--fleet-id",
-            str(fleet_id),
-            "--member-id",
-            str(member_id),
-            removed_flag,
-            "2026-01-01T00:00:00+00:00",
-        ],
-    )
-    assert result.exit_code == 2, result.output
-    assert "no such option" in (result.output or "").lower()
-
-
-@pytest.mark.parametrize("subcommand", ["ack", "cancel", "show"])
-def test_message_task_id_flag_rejected(runner, fleet_id, member_id, subcommand):
-    """The id flag is ``--message-id``; ``--task-id`` no longer parses —
-    Click rejects it with its standard 'no such option' error (exit 2)."""
-    result = runner.invoke(
-        cli,
-        [
-            "message",
-            subcommand,
-            "--fleet-id",
-            str(fleet_id),
-            "--member-id",
-            str(member_id),
-            "--task-id",
-            "300",
-        ],
-    )
-    assert result.exit_code == 2, result.output
-    assert "no such option" in (result.output or "").lower()
-
-
 # --- message_ack_auth_check: ``message ack`` must gate its
 # ``broker.ack_message`` call on ``broker.verify_member_fleet``. ---
 

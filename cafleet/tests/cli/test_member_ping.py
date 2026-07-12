@@ -92,7 +92,7 @@ def test_ping__keystrokes_escape_first(
 ):
     """`member ping` inherits the `Esc` safeguard from `send_poll_trigger`: with
     the real keystroke helper in play, the sequence leads with `Escape` before
-    the literal poll command + Enter (design 0000090 §2, C7).
+    the literal poll command + Enter.
 
     Unlike the other tests in this module, this one does NOT stub
     `send_poll_trigger` — it lets the real helper run with `_run`/`shutil.which`

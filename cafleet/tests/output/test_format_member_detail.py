@@ -1,6 +1,6 @@
 """Tests for ``output.format_member_detail`` — the ``member show`` text formatter.
 
-Extended per design 0000116: the ``--full`` block gains ``kind``, ``skills``
+The ``--full`` block includes ``kind``, ``skills``
 (compact JSON array or ``-`` when empty), and a placement sub-block that
 appears only when a placement row exists (``placement:   none`` otherwise);
 ``None`` fields inside the placement render ``-``.

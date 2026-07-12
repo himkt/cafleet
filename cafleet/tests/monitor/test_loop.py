@@ -431,7 +431,7 @@ def test_monitor_tick__stop_when_ownership_lost(monkeypatch):
 
 # --- native agent-state due trigger (§5, herdr-only) -----------------------
 #
-# After design 0000124: ``_WAKE_ON_STATUS = ("done",)``. A transition into
+# ``_WAKE_ON_STATUS = ("done",)``. A transition into
 # ``done`` still flags a wake (tagged ``status:done``); a transition into
 # ``blocked`` is RECORDED in ``_last_member_status`` but NEVER flags a wake — a
 # member parked on a user answer must not be woken about. The per-member wake tag
@@ -440,7 +440,7 @@ def test_monitor_tick__stop_when_ownership_lost(monkeypatch):
 
 def test_wake_on_status_is_done_only():
     """The wake-on-status set is exactly ``("done",)`` — ``blocked`` is not
-    a wake trigger (design 0000124)."""
+    a wake trigger."""
     assert _WAKE_ON_STATUS == ("done",)
     assert "blocked" not in _WAKE_ON_STATUS
 

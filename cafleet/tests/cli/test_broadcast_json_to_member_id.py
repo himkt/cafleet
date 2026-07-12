@@ -1,4 +1,4 @@
-"""End-to-end: ``message broadcast --json --full`` emits ``to_member_id: null`` (design 0000118, item 1.1).
+"""End-to-end: ``message broadcast --json --full`` emits ``to_member_id: null``.
 
 The broadcast-summary row carries no single recipient, so the ``--json``
 surface emits JSON ``null`` (not ``0``) for its ``to_member_id``. ``--full`` is
