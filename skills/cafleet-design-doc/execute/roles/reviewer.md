@@ -71,4 +71,4 @@ A routed member may dispute a finding by counter-escalating; the Director arbitr
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` (sends the backend exit keystroke, waits up to 15 s). When the exit keystroke arrives your process exits immediately — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.
+The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your `claude` process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.

@@ -87,4 +87,4 @@ Rules:
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` (sends the backend exit keystroke, waits up to 15 s). When the exit keystroke arrives your `claude` process exits immediately — nothing is required of you.
+The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your `claude` process is terminated — nothing is required of you.

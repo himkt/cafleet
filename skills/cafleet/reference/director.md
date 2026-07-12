@@ -167,14 +167,13 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 
 ## Member Delete
 
-The CLI sends the backend exit keystroke, waits for the pane to close (15 s timeout), then deregisters and rebalances the layout; on timeout it exits 2 with the pane buffer tail on stderr (no deregister). `--force` / `-f` skips the wait and kill-panes immediately (exit 0 even if the pane was already gone). A member with a pending placement (no pane yet) is a plain registry soft-delete, and so is a placementless registry row — `member delete` handles both without touching tmux.
+The CLI kills the pane immediately, then deregisters and rebalances the layout (exit 0 even if the pane was already gone). A member with a pending placement (no pane yet) is a plain registry soft-delete, and so is a placementless registry row — `member delete` handles both without touching tmux.
 
 ```bash
 cafleet member delete --fleet-id <fleet-id> --member-id <member-id>
-cafleet member delete --fleet-id <fleet-id> --member-id <member-id> --force
 ```
 
-Fleet-isolation only: a `--member-id` outside `--fleet-id` exits 1 (`Error: Member <member-id> not found`); deleting the root Director stays blocked by the root-Director guard. Exit codes and the timeout output shape: [`cli-options.md`](../../../docs/spec/cli-options.md#member-delete).
+Fleet-isolation only: a `--member-id` outside `--fleet-id` exits 1 (`Error: Member <member-id> not found`); deleting the root Director stays blocked by the root-Director guard. Exit codes and the output shape: [`cli-options.md`](../../../docs/spec/cli-options.md#member-delete).
 
 ## Member List
 

@@ -120,8 +120,8 @@ differ.
     Sent bash command 'git status' to member alice (%7).
     ```
 
-    Ladder rung 3, `member delete` (last resort) — sends the backend exit
-    keystroke and waits up to 15 s for the pane to close:
+    Ladder rung 3, `member delete` (last resort) — kills the pane immediately,
+    then deregisters and exits 0 even if the pane was already gone:
 
     ```bash
     cafleet member delete --fleet-id 1 --member-id 4
@@ -130,20 +130,7 @@ differ.
     ```
     Member deleted.
       member_id:  4
-      pane_id:    %7 (closed)
-    ```
-
-    A pane that refuses to close makes the command exit 2 with the pane tail
-    and a built-in recovery hint; `cafleet member delete --member-id 4 --force`
-    skips the wait, kills the pane, and exits 0 even if the pane was already
-    gone:
-
-    ```
-    Error: pane %7 did not close within 15.0s after /exit.
-    --- pane %7 tail (last 80 lines) ---
-    <captured terminal buffer>
-    ---
-    Recovery: inspect with `cafleet member capture`, then re-run `cafleet member delete`. Or re-run with `--force` to skip the wait and kill the pane.
+      pane_id:    %7 (killed)
     ```
 
 Every flag, validation rule, and exit code for the `member`

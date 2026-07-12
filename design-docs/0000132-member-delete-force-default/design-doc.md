@@ -1,7 +1,7 @@
 # Make immediate kill the default for `cafleet member delete`
 
 **Status**: Approved
-**Progress**: 9/23 tasks complete
+**Progress**: 16/23 tasks complete
 **Last Updated**: 2026-07-12
 
 ## Overview
@@ -173,13 +173,13 @@ Two classes of edit. Class A purges explicit `--force` teardown fallbacks; Class
 
 ### Step 2: Documentation — `cafleet` skill reference & teardown sweep
 
-- [ ] `skills/cafleet/reference/director.md` § Member Delete: rewrite to immediate kill; drop the `--force` sentence and example. <!-- completed: -->
-- [ ] `skills/cafleet/reference/recovery.md`: purge `--force` from the crashed/wedged rows and doctor-fallback item; delete the graceful-wait paragraph + wedged-exit decision tree; rewrite Shutdown Protocol steps 1–2 to immediate kill. <!-- completed: -->
-- [ ] `skills/cafleet/reference/supervision.md`: rewrite the unblock-ladder `member delete --force` entry to the flagless immediate-kill form. <!-- completed: -->
-- [ ] Class A workflow teardown bodies (create.md, interview.md, execute.md, report.md, report/roles/director.md): drop the 15 s / exit-2 / `--force` recovery parenthetical. <!-- completed: -->
-- [ ] Class A presentation.md per-batch note: rewrite to immediate close; remove the "blocks ≈15 s … `--force` is an escape hatch" sentence. <!-- completed: -->
-- [ ] Class B member Shutdown boilerplate across the 7 cafleet-design-doc role files: apply the "kills your pane immediately" rewrite, preserving the wrap-up-first clause. <!-- completed: -->
-- [ ] Class B research/presentation role variants (researcher, scout, manager, presentation, transcript, visual-reviewer): apply the "kills your pane immediately" rewrite. <!-- completed: -->
+- [x] `skills/cafleet/reference/director.md` § Member Delete: rewrite to immediate kill; drop the `--force` sentence and example. <!-- completed: 2026-07-12T14:08 -->
+- [x] `skills/cafleet/reference/recovery.md`: purge `--force` from the crashed/wedged rows and doctor-fallback item; delete the graceful-wait paragraph + wedged-exit decision tree; rewrite Shutdown Protocol steps 1–2 to immediate kill. <!-- completed: 2026-07-12T14:08 -->
+- [x] `skills/cafleet/reference/supervision.md`: rewrite the unblock-ladder `member delete --force` entry to the flagless immediate-kill form. <!-- completed: 2026-07-12T14:08 -->
+- [x] Class A workflow teardown bodies (create.md, interview.md, execute.md, report.md, report/roles/director.md): drop the 15 s / exit-2 / `--force` recovery parenthetical. <!-- completed: 2026-07-12T14:08 -->
+- [x] Class A presentation.md per-batch note: rewrite to immediate close; remove the "blocks ≈15 s … `--force` is an escape hatch" sentence. <!-- completed: 2026-07-12T14:08 -->
+- [x] Class B member Shutdown boilerplate across the 7 cafleet-design-doc role files: apply the "kills your pane immediately" rewrite, preserving the wrap-up-first clause. <!-- completed: 2026-07-12T14:08 -->
+- [x] Class B research/presentation role variants (researcher, scout, manager, presentation, transcript, visual-reviewer): apply the "kills your pane immediately" rewrite. <!-- completed: 2026-07-12T14:08 -->
 
 ### Step 3: Code — CLI
 

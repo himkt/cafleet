@@ -142,7 +142,7 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
     ```
     Member deleted.
       member_id:  3
-      pane_id:    %7 (closed)
+      pane_id:    %7 (killed)
     ```
 
     ```bash
