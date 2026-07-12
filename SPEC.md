@@ -1128,10 +1128,9 @@ orphan row survives; the best-effort cleanup never masks the original error.
 #### `member delete`
 
 The pane-teardown + registry-soft-delete op. Options: `--member-id`
-(integer, required — the **target**), `--force` / `-f` (boolean, default
-`false`). The tmux precondition fires only on the pane-teardown paths (live
-pane id) — a placementless or pending-placement delete is a pure registry
-operation and succeeds outside tmux.
+(integer, required — the **target**). The tmux precondition fires only on the
+pane-teardown path (live pane id) — a placementless or pending-placement
+delete is a pure registry operation and succeeds outside tmux.
 
 1. **Root-Director guard, before any pane mutation** — fetch the fleet; if the
    target is the fleet's Director → application error (exit 1) `cannot deregister
@@ -1147,29 +1146,12 @@ operation and succeeds outside tmux.
    the broker (a failure → application error `deregister failed: <error>`).
    Success: header `Member deleted.`, pane status `(pending — no pane)`, exit 0.
    No multiplexer requirement.
-5. **`--force`** (has pane) — ensure the resolved multiplexer available, then kill
-   the pane immediately, skipping the graceful
-   wait (tolerating a missing pane); a multiplexer error → application error `kill_pane
-   failed for pane <pane_id>: <error>. The <backend> server may be unreachable. Verify
-   with 'cafleet doctor', then re-run the command.`. Then deregister; header
-   `Member deleted (--force).`, pane status `<pane_id> (killed)`, exit 0.
-6. **Default path** (has pane) — ensure the resolved multiplexer available, then
-   send the backend exit keystroke (tolerating a
-   missing pane; a multiplexer error → application error `send_exit failed for pane
-   <pane_id>: <error>. The <backend> server may be unreachable. Verify with 'cafleet
-   doctor', then re-run 'cafleet member delete', or use '--force' to kill the
-   pane directly.`), then wait up to 15 s for the pane to disappear, polling
-   every 0.5 s (a multiplexer error during the wait → application error `<backend> call failed
-   while waiting for pane <pane_id> to close: <error>`). `<backend>` is the resolved `mux.name` (`tmux`/`herdr`).
-   - **Pane gone** — deregister; header `Member deleted.`, pane
-     status `<pane_id> (closed)`, exit 0.
-   - **Timeout** — capture the pane's last 80 lines (a capture error prints a
-     stderr warning and yields an empty tail); print to **stderr** the block:
-     `Error: pane <pane_id> did not close within 15.0s after /exit.`,
-     then `--- pane <pane_id> tail (last 80 lines) ---`, the tail, `---`, and a
-     `Recovery: …` hint naming `cafleet member capture` / `cafleet member
-     delete`; pane status `<pane_id> (timeout)`; emit a JSON object
-     (`member_id`, `pane_status`) in JSON mode; **exit 2**.
+5. **Has pane** — ensure the resolved multiplexer available, then kill the pane
+   immediately (tolerating a missing pane); a multiplexer error → application
+   error `kill_pane failed for pane <pane_id>: <error>. The <backend> server may
+   be unreachable. Verify with 'cafleet doctor', then re-run the command.`
+   (`<backend>` is the resolved `mux.name`, `tmux`/`herdr`). Then deregister;
+   header `Member deleted.`, pane status `<pane_id> (killed)`, exit 0.
 
 Success text: the header line plus indented `member_id:` / `pane_id:` lines;
 JSON: `{member_id, pane_status}`.
@@ -1661,7 +1643,7 @@ shows.
 ### 6.5 Multiplexer (tmux + herdr)
 
 **Scope:** the `Multiplexer` interface, the frozen `MultiplexerContext`, the
-optional `AgentStateAware` capability, the `poll_until_pane_gone` helper, the
+optional `AgentStateAware` capability, the
 `MultiplexerError` exception taxonomy, the `MULTIPLEXERS` registry with the
 `resolve_multiplexer()` resolver, and the two shipped backends `TmuxMultiplexer`
 and `HerdrMultiplexer`. Each backend owns all subprocess invocation and
@@ -1778,18 +1760,13 @@ Director's `MultiplexerContext` and passes it directly.
   resolves liveness for every member in a monitor tick.
 - **`kill_pane(*, target_pane_id, ignore_missing=False)`** — fail-fast. `tmux
   kill-pane -t <target_pane_id>` through the pane-gone-tolerant runner.
-- **`wait_for_pane_gone(*, target_pane_id, timeout=15.0, interval=0.5) ->
-  bool`** — delegates to `poll_until_pane_gone` with a pane-existence closure
-  (whether `target_pane_id` is in `list_pane_ids()`); `true` if the pane
-  disappeared before timeout, `false` on timeout.
 
 #### Fail-fast vs. best-effort split
 
 - **Fail-fast** (surface failures): `ensure_available`, `context_discovery`,
   `split_window`, `select_layout`, `send_exit`, `send_bash_command`,
-  `capture_pane`, `list_pane_ids`, `kill_pane`,
-  `wait_for_pane_gone` (modulo `ignore_missing` pane-gone tolerance on
-  `kill_pane` / `send_exit`).
+  `capture_pane`, `list_pane_ids`, `kill_pane` (modulo `ignore_missing`
+  pane-gone tolerance on `kill_pane` / `send_exit`).
 - **Best-effort boolean** (NEVER raise; `false` on any failure):
   `send_poll_trigger`, `send_wake_trigger`, `send_inline_preview`. Each guards
   "tmux missing → `false`" then wraps the keystroke so any error → `false`. The
@@ -1801,15 +1778,6 @@ Director's `MultiplexerContext` and passes it directly.
 Immutable, three non-nullable string fields, no defaults, constructed only by
 `context_discovery`: `session` (tmux session name), `window_id` (e.g. `@N`),
 `pane_id` (e.g. `%N`).
-
-#### `poll_until_pane_gone` helper
-
-Backend-generic. Takes a no-arg predicate `pane_exists_fn` (may raise —
-propagate), plus `timeout` and `interval` seconds. Using a **monotonic** clock:
-compute `deadline = monotonic_now() + timeout`; loop — if `not pane_exists_fn()`
-return `true`; if `monotonic_now() >= deadline` return `false`; sleep
-`interval`. Checks existence **first** (so `timeout=0` against an already-gone
-pane returns `true`), then the deadline, then sleeps.
 
 #### Keystroke core, delays, and the Esc-first matrix
 
@@ -1906,18 +1874,6 @@ Each method's herdr realization:
 - **`kill_pane(*, target_pane_id, ignore_missing=False)`** — `herdr pane close
   <pane_id>` through the `not_found`-tolerant runner.
 - **`list_pane_ids() -> set`** — `herdr pane list` → the set of pane ids.
-- **`wait_for_pane_gone(...)`** — graceful teardown for a pane whose shell
-  outlives its agent: poll `agent_status` until it returns `"unknown"` (herdr
-  drops the `agent` field and reports the non-live `"unknown"` status once the
-  coding agent has exited back to the bare shell) or `None` (the pane is already
-  gone via `pane_not_found`), then `herdr pane close` (`kill_pane` with
-  `ignore_missing`, which also swallows the already-gone teardown race) and
-  return `True`, all within the caller's `timeout`/`interval` budget. `"unknown"`
-  / `None` are the only exit signals — `done`/`blocked` mean the agent is still
-  alive, so they never trigger the close. If the agent never leaves before the
-  deadline, return `False` **without** closing the pane, leaving the exit-2
-  timeout path to the CLI. tmux's `wait_for_pane_gone` is unchanged (still
-  `poll_until_pane_gone` over `list-panes`).
 - **`send_exit(*, target_pane_id, ignore_missing=False)`** — `herdr pane run
   <id> "/exit"`.
 - **`send_poll_trigger(...) -> bool`** — best-effort. `herdr pane send-keys <id>
@@ -2616,10 +2572,7 @@ printer that writes `Error: <message>` to stderr.
 | HTTP error | — | serialized `{"detail": <string>}` | HTTP error responses with the same status + body. |
 
 The root-Director-deregistration guard raises a single **application error
-(exit 1)** on both the broker side and the `member delete` CLI side. The one
-deliberate exception to the two-tier mapping is the `member delete`
-pane-teardown **timeout**, which exits **2** after printing its stderr
-diagnostic block (§6.3).
+(exit 1)** on both the broker side and the `member delete` CLI side.
 
 **Fail-fast points (never silently fall back):**
 
@@ -2669,8 +2622,8 @@ UTF-8 (no ASCII escaping).
 - The monitor loop emits per-due-member heartbeat lines to **stdout**
   (`{iso} due member {id} ({name}) [{reasons}] -> wake monitor`), `name` raw
   (unsanitized), the `[{reasons}]` suffix listing that member's joined wake reasons.
-- The "WebUI not built" warning, `member create`/`member delete` rollback and
-  timeout diagnostics, and `monitor start`'s "no monitoring member" warning all
+- The "WebUI not built" warning, `member create` rollback diagnostics,
+  and `monitor start`'s "no monitoring member" warning all
   go to **stderr**. Preserve the stream choice (stdout vs. stderr) — it is part
   of the observable contract.
 
@@ -2807,7 +2760,7 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 **`member`:**
 
 - [ ] `cafleet member create` (no identity flag — Director auto-resolved; `--name`, `--description`, `--coding-agent`, `--model`, `--role`=member, `--text` / `--text-file` xor-required, `--full`, `--json`)
-- [ ] `cafleet member delete` (`--member-id` target, `--force`/`-f`, `--json`; placementless target → registry soft-delete, exit 0)
+- [ ] `cafleet member delete` (`--member-id` target, `--json`; pane path kills immediately and always exits 0; placementless target → registry soft-delete, exit 0)
 - [ ] `cafleet member show` (`--member-id` target, `--full`, `--json`)
 - [ ] `cafleet member list` (`--json`)
 - [ ] `cafleet member capture` (`--member-id`, `--lines`=**20**, `--ansi`/`--no-ansi`, `--json`)
@@ -2860,9 +2813,7 @@ The decisions that shape this surface (full rationale in the design doc):
 - **`member` is the single member-lifecycle surface.** `member` owns member registration, teardown, introspection (`show`, `list`), and keystroke interaction (`create`/`delete`/`show`/`list`/`capture`/`exec`/`ping`). There is no separate `agent` group.
 - **`--fleet-id` is a required option with no environment default** (§6.3); a
   missing value is the shared callback's exit-1 error.
-- **One error/exit model** (§7.2): usage → exit 2, application/runtime → exit
-  1; the `member delete` teardown timeout (exit 2) is the one deliberate
-  exception.
+- **One error/exit model** (§7.2): usage → exit 2, application/runtime → exit 1.
 - **Alembic-migrated schema** (§8): a single initial revision
   (`0001`) with the current revision recorded in `alembic_version`; no
   cross-implementation DB interoperability. Re-running `cafleet setup` (or

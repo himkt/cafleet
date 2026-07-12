@@ -529,17 +529,15 @@ the placement); `--json` returns the member dict with its `placement`.
 | Flag | Required | Notes |
 |---|---|---|
 | `--member-id` | yes | The member to delete (target). |
-| `--force` / `-f` | no | Skip the graceful close wait: immediately kill-pane the target, then deregister. Exit 0 even if the pane was already gone. |
 
 Tears down the target's pane (when one exists) and soft-deletes the member.
 Targeting the root Director is blocked (see
 [Error Messages](#error-messages)). A placementless or pending-placement
 delete is a pure registry soft-delete and succeeds outside a multiplexer.
-The default pane path sends the backend exit keystroke and waits for the pane
-to close (poll every 500 ms, 15.0 s timeout); on timeout it prints the pane
-buffer tail (last 80 lines) on stderr with a recovery hint and exits **2** —
-re-run, or escalate with `--force`. Success output is a `Member deleted.`
-header plus `member_id:` / `pane_id:` lines; JSON is `{member_id, pane_status}`.
+The pane path kills the pane immediately (tolerating an already-gone pane),
+then soft-deletes; exit 0. Success output is a `Member deleted.`
+header plus `member_id:` / `pane_id:` lines with pane status `<pane_id> (killed)`;
+JSON is `{member_id, pane_status}`.
 
 ### `member show` {#member-show}
 
@@ -703,7 +701,6 @@ never pinged). Exits 1 for a not-in-fleet or not-enrolled member.
 | `member create` when the fleet row has no `director_member_id` recorded (mid-bootstrap corruption) | `Error: fleet <fleet-id> has no root Director recorded; re-create the fleet with 'cafleet fleet create'.` (exit 1) |
 | `member create` (with a placement) when the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` (exit 1; the `register_member` invariant guard) |
 | `member delete` against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 1) |
-| `member delete` default path when the pane does not close within 15.0 s | `Error: pane <pane> did not close within 15.0s after /exit.` (exit 2; pane tail printed on stderr) |
 | `message send` / `message broadcast` / `message poll` / `message ack` / `message cancel` / `message show` with an acting member id (`--member-id` / `--from-member-id`) that is not in `--fleet-id` | `Error: member <member-id> is not in fleet <fleet-id>.` (exit 1) — the fleet-membership gate runs before any read/write operation, and also fires for an unknown id. |
 | `member exec` with missing positional `COMMAND` | `Error: Missing argument 'COMMAND'.` (exit 2) |
 | `member exec ""` (empty / whitespace-only) | `Error: command may not be empty.` (exit 2) |

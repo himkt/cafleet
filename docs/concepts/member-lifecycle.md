@@ -35,11 +35,7 @@ stateDiagram-v2
     Rollback1 --> [*]: deregister
     Rollback2 --> [*]: exit pane + deregister
 
-    Active --> Exiting: cafleet member delete (default)
-    Exiting --> Gone: exit keystroke, wait for pane to close
-    Gone --> [*]: deregister
-
-    Active --> Killed: cafleet member delete --force
+    Active --> Killed: cafleet member delete
     Killed --> [*]: kill pane + deregister
 ```
 
@@ -59,15 +55,8 @@ substituting `{fleet_id}`, `{member_id}` (the member's own newly-allocated id),
 ## Delete ordering
 
 `cafleet member delete` tears down the pane (when one exists) and
-soft-deletes the member. Default path: send the backend exit keystroke and submit
-it (separate keystrokes with a short settle gap, so every backend's input line
-registers the command before Enter), wait for the pane to close (15 s timeout),
-then deregister. On a backend where the coding agent *is* the pane's foreground
-process (tmux), the exit closes the pane directly. On a backend whose pane hosts
-a persistent shell that outlives its agent (herdr), the default path first waits
-for the coding agent to exit back to the shell, then closes the now-shell-only
-pane. On timeout, capture the pane tail and fail loudly with exit code 2; the
-operator reruns with `--force` for an atomic kill+deregister. A member with a
+soft-deletes the member. Pane path: kill the pane immediately (tolerating an
+already-gone pane), then deregister — exit 0. A member with a
 pending placement (no pane yet) is a plain registry soft-delete, and so is a
 placementless registry row (no placement row) — `cafleet member delete`
 soft-deletes both without touching the multiplexer.
@@ -81,8 +70,8 @@ whole prompt from stdin); literal braces in prompt text must be doubled (`{{`,
 
 ## Commands
 
-The lifecycle ops live in the `member` group: `member create`, `member delete`
-(with `--force` for an atomic kill+deregister), `member show` (single-member
+The lifecycle ops live in the `member` group: `member create`, `member delete`,
+`member show` (single-member
 detail — kind, skills, placement block), and `member list` (every active
 registry entry of the fleet, with `kind` and `idle` columns). Keystroke
 interaction lives
