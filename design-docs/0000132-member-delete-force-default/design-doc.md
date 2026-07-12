@@ -10,13 +10,13 @@
 
 ## Success Criteria
 
-- [ ] `cafleet member delete --fleet-id <s> --member-id <m>` on a live pane kills the pane immediately (no exit keystroke, no wait) and exits 0, even if the pane was already gone.
-- [ ] The 15 s graceful wait, the exit-2 timeout path, and the pane-tail-on-stderr diagnostic no longer exist on any `member delete` path.
-- [ ] `--force` / `-f` is removed; `cafleet member delete --force` (or `-f`) fails with Click's "no such option" (exit 2), pinned by a regression test.
-- [ ] `wait_for_pane_gone` (base/tmux/herdr) and `poll_until_pane_gone` (base) are deleted along with their tests; no dead graceful-teardown code remains. `pane_exists` is intentionally retained (see Non-goals).
-- [ ] Success header collapses to `Member deleted.` with pane status `<pane_id> (killed)`; JSON `{member_id, pane_status}` is unchanged; the root-Director guard (exit 1), placementless/pending registry soft-delete (exit 0), and `kill_pane` multiplexer-error (exit 1) contracts are unchanged.
-- [ ] Every affected surface is updated in the same cycle with no historical "was `--force`" / "15 s wait" residue: `SPEC.md`, `docs/spec/cli-options.md`, `docs/concepts/member-lifecycle.md`, `skills/cafleet/reference/{director,recovery,supervision}.md`, and every role/workflow teardown mention.
-- [ ] `mise //cafleet:lint` / `:typecheck` / `:test` pass.
+- [x] `cafleet member delete --fleet-id <s> --member-id <m>` on a live pane kills the pane immediately (no exit keystroke, no wait) and exits 0, even if the pane was already gone.
+- [x] The 15 s graceful wait, the exit-2 timeout path, and the pane-tail-on-stderr diagnostic no longer exist on any `member delete` path.
+- [x] `--force` / `-f` is removed; `cafleet member delete --force` (or `-f`) fails with Click's "no such option" (exit 2), pinned by a regression test.
+- [x] `wait_for_pane_gone` (base/tmux/herdr) and `poll_until_pane_gone` (base) are deleted along with their tests; no dead graceful-teardown code remains. `pane_exists` is intentionally retained (see Non-goals).
+- [x] Success header collapses to `Member deleted.` with pane status `<pane_id> (killed)`; JSON `{member_id, pane_status}` is unchanged; the root-Director guard (exit 1), placementless/pending registry soft-delete (exit 0), and `kill_pane` multiplexer-error (exit 1) contracts are unchanged.
+- [x] Every affected surface is updated in the same cycle with no historical "was `--force`" / "15 s wait" residue: `SPEC.md`, `docs/spec/cli-options.md`, `docs/concepts/member-lifecycle.md`, `skills/cafleet/reference/{director,recovery,supervision}.md`, and every role/workflow teardown mention.
+- [x] `mise //cafleet:lint` / `:typecheck` / `:test` pass.
 
 ---
 
