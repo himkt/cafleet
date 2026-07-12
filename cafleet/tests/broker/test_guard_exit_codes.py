@@ -1,4 +1,4 @@
-"""Regression tests: broker guards exit 1, not 2 (design 0000118, items 2.2 + 3.3).
+"""Regression tests: broker guards exit 1, not 2.
 
 The root-Director deregistration guard (``deregister_member``) and the
 soft-deleted-fleet guard (``register_member``) both raise ``click.ClickException``

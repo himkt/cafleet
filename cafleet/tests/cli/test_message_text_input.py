@@ -1,5 +1,5 @@
 """``--text`` / ``--text-file`` input coverage for ``message send`` and
-``message broadcast`` (design 0000112 §1, §3).
+``message broadcast``.
 
 Both commands drop ``required=True`` on ``--text``, gain ``--text-file``, and
 resolve the body through the shared ``read_text_input`` helper (no placeholder

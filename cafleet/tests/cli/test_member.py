@@ -1,6 +1,6 @@
 """Tests for ``cafleet member create``.
 
-Covers the unified ``--text`` / ``--text-file`` input pair (design 0000112 §3):
+Covers the unified ``--text`` / ``--text-file`` input pair:
 xor + exactly-one-required, inline placeholder substitution, the ``--text-file``
 path / stdin / error matrix, spawn-argv shape per backend, permission-mode
 injection, and ``--role`` handling.
@@ -186,7 +186,7 @@ def test_member_create__text_file_relative_path_accepted(
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
-    # `--text-file` resolves a relative path against the CWD (design 0000112 §1).
+    # `--text-file` resolves a relative path against the CWD.
     fleet_id, director_id, runner = bootstrapped_fleet
     (tmp_path / "prompt.md").write_text("relative body", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
@@ -603,7 +603,7 @@ def test_member_create__claude_default_injects_dontask_permission_mode(
     assert perm_index < name_index
 
 
-# --- member create --role (design 0000090 §5) ------------------------------
+# --- member create --role ------------------------------
 
 
 def _read_member_card(new_member_id: int) -> dict:
@@ -725,7 +725,7 @@ def test_member_create__invalid_role_choice_rejected(
     assert "not one of" in result.output
 
 
-# --- monitor inherits the Director's coding agent (design 0000101) ----------
+# --- monitor inherits the Director's coding agent ----------
 
 
 @pytest.fixture

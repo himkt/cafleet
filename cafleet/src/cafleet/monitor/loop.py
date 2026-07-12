@@ -22,7 +22,7 @@ from cafleet.config import settings
 from cafleet.multiplexer import AgentStateAware, resolve_multiplexer
 
 # The sole native agent status that flags a wake. ``blocked`` is deliberately
-# excluded (design 0000124): it means the member awaits a user answer, and the
+# excluded: it means the member awaits a user answer, and the
 # monitoring member's only correct action there is inaction — waking about it is
 # pure token cost plus a nonzero chance of a destructive nudge. ``blocked`` is
 # still recorded in ``_last_member_status`` so the episode is tracked and a later

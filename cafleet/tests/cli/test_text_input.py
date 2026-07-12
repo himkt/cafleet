@@ -1,4 +1,4 @@
-"""Tests for the shared text-input helper (design 0000112 §1, §2).
+"""Tests for the shared text-input helper.
 
 ``read_text_input`` owns all body resolution and validation for the three
 text-body commands (``message send`` / ``message broadcast`` / ``member

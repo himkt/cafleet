@@ -2,8 +2,7 @@
 
 ``member create`` takes no Director-identity flag: it resolves the Director
 from ``fleets.director_member_id`` first thing — before any multiplexer or
-registration side effect — and fails loudly per the design 0000127
-§ Issue #185 error table.
+registration side effect — and fails loudly.
 """
 
 import json

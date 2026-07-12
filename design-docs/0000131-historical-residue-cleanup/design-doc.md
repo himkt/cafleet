@@ -1,7 +1,7 @@
 # 0000131 — Historical-Residue Cleanup Skill (CAFleet-orchestrated)
 
-**Status**: Approved
-**Progress**: 0/11 tasks complete
+**Status**: Complete
+**Progress**: 11/11 tasks complete
 **Last Updated**: 2026-07-12
 
 ## Overview
@@ -10,15 +10,15 @@ Specify and build a reusable, project-local CAFleet-orchestrated skill at `.clau
 
 ## Success Criteria
 
-- [ ] The skill exists at `.claude/skills/historical-residue-cleanup/` with a `SKILL.md`, `roles/scanner.md`, `roles/reviewer.md`, `reference/rubric.md`, and `reference/patterns.md`, and loads via the Skill tool (its `description` triggers on "clean up historical narration / residue", "remove deprecation notes", "affirmative-writing sweep").
-- [ ] **R1 encoded** — the skill both *removes* existing narration and is *forbidden from introducing* any new narration: every edit it makes reads as a clean present-tense statement of current behavior (no "previously/now/no longer/formerly", no "this replaces X", no "renamed from Y"). Stated as a `SKILL.md` instruction, a `reviewer.md` check, and a rubric rule.
-- [ ] **R2 encoded** — the skill never modifies `design-docs/`, `researches/`, `cafleet/src/cafleet/db/alembic/versions/**`, `cafleet/src/cafleet/webui/dist/**`, or lock files.
-- [ ] **R3 encoded** — the skill sweeps the whole tracked tree minus the R2 exempt set (canonical definition); the enumerated surfaces (`docs/`, `README.md`, `SPEC.md`, `skills/`, `.claude/`, `cafleet/src/`, `cafleet/tests/`, `admin/src/`, root `CLAUDE.md`) are illustrative of the major surfaces, not an exhaustive allow-list.
-- [ ] **R4 encoded** — the skill runs a structured multi-pass sweep plus hand-inspection of every hit, fanned out across scanner members; never a shallow single grep.
-- [ ] The fixed classification rubric (sentinel-test / narration-citation / keep, plus the known-benign class) is specified in `reference/rubric.md` and both role files reference it.
-- [ ] The skill's per-run output is a file→action inventory (grouped tables) + an explicit KEEP list + a "Known-benign sweep matches" subsection, written under the run's task-scoped `${BASE}`.
-- [ ] The worked-example section classifies the current-tree residue correctly against the rubric (proves the rubric on real hits).
-- [ ] Dogfood: invoking the skill (or applying its first-run inventory) against the current tree leaves `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` green, and a re-sweep returns zero unaccounted matches (every remaining hit KEEP-listed or exempt). No live test coverage is lost.
+- [x] The skill exists at `.claude/skills/historical-residue-cleanup/` with a `SKILL.md`, `roles/scanner.md`, `roles/reviewer.md`, `reference/rubric.md`, and `reference/patterns.md`, and loads via the Skill tool (its `description` triggers on "clean up historical narration / residue", "remove deprecation notes", "affirmative-writing sweep").
+- [x] **R1 encoded** — the skill both *removes* existing narration and is *forbidden from introducing* any new narration: every edit it makes reads as a clean present-tense statement of current behavior (no "previously/now/no longer/formerly", no "this replaces X", no "renamed from Y"). Stated as a `SKILL.md` instruction, a `reviewer.md` check, and a rubric rule.
+- [x] **R2 encoded** — the skill never modifies `design-docs/`, `researches/`, `cafleet/src/cafleet/db/alembic/versions/**`, `cafleet/src/cafleet/webui/dist/**`, or lock files.
+- [x] **R3 encoded** — the skill sweeps the whole tracked tree minus the R2 exempt set (canonical definition); the enumerated surfaces (`docs/`, `README.md`, `SPEC.md`, `skills/`, `.claude/`, `cafleet/src/`, `cafleet/tests/`, `admin/src/`, root `CLAUDE.md`) are illustrative of the major surfaces, not an exhaustive allow-list.
+- [x] **R4 encoded** — the skill runs a structured multi-pass sweep plus hand-inspection of every hit, fanned out across scanner members; never a shallow single grep.
+- [x] The fixed classification rubric (sentinel-test / narration-citation / keep, plus the known-benign class) is specified in `reference/rubric.md` and both role files reference it.
+- [x] The skill's per-run output is a file→action inventory (grouped tables) + an explicit KEEP list + a "Known-benign sweep matches" subsection, written under the run's task-scoped `${BASE}`.
+- [x] The worked-example section classifies the current-tree residue correctly against the rubric (proves the rubric on real hits).
+- [x] Dogfood: invoking the skill (or applying its first-run inventory) against the current tree leaves `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` green, and a re-sweep returns zero unaccounted matches (every remaining hit KEEP-listed or exempt). No live test coverage is lost.
 
 ---
 
@@ -240,32 +240,32 @@ The monitoring member reuses the `cafleet` skill's canonical `roles/monitor.md` 
 
 ### Step 1: Skill scaffold — `SKILL.md`
 
-- [ ] Create `.claude/skills/historical-residue-cleanup/SKILL.md` with the trigger `description` (Success Criterion 1), the R1–R4 behavioral contract (§2), the team shape (§3), and the per-run process (§5) wiring the five skill-author sub-systems (BASE resolve → fleet bootstrap → monitor-first → member spawn → monitor-first teardown). Backend-neutral with the overlay pointer + `CODING AGENT:` line (§9). <!-- completed: -->
-- [ ] State the two invariants explicitly in `SKILL.md`: no runtime behavior removed; no live coverage lost. <!-- completed: -->
+- [x] Create `.claude/skills/historical-residue-cleanup/SKILL.md` with the trigger `description` (Success Criterion 1), the R1–R4 behavioral contract (§2), the team shape (§3), and the per-run process (§5) wiring the five skill-author sub-systems (BASE resolve → fleet bootstrap → monitor-first → member spawn → monitor-first teardown). Backend-neutral with the overlay pointer + `CODING AGENT:` line (§9). <!-- completed: 2026-07-12T01:52 -->
+- [x] State the two invariants explicitly in `SKILL.md`: no runtime behavior removed; no live coverage lost. <!-- completed: 2026-07-12T01:52 -->
 
 ### Step 2: Role files
 
-- [ ] Create `roles/scanner.md` — required-reading block (overlay row #1, base-dir, coordination); accountability (sweep own slice with §7 patterns, hand-inspect every hit, classify with §4, write partial inventory, apply own slice after `approved`); disjoint file-ownership contract. <!-- completed: -->
-- [ ] Create `roles/reviewer.md` — accountability as the over-deletion / lost-coverage / new-narration (R1) guard; validates the merged inventory before apply, re-checks after apply; signs off with `approved (inventory)`. <!-- completed: -->
+- [x] Create `roles/scanner.md` — required-reading block (overlay row #1, base-dir, coordination); accountability (sweep own slice with §7 patterns, hand-inspect every hit, classify with §4, write partial inventory, apply own slice after `approved`); disjoint file-ownership contract. <!-- completed: 2026-07-12T01:52 -->
+- [x] Create `roles/reviewer.md` — accountability as the over-deletion / lost-coverage / new-narration (R1) guard; validates the merged inventory before apply, re-checks after apply; signs off with `approved (inventory)`. <!-- completed: 2026-07-12T01:52 -->
 
 ### Step 3: Reference pages
 
-- [ ] Create `reference/rubric.md` — the fixed classification rubric (§4) incl. the known-benign class, as the canonical source both role files cite. <!-- completed: -->
-- [ ] Create `reference/patterns.md` — the multi-pass sweep pattern catalog (§7) with the exempt-set exclusion and the word-boundary design-number form. <!-- completed: -->
+- [x] Create `reference/rubric.md` — the fixed classification rubric (§4) incl. the known-benign class, as the canonical source both role files cite. <!-- completed: 2026-07-12T01:52 -->
+- [x] Create `reference/patterns.md` — the multi-pass sweep pattern catalog (§7) with the exempt-set exclusion and the word-boundary design-number form. <!-- completed: 2026-07-12T01:52 -->
 
 ### Step 4: Backend-neutrality wiring
 
-- [ ] Verify `SKILL.md` + `roles/*.md` use only neutral `{…}` tokens for backend-varying behavior and carry the `skills/cafleet/reference/coding-agent/<name>.md` pointer; the spawn-prompt skeleton includes the `CODING AGENT: {coding_agent}` line and doubles every literal brace. <!-- completed: -->
+- [x] Verify `SKILL.md` + `roles/*.md` use only neutral `{…}` tokens for backend-varying behavior and carry the `skills/cafleet/reference/coding-agent/<name>.md` pointer; the spawn-prompt skeleton includes the `CODING AGENT: {coding_agent}` line and doubles every literal brace. <!-- completed: 2026-07-12T01:52 -->
 
 ### Step 5: Load + trigger check
 
-- [ ] Confirm the skill loads via the Skill tool and its `description` triggers on the intended phrases (Success Criterion 1); no `{token}` leaks in any user-facing string. <!-- completed: -->
+- [x] Confirm the skill loads via the Skill tool and its `description` triggers on the intended phrases (Success Criterion 1); no `{token}` leaks in any user-facing string. <!-- completed: 2026-07-12T01:58 -->
 
 ### Step 6: Dogfood — first run against the current tree
 
-- [ ] Apply the §8 worked-example inventory to the current tree (rubric a: delete B1–B4 sentinels preserving live coverage; rubric b: reword A1–A2, C1–C5, D1–D8 and the remaining citation-family files; honor the §8e KEEP list and §8f known-benign matches). This validates the rubric, the cleanup edits, and the verification loop, and completes the original cleanup intent; the skill's full orchestration path (fleet bootstrap, scanner fan-out, merge, review-gate) is exercised on subsequent live `/historical-residue-cleanup` runs. <!-- completed: -->
-- [ ] Verify: `mise //cafleet:test` (special attention to B4 and B3), `mise //cafleet:lint`, `mise //cafleet:typecheck` all green. <!-- completed: -->
-- [ ] Re-run the §7 sweep over tracked files outside the exempt set → zero unaccounted matches (every remaining hit KEEP-listed / benign / exempt); confirm no live assertion or runtime behavior was lost and no new narration was introduced (R1). <!-- completed: -->
+- [x] Apply the §8 worked-example inventory to the current tree (rubric a: delete B1–B4 sentinels preserving live coverage; rubric b: reword A1–A2, C1–C5, D1–D8 and the remaining citation-family files; honor the §8e KEEP list and §8f known-benign matches). This validates the rubric, the cleanup edits, and the verification loop, and completes the original cleanup intent; the skill's full orchestration path (fleet bootstrap, scanner fan-out, merge, review-gate) is exercised on subsequent live `/historical-residue-cleanup` runs. <!-- completed: 2026-07-12T02:05 -->
+- [x] Verify: `mise //cafleet:test` (special attention to B4 and B3), `mise //cafleet:lint`, `mise //cafleet:typecheck` all green. <!-- completed: 2026-07-12T02:05 -->
+- [x] Re-run the §7 sweep over tracked files outside the exempt set → zero unaccounted matches (every remaining hit KEEP-listed / benign / exempt); confirm no live assertion or runtime behavior was lost and no new narration was introduced (R1). <!-- completed: 2026-07-12T02:05 -->
 
 ---
 
@@ -275,3 +275,4 @@ The monitoring member reuses the `cafleet` skill's canonical `roles/monitor.md` 
 |------|---------|
 | 2026-07-12 | Initial draft — specifies the reusable CAFleet-orchestrated cleanup skill; the current-tree residue (Director scan + citation family) is the §8 worked example and Step-6 dogfood target |
 | 2026-07-12 | Reviewer pass: fixed `webui/assets`→`webui/dist` exempt path and audit-render `prompts/`→`.prompts/`; pinned R3 as "whole tracked tree minus R2" (enumerated list illustrative); adopted the cafleet coordination schema with a `scanner` role + `inventory` pointer (`approved (inventory)`); stated one-scanner-owns-a-whole-file; widened the design-number pattern to `0[0-9]{6}`; removed the bare in-prose scanner-marker token; softened the Step-6 dogfood claim |
+| 2026-07-12 | Executed (CAFleet team): authored all 5 skill files (Steps 1–4), dogfooded the §8 inventory on the current tree (Step 6) removing the B1–B4 sentinels and the design-number citation family across ~24 files with no coverage lost. Fresh-reviewer round caught two missed `Design 0000092` docstrings + the `0000072 spine` citation in `SKILL.md` and root-caused the miss to `git grep` needing `-i`/`-P` (hardened `patterns.md`). Verified 998 tests + lint + typecheck green; reviewer `approved (doc)`. PR #192. |

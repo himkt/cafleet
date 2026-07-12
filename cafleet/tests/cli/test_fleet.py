@@ -253,7 +253,7 @@ def test_fleet_delete__nonexistent_fleet_handles_gracefully(fresh_db):
     assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
-# --- fleet show / delete take --fleet-id, not a positional (design 0000118, item 3.1) ---
+# --- fleet show / delete take --fleet-id, not a positional ---
 
 
 def test_fleet_show__accepts_fleet_id_option(fresh_db):

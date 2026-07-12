@@ -1,9 +1,9 @@
-"""Regression tests for split broadcast counts (design 0000118, item 2.1).
+"""Regression tests for split broadcast counts.
 
 The broadcast result reports two distinct counts: ``recipients`` — the real
 number of active non-admin peers a delivery row was fanned out to (N) — and
 ``delivered`` — how many inline-preview keystrokes actually landed (k, a subset
-of N). The legacy single ``notifications_sent_count`` key is gone.
+of N).
 
 ``_create_fleet`` + sender + recipient-a + recipient-b gives three peers of the
 sender (the pane-bound root Director and the two registered recipients), so
@@ -28,13 +28,3 @@ def test_broadcast_result_carries_separate_recipients_and_delivered():
     assert result["delivered"] == 1
     assert isinstance(result["recipients"], int)
     assert isinstance(result["delivered"], int)
-
-
-def test_broadcast_result_drops_legacy_notifications_sent_count_key():
-    sid = _create_fleet()["fleet_id"]
-    sender = _register_member(sid, "sender")
-    _register_member(sid, "recipient-a")
-
-    [result] = broker.broadcast_message(sid, sender["member_id"], "hi all")
-
-    assert "notifications_sent_count" not in result

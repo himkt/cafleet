@@ -1,8 +1,8 @@
-"""Regression tests for nullable ``messages.to_member_id`` (design 0000118, items 1.1/1.2).
+"""Regression tests for nullable ``messages.to_member_id``.
 
 A broadcast-summary row is owned by the broadcaster and has no single
-recipient, so its ``to_member_id`` is NULL rather than the legacy ``0``
-sentinel. The column is nullable, the returned summary dict carries ``None``,
+recipient, so its ``to_member_id`` is NULL. The column is nullable, the returned
+summary dict carries ``None``,
 and the persisted row reads back as ``None``. A real unicast still retains its
 recipient id (the "shows on a real id" half of the surfacing contract).
 """

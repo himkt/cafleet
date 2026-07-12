@@ -1,4 +1,4 @@
-"""Regression tests: the shared operator flags are visible and documented (design 0000118, items 3.4 + 3.5).
+"""Regression tests: the shared operator flags are visible and documented.
 
 ``--full`` / ``--quiet`` (shared ``full_flag`` / ``quiet_flag``) and
 ``--ansi/--no-ansi`` (``member capture``) are visible and carry help text, so
