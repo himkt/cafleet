@@ -1,7 +1,7 @@
 # 0000131 — Historical-Residue Cleanup Skill (CAFleet-orchestrated)
 
 **Status**: Approved
-**Progress**: 0/11 tasks complete
+**Progress**: 7/11 tasks complete
 **Last Updated**: 2026-07-12
 
 ## Overview
@@ -240,22 +240,22 @@ The monitoring member reuses the `cafleet` skill's canonical `roles/monitor.md` 
 
 ### Step 1: Skill scaffold — `SKILL.md`
 
-- [ ] Create `.claude/skills/historical-residue-cleanup/SKILL.md` with the trigger `description` (Success Criterion 1), the R1–R4 behavioral contract (§2), the team shape (§3), and the per-run process (§5) wiring the five skill-author sub-systems (BASE resolve → fleet bootstrap → monitor-first → member spawn → monitor-first teardown). Backend-neutral with the overlay pointer + `CODING AGENT:` line (§9). <!-- completed: -->
-- [ ] State the two invariants explicitly in `SKILL.md`: no runtime behavior removed; no live coverage lost. <!-- completed: -->
+- [x] Create `.claude/skills/historical-residue-cleanup/SKILL.md` with the trigger `description` (Success Criterion 1), the R1–R4 behavioral contract (§2), the team shape (§3), and the per-run process (§5) wiring the five skill-author sub-systems (BASE resolve → fleet bootstrap → monitor-first → member spawn → monitor-first teardown). Backend-neutral with the overlay pointer + `CODING AGENT:` line (§9). <!-- completed: 2026-07-12T01:52 -->
+- [x] State the two invariants explicitly in `SKILL.md`: no runtime behavior removed; no live coverage lost. <!-- completed: 2026-07-12T01:52 -->
 
 ### Step 2: Role files
 
-- [ ] Create `roles/scanner.md` — required-reading block (overlay row #1, base-dir, coordination); accountability (sweep own slice with §7 patterns, hand-inspect every hit, classify with §4, write partial inventory, apply own slice after `approved`); disjoint file-ownership contract. <!-- completed: -->
-- [ ] Create `roles/reviewer.md` — accountability as the over-deletion / lost-coverage / new-narration (R1) guard; validates the merged inventory before apply, re-checks after apply; signs off with `approved (inventory)`. <!-- completed: -->
+- [x] Create `roles/scanner.md` — required-reading block (overlay row #1, base-dir, coordination); accountability (sweep own slice with §7 patterns, hand-inspect every hit, classify with §4, write partial inventory, apply own slice after `approved`); disjoint file-ownership contract. <!-- completed: 2026-07-12T01:52 -->
+- [x] Create `roles/reviewer.md` — accountability as the over-deletion / lost-coverage / new-narration (R1) guard; validates the merged inventory before apply, re-checks after apply; signs off with `approved (inventory)`. <!-- completed: 2026-07-12T01:52 -->
 
 ### Step 3: Reference pages
 
-- [ ] Create `reference/rubric.md` — the fixed classification rubric (§4) incl. the known-benign class, as the canonical source both role files cite. <!-- completed: -->
-- [ ] Create `reference/patterns.md` — the multi-pass sweep pattern catalog (§7) with the exempt-set exclusion and the word-boundary design-number form. <!-- completed: -->
+- [x] Create `reference/rubric.md` — the fixed classification rubric (§4) incl. the known-benign class, as the canonical source both role files cite. <!-- completed: 2026-07-12T01:52 -->
+- [x] Create `reference/patterns.md` — the multi-pass sweep pattern catalog (§7) with the exempt-set exclusion and the word-boundary design-number form. <!-- completed: 2026-07-12T01:52 -->
 
 ### Step 4: Backend-neutrality wiring
 
-- [ ] Verify `SKILL.md` + `roles/*.md` use only neutral `{…}` tokens for backend-varying behavior and carry the `skills/cafleet/reference/coding-agent/<name>.md` pointer; the spawn-prompt skeleton includes the `CODING AGENT: {coding_agent}` line and doubles every literal brace. <!-- completed: -->
+- [x] Verify `SKILL.md` + `roles/*.md` use only neutral `{…}` tokens for backend-varying behavior and carry the `skills/cafleet/reference/coding-agent/<name>.md` pointer; the spawn-prompt skeleton includes the `CODING AGENT: {coding_agent}` line and doubles every literal brace. <!-- completed: 2026-07-12T01:52 -->
 
 ### Step 5: Load + trigger check
 
