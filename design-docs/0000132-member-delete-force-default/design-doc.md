@@ -1,6 +1,6 @@
 # Make immediate kill the default for `cafleet member delete`
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 23/23 tasks complete
 **Last Updated**: 2026-07-12
 
@@ -213,3 +213,4 @@ Two classes of edit. Class A purges explicit `--force` teardown fallbacks; Class
 | 2026-07-12 | Initial draft |
 | 2026-07-12 | Round-1 revision: scoped the Overview exit-0 claim; enumerated all four SPEC §6.5 `wait_for_pane_gone` mentions; named the three deleted graceful success tests, both pending-placement tests, and the orphaned test fixtures; extended the method-name residue grep to SPEC/docs/skills. |
 | 2026-07-12 | Finalized: Status → Approved after Reviewer approval and user sign-off. |
+| 2026-07-12 | Implemented: all 23 tasks + 7 Success Criteria complete; 983 tests / lint / typecheck green; live smoke passed; Opus Reviewer approved on first pass; PR #193 opened. Status → Complete. |
