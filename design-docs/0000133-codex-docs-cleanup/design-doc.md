@@ -1,7 +1,7 @@
 # Codex Docs Cleanup
 
 **Status**: Approved
-**Progress**: 9/11 tasks complete
+**Progress**: 11/11 tasks complete
 **Last Updated**: 2026-07-14
 
 ## Overview
@@ -10,12 +10,12 @@ Docs-only follow-up to GitHub issue #196 ("Codex permission problems"): correct 
 
 ## Success Criteria
 
-- [ ] Both Codex sandbox TOML snippets (merged Quickstart and `docs/reference/coding-agents/codex.md`) contain `network_access = true` plus the `writable_roots` entry, each with the tmux/herdr socket rationale.
-- [ ] The `cafleet.rules` snippet is the two-rule form from issue #196, the prose states that the more specific prefix rule takes precedence, and a `!!! tip "Where this lives"` admonition names `~/.codex/rules/cafleet.rules`.
-- [ ] `docs/get-started/` contains exactly `index.md`, `quickstart.md`, and `contributing.md`; a repo-wide search for links to `install.md` / `configure.md` (and their published URLs) returns nothing.
-- [ ] The contributor skill install (`mise //:skill-install`) is documented in `docs/get-started/contributing.md`.
-- [ ] `README.md`'s "Full guide" link points to the Quickstart page and the Get Started blurb no longer names Install/Configure.
-- [ ] `navigation.sections` is absent from `zensical.toml`; `mise //:docs-build` succeeds and the served site shows all top-level nav sections collapsed by default (matching how "Coding-agent backends" behaves today).
+- [x] Both Codex sandbox TOML snippets (merged Quickstart and `docs/reference/coding-agents/codex.md`) contain `network_access = true` plus the `writable_roots` entry, each with the tmux/herdr socket rationale.
+- [x] The `cafleet.rules` snippet is the two-rule form from issue #196, the prose states that the more specific prefix rule takes precedence, and a `!!! tip "Where this lives"` admonition names `~/.codex/rules/cafleet.rules`.
+- [x] `docs/get-started/` contains exactly `index.md`, `quickstart.md`, and `contributing.md`; a repo-wide search for links to `install.md` / `configure.md` (and their published URLs) returns nothing.
+- [x] The contributor skill install (`mise //:skill-install`) is documented in `docs/get-started/contributing.md`.
+- [x] `README.md`'s "Full guide" link points to the Quickstart page and the Get Started blurb no longer names Install/Configure.
+- [x] `navigation.sections` is absent from `zensical.toml`; `mise //:docs-build` succeeds and the served site shows all top-level nav sections collapsed by default (matching how "Coding-agent backends" behaves today).
 
 ---
 
@@ -154,8 +154,8 @@ Inbound link retargets (no redirect stubs; the old published URLs 404):
 
 ### Step 4: Verification
 
-- [ ] Run `mise //:docs-build`; serve the site and verify: all top-level nav sections collapsed by default, the merged Quickstart renders with the corrected snippets, and every retargeted link resolves (§5) <!-- completed: -->
-- [ ] Repo-wide search confirms no remaining reference to `install.md` / `configure.md` or their published URLs <!-- completed: -->
+- [x] Run `mise //:docs-build`; serve the site and verify: all top-level nav sections collapsed by default, the merged Quickstart renders with the corrected snippets, and every retargeted link resolves (§5) <!-- completed: 2026-07-14T21:04 -->
+- [x] Repo-wide search confirms no remaining reference to `install.md` / `configure.md` or their published URLs <!-- completed: 2026-07-14T21:04 -->
 
 ---
 
