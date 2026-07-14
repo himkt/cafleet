@@ -14,8 +14,8 @@ with one member per backend and messages each of them.
 - The backend binaries you want to mix (`claude`, `codex`, `opencode`) are on
   `PATH` — `member create` exits 1 with `Error: binary <name> not found on
   PATH` otherwise.
-- You have followed [Install](../get-started/install.md) and
-  [Configure](../get-started/configure.md), and you are inside a tmux or herdr
+- You have followed [Quickstart § Install](../get-started/quickstart.md#install) and
+  [Quickstart § Configure](../get-started/quickstart.md#configure), and you are inside a tmux or herdr
   session (the multiplexer backend is auto-detected — see
   [Multiplexer backends](../spec/multiplexer-backends.md)).
 
