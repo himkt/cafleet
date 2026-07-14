@@ -1,7 +1,7 @@
 # Require an Explicit Coding Agent: Mandatory `--coding-agent` on `fleet create`, Director Inheritance on `member create`
 
 **Status**: Approved
-**Progress**: 13/33 tasks complete
+**Progress**: 18/33 tasks complete
 **Last Updated**: 2026-07-14
 
 ## Overview
@@ -166,11 +166,11 @@ Per `removal.md`, no page narrates the removal — every page states only the cu
 
 ### Step 3: skills/
 
-- [ ] `skills/cafleet/reference/cli.md`: fleet-create example (line 135) gains `--coding-agent <backend>` + the instruction sentence; line 43 drops "(default)" <!-- completed: -->
-- [ ] `skills/cafleet/reference/director.md`: member-create `--coding-agent` row (line 30) → inheritance for all roles; "default backend" claims in the model-inference table (lines 46, 54); monitor-inheritance restatements (lines 32, 136) <!-- completed: -->
-- [ ] `skills/cafleet/roles/monitor.md` line 99: reword the omit-flag note to the general inheritance rule <!-- completed: -->
-- [ ] `skills/cafleet-design-doc`: create/create.md:91, execute/execute.md:156, interview/interview.md:105 fleet-create invocations + create/execute roles/director.md prose <!-- completed: -->
-- [ ] `skills/cafleet-research`: report/report.md:78, presentation/presentation.md:93 + both roles/director.md:20 inline invocations <!-- completed: -->
+- [x] `skills/cafleet/reference/cli.md`: fleet-create example (line 135) gains `--coding-agent <backend>` + the instruction sentence; line 43 drops "(default)" <!-- completed: 2026-07-14T23:03 -->
+- [x] `skills/cafleet/reference/director.md`: member-create `--coding-agent` row (line 30) → inheritance for all roles; "default backend" claims in the model-inference table (lines 46, 54); monitor-inheritance restatements (lines 32, 136) <!-- completed: 2026-07-14T23:03 -->
+- [x] `skills/cafleet/roles/monitor.md` line 99: reword the omit-flag note to the general inheritance rule <!-- completed: 2026-07-14T23:03 -->
+- [x] `skills/cafleet-design-doc`: create/create.md:91, execute/execute.md:156, interview/interview.md:105 fleet-create invocations + create/execute roles/director.md prose <!-- completed: 2026-07-14T23:03 -->
+- [x] `skills/cafleet-research`: report/report.md:78, presentation/presentation.md:93 + both roles/director.md:20 inline invocations <!-- completed: 2026-07-14T23:03 -->
 
 ### Step 4: CLI implementation
 

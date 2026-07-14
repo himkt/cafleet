@@ -75,8 +75,10 @@ Run `cafleet doctor` to confirm the Director is inside a tmux or herdr session w
 `cafleet fleet create` atomically creates the fleet and registers a root Director bound to the current tmux pane. Capture the `fleet_id` and `director.member_id` integer ids from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
 
 ```bash
-cafleet fleet create --name "research-[topic-slug]" --json
+cafleet fleet create --name "research-[topic-slug]" --coding-agent <backend> --json
 ```
+
+`--coding-agent <backend>` — substitute the coding agent you are actually running on: your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity (e.g. Claude Code → `claude`).
 
 Capture `fleet_id` and `director.member_id` from the response. Treat `fleet_id` as `[fleet-id]` and `director.member_id` as `[director-member-id]` for the rest of this skill.
 

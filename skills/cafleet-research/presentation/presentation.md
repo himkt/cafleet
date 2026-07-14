@@ -90,8 +90,10 @@ Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, faci
 
 ```bash
 cafleet doctor
-cafleet fleet create --name "present-[topic-slug]" --json
+cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --json
 ```
+
+`--coding-agent <backend>` — substitute the coding agent you are actually running on: your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity (e.g. Claude Code → `claude`).
 
 `cafleet doctor` confirms the Director is inside a tmux or herdr session (a hard requirement of `cafleet member create`). On non-zero exit, abort and surface the error to the user — do NOT attempt raw `tmux` probes as a workaround.
 
