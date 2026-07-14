@@ -1,7 +1,7 @@
 # Codex Docs Cleanup
 
 **Status**: Approved
-**Progress**: 1/11 tasks complete
+**Progress**: 5/11 tasks complete
 **Last Updated**: 2026-07-14
 
 ## Overview
@@ -140,10 +140,10 @@ Inbound link retargets (no redirect stubs; the old published URLs 404):
 
 ### Step 2: Consolidate the get-started pages
 
-- [ ] Rewrite `docs/get-started/quickstart.md` as the merged simplified page per §3, with the corrected Codex snippets (§1, §2) and the `cafleet.rules` "Where this lives" admonition <!-- completed: -->
-- [ ] Add the contributor skill-install content to `docs/get-started/contributing.md` under `## Development` <!-- completed: -->
-- [ ] Delete `docs/get-started/install.md` and `docs/get-started/configure.md` <!-- completed: -->
-- [ ] Update `docs/get-started/index.md` per the §4 retarget table <!-- completed: -->
+- [x] Rewrite `docs/get-started/quickstart.md` as the merged simplified page per §3, with the corrected Codex snippets (§1, §2) and the `cafleet.rules` "Where this lives" admonition <!-- completed: 2026-07-14T20:43 -->
+- [x] Add the contributor skill-install content to `docs/get-started/contributing.md` under `## Development` <!-- completed: 2026-07-14T20:43 -->
+- [x] Delete `docs/get-started/install.md` and `docs/get-started/configure.md` <!-- completed: 2026-07-14T20:44 -->
+- [x] Update `docs/get-started/index.md` per the §4 retarget table <!-- completed: 2026-07-14T20:43 -->
 
 ### Step 3: Navigation, links, and README
 

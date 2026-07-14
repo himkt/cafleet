@@ -5,8 +5,150 @@ icon: lucide/zap
 # Quickstart
 
 This page is a one-screen walkthrough that creates a CAFleet fleet, spawns
-two member panes, and sends a message between them. It assumes you have
-already followed [Install](install.md) and [Configure](configure.md).
+two member panes, and sends a message between them. It starts from a clean
+machine: install the CLI, configure your coding agent, then run the
+walkthrough.
+
+## Install
+
+Prerequisites:
+
+- Python 3.12+
+- A terminal multiplexer — tmux or herdr (see
+  [Multiplexer backends](../spec/multiplexer-backends.md))
+- At least one of: `claude` (Claude Code), `codex` (OpenAI Codex CLI), or
+  `opencode`
+
+```bash
+uv tool install cafleet     # or: pip install cafleet
+cafleet setup               # migrate the database schema + install the skills
+```
+
+Each half of `cafleet setup` is also available as its own subcommand:
+
+- `cafleet setup db` — migrates the schema only (idempotent).
+- `cafleet setup skill [--agent claude|codex|opencode]...` — installs the
+  skills only; `--agent` (repeatable) scopes the install to the named agents.
+
+After upgrading the package, the first fleet-scoped command errors with
+`stale skills detected (...); run 'cafleet setup skill' to reinstall` — run
+the named command to refresh the skills. The default database lives at
+`~/.local/share/cafleet/cafleet_v5.db`; override with the
+`CAFLEET_DATABASE_URL` environment variable — use an absolute path, since
+SQLAlchemy does not expand `~` in SQLite URLs.
+
+## Configure
+
+CAFleet is designed to run inside a coding agent without per-command
+permission prompts — each backend has a different config file and permission
+system, and the snippets below are the recommended starting points.
+
+### Claude Code
+
+!!! tip "Where this lives"
+
+    Typically the config entries below go in `~/.claude/settings.json`.
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(cafleet *)",
+      "Skill(cafleet:cafleet)",
+      "Skill(cafleet:cafleet-design-doc)",
+      "Skill(cafleet:cafleet-research)"
+    ],
+    "ask": [
+      "Bash(cafleet * member exec *)"
+    ]
+  }
+}
+```
+
+The `Bash(cafleet *)` pattern is the single allow-everything entry that the
+literal `--fleet-id <int>` / `--member-id <int>` flag convention enables —
+one pattern covers every subcommand for every fleet. `cafleet member exec *`
+is moved to the `ask` list because it dispatches arbitrary shell commands on
+behalf of a member; the operator should confirm each invocation.
+
+### Codex
+
+!!! tip "Where this lives"
+
+    Typically the config entries below go in `~/.codex/config.toml`.
+
+```toml
+[sandbox_workspace_write]
+network_access = true
+writable_roots = ["/home/<you>/.local/share/cafleet"]
+```
+
+`network_access = true` is required because cafleet's multiplexer backends
+(tmux and herdr) communicate over a local socket, which the Codex sandbox
+classifies as network access — without it cafleet commands fail with
+`Operation not permitted`. `writable_roots` grants write access to cafleet's
+default SQLite DB directory. Use the absolute path matching
+`CAFLEET_DATABASE_URL` or the default XDG location.
+
+!!! tip "Where this lives"
+
+    The Codex rules for `cafleet` commands live at `~/.codex/rules/cafleet.rules`.
+
+```text
+prefix_rule(pattern = ["cafleet"], decision = "allow")
+
+prefix_rule(
+    pattern = ["cafleet", "member", "exec"],
+    decision = "prompt",
+    justification = "cafleet member exec runs arbitrary commands on a member",
+)
+```
+
+The more specific prefix rule takes precedence: `["cafleet", "member", "exec"]`
+wins over the broad `["cafleet"]` allow, so `cafleet member exec` keeps
+prompting while every other subcommand is allowed. Because `--fleet-id` is a
+trailing per-subcommand flag, it sits past the matched prefix — no per-fleet
+rule is needed.
+
+### Opencode
+
+!!! tip "Where this lives"
+
+    Opencode's `cafleet` agent definition lives at `~/.opencode/agents/cafleet.md`.
+
+No manual configuration is required. On the first `cafleet member create
+--coding-agent opencode` call, cafleet writes the `cafleet` agent definition
+to `~/.opencode/agents/cafleet.md` if it does not already exist — the preset
+embeds the catch-all-allow + specific-deny ruleset that mirrors Claude Code's
+`dontAsk` safety floor. To refresh the preset after a CAFleet release (e.g.
+after `pip install -U cafleet`), delete the existing file and re-run
+`cafleet member create --coding-agent opencode` so the next spawn writes the
+current bundled preset. See
+[Opencode members](../reference/coding-agents/opencode.md) for the full
+materialization protocol, refresh recipe, and the operator MUST-NOT rule on
+MCP servers (MCP-contributed tools bypass the deny-list).
+
+### Trust the working directory
+
+Coding agents ask for a trust confirmation the first time they start in a
+directory they have not seen before. Trust the workspace in advance: launch
+your coding agent once in the working directory the member panes will run in
+and accept its first-run prompt, or add a trust entry to the agent's
+configuration file (see your agent's reference page). Trust is granted per
+directory, so each git worktree needs its own approval.
+
+This prevents a spawn-time stall: in an untrusted directory, the agent's
+first-run trust prompt stalls a freshly spawned member — the member ignores
+every incoming message until the prompt is cleared.
+
+### Passing the fleet id
+
+Every fleet-scoped command except `fleet create` and `fleet list` takes a
+required `--fleet-id`, passed as a literal integer flag on each invocation (a
+member reads its fleet id from the `FLEET ID:` line of its spawn prompt). Members driving cafleet under
+`permissions.allow` pass `--fleet-id` as a literal flag — the allow patterns
+match the literal command string, so a shell-expanded variable would break the
+match and prompt.
 
 ## Simple example — invoke from a coding agent
 

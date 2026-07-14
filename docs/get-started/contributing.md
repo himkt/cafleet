@@ -56,6 +56,21 @@ To change the WebUI's dependencies, edit `admin/package.json` and run plain
 `mise //admin:install` runs `bun install --frozen-lockfile`, so it only
 reinstalls from the committed lockfile and cannot update it.
 
+### Installing the skills from your checkout
+
+`cafleet setup` installs the skills from a published Release, so it is the
+**end-user (installed-CLI)** path. Contributors working from a clone install
+the skills from the working tree instead:
+
+```bash
+mise //:skill-install
+```
+
+This runs `gh skill install ./ --from-local --agent <backend> --force --scope
+user` for each of the three backends (`claude-code`, `codex`, `opencode`),
+placing the skills from your checkout (not a Release) into the three agent
+homes.
+
 ## Building docs locally
 
 Build the documentation site (this site) locally with:
