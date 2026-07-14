@@ -1,7 +1,7 @@
 # Require an Explicit Coding Agent: Mandatory `--coding-agent` on `fleet create`, Director Inheritance on `member create`
 
 **Status**: Approved
-**Progress**: 8/33 tasks complete
+**Progress**: 13/33 tasks complete
 **Last Updated**: 2026-07-14
 
 ## Overview
@@ -158,11 +158,11 @@ Per `removal.md`, no page narrates the removal — every page states only the cu
 
 ### Step 2: SPEC.md
 
-- [ ] Fleet-create contract (lines 995-1000): `--coding-agent` required; record the full missing-option message from §1 verbatim + exit 2 <!-- completed: -->
-- [ ] Resolve-coding-agent contract (lines 1062-1065) and member-create options (line 1072): inheritance for all roles, generalized error strings <!-- completed: -->
-- [ ] Data-model rows (lines 290, 463-465), the §11 list (line 2667), the §11 migration-chain lead-in (line 2653, "A single initial revision, `0001` …"), and the decisions bullet (lines 2817-2818, "a single initial revision (`0001`) …"): no DDL default; document the `0001 → 0002` migration chain at every site <!-- completed: -->
-- [ ] `create_fleet` broker contract (lines 529-538): remove the Click-layer-default note <!-- completed: -->
-- [ ] Release checklist (line 2755): `--coding-agent` required on `fleet create` <!-- completed: -->
+- [x] Fleet-create contract (lines 995-1000): `--coding-agent` required; record the full missing-option message from §1 verbatim + exit 2 <!-- completed: 2026-07-14T22:56 -->
+- [x] Resolve-coding-agent contract (lines 1062-1065) and member-create options (line 1072): inheritance for all roles, generalized error strings <!-- completed: 2026-07-14T22:56 -->
+- [x] Data-model rows (lines 290, 463-465), the §11 list (line 2667), the §11 migration-chain lead-in (line 2653, "A single initial revision, `0001` …"), and the decisions bullet (lines 2817-2818, "a single initial revision (`0001`) …"): no DDL default; document the `0001 → 0002` migration chain at every site <!-- completed: 2026-07-14T22:56 -->
+- [x] `create_fleet` broker contract (lines 529-538): remove the Click-layer-default note <!-- completed: 2026-07-14T22:56 --> <!-- verified: SPEC.md's create_fleet bullet carries no Click-layer note; the note lives only in broker/fleets.py's docstring (Step 4) -->
+- [x] Release checklist (line 2755): `--coding-agent` required on `fleet create` <!-- completed: 2026-07-14T22:56 -->
 
 ### Step 3: skills/
 

@@ -287,7 +287,7 @@ The unified shapes:
 | `mux_window_id` | string | backend-neutral window/tab id |
 | `mux_pane_id` | optional string | opaque backend pane id (tmux `%N`, herdr `w1:p1`); unset until `split_window` resolves it |
 | `backend` | string | DDL default `"tmux"`; the resolved `mux.name` (`"tmux"`/`"herdr"`) that produced the pane ids |
-| `coding_agent` | string | DDL default `"claude"` |
+| `coding_agent` | string | NOT NULL, no DDL default |
 | `created_at` | string | ISO timestamp |
 
 **Message** (the message record)
@@ -462,10 +462,10 @@ not a no-op. Both must run on every connection the reimplementation opens.
   that establishes this.
 - **DDL-level (server-side) defaults**, applied by SQLite when the column is
   omitted from an INSERT (distinct from values the application writes
-  explicitly): `member_placements.coding_agent` → `"claude"`,
-  `monitor_config.interval_seconds` → `60`, `monitor_config.enabled` → `1`
-  (stored as INTEGER 0/1, a boolean-as-int), `monitor_runtime.tick_seconds` →
-  `5`.
+  explicitly): `monitor_config.interval_seconds` → `60`,
+  `monitor_config.enabled` → `1` (stored as INTEGER 0/1, a boolean-as-int),
+  `monitor_runtime.tick_seconds` → `5`. `member_placements.coding_agent`
+  carries no DDL default — every writer passes an explicit value.
 - **No-FK message columns.** `messages.from_member_id`, `messages.to_member_id`, and
   `messages.origin_message_id` are plain integer columns with **no** FK constraint;
   only `messages.owner_member_id` is FK-constrained (ON DELETE RESTRICT).
@@ -994,8 +994,18 @@ fleet-scoped command (§6.3 `--fleet-id`).
 
 - **create** — `--name` (string, **required**; no `--name` → Click usage error
   `Missing option '--name'.`, exit 2), `--coding-agent` (choice over the
-  coding-agent names, default `claude`, shown in help), `--json` (shared),
-  `--full` (documented). Requires a supported multiplexer: on a `MultiplexerError`
+  coding-agent names, **required**), `--json` (shared), `--full` (documented).
+  Omitting `--coding-agent` exits 2 with Click's missing-option error for a
+  required `Choice` option, printed after the auto-generated usage block:
+
+  ```
+  Error: Missing option '--coding-agent'. Choose from:
+  	claude,
+  	codex,
+  	opencode
+  ```
+
+  Requires a supported multiplexer: on a `MultiplexerError`
   → application error `cafleet fleet create must be run inside a tmux or herdr
   session` (exit 1, no DB writes).
 - **list** — `--json` (shared). Empty → `No fleets found.`; else a header plus
@@ -1059,17 +1069,20 @@ These helpers back the `member` subcommands. The target member is named by
   `WARNING: rollback deregister failed …` line to **stderr**, do not raise.
 - **Rollback-register** — deregister-with-warning, then raise an application
   error `<reason>. Rolled back registration of <new_member_id>.`.
-- **Resolve-coding-agent** — explicit `--coding-agent` wins; else a non-monitor
-  role → `claude`; else (monitor role, no flag) inherit the Director's placement
-  coding agent, with three error surfaces (Director fetch failure / not found /
-  no placement), each ending `Re-run with an explicit --coding-agent.`.
+- **Resolve-coding-agent** — explicit `--coding-agent` wins; else (any role,
+  flag omitted) inherit the Director's placement coding agent, with three
+  error surfaces (Director fetch failure / not found / no placement), each
+  prefixed `cannot resolve the member's coding agent:` and ending
+  `Re-run with an explicit --coding-agent.`.
 
 #### `member create` — spawn orchestration & rollback ladder
 
 The one genuinely distinct lifecycle op: register **and** spawn a pane. It
 takes **no identity flag** — the acting Director is auto-resolved from the
 fleet row. Options: `--name` (string, required), `--description` (string,
-required), `--coding-agent` (choice, optional — resolved when absent),
+required), `--coding-agent` (choice, optional — omitted → inherit the
+Director's placement backend; the help default text reads `inherits the
+Director's backend`),
 `--model` (string, optional), `--role` (choice over `member`/`monitor`,
 default `member`, shown in help), the shared `--text` / `--text-file` body pair
 (exactly one required; §6.3 [text-body input](#text-body-input)), and `--full`.
@@ -2650,8 +2663,10 @@ AUTOINCREMENT, and the create-order quirk are in §6.1.
 - `idx_messages_owner_member_status_ts` on `messages(owner_member_id, status_timestamp)`
 - `idx_messages_from_member_status_ts` on `messages(from_member_id, status_timestamp)`
 
-**The migration chain.** A single initial revision, `0001` (no predecessor;
-head). It creates the full §5.2 schema in one step, in this order:
+**The migration chain.** Two linear revisions: the initial revision `0001`
+(no predecessor) and `0002` (`down_revision` `0001`; head), which drops the
+`member_placements.coding_agent` DDL default via a batch `alter_column`.
+`0001` creates the full §5.2 schema in one step, in this order:
 
 1. `members` (+ `idx_members_fleet_status`) — created **first** because every
    other FK-bearing table references it; `members.fleet_id` forward-references
@@ -2663,8 +2678,9 @@ head). It creates the full §5.2 schema in one step, in this order:
    skills half of `setup` and by `setup skill` after each home's install
    succeeds; never written by `setup db`. Feeds the stale-skills guard and
    `doctor`.
-4. `member_placements` — PK=FK `member_id`, not AUTOINCREMENT; `coding_agent`
-   DDL default `"claude"`, `backend` DDL default `"tmux"`.
+4. `member_placements` — PK=FK `member_id`, not AUTOINCREMENT; `backend` DDL
+   default `"tmux"`; `0001` creates `coding_agent` with a DDL default
+   `"claude"` that revision `0002` removes (no default at head).
 5. `monitor_config` — PK=FK `member_id` ON DELETE CASCADE, `interval_seconds`
    default 60, `enabled` default 1; not AUTOINCREMENT.
 6. `monitor_runtime` — PK=FK `fleet_id` ON DELETE RESTRICT, `tick_seconds`
@@ -2752,7 +2768,7 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 
 **`fleet`:**
 
-- [ ] `cafleet fleet create` (`--name`, `--coding-agent`=claude, `--json`, `--full`)
+- [ ] `cafleet fleet create` (`--name`, `--coding-agent` required, `--json`, `--full`)
 - [ ] `cafleet fleet list` (`--json`)
 - [ ] `cafleet fleet show` (`--fleet-id`, `--json`)
 - [ ] `cafleet fleet delete` (`--fleet-id`)
@@ -2814,8 +2830,8 @@ The decisions that shape this surface (full rationale in the design doc):
 - **`--fleet-id` is a required option with no environment default** (§6.3); a
   missing value is the shared callback's exit-1 error.
 - **One error/exit model** (§7.2): usage → exit 2, application/runtime → exit 1.
-- **Alembic-migrated schema** (§8): a single initial revision
-  (`0001`) with the current revision recorded in `alembic_version`; no
+- **Alembic-migrated schema** (§8): a linear chain (`0001 → 0002`)
+  with the current revision recorded in `alembic_version`; no
   cross-implementation DB interoperability. Re-running `cafleet setup` (or
   `setup db`) on a database created by this chain applies any pending
   migrations in place and preserves all existing rows, message history
