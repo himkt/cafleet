@@ -7,12 +7,12 @@ copyright = "Copyright © 2026 himkt"
 
 nav = [
     { "Get Started" = [
-        "get-started/index.md",
+        { "Overview" = "get-started/index.md" },
         { "Quickstart" = "get-started/quickstart.md" },
         { "Contributing" = "get-started/contributing.md" },
     ] },
     { "How-to guides" = [
-        "how-to/index.md",
+        { "Overview" = "how-to/index.md" },
         { "Run a mixed-backend team" = "how-to/mixed-backend-team.md" },
         { "Monitor and recover members" = "how-to/monitor-and-recover.md" },
         { "Use the admin WebUI" = "how-to/use-the-webui.md" },
@@ -33,7 +33,7 @@ nav = [
         { "Multiplexer backends" = "spec/multiplexer-backends.md" },
         { "WebUI API" = "spec/webui-api.md" },
         { "Coding-agent backends" = [
-            "reference/coding-agents/index.md",
+            { "Overview" = "reference/coding-agents/index.md" },
             { "Claude members" = "reference/coding-agents/claude.md" },
             { "Codex members" = "reference/coding-agents/codex.md" },
             { "Opencode members" = "reference/coding-agents/opencode.md" },
@@ -61,7 +61,6 @@ features = [
     "content.tabs.link",
     "content.tooltips",
     "navigation.footer",
-    "navigation.indexes",
     "navigation.instant",
     "navigation.instant.prefetch",
     "navigation.path",
