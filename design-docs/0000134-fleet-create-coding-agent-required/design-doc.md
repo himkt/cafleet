@@ -1,7 +1,7 @@
 # Require an Explicit Coding Agent: Mandatory `--coding-agent` on `fleet create`, Director Inheritance on `member create`
 
 **Status**: Approved
-**Progress**: 30/33 tasks complete
+**Progress**: 33/33 tasks complete
 **Last Updated**: 2026-07-14
 
 ## Overview
@@ -10,11 +10,11 @@
 
 ## Success Criteria
 
-- [ ] `cafleet fleet create --name x` (flag omitted) exits 2 with Click's `Missing option '--coding-agent'`; choices remain `claude` / `codex` / `opencode`.
-- [ ] `cafleet member create` with `--coding-agent` omitted records the Director's placement backend for **every** role (ordinary member and monitor alike); an explicit flag still wins.
-- [ ] No coding-agent `"claude"` default remains in `cafleet/src/cafleet/cli/` or `cafleet/src/cafleet/db/models.py` — neither `default="claude"` at the Click layer nor `server_default="claude"` in the model. The historical migration chain under `db/alembic/versions/` is exempt: `0001` is immutable and `0002`'s `downgrade()` restores the literal by design.
-- [ ] Every `cafleet fleet create` invocation in `docs/` and `skills/` shows `--coding-agent <backend>`, and the skill pages carry the instruction that the Director substitutes the backend it is actually running on.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
+- [x] `cafleet fleet create --name x` (flag omitted) exits 2 with Click's `Missing option '--coding-agent'`; choices remain `claude` / `codex` / `opencode`.
+- [x] `cafleet member create` with `--coding-agent` omitted records the Director's placement backend for **every** role (ordinary member and monitor alike); an explicit flag still wins.
+- [x] No coding-agent `"claude"` default remains in `cafleet/src/cafleet/cli/` or `cafleet/src/cafleet/db/models.py` — neither `default="claude"` at the Click layer nor `server_default="claude"` in the model. The historical migration chain under `db/alembic/versions/` is exempt: `0001` is immutable and `0002`'s `downgrade()` restores the literal by design.
+- [x] Every `cafleet fleet create` invocation in `docs/` and `skills/` shows `--coding-agent <backend>`, and the skill pages carry the instruction that the Director substitutes the backend it is actually running on.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
 
@@ -195,9 +195,9 @@ Per `removal.md`, no page narrates the removal — every page states only the cu
 
 ### Step 7: Verification
 
-- [ ] Grep `cafleet/src/cafleet/cli/` and `cafleet/src/cafleet/db/models.py` for `default="claude"` / `server_default="claude"` — zero coding-agent hits remain (`db/alembic/versions/` is exempt: `0001` is immutable and `0002`'s `downgrade()` restores the literal by design) <!-- completed: -->
-- [ ] Grep `docs/` and `skills/` for `fleet create` invocations — every one carries `--coding-agent` <!-- completed: -->
-- [ ] Manual smoke: `cafleet fleet create --name t` exits 2 with the missing-option error; `cafleet fleet create --name t --coding-agent codex` then `cafleet member create` (flag omitted) records `codex` for the member <!-- completed: -->
+- [x] Grep `cafleet/src/cafleet/cli/` and `cafleet/src/cafleet/db/models.py` for `default="claude"` / `server_default="claude"` — zero coding-agent hits remain (`db/alembic/versions/` is exempt: `0001` is immutable and `0002`'s `downgrade()` restores the literal by design) <!-- completed: 2026-07-14T23:24 -->
+- [x] Grep `docs/` and `skills/` for `fleet create` invocations — every one carries `--coding-agent` <!-- completed: 2026-07-14T23:24 -->
+- [x] Manual smoke: `cafleet fleet create --name t` exits 2 with the missing-option error; `cafleet fleet create --name t --coding-agent codex` then `cafleet member create` (flag omitted) records `codex` for the member <!-- completed: 2026-07-14T23:24 -->
 
 ---
 
