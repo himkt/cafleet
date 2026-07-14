@@ -1,7 +1,7 @@
 # Require an Explicit Coding Agent: Mandatory `--coding-agent` on `fleet create`, Director Inheritance on `member create`
 
 **Status**: Approved
-**Progress**: 18/33 tasks complete
+**Progress**: 30/33 tasks complete
 **Last Updated**: 2026-07-14
 
 ## Overview
@@ -174,24 +174,24 @@ Per `removal.md`, no page narrates the removal — every page states only the cu
 
 ### Step 4: CLI implementation
 
-- [ ] `cafleet/src/cafleet/cli/fleet.py`: `--coding-agent` → `required=True`, remove `default` / `show_default`, update help text <!-- completed: -->
-- [ ] `cafleet/src/cafleet/cli/member.py`: `_resolve_coding_agent` drops the `role` parameter and branch; error strings generalized; call site updated; `show_default="inherits the Director's backend"` <!-- completed: -->
-- [ ] `cafleet/src/cafleet/broker/fleets.py`: delete the docstring note that the `claude` default lives at the Click layer <!-- completed: -->
+- [x] `cafleet/src/cafleet/cli/fleet.py`: `--coding-agent` → `required=True`, remove `default` / `show_default`, update help text <!-- completed: 2026-07-14T23:11 -->
+- [x] `cafleet/src/cafleet/cli/member.py`: `_resolve_coding_agent` drops the `role` parameter and branch; error strings generalized; call site updated; `show_default="inherits the Director's backend"` <!-- completed: 2026-07-14T23:11 -->
+- [x] `cafleet/src/cafleet/broker/fleets.py`: delete the docstring note that the `claude` default lives at the Click layer <!-- completed: 2026-07-14T23:11 -->
 
 ### Step 5: DB migration
 
-- [ ] `db/models.py`: remove `server_default="claude"` from `MemberPlacement.coding_agent` <!-- completed: -->
-- [ ] Generate migration `0002` via `mise //cafleet:makemigration "drop coding_agent server default on member_placements"`; hand-edit to the batch `alter_column` form (upgrade drops the default, downgrade restores it) <!-- completed: -->
-- [ ] `cafleet/tests/db/test_alembic_smoke.py`: update the chain guard to the 2-revision chain (`0002`, `down_revision="0001"`, head `0002`), rename the head-version test, and assert `coding_agent` declares no column default in `test_member_placements_table_created_by_migration` <!-- completed: -->
+- [x] `db/models.py`: remove `server_default="claude"` from `MemberPlacement.coding_agent` <!-- completed: 2026-07-14T23:10 -->
+- [x] Generate migration `0002` via `mise //cafleet:makemigration "drop coding_agent server default on member_placements"`; hand-edit to the batch `alter_column` form (upgrade drops the default, downgrade restores it) <!-- completed: 2026-07-14T23:11 -->
+- [x] `cafleet/tests/db/test_alembic_smoke.py`: update the chain guard to the 2-revision chain (`0002`, `down_revision="0001"`, head `0002`), rename the head-version test, and assert `coding_agent` declares no column default in `test_member_placements_table_created_by_migration` <!-- completed: 2026-07-14T23:16 -->
 
 ### Step 6: Tests
 
-- [ ] `cafleet/tests/cli/test_fleet_bootstrap.py`: replace `test_fleet_create_coding_agent__default_is_claude` with an omitted-flag guard asserting exit 2 and `Missing option '--coding-agent'`; add `--coding-agent claude` to `test_fleet_create_json_output__placement_sub_dict_matches_spec` and the other invocations that omit the flag <!-- completed: -->
-- [ ] `cafleet/tests/cli/conftest.py`: fleet-create fixtures (lines 36-53) and the flag-omitting invocation `runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])` at lines 56-59 pass `--coding-agent claude` <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_member.py` `make_bootstrapped_fleet` (lines 743-747): pass `--coding-agent` unconditionally — it currently appends the flag only when the backend is not `claude`, and its claude path would exit 2 under the required flag <!-- completed: -->
-- [ ] `cafleet/tests/cli/test_member.py`: `test_member_create__role_member_omitted_flag_stays_claude` (line 817) → rename to `test_member_create__role_member_omitted_flag_inherits_director_backend`, assert a codex Director's ordinary member inherits `codex`, and replace its "inheritance is monitor-only" inline comment; monitor fail-loud tests (lines 838, 863) update expected strings to `the member's coding agent`; verify `_invoke_member_create` and the claude-Director-based tests (lines 326, 582) still hold under inheritance <!-- completed: -->
-- [ ] Sweep the remaining test fixtures for `fleet create` invocations relying on the removed default (e.g. `tests/cli/test_fleet.py`, `test_fleet_flag.py`, WebUI/broker fixtures that shell through the CLI) <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` <!-- completed: -->
+- [x] `cafleet/tests/cli/test_fleet_bootstrap.py`: replace `test_fleet_create_coding_agent__default_is_claude` with an omitted-flag guard asserting exit 2 and `Missing option '--coding-agent'`; add `--coding-agent claude` to `test_fleet_create_json_output__placement_sub_dict_matches_spec` and the other invocations that omit the flag <!-- completed: 2026-07-14T23:16 -->
+- [x] `cafleet/tests/cli/conftest.py`: fleet-create fixtures (lines 36-53) and the flag-omitting invocation `runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])` at lines 56-59 pass `--coding-agent claude` <!-- completed: 2026-07-14T23:16 -->
+- [x] `cafleet/tests/cli/test_member.py` `make_bootstrapped_fleet` (lines 743-747): pass `--coding-agent` unconditionally — it currently appends the flag only when the backend is not `claude`, and its claude path would exit 2 under the required flag <!-- completed: 2026-07-14T23:16 -->
+- [x] `cafleet/tests/cli/test_member.py`: `test_member_create__role_member_omitted_flag_stays_claude` (line 817) → rename to `test_member_create__role_member_omitted_flag_inherits_director_backend`, assert a codex Director's ordinary member inherits `codex`, and replace its "inheritance is monitor-only" inline comment; monitor fail-loud tests (lines 838, 863) update expected strings to `the member's coding agent`; verify `_invoke_member_create` and the claude-Director-based tests (lines 326, 582) still hold under inheritance <!-- completed: 2026-07-14T23:16 -->
+- [x] Sweep the remaining test fixtures for `fleet create` invocations relying on the removed default (e.g. `tests/cli/test_fleet.py`, `test_fleet_flag.py`, WebUI/broker fixtures that shell through the CLI) <!-- completed: 2026-07-14T23:16 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` <!-- completed: 2026-07-14T23:17 -->
 
 ### Step 7: Verification
 

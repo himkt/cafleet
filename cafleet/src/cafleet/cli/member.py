@@ -138,39 +138,34 @@ def _resolve_director_or_die(fleet_id: int) -> int:
 
 def _resolve_coding_agent(
     coding_agent: str | None,
-    role: str,
     director_member_id: int,
     fleet_id: int,
 ) -> str:
     """Resolve the backend for a new member.
 
-    An explicit ``--coding-agent`` always wins. When the flag is omitted
-    (``coding_agent is None``): ``--role monitor`` inherits the spawning
-    Director's backend from its placement row; an ordinary member defaults
-    to ``claude``.
+    An explicit ``--coding-agent`` always wins. When the flag is omitted,
+    the member inherits the spawning Director's backend from its placement row.
     """
     if coding_agent is not None:
         return coding_agent
-    if role != "monitor":
-        return "claude"
     try:
         director = broker.get_member(director_member_id, fleet_id)
     except Exception as exc:  # broker/DB failure — surface, do not mask
         raise click.ClickException(
-            f"cannot resolve the monitor's coding agent: failed to fetch "
+            f"cannot resolve the member's coding agent: failed to fetch "
             f"Director {director_member_id}: {exc}. "
             f"Re-run with an explicit --coding-agent."
         ) from exc
     if director is None:
         raise click.ClickException(
-            f"cannot resolve the monitor's coding agent: Director "
+            f"cannot resolve the member's coding agent: Director "
             f"{director_member_id} not found in fleet {fleet_id}. "
             f"Re-run with an explicit --coding-agent."
         )
     placement = director["placement"]
     if placement is None:
         raise click.ClickException(
-            f"cannot resolve the monitor's coding agent: Director "
+            f"cannot resolve the member's coding agent: Director "
             f"{director_member_id} has no placement row recording its backend. "
             f"Re-run with an explicit --coding-agent."
         )
@@ -186,7 +181,7 @@ def _resolve_coding_agent(
     "coding_agent",
     type=click.Choice(list(CODING_AGENTS.keys())),
     default=None,
-    show_default="claude; monitor inherits Director's backend",
+    show_default="inherits the Director's backend",
     help="Backend binary to spawn / record.",
 )
 @click.option(
@@ -224,12 +219,10 @@ def member_create(
     fleet_id = ctx.obj["fleet_id"]
 
     # Director auto-discovery runs first thing: the resolved id feeds the
-    # monitor's backend inheritance and the spawn-prompt substitution.
+    # member's backend inheritance and the spawn-prompt substitution.
     director_member_id = _resolve_director_or_die(fleet_id)
 
-    coding_agent = _resolve_coding_agent(
-        coding_agent, role, director_member_id, fleet_id
-    )
+    coding_agent = _resolve_coding_agent(coding_agent, director_member_id, fleet_id)
 
     agent = CODING_AGENTS[coding_agent]
 
