@@ -4,13 +4,13 @@ icon: lucide/bot
 
 # Claude members
 
-Operational doc for cafleet member panes that run Claude Code (`claude`), the default backend — this file covers the claude-specific surface.
+Operational doc for cafleet member panes that run Claude Code (`claude`) — this file covers the claude-specific surface.
 
 For the multi-backend overview and selection rules, see the [Coding agents](../../concepts/coding-agents.md) Concepts page.
 
 ## Overview
 
-A claude member is a cafleet member whose `member_placements.coding_agent` value is `"claude"`. claude is the **default** backend: `cafleet member create` spawns it when `--coding-agent` is omitted.
+A claude member is a cafleet member whose `member_placements.coding_agent` value is `"claude"`. When `--coding-agent` is omitted, `cafleet member create` inherits the spawning Director's placement backend — so a claude Director spawns claude members without the flag.
 
 ```bash
 cafleet member create --fleet-id <fleet-id> \
@@ -20,7 +20,7 @@ cafleet member create --fleet-id <fleet-id> \
 
 ## Spawn flags
 
-When `--coding-agent claude` is in effect (the default when `--coding-agent` is omitted), cafleet spawns the member pane with:
+When `--coding-agent claude` is in effect (explicitly or by inheritance from a claude Director), cafleet spawns the member pane with:
 
 ```
 claude --permission-mode dontAsk --name <member-name> <prompt>
@@ -54,7 +54,7 @@ Gated on local install of the `claude` binary. Run from inside a tmux or herdr s
     cafleet member create --fleet-id 1 \
       --name Claude-Smoke --description "claude smoke member" \
       --text "You are Claude-Smoke. Reply hello when polled."
-    # Expect: the backend defaults to claude (no --coding-agent needed).
+    # Expect: the member inherits claude from the Director (no --coding-agent needed).
 
     cafleet member list --fleet-id 1
     # Expect: the new member's row, backend column shows 'claude'; the pane title shows the member name.

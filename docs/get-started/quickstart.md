@@ -192,10 +192,12 @@ the `fleet create` and `member create` commands require one.
     members `3` and `4`, message `10`. Your ids will differ — substitute the
     integers your own commands print.
 
-    Create a fleet. This records your current pane as the root Director's pane:
+    Create a fleet. This records your current pane as the root Director's
+    pane; `--coding-agent` is required — pass the backend the Director is
+    actually running on (here, Claude Code):
 
     ```bash
-    cafleet fleet create --name "demo"
+    cafleet fleet create --name "demo" --coding-agent claude
     ```
 
     ```

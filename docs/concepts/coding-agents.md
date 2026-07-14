@@ -5,7 +5,7 @@ icon: lucide/cpu
 # Coding agents
 
 cafleet supports three coding-agent binaries inside member panes: `claude`
-(Claude Code, the default), `codex` (OpenAI Codex CLI), and `opencode`
+(Claude Code), `codex` (OpenAI Codex CLI), and `opencode`
 (opencode.ai). The backend is selected per member with
 `--coding-agent {claude,codex,opencode}`, and mixed-backend teams are allowed:
 a single Director may spawn all three in the same fleet with no broker-level
@@ -13,13 +13,14 @@ differences. The value is recorded in the placement's `coding_agent` column.
 
 The flag means slightly different things per command:
 
-- `cafleet fleet create --coding-agent` is operator-declared metadata only —
-  cafleet does not spawn the root Director's process and cannot auto-detect
-  what is already running in the calling pane.
+- `cafleet fleet create --coding-agent` is required, operator-declared
+  metadata — cafleet does not spawn the root Director's process and cannot
+  auto-detect what is already running in the calling pane, so the operator
+  states the backend the Director is actually running on.
 - `cafleet member create --coding-agent` both selects which backend is spawned
-  and is recorded as placement metadata. Ordinary members default to `claude`;
-  a `--role monitor` member inherits the spawning Director's backend when the
-  flag is omitted (an explicit value still wins).
+  and is recorded as placement metadata. When the flag is omitted, the member —
+  every role — inherits the spawning Director's placement backend (an explicit
+  value still wins).
 
 Each backend is spawned with flags that enable its Bash tool and auto-resolve
 routine permission prompts, so members run cafleet (and any shell command)

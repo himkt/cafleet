@@ -274,9 +274,19 @@ detail: [`create_fleet`](../api/broker.md#cafleet.broker.create_fleet),
 | Flag | Required | Notes |
 |---|---|---|
 | `--name` | yes | Human-readable name for the fleet |
-| `--coding-agent` | no | One of `claude` (default), `codex`, or `opencode`, recorded as the root Director's placement `coding_agent` — operator-declared metadata; see [Coding agents](../concepts/coding-agents.md). |
+| `--coding-agent` | yes | One of `claude`, `codex`, or `opencode`, recorded as the root Director's placement `coding_agent` — the operator declares the backend the Director is actually running on; see [Coding agents](../concepts/coding-agents.md). |
 | `--json` | no | Output as JSON |
 | `--full` | no | Switches the non-JSON output from the compact one-line form to a labeled block. |
+
+Omitting `--coding-agent` exits 2 with Click's missing-option error for a
+required `Choice` option, printed after the auto-generated usage block:
+
+```
+Error: Missing option '--coding-agent'. Choose from:
+	claude,
+	codex,
+	opencode
+```
 
 **Must be run inside a tmux or herdr session** — outside one it exits 1 with
 `Error: cafleet fleet create must be run inside a tmux or herdr session` and
@@ -485,7 +495,7 @@ unavailable, member not found, missing placement, pending placement, or a
 
 Register a member **and** spawn its coding-agent pane. It takes no identity
 flag: the acting Director is auto-resolved from `fleets.director_member_id`
-first thing, before registration (the resolved id also feeds the monitor's
+first thing, before registration (the resolved id also feeds the member's
 backend inheritance and the spawn-prompt substitution). A fleet has exactly
 one root Director by construction, so no override flag exists.
 
@@ -493,7 +503,7 @@ one root Director by construction, so no override flag exists.
 |---|---|---|
 | `--name` | yes | Display name — see [Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals) for pane-title behavior. |
 | `--description` | yes | One-sentence purpose. |
-| `--coding-agent` | no | One of `claude` (default for ordinary members), `codex`, or `opencode`; a `--role monitor` member inherits the Director's backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. |
+| `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; when omitted, the member — every role — inherits the spawning Director's placement backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. |
 | `--model` | no | Model forwarded to the backend binary's own `--model` flag — see [Model selection](../concepts/coding-agents.md#model-selection). |
 | `--role` | no | `member` (default) or `monitor`. `monitor` spawns the fleet's single dedicated monitoring member; a second spawn is rejected. See [Monitoring](../concepts/monitoring.md#the-monitoring-member). |
 | `--full` | no | Switches the non-JSON output to the 6-line labeled block. |
@@ -694,6 +704,7 @@ never pinged). Exits 1 for a not-in-fleet or not-enrolled member.
 | Missing `--fleet-id` on a fleet-scoped subcommand | `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` (exit 1) |
 | Missing `--member-id` | `Error: Missing option '--member-id'.` (exit 2) |
 | `fleet create` with no `--name` | `Error: Missing option '--name'.` (exit 2) |
+| `fleet create` with `--coding-agent` omitted | `Error: Missing option '--coding-agent'. Choose from:` followed by `claude,` / `codex,` / `opencode`, one per tab-indented line — recorded verbatim under [`fleet create`](#fleet-create) (exit 2) |
 | `fleet create` run outside a supported multiplexer | `Error: cafleet fleet create must be run inside a tmux or herdr session` (exit 1; no DB writes) |
 | `fleet delete` on unknown fleet_id | `Error: fleet 'X' not found.` (exit 1) |
 | `member create` against an unknown `--fleet-id` | `Error: Fleet '<fleet-id>' not found.` (exit 2; Director auto-discovery runs first thing) |
@@ -721,8 +732,8 @@ never pinged). Exits 1 for a not-in-fleet or not-enrolled member.
 | `member create` with an unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` (exit 2; the just-registered member is rolled back) |
 | `member create` with a malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` (exit 2; the just-registered member is rolled back) |
 | `member create --role monitor` when the fleet already has an active monitoring member | `Error: fleet <id> already has an active monitoring member (member <existing-id>); only one is allowed.` (exit 1) |
-| `member create --role monitor` with `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the monitor's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
-| `member create --role monitor` with `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the monitor's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
+| `member create` with `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the member's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
+| `member create` with `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the member's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
 | `monitor start` for a fleet that already has a live monitor | `Error: monitor already running for fleet <id>` (exit 1) |
 | `monitor start` / `monitor status` against an unknown or soft-deleted fleet | `Error: fleet <id> not found` (exit 1) |
 | `monitor config` with both `--enable` and `--disable` | `Error: --enable and --disable are mutually exclusive.` (exit 2) |

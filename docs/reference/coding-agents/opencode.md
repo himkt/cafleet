@@ -18,7 +18,7 @@ cafleet member create --fleet-id <fleet-id> \
   --text "<spawn prompt>"
 ```
 
-The default backend, mixed-backend teams, and the shared spawn framing are covered on [Coding agents](../../concepts/coding-agents.md).
+Backend selection and inheritance, mixed-backend teams, and the shared spawn framing are covered on [Coding agents](../../concepts/coding-agents.md).
 
 The opencode pane runs the bare `opencode` command, which per <https://opencode.ai/docs/cli/> is the documented TUI entry point ("The OpenCode CLI by default starts the TUI when run without any arguments"). The pane stays alive as a long-lived TUI you can scroll, switch to, and observe — matching the operator affordance of `claude` and `codex` panes. The `opencode run` subcommand (the documented headless / scripting entry) is **not** used.
 
@@ -106,6 +106,8 @@ Gated on local install of `opencode`. Run from inside a tmux or herdr session. T
     rm -f ~/.opencode/agents/cafleet.md
 
     cafleet fleet create --name opencode-smoke --coding-agent claude
+    # The Director pane in this recipe runs Claude Code — declare the backend
+    # your Director is actually running on.
     # Expect: a '<fleet_id> director=<director_id>' line.
     # Note the fleet and Director ids — the steps below use 1 and 2.
 
