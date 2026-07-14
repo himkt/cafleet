@@ -1,6 +1,6 @@
 # Codex Docs Cleanup
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 11/11 tasks complete
 **Last Updated**: 2026-07-14
 
@@ -165,3 +165,4 @@ Inbound link retargets (no redirect stubs; the old published URLs 404):
 |------|---------|
 | 2026-07-14 | Initial draft |
 | 2026-07-14 | Review round 1: dual "Where this lives" admonitions in the Codex subsection, `CAFLEET_DATABASE_URL` sentence in both TOML occurrences, `update-readme` skill retarget row + task, named `uv run zensical serve` as the verification serve command |
+| 2026-07-14 | Implementation complete: all 11 tasks and 6 Success Criteria verified (Verifier E2E + Reviewer approved round 1); PR #197 opened; Status → Complete |
