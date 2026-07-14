@@ -57,7 +57,18 @@ def _fetch_director_member_id(db_path, fleet_id: int) -> int:
 def bootstrapped_fleet(_cli_registry, _mock_tmux_for_fleet_create):
     """(fleet_id, runner, db_path) for a freshly bootstrapped fleet."""
     runner = CliRunner()
-    create = runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])
+    create = runner.invoke(
+        cli,
+        [
+            "fleet",
+            "create",
+            "--name",
+            "test-fleet",
+            "--coding-agent",
+            "claude",
+            "--json",
+        ],
+    )
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
     return data["fleet_id"], runner, _cli_registry

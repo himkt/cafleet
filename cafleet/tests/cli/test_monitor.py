@@ -36,7 +36,18 @@ def fresh_db(_cli_registry):
 @pytest.fixture
 def fleet(fresh_db, _mock_tmux_for_fleet_create):
     db_file, runner = fresh_db
-    result = runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])
+    result = runner.invoke(
+        cli,
+        [
+            "fleet",
+            "create",
+            "--name",
+            "test-fleet",
+            "--coding-agent",
+            "claude",
+            "--json",
+        ],
+    )
     assert result.exit_code == 0, result.output
     return db_file, runner, json.loads(result.output)
 
