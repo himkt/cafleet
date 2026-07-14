@@ -8,8 +8,6 @@ copyright = "Copyright © 2026 himkt"
 nav = [
     { "Get Started" = [
         "get-started/index.md",
-        { "Install" = "get-started/install.md" },
-        { "Configure" = "get-started/configure.md" },
         { "Quickstart" = "get-started/quickstart.md" },
         { "Contributing" = "get-started/contributing.md" },
     ] },
@@ -67,7 +65,6 @@ features = [
     "navigation.instant",
     "navigation.instant.prefetch",
     "navigation.path",
-    "navigation.sections",
     "navigation.top",
     "navigation.tracking",
     "search.highlight",

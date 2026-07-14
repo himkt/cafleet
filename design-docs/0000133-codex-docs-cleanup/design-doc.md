@@ -1,7 +1,7 @@
 # Codex Docs Cleanup
 
 **Status**: Approved
-**Progress**: 5/11 tasks complete
+**Progress**: 9/11 tasks complete
 **Last Updated**: 2026-07-14
 
 ## Overview
@@ -147,10 +147,10 @@ Inbound link retargets (no redirect stubs; the old published URLs 404):
 
 ### Step 3: Navigation, links, and README
 
-- [ ] Update `zensical.toml`: Get Started nav rows and removal of `navigation.sections` (§4) <!-- completed: -->
-- [ ] Retarget the inbound links in `docs/spec/cli-options.md`, `docs/how-to/mixed-backend-team.md`, and `docs/reference/coding-agents/codex.md` (§4) <!-- completed: -->
-- [ ] Update `README.md`: the "Full guide" link and the Get Started blurb (§4) <!-- completed: -->
-- [ ] Retarget `.claude/skills/update-readme/SKILL.md` to the merged Quickstart's Install section (§4) <!-- completed: -->
+- [x] Update `zensical.toml`: Get Started nav rows and removal of `navigation.sections` (§4) <!-- completed: 2026-07-14T20:47 -->
+- [x] Retarget the inbound links in `docs/spec/cli-options.md`, `docs/how-to/mixed-backend-team.md`, and `docs/reference/coding-agents/codex.md` (§4) <!-- completed: 2026-07-14T20:47 -->
+- [x] Update `README.md`: the "Full guide" link and the Get Started blurb (§4) <!-- completed: 2026-07-14T20:47 -->
+- [x] Retarget `.claude/skills/update-readme/SKILL.md` to the merged Quickstart's Install section (§4) <!-- completed: 2026-07-14T20:53 -->
 
 ### Step 4: Verification
 
