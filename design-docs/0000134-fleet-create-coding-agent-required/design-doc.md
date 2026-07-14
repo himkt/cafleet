@@ -1,6 +1,6 @@
 # Require an Explicit Coding Agent: Mandatory `--coding-agent` on `fleet create`, Director Inheritance on `member create`
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 33/33 tasks complete
 **Last Updated**: 2026-07-14
 
@@ -207,3 +207,4 @@ Per `removal.md`, no page narrates the removal — every page states only the cu
 |------|---------|
 | 2026-07-14 | Initial draft |
 | 2026-07-14 | Review round 1: full Click missing-option message as the error contract; default-grep criterion scoped to `cli/` + `db/models.py`; SPEC.md §11 chain lead-in and decisions bullet added; conftest.py:56-59 and `make_bootstrapped_fleet` fixtures named; inheritance test rename specified |
+| 2026-07-14 | Executed: all 33 tasks and 5 Success Criteria complete; 986 tests, lint, typecheck green; Verifier live smoke passed; Reviewer approved in round 1; PR #198 opened. Status → Complete |
