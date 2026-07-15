@@ -48,20 +48,20 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         engine.dispose()
 
 
-def test_alembic_version_table_records_head_0001(alembic_upgraded_db):
+def test_alembic_version_table_records_head_0002(alembic_upgraded_db):
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version_num FROM alembic_version"))
             rows = result.fetchall()
-        assert rows == [("0001",)]
+        assert rows == [("0002",)]
     finally:
         engine.dispose()
 
 
-def test_single_initial_migration_revision_exists():
-    """The migration history is a single fresh initial revision (0001) with no
-    predecessor, which is the head."""
+def test_two_revision_migration_chain_exists():
+    """The migration history is a linear 2-revision chain: the initial revision
+    (0001, no predecessor) followed by 0002, which is the head."""
     with importlib.resources.as_file(
         importlib.resources.files("cafleet.db") / "alembic" / "alembic.ini"
     ) as ini_path:
@@ -69,10 +69,12 @@ def test_single_initial_migration_revision_exists():
         script = ScriptDirectory.from_config(cfg)
         revisions = list(script.walk_revisions())
 
-    assert len(revisions) == 1
-    assert revisions[0].revision == "0001"
-    assert revisions[0].down_revision is None
-    assert script.get_current_head() == "0001"
+    assert len(revisions) == 2
+    assert revisions[0].revision == "0002"
+    assert revisions[0].down_revision == "0001"
+    assert revisions[1].revision == "0001"
+    assert revisions[1].down_revision is None
+    assert script.get_current_head() == "0002"
 
 
 def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
@@ -168,6 +170,10 @@ def test_member_placements_table_created_by_migration(alembic_upgraded_db):
 
         # backend defaults to 'tmux'
         assert "tmux" in str(cols["backend"]["default"])
+
+        # coding_agent declares no column default — the backend is always an
+        # explicit, operator-declared or inherited value
+        assert cols["coding_agent"]["default"] is None
 
         assert insp.get_indexes("member_placements") == []
     finally:

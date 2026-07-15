@@ -52,9 +52,7 @@ class MemberPlacement(Base):
     mux_window_id: Mapped[str] = mapped_column(String, nullable=False)
     mux_pane_id: Mapped[str | None] = mapped_column(String, nullable=True)
     backend: Mapped[str] = mapped_column(String, nullable=False, server_default="tmux")
-    coding_agent: Mapped[str] = mapped_column(
-        String, nullable=False, server_default="claude"
-    )
+    coding_agent: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
 
 

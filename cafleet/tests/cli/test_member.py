@@ -28,7 +28,18 @@ from cafleet.db.models import Member, MemberPlacement
 @pytest.fixture
 def bootstrapped_fleet(_mock_tmux_for_fleet_create):
     runner = CliRunner()
-    create = runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])
+    create = runner.invoke(
+        cli,
+        [
+            "fleet",
+            "create",
+            "--name",
+            "test-fleet",
+            "--coding-agent",
+            "claude",
+            "--json",
+        ],
+    )
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
     return data["fleet_id"], data["director"]["member_id"], runner
@@ -725,7 +736,7 @@ def test_member_create__invalid_role_choice_rejected(
     assert "not one of" in result.output
 
 
-# --- monitor inherits the Director's coding agent ----------
+# --- an omitted --coding-agent inherits the Director's backend ----------
 
 
 @pytest.fixture
@@ -733,8 +744,8 @@ def make_bootstrapped_fleet(tmp_path, monkeypatch, _mock_tmux_for_fleet_create):
     """Bootstrap a fleet whose root Director runs on a chosen backend.
 
     Returns a factory ``make(coding_agent="claude") -> (fleet_id, director_id,
-    runner)`` so monitor-inheritance tests can stand up a non-claude Director
-    whose placement row records ``codex`` / ``opencode``.
+    runner)`` so inheritance tests can stand up a non-claude Director whose
+    placement row records ``codex`` / ``opencode``.
     """
     # An inherited-opencode spawn's ensure_available materializes
     # ~/.opencode/agents/cafleet.md; redirect HOME so it stays in tmp_path.
@@ -742,10 +753,18 @@ def make_bootstrapped_fleet(tmp_path, monkeypatch, _mock_tmux_for_fleet_create):
 
     def _make(coding_agent: str = "claude"):
         runner = CliRunner()
-        args = ["fleet", "create", "--name", "test-fleet", "--json"]
-        if coding_agent != "claude":
-            args += ["--coding-agent", coding_agent]
-        create = runner.invoke(cli, args)
+        create = runner.invoke(
+            cli,
+            [
+                "fleet",
+                "create",
+                "--name",
+                "test-fleet",
+                "--coding-agent",
+                coding_agent,
+                "--json",
+            ],
+        )
         assert create.exit_code == 0, create.output
         data = json.loads(create.output)
         return data["fleet_id"], data["director"]["member_id"], runner
@@ -814,35 +833,42 @@ def test_member_create__role_monitor_explicit_coding_agent_wins(
     assert json.loads(result.output)["placement"]["coding_agent"] == "claude"
 
 
-def test_member_create__role_member_omitted_flag_stays_claude(
+@pytest.mark.parametrize("backend", ["codex", "opencode"])
+def test_member_create__role_member_omitted_flag_inherits_director_backend(
     make_bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
+    backend,
 ):
-    # Scope guard: an ordinary member on a codex Director still defaults to
-    # claude when --coding-agent is omitted — inheritance is monitor-only.
-    fleet_id, director_id, runner = make_bootstrapped_fleet("codex")
+    # An ordinary member with --coding-agent OMITTED inherits the Director's
+    # backend: the spawned binary, the placement, and the rendered prompt's
+    # CODING AGENT line all equal the Director's backend.
+    fleet_id, director_id, runner = make_bootstrapped_fleet(backend)
     result = _invoke_member_create(
         runner,
         fleet_id,
-        text="hello",
+        text="CODING AGENT: {coding_agent}",
         name="Ordinary",
         role="member",
         json_output=True,
     )
     assert result.exit_code == 0, result.output
-    assert split_window_recorder[0]["command"][0] == "claude"
-    assert json.loads(result.output)["placement"]["coding_agent"] == "claude"
+    command = split_window_recorder[0]["command"]
+    assert command[0] == backend
+    assert command[-1] == f"CODING AGENT: {backend}"
+    assert json.loads(result.output)["placement"]["coding_agent"] == backend
 
 
-def test_member_create__role_monitor_fail_loud_missing_placement(
+@pytest.mark.parametrize("role", ["member", "monitor"])
+def test_member_create__omitted_flag_fail_loud_missing_placement(
     bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
+    role,
 ):
     # A Director whose placement row is gone (corruption) is unresolvable for
-    # monitor backend inheritance: exit 1 with the "has no placement row"
-    # message and no spawn.
+    # backend inheritance — for every role: exit 1 with the "has no placement
+    # row" message and no spawn.
     fleet_id, director_id, runner = bootstrapped_fleet
     with _shared.write_session() as s:
         s.execute(
@@ -853,21 +879,25 @@ def test_member_create__role_monitor_fail_loud_missing_placement(
         fleet_id,
         text="hello",
         name="Watcher",
-        role="monitor",
+        role=role,
     )
     assert result.exit_code == 1, result.output
+    assert "cannot resolve the member's coding agent" in result.output
     assert "has no placement row" in result.output
+    assert "Re-run with an explicit --coding-agent." in result.output
     assert split_window_recorder == []
 
 
-def test_member_create__role_monitor_fail_loud_director_not_found(
+@pytest.mark.parametrize("role", ["member", "monitor"])
+def test_member_create__omitted_flag_fail_loud_director_not_found(
     bootstrapped_fleet,
     split_window_recorder,
     stub_coding_agent_binaries,
+    role,
 ):
     # An auto-resolved Director that is no longer active (corruption) exercises
-    # the director-is-None branch: exit 1 with the "not found in fleet" message
-    # and no spawn.
+    # the director-is-None branch — for every role: exit 1 with the "not found
+    # in fleet" message and no spawn.
     fleet_id, director_id, runner = bootstrapped_fleet
     with _shared.write_session() as s:
         s.execute(
@@ -880,8 +910,10 @@ def test_member_create__role_monitor_fail_loud_director_not_found(
         fleet_id,
         text="hello",
         name="Watcher",
-        role="monitor",
+        role=role,
     )
     assert result.exit_code == 1, result.output
+    assert "cannot resolve the member's coding agent" in result.output
     assert "not found in fleet" in result.output
+    assert "Re-run with an explicit --coding-agent." in result.output
     assert split_window_recorder == []

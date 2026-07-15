@@ -14,22 +14,24 @@ from click.testing import CliRunner
 from cafleet.cli import cli
 
 
-def _invoke_member_create(runner: CliRunner, fleet_id: int):
-    return runner.invoke(
-        cli,
-        [
-            "member",
-            "create",
-            "--fleet-id",
-            str(fleet_id),
-            "--name",
-            "Member",
-            "--description",
-            "Member for tests",
-            "--text",
-            "do work",
-        ],
-    )
+def _invoke_member_create(
+    runner: CliRunner, fleet_id: int, *, coding_agent: str | None = None
+):
+    args = [
+        "member",
+        "create",
+        "--fleet-id",
+        str(fleet_id),
+        "--name",
+        "Member",
+        "--description",
+        "Member for tests",
+        "--text",
+        "do work",
+    ]
+    if coding_agent is not None:
+        args.extend(["--coding-agent", coding_agent])
+    return runner.invoke(cli, args)
 
 
 def _db_execute(db_path, sql: str, params: tuple):
@@ -57,7 +59,18 @@ def _fetch_director_member_id(db_path, fleet_id: int) -> int:
 def bootstrapped_fleet(_cli_registry, _mock_tmux_for_fleet_create):
     """(fleet_id, runner, db_path) for a freshly bootstrapped fleet."""
     runner = CliRunner()
-    create = runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])
+    create = runner.invoke(
+        cli,
+        [
+            "fleet",
+            "create",
+            "--name",
+            "test-fleet",
+            "--coding-agent",
+            "claude",
+            "--json",
+        ],
+    )
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
     return data["fleet_id"], runner, _cli_registry
@@ -113,7 +126,9 @@ def test_member_create__inactive_root_director_exits_1(bootstrapped_fleet, monke
     # The invariant guard fires inside register_member, past the multiplexer
     # and binary availability checks (the tmux stubs from the bootstrap
     # fixture are still active) — stub the binary lookup and record that no
-    # pane is ever split.
+    # pane is ever split. The explicit --coding-agent skips backend
+    # resolution, whose Director-not-found surface would otherwise fire
+    # first and shadow the invariant guard.
     monkeypatch.setattr(
         "cafleet.coding_agent.base.shutil.which", lambda _: "/usr/bin/stub"
     )
@@ -123,7 +138,7 @@ def test_member_create__inactive_root_director_exits_1(bootstrapped_fleet, monke
         lambda self, **kwargs: split_calls.append(kwargs) or "%42",
     )
 
-    result = _invoke_member_create(runner, fleet_id)
+    result = _invoke_member_create(runner, fleet_id, coding_agent="claude")
     assert result.exit_code == 1, result.output
     assert (
         f"fleet {fleet_id}'s root Director (member {director_id}) is not active."

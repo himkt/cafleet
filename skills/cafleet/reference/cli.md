@@ -40,7 +40,7 @@ Environment variable controlling body truncation in the rendered envelope; defau
 
 ## Coding-agent backends
 
-Three backends — `claude` (default), `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent`. `--model <m>` pins the LLM and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; both flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md) (and [`roles/monitor.md`](../roles/monitor.md) plus [`reference/supervision.md`](supervision.md) for the monitor). All three honor the leading-`!` input shortcut, so `member exec` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent/claude.md) / [`codex`](coding-agent/codex.md) / [`opencode`](coding-agent/opencode.md).
+Three backends — `claude`, `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent` (omitted → the member inherits the Director's backend). `--model <m>` pins the LLM and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; both flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md) (and [`roles/monitor.md`](../roles/monitor.md) plus [`reference/supervision.md`](supervision.md) for the monitor). All three honor the leading-`!` input shortcut, so `member exec` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent/claude.md) / [`codex`](coding-agent/codex.md) / [`opencode`](coding-agent/opencode.md).
 
 ## Cancel (Retract)
 
@@ -132,9 +132,10 @@ Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters ever
 
 1. **Create a fleet** (if none exists):
    ```bash
-   cafleet fleet create --name "my-project"
+   cafleet fleet create --name "my-project" --coding-agent <backend>
    # text: '<fleet-id> director=<root-director-member-id>'; append --json for the nested shape
    ```
+   `--coding-agent <backend>` — substitute the coding agent you are actually running on: your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity (e.g. Claude Code → `claude`).
    Must run inside a tmux or herdr session (else exits 1 with `Error: cafleet fleet create must be run inside a tmux or herdr session`, writes nothing).
 
 2. **Discover, send, poll, ack** per the command sections above; append a trailing `--json` when parsing output. Director-side create/capture/exec/ping: [`reference/director.md`](director.md); shutdown ordering: [`reference/recovery.md`](recovery.md).

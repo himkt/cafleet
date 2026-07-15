@@ -97,7 +97,7 @@ def fresh_db(tmp_path, monkeypatch):
 @pytest.mark.parametrize("output_mode", ["text", "json"])
 def test_fleet_create__happy_path(fresh_db, output_mode):
     db_file, runner = fresh_db
-    args = ["fleet", "create", "--name", "happy"]
+    args = ["fleet", "create", "--name", "happy", "--coding-agent", "claude"]
     if output_mode == "json":
         args.append("--json")
     result = runner.invoke(cli, args)
@@ -116,16 +116,18 @@ def test_fleet_create__happy_path(fresh_db, output_mode):
 
 def test_fleet_create__name_round_trip(fresh_db):
     db_file, runner = fresh_db
-    result = runner.invoke(cli, ["fleet", "create", "--name", "PR-42 review"])
+    result = runner.invoke(
+        cli, ["fleet", "create", "--name", "PR-42 review", "--coding-agent", "claude"]
+    )
     assert result.exit_code == 0, result.output
     assert _fleet_rows(db_file)[0][1] == "PR-42 review"
 
 
 def test_fleet_create__missing_required_name_exits_2(fresh_db):
-    """``--name`` is required (mirrors ``member create``); a bare ``fleet create``
-    fails at parse time with Click's missing-required-option error (exit 2)."""
+    """``--name`` is required (mirrors ``member create``); omitting it fails at
+    parse time with Click's missing-required-option error (exit 2)."""
     _db_file, runner = fresh_db
-    result = runner.invoke(cli, ["fleet", "create"])
+    result = runner.invoke(cli, ["fleet", "create", "--coding-agent", "claude"])
     assert result.exit_code == 2, result.output
     out = result.output or ""
     assert "Missing option" in out
@@ -134,15 +136,30 @@ def test_fleet_create__missing_required_name_exits_2(fresh_db):
 
 def test_fleet_create__each_create_mints_unique_id(fresh_db):
     db_file, runner = fresh_db
-    r1 = runner.invoke(cli, ["fleet", "create", "--name", "u1", "--json"])
-    r2 = runner.invoke(cli, ["fleet", "create", "--name", "u2", "--json"])
+    r1 = runner.invoke(
+        cli, ["fleet", "create", "--name", "u1", "--coding-agent", "claude", "--json"]
+    )
+    r2 = runner.invoke(
+        cli, ["fleet", "create", "--name", "u2", "--coding-agent", "claude", "--json"]
+    )
     assert json.loads(r1.output)["fleet_id"] != json.loads(r2.output)["fleet_id"]
     assert len(_fleet_rows(db_file)) == 2
 
 
 def test_fleet_create__seeds_only_the_root_director_in_db(fresh_db):
     db_file, runner = fresh_db
-    result = runner.invoke(cli, ["fleet", "create", "--name", "seed-check", "--json"])
+    result = runner.invoke(
+        cli,
+        [
+            "fleet",
+            "create",
+            "--name",
+            "seed-check",
+            "--coding-agent",
+            "claude",
+            "--json",
+        ],
+    )
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     sid = data["fleet_id"]

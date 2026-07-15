@@ -56,7 +56,9 @@ def test_fleet_create_text_output__compact_default_emits_fleet_id_and_full_ids(
 ):
     """Default text output is 1 line: ``<fleet_id> director=<id>``."""
     runner = CliRunner()
-    result = runner.invoke(cli, ["fleet", "create", "--name", "boot"])
+    result = runner.invoke(
+        cli, ["fleet", "create", "--name", "boot", "--coding-agent", "claude"]
+    )
     assert result.exit_code == 0, result.output
 
     out = result.output.strip()
@@ -78,7 +80,16 @@ def test_fleet_create_text_output__full_flag_emits_verbose_6_line_layout(
     """``--full`` emits the verbose 6-line layout with field labels."""
     runner = CliRunner()
     result = runner.invoke(
-        cli, ["fleet", "create", "--name", "bootstrap-check", "--full"]
+        cli,
+        [
+            "fleet",
+            "create",
+            "--name",
+            "bootstrap-check",
+            "--coding-agent",
+            "claude",
+            "--full",
+        ],
     )
     assert result.exit_code == 0
 
@@ -98,7 +109,9 @@ def test_fleet_create_text_output__full_flag_emits_verbose_6_line_layout(
 
 def test_fleet_create_json_output__top_level_keys(db_file, mock_tmux_ok):
     runner = CliRunner()
-    result = runner.invoke(cli, ["fleet", "create", "--name", "boot", "--json"])
+    result = runner.invoke(
+        cli, ["fleet", "create", "--name", "boot", "--coding-agent", "claude", "--json"]
+    )
     assert result.exit_code == 0, result.output
 
     data = json.loads(result.output)
@@ -107,7 +120,9 @@ def test_fleet_create_json_output__top_level_keys(db_file, mock_tmux_ok):
 
 def test_fleet_create_json_output__director_sub_dict(db_file, mock_tmux_ok):
     runner = CliRunner()
-    result = runner.invoke(cli, ["fleet", "create", "--name", "boot", "--json"])
+    result = runner.invoke(
+        cli, ["fleet", "create", "--name", "boot", "--coding-agent", "claude", "--json"]
+    )
     assert result.exit_code == 0
     data = json.loads(result.output)
     director = data["director"]
@@ -122,12 +137,13 @@ def test_fleet_create_json_output__placement_sub_dict_matches_spec(
     db_file, mock_tmux_ok
 ):
     runner = CliRunner()
-    result = runner.invoke(cli, ["fleet", "create", "--name", "boot", "--json"])
+    result = runner.invoke(
+        cli, ["fleet", "create", "--name", "boot", "--coding-agent", "claude", "--json"]
+    )
     assert result.exit_code == 0
     data = json.loads(result.output)
     placement = data["director"]["placement"]
 
-    # Default --coding-agent is 'claude'.
     assert placement["coding_agent"] == "claude"
     assert placement["backend"] == "tmux"
     assert placement["mux_session"] == _FAKE_DIRECTOR_CTX.session
@@ -167,13 +183,15 @@ def test_fleet_create_coding_agent__claude_records_claude_in_placement(
     assert data["director"]["placement"]["coding_agent"] == "claude"
 
 
-def test_fleet_create_coding_agent__default_is_claude(db_file, mock_tmux_ok):
-    """No ``--coding-agent`` flag defaults the placement to ``'claude'``."""
+def test_fleet_create_coding_agent__omitted_flag_exits_2_missing_option(
+    db_file, mock_tmux_ok
+):
+    """``--coding-agent`` is required; omitting it is a usage error (exit 2)."""
     runner = CliRunner()
     result = runner.invoke(cli, ["fleet", "create", "--name", "boot", "--json"])
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
-    assert data["director"]["placement"]["coding_agent"] == "claude"
+    assert result.exit_code == 2, result.output
+    assert "Missing option '--coding-agent'" in (result.output or "")
+    assert _fleet_rows(db_file) == []
 
 
 def test_fleet_create_coding_agent__unknown_value_rejected(db_file, mock_tmux_ok):
@@ -188,7 +206,18 @@ def test_fleet_create_coding_agent__unknown_value_rejected(db_file, mock_tmux_ok
 
 def test_fleet_create_json_output__name_propagates_to_json(db_file, mock_tmux_ok):
     runner = CliRunner()
-    result = runner.invoke(cli, ["fleet", "create", "--name", "json-name", "--json"])
+    result = runner.invoke(
+        cli,
+        [
+            "fleet",
+            "create",
+            "--name",
+            "json-name",
+            "--coding-agent",
+            "claude",
+            "--json",
+        ],
+    )
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["name"] == "json-name"
@@ -198,7 +227,9 @@ def test_fleet_create_outside_tmux__fails_with_specific_error_and_exit_1(
     db_file, mock_tmux_unavailable
 ):
     runner = CliRunner()
-    result = runner.invoke(cli, ["fleet", "create", "--name", "boot"])
+    result = runner.invoke(
+        cli, ["fleet", "create", "--name", "boot", "--coding-agent", "claude"]
+    )
     assert result.exit_code == 1, result.output
     combined = (result.output or "") + (result.stderr or "")
     assert "cafleet fleet create must be run inside a tmux or herdr session" in combined
@@ -209,7 +240,9 @@ def test_fleet_create_outside_tmux__no_fleet_row_is_written_when_tmux_is_missing
 ):
     runner = CliRunner()
     before = _fleet_rows(db_file)
-    result = runner.invoke(cli, ["fleet", "create", "--name", "boot"])
+    result = runner.invoke(
+        cli, ["fleet", "create", "--name", "boot", "--coding-agent", "claude"]
+    )
     assert result.exit_code == 1, result.output
     after = _fleet_rows(db_file)
     assert before == after
@@ -219,8 +252,12 @@ def test_fleet_list_hides_soft_deleted__deleted_fleet_is_hidden_from_text_list(
     db_file, mock_tmux_ok
 ):
     runner = CliRunner()
-    r1 = runner.invoke(cli, ["fleet", "create", "--name", "keep", "--json"])
-    r2 = runner.invoke(cli, ["fleet", "create", "--name", "drop", "--json"])
+    r1 = runner.invoke(
+        cli, ["fleet", "create", "--name", "keep", "--coding-agent", "claude", "--json"]
+    )
+    r2 = runner.invoke(
+        cli, ["fleet", "create", "--name", "drop", "--coding-agent", "claude", "--json"]
+    )
     assert r1.exit_code == 0
     assert r2.exit_code == 0
     keep_sid = json.loads(r1.output)["fleet_id"]
@@ -241,8 +278,12 @@ def test_fleet_list_hides_soft_deleted__deleted_fleet_is_hidden_from_json_list(
     db_file, mock_tmux_ok
 ):
     runner = CliRunner()
-    r1 = runner.invoke(cli, ["fleet", "create", "--name", "boot", "--json"])
-    r2 = runner.invoke(cli, ["fleet", "create", "--name", "boot", "--json"])
+    r1 = runner.invoke(
+        cli, ["fleet", "create", "--name", "boot", "--coding-agent", "claude", "--json"]
+    )
+    r2 = runner.invoke(
+        cli, ["fleet", "create", "--name", "boot", "--coding-agent", "claude", "--json"]
+    )
     keep_sid = json.loads(r1.output)["fleet_id"]
     drop_sid = json.loads(r2.output)["fleet_id"]
     runner.invoke(cli, ["fleet", "delete", "--fleet-id", str(drop_sid)])
@@ -271,7 +312,9 @@ def test_fleet_delete_unknown_and_idempotent__second_delete_is_idempotent_and_re
     db_file, mock_tmux_ok
 ):
     runner = CliRunner()
-    r = runner.invoke(cli, ["fleet", "create", "--name", "boot", "--json"])
+    r = runner.invoke(
+        cli, ["fleet", "create", "--name", "boot", "--coding-agent", "claude", "--json"]
+    )
     assert r.exit_code == 0
     sid = json.loads(r.output)["fleet_id"]
 

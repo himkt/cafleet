@@ -46,7 +46,18 @@ def bootstrapped_roster(_mock_tmux_for_fleet_create):
     ``(sid, ids, runner)`` where ``ids`` maps fixture names to member ids.
     """
     runner = CliRunner()
-    create = runner.invoke(cli, ["fleet", "create", "--name", "test-fleet", "--json"])
+    create = runner.invoke(
+        cli,
+        [
+            "fleet",
+            "create",
+            "--name",
+            "test-fleet",
+            "--coding-agent",
+            "claude",
+            "--json",
+        ],
+    )
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
     sid = data["fleet_id"]
@@ -184,7 +195,9 @@ def test_member_list__json_activity_visible_after_send(bootstrapped_roster):
 @pytest.mark.usefixtures("_mock_tmux_for_fleet_create")
 def test_member_list__json_bootstrap_only_lists_the_director():
     runner = CliRunner()
-    create = runner.invoke(cli, ["fleet", "create", "--name", "bare", "--json"])
+    create = runner.invoke(
+        cli, ["fleet", "create", "--name", "bare", "--coding-agent", "claude", "--json"]
+    )
     assert create.exit_code == 0, create.output
     data = json.loads(create.output)
 

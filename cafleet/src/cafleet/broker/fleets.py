@@ -32,8 +32,7 @@ def create_fleet(
             Director, obtained via ``Multiplexer.context_discovery``.
         coding_agent: Operator-declared metadata that lands in the root
             Director's ``placement.coding_agent`` column. The CLI is the only
-            caller and always supplies it (default ``'claude'`` lives at the
-            Click layer).
+            caller and always supplies it.
         backend: The resolved multiplexer name (``mux.name``) recorded in the
             Director's ``placement.backend`` column.
 

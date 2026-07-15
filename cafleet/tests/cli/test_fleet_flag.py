@@ -129,7 +129,9 @@ def test_subcommands_that_do_not_require_fleet_id__fleet_create_without_fleet_id
     db_runner,
 ):
     """fleet create mints a fleet, so it cannot itself require one."""
-    result = db_runner.invoke(cli, ["fleet", "create", "--name", "smoke"])
+    result = db_runner.invoke(
+        cli, ["fleet", "create", "--name", "smoke", "--coding-agent", "claude"]
+    )
     assert result.exit_code == 0, result.output
 
 
@@ -161,7 +163,18 @@ def test_fleet_id_rejected_where_not_required__fleet_create_rejects_in_both_posi
 
 def _create_fleet_via_cli(runner: CliRunner) -> int:
     """Run ``fleet create --json`` and return the fleet_id."""
-    result = runner.invoke(cli, ["fleet", "create", "--name", "flag-test", "--json"])
+    result = runner.invoke(
+        cli,
+        [
+            "fleet",
+            "create",
+            "--name",
+            "flag-test",
+            "--coding-agent",
+            "claude",
+            "--json",
+        ],
+    )
     assert result.exit_code == 0, result.output
     return json.loads(result.output)["fleet_id"]
 

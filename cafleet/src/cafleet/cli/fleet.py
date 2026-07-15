@@ -25,9 +25,8 @@ def fleet() -> None:
     "--coding-agent",
     "coding_agent",
     type=click.Choice(list(CODING_AGENTS.keys())),
-    default="claude",
-    show_default=True,
-    help="Coding-agent binary to spawn / declare for the placement.",
+    required=True,
+    help="Coding-agent binary the Director is actually running on.",
 )
 @full_flag
 @json_flag

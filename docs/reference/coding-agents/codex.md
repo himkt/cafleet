@@ -18,7 +18,7 @@ cafleet member create --fleet-id <fleet-id> \
   --text "<spawn prompt>"
 ```
 
-The default backend, mixed-backend teams, and the shared spawn framing are covered on [Coding agents](../../concepts/coding-agents.md).
+Backend selection and inheritance, mixed-backend teams, and the shared spawn framing are covered on [Coding agents](../../concepts/coding-agents.md).
 
 ## Spawn flags
 
@@ -80,6 +80,8 @@ Gated on local install of both `claude` and `codex` binaries. Run from inside a 
 
     ```bash
     cafleet fleet create --name codex-smoke --coding-agent claude
+    # The Director pane in this recipe runs Claude Code — declare the backend
+    # your Director is actually running on.
     # Expect: a '<fleet_id> director=<director_id>' line.
     # Note the fleet and Director ids — the steps below use 1 and 2.
 
