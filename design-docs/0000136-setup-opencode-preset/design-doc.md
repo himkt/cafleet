@@ -1,7 +1,7 @@
 # Ship Coding-Agent Presets via `cafleet setup`
 
 **Status**: Approved
-**Progress**: 12/25 tasks complete
+**Progress**: 15/25 tasks complete
 **Last Updated**: 2026-07-17
 
 ## Overview
@@ -166,9 +166,9 @@ def ensure_available(self) -> None:
 
 ### Step 2: Preset assets + release archive
 
-- [ ] Add `presets/opencode/cafleet.md`, byte-identical to the current `CAFLEET_AGENT.to_markdown()` output (verify against the SPEC verbatim block) <!-- completed: -->
-- [ ] Add `presets/codex/cafleet.rules` with the verbatim rules block from § Preset asset catalog <!-- completed: -->
-- [ ] Update `.github/workflows/publish.yml` to zip `skills presets` <!-- completed: -->
+- [x] Add `presets/opencode/cafleet.md`, byte-identical to the current `CAFLEET_AGENT.to_markdown()` output (verify against the SPEC verbatim block) <!-- completed: 2026-07-17T02:52 -->
+- [x] Add `presets/codex/cafleet.rules` with the verbatim rules block from § Preset asset catalog <!-- completed: 2026-07-17T02:53 -->
+- [x] Update `.github/workflows/publish.yml` to zip `skills presets` <!-- completed: 2026-07-17T02:53 -->
 
 ### Step 3: CLI implementation
 

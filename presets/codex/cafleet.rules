@@ -1,0 +1,7 @@
+prefix_rule(pattern = ["cafleet"], decision = "allow")
+
+prefix_rule(
+    pattern = ["cafleet", "member", "exec"],
+    decision = "prompt",
+    justification = "cafleet member exec runs arbitrary commands on a member",
+)
