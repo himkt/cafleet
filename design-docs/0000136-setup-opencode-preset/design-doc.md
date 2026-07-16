@@ -1,7 +1,7 @@
 # Ship Coding-Agent Presets via `cafleet setup`
 
 **Status**: Approved
-**Progress**: 15/25 tasks complete
+**Progress**: 21/25 tasks complete
 **Last Updated**: 2026-07-17
 
 ## Overview
@@ -172,12 +172,12 @@ def ensure_available(self) -> None:
 
 ### Step 3: CLI implementation
 
-- [ ] `cli/setup.py`: rename the skills half to the assets half; update half-failure labels and the no-homes-detected message <!-- completed: -->
-- [ ] `cli/setup.py`: replace `setup skill` with per-agent subcommands `claude` / `codex` / `opencode` sharing one implementation <!-- completed: -->
-- [ ] `cli/setup.py`: add the preset asset catalog; extend archive validation to require both archive sources; add the per-agent preset install (mkdir parents; remove existing target in the order `is_symlink()` → unlink, else `is_dir()` → rmtree, else unlink if present; copy) with the new error string; record the row only after skills + preset succeed; add the preset success line <!-- completed: -->
-- [ ] Update the stale-skills guard message to `run 'cafleet setup' to reinstall` <!-- completed: -->
-- [ ] `coding_agent/opencode.py`: `ensure_available` = PATH check + preset-existence check with the new error; drop the `materialize_cafleet_agent` import <!-- completed: -->
-- [ ] Delete `coding_agent/opencode_preset.py`; update the `CodingAgent` protocol docstring in `base.py` in both places (remove the side-effect clause; reword the precondition to "the preset file exists on disk") <!-- completed: -->
+- [x] `cli/setup.py`: rename the skills half to the assets half; update half-failure labels and the no-homes-detected message <!-- completed: 2026-07-17T03:05 -->
+- [x] `cli/setup.py`: replace `setup skill` with per-agent subcommands `claude` / `codex` / `opencode` sharing one implementation <!-- completed: 2026-07-17T03:05 -->
+- [x] `cli/setup.py`: add the preset asset catalog; extend archive validation to require both archive sources; add the per-agent preset install (mkdir parents; remove existing target in the order `is_symlink()` → unlink, else `is_dir()` → rmtree, else unlink if present; copy) with the new error string; record the row only after skills + preset succeed; add the preset success line <!-- completed: 2026-07-17T03:05 -->
+- [x] Update the stale-skills guard message to `run 'cafleet setup' to reinstall` <!-- completed: 2026-07-17T03:05 -->
+- [x] `coding_agent/opencode.py`: `ensure_available` = PATH check + preset-existence check with the new error; drop the `materialize_cafleet_agent` import <!-- completed: 2026-07-17T03:05 -->
+- [x] Delete `coding_agent/opencode_preset.py`; update the `CodingAgent` protocol docstring in `base.py` in both places (remove the side-effect clause; reword the precondition to "the preset file exists on disk") <!-- completed: 2026-07-17T03:12 -->
 
 ### Step 4: Tests
 

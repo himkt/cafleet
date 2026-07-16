@@ -30,11 +30,8 @@ class CodingAgent(Protocol):
         """Raise if any spawn precondition is unmet.
 
         Preconditions covered by impls include: the backend binary is on
-        ``PATH``, any required config file is writable, and (for backends
-        with bundled presets) the preset has been materialized to disk.
-
-        Impls MAY materialize required config files here as a side effect —
-        see ``OpencodeAgent.ensure_available`` for the canonical example.
+        ``PATH``, and (for backends with bundled presets) the preset file
+        exists on disk.
 
         Raises:
             RuntimeError: If any precondition is unmet.

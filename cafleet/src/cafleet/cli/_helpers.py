@@ -35,7 +35,7 @@ def ensure_skills_current() -> None:
         )
         raise click.ClickException(
             f"stale skills detected ({listed}; CLI {runtime_version}); "
-            "run 'cafleet setup skill' to reinstall"
+            "run 'cafleet setup' to reinstall"
         )
 
 
