@@ -6,11 +6,7 @@ site_url = "https://himkt.github.io/cafleet/"
 copyright = "Copyright © 2026 himkt"
 
 nav = [
-    { "Get Started" = [
-        { "Overview" = "get-started/index.md" },
-        { "Quickstart" = "get-started/quickstart.md" },
-        { "Contributing" = "get-started/contributing.md" },
-    ] },
+    { "Quickstart" = "quickstart.md" },
     { "How-to guides" = [
         { "Overview" = "how-to/index.md" },
         { "Run a mixed-backend team" = "how-to/mixed-backend-team.md" },
@@ -39,6 +35,7 @@ nav = [
             { "Opencode members" = "reference/coding-agents/opencode.md" },
         ] },
     ] },
+    { "Contributing" = "contributing.md" },
     { "API Reference" = [
         { "broker" = "api/broker.md" },
         { "config" = "api/config.md" },

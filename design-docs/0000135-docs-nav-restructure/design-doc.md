@@ -1,7 +1,7 @@
 # Docs-Site Navigation Restructure: Flatten Get Started
 
 **Status**: Approved
-**Progress**: 5/18 tasks complete
+**Progress**: 6/18 tasks complete
 **Last Updated**: 2026-07-16
 
 ## Overview
@@ -222,7 +222,7 @@ The root stub points contributors at the published guide and its source page; bo
 
 ### Step 3: Update the nav
 
-- [ ] Replace the `nav` array in `zensical.toml` with the block in the Specification <!-- completed: -->
+- [x] Replace the `nav` array in `zensical.toml` with the block in the Specification <!-- completed: 2026-07-16T14:11 -->
 
 ### Step 4: Update `docs/index.md`
 
