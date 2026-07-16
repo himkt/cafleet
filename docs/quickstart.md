@@ -24,10 +24,6 @@ uv tool install cafleet     # or: pip install cafleet
 cafleet setup               # migrate the database schema + install the skills
 ```
 
-The default database lives at `~/.local/share/cafleet/cafleet_v5.db`;
-override with the `CAFLEET_DATABASE_URL` environment variable — use an
-absolute path, since SQLAlchemy does not expand `~` in SQLite URLs.
-
 ## Configure
 
 CAFleet is designed to run inside a coding agent without per-command
