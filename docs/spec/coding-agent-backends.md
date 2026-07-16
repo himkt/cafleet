@@ -62,6 +62,36 @@ trusted before spawning
 trust_level = "trusted"
 ```
 
+### The `cafleet` rules file {#cafleet-rules-file}
+
+`~/.codex/rules/cafleet.rules` grants the auto-approval posture for `cafleet`
+commands. It ships as a static file in the skills release archive
+(`presets/codex/cafleet.rules`) and is installed by `cafleet setup` (or
+`cafleet setup codex`):
+
+```text
+prefix_rule(pattern = ["cafleet"], decision = "allow")
+
+prefix_rule(
+    pattern = ["cafleet", "member", "exec"],
+    decision = "prompt",
+    justification = "cafleet member exec runs arbitrary commands on a member",
+)
+```
+
+Codex applies the strictest decision when more than one rule matches
+(`forbidden` > `prompt` > `allow`): `cafleet member exec` matches both rules,
+so its `prompt` wins and each invocation keeps requiring approval, while every
+other subcommand matches only the broad `["cafleet"]` allow — for every fleet,
+since `--fleet-id` is a trailing flag past the matched prefix.
+
+The file is **owned by `cafleet setup`**: it is overwritten on every install,
+so operator customizations belong in a separate rules file under
+`~/.codex/rules/` — Codex loads every `*.rules` file in that directory at
+startup and applies the strictest decision across all of them. The rules file
+is a permission posture, not a spawn dependency: `cafleet member create
+--coding-agent codex` requires only the `codex` binary on PATH.
+
 ## Opencode {#opencode}
 
 The pane runs the bare `opencode` TUI (not `opencode run`), so it stays a
@@ -76,11 +106,14 @@ Example values: `anthropic/claude-sonnet-4-6`, `openai/gpt-5.5`.
 
 ### The `cafleet` agent preset {#cafleet-agent-preset}
 
-`--agent cafleet` binds the member to `~/.opencode/agents/cafleet.md` — the
-only file cafleet ever writes under `$HOME`. It is materialized on first
-spawn with skip-if-exists semantics: operator customizations are never
-overwritten. To refresh after a CAFleet upgrade, delete the file and spawn an
-opencode member; the next spawn re-renders the current bundled preset.
+`--agent cafleet` binds the member to `~/.opencode/agents/cafleet.md`. The
+preset ships as a static file in the skills release archive
+(`presets/opencode/cafleet.md`) and is installed — overwriting any existing
+copy — by `cafleet setup` (or `cafleet setup opencode`); to refresh after a
+CAFleet upgrade, re-run it. The preset is a spawn precondition: the spawn argv
+references `--agent cafleet`, so `cafleet member create --coding-agent
+opencode` fails with `opencode agent preset not found at <preset>; run
+'cafleet setup opencode' first` when the file is missing.
 
 The preset's ruleset lists a catch-all `"*": "allow"` first, then specific
 denies (`sudo*`, `rm -rf*`, `curl*`, `git push*`, `**/.env`, …). opencode

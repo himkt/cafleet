@@ -21,7 +21,7 @@ Prerequisites:
 
 ```bash
 uv tool install cafleet     # or: pip install cafleet
-cafleet setup               # migrate the database schema + install the skills
+cafleet setup               # migrate the database schema + install the skills and presets
 ```
 
 ## Configure
@@ -77,34 +77,16 @@ classifies as network access — without it cafleet commands fail with
 default SQLite DB directory. Use the absolute path matching
 `CAFLEET_DATABASE_URL` or the default XDG location.
 
-!!! tip "Where this lives"
-
-    The Codex rules for `cafleet` commands live at `~/.codex/rules/cafleet.rules`.
-
-```text
-prefix_rule(pattern = ["cafleet"], decision = "allow")
-
-prefix_rule(
-    pattern = ["cafleet", "member", "exec"],
-    decision = "prompt",
-    justification = "cafleet member exec runs arbitrary commands on a member",
-)
-```
-
-The more specific prefix rule takes precedence: `["cafleet", "member", "exec"]`
-wins over the broad `["cafleet"]` allow, so `cafleet member exec` keeps
-prompting while every other subcommand is allowed — for every fleet, since
-`--fleet-id` is a trailing flag past the matched prefix.
+The Codex rules for `cafleet` commands — allow every subcommand, keep
+`cafleet member exec` prompting — are installed to
+`~/.codex/rules/cafleet.rules` by `cafleet setup`. See
+[Coding-agent backends § The `cafleet` rules file](spec/coding-agent-backends.md#cafleet-rules-file)
+for the rules, their precedence, and where operator customizations belong.
 
 ### Opencode
 
-!!! tip "Where this lives"
-
-    Opencode's `cafleet` agent definition lives at `~/.opencode/agents/cafleet.md`.
-
-No manual configuration is required. The first `cafleet member create
---coding-agent opencode` writes the agent preset to
-`~/.opencode/agents/cafleet.md` if it does not already exist. See
+No manual configuration is required. `cafleet setup` installs opencode's
+`cafleet` agent preset to `~/.opencode/agents/cafleet.md`. See
 [Coding-agent backends § Opencode](spec/coding-agent-backends.md#opencode)
 for the preset's ruleset, the refresh recipe after upgrades, and the
 MCP-server rule.

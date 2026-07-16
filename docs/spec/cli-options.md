@@ -20,9 +20,9 @@ subcommand rejects it with `No such option`.
 
 | Subcommand | Purpose | `--fleet-id` | Identity flag | Section |
 |---|---|---|---|---|
-| `setup` | Create the database schema + install the skills (bare group invocation) | no | none | [setup](#cafleet-setup) |
+| `setup` | Create the database schema + install the skills and presets (bare group invocation) | no | none | [setup](#cafleet-setup) |
 | `setup db` | Migrate the database schema only | no | none | [setup db](#setup-db) |
-| `setup skill` | Install the skills + record the installed version | no | none | [setup skill](#setup-skill) |
+| `setup claude` / `setup codex` / `setup opencode` | Install the skills + preset for exactly that agent | no | none | [setup &lt;agent&gt;](#setup-agent) |
 | `doctor` | Print the resolved multiplexer backend + the calling pane's identifiers + the skills-install report | no | none | [doctor](#cafleet-doctor) |
 | `server` | Start the admin WebUI server | no | none | [server](#cafleet-server) |
 | `fleet create` | Create a fleet with its root Director | no | none | [fleet create](#fleet-create) |
@@ -186,8 +186,9 @@ A `--quiet` flag on `cafleet message send`, `cafleet message ack`, and
 
 `cafleet setup` is a Click group with `invoke_without_command=True`: bare
 `cafleet setup` runs the full onboarding sequence (the recommended end-user
-path — see [Quickstart](../quickstart.md#install)), while `setup db` and
-`setup skill` run one half each. No command in the group accepts `--fleet-id`.
+path — see [Quickstart](../quickstart.md#install)), while `setup db` runs the
+db half alone and `setup claude` / `setup codex` / `setup opencode` run the
+assets half for a single agent. No command in the group accepts `--fleet-id`.
 
 ### `setup` (bare invocation)
 
@@ -195,15 +196,53 @@ Takes no options and runs two independent halves, in order:
 
 1. **db half** — initializes or migrates the registry database to the bundled
    Alembic head revision (idempotent).
-2. **skills half** — downloads the `cafleet-skills-v<version>.zip` asset
+2. **assets half** — downloads the `cafleet-skills-v<version>.zip` asset
    matching the installed CLI version from the corresponding GitHub Release,
-   extracts the three skill directories into every detected coding-agent home,
-   and records one `skill_installs` row per home.
+   then per detected coding-agent home installs the three skill directories
+   plus the agent's bundled preset where one exists, and records one
+   `skill_installs` row per home (see [Assets half](#assets-half)).
 
-The halves fail independently (`db half failed: <msg>` / `skills half failed:
+The halves fail independently (`db half failed: <msg>` / `assets half failed:
 <msg>`); if anything failed the command exits 1 with the failed halves joined
-by `' and '`. Bare `setup` accepts no `--agent` — per-agent targeting lives on
-[`setup skill`](#setup-skill).
+by `' and '`. Bare `setup` takes no per-agent targeting — that lives on the
+[per-agent subcommands](#setup-agent). When no agent home is detected, the
+assets half fails with `no coding-agent homes detected (looked for ~/.claude,
+~/.codex, ~/.config/opencode); install a coding agent first, or run 'cafleet
+setup <agent>'`.
+
+### Assets half {#assets-half}
+
+The shared install path behind bare `setup` and the per-agent subcommands.
+Each agent's preset, where one exists, is a static file shipped in the release
+archive next to the skills:
+
+| Agent | Bundled preset | Install target |
+|---|---|---|
+| claude | — (skills only) | — |
+| codex | `presets/codex/cafleet.rules` | `~/.codex/rules/cafleet.rules` |
+| opencode | `presets/opencode/cafleet.md` | `~/.opencode/agents/cafleet.md` |
+
+Per resolved target (every detected home for bare `setup`; exactly the named
+agent for a per-agent subcommand):
+
+1. The three skill directories are delete-and-reinstalled into the agent's
+   skills dir; a failure aborts with `failed to install skills into
+   <skills_dir>: <error>`.
+2. For agents with a bundled preset (codex, opencode), the preset is installed
+   to its target, overwriting whatever exists there — a regular file, a
+   directory, or a symlink. A filesystem error aborts with `failed to install
+   preset into <target>: <error>`.
+3. The agent's `skill_installs` row is upserted only after both its skills and
+   its preset install successfully — the row attests skills + preset — then
+   the command echoes (the preset line appears for codex and opencode targets
+   only):
+
+```
+<agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>) -> <skills dir>
+<agent>: installed preset (v<version>) -> <target>
+```
+
+An install failure aborts the loop; rows recorded before the failure remain.
 
 ### `setup db` {#setup-db}
 
@@ -224,22 +263,16 @@ Error: DB schema is at revision <rev> which is unknown to this version of caflee
 
 `setup db` never records `skill_installs` rows (schema only).
 
-### `setup skill` {#setup-skill}
+### `setup claude` / `setup codex` / `setup opencode` {#setup-agent}
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--agent` | no | One of `claude`, `codex`, or `opencode`; repeatable, duplicates deduped. Scopes the install to exactly the named agents (a named agent's home is created if missing). Omitted → auto-detect every agent whose home directory exists. |
+One subcommand per coding agent, registered from the coding-agent names; none
+takes options. Each runs the [assets half](#assets-half) for exactly the named
+agent — auto-detection is skipped, and the agent's home is created if missing.
 
 Pre-flight: the `skill_installs` table must exist, else exit 1 with
 `Error: the database schema is missing or outdated; run 'cafleet setup' or
-'cafleet setup db' first` — `setup skill` does not auto-create the schema.
-Per-home success output:
-
-```
-<agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>) -> <skills dir>
-```
-
-An install failure aborts the loop; rows recorded before the failure remain.
+'cafleet setup db' first` — the per-agent subcommands do not auto-create the
+schema.
 
 ## Stale-skills guard {#stale-skills-guard}
 
@@ -252,7 +285,7 @@ runs:
 2. Any recorded `cafleet_version` differing from the runtime CLI version
    (string inequality — a downgrade also triggers) → exit 1 with
    `Error: stale skills detected (<agent>=<recorded>[, ...]; CLI <runtime>);
-   run 'cafleet setup skill' to reinstall`, stale agents in ascending order.
+   run 'cafleet setup' to reinstall`, stale agents in ascending order.
 3. Otherwise the command proceeds silently.
 
 Homes with no recorded row are not checked. Exempt surfaces: the `setup` group
@@ -697,8 +730,8 @@ never pinged). Exits 1 for a not-in-fleet or not-enrolled member.
 | Situation | Error Message |
 |---|---|
 | Any `fleet` / `member` / `message` / `monitor` command with no skills install recorded (missing DB file, missing `skill_installs` table, or zero rows) | `Error: no skills install is recorded; run 'cafleet setup' first` (exit 1; see [Stale-skills guard](#stale-skills-guard)) |
-| Any `fleet` / `member` / `message` / `monitor` command with a recorded `skill_installs` version differing from the runtime CLI version | `Error: stale skills detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup skill' to reinstall` (exit 1; see [Stale-skills guard](#stale-skills-guard)) |
-| `setup skill` when the `skill_installs` table is missing | `Error: the database schema is missing or outdated; run 'cafleet setup' or 'cafleet setup db' first` (exit 1) |
+| Any `fleet` / `member` / `message` / `monitor` command with a recorded `skill_installs` version differing from the runtime CLI version | `Error: stale skills detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall` (exit 1; see [Stale-skills guard](#stale-skills-guard)) |
+| `setup claude` / `setup codex` / `setup opencode` when the `skill_installs` table is missing | `Error: the database schema is missing or outdated; run 'cafleet setup' or 'cafleet setup db' first` (exit 1) |
 | Missing `--fleet-id` on a fleet-scoped subcommand | `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` (exit 1) |
 | Missing `--member-id` | `Error: Missing option '--member-id'.` (exit 2) |
 | `fleet create` with no `--name` | `Error: Missing option '--name'.` (exit 2) |

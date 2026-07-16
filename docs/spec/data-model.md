@@ -137,7 +137,8 @@ transaction. Enrollment, cadence, and liveness semantics are on
 ### `skill_installs`
 
 One upserted row per coding-agent home, recording the CLI version whose skills
-install last landed there. Written by `cafleet setup` / `cafleet setup skill`;
+and preset (where one exists) install last landed there — the row attests
+both. Written by the assets half of `cafleet setup` (bare or per-agent);
 feeds the stale-skills guard and the `cafleet doctor` report (see
 [CLI options](cli-options.md#stale-skills-guard)).
 
