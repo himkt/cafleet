@@ -24,18 +24,9 @@ uv tool install cafleet     # or: pip install cafleet
 cafleet setup               # migrate the database schema + install the skills
 ```
 
-Each half of `cafleet setup` is also available as its own subcommand:
-
-- `cafleet setup db` — migrates the schema only (idempotent).
-- `cafleet setup skill [--agent claude|codex|opencode]...` — installs the
-  skills only; `--agent` (repeatable) scopes the install to the named agents.
-
-After upgrading the package, the first fleet-scoped command errors with
-`stale skills detected (...); run 'cafleet setup skill' to reinstall` — run
-the named command to refresh the skills. The default database lives at
-`~/.local/share/cafleet/cafleet_v5.db`; override with the
-`CAFLEET_DATABASE_URL` environment variable — use an absolute path, since
-SQLAlchemy does not expand `~` in SQLite URLs.
+The default database lives at `~/.local/share/cafleet/cafleet_v5.db`;
+override with the `CAFLEET_DATABASE_URL` environment variable — use an
+absolute path, since SQLAlchemy does not expand `~` in SQLite URLs.
 
 ## Configure
 
