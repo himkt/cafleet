@@ -42,7 +42,7 @@ When the operator names a model rather than a backend ("please create a member w
 | Model name shape | Backend | Flags to pass |
 |---|---|---|
 | Contains a `/` — provider-prefixed (e.g. `opencode/gpt-5.5`, `anthropic/claude-sonnet-4-6`) | `opencode` | `--coding-agent opencode --model <provider-id>/<model-id>` |
-| `gpt-*` (e.g. `gpt-5.5`, `gpt-5.4-mini`) | `codex` | `--coding-agent codex --model <name>` |
+| `gpt-*` (e.g. `gpt-5.6-terra`, `gpt-5.4-mini`) | `codex` | `--coding-agent codex --model <name>` |
 | Claude alias or `claude-*` full name — `fable`, `opus`, `sonnet`, `haiku`, `best`, `default`, `opusplan`, `sonnet[1m]`, `opus[1m]`, `claude-opus-4-8`, … | `claude` | `--coding-agent claude --model <name>` (omitting the flag inherits your own backend, which matches only when you are a claude Director) |
 | Any other bare name — no shape match (e.g. `gemini-2.5-pro`, `o3-mini`) | none — do NOT infer | Ask the operator for the explicit `--coding-agent` + `--model` pair |
 
@@ -66,11 +66,9 @@ Precedence matters for the slash case: `anthropic/claude-sonnet-4-6` contains bo
 | `opus` | complex reasoning | high |
 | `sonnet` | everyday coding | medium |
 | `haiku` | fast, simple tasks | low |
-| `best` | Fable 5 if the org has access, else the latest Opus | resolves to the highest available (Fable 5 if the org has access, else the latest Opus) |
-| `default` | clears the override; returns to the account-tier model | that of the account-tier model it returns to |
-| `opusplan` | `opus` in Plan Mode, `sonnet` during execution | high (`opus`) in Plan Mode, medium (`sonnet`) during execution |
-| `sonnet[1m]` | `sonnet` with a 1M-token context window | medium (same as `sonnet`) |
-| `opus[1m]` | `opus` with a 1M-token context window | high (same as `opus`) |
+
+Aliases such as `best` (resolves to the highest available model — Fable 5 if
+the org has access, else the latest Opus) also pass through.
 
 Full names: `claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5`.
 
@@ -78,10 +76,12 @@ Full names: `claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-ha
 
 | Model | Notes | Intelligence |
 |---|---|---|
-| `gpt-5.5` | newest frontier; default / recommended | highest |
-| `gpt-5.4` | flagship frontier — professional coding & reasoning | high |
-| `gpt-5.4-mini` | fast, efficient mini — responsive tasks and subagents | medium |
-| `gpt-5.3-codex-spark` | text-only research preview (ChatGPT Pro) — near-instant iteration | low |
+| `gpt-5.6-sol` | latest frontier agentic coding model; default / recommended | highest |
+| `gpt-5.6-terra` | balanced agentic coding model for everyday work | high |
+| `gpt-5.6-luna` | fast and affordable agentic coding model | medium |
+| `gpt-5.5` | frontier model for complex coding, research, and real-world work | high |
+| `gpt-5.4` | strong model for everyday coding | medium |
+| `gpt-5.4-mini` | fast, efficient mini — responsive tasks and subagents | low |
 
 **OpenCode Zen (`--coding-agent opencode`)** — the OpenCode Zen catalog ([opencode.ai/docs/zen](https://opencode.ai/docs/zen/)). Every Zen model is passed with the `opencode/` gateway prefix, i.e. `opencode/<model-id>` (e.g. `opencode/gpt-5.5`, `opencode/claude-sonnet-4-6`, `opencode/gemini-3.5-flash`). The Models column lists the bare `<model-id>`; prepend `opencode/`:
 
@@ -94,7 +94,7 @@ Full names: `claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-ha
 Other providers: Qwen, DeepSeek, Kimi, GLM, MiniMax, Grok.
 Free (limited beta): Big Pickle, DeepSeek V4 Flash Free, MiMo-V2.5 Free, North Mini Code Free, Nemotron 3 Ultra Free.
 
-Intelligence ranking within the Zen catalog: `gpt-5.5-pro` highest, then `gpt-5.5` / `claude-opus-4-8`, then the mid-tier `gpt-5.4` / `claude-sonnet-4-6`, then the fast tier. Each overlay's `{reviewer_model}` value equals the entry its backend's table marks as highest intelligence — directly for codex (`gpt-5.5`) and opencode (`opencode/gpt-5.5-pro`); for claude via the `best` alias, which resolves to the highest available model (Fable 5 if the org has access, else the latest Opus).
+Intelligence ranking within the Zen catalog: `gpt-5.5-pro` highest, then `gpt-5.5` / `claude-opus-4-8`, then the mid-tier `gpt-5.4` / `claude-sonnet-4-6`, then the fast tier. Each overlay's `{reviewer_model}` value equals the entry its backend's table marks as highest intelligence — directly for codex (`gpt-5.6-sol`) and opencode (`opencode/gpt-5.5-pro`); for claude via the `best` alias, which resolves to the highest available model (Fable 5 if the org has access, else the latest Opus).
 
 The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`; the Zen catalog above is normalized to the `opencode/` gateway prefix, and the direct-provider examples elsewhere in `director.md` / `coding-agents.md` stay valid.
 

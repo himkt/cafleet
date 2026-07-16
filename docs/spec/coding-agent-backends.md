@@ -39,8 +39,7 @@ Shared contract:
 ## Claude {#claude}
 
 `--permission-mode dontAsk` is the reference auto-approval posture the other
-backends match. Example `--model` values: `fable`, `opus`, `sonnet`, `haiku`,
-`best`, `default`, `opusplan`, `sonnet[1m]`, `opus[1m]`.
+backends match. Example `--model` values: `haiku`, `sonnet`, `opus`, `fable`.
 
 ## Codex {#codex}
 
@@ -48,7 +47,8 @@ backends match. Example `--model` values: `fable`, `opus`, `sonnet`, `haiku`,
 kernel-enforced sandbox — codex is the only backend with one.
 `--ask-for-approval never` disables interactive approval prompts (upstream
 write-up: <https://developers.openai.com/codex/agent-approvals-security>).
-Example `--model` values: `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`.
+Example `--model` values: `gpt-5.6-sol` (default), `gpt-5.6-terra`,
+`gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`.
 
 Two `~/.codex/config.toml` requirements, covered in
 [Quickstart § Configure](../quickstart.md#codex): `network_access = true`
@@ -61,9 +61,6 @@ trusted before spawning
 [projects."/abs/path/to/workspace"]
 trust_level = "trusted"
 ```
-
-Validated against `codex-cli 0.128.0`; older versions may reject the
-approval/sandbox flags.
 
 ## Opencode {#opencode}
 
