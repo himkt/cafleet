@@ -1,6 +1,6 @@
 # Ship Coding-Agent Presets via `cafleet setup`
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 25/25 tasks complete
 **Last Updated**: 2026-07-17
 
@@ -204,3 +204,4 @@ def ensure_available(self) -> None:
 | 2026-07-17 | Initial draft |
 | 2026-07-17 | Review round 1: Codex `cafleet.rules` added to scope (shipped + installed like the opencode preset); symlink-to-directory removal order fixed; second `base.py` docstring mention, `test_skills_guard.py`, and the outlying SPEC/doc `setup skill` surfaces enumerated |
 | 2026-07-17 | Review round 2: `cafleet.rules` declared owned/overwritten by `cafleet setup`, with customizations directed to a separate rules file and the multi-file loading behavior to be verified in the docs task |
+| 2026-07-17 | Implementation complete: all 25 tasks and Success Criteria done, Reviewer approved in round 1, PR #201 opened |
