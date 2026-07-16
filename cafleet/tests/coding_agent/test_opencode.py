@@ -2,8 +2,8 @@
 
 Verifies the byte-exact spawn argv (with regression guards against
 re-adding the dropped flags), the ``display_name`` ignore semantics, the
-registry wiring, and the ``ensure_available`` integration with
-``materialize_cafleet_agent``.
+registry wiring, and the ``ensure_available`` spawn preconditions (PATH
+probe + preset-file existence).
 """
 
 import re
@@ -14,7 +14,6 @@ from cafleet.coding_agent import (
     CODING_AGENTS,
     OpencodeAgent,
 )
-from cafleet.coding_agent.opencode_preset import CAFLEET_AGENT
 
 # ---------------------------------------------------------------------------
 # Registry wiring (§2)
@@ -148,73 +147,65 @@ def test_validate_model_rejects_malformed_with_exact_message(model):
 
 
 # ---------------------------------------------------------------------------
-# ensure_available (§1, §4.2) — PATH probe + materialization integration
+# ensure_available — PATH probe + preset-existence spawn precondition
 # ---------------------------------------------------------------------------
 
 
-def test_ensure_available_calls_materialize_with_cafleet_agent(tmp_path, monkeypatch):
-    """Per §1: ``ensure_available`` does two things — PATH probe + materialize.
-    Verifies (c) of the Step-5 task: a monkeypatched spy on
-    ``materialize_cafleet_agent`` is called exactly once with ``CAFLEET_AGENT``.
-
-    Spy is installed on the symbol the ``opencode`` module imported (function
-    objects are bound at import time, so patching the source module does not
-    affect the call site)."""
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
-
-    calls: list = []
-
-    def spy(definition):
-        calls.append(definition)
-
-    monkeypatch.setattr("cafleet.coding_agent.opencode.materialize_cafleet_agent", spy)
-
-    OpencodeAgent().ensure_available()
-
-    assert len(calls) == 1
-    assert calls[0] is CAFLEET_AGENT
+def _preset_path(home):
+    return home / ".opencode" / "agents" / "cafleet.md"
 
 
 def test_ensure_available_raises_when_binary_missing(tmp_path, monkeypatch):
-    """Per the shared ``ensure_binary_on_path`` contract: missing binary
-    raises ``RuntimeError`` BEFORE any materialization side effect runs."""
+    """Per the shared ``ensure_binary_on_path`` contract: a missing binary
+    raises the PATH ``RuntimeError`` first — with the preset also absent, the
+    PATH error is the one reported."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("shutil.which", lambda _: None)
 
     with pytest.raises(RuntimeError, match="not found on PATH"):
         OpencodeAgent().ensure_available()
 
-    # The deny-list file must NOT be materialized when the binary is absent.
-    assert not (tmp_path / ".opencode" / "agents" / "cafleet.md").exists()
 
-
-def test_ensure_available_materializes_preset_on_first_call(tmp_path, monkeypatch):
-    """End-to-end: binary available + HOME pointed at tmp_path →
-    ``~/.opencode/agents/cafleet.md`` is materialized with the rendered
-    preset content."""
+def test_ensure_available_raises_when_preset_missing(tmp_path, monkeypatch):
+    """Binary on PATH but no ``~/.opencode/agents/cafleet.md``: the spawn
+    precondition fails with guidance to run ``cafleet setup opencode`` — and
+    ``ensure_available`` writes no file."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    OpencodeAgent().ensure_available()
+    preset = _preset_path(tmp_path)
+    expected = (
+        f"opencode agent preset not found at {preset}; "
+        "run 'cafleet setup opencode' first"
+    )
+    with pytest.raises(RuntimeError, match=f"^{re.escape(expected)}$"):
+        OpencodeAgent().ensure_available()
 
-    target = tmp_path / ".opencode" / "agents" / "cafleet.md"
-    assert target.exists()
-    assert target.read_text(encoding="utf-8") == CAFLEET_AGENT.to_markdown()
+    assert not preset.exists()
 
 
-def test_ensure_available_is_idempotent_on_second_call(tmp_path, monkeypatch):
-    """Per §1: ``ensure_available`` is safe to call on every spawn — the
-    skip-if-exists rule makes the second call a cheap no-op that does NOT
-    overwrite a customized preset file."""
+def test_ensure_available_rejects_preset_directory(tmp_path, monkeypatch):
+    """The existence check is ``is_file()``: a directory squatting on the
+    preset path fails the precondition with the same missing-preset error."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    target = tmp_path / ".opencode" / "agents" / "cafleet.md"
-    target.parent.mkdir(parents=True)
-    custom = "# customized by operator\n"
-    target.write_text(custom, encoding="utf-8")
+    _preset_path(tmp_path).mkdir(parents=True)
 
-    OpencodeAgent().ensure_available()
-    OpencodeAgent().ensure_available()
+    with pytest.raises(RuntimeError, match="opencode agent preset not found at"):
+        OpencodeAgent().ensure_available()
 
-    assert target.read_text(encoding="utf-8") == custom
+
+def test_ensure_available_succeeds_when_preset_exists(tmp_path, monkeypatch):
+    """Binary on PATH + preset file present: the check passes and the file is
+    left untouched (read-only precondition, no rewrite)."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+
+    preset = _preset_path(tmp_path)
+    preset.parent.mkdir(parents=True)
+    content = "# installed by cafleet setup\n"
+    preset.write_text(content, encoding="utf-8")
+
+    assert OpencodeAgent().ensure_available() is None
+    assert preset.read_text(encoding="utf-8") == content

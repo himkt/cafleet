@@ -15,17 +15,18 @@ from cafleet.coding_agent import CODING_AGENTS, CodingAgent
 
 
 @pytest.fixture(autouse=True)
-def _redirect_home_for_opencode_materialize(tmp_path, monkeypatch):
-    """Redirect HOME → ``tmp_path`` for every test in this file.
+def _opencode_preset_in_redirected_home(tmp_path, monkeypatch):
+    """Redirect HOME → ``tmp_path`` and pre-create the opencode agent preset.
 
-    ``OpencodeAgent.ensure_available()`` materializes the CAFleet agent
-    preset to ``~/.opencode/agents/cafleet.md`` as a spawn precondition.
-    When the protocol-contract parametrization
-    runs the ``ensure_available`` cases for OpencodeAgent, that write
-    would otherwise pollute the real user's ``$HOME``. Redirecting HOME
-    is a no-op for claude / codex (they do not touch ``$HOME``) and
-    contains the opencode side effect inside the per-test ``tmp_path``."""
+    ``OpencodeAgent.ensure_available()`` verifies ``~/.opencode/agents/
+    cafleet.md`` exists as a spawn precondition (it reads, never writes).
+    Pre-creating the file in a redirected HOME lets the parametrized
+    ``ensure_available`` cases pass for OpencodeAgent without depending on
+    the real user's ``$HOME``; claude / codex ignore ``$HOME`` entirely."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    preset = tmp_path / ".opencode" / "agents" / "cafleet.md"
+    preset.parent.mkdir(parents=True)
+    preset.write_text("# cafleet agent preset\n", encoding="utf-8")
 
 
 @pytest.mark.parametrize(("name", "impl"), list(CODING_AGENTS.items()))
