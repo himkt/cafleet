@@ -186,7 +186,7 @@ A `--quiet` flag on `cafleet message send`, `cafleet message ack`, and
 
 `cafleet setup` is a Click group with `invoke_without_command=True`: bare
 `cafleet setup` runs the full onboarding sequence (the recommended end-user
-path — see [Quickstart](../get-started/quickstart.md#install)), while `setup db` and
+path — see [Quickstart](../quickstart.md#install)), while `setup db` and
 `setup skill` run one half each. No command in the group accepts `--fleet-id`.
 
 ### `setup` (bare invocation)

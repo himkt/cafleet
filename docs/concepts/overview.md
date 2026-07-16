@@ -88,4 +88,4 @@ See [Monitoring](monitoring.md).
 
 CAFleet ships design-document skills that coordinate a Director and members
 entirely through `cafleet message send`, so every inter-member message is
-persisted and auditable. See [Quickstart](../get-started/quickstart.md).
+persisted and auditable. See [Quickstart](../quickstart.md).

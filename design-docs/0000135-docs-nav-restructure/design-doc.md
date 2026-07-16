@@ -1,7 +1,7 @@
 # Docs-Site Navigation Restructure: Flatten Get Started
 
 **Status**: Approved
-**Progress**: 8/18 tasks complete
+**Progress**: 13/18 tasks complete
 **Last Updated**: 2026-07-16
 
 ## Overview
@@ -231,11 +231,11 @@ The root stub points contributors at the published guide and its source page; bo
 
 ### Step 5: Update inbound cross-links in `docs/`
 
-- [ ] `docs/spec/cli-options.md` — Quickstart install link <!-- completed: -->
-- [ ] `docs/how-to/mixed-backend-team.md` — Quickstart install + configure links <!-- completed: -->
-- [ ] `docs/concepts/overview.md` — Quickstart link <!-- completed: -->
-- [ ] `docs/reference/coding-agents/codex.md` — Quickstart trust-the-working-directory link <!-- completed: -->
-- [ ] `docs/how-to/design-doc-development.md` — Contributing link <!-- completed: -->
+- [x] `docs/spec/cli-options.md` — Quickstart install link <!-- completed: 2026-07-16T14:14 -->
+- [x] `docs/how-to/mixed-backend-team.md` — Quickstart install + configure links <!-- completed: 2026-07-16T14:14 -->
+- [x] `docs/concepts/overview.md` — Quickstart link <!-- completed: 2026-07-16T14:14 -->
+- [x] `docs/reference/coding-agents/codex.md` — Quickstart trust-the-working-directory link <!-- completed: 2026-07-16T14:14 -->
+- [x] `docs/how-to/design-doc-development.md` — Contributing link <!-- completed: 2026-07-16T14:14 -->
 
 ### Step 6: Update `README.md`, `CONTRIBUTING.md`, and the update-readme skill
 
