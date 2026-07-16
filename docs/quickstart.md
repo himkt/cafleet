@@ -253,4 +253,4 @@ the `fleet create` and `member create` commands require one.
 Where to go next:
 
 - [CLI options](spec/cli-options.md) — every subcommand and flag.
-- [How-to guides](how-to/index.md) — prompt-first task guides.
+- [How-to guides](how-to/mixed-backend-team.md) — prompt-first task guides.

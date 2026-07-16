@@ -26,7 +26,7 @@ auditable multi-agent coding teams in tmux or herdr.
 ## Browse the docs
 
 - [Quickstart](quickstart.md) — install, configure, and run your first fleet.
-- [How-to guides](how-to/) — prompt-first task guides for common workflows.
+- [How-to guides](how-to/mixed-backend-team.md) — prompt-first task guides for common workflows.
 - [Concepts](concepts/overview.md) — architecture and the ideas behind it.
 - [Specification](spec/data-model.md) — data model, message envelope, CLI, multiplexer backends, WebUI API, and coding-agent backends.
 - [Contributing](contributing.md) — project layout, local development loop, and the design-doc-driven contribution flow.

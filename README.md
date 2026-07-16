@@ -16,7 +16,7 @@ Full guide: <https://himkt.github.io/cafleet/quickstart/>
 ## Documentation
 
 - [Quickstart](https://himkt.github.io/cafleet/quickstart/) — install, configure, and run your first fleet.
-- [How-to guides](https://himkt.github.io/cafleet/how-to/) — prompt-first task guides.
+- [How-to guides](https://himkt.github.io/cafleet/how-to/mixed-backend-team/) — prompt-first task guides.
 - [Concepts](https://himkt.github.io/cafleet/concepts/overview/) — architecture and the ideas behind it.
 - [Specification](https://himkt.github.io/cafleet/spec/data-model/) — data model, message envelope, CLI, multiplexer backends, WebUI API, coding-agent backends.
 - [Contributing](https://himkt.github.io/cafleet/contributing/) — project layout, local development loop, and the contribution flow.

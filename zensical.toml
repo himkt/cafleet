@@ -8,7 +8,6 @@ copyright = "Copyright © 2026 himkt"
 nav = [
     { "Quickstart" = "quickstart.md" },
     { "How-to guides" = [
-        { "Overview" = "how-to/index.md" },
         { "Run a mixed-backend team" = "how-to/mixed-backend-team.md" },
         { "Use the admin WebUI" = "how-to/use-the-webui.md" },
         { "Design-doc-driven development" = "how-to/design-doc-development.md" },
