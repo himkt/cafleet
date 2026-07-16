@@ -1,7 +1,7 @@
 # Ship Coding-Agent Presets via `cafleet setup`
 
 **Status**: Approved
-**Progress**: 21/25 tasks complete
+**Progress**: 25/25 tasks complete
 **Last Updated**: 2026-07-17
 
 ## Overview
@@ -10,12 +10,12 @@ The OpenCode agent preset (`~/.opencode/agents/cafleet.md`) and the Codex rules 
 
 ## Success Criteria
 
-- [ ] `presets/opencode/cafleet.md` (byte-identical to the current rendered preset) and `presets/codex/cafleet.rules` (the rules block currently documented as a manual step in quickstart) are checked into the repo and packaged into `cafleet-skills-v<version>.zip` alongside `skills/`
-- [ ] Bare `cafleet setup` installs each preset to its target whenever its agent is a resolved target, overwriting any existing copy
-- [ ] `cafleet setup claude` / `cafleet setup codex` / `cafleet setup opencode` replace `cafleet setup skill --agent <name>`; no `setup skill` surface remains
-- [ ] `member create --coding-agent opencode` writes no file; a missing preset fails the spawn with guidance to run `cafleet setup opencode`
-- [ ] `opencode_preset.py`, its tests, every "materialized on first spawn" / skip-if-exists mention, and quickstart's manual rules-file step are removed repo-wide (per `removal.md`)
-- [ ] SPEC.md, docs/, README.md, and skills references reflect the new contract; `mise //cafleet:lint`, `//cafleet:typecheck`, and `//cafleet:test` pass
+- [x] `presets/opencode/cafleet.md` (byte-identical to the current rendered preset) and `presets/codex/cafleet.rules` (the rules block currently documented as a manual step in quickstart) are checked into the repo and packaged into `cafleet-skills-v<version>.zip` alongside `skills/`
+- [x] Bare `cafleet setup` installs each preset to its target whenever its agent is a resolved target, overwriting any existing copy
+- [x] `cafleet setup claude` / `cafleet setup codex` / `cafleet setup opencode` replace `cafleet setup skill --agent <name>`; no `setup skill` surface remains
+- [x] `member create --coding-agent opencode` writes no file; a missing preset fails the spawn with guidance to run `cafleet setup opencode`
+- [x] `opencode_preset.py`, its tests, every "materialized on first spawn" / skip-if-exists mention, and quickstart's manual rules-file step are removed repo-wide (per `removal.md`)
+- [x] SPEC.md, docs/, README.md, and skills references reflect the new contract; `mise //cafleet:lint`, `//cafleet:typecheck`, and `//cafleet:test` pass
 
 ---
 
@@ -190,10 +190,10 @@ def ensure_available(self) -> None:
 
 ### Step 5: Verification
 
-- [ ] `mise //cafleet:lint` passes <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` passes <!-- completed: -->
-- [ ] `mise //cafleet:test` passes <!-- completed: -->
-- [ ] Repo-wide sweep confirms no `setup skill`, `materialize_cafleet_agent`, or first-spawn-materialization mention remains outside design-docs/ and git history <!-- completed: -->
+- [x] `mise //cafleet:lint` passes <!-- completed: 2026-07-17T02:51 -->
+- [x] `mise //cafleet:typecheck` passes <!-- completed: 2026-07-17T02:51 -->
+- [x] `mise //cafleet:test` passes <!-- completed: 2026-07-17T02:51 -->
+- [x] Repo-wide sweep confirms no `setup skill`, `materialize_cafleet_agent`, or first-spawn-materialization mention remains outside design-docs/ and git history <!-- completed: 2026-07-17T02:51 -->
 
 ---
 
