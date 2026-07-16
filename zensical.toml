@@ -26,12 +26,7 @@ nav = [
         { "CLI options" = "spec/cli-options.md" },
         { "Multiplexer backends" = "spec/multiplexer-backends.md" },
         { "WebUI API" = "spec/webui-api.md" },
-        { "Coding-agent backends" = [
-            { "Overview" = "reference/coding-agents/index.md" },
-            { "Claude members" = "reference/coding-agents/claude.md" },
-            { "Codex members" = "reference/coding-agents/codex.md" },
-            { "Opencode members" = "reference/coding-agents/opencode.md" },
-        ] },
+        { "Coding-agent backends" = "spec/coding-agent-backends.md" },
     ] },
     { "Contributing" = "contributing.md" },
     { "API Reference" = [

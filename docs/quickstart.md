@@ -105,8 +105,9 @@ prompting while every other subcommand is allowed — for every fleet, since
 No manual configuration is required. The first `cafleet member create
 --coding-agent opencode` writes the agent preset to
 `~/.opencode/agents/cafleet.md` if it does not already exist. See
-[Opencode members](reference/coding-agents/opencode.md) for the preset's
-ruleset, the refresh recipe after upgrades, and the MCP-server rule.
+[Coding-agent backends § Opencode](spec/coding-agent-backends.md#opencode)
+for the preset's ruleset, the refresh recipe after upgrades, and the
+MCP-server rule.
 
 ### Trust the working directory
 

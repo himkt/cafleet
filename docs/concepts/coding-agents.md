@@ -25,10 +25,8 @@ The flag means slightly different things per command:
 Each backend is spawned with flags that enable its Bash tool and auto-resolve
 routine permission prompts, so members run cafleet (and any shell command)
 directly. The per-backend spawn argv, auto-approval posture, and sandbox
-trade-offs are specified on the backend reference pages:
-[Claude members](../reference/coding-agents/claude.md),
-[Codex members](../reference/coding-agents/codex.md), and
-[Opencode members](../reference/coding-agents/opencode.md).
+trade-offs are specified in
+[Coding-agent backends](../spec/coding-agent-backends.md).
 
 ## cafleet usage from a member pane
 

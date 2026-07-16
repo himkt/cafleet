@@ -512,10 +512,8 @@ one root Director by construction, so no override flag exists.
 
 #### Spawn command per backend
 
-The per-backend spawn argv and auto-approval flags live on the backend
-reference pages: [Claude members](../reference/coding-agents/claude.md),
-[Codex members](../reference/coding-agents/codex.md),
-[Opencode members](../reference/coding-agents/opencode.md).
+The per-backend spawn argv and auto-approval flags live in
+[Coding-agent backends](coding-agent-backends.md#spawn-argv).
 
 #### Spawn-prompt substitution
 
