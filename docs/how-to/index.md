@@ -11,7 +11,6 @@ in a closing appendix, with the full flag surface in the
 [spec pages](../spec/cli-options.md).
 
 - [Run a mixed-backend team](mixed-backend-team.md)
-- [Monitor and recover members](monitor-and-recover.md)
 - [Use the admin WebUI](use-the-webui.md) — the one human-operated guide:
   the WebUI is a browser dashboard you use directly, not through an agent.
 - [Design-doc-driven development](design-doc-development.md)
