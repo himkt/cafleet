@@ -1,7 +1,7 @@
 # Docs-Site Navigation Restructure: Flatten Get Started
 
 **Status**: Approved
-**Progress**: 6/18 tasks complete
+**Progress**: 8/18 tasks complete
 **Last Updated**: 2026-07-16
 
 ## Overview
@@ -226,8 +226,8 @@ The root stub points contributors at the published guide and its source page; bo
 
 ### Step 4: Update `docs/index.md`
 
-- [ ] Retarget and relabel the primary button to `[Quickstart :material-arrow-right:](quickstart/)` <!-- completed: -->
-- [ ] Replace the "Browse the docs" list with the six-entry list in the Specification <!-- completed: -->
+- [x] Retarget and relabel the primary button to `[Quickstart :material-arrow-right:](quickstart/)` <!-- completed: 2026-07-16T14:13 -->
+- [x] Replace the "Browse the docs" list with the six-entry list in the Specification <!-- completed: 2026-07-16T14:13 -->
 
 ### Step 5: Update inbound cross-links in `docs/`
 

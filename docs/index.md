@@ -21,12 +21,13 @@ auditable multi-agent coding teams in tmux or herdr.
 - Monitoring member — [Monitoring](concepts/monitoring.md)
 - Design-doc-driven development (SDD skills) — [Design-doc-driven development](how-to/design-doc-development.md)
 
-[Get started :material-arrow-right:](get-started/){ .md-button .md-button--primary }
+[Quickstart :material-arrow-right:](quickstart/){ .md-button .md-button--primary }
 
 ## Browse the docs
 
-- [Get Started](get-started/) — install, configure, and quickstart walkthroughs.
+- [Quickstart](quickstart.md) — install, configure, and run your first fleet.
 - [How-to guides](how-to/) — prompt-first task guides for common workflows.
 - [Concepts](concepts/overview.md) — architecture and the ideas behind it.
 - [Specification](spec/data-model.md) — data model, message envelope, CLI, multiplexer backends, WebUI API, and coding-agent backends.
+- [Contributing](contributing.md) — project layout, local development loop, and the design-doc-driven contribution flow.
 - [API Reference](api/broker.md) — Python API generated from source.
