@@ -1,7 +1,7 @@
 # Docs-Site Navigation Restructure: Flatten Get Started
 
 **Status**: Approved
-**Progress**: 16/18 tasks complete
+**Progress**: 18/18 tasks complete
 **Last Updated**: 2026-07-16
 
 ## Overview
@@ -10,11 +10,11 @@ Flatten the docs-site navigation: promote Quickstart to a simple top-level page,
 
 ## Success Criteria
 
-- [ ] `zensical.toml` nav renders exactly six top-level entries in order: Quickstart, How-to guides, Concepts, Specification, Contributing, API Reference — with Quickstart and Contributing as simple pages (no sub-section).
-- [ ] `docs/get-started/` no longer exists; `docs/quickstart.md` and `docs/contributing.md` are the pages' new homes; the old Overview page is deleted with nothing salvaged.
-- [ ] A repo-wide sweep finds zero `get-started` references outside `design-docs/` and git history.
-- [ ] `mise //:docs-build` completes cleanly with no broken-link warnings.
-- [ ] `README.md`, `CONTRIBUTING.md`, `docs/index.md`, and `.claude/skills/update-readme/SKILL.md` reflect the new structure (README's Documentation bullets and Full-guide URL, CONTRIBUTING.md's published-guide URL and source path, the home page's button and Browse list, the skill's section list and quickstart path).
+- [x] `zensical.toml` nav renders exactly six top-level entries in order: Quickstart, How-to guides, Concepts, Specification, Contributing, API Reference — with Quickstart and Contributing as simple pages (no sub-section).
+- [x] `docs/get-started/` no longer exists; `docs/quickstart.md` and `docs/contributing.md` are the pages' new homes; the old Overview page is deleted with nothing salvaged.
+- [x] A repo-wide sweep finds zero `get-started` references outside `design-docs/` and git history.
+- [x] `mise //:docs-build` completes cleanly with no broken-link warnings.
+- [x] `README.md`, `CONTRIBUTING.md`, `docs/index.md`, and `.claude/skills/update-readme/SKILL.md` reflect the new structure (README's Documentation bullets and Full-guide URL, CONTRIBUTING.md's published-guide URL and source path, the home page's button and Browse list, the skill's section list and quickstart path).
 
 ---
 
@@ -245,8 +245,8 @@ The root stub points contributors at the published guide and its source page; bo
 
 ### Step 7: Verification
 
-- [ ] `mise //:docs-build` completes cleanly with no broken-link warnings <!-- completed: -->
-- [ ] Repo-wide sweep confirms zero `get-started` references outside `design-docs/` and git history <!-- completed: -->
+- [x] `mise //:docs-build` completes cleanly with no broken-link warnings <!-- completed: 2026-07-16T14:20 -->
+- [x] Repo-wide sweep confirms zero `get-started` references outside `design-docs/` and git history <!-- completed: 2026-07-16T14:20 -->
 
 ---
 
