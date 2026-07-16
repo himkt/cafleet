@@ -1,7 +1,7 @@
 # Docs-Site Navigation Restructure: Flatten Get Started
 
 **Status**: Approved
-**Progress**: 3/18 tasks complete
+**Progress**: 5/18 tasks complete
 **Last Updated**: 2026-07-16
 
 ## Overview
@@ -217,8 +217,8 @@ The root stub points contributors at the published guide and its source page; bo
 
 ### Step 2: Fix relative links inside the moved pages
 
-- [ ] `docs/quickstart.md`: drop the `../` prefix on the 4 links listed in the Specification <!-- completed: -->
-- [ ] `docs/contributing.md`: drop the `../` prefix on the 2 links listed in the Specification <!-- completed: -->
+- [x] `docs/quickstart.md`: drop the `../` prefix on the 4 links listed in the Specification <!-- completed: 2026-07-16T14:02 -->
+- [x] `docs/contributing.md`: drop the `../` prefix on the 2 links listed in the Specification <!-- completed: 2026-07-16T14:02 -->
 
 ### Step 3: Update the nav
 

@@ -15,7 +15,7 @@ Prerequisites:
 
 - Python 3.12+
 - A terminal multiplexer — tmux or herdr (see
-  [Multiplexer backends](../spec/multiplexer-backends.md))
+  [Multiplexer backends](spec/multiplexer-backends.md))
 - At least one of: `claude` (Claude Code), `codex` (OpenAI Codex CLI), or
   `opencode`
 
@@ -124,7 +124,7 @@ embeds the catch-all-allow + specific-deny ruleset that mirrors Claude Code's
 after `pip install -U cafleet`), delete the existing file and re-run
 `cafleet member create --coding-agent opencode` so the next spawn writes the
 current bundled preset. See
-[Opencode members](../reference/coding-agents/opencode.md) for the full
+[Opencode members](reference/coding-agents/opencode.md) for the full
 materialization protocol, refresh recipe, and the operator MUST-NOT rule on
 MCP servers (MCP-contributed tools bypass the deny-list).
 
@@ -283,5 +283,5 @@ the `fleet create` and `member create` commands require one.
 
 Where to go next:
 
-- [CLI options](../spec/cli-options.md) — every subcommand and flag.
-- [How-to guides](../how-to/index.md) — prompt-first task guides.
+- [CLI options](spec/cli-options.md) — every subcommand and flag.
+- [How-to guides](how-to/index.md) — prompt-first task guides.

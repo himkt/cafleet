@@ -112,12 +112,12 @@ When editing `docs/` or `README.md`, follow these conventions:
 - **Voice**: second person ("you"), active voice, present tense. Lead each
   page with what the reader accomplishes, not with architecture.
 - **Terms**: link a term's first use on a page to the
-  [Core terms](../concepts/overview.md#core-terms) table in the concepts
+  [Core terms](concepts/overview.md#core-terms) table in the concepts
   overview; do not re-define it.
 - **Examples**: every CLI example is a runnable command using the standard
   sample-id cast — fleet `1`, root Director `2`, members
   `3`+ — followed by an expected-output block matching the output shapes in
-  [CLI options](../spec/cli-options.md). Never use shell variables to hold
+  [CLI options](spec/cli-options.md). Never use shell variables to hold
   ids.
 - **SSOT**: one fact, one home. When another page needs the fact, link;
   when a fact serves no install/configure/use/understand purpose, delete.
