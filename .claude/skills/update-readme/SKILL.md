@@ -31,7 +31,7 @@ You are a documentation writer for the CAFleet project. Your job is to keep two 
 1. Read all docs/concepts/*.md files (use Glob to enumerate) for the canonical architecture
 2. Discover and read all files under docs/ (use Glob to find them)
 3. Read the zensical.toml nav (repo root) for the docs-site section layout, then read the current README.md
-4. Sync README.md's thin surface: align the pitch paragraph with docs/index.md, the Install block with the Install section of docs/get-started/quickstart.md, and the Documentation links with the nav
+4. Sync README.md's thin surface: align the pitch paragraph with docs/index.md, the Install block with the Install section of docs/quickstart.md, and the Documentation links with the nav
 5. Read the current SPEC.md (the reimplementation specification, at the repo root)
 6. Reconcile SPEC.md against the source materials per the "SPEC.md Maintenance" rules below, updating only where the contract surfaces have drifted
 
@@ -41,7 +41,7 @@ README.md is a thin entry point with exactly four surfaces, in order:
 
 1. **Title, demo video, and pitch** -- Project name, the demo video asset, and a one-paragraph pitch aligned with docs/index.md (no bullet list)
 2. **Install** -- The two-command install block (`uv tool install cafleet` / `cafleet setup`) plus a link to the full install guide
-3. **Documentation** -- Links to the docs-site sections (Get Started, How-to guides, Concepts, Specification, API Reference)
+3. **Documentation** -- Links to the docs-site sections (Quickstart, How-to guides, Concepts, Specification, Contributing, API Reference)
 4. **License** -- MIT
 
 All other descriptive content (features, architecture, quick start, CLI usage, API overview, tech stack, project structure, development) lives in docs/ only -- never add it back to README.md.

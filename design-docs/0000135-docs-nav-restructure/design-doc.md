@@ -1,7 +1,7 @@
 # Docs-Site Navigation Restructure: Flatten Get Started
 
 **Status**: Approved
-**Progress**: 13/18 tasks complete
+**Progress**: 16/18 tasks complete
 **Last Updated**: 2026-07-16
 
 ## Overview
@@ -239,9 +239,9 @@ The root stub points contributors at the published guide and its source page; bo
 
 ### Step 6: Update `README.md`, `CONTRIBUTING.md`, and the update-readme skill
 
-- [ ] `README.md` — Full-guide URL and the six-bullet Documentation section per the Specification <!-- completed: -->
-- [ ] `CONTRIBUTING.md` — retarget the published-guide URL (line 3) and source path (line 4) <!-- completed: -->
-- [ ] `.claude/skills/update-readme/SKILL.md` — quickstart path (line 34) and section list (line 44) <!-- completed: -->
+- [x] `README.md` — Full-guide URL and the six-bullet Documentation section per the Specification <!-- completed: 2026-07-16T14:16 -->
+- [x] `CONTRIBUTING.md` — retarget the published-guide URL (line 3) and source path (line 4) <!-- completed: 2026-07-16T14:16 -->
+- [x] `.claude/skills/update-readme/SKILL.md` — quickstart path (line 34) and section list (line 44) <!-- completed: 2026-07-16T14:18 -->
 
 ### Step 7: Verification
 

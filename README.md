@@ -11,14 +11,15 @@ uv tool install cafleet     # or: pip install cafleet
 cafleet setup               # migrate the database schema + install the skills
 ```
 
-Full guide: <https://himkt.github.io/cafleet/get-started/quickstart/>
+Full guide: <https://himkt.github.io/cafleet/quickstart/>
 
 ## Documentation
 
-- [Get Started](https://himkt.github.io/cafleet/get-started/) — quickstart and contributing.
+- [Quickstart](https://himkt.github.io/cafleet/quickstart/) — install, configure, and run your first fleet.
 - [How-to guides](https://himkt.github.io/cafleet/how-to/) — prompt-first task guides.
 - [Concepts](https://himkt.github.io/cafleet/concepts/overview/) — architecture and the ideas behind it.
 - [Specification](https://himkt.github.io/cafleet/spec/data-model/) — data model, message envelope, CLI, multiplexer backends, WebUI API, coding-agent backends.
+- [Contributing](https://himkt.github.io/cafleet/contributing/) — project layout, local development loop, and the contribution flow.
 - [API Reference](https://himkt.github.io/cafleet/api/broker/) — Python API generated from source.
 
 ## License
