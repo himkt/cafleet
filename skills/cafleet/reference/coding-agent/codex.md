@@ -6,7 +6,7 @@ Substitute these into the base `{…}` placeholders.
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
 | `{monitor_model}` | `gpt-5.4-mini` |
-| `{reviewer_model}` | `gpt-5.5` |
+| `{reviewer_model}` | `gpt-5.6-sol` |
 | `{permission_flags}` | `--ask-for-approval never --sandbox workspace-write` |
 | `{bg_run}` | a backgrounded `!` shell command |
 | `{bg_stop}` | killing the recorded background process |

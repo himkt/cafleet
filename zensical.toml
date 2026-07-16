@@ -6,15 +6,9 @@ site_url = "https://himkt.github.io/cafleet/"
 copyright = "Copyright © 2026 himkt"
 
 nav = [
-    { "Get Started" = [
-        { "Overview" = "get-started/index.md" },
-        { "Quickstart" = "get-started/quickstart.md" },
-        { "Contributing" = "get-started/contributing.md" },
-    ] },
+    { "Quickstart" = "quickstart.md" },
     { "How-to guides" = [
-        { "Overview" = "how-to/index.md" },
         { "Run a mixed-backend team" = "how-to/mixed-backend-team.md" },
-        { "Monitor and recover members" = "how-to/monitor-and-recover.md" },
         { "Use the admin WebUI" = "how-to/use-the-webui.md" },
         { "Design-doc-driven development" = "how-to/design-doc-development.md" },
     ] },
@@ -32,13 +26,9 @@ nav = [
         { "CLI options" = "spec/cli-options.md" },
         { "Multiplexer backends" = "spec/multiplexer-backends.md" },
         { "WebUI API" = "spec/webui-api.md" },
-        { "Coding-agent backends" = [
-            { "Overview" = "reference/coding-agents/index.md" },
-            { "Claude members" = "reference/coding-agents/claude.md" },
-            { "Codex members" = "reference/coding-agents/codex.md" },
-            { "Opencode members" = "reference/coding-agents/opencode.md" },
-        ] },
+        { "Coding-agent backends" = "spec/coding-agent-backends.md" },
     ] },
+    { "Contributing" = "contributing.md" },
     { "API Reference" = [
         { "broker" = "api/broker.md" },
         { "config" = "api/config.md" },

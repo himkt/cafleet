@@ -6,7 +6,7 @@ Substitute these into the base `{…}` placeholders.
 |---|---|
 | `{decision_surface}` | the AskUserQuestion tool |
 | `{monitor_model}` | `haiku` |
-| `{reviewer_model}` | `best` |
+| `{reviewer_model}` | `opus` |
 | `{permission_flags}` | `--permission-mode dontAsk` |
 | `{bg_run}` | the Bash tool's `run_in_background: true` |
 | `{bg_stop}` | `TaskStop` |

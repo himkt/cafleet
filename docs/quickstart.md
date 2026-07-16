@@ -15,7 +15,7 @@ Prerequisites:
 
 - Python 3.12+
 - A terminal multiplexer — tmux or herdr (see
-  [Multiplexer backends](../spec/multiplexer-backends.md))
+  [Multiplexer backends](spec/multiplexer-backends.md))
 - At least one of: `claude` (Claude Code), `codex` (OpenAI Codex CLI), or
   `opencode`
 
@@ -23,19 +23,6 @@ Prerequisites:
 uv tool install cafleet     # or: pip install cafleet
 cafleet setup               # migrate the database schema + install the skills
 ```
-
-Each half of `cafleet setup` is also available as its own subcommand:
-
-- `cafleet setup db` — migrates the schema only (idempotent).
-- `cafleet setup skill [--agent claude|codex|opencode]...` — installs the
-  skills only; `--agent` (repeatable) scopes the install to the named agents.
-
-After upgrading the package, the first fleet-scoped command errors with
-`stale skills detected (...); run 'cafleet setup skill' to reinstall` — run
-the named command to refresh the skills. The default database lives at
-`~/.local/share/cafleet/cafleet_v5.db`; override with the
-`CAFLEET_DATABASE_URL` environment variable — use an absolute path, since
-SQLAlchemy does not expand `~` in SQLite URLs.
 
 ## Configure
 
@@ -106,9 +93,8 @@ prefix_rule(
 
 The more specific prefix rule takes precedence: `["cafleet", "member", "exec"]`
 wins over the broad `["cafleet"]` allow, so `cafleet member exec` keeps
-prompting while every other subcommand is allowed. Because `--fleet-id` is a
-trailing per-subcommand flag, it sits past the matched prefix — no per-fleet
-rule is needed.
+prompting while every other subcommand is allowed — for every fleet, since
+`--fleet-id` is a trailing flag past the matched prefix.
 
 ### Opencode
 
@@ -116,17 +102,12 @@ rule is needed.
 
     Opencode's `cafleet` agent definition lives at `~/.opencode/agents/cafleet.md`.
 
-No manual configuration is required. On the first `cafleet member create
---coding-agent opencode` call, cafleet writes the `cafleet` agent definition
-to `~/.opencode/agents/cafleet.md` if it does not already exist — the preset
-embeds the catch-all-allow + specific-deny ruleset that mirrors Claude Code's
-`dontAsk` safety floor. To refresh the preset after a CAFleet release (e.g.
-after `pip install -U cafleet`), delete the existing file and re-run
-`cafleet member create --coding-agent opencode` so the next spawn writes the
-current bundled preset. See
-[Opencode members](../reference/coding-agents/opencode.md) for the full
-materialization protocol, refresh recipe, and the operator MUST-NOT rule on
-MCP servers (MCP-contributed tools bypass the deny-list).
+No manual configuration is required. The first `cafleet member create
+--coding-agent opencode` writes the agent preset to
+`~/.opencode/agents/cafleet.md` if it does not already exist. See
+[Coding-agent backends § Opencode](spec/coding-agent-backends.md#opencode)
+for the preset's ruleset, the refresh recipe after upgrades, and the
+MCP-server rule.
 
 ### Trust the working directory
 
@@ -140,15 +121,6 @@ directory, so each git worktree needs its own approval.
 This prevents a spawn-time stall: in an untrusted directory, the agent's
 first-run trust prompt stalls a freshly spawned member — the member ignores
 every incoming message until the prompt is cleared.
-
-### Passing the fleet id
-
-Every fleet-scoped command except `fleet create` and `fleet list` takes a
-required `--fleet-id`, passed as a literal integer flag on each invocation (a
-member reads its fleet id from the `FLEET ID:` line of its spawn prompt). Members driving cafleet under
-`permissions.allow` pass `--fleet-id` as a literal flag — the allow patterns
-match the literal command string, so a shell-expanded variable would break the
-match and prompt.
 
 ## Simple example — invoke from a coding agent
 
@@ -164,21 +136,6 @@ After the demonstration, please shutdown the team.
 The coding agent will invoke the `cafleet` skill, which guides it through the
 fleet-create / member-create / message-send loop and finally tears the team
 down.
-
-## Design-doc-driven development
-
-CAFleet ships built-in skills for spec-driven development (SDD). The CAFleet
-project itself uses them to evolve — every change lands as a design document
-first, executed by a CAFleet-orchestrated Director / Drafter / Reviewer team.
-
-Invoke the `cafleet-design-doc` skill (create workflow) with a one-line request, e.g.:
-
-```text
-I want to create a simple TUI calculator.
-```
-
-See your coding-agent's skill documentation for the literal invocation syntax
-(Claude Code's `/skills`, codex's `/skills`, opencode's skill discovery).
 
 ## Raw CLI walkthrough
 
@@ -283,5 +240,5 @@ the `fleet create` and `member create` commands require one.
 
 Where to go next:
 
-- [CLI options](../spec/cli-options.md) — every subcommand and flag.
-- [How-to guides](../how-to/index.md) — prompt-first task guides.
+- [CLI options](spec/cli-options.md) — every subcommand and flag.
+- [How-to guides](how-to/mixed-backend-team.md) — prompt-first task guides.
