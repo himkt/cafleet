@@ -149,21 +149,6 @@ The coding agent will invoke the `cafleet` skill, which guides it through the
 fleet-create / member-create / message-send loop and finally tears the team
 down.
 
-## Design-doc-driven development
-
-CAFleet ships built-in skills for spec-driven development (SDD). The CAFleet
-project itself uses them to evolve — every change lands as a design document
-first, executed by a CAFleet-orchestrated Director / Drafter / Reviewer team.
-
-Invoke the `cafleet-design-doc` skill (create workflow) with a one-line request, e.g.:
-
-```text
-I want to create a simple TUI calculator.
-```
-
-See your coding-agent's skill documentation for the literal invocation syntax
-(Claude Code's `/skills`, codex's `/skills`, opencode's skill discovery).
-
 ## Raw CLI walkthrough
 
 If you would rather drive CAFleet from the shell directly, the commands below
