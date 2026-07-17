@@ -177,7 +177,7 @@ class HerdrMultiplexer:
         # NOTE(himkt): once herdr respects the login shell when split, this won't be necessary
         # https://github.com/ogulcancelik/herdr/discussions/1517
         try:
-            cwd = os.getcwd()
+            cwd = os.getcwd()  # noqa: PTH109 - the argv wants str; the design pins os.getcwd
         except OSError as exc:
             raise HerdrError(
                 f"cannot resolve the working directory for pane spawn: {exc}"

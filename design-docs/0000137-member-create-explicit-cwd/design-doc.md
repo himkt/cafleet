@@ -1,7 +1,7 @@
 # Explicit Working Directory for herdr Pane Spawn in `cafleet member create`
 
 **Status**: Approved
-**Progress**: 6/9 tasks complete
+**Progress**: 9/9 tasks complete
 **Last Updated**: 2026-07-17
 
 ## Overview
@@ -159,9 +159,9 @@ Live-herdr verification (a member pane actually starting in the Director's cwd) 
 
 ### Step 4: Verification
 
-- [ ] `mise //cafleet:test` passes <!-- completed: -->
-- [ ] `mise //cafleet:lint` passes <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` passes <!-- completed: -->
+- [x] `mise //cafleet:test` passes <!-- completed: 2026-07-17T13:00 -->
+- [x] `mise //cafleet:lint` passes <!-- completed: 2026-07-17T13:00 -->
+- [x] `mise //cafleet:typecheck` passes <!-- completed: 2026-07-17T13:00 -->
 
 ---
 
