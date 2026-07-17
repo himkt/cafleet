@@ -10,13 +10,13 @@
 
 ## Success Criteria
 
-- [ ] A member spawned via `cafleet member create` on the herdr backend receives the invoking process's working directory (the Director's pane cwd) as its start directory — verified by proxy via the pinned-argv `--cwd` tests in § Testing; live-herdr confirmation is a manual operator step outside this checklist.
-- [ ] Every `herdr pane split` issued by `split_window` — both the first-member right split and the subsequent down split — carries `--cwd <dir>`.
-- [ ] The tmux backend is unchanged (builtin inheritance remains the mechanism).
-- [ ] The cwd-fetching logic is annotated with the mandated 2-line `NOTE(himkt)` comment, verbatim.
-- [ ] An unresolvable cwd fails the spawn loudly (`HerdrError`); no fallback directory.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
-- [ ] SPEC.md and `docs/spec/multiplexer-backends.md` reflect the new contract in this same cycle.
+- [x] A member spawned via `cafleet member create` on the herdr backend receives the invoking process's working directory (the Director's pane cwd) as its start directory — verified by proxy via the pinned-argv `--cwd` tests in § Testing; live-herdr confirmation is a manual operator step outside this checklist.
+- [x] Every `herdr pane split` issued by `split_window` — both the first-member right split and the subsequent down split — carries `--cwd <dir>`.
+- [x] The tmux backend is unchanged (builtin inheritance remains the mechanism).
+- [x] The cwd-fetching logic is annotated with the mandated 2-line `NOTE(himkt)` comment, verbatim.
+- [x] An unresolvable cwd fails the spawn loudly (`HerdrError`); no fallback directory.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
+- [x] SPEC.md and `docs/spec/multiplexer-backends.md` reflect the new contract in this same cycle.
 
 ---
 
