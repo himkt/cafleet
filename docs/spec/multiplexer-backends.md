@@ -79,6 +79,22 @@ and a concurrent reader that cafleet's synchronous `scan → wake → sleep`
 monitor loop does not have, so the socket stream is a deliberately-deferred
 optimization.
 
+## Pane spawn working directory {#pane-spawn-cwd}
+
+A member pane spawned by `cafleet member create` starts in the invoking
+process's working directory (the Director's pane cwd). Each backend realizes
+this differently:
+
+- **tmux** relies on the multiplexer's builtin cwd inheritance — a new pane
+  starts in the splitting pane's working directory.
+- **herdr** receives the member-create process's cwd explicitly: every
+  `herdr pane split` carries `--cwd <dir>`, where `<dir>` is `os.getcwd()` of
+  the invoking process. herdr's own inheritance is not relied upon because
+  herdr spawns `/bin/sh` instead of the passwd login shell when `SHELL` is
+  unset ([herdr discussion #1517](https://github.com/ogulcancelik/herdr/discussions/1517)).
+  An unresolvable cwd fails the spawn loudly with `HerdrError`; there is no
+  fallback directory.
+
 ## Push notifications {#push-notifications}
 
 CAFleet's delivery model is pull-based: recipients discover messages via
