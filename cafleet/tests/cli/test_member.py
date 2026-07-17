@@ -75,6 +75,17 @@ def stub_coding_agent_binaries(monkeypatch):
     )
 
 
+def _precreate_opencode_preset(home):
+    """Satisfy the opencode spawn precondition inside a redirected HOME.
+
+    ``OpencodeAgent.ensure_available()`` requires ``~/.opencode/agents/
+    cafleet.md`` to exist (installed by ``cafleet setup opencode``); it never
+    writes the file itself."""
+    preset = home / ".opencode" / "agents" / "cafleet.md"
+    preset.parent.mkdir(parents=True, exist_ok=True)
+    preset.write_text("# cafleet agent preset\n", encoding="utf-8")
+
+
 def _invoke_member_create(
     runner: CliRunner,
     fleet_id: int,
@@ -474,9 +485,10 @@ def test_member_create__model_opencode_tokens_before_prompt_pair(
     split_window_recorder,
     stub_coding_agent_binaries,
 ):
-    # OpencodeAgent.ensure_available materializes ~/.opencode/agents/cafleet.md;
-    # redirect HOME so the write stays inside tmp_path.
+    # OpencodeAgent.ensure_available requires ~/.opencode/agents/cafleet.md to
+    # exist; pre-create it inside a redirected HOME.
     monkeypatch.setenv("HOME", str(tmp_path))
+    _precreate_opencode_preset(tmp_path)
     fleet_id, director_id, runner = bootstrapped_fleet
     result = _invoke_member_create(
         runner,
@@ -508,6 +520,7 @@ def test_member_create__no_model_flag_emits_no_model_token(
     coding_agent,
 ):
     monkeypatch.setenv("HOME", str(tmp_path))
+    _precreate_opencode_preset(tmp_path)
     fleet_id, director_id, runner = bootstrapped_fleet
     result = _invoke_member_create(
         runner,
@@ -588,6 +601,32 @@ def test_member_create__opencode_invalid_model_wins_over_missing_binary(
     assert "--model for the opencode backend must be" in result.output
     assert "not found on PATH" not in result.output
     assert split_window_recorder == []
+
+
+def test_member_create__opencode_missing_preset_fails_spawn_with_guidance(
+    tmp_path,
+    monkeypatch,
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    # With no ~/.opencode/agents/cafleet.md installed, the spawn precondition
+    # fails with guidance to run `cafleet setup opencode` — and member create
+    # writes no file.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        coding_agent="opencode",
+        text="hello",
+        name="OC-Member",
+    )
+    assert result.exit_code == 1, result.output
+    assert "opencode agent preset not found at" in result.output
+    assert "run 'cafleet setup opencode' first" in result.output
+    assert split_window_recorder == []
+    assert not (tmp_path / ".opencode").exists()
 
 
 def test_member_create__claude_default_injects_dontask_permission_mode(
@@ -747,9 +786,10 @@ def make_bootstrapped_fleet(tmp_path, monkeypatch, _mock_tmux_for_fleet_create):
     runner)`` so inheritance tests can stand up a non-claude Director whose
     placement row records ``codex`` / ``opencode``.
     """
-    # An inherited-opencode spawn's ensure_available materializes
-    # ~/.opencode/agents/cafleet.md; redirect HOME so it stays in tmp_path.
+    # An inherited-opencode spawn's ensure_available requires
+    # ~/.opencode/agents/cafleet.md; pre-create it in a redirected HOME.
     monkeypatch.setenv("HOME", str(tmp_path))
+    _precreate_opencode_preset(tmp_path)
 
     def _make(coding_agent: str = "claude"):
         runner = CliRunner()

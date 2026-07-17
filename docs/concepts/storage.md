@@ -44,10 +44,10 @@ the first request fails with `OperationalError: no such table: members`.
 ## Skills-install recording
 
 The `skill_installs` table records, per
-coding-agent home, the CLI version that last installed the skills there —
-**not** a schema version. The skills
-half of `cafleet setup` (and `cafleet setup skill`) upserts one row per home
-after that home's install succeeds. Every fleet-scoped command (`fleet *`,
+coding-agent home, the CLI version that last installed the skills and preset
+(where one exists) there — **not** a schema version. The assets
+half of `cafleet setup` (bare, or per-agent via `cafleet setup <agent>`)
+upserts one row per home after that home's install succeeds. Every fleet-scoped command (`fleet *`,
 `member *`, `message *`, `monitor *`) checks the recorded rows before running
 and hard-errors when no install is recorded or when any recorded version
 differs from the running CLI version — so skills can never silently go stale

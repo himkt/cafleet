@@ -182,8 +182,8 @@ Edges (who depends on whom):
 - **multiplexer** — leaf (process invocation only). Truncation for inline
   previews is done by the *broker* before calling `send_inline_preview`, so the
   multiplexer needs no config.
-- **coding-agent** — leaf (process/PATH checks + serialization for the opencode
-  preset).
+- **coding-agent** — leaf (process/PATH checks + the opencode preset-existence
+  check).
 - **broker** — depends on `db` (models + connection), `multiplexer`
   (`MultiplexerContext` argument to `create_fleet`; `send_inline_preview` for
   inline previews), and `config` (`max_text_len` for preview truncation).
@@ -332,7 +332,7 @@ The unified shapes:
 | `cafleet_version` | string | the `importlib.metadata.version("cafleet")` string at install time |
 | `installed_at` | string | UTC ISO-8601 with microsecond precision |
 
-Writes are upserts. Rows are written by the skills half of `cafleet setup` and by `cafleet setup skill` after each home's install succeeds; `cafleet setup db` never touches the rows. The rows feed the stale-skills guard on every fleet-scoped command group and the `cafleet doctor` skills report.
+Writes are upserts. Rows are written by the assets half of `cafleet setup` — bare or per-agent (`setup claude` / `setup codex` / `setup opencode`) — after each home's skills and preset (where one exists) install successfully, so a row attests skills + preset; `cafleet setup db` never touches the rows. The rows feed the stale-skills guard on every fleet-scoped command group and the `cafleet doctor` skills report.
 
 ### 5.3 Enums (literal string contracts)
 
@@ -811,7 +811,7 @@ HTTP status); permission errors gate authorization. The exit-code policy is
 
 ### 6.3 CLI
 
-**Scope:** the entire `cafleet` command tree (23 commands across 5 groups + 3
+**Scope:** the entire `cafleet` command tree (25 commands across 5 groups + 3
 top-level commands — §1, §10), the shared option guards, and the `member create`
 spawn orchestration + rollback ladder. Orchestration glue only — it wires
 broker/multiplexer/output/coding-agent. The command/option checklist is §10; this
@@ -1266,23 +1266,23 @@ errors propagate unwrapped.
 #### `setup`
 
 `setup` is a Click **group** with `invoke_without_command=True`. Bare `cafleet
-setup` takes **no** options (supplying `--agent` exits 2 with the parser's
-unknown-option error). The `setup` group is the single schema-management entry
-point. Bare invocation reads the CLI's own version and runs two independent
-halves, **in order** (db first, then skills):
+setup` takes **no** options. The `setup` group is the single schema-management
+entry point. Bare invocation reads the CLI's own version and runs two
+independent halves, **in order** (db first, then assets):
 
 - **DB half** — initialize or migrate the registry via the db-migration driver
   (§8): force a sync SQLite URL, create the DB file's parent directory, and
   apply the bundled migrations up to the head revision (idempotent). On an
   application error, print `db half failed: <message>` and record the
-  failure. If the db half failed, the skills half fails its schema pre-flight and
+  failure. If the db half failed, the assets half fails its schema pre-flight and
   both halves are reported failed.
-- **Skills half** — resolve install targets, then download and install the
-  skills release and upsert one `skill_installs` row per home after that home's
-  install succeeds. On an application error, print `skills half failed: <message>`
+- **Assets half** — resolve install targets, then download the release archive
+  and install the skills plus each target's bundled preset (where one exists),
+  upserting one `skill_installs` row per home after that home's install
+  succeeds. On an application error, print `assets half failed: <message>`
   and record the failure.
 - If anything failed → application error `<failed halves joined by ' and '> half
-  failed` (exit 1; db listed first, matching run order — e.g. `db and skills
+  failed` (exit 1; db listed first, matching run order — e.g. `db and assets
   half failed`).
 
 The group callback no-ops unless `ctx.invoked_subcommand is None`, so the
@@ -1312,35 +1312,36 @@ Error: DB schema is at revision <rev> which is unknown to this version of caflee
 Never touches `skill_installs` rows (the schema migration creates the table
 but `setup db` records nothing).
 
-##### `setup skill` subcommand
+##### Per-agent subcommands (`setup claude` / `setup codex` / `setup opencode`)
 
-Options: `--agent` (choice over `claude`/`codex`/`opencode`, repeatable,
-`multiple=True`, duplicate values deduped silently, default empty). Reads the
-CLI's own version. Pre-flight: the `skill_installs` table must exist, else exit
-1 with:
+One subcommand per coding-agent name, registered from the coding-agent names so
+all three share one implementation. No options. Reads the CLI's own version.
+Pre-flight: the `skill_installs` table must exist, else exit 1 with:
 
 ```
 Error: the database schema is missing or outdated; run 'cafleet setup' or 'cafleet setup db' first
 ```
 
-After the pre-flight, resolves targets (`--agent` values when given, else
-auto-detect), downloads and installs exactly as the bare skills half, and after
-each home's install succeeds upserts that home's `skill_installs` row with the
-runtime CLI version. Per-home success output:
+After the pre-flight, runs the assets half for exactly the named agent —
+auto-detection is skipped and the agent's home is created if missing — exactly
+as the bare assets half does per detected home. Per-home success output (the
+preset line appears for codex and opencode only):
 
 ```
 <agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>) -> <skills dir>
+<agent>: installed preset (v<version>) -> <target>
 ```
 
 An install failure aborts the loop; rows recorded for homes completed before
 the failure remain.
 
-##### Shared helpers (bare `setup` and `setup skill`)
+##### Shared helpers (bare `setup` and the per-agent subcommands)
 
-**resolve-targets** (given `--agent`, dedupe preserving order; else
-auto-detect each known coding-agent home whose parent dir exists; none →
-application error `no coding-agent homes detected (looked for ~/.claude,
-~/.codex, ~/.config/opencode); install a coding agent first, or pass --agent`);
+**resolve-targets** (a per-agent subcommand yields exactly its literal agent;
+bare `setup` auto-detects each known coding-agent home whose parent dir exists;
+none → application error `no coding-agent homes detected (looked for ~/.claude,
+~/.codex, ~/.config/opencode); install a coding agent first, or run 'cafleet
+setup <agent>'`);
 **resolve-download-url** (GET the GitHub release for the tag matching the CLI
 version, 30 s timeout; 404 → `no release found for version <version>`; other
 HTTP/network error → `could not reach the GitHub API (<reason>)`; find asset
@@ -1351,11 +1352,25 @@ member whose path is absolute or contains a `..` component** with `archive
 member '<member>' has an unsafe path; rejecting the archive`; a
 malformed/unreadable archive → `release asset is malformed`; validate the
 extracted `skills/` dir contains exactly the three skill dirs `cafleet`,
-`cafleet-design-doc`, `cafleet-research`, else `release asset is malformed`);
+`cafleet-design-doc`, `cafleet-research`, and that both preset archive sources
+`presets/opencode/cafleet.md` and `presets/codex/cafleet.rules` are regular
+files in the extracted root, else `release asset is malformed`);
 **install-skills** (per target, copy each skill dir into the agent's skills dir,
 removing any existing copy first; a filesystem error → `failed to install skills
 into <skills_dir>: <error>`; success prints `<agent>: installed <skill dirs
-joined by ', '> (v<version>) -> <skills dir>`). Known skills dirs: `claude` →
+joined by ', '> (v<version>) -> <skills dir>`);
+**install-preset** (per target with a preset — codex: archive source
+`presets/codex/cafleet.rules` → `~/.codex/rules/cafleet.rules`; opencode:
+`presets/opencode/cafleet.md` → `~/.opencode/agents/cafleet.md`; claude has
+none: create the target's parent directory chain recursively, remove any
+existing target in this explicit check order — `is_symlink()` → unlink; else
+`is_dir()` → rmtree; else if it exists → unlink (the symlink check comes first
+because `is_dir()` follows symlinks and `shutil.rmtree` refuses them) — then
+copy the archive source in; a filesystem error → `failed to install preset into
+<target>: <error>`; success prints `<agent>: installed preset (v<version>) ->
+<target>`). A target's `skill_installs` row is upserted only after both its
+skills and its preset (where one exists) install successfully — the row attests
+skills + preset. Known skills dirs: `claude` →
 `~/.claude/skills`, `codex` → `~/.codex/skills`, `opencode` →
 `~/.config/opencode/skills`.
 
@@ -1375,7 +1390,7 @@ before any subcommand body runs:
    (simple string inequality — a downgrade also triggers), exit 1 with the
    stale agents listed in ascending `coding_agent` order:
    ```
-   Error: stale skills detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup skill' to reinstall
+   Error: stale skills detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall
    ```
 
 3. Otherwise proceed silently.
@@ -2158,8 +2173,8 @@ boundary.
 
 **Scope:** the `CodingAgent` interface and `claude`/`codex`/`opencode` backends
 that determine which binary to launch and how to build its spawn `argv`, plus
-the opencode bundled-agent preset materialization and the `CODING_AGENTS`
-registry.
+the shipped per-agent preset files (§ preset sections below) and the
+`CODING_AGENTS` registry.
 
 #### Interface
 
@@ -2172,10 +2187,10 @@ Each exposes two read-only properties and three methods:
   which it is registered.
 - **`binary_name`** — the executable resolved against `PATH` (`"claude"` /
   `"codex"` / `"opencode"`).
-- **`ensure_available()`** — raises if any spawn precondition is unmet; MAY
-  materialize on-disk config as a side effect (opencode does). A shared helper
-  resolves `binary_name` against `PATH` and, on a miss, raises `binary
-  {binary_name} not found on PATH`.
+- **`ensure_available()`** — raises if any spawn precondition is unmet: the
+  binary resolves on `PATH` and (for backends with bundled presets) the preset
+  file exists on disk. A shared helper resolves `binary_name` against `PATH`
+  and, on a miss, raises `binary {binary_name} not found on PATH`.
 - **`validate_model(model)`** — `model` is optional; raises a value-error if
   malformed for this backend; a `None` model is always valid. **Exit-code note:**
   `member create` translates this value-error to a **usage error (exit 2)** with
@@ -2187,8 +2202,8 @@ Each exposes two read-only properties and three methods:
 
 **Ordering invariant:** the consumer (`member create`) MUST call them in the
 order **`validate_model` → `ensure_available` → `build_spawn_argv`**, so a
-malformed model fails before any disk write (opencode preset) or registration
-side effect.
+malformed model fails before any precondition check or registration side
+effect.
 
 **No-model byte-identity:** when `model` is `None`, `build_spawn_argv` emits
 **no** `--model` tokens at all — the argv is identical to the no-model form.
@@ -2228,8 +2243,9 @@ validates). `ensure_available` PATH check on `claude` only. claude is the
 non-empty, else value-error `--model for the opencode backend must be
 '<provider-id>/<model-id>' (got '{model}').`. (`"openai/gpt-4"` accepted;
 `"a/b/c"` accepted as provider `a` / model `b/c`; `"a/"`, `"/b"`, `"abc"`
-rejected.) `ensure_available` PATH check on `opencode` **first**, then
-materialize the preset. `display_name` is silently ignored; the prompt is passed
+rejected.) `ensure_available` PATH check on `opencode` **first**, then verify
+the preset file exists at `~/.opencode/agents/cafleet.md` (see § opencode
+preset). `display_name` is silently ignored; the prompt is passed
 as a `--prompt <prompt>` flag pair (two tokens), unlike claude/codex's bare
 positional.
 
@@ -2239,53 +2255,53 @@ positional.
   (+ ["--prompt", <prompt>])                         # prompt via flag — TWO tokens
 ```
 
-#### opencode preset materialization
+#### codex rules file
 
-`ensure_available` for opencode writes the bundled `cafleet` agent definition to
-`~/.opencode/agents/cafleet.md` (expanding `~`). **Two opencode base directories
-serve two distinct purposes** and are not interchangeable: the agent preset lives
+The codex auto-approval rules for `cafleet` commands are a static file shipped
+in the skills release archive as `presets/codex/cafleet.rules` and installed to
+`~/.codex/rules/cafleet.rules` (expanding `~`) by the assets half of `setup`
+(§6.3), overwriting any existing target. The file is not a spawn precondition —
+codex's `ensure_available` is PATH-check-only — and codex loads every `*.rules`
+file under `~/.codex/rules/`, applying the strictest matching decision, so
+operator customizations live in a separate rules file in that directory. Exact
+contents (verbatim):
+
+```text
+prefix_rule(pattern = ["cafleet"], decision = "allow")
+
+prefix_rule(
+    pattern = ["cafleet", "member", "exec"],
+    decision = "prompt",
+    justification = "cafleet member exec runs arbitrary commands on a member",
+)
+```
+
+#### opencode preset
+
+The `cafleet` agent definition is a static file shipped in the skills release
+archive as `presets/opencode/cafleet.md` and installed to
+`~/.opencode/agents/cafleet.md` (expanding `~`) by the assets half of `setup`
+(§6.3), overwriting any existing target. **Two opencode base directories serve
+two distinct purposes** and are not interchangeable: the agent preset lives
 under `~/.opencode/`, which is opencode's mandated `--agent cafleet` discovery
 path; `setup`'s skills install + home auto-detection (§6.3) use
-`~/.config/opencode/`, cafleet's own skills-install / home-detection target. Both
-paths are correct for their purpose — keep each as written. The writer is an
-idempotent skip-if-exists guard with a refuse-to-overwrite branch; resolve the
-target, then branch in this exact order:
+`~/.config/opencode/`, cafleet's own skills-install / home-detection target.
+Both paths are correct for their purpose — keep each as written.
 
-1. **Target is a regular file** (following symlinks — a symlink to a regular file
-   counts here): **return, no-op** (skips dotfile-managed customizations).
-2. **Otherwise the target exists** but is not a regular file / symlink-to-regular
-   (a directory, a broken symlink, a symlink to a non-file): **raise**, refusing
-   to overwrite, with `cannot materialize CAFleet opencode agent preset:
-   {target} exists but is not a regular file or symlink to one (e.g. directory,
-   broken symlink, symlink to a non-file); refusing to overwrite`.
-3. **Otherwise** (does not exist): create the parent directory chain recursively
-   (no error if present), then write the rendered markdown as UTF-8. Any
-   directory-create or write error is wrapped with the prefix `cannot
-   materialize CAFleet opencode agent preset at {target}: ` (the prefix up to and
-   including `: ` is the contract; the trailing OS message is platform-
-   dependent).
-
-The branch order is load-bearing: the regular-file skip is checked before the
-exists-but-not-regular refusal.
-
-#### Preset file rendering rules
-
-The definition has four fields — `description` (string), `mode` (`primary`),
-`permission` (a ruleset), `body` (markdown) — rendered as a `---`-delimited
-**JSON** (not YAML) frontmatter block, then a blank line, then the body, then a
-trailing newline. JSON formatting rules (all load-bearing for byte-identical
-output): JSON not YAML; **2-space indent**; **non-ASCII preserved** (never
-`\uXXXX`); **insertion-ordered maps** (top-level key order `description`, `mode`,
-`permission`; within `permission`, field order `bash`, `read`, `edit`,
-`external_directory`, `webfetch`, `websearch`, `repo_clone`, `question`,
-`plan_enter`, `plan_exit`; within each glob map, entry order exactly as below).
-`bash`/`read`/`edit` are glob→decision maps (`"allow"`/`"deny"`); the other
-seven `permission` fields are scalar `"deny"`.
+The preset is a spawn precondition (the spawn argv references `--agent
+cafleet`): opencode's `ensure_available` verifies the file exists at the
+install target and raises `opencode agent preset not found at {preset}; run
+'cafleet setup opencode' first` when it does not.
 
 #### Exact preset file contents (verbatim)
 
-Reproduce this file faithfully (the body contains literal backticks around
-`dontAsk` and `.env`):
+The checked-in `presets/opencode/cafleet.md` is the content contract: a
+`---`-delimited **JSON** (not YAML) frontmatter block (2-space indent,
+non-ASCII preserved, top-level key order `description`, `mode`, `permission`),
+a blank line, then the markdown body. `bash`/`read`/`edit` are glob→decision
+maps (`"allow"`/`"deny"`); the other seven `permission` fields are scalar
+`"deny"`. Reproduce this file faithfully (the body contains literal backticks
+around `dontAsk` and `.env`):
 
 ````markdown
 ---
@@ -2354,12 +2370,8 @@ heading and its blank line); the file ends with exactly one trailing newline.
 - PATH miss: `binary {binary_name} not found on PATH`
 - opencode model format: `--model for the opencode backend must be
   '<provider-id>/<model-id>' (got '{model}').`
-- preset non-regular-file collision: `cannot materialize CAFleet opencode agent
-  preset: {target} exists but is not a regular file or symlink to one (e.g.
-  directory, broken symlink, symlink to a non-file); refusing to overwrite`
-- preset write failure (prefix is the contract; OS-message suffix is
-  platform-dependent): `cannot materialize CAFleet opencode agent preset at
-  {target}: {error}`
+- missing opencode preset: `opencode agent preset not found at {preset}; run
+  'cafleet setup opencode' first`
 
 ### 6.8 WebUI + Config
 
@@ -2600,7 +2612,8 @@ The root-Director-deregistration guard raises a single **application error
 - `derive_member_kind` collapses a malformed card kind to the ordinary kind (a
   deliberate non-match).
 - `register_member` monitoring-member-without-placement raises.
-- The opencode preset refuses to overwrite a non-regular-file target.
+- opencode's `ensure_available` raises on a missing preset file rather than
+  writing one.
 - Broker "exactly one row" invariants raise if the assumption breaks — keep
   fail-loud.
 
@@ -2675,8 +2688,9 @@ AUTOINCREMENT, and the create-order quirk are in §6.1.
 3. `skill_installs` — TEXT PK `coding_agent`, no AUTOINCREMENT, no FK
    constraint. Columns: `coding_agent` TEXT PK, `cafleet_version` TEXT NOT
    NULL, `installed_at` TEXT NOT NULL. Upsert semantics; rows written by the
-   skills half of `setup` and by `setup skill` after each home's install
-   succeeds; never written by `setup db`. Feeds the stale-skills guard and
+   assets half of `setup` (bare or per-agent) after each home's skills and
+   preset (where one exists) install successfully — the row attests skills +
+   preset; never written by `setup db`. Feeds the stale-skills guard and
    `doctor`.
 4. `member_placements` — PK=FK `member_id`, not AUTOINCREMENT; `backend` DDL
    default `"tmux"`; `0001` creates `coding_agent` with a DDL default
@@ -2722,8 +2736,8 @@ for bare `setup`'s db half and for `setup db` — both print the same lines.
     exact argv lists, the Esc-first/`-l`/Enter ordering, the two sleeps, the
     sanitizer substitutions, and best-effort-vs-raising contracts.
   - *Coding-agent* — assert each `build_spawn_argv` argv, the opencode model
-    validation, and the preset markdown structure; the materializer's
-    skip/refuse/write branches against a temp HOME.
+    validation, and each backend's `ensure_available` preconditions (PATH
+    check; opencode's preset-existence check) against a temp HOME.
   - *Monitor* — `should_ping` is pure (table-test interval/enabled/pane states);
     `monitor_tick` against a fake broker+multiplexer asserting the `woke`-gated
     `record_pings` and the `STOP` paths.
@@ -2749,7 +2763,7 @@ for bare `setup`'s db half and for `setup db` — both print the same lines.
 
 ## 10. CLI command checklist
 
-The full command surface — **23 commands across 5 groups + 3 top-level commands**.
+The full command surface — **25 commands across 5 groups + 3 top-level commands**.
 Each must be reproduced with identical option names, types, defaults,
 required-ness, documented-vs-hidden status, output shapes, and exit codes. Every
 interaction flag is now **documented** (there are no hidden flags). Per-command
@@ -2760,9 +2774,9 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 
 **Top-level:**
 
-- [ ] `cafleet setup` (bare group invocation: no options; runs db half then skills half)
+- [ ] `cafleet setup` (bare group invocation: no options; runs db half then assets half)
 - [ ] `cafleet setup db` (no options; db migration only; prints the created/upgraded/already-at-head line)
-- [ ] `cafleet setup skill` (`--agent` multiple: claude/codex/opencode; pre-flight requires `skill_installs` table)
+- [ ] `cafleet setup claude` / `cafleet setup codex` / `cafleet setup opencode` (one subcommand per agent, no options; assets half for exactly that agent; pre-flight requires `skill_installs` table)
 - [ ] `cafleet doctor` (`--json`; emits tmux block + skills-install report)
 - [ ] `cafleet server` (`--host`=settings.broker_host, `--port`=settings.broker_port)
 
@@ -2819,7 +2833,7 @@ preserved.
 
 Fidelity is structural and semantic, not byte-for-byte (§1). The host-language
 artifacts that need only preserve *intent* (not exact bytes): the `repr()`-style
-quoting in `member exec` echo, the OS-error message suffix in a preset-write
+quoting in `member exec` echo, the OS-error message suffix in a preset-install
 failure, and an exception's exact internal-repr fragment.
 
 ### Surface-redesign decisions
@@ -2838,7 +2852,7 @@ The decisions that shape this surface (full rationale in the design doc):
   included; it refuses to auto-downgrade an ahead-of-head database and
   refuses an unversioned database with existing tables. Upgrade path: after
   `uv tool upgrade cafleet`, the first fleet-scoped command errors with the
-  stale-skills message and instructs the operator to run `cafleet setup skill`
+  stale-skills message and instructs the operator to run `cafleet setup`
   to reinstall.
 - **Stale-skills guard** (§6.3): every fleet-scoped group callback validates
   recorded `skill_installs` versions against the runtime CLI version before any
@@ -2857,9 +2871,9 @@ The decisions that shape this surface (full rationale in the design doc):
 Choices left unconstrained by the contract (each underlying behavior is fully
 specified in the cited section):
 
-- **CLI (§6.3):** the `--coding-agent`/`--role`/`--agent` choice sets may be
-  hardcoded to `claude`/`codex`/`opencode` or data-driven off the registry — an
-  implementation choice.
+- **CLI (§6.3):** the `--coding-agent`/`--role` choice sets and the per-agent
+  `setup` subcommand names may be hardcoded to `claude`/`codex`/`opencode` or
+  data-driven off the registry — an implementation choice.
 - **Multiplexer (§6.5):** `env` argument ordering in `split_window` is not
   behaviorally significant (tmux treats `-e` flags as a set).
 - **Coding agents (§6.7):** the backend registry may be a name→backend map or a

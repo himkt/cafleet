@@ -1,8 +1,6 @@
+from pathlib import Path
+
 from cafleet.coding_agent.base import ensure_binary_on_path
-from cafleet.coding_agent.opencode_preset import (
-    CAFLEET_AGENT,
-    materialize_cafleet_agent,
-)
 
 
 class OpencodeAgent:
@@ -11,7 +9,12 @@ class OpencodeAgent:
 
     def ensure_available(self) -> None:
         ensure_binary_on_path(self.binary_name)
-        materialize_cafleet_agent(CAFLEET_AGENT)
+        preset = Path("~/.opencode/agents/cafleet.md").expanduser()
+        if not preset.is_file():
+            raise RuntimeError(
+                f"opencode agent preset not found at {preset}; "
+                "run 'cafleet setup opencode' first"
+            )
 
     def validate_model(self, model: str | None) -> None:
         if model is None:

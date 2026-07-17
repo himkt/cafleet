@@ -22,7 +22,7 @@ from cafleet.multiplexer.tmux import TmuxMultiplexer
 RUNTIME_VERSION = importlib.metadata.version("cafleet")
 
 NO_INSTALL_ERROR = "no skills install is recorded; run 'cafleet setup' first"
-STALE_REPAIR = "run 'cafleet setup skill' to reinstall"
+STALE_REPAIR = "run 'cafleet setup' to reinstall"
 
 FLEET_SCOPED_INVOCATIONS = [
     pytest.param(["fleet", "list"], id="fleet"),
