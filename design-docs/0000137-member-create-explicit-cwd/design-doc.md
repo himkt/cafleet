@@ -1,6 +1,6 @@
 # Explicit Working Directory for herdr Pane Spawn in `cafleet member create`
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 9/9 tasks complete
 **Last Updated**: 2026-07-17
 
@@ -170,3 +170,4 @@ Live-herdr verification (a member pane actually starting in the Director's cwd) 
 | Date | Changes |
 |------|---------|
 | 2026-07-17 | Initial draft |
+| 2026-07-17 | Implementation complete: all 9 tasks and 7 Success Criteria satisfied, Reviewer approved round 1 with zero issues, PR #202 opened. Status → Complete. |
