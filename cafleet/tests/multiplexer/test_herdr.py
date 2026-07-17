@@ -124,13 +124,19 @@ def test_context_discovery__missing_field_raises(herdr_run):
 
 _REFERENCE = MultiplexerContext(session="wG", window_id="wG:t1", pane_id="wG:p1")
 
+# split_window passes the invoking process's cwd to every split via --cwd
+# (herdr does not respect the login shell when SHELL is unset — discussion
+# #1517), so each split test pins os.getcwd to this fixed path.
+_CWD = "/work/director-cwd"
 
-def test_split_window__first_member_splits_director_right(herdr_run):
+
+def test_split_window__first_member_splits_director_right(monkeypatch, herdr_run):
     """No pane in the Director's tab besides the Director itself → empty column →
     the first member starts the right column with ``pane split --direction
     right``, then runs the command in the new pane. Panes in other tabs and the
     Director's own pane are excluded from the column."""
     captured, set_returns = herdr_run
+    monkeypatch.setattr("os.getcwd", lambda: _CWD)
     set_returns(
         _envelope(
             {
@@ -158,6 +164,8 @@ def test_split_window__first_member_splits_director_right(herdr_run):
             "--direction",
             "right",
             "--no-focus",
+            "--cwd",
+            _CWD,
             "--env",
             "CAFLEET_DATABASE_URL=sqlite:////tmp/cafleet.db",
         ],
@@ -166,8 +174,9 @@ def test_split_window__first_member_splits_director_right(herdr_run):
     ]
 
 
-def test_split_window__first_member_no_env_omits_env_flags(herdr_run):
+def test_split_window__first_member_no_env_omits_env_flags(monkeypatch, herdr_run):
     captured, set_returns = herdr_run
+    monkeypatch.setattr("os.getcwd", lambda: _CWD)
     set_returns(
         _envelope({"panes": [{"pane_id": "wG:p1", "tab_id": "wG:t1"}]}),
         _envelope({"pane": {"pane_id": "wG:p2"}}),
@@ -182,6 +191,8 @@ def test_split_window__first_member_no_env_omits_env_flags(herdr_run):
         "--direction",
         "right",
         "--no-focus",
+        "--cwd",
+        _CWD,
     ]
     assert "--env" not in split_argv
 
@@ -215,13 +226,16 @@ def _balanced_layout(tab_id: str, col_x: int) -> dict:
     }
 
 
-def test_split_window__subsequent_member_splits_max_then_equalizes(herdr_run):
+def test_split_window__subsequent_member_splits_max_then_equalizes(
+    monkeypatch, herdr_run
+):
     """A non-empty column → the member splits ``max(column)`` downward, then
     ``_equalize_focused_tab_column`` reads the focused tab (``pane current`` +
     ``pane layout``) before the command runs. The column is listed [p3, p2] to
     pin that the split targets ``max`` (p3), not the last-listed pane (p2); the
     layout is already balanced (0.5), so no resize is emitted."""
     captured, set_returns = herdr_run
+    monkeypatch.setattr("os.getcwd", lambda: _CWD)
     set_returns(
         _envelope(
             {
@@ -248,7 +262,17 @@ def test_split_window__subsequent_member_splits_max_then_equalizes(herdr_run):
     assert captured == [
         ["herdr", "pane", "list"],
         # max(["wG:p3", "wG:p2"]) == "wG:p3" — the deterministic column anchor.
-        ["herdr", "pane", "split", "wG:p3", "--direction", "down", "--no-focus"],
+        [
+            "herdr",
+            "pane",
+            "split",
+            "wG:p3",
+            "--direction",
+            "down",
+            "--no-focus",
+            "--cwd",
+            _CWD,
+        ],
         ["herdr", "pane", "current"],
         ["herdr", "pane", "layout"],
         ["herdr", "pane", "run", "wG:p4", "claude second"],
@@ -261,6 +285,23 @@ def test_split_window__pane_list_missing_field_raises(herdr_run):
     set_returns(_envelope({"panes": [{"tab_id": "wG:t1"}]}))
     with pytest.raises(HerdrError, match="missing"):
         _herdr.split_window(reference=_REFERENCE, env={}, command=["claude"])
+
+
+def test_split_window__unresolvable_cwd_raises(monkeypatch, herdr_run):
+    """The cwd is fetched before any herdr subprocess; an ``OSError`` from
+    ``os.getcwd`` (the invoking process's cwd was deleted) wraps into
+    ``HerdrError`` with no fallback directory and no herdr call."""
+
+    def raise_deleted_cwd():
+        raise FileNotFoundError("No such file or directory")
+
+    captured, _set_returns = herdr_run
+    monkeypatch.setattr("os.getcwd", raise_deleted_cwd)
+    with pytest.raises(
+        HerdrError, match="cannot resolve the working directory for pane spawn"
+    ):
+        _herdr.split_window(reference=_REFERENCE, env={}, command=["claude"])
+    assert captured == []
 
 
 # --- _equalize_focused_tab_column (deterministic ratio math) ---------------

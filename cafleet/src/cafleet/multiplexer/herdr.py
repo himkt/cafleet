@@ -174,6 +174,14 @@ class HerdrMultiplexer:
         # split a deterministic column pane downward. After appending a member,
         # the column is rebalanced to equal heights (see
         # _equalize_focused_tab_column) so the result matches tmux main-vertical.
+        # NOTE(himkt): once herdr respects the login shell when split, this won't be necessary
+        # https://github.com/ogulcancelik/herdr/discussions/1517
+        try:
+            cwd = os.getcwd()  # noqa: PTH109 - the argv wants str; the design pins os.getcwd
+        except OSError as exc:
+            raise HerdrError(
+                f"cannot resolve the working directory for pane spawn: {exc}"
+            ) from exc
         env_args = [arg for k, v in env.items() for arg in ("--env", f"{k}={v}")]
         result = _run_json(["herdr", "pane", "list"])
         try:
@@ -186,9 +194,9 @@ class HerdrMultiplexer:
         except KeyError as exc:
             raise HerdrError(f"herdr pane list missing {exc} field") from exc
         if not column:
-            new_pane_id = self._split_pane(reference.pane_id, "right", env_args)
+            new_pane_id = self._split_pane(reference.pane_id, "right", cwd, env_args)
         else:
-            new_pane_id = self._split_pane(max(column), "down", env_args)
+            new_pane_id = self._split_pane(max(column), "down", cwd, env_args)
             self._equalize_focused_tab_column()
         # pane run feeds one shell line, so the argv is quoted to preserve boundaries.
         _run(["herdr", "pane", "run", new_pane_id, shlex.join(command)])
@@ -265,9 +273,21 @@ class HerdrMultiplexer:
                 ]
             )
 
-    def _split_pane(self, pane_id: str, direction: str, env_args: list[str]) -> str:
+    def _split_pane(
+        self, pane_id: str, direction: str, cwd: str, env_args: list[str]
+    ) -> str:
         result = _run_json(
-            ["herdr", "pane", "split", pane_id, "--direction", direction, "--no-focus"]
+            [
+                "herdr",
+                "pane",
+                "split",
+                pane_id,
+                "--direction",
+                direction,
+                "--no-focus",
+                "--cwd",
+                cwd,
+            ]
             + env_args
         )
         try:

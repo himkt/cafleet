@@ -1871,13 +1871,17 @@ Each method's herdr realization:
   context (`session ← workspace_id`, `window_id ← tab_id`, `pane_id`).
 
 - **`split_window(*, reference, env, command) -> str`** — layout-aware (emulates
-  tmux `select-layout main-vertical`): reads `herdr pane list` and computes the
-  right column as the panes in the Director's tab
-  (`tab_id == reference.window_id`) minus the Director's own `pane_id`. If empty →
-  `herdr pane split <reference.pane_id> --direction right --no-focus [--env K=V …]`
-  (first member); else `herdr pane split <max(column)> --direction down
-  --no-focus [--env K=V …]` followed by the column-equalization step below.
-  `--cwd` is never passed. Then `herdr pane run <new_id> "<shlex.join(command)>"`.
+  tmux `select-layout main-vertical`): fetches the invoking process's working
+  directory once per call via `os.getcwd()` (an `OSError` from the fetch maps to
+  `HerdrError("cannot resolve the working directory for pane spawn: …")`; no
+  fallback directory), then reads `herdr pane list` and computes the right column
+  as the panes in the Director's tab (`tab_id == reference.window_id`) minus the
+  Director's own `pane_id`. If empty → `herdr pane split <reference.pane_id>
+  --direction right --no-focus --cwd <cwd> [--env K=V …]` (first member); else
+  `herdr pane split <max(column)> --direction down --no-focus --cwd <cwd>
+  [--env K=V …]` followed by the column-equalization step below. `<cwd>` is the
+  fetched working directory, passed verbatim (absolute path, argv list, no
+  quoting). Then `herdr pane run <new_id> "<shlex.join(command)>"`.
   The argv `command` is rendered to a single properly-quoted string with
   `shlex.join` before the `pane run` because `pane run` submits one text line into
   the pane's shell (a genuine semantic difference from the tmux exec-argv path —
