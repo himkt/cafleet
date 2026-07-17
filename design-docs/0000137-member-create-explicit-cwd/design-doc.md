@@ -1,7 +1,7 @@
 # Explicit Working Directory for herdr Pane Spawn in `cafleet member create`
 
 **Status**: Approved
-**Progress**: 4/9 tasks complete
+**Progress**: 6/9 tasks complete
 **Last Updated**: 2026-07-17
 
 ## Overview
@@ -149,8 +149,8 @@ Live-herdr verification (a member pane actually starting in the Director's cwd) 
 
 ### Step 2: herdr backend
 
-- [ ] In `HerdrMultiplexer.split_window`, fetch `os.getcwd()` once (annotated with the verbatim 2-line NOTE(himkt) comment), wrapping `OSError` in `HerdrError` <!-- completed: -->
-- [ ] Thread `cwd` through `_split_pane` and append `--cwd <cwd>` after `--no-focus` in the split argv <!-- completed: -->
+- [x] In `HerdrMultiplexer.split_window`, fetch `os.getcwd()` once (annotated with the verbatim 2-line NOTE(himkt) comment), wrapping `OSError` in `HerdrError` <!-- completed: 2026-07-17T12:56 -->
+- [x] Thread `cwd` through `_split_pane` and append `--cwd <cwd>` after `--no-focus` in the split argv <!-- completed: 2026-07-17T12:56 -->
 
 ### Step 3: Tests
 
