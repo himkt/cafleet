@@ -1,7 +1,7 @@
 # Explicit Working Directory for herdr Pane Spawn in `cafleet member create`
 
 **Status**: Approved
-**Progress**: 2/9 tasks complete
+**Progress**: 4/9 tasks complete
 **Last Updated**: 2026-07-17
 
 ## Overview
@@ -154,8 +154,8 @@ Live-herdr verification (a member pane actually starting in the Director's cwd) 
 
 ### Step 3: Tests
 
-- [ ] Update the three pinned-argv `split_window` tests in `tests/multiplexer/test_herdr.py` for the `--cwd` flag (fixed-path `os.getcwd` monkeypatch) <!-- completed: -->
-- [ ] Add `test_split_window__unresolvable_cwd_raises` (`os.getcwd` raises → `HerdrError`, no subprocess call) <!-- completed: -->
+- [x] Update the three pinned-argv `split_window` tests in `tests/multiplexer/test_herdr.py` for the `--cwd` flag (fixed-path `os.getcwd` monkeypatch) <!-- completed: 2026-07-17T12:52 -->
+- [x] Add `test_split_window__unresolvable_cwd_raises` (`os.getcwd` raises → `HerdrError`, no subprocess call) <!-- completed: 2026-07-17T12:52 -->
 
 ### Step 4: Verification
 
