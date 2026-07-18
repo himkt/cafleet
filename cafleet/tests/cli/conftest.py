@@ -17,7 +17,7 @@ _FAKE_DIRECTOR_CTX = DirectorContext(session="main", window_id="@3", pane_id="%0
 def _cli_registry(tmp_path, monkeypatch, _reset_engine_singletons):
     """Redirect the registry at a seeded temp SQLite for every CLI test.
 
-    Fleet-scoped commands run the stale-skills guard against the engine built
+    Fleet-scoped commands run the stale-assets guard against the engine built
     from ``settings.database_url``; without this redirect a CLI test that never
     patches the broker session would read the operator's real registry (and
     fail the guard). Per-file fixtures that re-redirect ``database_url`` run

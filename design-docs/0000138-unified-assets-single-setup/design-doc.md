@@ -15,7 +15,7 @@ Unify the shipped skill/preset artifacts under a single "assets" concept — the
 - [ ] `cafleet setup --skip claude --skip codex --skip opencode` runs the DB half only and exits 0 — the documented schema-only path for contributors and `mise //cafleet:makemigration`.
 - [ ] The publish workflow uploads `cafleet-assets-v<version>.zip` and the CLI downloads exactly that name; a missing release or asset remains a loud exit-1 failure.
 - [ ] Migration `0003` moves every `skill_installs` row into `asset_installs` (create + copy + drop, data-preserving both ways); the chain-guard test asserts the 3-revision chain.
-- [ ] No mention of `setup db`, per-agent setup subcommands, home auto-detection, `cafleet-skills-v`, or the `skill_installs` name family remains anywhere outside `design-docs/`, `cafleet/src/cafleet/db/alembic/versions/`, and SPEC.md §8's migration-chain contract (removal rule; migration scripts are immutable history, migration `0003` itself necessarily references `skill_installs`, and §8 must name the table that revisions `0001` and `0003` create and rename for the chain to be reproducible); the project `CLAUDE.md` describes the single `setup` command.
+- [ ] No mention of `setup db`, per-agent setup subcommands, home auto-detection, `cafleet-skills-v`, or the `skill_installs` name family remains anywhere outside `design-docs/`, `cafleet/src/cafleet/db/alembic/versions/`, SPEC.md §8's migration-chain contract, and the migration data-preservation test in `tests/db/test_alembic_smoke.py` (removal rule; migration scripts are immutable history, migration `0003` itself necessarily references `skill_installs`, §8 must name the table that revisions `0001` and `0003` create and rename for the chain to be reproducible, and the SC-5 data-preservation test must seed and assert the pre-rename table); the project `CLAUDE.md` describes the single `setup` command.
 - [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
@@ -192,7 +192,8 @@ Per `.claude/rules/removal.md`, every mention of the removed surface is updated 
 
 - [ ] `mise //cafleet:test` passes <!-- completed: -->
 - [ ] `mise //cafleet:lint` and `mise //cafleet:typecheck` pass <!-- completed: -->
-- [ ] Repo-wide sweep confirms no mention of `setup db`, `setup claude|codex|opencode`, home auto-detection, `cafleet-skills-v`, or the `skill_installs` name family outside `design-docs/`, `cafleet/src/cafleet/db/alembic/versions/`, and SPEC.md §8's migration-chain contract <!-- completed: -->
+- [ ] Repo-wide sweep confirms no mention of `setup db`, `setup claude|codex|opencode`, home auto-detection, `cafleet-skills-v`, or the `skill_installs` name family outside `design-docs/`, `cafleet/src/cafleet/db/alembic/versions/`, SPEC.md §8's migration-chain contract, and the migration data-preservation test in `tests/db/test_alembic_smoke.py` <!-- completed: -->
+
 - [ ] Smoke-check the schema-only invocation on a fresh DB: `cafleet setup --skip claude --skip codex --skip opencode` exits 0 and reports head `0003` <!-- completed: -->
 - [ ] Smoke-check upgrade data preservation: a DB at `0002` with a seeded `skill_installs` row migrates to `0003` with the row present in `asset_installs` <!-- completed: -->
 
@@ -204,3 +205,4 @@ Per `.claude/rules/removal.md`, every mention of the removed surface is updated 
 |------|---------|
 | 2026-07-18 | Initial draft |
 | 2026-07-18 | Step-1 arbitration: extended the `skill_installs`-mention carve-out (SC #6 and the Step-5 sweep task) to SPEC.md §8's migration-chain contract — §8 must name the table that revisions `0001` and `0003` create and rename, same immutable-history rationale as the migration-script exemption. |
+| 2026-07-18 | Phase-D arbitration: extended the same carve-out to the migration data-preservation test in `tests/db/test_alembic_smoke.py` — the SC-5 test must seed and assert the pre-rename `skill_installs` table to prove the copy. |

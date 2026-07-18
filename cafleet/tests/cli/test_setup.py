@@ -812,16 +812,13 @@ def test_extractall_oserror_is_malformed(homes, registry_db, monkeypatch):
 
 
 def test_missing_asset_message(homes, registry_db, monkeypatch):
-    """An asset absent from the release surfaces the specific not-found message.
-
-    The release carries only the retired ``cafleet-skills-v`` name — there is
-    no fallback lookup, so the new name is reported missing.
-    """
+    """A release lacking the expected asset name surfaces the specific
+    not-found message — the lookup matches exactly one name, no fallback."""
     _mock_release(
         monkeypatch,
         assets=[
             {
-                "name": f"cafleet-skills-v{CLI_VERSION}.zip",
+                "name": "other-asset.zip",
                 "browser_download_url": DOWNLOAD_URL,
             }
         ],
