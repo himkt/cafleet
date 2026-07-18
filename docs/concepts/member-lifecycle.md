@@ -61,13 +61,6 @@ pending placement (no pane yet) is a plain registry soft-delete, and so is a
 placementless registry row (no placement row) — `cafleet member delete`
 soft-deletes both without touching the multiplexer.
 
-On backends without native layout reflow (herdr), killing the pane also
-restores the pane layout best-effort: the remaining member column is
-re-equalized, and the Director pane returns to full tab width after the last
-member — a layout failure never fails the delete. tmux relies on the
-multiplexer's native auto-fit. See
-[Multiplexer backends](../spec/multiplexer-backends.md#delete-time-pane-layout).
-
 ## Spawn-prompt input modes
 
 The spawn prompt is supplied inline via `--text "<prompt>"` or from a file via

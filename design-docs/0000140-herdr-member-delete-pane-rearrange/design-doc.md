@@ -1,7 +1,7 @@
 # Herdr Pane Rearrange on `cafleet member delete`
 
 **Status**: Complete
-**Progress**: 19/19 tasks complete
+**Progress**: 17/17 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -16,7 +16,7 @@
 - [x] The rebalance only ever resizes the killed pane's tab: when the focused-tab layout reports a different tab, no resize is emitted.
 - [x] The tmux backend's delete path is unchanged: a bare `tmux kill-pane` with no layout step.
 - [x] The `Multiplexer` Protocol, the `member delete` CLI path, and the CLI-level call-order contract (`kill_pane` → `deregister_member`) are unchanged.
-- [x] `docs/spec/multiplexer-backends.md`, `SPEC.md`, `docs/concepts/member-lifecycle.md`, and `docs/api/multiplexer.md` document the delete-time layout behavior; `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
+- [x] `docs/spec/multiplexer-backends.md` and `SPEC.md` document the delete-time layout behavior (the concept and API pages instruct member deletion only); `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
 
@@ -175,8 +175,6 @@ The verification is the layout read itself: a single pane with an empty `splits`
 
 - [x] `docs/spec/multiplexer-backends.md`: add a "Delete-time pane layout" section documenting the asymmetry — tmux relies on native auto-fit after `kill-pane`; herdr's `kill_pane` reads the target's tab (`herdr pane get`), closes the pane, then runs a best-effort rebalance scoped to that tab (column re-equalization for ≥ 2 members, explicit Director full-width restore after the last member, silent skip on unexpected shapes or when the focused-tab layout is a different tab). <!-- completed: 2026-07-18T06:37 -->
 - [x] `SPEC.md`: update the herdr `kill_pane` entry (~line 1884) to specify the pre-close `_pane_tab_id` read, `herdr pane close`, then the `_rebalance_after_close` algorithm (target-tab-scoped layout read with skip-on-mismatch, the column case table, the full-width restore rule, best-effort `HerdrError` swallowing), alongside the existing `_equalize_focused_tab_column` algorithm section. <!-- completed: 2026-07-18T06:37 -->
-- [x] `docs/concepts/member-lifecycle.md`: note that member deletion restores the pane layout on backends without native reflow (herdr). <!-- completed: 2026-07-18T06:37 -->
-- [x] `docs/api/multiplexer.md`: note on `kill_pane` that backends may restore the window layout after the close as a backend-internal detail (herdr does; tmux relies on native auto-fit). <!-- completed: 2026-07-18T06:37 -->
 
 ### Step 2: Tests (`tests/multiplexer/test_herdr.py`)
 
@@ -210,4 +208,5 @@ The verification is the layout read itself: a single pane with an empty `splits`
 |------|---------|
 | 2026-07-18 | Initial draft |
 | 2026-07-18 | Review round 1: rebalance scoped to the killed pane's tab via a pre-close `pane get` anchor (decision #7); collapsed the full-width-restore residue guards |
-| 2026-07-18 | Implementation complete: all 19 tasks and 7 success criteria met; Reviewer approved in 1 round; PR #206 |
+| 2026-07-18 | Implementation complete: all tasks and success criteria met; Reviewer approved in 1 round; PR #206 |
+| 2026-07-18 | User review: backend layout behavior is documented only in `docs/spec/multiplexer-backends.md` and `SPEC.md`; the concept and API pages instruct member deletion without backend layout notes |
