@@ -1,7 +1,7 @@
 # Deny-by-Default Bash Allowlist for the opencode Preset
 
 **Status**: Approved
-**Progress**: 4/8 tasks complete
+**Progress**: 5/8 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -203,7 +203,7 @@ Per `documentation-maintenance.md`, all of the following update in this cycle, b
 
 ### Step 2: Preset
 
-- [ ] Replace `presets/opencode/cafleet.md` with § *New preset file content*, byte-for-byte <!-- completed: -->
+- [x] Replace `presets/opencode/cafleet.md` with § *New preset file content*, byte-for-byte <!-- completed: 2026-07-18T05:16 -->
 
 ### Step 3: Verification
 
