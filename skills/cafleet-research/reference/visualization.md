@@ -1,7 +1,7 @@
 # Create Figure
 
 Generate matplotlib charts. Scripts and data go under the hidden `.figures/` directory; rendered outputs stay visible under `figures/output`.
-The skill writes a self-contained Python script that imports matplotlib. The run command is host-project-specific — refer to your project's `.claude/rules/` for the canonical Python invocation. Any environment that provides matplotlib will run the script.
+The skill writes a self-contained Python script that imports matplotlib. The run command is host-project-specific — refer to your host project's agent rules directory (`.claude/rules/` in this repo) for the canonical Python invocation. Any environment that provides matplotlib will run the script.
 
 **Before writing any script, read the Chart Type Selection and Color Rules sections.** All charts in a deck share the same `C_BAR` / `C_BAR_SEC` palette regardless of data topic.
 
@@ -69,7 +69,7 @@ Key points:
 
 ### 2. Execute the script
 
-Run the script with the Python invocation documented in your host project's `.claude/rules/` (typical patterns: `uv run`, `python`, or a `mise` task wrapper). This skill is invocation-agnostic — it only requires that the chosen environment provide matplotlib:
+Run the script with the Python invocation documented in your host project's agent rules directory (`.claude/rules/` in this repo; typical patterns: `uv run`, `python`, or a `mise` task wrapper). This skill is invocation-agnostic — it only requires that the chosen environment provide matplotlib:
 
 ```
 <project-python-runner> ${CODE_DIR}/script_name.py

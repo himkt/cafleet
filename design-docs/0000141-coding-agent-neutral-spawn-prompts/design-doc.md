@@ -1,7 +1,7 @@
 # Coding-Agent-Neutral Spawn Prompts and Skill-Wide Neutrality Sweep
 
 **Status**: Approved
-**Progress**: 27/32 tasks complete
+**Progress**: 30/32 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -249,9 +249,9 @@ The three scope expansions touch these non-`skills/` surfaces — the complete s
 
 ### Step 7: Layout-agnostic `.claude/rules/` phrasing
 
-- [ ] `cafleet-research/presentation/presentation.md:198,200,201` <!-- completed: -->
-- [ ] `cafleet-research/reference/visualization.md:4,72` <!-- completed: -->
-- [ ] `cafleet-design-doc/execute/roles/reviewer.md:23` <!-- completed: -->
+- [x] `cafleet-research/presentation/presentation.md:198,200,201` <!-- completed: 2026-07-18T11:35 -->
+- [x] `cafleet-research/reference/visualization.md:4,72` <!-- completed: 2026-07-18T11:35 -->
+- [x] `cafleet-design-doc/execute/roles/reviewer.md:23` <!-- completed: 2026-07-18T11:35 -->
 
 ### Step 8: slidev.md three-backend discovery table
 
