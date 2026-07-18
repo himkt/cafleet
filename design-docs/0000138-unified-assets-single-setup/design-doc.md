@@ -1,6 +1,6 @@
 # Unified Assets Concept and Single Setup Command
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 24/24 tasks complete
 **Last Updated**: 2026-07-18
 
@@ -204,3 +204,4 @@ Per `.claude/rules/removal.md`, every mention of the removed surface is updated 
 | 2026-07-18 | Step-1 arbitration: extended the `skill_installs`-mention carve-out (SC #6 and the Step-5 sweep task) to SPEC.md §8's migration-chain contract — §8 must name the table that revisions `0001` and `0003` create and rename, same immutable-history rationale as the migration-script exemption. |
 | 2026-07-18 | Phase-D arbitration: extended the same carve-out to the migration data-preservation test in `tests/db/test_alembic_smoke.py` — the SC-5 test must seed and assert the pre-rename `skill_installs` table to prove the copy. |
 | 2026-07-18 | Admin decision: dropped the two Step-5 smoke-check tasks (schema-only fresh-DB run; seeded 0002→0003 upgrade). The environment cannot run branch code against a scratch DB without either migrating the live broker DB or operator-dispatched shell escapes, and the migration behavior is already covered by the data-preservation and chain-guard tests in `tests/db/test_alembic_smoke.py`. |
+| 2026-07-18 | Implementation complete: Reviewer approved on the first pass (no findings); admin approved; PR #203 opened. Status → Complete. |
