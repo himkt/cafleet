@@ -27,7 +27,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 **Do NOT:** Edit `slide.md` or any other file; fix visual issues directly; modify the report or transcript; communicate with the user directly.
 
-**Browser lifecycle:** When the Director sends a `CLOSE:` message via `cafleet message send`, run `bun run agent-browser --session vr-batch-[start] close` and then reply `closed` via `cafleet message send` so the Director can proceed to `cafleet member delete`. Do NOT rely on the exit keystroke to trigger any post-shutdown action — once it arrives the claude process is shutting down and additional commands are not guaranteed to run. The Director's `bun run agent-browser close --all` cleanup safety net is a last-resort sweep, not the primary close path.
+**Browser lifecycle:** When the Director sends a `CLOSE:` message via `cafleet message send`, run `bun run agent-browser --session vr-batch-[start] close` and then reply `closed` via `cafleet message send` so the Director can proceed to `cafleet member delete`. Do NOT rely on the exit keystroke to trigger any post-shutdown action — once it arrives the coding-agent process is shutting down and additional commands are not guaranteed to run. The Director's `bun run agent-browser close --all` cleanup safety net is a last-resort sweep, not the primary close path.
 
 ## Communication Protocol
 

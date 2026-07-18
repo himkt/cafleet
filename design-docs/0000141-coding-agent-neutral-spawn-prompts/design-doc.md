@@ -1,7 +1,7 @@
 # Coding-Agent-Neutral Spawn Prompts and Skill-Wide Neutrality Sweep
 
 **Status**: Approved
-**Progress**: 31/32 tasks complete
+**Progress**: 32/32 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -12,15 +12,15 @@ The execute-workflow spawn prompts order every member to read `.claude/rules/bas
 
 All criteria are verified by manual repo-wide search (no new automated guard test). Search scope is `skills/`, `docs/`, `SPEC.md`, `README.md`, and `.claude/` unless narrower; `design-docs/` and `researches/` are always excluded.
 
-- [ ] `bash-tool.md` and `bash-command.md` have zero mentions in `skills/`.
-- [ ] Every remaining `~/.claude` in `skills/` sits within a three-backend enumeration block (the base-dir config-dir table or the slidev discovery hints) whose sibling entries cover codex and opencode.
-- [ ] `/tmp/claude-code` has zero mentions in `skills/`, `docs/`, `SPEC.md`, `README.md`, and `.claude/`.
-- [ ] The overlay files exist as `coding-agent/claude-overlay.md`, `codex-overlay.md`, `opencode-overlay.md`; `coding-agent/claude.md` does not exist; every overlay reference (skills and `.claude/`) uses the `coding-agent/<name>-overlay.md` scheme, and no `coding-agent/<name>.md` reference remains.
-- [ ] `COMMENT(claude)`, `FIXME(claude)`, and `DONE(claude)` have zero mentions in `skills/`, `docs/`, `SPEC.md`, and `.claude/`; the coordination.md role table carries `user-relay` in place of `claude`.
-- [ ] `Main Claude`, `main Claude`, `claude pane`, and the phrase `` `claude` process `` have zero mentions in `skills/`.
-- [ ] `AskUserQuestion` appears in `skills/` only inside `coding-agent/claude-overlay.md` and the `allowed-tools` frontmatter of `skills/cafleet-design-doc/SKILL.md`.
-- [ ] Every remaining `Claude` mention in `skills/` matches the by-design keep list (Specification § By-design keep list).
-- [ ] The four execute-role spawn deltas and the lossless-rule bullet in `skills/cafleet/reference/director.md` carry the identical neutral member-Bash IMPORTANT line, verbatim.
+- [x] `bash-tool.md` and `bash-command.md` have zero mentions in `skills/`.
+- [x] Every remaining `~/.claude` in `skills/` sits within a three-backend enumeration block (the base-dir config-dir table or the slidev discovery hints) whose sibling entries cover codex and opencode.
+- [x] `/tmp/claude-code` has zero mentions in `skills/`, `docs/`, `SPEC.md`, `README.md`, and `.claude/`.
+- [x] The overlay files exist as `coding-agent/claude-overlay.md`, `codex-overlay.md`, `opencode-overlay.md`; `coding-agent/claude.md` does not exist; every overlay reference (skills and `.claude/`) uses the `coding-agent/<name>-overlay.md` scheme, and no `coding-agent/<name>.md` reference remains.
+- [x] `COMMENT(claude)`, `FIXME(claude)`, and `DONE(claude)` have zero mentions in `skills/`, `docs/`, `SPEC.md`, and `.claude/`; the coordination.md role table carries `user-relay` in place of `claude`.
+- [x] `Main Claude`, `main Claude`, `claude pane`, and the phrase `` `claude` process `` have zero mentions in `skills/`.
+- [x] `AskUserQuestion` appears in `skills/` only inside `coding-agent/claude-overlay.md` and the `allowed-tools` frontmatter of `skills/cafleet-design-doc/SKILL.md`.
+- [x] Every remaining `Claude` mention in `skills/` matches the by-design keep list (Specification § By-design keep list).
+- [x] The four execute-role spawn deltas and the lossless-rule bullet in `skills/cafleet/reference/director.md` carry the identical neutral member-Bash IMPORTANT line, verbatim.
 
 ---
 
@@ -259,7 +259,7 @@ The three scope expansions touch these non-`skills/` surfaces — the complete s
 
 ### Step 9: Verification sweep
 
-- [ ] Run every Success Criteria search, fix any straggler, and check the criteria boxes <!-- completed: -->
+- [x] Run every Success Criteria search, fix any straggler, and check the criteria boxes <!-- completed: 2026-07-18T11:40 -->
 
 ---
 

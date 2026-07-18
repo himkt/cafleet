@@ -124,7 +124,7 @@ If a member finds themselves needing to send anchorless status updates frequentl
 
 When the design doc moves to `Status: Approved` (the create workflow Step 6) or `Status: Complete` (the execute workflow Step 8):
 
-1. Issue markers (`COMMENT(role)` for `reviewer`, `director`, `drafter`, `programmer`, `tester`, `verifier`, `claude`) MUST already be resolved per `skills/cafleet-design-doc/reference/guidelines.md` § *Completeness Check* — the existing rule "No `COMMENT(` markers remain" stays.
+1. Issue markers (`COMMENT(role)` for `reviewer`, `director`, `drafter`, `programmer`, `tester`, `verifier`, `user-relay`) MUST already be resolved per `skills/cafleet-design-doc/reference/guidelines.md` § *Completeness Check* — the existing rule "No `COMMENT(` markers remain" stays.
 2. Status markers do not exist in the design doc by construction (split), so there is nothing to strip.
 3. `COMMENT(reviewer)` markers in source files are removed by the routed member as part of each fix commit; finalize-time validation only needs to confirm the design doc is marker-free.
 

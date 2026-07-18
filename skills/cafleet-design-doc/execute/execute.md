@@ -36,7 +36,7 @@ This skill's Director, Programmer, Tester, Verifier, and Reviewer coordinate via
 
 Two skill-specific notes layer on top of that canonical protocol:
 
-- **Roles in play**: this skill uses only the `director`, `programmer`, `tester`, `verifier`, `reviewer`, and `claude` marker roles — never `drafter` (that belongs to the create workflow). Finalize happens at `Status: Complete` (Step 8).
+- **Roles in play**: this skill uses only the `director`, `programmer`, `tester`, `verifier`, `reviewer`, and `user-relay` marker roles — never `drafter` (that belongs to the create workflow). Finalize happens at `Status: Complete` (Step 8).
 - **Verifier Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the interview workflow). Phase 2 verification reports follow the schema.
 
 ## Architecture
