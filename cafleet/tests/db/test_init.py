@@ -57,7 +57,7 @@ def test_setup_db_creates_schema(tmp_path, monkeypatch):
         "members",
         "messages",
         "member_placements",
-        "skill_installs",
+        "asset_installs",
         "alembic_version",
     }
     assert expected <= tables
@@ -217,7 +217,7 @@ def test_run_db_init_creates_schema_at_head(tmp_path, monkeypatch, capsys):
         "members",
         "messages",
         "member_placements",
-        "skill_installs",
+        "asset_installs",
         "alembic_version",
     }
     assert expected <= tables

@@ -15,17 +15,17 @@ def _now_iso() -> str:
 
 
 def _init_registry() -> None:
-    """Migrate the registry to head and record a current skills install.
+    """Migrate the registry to head and record a current assets install.
 
-    The seeded ``skill_installs`` row lets fleet-scoped CLI commands pass the
-    stale-skills version guard.
+    The seeded ``asset_installs`` row lets fleet-scoped CLI commands pass the
+    stale-assets version guard.
     """
     run_db_init()
     db_file = make_url(settings.database_url).database
     conn = sqlite3.connect(str(db_file))
     try:
         conn.execute(
-            "INSERT OR REPLACE INTO skill_installs"
+            "INSERT OR REPLACE INTO asset_installs"
             " (coding_agent, cafleet_version, installed_at) VALUES (?, ?, ?)",
             ("claude", importlib.metadata.version("cafleet"), _now_iso()),
         )

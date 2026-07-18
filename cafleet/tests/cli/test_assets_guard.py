@@ -1,8 +1,8 @@
-"""Tests for the stale-skills version guard on the fleet-scoped groups.
+"""Tests for the stale-assets version guard on the fleet-scoped groups.
 
-``ensure_skills_current()`` runs at the top of the ``fleet`` / ``member`` /
+``ensure_assets_current()`` runs at the top of the ``fleet`` / ``member`` /
 ``message`` / ``monitor`` group callbacks — before any subcommand body — and
-hard-errors when no skills install is recorded or when any recorded version
+hard-errors when no assets install is recorded or when any recorded version
 differs from the runtime CLI version. ``setup``, ``doctor``, and ``server``
 are exempt.
 """
@@ -21,7 +21,7 @@ from cafleet.multiplexer.tmux import TmuxMultiplexer
 
 RUNTIME_VERSION = importlib.metadata.version("cafleet")
 
-NO_INSTALL_ERROR = "no skills install is recorded; run 'cafleet setup' first"
+NO_INSTALL_ERROR = "no assets install is recorded; run 'cafleet setup' first"
 STALE_REPAIR = "run 'cafleet setup' to reinstall"
 
 FLEET_SCOPED_INVOCATIONS = [
@@ -59,7 +59,7 @@ def _seed_install(
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute(
-            "INSERT OR REPLACE INTO skill_installs"
+            "INSERT OR REPLACE INTO asset_installs"
             " (coding_agent, cafleet_version, installed_at) VALUES (?, ?, ?)",
             (coding_agent, cafleet_version, installed_at),
         )
@@ -110,7 +110,7 @@ def test_guard_stale_row_error_string(registry_db):
 
     assert result.exit_code == 1, result.output
     assert (
-        f"stale skills detected (claude=0.0.1; CLI {RUNTIME_VERSION}); {STALE_REPAIR}"
+        f"stale assets detected (claude=0.0.1; CLI {RUNTIME_VERSION}); {STALE_REPAIR}"
     ) in result.output
 
 
@@ -125,7 +125,7 @@ def test_guard_stale_lists_agents_ascending_and_skips_current(registry_db):
 
     assert result.exit_code == 1, result.output
     assert (
-        f"stale skills detected (claude=0.0.1, codex=0.0.2; CLI {RUNTIME_VERSION}); "
+        f"stale assets detected (claude=0.0.1, codex=0.0.2; CLI {RUNTIME_VERSION}); "
         f"{STALE_REPAIR}"
     ) in result.output
     assert "opencode=" not in result.output
@@ -139,7 +139,7 @@ def test_guard_downgrade_is_also_stale(registry_db):
     result = _run(["fleet", "list"])
 
     assert result.exit_code == 1, result.output
-    assert "stale skills detected" in result.output
+    assert "stale assets detected" in result.output
     assert STALE_REPAIR in result.output
 
 
@@ -221,7 +221,7 @@ def test_group_help_prints_under_stale_install(registry_db):
 
     assert result.exit_code == 0, result.output
     assert "Usage:" in result.output
-    assert "stale skills detected" not in result.output
+    assert "stale assets detected" not in result.output
 
 
 def test_subcommand_help_errors_under_stale_install(registry_db):
@@ -232,7 +232,7 @@ def test_subcommand_help_errors_under_stale_install(registry_db):
     result = _run(["fleet", "create", "--help"])
 
     assert result.exit_code == 1, result.output
-    assert "stale skills detected" in result.output
+    assert "stale assets detected" in result.output
 
 
 def test_subcommand_help_errors_when_never_setup(registry_db):

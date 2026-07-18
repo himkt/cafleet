@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 import cafleet.db.engine  # noqa: F401 — registers PRAGMA listener globally
 from cafleet.broker import _shared
 from cafleet.config import settings
-from cafleet.db.models import Base, SkillInstall
+from cafleet.db.models import AssetInstall, Base
 from cafleet.multiplexer import tmux as multiplexer_tmux
 
 
@@ -33,10 +33,10 @@ def sync_sessionmaker():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sm = sessionmaker(engine, expire_on_commit=False)
-    # Seed a current skills install so fleet-scoped CLI tests pass the guard.
+    # Seed a current assets install so fleet-scoped CLI tests pass the guard.
     with sm() as session, session.begin():
         session.add(
-            SkillInstall(
+            AssetInstall(
                 coding_agent="claude",
                 cafleet_version=importlib.metadata.version("cafleet"),
                 installed_at=_shared.now_iso(),

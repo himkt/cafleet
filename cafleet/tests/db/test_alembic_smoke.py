@@ -40,7 +40,7 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
             "member_placements",
             "monitor_config",
             "monitor_runtime",
-            "skill_installs",
+            "asset_installs",
             "alembic_version",
         }
         assert tables == expected
@@ -48,20 +48,20 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         engine.dispose()
 
 
-def test_alembic_version_table_records_head_0002(alembic_upgraded_db):
+def test_alembic_version_table_records_head_0003(alembic_upgraded_db):
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version_num FROM alembic_version"))
             rows = result.fetchall()
-        assert rows == [("0002",)]
+        assert rows == [("0003",)]
     finally:
         engine.dispose()
 
 
-def test_two_revision_migration_chain_exists():
-    """The migration history is a linear 2-revision chain: the initial revision
-    (0001, no predecessor) followed by 0002, which is the head."""
+def test_three_revision_migration_chain_exists():
+    """The migration history is a linear 3-revision chain: the initial revision
+    (0001, no predecessor) followed by 0002 and 0003, which is the head."""
     with importlib.resources.as_file(
         importlib.resources.files("cafleet.db") / "alembic" / "alembic.ini"
     ) as ini_path:
@@ -69,12 +69,14 @@ def test_two_revision_migration_chain_exists():
         script = ScriptDirectory.from_config(cfg)
         revisions = list(script.walk_revisions())
 
-    assert len(revisions) == 2
-    assert revisions[0].revision == "0002"
-    assert revisions[0].down_revision == "0001"
-    assert revisions[1].revision == "0001"
-    assert revisions[1].down_revision is None
-    assert script.get_current_head() == "0002"
+    assert len(revisions) == 3
+    assert revisions[0].revision == "0003"
+    assert revisions[0].down_revision == "0002"
+    assert revisions[1].revision == "0002"
+    assert revisions[1].down_revision == "0001"
+    assert revisions[2].revision == "0001"
+    assert revisions[2].down_revision is None
+    assert script.get_current_head() == "0003"
 
 
 def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
@@ -371,32 +373,92 @@ def test_monitor_tables_do_not_declare_autoincrement(alembic_upgraded_db):
         engine.dispose()
 
 
-def test_skill_installs_table_created_by_migration(alembic_upgraded_db):
-    """The initial schema creates ``skill_installs``: three NOT NULL string
+def test_asset_installs_table_created_by_migration(alembic_upgraded_db):
+    """The migrated head schema carries ``asset_installs``: three NOT NULL string
     columns with ``coding_agent`` (a known home key, not a minted id) as the PK."""
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         insp = inspect(engine)
 
         tables = set(insp.get_table_names())
-        assert "skill_installs" in tables
+        assert "asset_installs" in tables
 
-        cols = {col["name"]: col for col in insp.get_columns("skill_installs")}
+        cols = {col["name"]: col for col in insp.get_columns("asset_installs")}
         assert set(cols) == {"coding_agent", "cafleet_version", "installed_at"}
         for name in ("coding_agent", "cafleet_version", "installed_at"):
             assert cols[name]["nullable"] is False
 
-        pk = insp.get_pk_constraint("skill_installs")
+        pk = insp.get_pk_constraint("asset_installs")
         assert pk["constrained_columns"] == ["coding_agent"]
 
         with engine.connect() as conn:
             ddl = conn.execute(
                 text(
                     "SELECT sql FROM sqlite_master "
-                    "WHERE type='table' AND name='skill_installs'"
+                    "WHERE type='table' AND name='asset_installs'"
                 )
             ).scalar()
         assert ddl is not None
         assert "AUTOINCREMENT" not in ddl.upper()
     finally:
         engine.dispose()
+
+
+def test_migration_0003_moves_rows_both_directions(tmp_path):
+    """Upgrading ``0002`` → ``0003`` copies every ``skill_installs`` row into
+    ``asset_installs`` and drops the old table; downgrading mirrors it back."""
+    db_path = tmp_path / "preserve.db"
+    row = ("claude", "0.6.0", "2026-07-18T00:00:00+00:00")
+
+    with importlib.resources.as_file(
+        importlib.resources.files("cafleet.db") / "alembic" / "alembic.ini"
+    ) as ini_path:
+        cfg = Config(str(ini_path))
+        cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+
+        command.upgrade(cfg, "0002")
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO skill_installs"
+                        " (coding_agent, cafleet_version, installed_at)"
+                        " VALUES (:a, :v, :t)"
+                    ),
+                    {"a": row[0], "v": row[1], "t": row[2]},
+                )
+        finally:
+            engine.dispose()
+
+        command.upgrade(cfg, "0003")
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            insp = inspect(engine)
+            assert "skill_installs" not in insp.get_table_names()
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT coding_agent, cafleet_version, installed_at"
+                        " FROM asset_installs"
+                    )
+                ).fetchall()
+            assert rows == [row]
+        finally:
+            engine.dispose()
+
+        command.downgrade(cfg, "0002")
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            insp = inspect(engine)
+            assert "asset_installs" not in insp.get_table_names()
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT coding_agent, cafleet_version, installed_at"
+                        " FROM skill_installs"
+                    )
+                ).fetchall()
+            assert rows == [row]
+        finally:
+            engine.dispose()
