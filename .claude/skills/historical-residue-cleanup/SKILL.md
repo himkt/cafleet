@@ -52,7 +52,7 @@ Read your overlay and **resolve** it before your first action.
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../skills/cafleet/reference/coding-agent/<name>.md`](../../../skills/cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{reviewer_model}` / `{skill_loader}` / `{decision_surface}`, **or** guess a wrong/default value, **or** ignore a backend note |
+| 1 | your overlay [`../../../skills/cafleet/reference/coding-agent/<name>-overlay.md`](../../../skills/cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{reviewer_model}` / `{skill_loader}` / `{decision_surface}`, **or** guess a wrong/default value, **or** ignore a backend note |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../skills/cafleet/reference/base-dir.md) | the task-scope BASE resolution, the no-bypass write protocol, and the `<unset>` contract — you mis-root run artifacts or fall back to `/tmp` |
 | 3 | the `cafleet-design-doc` skill's [`reference/coordination.md`](../../../skills/cafleet-design-doc/reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema and the two skill-local extensions (`scanner` role, `inventory` pointer) — your status hops mis-route |
 
@@ -189,7 +189,7 @@ The monitoring member reuses the `cafleet` skill's canonical `roles/monitor.md`
 
 `SKILL.md` and `roles/*.md` are backend-neutral: they use `{monitor_model}` /
 `{reviewer_model}` / `{skill_loader}` / `{decision_surface}` / `{permission_flags}`
-tokens resolved from `../../../skills/cafleet/reference/coding-agent/<name>.md`,
+tokens resolved from `../../../skills/cafleet/reference/coding-agent/<name>-overlay.md`,
 and every member's spawn-prompt identity block carries a `CODING AGENT: {coding_agent}`
 line so the member resolves its overlay. Role files are referenced by absolute path
 in spawn prompts (never inlined); spawns use `--text-file`; spawn-prompt audit

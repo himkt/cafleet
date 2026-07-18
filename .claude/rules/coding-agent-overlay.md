@@ -4,11 +4,11 @@ cafleet skill instructions are backend-neutral by default. Write the base — ev
 
 ## Where backend specifics live
 
-Backend-specific deltas live in `skills/cafleet/reference/coding-agent/<name>.md`, one overlay per backend (`claude`, `codex`, `opencode`), with the canonical skeleton in `_template.md`. Each overlay carries that backend's concrete realization of the six deltas: the decision surface, the per-role model pins (monitor + reviewer), the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, and the skill-loading recipe.
+Backend-specific deltas live in `skills/cafleet/reference/coding-agent/<name>-overlay.md`, one overlay per backend (`claude`, `codex`, `opencode`), with the canonical skeleton in `_template.md`. Each overlay carries that backend's concrete realization of the six deltas: the decision surface, the per-role model pins (monitor + reviewer), the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, and the skill-loading recipe.
 
 ## How the base and overlay connect
 
-Every base instruction that varies by backend states the neutral behavior and points the agent at its overlay. The overlay is not an in-stream aside to consult lazily: it is **row #1 of each reader entry point's Required-reading block** — the first load-bearing read, gated before any other action. That row is **read-and-resolve**, not read-only. An agent identifies its coding agent — the spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity — reads `reference/coding-agent/<name>.md` first, then **resolves** it before its first action:
+Every base instruction that varies by backend states the neutral behavior and points the agent at its overlay. The overlay is not an in-stream aside to consult lazily: it is **row #1 of each reader entry point's Required-reading block** — the first load-bearing read, gated before any other action. That row is **read-and-resolve**, not read-only. An agent identifies its coding agent — the spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity — reads `reference/coding-agent/<name>-overlay.md` first, then **resolves** it before its first action:
 
 1. **Materialize values.** For every `{placeholder}` token it will use, take the concrete value from the overlay's table and use that literal value — never the brace token.
 2. **Apply notes.** At each base instruction named in the overlay's *Note → applies at* table, follow that note's caveat there.

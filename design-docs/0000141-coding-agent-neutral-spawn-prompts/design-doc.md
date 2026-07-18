@@ -1,7 +1,7 @@
 # Coding-Agent-Neutral Spawn Prompts and Skill-Wide Neutrality Sweep
 
 **Status**: Approved
-**Progress**: 8/32 tasks complete
+**Progress**: 14/32 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -221,12 +221,12 @@ The three scope expansions touch these non-`skills/` surfaces — the complete s
 
 ### Step 4: Rename the overlay files and lookup scheme
 
-- [ ] `git mv` the three overlays to `claude-overlay.md` / `codex-overlay.md` / `opencode-overlay.md` (`_template.md` unchanged) <!-- completed: -->
-- [ ] cafleet skill references: `SKILL.md:24`; `roles/{director,member,monitor}.md:15`; `reference/cli.md:43`, `reference/director.md:36,131,192`, `reference/supervision.md:5,157`, `reference/recovery.md:19` <!-- completed: -->
-- [ ] cafleet-design-doc references: `SKILL.md:30` + the 12 workflow/role files listed in § 4 <!-- completed: -->
-- [ ] cafleet-research references: `SKILL.md:30` + the 10 workflow/role files listed in § 4 <!-- completed: -->
-- [ ] `.claude/` references: `rules/coding-agent-overlay.md:7,11`; `skills/skill-author/SKILL.md:530,534`; `skills/historical-residue-cleanup/SKILL.md:55,192`, `roles/scanner.md:19`, `roles/reviewer.md:19` <!-- completed: -->
-- [ ] Verify zero `coding-agent/claude.md` / `coding-agent/<name>.md` references in `cafleet/src/` and `cafleet/tests/` <!-- completed: -->
+- [x] `git mv` the three overlays to `claude-overlay.md` / `codex-overlay.md` / `opencode-overlay.md` (`_template.md` unchanged) <!-- completed: 2026-07-18T11:26 -->
+- [x] cafleet skill references: `SKILL.md:24`; `roles/{director,member,monitor}.md:15`; `reference/cli.md:43`, `reference/director.md:36,131,192`, `reference/supervision.md:5,157`, `reference/recovery.md:19` <!-- completed: 2026-07-18T11:24 -->
+- [x] cafleet-design-doc references: `SKILL.md:30` + the 12 workflow/role files listed in § 4 <!-- completed: 2026-07-18T11:24 -->
+- [x] cafleet-research references: `SKILL.md:30` + the 10 workflow/role files listed in § 4 <!-- completed: 2026-07-18T11:24 -->
+- [x] `.claude/` references: `rules/coding-agent-overlay.md:7,11`; `skills/skill-author/SKILL.md:530,534`; `skills/historical-residue-cleanup/SKILL.md:55,192`, `roles/scanner.md:19`, `roles/reviewer.md:19` <!-- completed: 2026-07-18T11:26 -->
+- [x] Verify zero `coding-agent/claude.md` / `coding-agent/<name>.md` references in `cafleet/src/` and `cafleet/tests/` <!-- completed: 2026-07-18T11:24 -->
 
 ### Step 5: Rename the marker-role tokens
 
