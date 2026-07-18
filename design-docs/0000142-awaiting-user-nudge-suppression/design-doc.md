@@ -1,7 +1,7 @@
 # Suppress Director Nudges to Busy or Prompt-Parked Members
 
 **Status**: Approved
-**Progress**: 10/11 tasks complete
+**Progress**: 11/11 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -126,7 +126,7 @@ The monitoring member's behavior is untouched, satisfying the issue's first requ
 
 ### Step 4: Verification
 
-- [ ] Verify `roles/monitor.md` needs no edit (monitor behavior unchanged; its `supervision.md` section anchors — Monitor Lifecycle, Idle Semantics, the 5-step facilitation loop — still resolve after Step 2) and verify the wake-nudge payload strings in `tmux.py` / `herdr.py` and the whole `cafleet/tests/multiplexer/` suite (`test_tmux.py`, `test_herdr.py`, `test_tmux_send_inline_preview.py` — wake payloads, cross-backend byte-identity, `Esc`-first contracts) are byte-identical to before (run `mise //cafleet:test tests/multiplexer/`). <!-- completed: -->
+- [x] Verify `roles/monitor.md` needs no edit (monitor behavior unchanged; its `supervision.md` section anchors — Monitor Lifecycle, Idle Semantics, the 5-step facilitation loop — still resolve after Step 2) and verify the wake-nudge payload strings in `tmux.py` / `herdr.py` and the whole `cafleet/tests/multiplexer/` suite (`test_tmux.py`, `test_herdr.py`, `test_tmux_send_inline_preview.py` — wake payloads, cross-backend byte-identity, `Esc`-first contracts) are byte-identical to before (run `mise //cafleet:test tests/multiplexer/`). <!-- completed: 2026-07-18T13:18 -->
 
 ---
 
