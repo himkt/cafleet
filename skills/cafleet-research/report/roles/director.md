@@ -80,4 +80,4 @@ The health-check sequence + tick cadence are canonical in the `cafleet` skill's 
 
 ## Shutdown Protocol
 
-Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then Researchers, any active Scout, and the Manager (`--member-id` takes the integer `member_id`; each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id [fleet-id]`; `cafleet fleet list` to confirm.
+Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): `cafleet member delete` the monitoring member first (the pane kill terminates its `monitor start` loop), then Researchers, any active Scout, and the Manager (`--member-id` takes the integer `member_id`; each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id [fleet-id]`; `cafleet fleet list` to confirm.

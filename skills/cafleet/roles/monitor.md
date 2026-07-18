@@ -12,7 +12,7 @@ At startup, identify your coding agent first — your spawn prompt's `CODING AGE
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{bg_run}` / `{bg_stop}` / `{monitor_model}` / `{permission_flags}` (can't background or stop the heartbeat), **or** guess a wrong/default value, **or** ignore a backend note |
+| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{bg_run}` / `{monitor_model}` / `{permission_flags}` (can't background the heartbeat), **or** guess a wrong/default value, **or** ignore a backend note |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + heartbeat mechanism you serve (Monitor Lifecycle, Idle Semantics, the 5-step facilitation loop) — you can't run the heartbeat or re-engage the Director correctly |
 
 Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
@@ -86,7 +86,7 @@ The count (`N member(s) due`), the named members (`<role> <id> (<name>) [<reason
 
 ## Teardown
 
-When the Director messages you to wrap up, stop your `monitor start` background task ({bg_stop}) — this delivers SIGTERM/SIGINT, so the loop clears its runtime row — confirm to the Director, and return to the prompt. The Director then runs `cafleet member delete` on you. The authoritative full teardown ordering is [`reference/recovery.md`](../reference/recovery.md) § Shutdown Protocol.
+Teardown is Director-driven: the Director runs `cafleet member delete` on you, which kills your pane, and your `monitor start` background task terminates with it. Keep the heartbeat running until that delete lands. The authoritative full teardown ordering is [`reference/recovery.md`](../reference/recovery.md) § Shutdown Protocol.
 
 ## Where the IDs come from
 
@@ -98,4 +98,4 @@ Your spawn prompt is built from the SAME canonical skeleton ordinary members use
 
 - **Omit `--coding-agent`** at `cafleet member create`: like every member spawned without the flag, you inherit the spawning Director's backend; the CLI resolves that backend and renders it into your `CODING AGENT:` line via the `{coding_agent}` placeholder, so it matches the binary you run on.
 - Pass `--role monitor --model {monitor_model}`.
-- Apply your overlay's deltas (`{bg_run}`, `{bg_stop}`, `{monitor_model}`, `{permission_flags}`) on top of this role — the overlay is Required-reading row #1 (above); `<name>` is the backend named on your `CODING AGENT:` line.
+- Apply your overlay's deltas (`{bg_run}`, `{monitor_model}`, `{permission_flags}`) on top of this role — the overlay is Required-reading row #1 (above); `<name>` is the backend named on your `CODING AGENT:` line.

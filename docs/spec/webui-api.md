@@ -125,7 +125,8 @@ When no monitor is running (no row, or a stale/cleared heartbeat) `running` is
 for a stale or cleared row it is **preserved** (the cadence the monitor last ran
 at). Launching the loop is CLI-only (`cafleet monitor start`, run as a
 background task); there is no `POST`/`DELETE` counterpart here and no
-`monitor stop` command — stop the background task to stop the loop.
+`monitor stop` command — the loop terminates with the monitoring member's
+pane (`member delete`), or self-terminates after `fleet delete`.
 
 ### GET /api/members/{member_id}/monitor — Member Monitor Config
 

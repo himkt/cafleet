@@ -95,4 +95,4 @@ Drafter and Reviewer members are spawned in workspace-scoped auto-approval mode 
 
 ## Shutdown Protocol
 
-Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for its confirmation, then `cafleet member delete` the monitoring member first and each ordinary member → `cafleet member list` verification → `cafleet fleet delete --fleet-id <fleet-id>` → `cafleet fleet list` sanity check.
+Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): `cafleet member delete` the monitoring member first (the pane kill terminates its `monitor start` loop), then each ordinary member → `cafleet member list` verification → `cafleet fleet delete --fleet-id <fleet-id>` → `cafleet fleet list` sanity check.

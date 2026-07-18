@@ -12,8 +12,8 @@ root Director and every ordinary member, each on its own interval) and, when at
 least one watched member is due, wakes the monitoring member once by keystroking
 into its pane. While the loop runs it spends no model tokens, and because it is
 just a backgrounded command it works identically on any backend. One monitor
-and one monitoring member per fleet; there is no `monitor stop` — stop the
-background task, or delete the monitoring member.
+and one monitoring member per fleet; there is no `monitor stop` — deleting the
+monitoring member kills its pane and the loop terminates with it.
 
 ## Heartbeat vs facilitation
 
@@ -127,16 +127,17 @@ flowchart LR
     Start["monitor start<br/>(monitoring member's background task)"] --> Claim["claim runtime row"]
     Claim --> Tick["every tick:<br/>heartbeat (STOP if slot lost) → scan watched set → wake monitor if any due"]
     Tick --> Tick
-    Tick --> Stop["stop the task /<br/>delete the monitoring member /<br/>fleet delete"]
+    Tick --> Stop["delete the monitoring member /<br/>fleet delete"]
     Stop --> Clear["clear runtime row"]
     Tick -. wake nudge .-> PaneMon["monitoring member pane"]
 ```
 
 The monitoring member is spawned **first-in**: it launches the loop, confirms
 with `cafleet monitor status`, and its `ready: monitor live` handshake gates
-spawning ordinary members. Teardown is **first-out**: the Director asks it to
-stop the background task (a clean stop clears the runtime row) before deleting
-it. `fleet delete` needs no stop step — the loop's next tick sees the
+spawning ordinary members. Teardown is **first-out**: the Director deletes the
+monitoring member before the ordinary members, and the loop terminates with its
+pane; a runtime row the pane kill leaves behind is removed by `fleet delete`.
+`fleet delete` alone also ends a still-running loop — its next tick sees the
 soft-deleted fleet and self-terminates.
 
 Per-member schedule (`interval_seconds`, `enabled`, `last_ping_at`) is persisted

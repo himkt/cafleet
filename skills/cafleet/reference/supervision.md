@@ -93,7 +93,7 @@ Every time you spawn a member:
 4. **Verify the member is placed** by checking that `cafleet member list --fleet-id <fleet-id>` shows the new member with a non-null `pane_id`. This confirms the pane was created. Liveness of the coding agent inside the pane is confirmed asynchronously when the ready signal arrives — NOT by `member list`.
 5. **End the active turn after spawn-and-verify.** The ready signal arrives via broker auto-fire (member's `cafleet message send` → 2-line inline preview keystroked into your pane via `tmux.send_inline_preview`), with the monitoring member's nudge as the time-based backstop. You process it — ACK, dispatch first task — in your next active turn. See § *Asynchronous Wait Rule* below.
 
-Never spawn ordinary members before the monitoring member's `ready: monitor live` handshake. Never stop the monitor (the monitoring member's `monitor start` background task) until all work is fully complete and the team is being shut down.
+Never spawn ordinary members before the monitoring member's `ready: monitor live` handshake. Keep the monitoring member (and the heartbeat it runs) alive until all work is fully complete and the team is being shut down.
 
 ### Asynchronous Wait Rule
 
@@ -125,9 +125,9 @@ On every supervision tick — whether fired by the monitoring member's on-demand
 | Gate ordinary members | Wait for the monitoring member's `ready: monitor live` message before the first ordinary `cafleet member create`. The Director MAY run `cafleet monitor status --fleet-id <fleet-id>` itself as optional corroboration, but it waits on the handshake message rather than block-polling status (consistent with the async wait rule). |
 | Run work | The monitor wakes the monitoring member whenever a watched member is due on its own interval (the root Director at 180 s, ordinary members at 720 s); do not intervene unless an escalation arrives. Each on-demand nudge from the monitoring member (or inbound work via inline preview) is the Director's cue to run the 5-step facilitation loop above. |
 | User review | Keep the monitoring member and its `monitor start` task running during the review cycle — revisions and re-reviews still count as in-progress work. |
-| Teardown (first-out) | Stop the monitor's background task FIRST, then delete the monitoring member before ordinary members. The authoritative full ordering is [`reference/recovery.md`](recovery.md) § *Shutdown Protocol*. |
+| Teardown (first-out) | Delete the monitoring member FIRST via `cafleet member delete` — the pane kill terminates the `monitor start` loop with it — then delete the ordinary members. The authoritative full ordering is [`reference/recovery.md`](recovery.md) § *Shutdown Protocol*. |
 
-**Lifecycle rule (non-negotiable):** The monitoring member MUST stay running (with its `monitor start` task live) from the first `member create` through every phase; at teardown the monitor is stopped FIRST (first-out) — a monitor still ticking after the monitoring member is deleted races the delete path. The full stop mechanism + ordering is canonical in [`reference/recovery.md`](recovery.md) § *Shutdown Protocol*.
+**Lifecycle rule (non-negotiable):** The monitoring member MUST stay running (with its `monitor start` task live) from the first `member create` through every phase; at teardown the monitoring member is deleted FIRST (first-out) via `cafleet member delete`, which stops the heartbeat by killing its pane. The full ordering is canonical in [`reference/recovery.md`](recovery.md) § *Shutdown Protocol*.
 
 ## Stall Response
 
@@ -179,7 +179,7 @@ CAFleet members never talk to the user directly — the Director relays. This is
 
 ## Cleanup Protocol
 
-Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol (first-out); the full ordering, the stop mechanism (no `cafleet monitor stop`; message the monitoring member to stop the task), and the race rationale are canonical there.
+Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol (first-out); the full ordering is canonical there. `cafleet member delete` on the monitoring member is the complete stop mechanism for the heartbeat — the loop terminates with its pane.
 
 ## Quick Reference
 
@@ -195,4 +195,4 @@ Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol (fir
 | Shell-dispatch on member's behalf | `cafleet member exec --fleet-id <s> --member-id <member> "<cmd>"` | Per [`reference/exec-routing.md`](exec-routing.md); follow with `member ping` |
 | Answer a member's relayed question | {decision_surface} → `cafleet message send` | Ask the user via {decision_surface} first, then relay the answer back to the member as a message; never decide silently |
 | Relay user input | {decision_surface} → `cafleet message send` | Pass-through; never substitute judgment |
-| Shut down team | [`reference/recovery.md`](recovery.md) § Shutdown Protocol | Stop monitor → delete monitoring member first → `member delete` each ordinary → `fleet delete` |
+| Shut down team | [`reference/recovery.md`](recovery.md) § Shutdown Protocol | Delete monitoring member first (kills the heartbeat with its pane) → `member delete` each ordinary → `fleet delete` |

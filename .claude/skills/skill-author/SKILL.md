@@ -139,11 +139,11 @@ The spawned member opens its role file with `Read` on its first turn. The role f
 
 When the work is done, the Director MUST tear down in this exact order:
 
-1. **Stop the monitoring member first.** There is no `monitor stop` command — message the monitoring member to stop its `cafleet monitor start` background task (the task-stop delivers SIGTERM/SIGINT, so the loop runs its `finally` and clears its runtime row), wait for its confirmation, then `cafleet member delete` the monitoring member **first**, before any ordinary member. A tick that keystrokes into a tearing-down pane races the delete path.
+1. **Delete the monitoring member first.** `cafleet member delete` the monitoring member **first**, before any ordinary member — the pane kill terminates its `cafleet monitor start` loop with it (there is no `monitor stop` command; `member delete` IS the stop mechanism). Deleting it first keeps the heartbeat from nudging a tearing-down pane.
 2. **`cafleet member delete --member-id <id>`** for every remaining (ordinary) member. This sends the backend exit keystroke to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` per member.
 3. **`cafleet fleet delete --fleet-id <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active member in the fleet (root Director + remaining members), and physically deletes every associated `member_placements` row. Messages are preserved. `fleet delete` makes any still-running loop self-terminate on its next tick, so step 1 is belt-and-suspenders.
 
-Order matters. Stop the monitoring member's monitor and delete it before the ordinary members so a tick cannot keystroke into a tearing-down pane or race the delete path. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
+Order matters. Delete the monitoring member before the ordinary members so a tick cannot keystroke into a tearing-down pane. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
 
 ---
 
@@ -442,14 +442,13 @@ cafleet message send --fleet-id 7 --from-member-id 8 --to-member-id 11 \
 ### Teardown
 
 ```bash
-# Stop the monitor's background task and delete the monitoring member FIRST
-# (message the monitoring member to stop its `cafleet monitor start` task; wait for confirmation).
+# Delete the monitoring member FIRST — its `cafleet monitor start` loop dies with the pane.
 cafleet member delete --fleet-id 7 --member-id 10
 cafleet member delete --fleet-id 7 --member-id 11
 cafleet fleet delete --fleet-id 7
 ```
 
-Order matters: stop the monitoring member's `monitor start` task and delete the monitoring member first (first-out), then delete the ordinary Summarizer, then delete the fleet (see § 2.5).
+Order matters: delete the monitoring member first (first-out; its `monitor start` loop dies with the pane), then delete the ordinary Summarizer, then delete the fleet (see § 2.5).
 
 ### What this example demonstrates
 
@@ -505,7 +504,7 @@ Fix: never fall back to `/tmp` silently. The `<unset>` sentinel is a hard stop, 
 
 Symptom: orphan `claude` processes lingering in tmux panes after the skill completes. The user closes the panes manually. On the next `cafleet fleet create`, the panes are rebound and the orphan members re-emerge.
 
-Fix: tear down in this exact order — stop the monitoring member's `cafleet monitor start` task and `cafleet member delete` the monitoring member first, then `cafleet member delete` for every ordinary member, then `cafleet fleet delete`. See § 2.5.
+Fix: tear down in this exact order — `cafleet member delete` the monitoring member first (its `monitor start` loop dies with the pane), then `cafleet member delete` for every ordinary member, then `cafleet fleet delete`. See § 2.5.
 
 ### 7.8 Spawning ordinary members before the monitoring member is live
 

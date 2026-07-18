@@ -165,7 +165,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 3b. Spawn the monitoring member (first-in)
 
-This team **keeps an active heartbeat**, so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`; it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `member create`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; its `monitor start` background task is stopped in Step 8's cleanup (first-out). See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
+This team **keeps an active heartbeat**, so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`; it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `member create`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; the monitoring member is deleted first in Step 8's cleanup (first-out), which terminates the loop with its pane. See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -437,7 +437,7 @@ No round limit — the loop continues until the user approves or aborts.
 
 1. Update design document Status to "Aborted", add Changelog entry. Place a `COMMENT(director): aborting — finalize and stand by` marker near the top of the doc body (above the Overview section — `Status:` is bold metadata, not a heading, so it is not a valid `paragraph-` target). Notify any still-live members with a single `cafleet message send --fleet-id <fleet-id> ... --text "ready (doc)"` per member so they read the marker and stand by.
 2. Commit (separate commands): `git add <design-doc>` then `git commit -m "docs: mark design doc as aborted"`
-3. Follow Shutdown Protocol (Step 8: stop the monitoring member's `monitor start` background task, then delete the monitoring member first and the remaining members, and run `cafleet fleet delete --fleet-id <fleet-id>` to tear down the fleet and sweep the root Director).
+3. Follow Shutdown Protocol (Step 8: delete the monitoring member first, then the remaining members, and run `cafleet fleet delete --fleet-id <fleet-id>` to tear down the fleet and sweep the root Director).
 
 ### Step 7: Push & Create PR (Director)
 
@@ -479,5 +479,5 @@ Runs after Step 7 completes, or directly after Step 6 when Step 7 was skipped (g
 4. **Push decision** (separate Bash call): run `git rev-parse --abbrev-ref <branch-name>@{upstream}`.
    - Exit code 0 (branch is tracked on origin): `git push`. Covers both the "Step 7 fully succeeded" path and the "Step 7 partial-fail (push OK, PR create failed)" path.
    - Non-zero exit: skip the push. The docs commit stays local.
-5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task (launched in Step 3b) and wait for confirmation; `cafleet member delete` the monitoring member first, then Programmer, Tester, Verifier, and Reviewer if spawned (each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
+5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): `cafleet member delete` the monitoring member first (the pane kill terminates the `monitor start` loop launched in Step 3b), then Programmer, Tester, Verifier, and Reviewer if spawned (each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
 6. **Report to the user**: include the PR URL (if Step 7 created one), the Reviewer outcome (rounds to approval), and any skipped-step reasons.

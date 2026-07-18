@@ -678,8 +678,9 @@ The per-fleet scheduler that wakes the monitoring member whenever a watched
 member is due. All three subcommands require `--fleet-id` and run behind the
 [stale-assets guard](#stale-assets-guard). The conceptual model is canonical
 on the [Monitoring](../concepts/monitoring.md) concepts page; there is no
-`monitor stop` — stop the monitoring member's background task. Behavior
-detail:
+`monitor stop` — the loop terminates with the monitoring member's pane
+(`member delete`), and a still-running loop self-terminates on its next tick
+after `fleet delete`. Behavior detail:
 [`list_monitor_targets`](../api/broker.md#cafleet.broker.list_monitor_targets),
 [`record_pings`](../api/broker.md#cafleet.broker.record_pings),
 [`get_monitor_config`](../api/broker.md#cafleet.broker.get_monitor_config),

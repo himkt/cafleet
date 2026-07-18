@@ -103,7 +103,7 @@ cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --js
 
 The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Presentation/Transcript spawns** (1d) — do not spawn an ordinary member until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the conditional idle-nudge routine) and lifecycle. The monitoring member is stopped and deleted first in the Step 5 teardown (first-out). Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
+See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the conditional idle-nudge routine) and lifecycle. The monitoring member is deleted first in the Step 5 teardown (first-out). Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 
@@ -286,7 +286,7 @@ No round limit — loop until approved.
 
 **Only enter after the user approves in Step 4.**
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation, then `cafleet member delete` the monitoring member first, then Presentation, Transcript, and any active VR batch — but **for an active VR batch, run the close handshake first**: the Director sends `CLOSE:` via `cafleet message send`, the VR runs `bun run agent-browser --session vr-batch-<start> close` and replies `closed`, THEN delete it. Verify the roster is empty with `cafleet member list`.
+Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol* (first-out): `cafleet member delete` the monitoring member first (the pane kill terminates its `monitor start` loop), then Presentation, Transcript, and any active VR batch — but **for an active VR batch, run the close handshake first**: the Director sends `CLOSE:` via `cafleet message send`, the VR runs `bun run agent-browser --session vr-batch-<start> close` and replies `closed`, THEN delete it. Verify the roster is empty with `cafleet member list`.
 
 Then the presentation-specific teardown:
 

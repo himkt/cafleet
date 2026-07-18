@@ -150,8 +150,8 @@ bootstrap fleet → spawn monitor first → spawn members → tear down monitor-
    confirms no coverage or runtime behavior was lost and no new narration was
    introduced (R1).
 8. **Report + teardown** — the Director reports the run summary and tears down
-   monitor-first (stop the monitor's `cafleet monitor start` task and delete the
-   monitoring member first, then ordinary members, then `cafleet fleet delete`).
+   monitor-first (delete the monitoring member first — its `cafleet monitor start`
+   loop dies with the pane — then ordinary members, then `cafleet fleet delete`).
 
 ## Per-run output artifact
 

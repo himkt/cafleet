@@ -102,7 +102,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the conditional idle-nudge routine) and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The heartbeat runs unchanged through the quality loop; its `monitor start` background task is stopped first in Step 6's teardown (first-out).
+See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the conditional idle-nudge routine) and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The heartbeat runs unchanged through the quality loop; the monitoring member is deleted first in Step 6's teardown (first-out), which terminates the loop with its pane.
 
 #### 1c. Locate role definitions (path-by-reference)
 
@@ -254,6 +254,6 @@ No round limit — loop continues until approved or aborted.
    ```
    Wait for the Drafter's `addressed (doc)` confirmation.
 
-2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): stop the monitoring member's `monitor start` background task and wait for confirmation; `cafleet member delete` the monitoring member first, then Drafter and Reviewer (each kills the pane immediately); `cafleet member list` to verify only the root Director's row remains; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
+2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): `cafleet member delete` the monitoring member first (the pane kill terminates its `monitor start` loop), then Drafter and Reviewer (each kills the pane immediately); `cafleet member list` to verify only the root Director's row remains; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
 
 The fleet row is soft-deleted and `messages` rows are preserved so the message trail remains inspectable in the broker database.

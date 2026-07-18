@@ -106,7 +106,7 @@ When the user provides free-form text instead of a listed option, use LLM reason
 
 ### Abort Detection
 
-- If abort intent is detected, trigger the Abort Flow — stop the monitoring member's `monitor start` background task (there is no `monitor stop` command), delete all members (monitoring member first), and run `cafleet fleet delete --fleet-id <fleet-id>` to soft-delete the fleet and sweep the root Director in one transaction.
+- If abort intent is detected, trigger the Abort Flow — delete all members (monitoring member first; the pane kill terminates its `monitor start` loop), and run `cafleet fleet delete --fleet-id <fleet-id>` to soft-delete the fleet and sweep the root Director in one transaction.
 - If non-abort intent is detected (e.g., verbal feedback), explain that feedback should be provided via COMMENT markers in the changed source files, then re-prompt with the same three-option pattern.
 
 ## Progress Monitoring
@@ -135,4 +135,4 @@ Programmer / Tester / Verifier / Reviewer members are spawned in workspace-scope
 
 Shutdown runs as Step 8's tail — only AFTER Step 8's doc-complete commit (and the conditional `git push` when the branch is tracked on origin) has landed.
 
-Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (stop the monitoring member's `monitor start` task → `cafleet member delete` the monitoring member first, then each ordinary member → `cafleet member list` verification → `cafleet fleet delete --fleet-id <fleet-id>` → `cafleet fleet list` sanity check). Stop the monitoring member's heartbeat (the single Step 3b `monitor start`, run unchanged through Steps 3–8) FIRST — there is no `monitor stop` command, so message the monitoring member to stop its background task, then delete it before the ordinary members (first-out).
+Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (`cafleet member delete` the monitoring member first, then each ordinary member → `cafleet member list` verification → `cafleet fleet delete --fleet-id <fleet-id>` → `cafleet fleet list` sanity check). Deleting the monitoring member first (first-out) terminates the heartbeat (the single Step 3b `monitor start`, run unchanged through Steps 3–8) with its pane.
