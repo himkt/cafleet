@@ -1,7 +1,7 @@
 # Herdr Pane Rearrange on `cafleet member delete`
 
 **Status**: Approved
-**Progress**: 4/19 tasks complete
+**Progress**: 11/19 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -180,13 +180,13 @@ The verification is the layout read itself: a single pane with an empty `splits`
 
 ### Step 2: Tests (`tests/multiplexer/test_herdr.py`)
 
-- [ ] `kill_pane` rebalance sequence: with a seeded 3-member post-close layout, `kill_pane` emits the pre-close `pane get <target>`, `pane close`, then the `pane layout` read, then the deterministic `1/(N-k)` resize deltas (mirroring the create-path equalize tests at `test_herdr.py:307-398`). <!-- completed: -->
-- [ ] Already-balanced column after close → the read pair runs but no `pane resize` is emitted. <!-- completed: -->
-- [ ] Single remaining member (`n == 1`) → no resize emitted. <!-- completed: -->
-- [ ] Last member deleted, residual right split (e.g. ratio 0.62) → exactly one corrective resize `--pane <director> --direction right --amount 0.38`. <!-- completed: -->
-- [ ] Last member deleted, single pane with empty `splits` → no resize emitted; anomalous residue (multiple splits, or a non-right residual split, or ≥ 2 panes all at `min_x`) → no resize emitted. <!-- completed: -->
-- [ ] Tab scoping: the layout read reports a `tab_id` different from the pre-close target tab (focus on an unrelated tab) → no resize emitted; a pane already gone at the pre-close `pane get` (`pane_not_found`, `ignore_missing=True`) → the close is tolerated and no layout read or resize is emitted. <!-- completed: -->
-- [ ] Best-effort semantics: a `HerdrError` from the pre-close `pane get` yields `None` and the close still runs (no rebalance); a `HerdrError` from the layout read or a resize is swallowed and `kill_pane` still succeeds; a non-tolerated close error propagates and no rebalance commands are emitted; the malformed-chain guard skips. Update the existing `kill_pane` argv tests (`test_herdr.py:434-462`) to seed the pre-close `pane get` and rebalance read responses. <!-- completed: -->
+- [x] `kill_pane` rebalance sequence: with a seeded 3-member post-close layout, `kill_pane` emits the pre-close `pane get <target>`, `pane close`, then the `pane layout` read, then the deterministic `1/(N-k)` resize deltas (mirroring the create-path equalize tests at `test_herdr.py:307-398`). <!-- completed: 2026-07-18T15:40 -->
+- [x] Already-balanced column after close → the read pair runs but no `pane resize` is emitted. <!-- completed: 2026-07-18T15:40 -->
+- [x] Single remaining member (`n == 1`) → no resize emitted. <!-- completed: 2026-07-18T15:40 -->
+- [x] Last member deleted, residual right split (e.g. ratio 0.62) → exactly one corrective resize `--pane <director> --direction right --amount 0.38`. <!-- completed: 2026-07-18T15:40 -->
+- [x] Last member deleted, single pane with empty `splits` → no resize emitted; anomalous residue (multiple splits, or a non-right residual split, or ≥ 2 panes all at `min_x`) → no resize emitted. <!-- completed: 2026-07-18T15:40 -->
+- [x] Tab scoping: the layout read reports a `tab_id` different from the pre-close target tab (focus on an unrelated tab) → no resize emitted; a pane already gone at the pre-close `pane get` (`pane_not_found`, `ignore_missing=True`) → the close is tolerated and no layout read or resize is emitted. <!-- completed: 2026-07-18T15:40 -->
+- [x] Best-effort semantics: a `HerdrError` from the pre-close `pane get` yields `None` and the close still runs (no rebalance); a `HerdrError` from the layout read or a resize is swallowed and `kill_pane` still succeeds; a non-tolerated close error propagates and no rebalance commands are emitted; the malformed-chain guard skips. Update the existing `kill_pane` argv tests (`test_herdr.py:434-462`) to seed the pre-close `pane get` and rebalance read responses. <!-- completed: 2026-07-18T15:40 -->
 - [ ] Create-path regression: the existing `split_window` / `_equalize_focused_tab_column` tests pass unchanged (the `_read_tab_layout` / `_equalize_column` extraction is behavior-preserving). <!-- completed: -->
 - [ ] CLI regression: `tests/cli/test_member_delete.py` passes unchanged, including the `["kill_pane", "deregister_member"]` call-order assertion. <!-- completed: -->
 

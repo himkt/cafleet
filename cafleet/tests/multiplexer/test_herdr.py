@@ -431,35 +431,356 @@ def test_pane_exists__other_error_propagates(herdr_run):
         _herdr.pane_exists(target_pane_id="wG:p1")
 
 
-# --- kill_pane (not_found-tolerant teardown) -------------------------------
+# --- kill_pane (not_found-tolerant teardown + best-effort rebalance) --------
+#
+# kill_pane anchors the rebalance to the killed pane's tab: a pre-close
+# `pane get <target>` records the target's tab_id, `pane close` runs with its
+# existing not_found-tolerant semantics, then the rebalance reads `pane layout`
+# and — only when the focused-tab layout is the killed pane's tab — either
+# re-equalizes the remaining member column (≥ 2 members, the create-path
+# 1/(N-k) arithmetic), does nothing (1 member), or restores the Director's
+# full tab width (0 members). Every layout step is best-effort: a HerdrError
+# from the pre-close read or the rebalance never fails the delete.
+
+# The Director pane in the `_column_layout` shape (leftmost column, x=26).
+_DIRECTOR_PANE = {
+    "pane_id": "wT:p3",
+    "rect": {"x": 26, "y": 1, "width": 364, "height": 86},
+}
+
+
+def _pane_get(tab_id: str = "wT:t3") -> str:
+    """The pre-close ``pane get <target>`` envelope anchoring the rebalance."""
+    return _envelope({"pane": {"pane_id": "wT:m9", "tab_id": tab_id}})
+
+
+def _post_close_layout(panes: list[dict], splits: list[dict]) -> str:
+    """A ``pane layout`` envelope on the killed pane's tab (``wT:t3``)."""
+    return _envelope({"layout": {"tab_id": "wT:t3", "panes": panes, "splits": splits}})
 
 
 def test_kill_pane__argv_and_success(herdr_run):
+    """The full delete sequence: pre-close ``pane get``, ``pane close``, then
+    the ``pane layout`` read. The sole remaining Director with an empty
+    ``splits`` list is structurally full-width — no corrective resize."""
     captured, set_returns = herdr_run
-    set_returns("")
-    assert _herdr.kill_pane(target_pane_id="wG:p1") is None
-    assert captured == [["herdr", "pane", "close", "wG:p1"]]
+    set_returns(
+        _pane_get(),
+        "",  # pane close
+        _post_close_layout([_DIRECTOR_PANE], []),
+    )
+    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
+    assert captured == [
+        ["herdr", "pane", "get", "wT:m9"],
+        ["herdr", "pane", "close", "wT:m9"],
+        ["herdr", "pane", "layout"],
+    ]
 
 
 def test_kill_pane__ignore_missing_swallows_pane_not_found(herdr_run):
-    _captured, set_returns = herdr_run
-    set_returns(HerdrError("herdr command failed", code="pane_not_found"))
-    # ignore_missing=True swallows the pane-not-found teardown race.
+    """A pane already gone: the pre-close ``pane get`` reports pane_not_found
+    (no tab anchor), ignore_missing=True swallows the close's pane_not_found,
+    and no layout read or resize is emitted — there is no tab to rebalance."""
+    captured, set_returns = herdr_run
+    set_returns(
+        HerdrError("herdr command failed", code="pane_not_found"),  # pane get
+        HerdrError("herdr command failed", code="pane_not_found"),  # pane close
+    )
     assert _herdr.kill_pane(target_pane_id="wG:p1", ignore_missing=True) is None
+    assert captured == [
+        ["herdr", "pane", "get", "wG:p1"],
+        ["herdr", "pane", "close", "wG:p1"],
+    ]
 
 
 def test_kill_pane__ignore_missing_does_not_swallow_other_errors(herdr_run):
-    _captured, set_returns = herdr_run
-    set_returns(HerdrError("herdr command failed: server unreachable"))
+    captured, set_returns = herdr_run
+    set_returns(
+        _pane_get(),
+        HerdrError("herdr command failed: server unreachable"),  # pane close
+    )
     with pytest.raises(HerdrError, match="server unreachable"):
         _herdr.kill_pane(target_pane_id="wG:p1", ignore_missing=True)
+    assert captured == [
+        ["herdr", "pane", "get", "wG:p1"],
+        ["herdr", "pane", "close", "wG:p1"],
+    ]
 
 
 def test_kill_pane__default_raises_on_pane_not_found(herdr_run):
-    _captured, set_returns = herdr_run
-    set_returns(HerdrError("herdr command failed", code="pane_not_found"))
+    """A non-tolerated close error propagates unchanged and no rebalance
+    commands are emitted — the rebalance only runs after a successful close."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _pane_get(),
+        HerdrError("herdr command failed", code="pane_not_found"),  # pane close
+    )
     with pytest.raises(HerdrError):
         _herdr.kill_pane(target_pane_id="wG:p1")
+    assert captured == [
+        ["herdr", "pane", "get", "wG:p1"],
+        ["herdr", "pane", "close", "wG:p1"],
+    ]
+
+
+def test_kill_pane__rebalances_remaining_column_after_close(herdr_run):
+    """A 3-member column remains after the close with down splits at 0.5/0.7.
+    Equal thirds ⇒ top split → 1/3 (resize m1 up 0.1667) and bottom split → 1/2
+    (resize m2 up 0.2) — the create-path 1/(N-k) arithmetic, driven from the
+    pre-close tab anchor instead of ``pane current``."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _pane_get(),
+        "",  # pane close
+        _column_layout([0.5, 0.7]),
+    )
+    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
+    assert captured == [
+        ["herdr", "pane", "get", "wT:m9"],
+        ["herdr", "pane", "close", "wT:m9"],
+        ["herdr", "pane", "layout"],
+        [
+            "herdr",
+            "pane",
+            "resize",
+            "--pane",
+            "wT:m1",
+            "--direction",
+            "up",
+            "--amount",
+            "0.1667",
+        ],
+        [
+            "herdr",
+            "pane",
+            "resize",
+            "--pane",
+            "wT:m2",
+            "--direction",
+            "up",
+            "--amount",
+            "0.2",
+        ],
+    ]
+
+
+def test_kill_pane__already_balanced_column_emits_no_resize(herdr_run):
+    """An already-balanced remaining column (1/3, 1/2): the read pair runs but
+    every delta rounds below the 1e-3 threshold — no resize."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _pane_get(),
+        "",  # pane close
+        _column_layout([0.3333, 0.5]),
+    )
+    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
+    assert captured == [
+        ["herdr", "pane", "get", "wT:m9"],
+        ["herdr", "pane", "close", "wT:m9"],
+        ["herdr", "pane", "layout"],
+    ]
+
+
+def test_kill_pane__single_remaining_member_emits_no_resize(herdr_run):
+    """One member remains (n == 1): heights are trivially equal and the right
+    split's ratio is unaffected by a down-close — no resize."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _pane_get(),
+        "",  # pane close
+        _column_layout([]),  # Director + a single member, right split only
+    )
+    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
+    assert captured == [
+        ["herdr", "pane", "get", "wT:m9"],
+        ["herdr", "pane", "close", "wT:m9"],
+        ["herdr", "pane", "layout"],
+    ]
+
+
+def test_kill_pane__last_member_residual_right_split_restores_director_width(
+    herdr_run,
+):
+    """The last member was deleted but a residual right split remains at ratio
+    0.62: exactly one corrective resize drives the Director pane's split to 1.0
+    (``--direction right --amount 0.38``)."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _pane_get(),
+        "",  # pane close
+        _post_close_layout(
+            [_DIRECTOR_PANE],
+            [{"direction": "right", "rect": {"x": 26, "y": 1}, "ratio": 0.62}],
+        ),
+    )
+    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
+    assert captured == [
+        ["herdr", "pane", "get", "wT:m9"],
+        ["herdr", "pane", "close", "wT:m9"],
+        ["herdr", "pane", "layout"],
+        [
+            "herdr",
+            "pane",
+            "resize",
+            "--pane",
+            "wT:p3",
+            "--direction",
+            "right",
+            "--amount",
+            "0.38",
+        ],
+    ]
+
+
+@pytest.mark.parametrize(
+    ("panes", "splits"),
+    [
+        pytest.param(
+            [_DIRECTOR_PANE],
+            [
+                {"direction": "right", "rect": {"x": 26, "y": 1}, "ratio": 0.62},
+                {"direction": "down", "rect": {"x": 26, "y": 44}, "ratio": 0.5},
+            ],
+            id="multiple-splits",
+        ),
+        pytest.param(
+            [_DIRECTOR_PANE],
+            [{"direction": "down", "rect": {"x": 26, "y": 44}, "ratio": 0.62}],
+            id="non-right-residual-split",
+        ),
+        pytest.param(
+            [
+                _DIRECTOR_PANE,
+                {
+                    "pane_id": "wT:p9",
+                    "rect": {"x": 26, "y": 44, "width": 364, "height": 43},
+                },
+            ],
+            [{"direction": "down", "rect": {"x": 26, "y": 44}, "ratio": 0.5}],
+            id="panes-all-at-min-x",
+        ),
+        pytest.param(
+            [_DIRECTOR_PANE],
+            [{"direction": "right", "rect": {"x": 26, "y": 1}, "ratio": 0.9999}],
+            id="ratio-within-tolerance",
+        ),
+    ],
+)
+def test_kill_pane__last_member_residue_guards_emit_no_resize(herdr_run, panes, splits):
+    """Anomalous residue after the last delete (multiple splits, a non-right
+    residual split, ≥ 2 panes all at min_x) is left untouched, and a right
+    split already within 1e-3 of full width needs no correction."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _pane_get(),
+        "",  # pane close
+        _post_close_layout(panes, splits),
+    )
+    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
+    assert captured == [
+        ["herdr", "pane", "get", "wT:m9"],
+        ["herdr", "pane", "close", "wT:m9"],
+        ["herdr", "pane", "layout"],
+    ]
+
+
+def test_kill_pane__layout_on_different_tab_skips_resize(herdr_run):
+    """The focused-tab layout reports a different tab than the pre-close target
+    tab (focus on an unrelated tab): no resize, even though the reported layout
+    carries an unbalanced column that would otherwise be equalized."""
+    captured, set_returns = herdr_run
+    unrelated = json.loads(_column_layout([0.5, 0.7]))
+    unrelated["result"]["layout"]["tab_id"] = "wT:t9"
+    set_returns(
+        _pane_get("wT:t3"),
+        "",  # pane close
+        json.dumps(unrelated),
+    )
+    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
+    assert captured == [
+        ["herdr", "pane", "get", "wT:m9"],
+        ["herdr", "pane", "close", "wT:m9"],
+        ["herdr", "pane", "layout"],
+    ]
+
+
+def test_kill_pane__pane_get_error_still_closes_without_rebalance(herdr_run):
+    """A HerdrError from the pre-close ``pane get`` yields no tab anchor: the
+    close still runs with its existing semantics and the rebalance is skipped
+    (no layout read, no resize)."""
+    captured, set_returns = herdr_run
+    set_returns(
+        HerdrError("herdr command failed: server unreachable"),  # pane get
+        "",  # pane close
+    )
+    assert _herdr.kill_pane(target_pane_id="wG:p1") is None
+    assert captured == [
+        ["herdr", "pane", "get", "wG:p1"],
+        ["herdr", "pane", "close", "wG:p1"],
+    ]
+
+
+def test_kill_pane__layout_read_error_swallowed(herdr_run):
+    """A HerdrError from the post-close ``pane layout`` read is swallowed —
+    the pane is already closed, so the delete still succeeds."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _pane_get(),
+        "",  # pane close
+        HerdrError("herdr command failed: server unreachable"),  # pane layout
+    )
+    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
+    assert captured == [
+        ["herdr", "pane", "get", "wT:m9"],
+        ["herdr", "pane", "close", "wT:m9"],
+        ["herdr", "pane", "layout"],
+    ]
+
+
+def test_kill_pane__resize_error_swallowed(herdr_run):
+    """A HerdrError from a corrective resize is swallowed — a layout failure
+    never fails ``member delete``."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _pane_get(),
+        "",  # pane close
+        _post_close_layout(
+            [_DIRECTOR_PANE],
+            [{"direction": "right", "rect": {"x": 26, "y": 1}, "ratio": 0.62}],
+        ),
+        HerdrError("herdr command failed: server unreachable"),  # pane resize
+    )
+    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
+    assert captured[-1][:4] == ["herdr", "pane", "resize", "--pane"]
+
+
+def test_kill_pane__malformed_split_chain_skips_resize(herdr_run):
+    """A remaining column of 3 members backed by only one down split is not the
+    expected right-leaning chain (``len(down_splits) != n - 1``) — the guard
+    skips and no resize is emitted."""
+    captured, set_returns = herdr_run
+    members = [
+        {
+            "pane_id": f"wT:m{k}",
+            "rect": {"x": 195, "y": 1 + 20 * k, "width": 169, "height": 20},
+        }
+        for k in range(3)
+    ]
+    splits = [
+        {"direction": "right", "rect": {"x": 26, "y": 1}, "ratio": 0.5},
+        {"direction": "down", "rect": {"x": 195, "y": 1}, "ratio": 0.5},
+    ]
+    set_returns(
+        _pane_get(),
+        "",  # pane close
+        _post_close_layout([_DIRECTOR_PANE, *members], splits),
+    )
+    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
+    assert captured == [
+        ["herdr", "pane", "get", "wT:m9"],
+        ["herdr", "pane", "close", "wT:m9"],
+        ["herdr", "pane", "layout"],
+    ]
 
 
 # --- send_exit -------------------------------------------------------------
