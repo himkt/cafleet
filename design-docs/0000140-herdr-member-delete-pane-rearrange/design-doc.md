@@ -1,6 +1,6 @@
 # Herdr Pane Rearrange on `cafleet member delete`
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 19/19 tasks complete
 **Last Updated**: 2026-07-18
 
@@ -210,3 +210,4 @@ The verification is the layout read itself: a single pane with an empty `splits`
 |------|---------|
 | 2026-07-18 | Initial draft |
 | 2026-07-18 | Review round 1: rebalance scoped to the killed pane's tab via a pre-close `pane get` anchor (decision #7); collapsed the full-width-restore residue guards |
+| 2026-07-18 | Implementation complete: all 19 tasks and 7 success criteria met; Reviewer approved in 1 round; PR #206 |
