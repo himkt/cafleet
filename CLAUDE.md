@@ -12,7 +12,7 @@ A message broker and member registry for coding agents.
 
 - **Single package**:
   - `cafleet/` — `cafleet` (FastAPI + SQLAlchemy + Alembic + click)
-- **Unified CLI command**: `cafleet` (with `setup` — and its `db` / `skill` subcommands — for onboarding and schema management, and all member/messaging commands)
+- **Unified CLI command**: `cafleet` (with a single `setup` command for onboarding and schema management, and all member/messaging commands)
 
 ## Tech Stack
 

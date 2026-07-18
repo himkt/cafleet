@@ -10,7 +10,7 @@ Always generate a new migration with the project's mise task — never invoke `a
 mise //cafleet:makemigration "short description of the change"
 ```
 
-- Run `cafleet setup db` (or `cafleet setup`) first so the DB is at head — `--autogenerate` requires it.
+- Run `cafleet setup --skip claude --skip codex --skip opencode` (the schema-only invocation) first so the DB is at head — `--autogenerate` requires it.
 - The message becomes the migration docstring and the filename slug.
 - `env.py`'s `process_revision_directives` hook mints the next sequential id, so the file lands as `000N_<slug>.py`, matching the chain and the chain-guard snapshot in `tests/db/test_alembic_smoke.py`. Raw `alembic revision` mints a random hex id and breaks both.
 

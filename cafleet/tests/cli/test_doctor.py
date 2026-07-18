@@ -17,7 +17,7 @@ _TMUX_ENV_VALUE = "/tmp/tmux-1000/default,12345,0"
 RUNTIME_VERSION = importlib.metadata.version("cafleet")
 TS_CURRENT = "2026-07-04T00:12:09.123456+00:00"
 TS_STALE = "2026-06-20T10:00:00.987654+00:00"
-NO_INSTALL_LINE = "(no skills install recorded; run 'cafleet setup')"
+NO_INSTALL_LINE = "(no assets install recorded; run 'cafleet setup')"
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ def _seed_install(db_path, coding_agent, cafleet_version, installed_at):
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute(
-            "INSERT OR REPLACE INTO skill_installs"
+            "INSERT OR REPLACE INTO asset_installs"
             " (coding_agent, cafleet_version, installed_at) VALUES (?, ?, ?)",
             (coding_agent, cafleet_version, installed_at),
         )
@@ -108,11 +108,11 @@ def test_doctor_rejects_fleet_id__rejected_in_both_positions(runner):
 
 
 # --------------------------------------------------------------------------- #
-# skills block — text form                                                     #
+# assets block — text form                                                     #
 # --------------------------------------------------------------------------- #
 
 
-def test_doctor_text_skills_section_ok_and_stale(runner, mock_tmux_ok, registry_db):
+def test_doctor_text_assets_section_ok_and_stale(runner, mock_tmux_ok, registry_db):
     """Every row is reported with its verbatim timestamp and ok/STALE verdict;
     a stale row never blocks ``doctor``."""
     _init_schema()
@@ -123,7 +123,7 @@ def test_doctor_text_skills_section_ok_and_stale(runner, mock_tmux_ok, registry_
 
     assert result.exit_code == 0, result.output
     out = result.output
-    assert "skills:" in out
+    assert "assets:" in out
     assert f"cli_version: {RUNTIME_VERSION}" in out
     assert re.search(
         rf"claude:\s+{re.escape(RUNTIME_VERSION)} \({re.escape(TS_CURRENT)}\) ok",
@@ -135,31 +135,31 @@ def test_doctor_text_skills_section_ok_and_stale(runner, mock_tmux_ok, registry_
     ), out
 
 
-def test_doctor_text_skills_after_multiplexer_block(runner, mock_tmux_ok, registry_db):
-    """The skills block is printed after the multiplexer block."""
+def test_doctor_text_assets_after_multiplexer_block(runner, mock_tmux_ok, registry_db):
+    """The assets block is printed after the multiplexer block."""
     _init_schema()
     _seed_install(registry_db, "claude", RUNTIME_VERSION, TS_CURRENT)
 
     result = runner.invoke(cli, ["doctor"])
 
     assert result.exit_code == 0, result.output
-    assert result.output.index("multiplexer:") < result.output.index("skills:")
+    assert result.output.index("multiplexer:") < result.output.index("assets:")
 
 
 @pytest.mark.parametrize("state", ["no-db-file", "empty-table"])
 def test_doctor_text_no_install_recorded(runner, mock_tmux_ok, registry_db, state):
-    """No rows / table missing yields the two-line no-install skills block."""
+    """No rows / table missing yields the two-line no-install assets block."""
     if state == "empty-table":
         _init_schema()
 
     result = runner.invoke(cli, ["doctor"])
 
     assert result.exit_code == 0, result.output
-    assert f"skills:\n  {NO_INSTALL_LINE}" in result.output
+    assert f"assets:\n  {NO_INSTALL_LINE}" in result.output
 
 
 # --------------------------------------------------------------------------- #
-# skills block — JSON form                                                     #
+# assets block — JSON form                                                     #
 # --------------------------------------------------------------------------- #
 
 
@@ -176,14 +176,14 @@ def test_doctor_json_output__json_output_shape(runner, mock_tmux_ok):
             "presence_var": "TMUX",
             "presence_value": _TMUX_ENV_VALUE,
         },
-        "skills": {
+        "assets": {
             "cli_version": RUNTIME_VERSION,
             "installs": [],
         },
     }
 
 
-def test_doctor_json_skills_installs(runner, mock_tmux_ok, registry_db):
+def test_doctor_json_assets_installs(runner, mock_tmux_ok, registry_db):
     """Each row appears with its ``current`` verdict, ordered by coding_agent."""
     _init_schema()
     _seed_install(registry_db, "codex", "0.0.1", TS_STALE)
@@ -193,7 +193,7 @@ def test_doctor_json_skills_installs(runner, mock_tmux_ok, registry_db):
 
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
-    assert data["skills"] == {
+    assert data["assets"] == {
         "cli_version": RUNTIME_VERSION,
         "installs": [
             {

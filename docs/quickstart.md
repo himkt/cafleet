@@ -21,7 +21,7 @@ Prerequisites:
 
 ```bash
 uv tool install cafleet     # or: pip install cafleet
-cafleet setup               # migrate the database schema + install the skills and presets
+cafleet setup               # migrate the database schema + install the assets (skills and presets) for claude, codex, and opencode — repeat --skip AGENT to skip agents
 ```
 
 ## Configure

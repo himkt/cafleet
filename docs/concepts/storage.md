@@ -9,9 +9,9 @@ icon: lucide/database
 Everything is persisted in a single SQLite database accessed through
 SQLAlchemy 2.x with the sync `pysqlite` driver. Schema changes are managed
 by Alembic, bundled inside the `cafleet` wheel and applied via
-`cafleet setup` (or its schema-only subcommand `cafleet setup db`). There is
-no separate database daemon to operate, monitor, or back up — the database is
-a single file.
+`cafleet setup` (schema-only: `cafleet setup --skip claude --skip codex
+--skip opencode`). There is no separate database daemon to operate, monitor,
+or back up — the database is a single file.
 
 The default database path is `~/.local/share/cafleet/cafleet_v5.db` (XDG state
 directory), expanded once at config load time. Override with the
@@ -33,25 +33,26 @@ schema.
 
 The schema is managed by a **chain of Alembic migrations**; the current
 revision is recorded in the `alembic_version` table. Operators run
-`cafleet setup` (or its schema-only subcommand `cafleet setup db`) once before
-starting the server; it migrates the database in place to the bundled head
+`cafleet setup` (schema-only: `cafleet setup --skip claude --skip codex
+--skip opencode`) once before starting the server; it migrates the database
+in place to the bundled head
 revision, preserving existing data (message history included), so it is
 idempotent and safe to re-run after every upgrade. It refuses to
 auto-downgrade a database that is ahead of the bundled head, and refuses an
 unversioned database with tables it does not recognize. Without the schema,
 the first request fails with `OperationalError: no such table: members`.
 
-## Skills-install recording
+## Assets-install recording
 
-The `skill_installs` table records, per
-coding-agent home, the CLI version that last installed the skills and preset
+The `asset_installs` table records, per
+coding agent, the CLI version that last installed the skills and preset
 (where one exists) there — **not** a schema version. The assets
-half of `cafleet setup` (bare, or per-agent via `cafleet setup <agent>`)
-upserts one row per home after that home's install succeeds. Every fleet-scoped command (`fleet *`,
+half of `cafleet setup`
+upserts one row per target agent after that agent's install succeeds. Every fleet-scoped command (`fleet *`,
 `member *`, `message *`, `monitor *`) checks the recorded rows before running
 and hard-errors when no install is recorded or when any recorded version
-differs from the running CLI version — so skills can never silently go stale
-after a CLI upgrade. `cafleet doctor` reports the per-home detail. See
+differs from the running CLI version — so the assets can never silently go
+stale after a CLI upgrade. `cafleet doctor` reports the per-agent detail. See
 [data model](../spec/data-model.md) for the table schema and
 [CLI options](../spec/cli-options.md) for the guard's error strings.
 

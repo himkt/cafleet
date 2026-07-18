@@ -14,8 +14,8 @@ import click
 
 from cafleet import broker, output
 from cafleet.cli._helpers import (
+    ensure_assets_current,
     ensure_multiplexer_or_die,
-    ensure_skills_current,
     fleet_id_option,
     json_flag,
     member_id_option,
@@ -26,7 +26,7 @@ from cafleet.monitor import DEFAULT_TICK_SECONDS, loop
 @click.group()
 def monitor() -> None:
     """Supervision scheduler (heartbeat) commands."""
-    ensure_skills_current()
+    ensure_assets_current()
 
 
 def _require_live_fleet(fleet_id: int) -> None:

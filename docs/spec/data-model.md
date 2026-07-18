@@ -8,9 +8,8 @@ The `Message` payload is fully relational: every routing field plus the message
 body lives in its own typed column. The only JSON `TEXT` blob is
 `members.member_card_json`. The runtime engine is SQLAlchemy 2.x with the
 synchronous `pysqlite` driver; the schema is managed by a chain of Alembic
-migrations bundled inside the wheel — run `cafleet setup` (or `cafleet setup
-db`) to migrate to head (idempotent, data-preserving; see
-[Storage](../concepts/storage.md)). The exact column-level DDL contract lives
+migrations bundled inside the wheel — run `cafleet setup` to migrate to head
+(idempotent, data-preserving; see [Storage](../concepts/storage.md)). The exact column-level DDL contract lives
 in the repository's `SPEC.md`.
 
 ## Schema diagram
@@ -74,7 +73,7 @@ erDiagram
         TEXT last_tick_at "liveness heartbeat"
         INTEGER tick_seconds
     }
-    skill_installs {
+    asset_installs {
         TEXT coding_agent PK "claude | codex | opencode"
         TEXT cafleet_version
         TEXT installed_at
@@ -83,7 +82,7 @@ erDiagram
 
 The three minted-id tables (`fleets`, `members`, `messages`) use `INTEGER PRIMARY
 KEY AUTOINCREMENT`, so **ids are never reused** and real ids are always `>= 1`.
-The three 1:1 tables reuse a parent id as their PK; `skill_installs` keys on
+The three 1:1 tables reuse a parent id as their PK; `asset_installs` keys on
 the coding-agent name and is not FK-linked.
 
 ## Tables
@@ -134,13 +133,13 @@ as "no row". Both are removed explicitly inside the `fleet delete`
 transaction. Enrollment, cadence, and liveness semantics are on
 [Monitoring](../concepts/monitoring.md).
 
-### `skill_installs`
+### `asset_installs`
 
-One upserted row per coding-agent home, recording the CLI version whose skills
+One upserted row per coding agent, recording the CLI version whose skills
 and preset (where one exists) install last landed there — the row attests
-both. Written by the assets half of `cafleet setup` (bare or per-agent);
-feeds the stale-skills guard and the `cafleet doctor` report (see
-[CLI options](cli-options.md#stale-skills-guard)).
+both. Written by the assets half of `cafleet setup`; feeds the stale-assets
+guard and the `cafleet doctor` report (see
+[CLI options](cli-options.md#stale-assets-guard)).
 
 ## Foreign key enforcement
 

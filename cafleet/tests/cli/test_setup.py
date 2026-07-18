@@ -1,4 +1,4 @@
-"""Tests for the ``cafleet setup`` CLI group (bare, ``db``, per-agent).
+"""Tests for the ``cafleet setup`` CLI command (single command, ``--skip``).
 
 The assets half is exercised entirely offline: ``importlib.metadata.version``,
 the ``GET /releases/tags/<version>`` lookup and the asset download are all
@@ -38,16 +38,26 @@ from click.testing import CliRunner
 
 from cafleet import config
 
+AGENTS = ("claude", "codex", "opencode")
 SKILL_DIR_NAMES = ("cafleet", "cafleet-design-doc", "cafleet-research")
 CLI_VERSION = "0.12.2"
-ASSET_NAME = f"cafleet-skills-v{CLI_VERSION}.zip"
+ASSET_NAME = f"cafleet-assets-v{CLI_VERSION}.zip"
 DOWNLOAD_URL = f"https://example.invalid/download/{ASSET_NAME}"
 _RELEASE_API_FRAGMENT = "/releases/tags/"
 
 PREFLIGHT_ERROR = (
-    "the database schema is missing or outdated; "
-    "run 'cafleet setup' or 'cafleet setup db' first"
+    "the database schema is missing or outdated; run 'cafleet setup' first"
 )
+
+SCHEMA_ONLY_ARGS = (
+    "--skip",
+    "claude",
+    "--skip",
+    "codex",
+    "--skip",
+    "opencode",
+)
+ASSETS_SKIPPED_LINE = "assets half skipped (all agents skipped)"
 
 OPENCODE_PRESET_CONTENT = "# cafleet opencode agent preset\n"
 CODEX_RULES_CONTENT = 'prefix_rule(pattern = ["cafleet"], decision = "allow")\n'
@@ -58,7 +68,7 @@ PRESET_ARCHIVE_MEMBERS = {
 }
 
 
-def _make_skills_zip(
+def _make_assets_zip(
     *,
     skill_dirs=SKILL_DIR_NAMES,
     extra_dirs=(),
@@ -165,8 +175,8 @@ def _preset_target_mapping(tmp_path):
 def homes(tmp_path, monkeypatch):
     """Point every agent's skills dir and preset target at ``tmp_path`` homes.
 
-    Returns the ``{agent: skills_dir}`` mapping; the home (the skills dir's
-    parent) is created on demand by ``_make_home``. The preset targets are
+    Returns the ``{agent: skills_dir}`` mapping. Nothing is pre-created: the
+    install path creates each target tree as needed. The preset targets are
     redirected alongside so no install ever touches the real ``$HOME``.
     """
     from cafleet.cli import setup as setup_module
@@ -189,10 +199,6 @@ def preset_targets(tmp_path, homes):
     return _preset_target_mapping(tmp_path)
 
 
-def _make_home(skills_dir):
-    skills_dir.parent.mkdir(parents=True, exist_ok=True)
-
-
 def _installed_skill_dirs(skills_dir):
     if not skills_dir.exists():
         return set()
@@ -210,23 +216,16 @@ def _table_names(db_path):
         conn.close()
 
 
-def _skill_install_rows(db_path):
+def _asset_install_rows(db_path):
     """Return ``[(coding_agent, cafleet_version), ...]`` ordered by agent."""
     conn = sqlite3.connect(str(db_path))
     try:
         return conn.execute(
-            "SELECT coding_agent, cafleet_version FROM skill_installs"
+            "SELECT coding_agent, cafleet_version FROM asset_installs"
             " ORDER BY coding_agent"
         ).fetchall()
     finally:
         conn.close()
-
-
-def _init_schema():
-    """Migrate the registry to head the way ``cafleet setup db`` does."""
-    from cafleet.db.init import run_db_init
-
-    run_db_init()
 
 
 def _run(args):
@@ -239,12 +238,9 @@ def _run_setup(args=()):
     return _run(["setup", *args])
 
 
-def _run_setup_db():
-    return _run(["setup", "db"])
-
-
-def _run_setup_agent(agent):
-    return _run(["setup", agent])
+def _only(agent):
+    """``--skip`` args narrowing the assets half to exactly ``agent``."""
+    return [arg for other in AGENTS if other != agent for arg in ("--skip", other)]
 
 
 def _skills_line(agent, skills_dir, version=CLI_VERSION):
@@ -258,73 +254,77 @@ def _preset_line(agent, target, version=CLI_VERSION):
 
 
 # --------------------------------------------------------------------------- #
-# Bare ``cafleet setup``: db half first, then assets half                      #
+# Bare ``cafleet setup``: db half first, then assets half for all three agents #
 # --------------------------------------------------------------------------- #
 
 
-def test_bare_setup_runs_both_halves_and_records_rows(
+def test_bare_setup_installs_all_three_agents(
     homes, preset_targets, registry_db, monkeypatch
 ):
-    """Bare setup creates the schema, installs every detected home, records rows."""
-    _make_home(homes["claude"])
-    _make_home(homes["opencode"])
-    # codex home intentionally absent
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+    """Bare setup migrates the schema, then installs skills + presets for
+    claude, codex, and opencode (in that order), creating every home from
+    scratch, and records one row per agent."""
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
 
     result = _run_setup()
 
     assert result.exit_code == 0, result.output
-    assert {"fleets", "members", "skill_installs"} <= _table_names(registry_db)
-    assert _installed_skill_dirs(homes["claude"]) == set(SKILL_DIR_NAMES)
-    assert _installed_skill_dirs(homes["opencode"]) == set(SKILL_DIR_NAMES)
-    assert not homes["codex"].exists()
-    # opencode is a resolved target with a catalog entry: its preset installs
-    assert (
-        preset_targets["opencode"].read_text(encoding="utf-8")
-        == OPENCODE_PRESET_CONTENT
-    )
-    # codex was not a target; claude has no preset at all
-    assert not preset_targets["codex"].exists()
-    assert "claude: installed preset" not in result.output
-    assert _skill_install_rows(registry_db) == [
-        ("claude", CLI_VERSION),
-        ("opencode", CLI_VERSION),
-    ]
-
-
-def test_bare_setup_installs_presets_for_codex_and_opencode(
-    homes, preset_targets, registry_db, monkeypatch
-):
-    """Both presets install on bare setup; per agent the skills line precedes
-    the preset line."""
-    _make_home(homes["codex"])
-    _make_home(homes["opencode"])
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
-
-    result = _run_setup()
-
-    assert result.exit_code == 0, result.output
+    assert {"fleets", "members", "asset_installs"} <= _table_names(registry_db)
+    for agent in AGENTS:
+        assert _installed_skill_dirs(homes[agent]) == set(SKILL_DIR_NAMES)
     assert preset_targets["codex"].read_text(encoding="utf-8") == CODEX_RULES_CONTENT
     assert (
         preset_targets["opencode"].read_text(encoding="utf-8")
         == OPENCODE_PRESET_CONTENT
     )
+    # claude has no preset at all
+    assert "claude: installed preset" not in result.output
     assert result.output.count("installed preset") == 2
+    assert _asset_install_rows(registry_db) == [
+        ("claude", CLI_VERSION),
+        ("codex", CLI_VERSION),
+        ("opencode", CLI_VERSION),
+    ]
+    # fixed per-target order: claude, then codex, then opencode
+    positions = [result.output.index(_skills_line(a, homes[a])) for a in AGENTS]
+    assert positions == sorted(positions)
+
+
+def test_bare_setup_per_agent_skills_line_precedes_preset_line(
+    homes, preset_targets, registry_db, monkeypatch
+):
+    """Per agent the skills line precedes the preset line."""
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
+
+    result = _run_setup()
+
+    assert result.exit_code == 0, result.output
     for agent in ("codex", "opencode"):
         skills_line = _skills_line(agent, homes[agent])
         preset_line = _preset_line(agent, preset_targets[agent])
         assert skills_line in result.output
         assert preset_line in result.output
         assert result.output.index(skills_line) < result.output.index(preset_line)
-    assert _skill_install_rows(registry_db) == [
-        ("codex", CLI_VERSION),
-        ("opencode", CLI_VERSION),
-    ]
+
+
+def test_setup_help_contract(homes, registry_db, monkeypatch):
+    """The command help and the ``--skip`` help match the documented strings."""
+    _forbid_network(monkeypatch)
+
+    result = _run_setup(["--help"])
+
+    assert result.exit_code == 0, result.output
+    assert (
+        "Migrate the database schema and install the coding-agent assets"
+        " (skills and presets)." in " ".join(result.output.split())
+    )
+    assert "Skip the named agent's assets install (repeatable)." in " ".join(
+        result.output.split()
+    )
 
 
 def test_bare_setup_rejects_agent_option(homes, registry_db, monkeypatch):
-    """Bare setup takes no ``--agent``; the option rejects with exit 2."""
-    _make_home(homes["claude"])
+    """``setup`` takes no ``--agent``; the option rejects with exit 2."""
     _forbid_network(monkeypatch)
 
     result = _run_setup(["--agent", "claude"])
@@ -343,8 +343,7 @@ def test_bare_setup_db_failure_cascades_to_assets_preflight(
     """
     from cafleet.cli import setup as setup_module
 
-    _make_home(homes["claude"])
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
 
     def broken_run_db_init():
         raise click.ClickException("disk full")
@@ -365,7 +364,6 @@ def test_bare_setup_db_failure_cascades_to_assets_preflight(
 
 def test_bare_setup_assets_fail_db_succeeds(homes, registry_db, monkeypatch):
     """Assets half fails (malformed asset); the db half already succeeded."""
-    _make_home(homes["claude"])
     _mock_release(monkeypatch, zip_bytes=b"not a zip")
 
     result = _run_setup()
@@ -375,29 +373,8 @@ def test_bare_setup_assets_fail_db_succeeds(homes, registry_db, monkeypatch):
     assert "malformed" in result.output.lower()
     assert "db half failed" not in result.output
     assert "Error: assets half failed" in result.output
-    assert {"fleets", "skill_installs"} <= _table_names(registry_db)
-    assert _skill_install_rows(registry_db) == []
-
-
-def test_bare_setup_zero_homes_detected(homes, registry_db, monkeypatch):
-    """Auto-detect with no homes fails the assets half listing the searched
-    paths and pointing at the per-agent subcommands."""
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
-
-    result = _run_setup()
-
-    assert result.exit_code == 1, result.output
-    out = result.output.lower()
-    assert "no coding-agent homes detected" in out
-    assert ".claude" in result.output
-    assert ".codex" in result.output
-    assert "opencode" in result.output
-    assert (
-        "install a coding agent first, or run 'cafleet setup <agent>'" in result.output
-    )
-    # the db half ran (and succeeded) despite the assets-half failure
-    assert "skill_installs" in _table_names(registry_db)
-    assert "Error: assets half failed" in result.output
+    assert {"fleets", "asset_installs"} <= _table_names(registry_db)
+    assert _asset_install_rows(registry_db) == []
 
 
 def test_bare_setup_preset_failure_aborts_remaining_targets(
@@ -405,17 +382,15 @@ def test_bare_setup_preset_failure_aborts_remaining_targets(
 ):
     """A preset failure aborts the assets loop exactly like a skills failure.
 
-    codex (first target) fails on its preset after its skills installed;
-    opencode is never processed and no row is recorded for either.
+    claude (first target) completes and keeps its row; codex fails on its
+    preset after its skills installed; opencode is never processed.
     """
-    _make_home(homes["codex"])
-    _make_home(homes["opencode"])
     # ``~/.codex/rules`` exists as a regular file: the parent-dir creation
     # for the preset target fails with an OSError.
     rules_parent = preset_targets["codex"].parent
     rules_parent.parent.mkdir(parents=True, exist_ok=True)
     rules_parent.write_text("not a directory\n", encoding="utf-8")
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
 
     result = _run_setup()
 
@@ -425,210 +400,187 @@ def test_bare_setup_preset_failure_aborts_remaining_targets(
     # skills for codex installed before the preset step aborted the loop
     assert _installed_skill_dirs(homes["codex"]) == set(SKILL_DIR_NAMES)
     assert _installed_skill_dirs(homes["opencode"]) == set()
-    assert _skill_install_rows(registry_db) == []
+    assert _asset_install_rows(registry_db) == [("claude", CLI_VERSION)]
 
 
 # --------------------------------------------------------------------------- #
-# ``cafleet setup db``: schema only                                            #
+# ``--skip``: single, repeated, duplicated, all three, invalid                 #
 # --------------------------------------------------------------------------- #
 
 
-def test_setup_db_creates_schema_only(homes, registry_db, monkeypatch):
-    """``setup db`` migrates the schema, writes no rows, and never goes online."""
-    _make_home(homes["claude"])
+def test_skip_single_agent(homes, preset_targets, registry_db, monkeypatch):
+    """``--skip claude`` installs codex and opencode only."""
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
+
+    result = _run_setup(["--skip", "claude"])
+
+    assert result.exit_code == 0, result.output
+    assert _installed_skill_dirs(homes["claude"]) == set()
+    assert _installed_skill_dirs(homes["codex"]) == set(SKILL_DIR_NAMES)
+    assert _installed_skill_dirs(homes["opencode"]) == set(SKILL_DIR_NAMES)
+    assert "claude:" not in result.output
+    assert _asset_install_rows(registry_db) == [
+        ("codex", CLI_VERSION),
+        ("opencode", CLI_VERSION),
+    ]
+
+
+def test_skip_repeated_agents(homes, preset_targets, registry_db, monkeypatch):
+    """Repeated ``--skip`` narrows the targets to the one remaining agent."""
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
+
+    result = _run_setup(["--skip", "claude", "--skip", "codex"])
+
+    assert result.exit_code == 0, result.output
+    assert _installed_skill_dirs(homes["claude"]) == set()
+    assert _installed_skill_dirs(homes["codex"]) == set()
+    assert _installed_skill_dirs(homes["opencode"]) == set(SKILL_DIR_NAMES)
+    assert not preset_targets["codex"].exists()
+    assert (
+        preset_targets["opencode"].read_text(encoding="utf-8")
+        == OPENCODE_PRESET_CONTENT
+    )
+    assert _asset_install_rows(registry_db) == [("opencode", CLI_VERSION)]
+
+
+def test_skip_duplicates_are_deduplicated(
+    homes, preset_targets, registry_db, monkeypatch
+):
+    """``--skip claude --skip claude`` equals a single ``--skip claude``."""
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
+
+    result = _run_setup(["--skip", "claude", "--skip", "claude"])
+
+    assert result.exit_code == 0, result.output
+    assert _installed_skill_dirs(homes["claude"]) == set()
+    assert _installed_skill_dirs(homes["codex"]) == set(SKILL_DIR_NAMES)
+    assert _installed_skill_dirs(homes["opencode"]) == set(SKILL_DIR_NAMES)
+    assert _asset_install_rows(registry_db) == [
+        ("codex", CLI_VERSION),
+        ("opencode", CLI_VERSION),
+    ]
+
+
+def test_skip_all_three_is_schema_only(homes, registry_db, monkeypatch):
+    """Skipping all three agents runs the db half only: no network access, no
+    installs, no rows — the documented schema-only path."""
     _forbid_network(monkeypatch)
 
-    result = _run_setup_db()
+    result = _run_setup(SCHEMA_ONLY_ARGS)
 
     assert result.exit_code == 0, result.output
     assert f"Created {registry_db} and applied migrations to head" in result.output
-    assert {"fleets", "skill_installs", "alembic_version"} <= _table_names(registry_db)
-    assert _skill_install_rows(registry_db) == []
-    assert _installed_skill_dirs(homes["claude"]) == set()
+    assert ASSETS_SKIPPED_LINE in result.output
+    assert {"fleets", "asset_installs", "alembic_version"} <= _table_names(registry_db)
+    assert _asset_install_rows(registry_db) == []
+    for agent in AGENTS:
+        assert _installed_skill_dirs(homes[agent]) == set()
 
 
-def test_setup_db_idempotent_and_preserves_rows(homes, registry_db, monkeypatch):
-    """A second ``setup db`` run succeeds and never touches recorded rows."""
-    _make_home(homes["claude"])
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+def test_skip_all_three_db_failure_reports_db_half_only(
+    homes, registry_db, monkeypatch
+):
+    """With every agent skipped, a db failure is the only reported failure —
+    the skipped assets half is not-run and cannot contribute."""
+    from cafleet.cli import setup as setup_module
 
-    assert _run_setup_db().exit_code == 0
-    assert _run_setup_agent("claude").exit_code == 0
-    assert _skill_install_rows(registry_db) == [("claude", CLI_VERSION)]
+    _forbid_network(monkeypatch)
 
-    result = _run_setup_db()
+    def broken_run_db_init():
+        raise click.ClickException("disk full")
+
+    monkeypatch.setattr(setup_module, "run_db_init", broken_run_db_init)
+
+    result = _run_setup(SCHEMA_ONLY_ARGS)
+
+    assert result.exit_code == 1, result.output
+    assert "db half failed: disk full" in result.output
+    assert "assets half failed" not in result.output
+    assert "Error: db half failed" in result.output
+
+
+def test_skip_invalid_choice(homes, registry_db, monkeypatch):
+    """An unknown ``--skip`` value fails with Click's invalid-choice error."""
+    _forbid_network(monkeypatch)
+
+    result = _run_setup(["--skip", "vim"])
+
+    assert result.exit_code == 2, result.output
+    assert "invalid value" in result.output.lower()
+    assert "vim" in result.output
+
+
+# --------------------------------------------------------------------------- #
+# Removed subcommands: ``db``, per-agent, ``skill``                            #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("word", ["db", "claude", "codex", "opencode", "skill"])
+def test_removed_subcommand_fails_with_extra_argument(
+    homes, registry_db, monkeypatch, word
+):
+    """Former subcommand invocations fail with Click's standard extra-argument
+    error (exit 2) and touch neither the DB nor the network."""
+    _forbid_network(monkeypatch)
+
+    result = _run_setup([word])
+
+    assert result.exit_code == 2, result.output
+    assert "got unexpected extra argument" in result.output.lower()
+    assert word in result.output
+    assert not registry_db.exists()
+
+
+# --------------------------------------------------------------------------- #
+# Idempotency and row upserts                                                  #
+# --------------------------------------------------------------------------- #
+
+
+def test_schema_only_idempotent_and_preserves_rows(homes, registry_db, monkeypatch):
+    """A second schema-only run reports ``Already at head`` and never touches
+    recorded rows."""
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
+
+    assert _run_setup(_only("claude")).exit_code == 0
+    assert _asset_install_rows(registry_db) == [("claude", CLI_VERSION)]
+
+    result = _run_setup(SCHEMA_ONLY_ARGS)
 
     assert result.exit_code == 0, result.output
     assert "already at head" in result.output.lower()
-    assert _skill_install_rows(registry_db) == [("claude", CLI_VERSION)]
+    assert _asset_install_rows(registry_db) == [("claude", CLI_VERSION)]
 
 
-# --------------------------------------------------------------------------- #
-# Per-agent subcommands: ``setup claude`` / ``codex`` / ``opencode``           #
-# --------------------------------------------------------------------------- #
+def test_reinstall_upserts_row(homes, registry_db, monkeypatch):
+    """Re-installing replaces the agent's row instead of adding a second one."""
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
 
-
-def test_setup_skill_subcommand_removed(homes, registry_db, monkeypatch):
-    """``setup skill`` is gone; Click reports its default no-such-command error."""
-    _forbid_network(monkeypatch)
-
-    result = _run_setup(["skill"])
-
-    assert result.exit_code == 2, result.output
-    assert "no such command" in result.output.lower()
-    assert "skill" in result.output
-
-
-@pytest.mark.parametrize("agent", ["claude", "codex", "opencode"])
-def test_setup_agent_preflight_error_when_schema_missing(
-    homes, registry_db, monkeypatch, agent
-):
-    """Without the ``skill_installs`` table the pre-flight fails before any
-    network access or install."""
-    _make_home(homes[agent])
-    _forbid_network(monkeypatch)
-
-    result = _run_setup_agent(agent)
-
-    assert result.exit_code == 1, result.output
-    assert PREFLIGHT_ERROR in result.output
-    assert _installed_skill_dirs(homes[agent]) == set()
-
-
-def test_setup_claude_installs_skills_without_preset(homes, registry_db, monkeypatch):
-    """``setup claude`` installs the skills, records one row, echoes no preset
-    line (claude has no catalog entry)."""
-    _init_schema()
-    _make_home(homes["claude"])
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
-
-    result = _run_setup_agent("claude")
-
-    assert result.exit_code == 0, result.output
-    assert _installed_skill_dirs(homes["claude"]) == set(SKILL_DIR_NAMES)
-    assert _skill_install_rows(registry_db) == [("claude", CLI_VERSION)]
-    assert _skills_line("claude", homes["claude"]) in result.output
-    assert "installed preset" not in result.output
-
-
-def test_setup_codex_installs_skills_and_preset(
-    homes, preset_targets, registry_db, monkeypatch
-):
-    """``setup codex`` installs skills + the rules file (overwriting a stale
-    copy), records one row, and echoes both success lines in order."""
-    _init_schema()
-    _make_home(homes["codex"])
-    target = preset_targets["codex"]
-    target.parent.mkdir(parents=True)
-    target.write_text("operator-customized stale copy\n", encoding="utf-8")
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
-
-    result = _run_setup_agent("codex")
-
-    assert result.exit_code == 0, result.output
-    assert _installed_skill_dirs(homes["codex"]) == set(SKILL_DIR_NAMES)
-    assert target.read_text(encoding="utf-8") == CODEX_RULES_CONTENT
-    assert _skill_install_rows(registry_db) == [("codex", CLI_VERSION)]
-    skills_line = _skills_line("codex", homes["codex"])
-    preset_line = _preset_line("codex", target)
-    assert skills_line in result.output
-    assert preset_line in result.output
-    assert result.output.index(skills_line) < result.output.index(preset_line)
-
-
-def test_setup_opencode_installs_skills_and_preset(
-    homes, preset_targets, registry_db, monkeypatch
-):
-    """``setup opencode`` installs skills + the agent preset and records one row."""
-    _init_schema()
-    _make_home(homes["opencode"])
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
-
-    result = _run_setup_agent("opencode")
-
-    assert result.exit_code == 0, result.output
-    assert _installed_skill_dirs(homes["opencode"]) == set(SKILL_DIR_NAMES)
-    assert (
-        preset_targets["opencode"].read_text(encoding="utf-8")
-        == OPENCODE_PRESET_CONTENT
-    )
-    assert _skill_install_rows(registry_db) == [("opencode", CLI_VERSION)]
-    assert _preset_line("opencode", preset_targets["opencode"]) in result.output
-
-
-def test_setup_agent_scopes_to_named_agent(
-    homes, preset_targets, registry_db, monkeypatch
-):
-    """``setup codex`` touches only codex even when every home exists."""
-    _init_schema()
-    for skills_dir in homes.values():
-        _make_home(skills_dir)
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
-
-    result = _run_setup_agent("codex")
-
-    assert result.exit_code == 0, result.output
-    assert _installed_skill_dirs(homes["codex"]) == set(SKILL_DIR_NAMES)
-    assert _installed_skill_dirs(homes["claude"]) == set()
-    assert _installed_skill_dirs(homes["opencode"]) == set()
-    assert not preset_targets["opencode"].exists()
-    assert _skill_install_rows(registry_db) == [("codex", CLI_VERSION)]
-
-
-def test_setup_agent_skips_detection_and_creates_missing_home(
-    homes, preset_targets, registry_db, monkeypatch
-):
-    """An explicitly named agent installs with zero homes present: detection is
-    skipped and the target trees are created."""
-    _init_schema()
-    # no homes pre-created
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
-
-    result = _run_setup_agent("opencode")
-
-    assert result.exit_code == 0, result.output
-    assert _installed_skill_dirs(homes["opencode"]) == set(SKILL_DIR_NAMES)
-    assert (
-        preset_targets["opencode"].read_text(encoding="utf-8")
-        == OPENCODE_PRESET_CONTENT
-    )
-    assert _skill_install_rows(registry_db) == [("opencode", CLI_VERSION)]
-
-
-def test_setup_agent_reinstall_upserts_row(homes, registry_db, monkeypatch):
-    """Re-installing replaces the home's row instead of adding a second one."""
-    _init_schema()
-    _make_home(homes["claude"])
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
-
-    assert _run_setup_agent("claude").exit_code == 0
-    assert _skill_install_rows(registry_db) == [("claude", CLI_VERSION)]
+    assert _run_setup(_only("claude")).exit_code == 0
+    assert _asset_install_rows(registry_db) == [("claude", CLI_VERSION)]
 
     _mock_release(
         monkeypatch,
         version="0.12.3",
-        zip_bytes=_make_skills_zip(),
+        zip_bytes=_make_assets_zip(),
         assets=[
             {
-                "name": "cafleet-skills-v0.12.3.zip",
-                "browser_download_url": "https://example.invalid/download/cafleet-skills-v0.12.3.zip",
+                "name": "cafleet-assets-v0.12.3.zip",
+                "browser_download_url": "https://example.invalid/download/cafleet-assets-v0.12.3.zip",
             }
         ],
     )
 
-    result = _run_setup_agent("claude")
+    result = _run_setup(_only("claude"))
 
     assert result.exit_code == 0, result.output
-    assert _skill_install_rows(registry_db) == [("claude", "0.12.3")]
+    assert _asset_install_rows(registry_db) == [("claude", "0.12.3")]
 
 
 def test_skills_install_failure_keeps_prior_rows(homes, registry_db, monkeypatch):
     """A skills failure aborts the assets loop; rows for completed targets remain."""
     from cafleet.cli import setup as setup_module
 
-    _make_home(homes["claude"])
-    _make_home(homes["codex"])
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
 
     real_copytree = shutil.copytree
 
@@ -643,7 +595,7 @@ def test_skills_install_failure_keeps_prior_rows(homes, registry_db, monkeypatch
 
     assert result.exit_code == 1, result.output
     assert "failed to install skills into" in result.output
-    assert _skill_install_rows(registry_db) == [("claude", CLI_VERSION)]
+    assert _asset_install_rows(registry_db) == [("claude", CLI_VERSION)]
 
 
 # --------------------------------------------------------------------------- #
@@ -655,13 +607,12 @@ def test_preset_overwrites_existing_file(
     homes, preset_targets, registry_db, monkeypatch
 ):
     """An existing regular file at the target is replaced by the bundled copy."""
-    _init_schema()
     target = preset_targets["opencode"]
     target.parent.mkdir(parents=True)
     target.write_text("operator custom\n", encoding="utf-8")
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
 
-    result = _run_setup_agent("opencode")
+    result = _run_setup(_only("opencode"))
 
     assert result.exit_code == 0, result.output
     assert not target.is_symlink()
@@ -672,13 +623,12 @@ def test_preset_overwrites_existing_directory(
     homes, preset_targets, registry_db, monkeypatch
 ):
     """An existing directory at the target is removed and replaced by the file."""
-    _init_schema()
     target = preset_targets["opencode"]
     target.mkdir(parents=True)
     (target / "nested.md").write_text("x\n", encoding="utf-8")
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
 
-    result = _run_setup_agent("opencode")
+    result = _run_setup(_only("opencode"))
 
     assert result.exit_code == 0, result.output
     assert target.is_file()
@@ -690,16 +640,15 @@ def test_preset_overwrites_symlink_to_file(
 ):
     """A symlink target is unlinked and replaced by a regular file; the
     linked-to file itself is untouched."""
-    _init_schema()
     real = tmp_path / "elsewhere" / "real.md"
     real.parent.mkdir(parents=True)
     real.write_text("keep\n", encoding="utf-8")
     target = preset_targets["opencode"]
     target.parent.mkdir(parents=True)
     target.symlink_to(real)
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
 
-    result = _run_setup_agent("opencode")
+    result = _run_setup(_only("opencode"))
 
     assert result.exit_code == 0, result.output
     assert not target.is_symlink()
@@ -713,16 +662,15 @@ def test_preset_overwrites_symlink_to_directory(
 ):
     """A symlink-to-directory target is unlinked (the symlink check precedes
     the dir check); the pointed-to directory and its contents stay intact."""
-    _init_schema()
     real_dir = tmp_path / "elsewhere" / "agents_dir"
     real_dir.mkdir(parents=True)
     (real_dir / "keep.md").write_text("keep\n", encoding="utf-8")
     target = preset_targets["opencode"]
     target.parent.mkdir(parents=True)
     target.symlink_to(real_dir, target_is_directory=True)
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
 
-    result = _run_setup_agent("opencode")
+    result = _run_setup(_only("opencode"))
 
     assert result.exit_code == 0, result.output
     assert not target.is_symlink()
@@ -737,23 +685,22 @@ def test_preset_install_failure_aborts_and_skips_row(
 ):
     """A filesystem error on the preset install exits 1 with the preset error
     string; the agent's row is not recorded even though its skills installed."""
-    _init_schema()
     # ``~/.codex/rules`` exists as a regular file: the parent-dir creation fails.
     rules_parent = preset_targets["codex"].parent
     rules_parent.parent.mkdir(parents=True, exist_ok=True)
     rules_parent.write_text("not a directory\n", encoding="utf-8")
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
 
-    result = _run_setup_agent("codex")
+    result = _run_setup(_only("codex"))
 
     assert result.exit_code == 1, result.output
     assert f"failed to install preset into {preset_targets['codex']}" in result.output
     assert _installed_skill_dirs(homes["codex"]) == set(SKILL_DIR_NAMES)
-    assert _skill_install_rows(registry_db) == []
+    assert _asset_install_rows(registry_db) == []
 
 
 # --------------------------------------------------------------------------- #
-# Archive integrity (via ``setup claude``)                                     #
+# Archive integrity (claude-only invocation)                                   #
 # --------------------------------------------------------------------------- #
 
 
@@ -762,29 +709,27 @@ def test_zip_slip_member_rejected_nothing_extracted(
     homes, registry_db, monkeypatch, evil_member
 ):
     """A ``..``/absolute member is rejected before extraction; targets untouched."""
-    _init_schema()
-    _make_home(homes["claude"])
     sentinel = homes["claude"] / "cafleet" / "SENTINEL.md"
     sentinel.parent.mkdir(parents=True)
     sentinel.write_text("keep")
     members = [f"skills/{name}/SKILL.md" for name in SKILL_DIR_NAMES]
     members += [path for path, _ in PRESET_ARCHIVE_MEMBERS.values()]
     members += [evil_member]
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip(raw_members=members))
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip(raw_members=members))
 
-    result = _run_setup_agent("claude")
+    result = _run_setup(_only("claude"))
 
     assert result.exit_code == 1, result.output
     assert sentinel.exists()  # nothing extracted, nothing removed
     assert sentinel.read_text() == "keep"
-    assert _skill_install_rows(registry_db) == []
+    assert _asset_install_rows(registry_db) == []
 
 
 @pytest.mark.parametrize(
     "zip_bytes",
     [
-        _make_skills_zip(extra_dirs=("rogue",)),
-        _make_skills_zip(extra_files=("README.md",)),
+        _make_assets_zip(extra_dirs=("rogue",)),
+        _make_assets_zip(extra_files=("README.md",)),
     ],
     ids=["extra-dir", "stray-file"],
 )
@@ -792,11 +737,9 @@ def test_extra_entry_under_skills_is_malformed(
     homes, registry_db, monkeypatch, zip_bytes
 ):
     """Any entry under ``skills/`` beyond the three skill dirs is malformed."""
-    _init_schema()
-    _make_home(homes["claude"])
     _mock_release(monkeypatch, zip_bytes=zip_bytes)
 
-    result = _run_setup_agent("claude")
+    result = _run_setup(_only("claude"))
 
     assert result.exit_code == 1, result.output
     assert "malformed" in result.output.lower()
@@ -804,14 +747,12 @@ def test_extra_entry_under_skills_is_malformed(
 
 def test_missing_skill_dir_is_malformed(homes, registry_db, monkeypatch):
     """A ``skills/`` holding only two of the three skill dirs is malformed."""
-    _init_schema()
-    _make_home(homes["claude"])
     _mock_release(
         monkeypatch,
-        zip_bytes=_make_skills_zip(skill_dirs=("cafleet", "cafleet-design-doc")),
+        zip_bytes=_make_assets_zip(skill_dirs=("cafleet", "cafleet-design-doc")),
     )
 
-    result = _run_setup_agent("claude")
+    result = _run_setup(_only("claude"))
 
     assert result.exit_code == 1, result.output
     assert "malformed" in result.output.lower()
@@ -827,24 +768,20 @@ def test_archive_missing_preset_is_malformed(
 ):
     """Layout validation requires both preset archive sources as regular files,
     whatever the install target is."""
-    _init_schema()
-    _make_home(homes["claude"])
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip(preset_agents=preset_agents))
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip(preset_agents=preset_agents))
 
-    result = _run_setup_agent("claude")
+    result = _run_setup(_only("claude"))
 
     assert result.exit_code == 1, result.output
     assert "malformed" in result.output.lower()
-    assert _skill_install_rows(registry_db) == []
+    assert _asset_install_rows(registry_db) == []
 
 
 def test_bad_zip_is_malformed(homes, registry_db, monkeypatch):
     """A non-zip / truncated download surfaces as the malformed-asset error."""
-    _init_schema()
-    _make_home(homes["claude"])
     _mock_release(monkeypatch, zip_bytes=b"this is not a zip archive")
 
-    result = _run_setup_agent("claude")
+    result = _run_setup(_only("claude"))
 
     assert result.exit_code == 1, result.output
     assert "malformed" in result.output.lower()
@@ -856,40 +793,42 @@ def test_extractall_oserror_is_malformed(homes, registry_db, monkeypatch):
     The archive passes the zip-slip and bad-zip pre-checks; the failure happens
     inside ``ZipFile.extractall`` (e.g. a filesystem error during extraction).
     """
-    _init_schema()
-    _make_home(homes["claude"])
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
 
     def boom(self, *args, **kwargs):
         raise OSError("extraction failed")
 
     monkeypatch.setattr(zipfile.ZipFile, "extractall", boom)
 
-    result = _run_setup_agent("claude")
+    result = _run_setup(_only("claude"))
 
     assert result.exit_code == 1, result.output
     assert "malformed" in result.output.lower()
 
 
 # --------------------------------------------------------------------------- #
-# Release / network resolution (via ``setup claude``)                          #
+# Release / network resolution (claude-only invocation)                        #
 # --------------------------------------------------------------------------- #
 
 
 def test_missing_asset_message(homes, registry_db, monkeypatch):
-    """An asset absent from the release surfaces the specific not-found message."""
-    _init_schema()
-    _make_home(homes["claude"])
+    """A release lacking the expected asset name surfaces the specific
+    not-found message — the lookup matches exactly one name, no fallback."""
     _mock_release(
         monkeypatch,
-        assets=[{"name": "something-else.txt", "browser_download_url": DOWNLOAD_URL}],
+        assets=[
+            {
+                "name": "other-asset.zip",
+                "browser_download_url": DOWNLOAD_URL,
+            }
+        ],
     )
 
-    result = _run_setup_agent("claude")
+    result = _run_setup(_only("claude"))
 
     assert result.exit_code == 1, result.output
-    assert ASSET_NAME in result.output
-    assert "not found" in result.output.lower()
+    assert f"asset {ASSET_NAME} not found in release {CLI_VERSION}" in result.output
+    assert "Error: assets half failed" in result.output
 
 
 @pytest.mark.parametrize(
@@ -899,20 +838,17 @@ def test_missing_asset_message(homes, registry_db, monkeypatch):
 )
 def test_unparseable_api_response(homes, registry_db, monkeypatch, release_body):
     """A 200 body that is not JSON, or lacks the ``assets`` array, is rejected."""
-    _init_schema()
-    _make_home(homes["claude"])
     _mock_release(monkeypatch, release_body=release_body)
 
-    result = _run_setup_agent("claude")
+    result = _run_setup(_only("claude"))
 
     assert result.exit_code == 1, result.output
     assert "could not parse the github api response" in result.output.lower()
 
 
 def test_no_release_for_version(homes, registry_db, monkeypatch):
-    """A 404 from ``/releases/tags/<version>`` is the no-release-for-version error."""
-    _init_schema()
-    _make_home(homes["claude"])
+    """A 404 from ``/releases/tags/<version>`` is the no-release-for-version
+    error, and it remains a loud exit-1 failure."""
     err = urllib.error.HTTPError(
         url="https://api.github.com/repos/himkt/cafleet/releases/tags/0.12.2",
         code=404,
@@ -922,11 +858,11 @@ def test_no_release_for_version(homes, registry_db, monkeypatch):
     )
     _mock_release(monkeypatch, api_error=err)
 
-    result = _run_setup_agent("claude")
+    result = _run_setup(_only("claude"))
 
     assert result.exit_code == 1, result.output
-    assert CLI_VERSION in result.output
-    assert "no release found" in result.output.lower()
+    assert f"no release found for version {CLI_VERSION}" in result.output
+    assert "Error: assets half failed" in result.output
 
 
 @pytest.mark.parametrize(
@@ -945,11 +881,9 @@ def test_no_release_for_version(homes, registry_db, monkeypatch):
 )
 def test_network_error_folded(homes, registry_db, monkeypatch, api_error):
     """URLError, timeout, 403 rate-limit and non-404 5xx fold into one message."""
-    _init_schema()
-    _make_home(homes["claude"])
     _mock_release(monkeypatch, api_error=api_error)
 
-    result = _run_setup_agent("claude")
+    result = _run_setup(_only("claude"))
 
     assert result.exit_code == 1, result.output
     assert "could not reach the github api" in result.output.lower()
@@ -975,20 +909,18 @@ def test_download_network_error_folded(homes, registry_db, monkeypatch, download
     so this exercises the second ``urlopen`` call, distinct from the
     release-lookup path covered by ``test_network_error_folded``.
     """
-    _init_schema()
-    _make_home(homes["claude"])
     _mock_release(
-        monkeypatch, zip_bytes=_make_skills_zip(), download_error=download_error
+        monkeypatch, zip_bytes=_make_assets_zip(), download_error=download_error
     )
 
-    result = _run_setup_agent("claude")
+    result = _run_setup(_only("claude"))
 
     assert result.exit_code == 1, result.output
     assert "could not reach the github api" in result.output.lower()
 
 
 # --------------------------------------------------------------------------- #
-# Install-time filesystem errors (via ``setup claude``)                        #
+# Install-time filesystem errors (claude-only invocation)                      #
 # --------------------------------------------------------------------------- #
 
 
@@ -996,18 +928,16 @@ def test_unwritable_target_permission_error(homes, registry_db, monkeypatch):
     """A ``PermissionError`` during install surfaces as a ClickException."""
     from cafleet.cli import setup as setup_module
 
-    _init_schema()
-    _make_home(homes["claude"])
-    _mock_release(monkeypatch, zip_bytes=_make_skills_zip())
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
 
     def deny_copytree(src, dst, *args, **kwargs):
         raise PermissionError(13, "Permission denied", str(dst))
 
     monkeypatch.setattr(setup_module.shutil, "copytree", deny_copytree)
 
-    result = _run_setup_agent("claude")
+    result = _run_setup(_only("claude"))
 
     assert result.exit_code == 1, result.output
     out = result.output.lower()
     assert "permission" in out or "denied" in out
-    assert _skill_install_rows(registry_db) == []
+    assert _asset_install_rows(registry_db) == []

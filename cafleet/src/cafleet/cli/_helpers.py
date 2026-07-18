@@ -4,9 +4,9 @@ import importlib.metadata
 
 import click
 
-from cafleet.broker.skill_installs import (
-    list_skill_installs,
-    skill_installs_table_exists,
+from cafleet.broker.asset_installs import (
+    asset_installs_table_exists,
+    list_asset_installs,
 )
 from cafleet.multiplexer import Multiplexer, MultiplexerError, resolve_multiplexer
 
@@ -20,12 +20,12 @@ def ensure_multiplexer_or_die() -> Multiplexer:
     return mux
 
 
-def ensure_skills_current() -> None:
-    """Hard-error when no skills install is recorded or any recorded one is stale."""
-    rows = list_skill_installs() if skill_installs_table_exists() else []
+def ensure_assets_current() -> None:
+    """Hard-error when no assets install is recorded or any recorded one is stale."""
+    rows = list_asset_installs() if asset_installs_table_exists() else []
     if not rows:
         raise click.ClickException(
-            "no skills install is recorded; run 'cafleet setup' first"
+            "no assets install is recorded; run 'cafleet setup' first"
         )
     runtime_version = importlib.metadata.version("cafleet")
     stale = [row for row in rows if row["cafleet_version"] != runtime_version]
@@ -34,7 +34,7 @@ def ensure_skills_current() -> None:
             f"{row['coding_agent']}={row['cafleet_version']}" for row in stale
         )
         raise click.ClickException(
-            f"stale skills detected ({listed}; CLI {runtime_version}); "
+            f"stale assets detected ({listed}; CLI {runtime_version}); "
             "run 'cafleet setup' to reinstall"
         )
 

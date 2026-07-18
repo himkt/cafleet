@@ -18,15 +18,15 @@ jobs:
           experimental: true
       - run: mise //cafleet:publish
 
-  upload-skills:
+  upload-assets:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Package skills and presets directories
-        run: zip -r "cafleet-skills-v${{ github.event.release.tag_name }}.zip" skills presets
-      - name: Upload skills archive to the release
+        run: zip -r "cafleet-assets-v${{ github.event.release.tag_name }}.zip" skills presets
+      - name: Upload assets archive to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" "cafleet-skills-v${{ github.event.release.tag_name }}.zip" --clobber
+        run: gh release upload "${{ github.event.release.tag_name }}" "cafleet-assets-v${{ github.event.release.tag_name }}.zip" --clobber

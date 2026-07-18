@@ -1,7 +1,7 @@
 # Unified Assets Concept and Single Setup Command
 
-**Status**: Approved
-**Progress**: 0/26 tasks complete
+**Status**: Complete
+**Progress**: 24/24 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -10,13 +10,13 @@ Unify the shipped skill/preset artifacts under a single "assets" concept — the
 
 ## Success Criteria
 
-- [ ] `cafleet setup` is a plain Click command; `cafleet setup db`, `cafleet setup claude`, `cafleet setup codex`, and `cafleet setup opencode` fail with Click's standard "Got unexpected extra argument" error (no custom hint).
-- [ ] Bare `cafleet setup` migrates the DB to head, then installs skills + presets for claude, codex, and opencode (creating agent homes as needed) and records one `asset_installs` row per agent.
-- [ ] `cafleet setup --skip claude --skip codex --skip opencode` runs the DB half only and exits 0 — the documented schema-only path for contributors and `mise //cafleet:makemigration`.
-- [ ] The publish workflow uploads `cafleet-assets-v<version>.zip` and the CLI downloads exactly that name; a missing release or asset remains a loud exit-1 failure.
-- [ ] Migration `0003` moves every `skill_installs` row into `asset_installs` (create + copy + drop, data-preserving both ways); the chain-guard test asserts the 3-revision chain.
-- [ ] No mention of `setup db`, per-agent setup subcommands, home auto-detection, `cafleet-skills-v`, or the `skill_installs` name family remains anywhere outside `design-docs/` and `cafleet/src/cafleet/db/alembic/versions/` (removal rule; migration scripts are immutable history, and migration `0003` itself necessarily references `skill_installs`); the project `CLAUDE.md` describes the single `setup` command.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
+- [x] `cafleet setup` is a plain Click command; `cafleet setup db`, `cafleet setup claude`, `cafleet setup codex`, and `cafleet setup opencode` fail with Click's standard "Got unexpected extra argument" error (no custom hint).
+- [x] Bare `cafleet setup` migrates the DB to head, then installs skills + presets for claude, codex, and opencode (creating agent homes as needed) and records one `asset_installs` row per agent.
+- [x] `cafleet setup --skip claude --skip codex --skip opencode` runs the DB half only and exits 0 — the documented schema-only path for contributors and `mise //cafleet:makemigration`.
+- [x] The publish workflow uploads `cafleet-assets-v<version>.zip` and the CLI downloads exactly that name; a missing release or asset remains a loud exit-1 failure.
+- [x] Migration `0003` moves every `skill_installs` row into `asset_installs` (create + copy + drop, data-preserving both ways); the chain-guard test asserts the 3-revision chain.
+- [x] No mention of `setup db`, per-agent setup subcommands, home auto-detection, `cafleet-skills-v`, or the `skill_installs` name family remains anywhere outside `design-docs/`, `cafleet/src/cafleet/db/alembic/versions/`, SPEC.md §8's migration-chain contract, and the migration data-preservation test in `tests/db/test_alembic_smoke.py` (removal rule; migration scripts are immutable history, migration `0003` itself necessarily references `skill_installs`, §8 must name the table that revisions `0001` and `0003` create and rename for the chain to be reproducible, and the SC-5 data-preservation test must seed and assert the pre-rename table); the project `CLAUDE.md` describes the single `setup` command.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
 
@@ -157,44 +157,42 @@ Per `.claude/rules/removal.md`, every mention of the removed surface is updated 
 
 ### Step 1: Documentation first
 
-- [ ] Rewrite `docs/spec/cli-options.md` § `cafleet setup`: single command with `--skip`, fixed three-agent target list, skip-all schema-only semantics, unchanged half-failure/exit contract, new preflight string; delete the `setup db` and per-agent sections; rename "Stale-skills guard" → "Stale-assets guard" with the new messages; update asset name, table name, and `permissions.allow` coverage rows <!-- completed: -->
-- [ ] Update `docs/spec/data-model.md`, `docs/spec/coding-agent-backends.md`, and `docs/api/broker.md` to the `asset_installs` / `broker/asset_installs.py` names and the single setup command <!-- completed: -->
-- [ ] Update `docs/concepts/overview.md`, `docs/concepts/storage.md`, `docs/contributing.md`, and `docs/quickstart.md` (schema-only invocation replaces `setup db`; all-agents-by-default install with `--skip`) <!-- completed: -->
-- [ ] Sync `SPEC.md` (and `README.md` if its thin surface drifted) via the `/update-readme` skill <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/director.md`, `.claude/rules/commands.md`, `.claude/rules/database-migrations.md`, and `.claude/skills/update-readme/SKILL.md` to the new setup surface <!-- completed: -->
-- [ ] Update the project `CLAUDE.md` unified-CLI line per the Specification <!-- completed: -->
-- [ ] Update the `makemigration` task description in `cafleet/mise.toml` to reference the schema-only invocation <!-- completed: -->
+- [x] Rewrite `docs/spec/cli-options.md` § `cafleet setup`: single command with `--skip`, fixed three-agent target list, skip-all schema-only semantics, unchanged half-failure/exit contract, new preflight string; delete the `setup db` and per-agent sections; rename "Stale-skills guard" → "Stale-assets guard" with the new messages; update asset name, table name, and `permissions.allow` coverage rows <!-- completed: 2026-07-18T00:25 -->
+- [x] Update `docs/spec/data-model.md`, `docs/spec/coding-agent-backends.md`, and `docs/api/broker.md` to the `asset_installs` / `broker/asset_installs.py` names and the single setup command <!-- completed: 2026-07-18T00:27 -->
+- [x] Update `docs/concepts/overview.md`, `docs/concepts/storage.md`, `docs/contributing.md`, and `docs/quickstart.md` (schema-only invocation replaces `setup db`; all-agents-by-default install with `--skip`) <!-- completed: 2026-07-18T00:29 -->
+- [x] Sync `SPEC.md` (and `README.md` if its thin surface drifted) via the `/update-readme` skill <!-- completed: 2026-07-18T00:39 -->
+- [x] Update `skills/cafleet/reference/director.md`, `.claude/rules/commands.md`, `.claude/rules/database-migrations.md`, and `.claude/skills/update-readme/SKILL.md` to the new setup surface <!-- completed: 2026-07-18T00:31 -->
+- [x] Update the project `CLAUDE.md` unified-CLI line per the Specification <!-- completed: 2026-07-18T00:33 -->
+- [x] Update the `makemigration` task description in `cafleet/mise.toml` to reference the schema-only invocation <!-- completed: 2026-07-18T00:33 -->
 
 ### Step 2: Data layer — rename + migration (lands as one unit)
 
-- [ ] Rename `SkillInstall` → `AssetInstall` (`__tablename__ = "asset_installs"`) in `cafleet/src/cafleet/db/models.py` <!-- completed: -->
-- [ ] Rename `broker/skill_installs.py` → `broker/asset_installs.py`; rename the three functions per the naming map; inspect `asset_installs` <!-- completed: -->
-- [ ] Update imports in `cli/_helpers.py`, `cli/doctor.py`, and `cli/setup.py`; rename `ensure_skills_current` → `ensure_assets_current` with the new guard messages, updating its importers `cli/fleet.py`, `cli/member.py`, `cli/message.py`, and `cli/monitor.py` <!-- completed: -->
-- [ ] Update `doctor`: `_assets_report`, JSON key `"assets"`, text section `assets:`, empty-state line, docstrings <!-- completed: -->
-- [ ] Generate migration `0003` with `mise //cafleet:makemigration "rename skill_installs to asset_installs"` (DB at head first) and hand-edit to the create + copy + drop `upgrade()` / mirrored `downgrade()` in the Specification <!-- completed: -->
-- [ ] Update the chain-guard tests in `tests/db/test_alembic_smoke.py` (3-revision chain, head `0003`, `asset_installs` assertions including the expected head-table set in `test_alembic_upgrade_head_creates_expected_tables`) <!-- completed: -->
-- [ ] Rename `tests/broker/test_skill_installs.py` → `tests/broker/test_asset_installs.py`; update `tests/conftest.py` and `tests/_helpers.py` to the new model/table names <!-- completed: -->
-- [ ] Update guard/doctor string assertions in `tests/cli/test_skills_guard.py` (rename the file to `test_assets_guard.py`) and `tests/cli/test_doctor.py` <!-- completed: -->
+- [x] Rename `SkillInstall` → `AssetInstall` (`__tablename__ = "asset_installs"`) in `cafleet/src/cafleet/db/models.py` <!-- completed: 2026-07-18T00:47 -->
+- [x] Rename `broker/skill_installs.py` → `broker/asset_installs.py`; rename the three functions per the naming map; inspect `asset_installs` <!-- completed: 2026-07-18T00:47 -->
+- [x] Update imports in `cli/_helpers.py`, `cli/doctor.py`, and `cli/setup.py`; rename `ensure_skills_current` → `ensure_assets_current` with the new guard messages, updating its importers `cli/fleet.py`, `cli/member.py`, `cli/message.py`, and `cli/monitor.py` <!-- completed: 2026-07-18T00:47 -->
+- [x] Update `doctor`: `_assets_report`, JSON key `"assets"`, text section `assets:`, empty-state line, docstrings <!-- completed: 2026-07-18T00:47 -->
+- [x] Generate migration `0003` with `mise //cafleet:makemigration "rename skill_installs to asset_installs"` (DB at head first) and hand-edit to the create + copy + drop `upgrade()` / mirrored `downgrade()` in the Specification <!-- completed: 2026-07-18T00:50 -->
+- [x] Update the chain-guard tests in `tests/db/test_alembic_smoke.py` (3-revision chain, head `0003`, `asset_installs` assertions including the expected head-table set in `test_alembic_upgrade_head_creates_expected_tables`) <!-- completed: 2026-07-18T00:42 -->
+- [x] Rename `tests/broker/test_skill_installs.py` → `tests/broker/test_asset_installs.py`; update `tests/conftest.py` and `tests/_helpers.py` to the new model/table names <!-- completed: 2026-07-18T00:42 -->
+- [x] Update guard/doctor string assertions in `tests/cli/test_skills_guard.py` (rename the file to `test_assets_guard.py`) and `tests/cli/test_doctor.py` <!-- completed: 2026-07-18T00:42 -->
 
 ### Step 3: CLI collapse
 
-- [ ] Rewrite `cli/setup.py`: plain `click.command` with repeatable deduplicated `--skip` (`click.Choice`); delete the group, `setup_db`, `_make_agent_command`, `_resolve_targets`, and the detection error; targets = fixed three-agent list minus skips; skip-all echoes `assets half skipped (all agents skipped)` and counts as not-run; new preflight string; asset name `cafleet-assets-v<version>.zip`; temp filename `assets.zip` <!-- completed: -->
-- [ ] Update the opencode missing-preset error in `coding_agent/opencode.py` to `run 'cafleet setup' first` <!-- completed: -->
-- [ ] Rework `tests/cli/test_setup.py`: default install covers all three agents; `--skip` (single, repeated, duplicate, all-three, invalid-choice) cases; removed-subcommand invocations fail with Click's extra-argument error; new asset name; missing-release/asset still exit 1 <!-- completed: -->
-- [ ] Update `tests/db/test_init.py` to drive the DB half via the schema-only invocation instead of `setup db` <!-- completed: -->
-- [ ] Update `tests/cli/test_member.py` and `tests/coding_agent/test_opencode.py` for the new opencode error string <!-- completed: -->
+- [x] Rewrite `cli/setup.py`: plain `click.command` with repeatable deduplicated `--skip` (`click.Choice`); delete the group, `setup_db`, `_make_agent_command`, `_resolve_targets`, and the detection error; targets = fixed three-agent list minus skips; skip-all echoes `assets half skipped (all agents skipped)` and counts as not-run; new preflight string; asset name `cafleet-assets-v<version>.zip`; temp filename `assets.zip` <!-- completed: 2026-07-18T01:05 -->
+- [x] Update the opencode missing-preset error in `coding_agent/opencode.py` to `run 'cafleet setup' first` <!-- completed: 2026-07-18T01:05 -->
+- [x] Rework `tests/cli/test_setup.py`: default install covers all three agents; `--skip` (single, repeated, duplicate, all-three, invalid-choice) cases; removed-subcommand invocations fail with Click's extra-argument error; new asset name; missing-release/asset still exit 1 <!-- completed: 2026-07-18T03:50 -->
+- [x] Update `tests/db/test_init.py` to drive the DB half via the schema-only invocation instead of `setup db` <!-- completed: 2026-07-18T03:50 -->
+- [x] Update `tests/cli/test_member.py` and `tests/coding_agent/test_opencode.py` for the new opencode error string <!-- completed: 2026-07-18T03:50 -->
 
 ### Step 4: Publish workflow
 
-- [ ] Update `.github/workflows/publish.yml`: `upload-assets` job name, `cafleet-assets-v<tag>.zip` in both steps, renamed upload step <!-- completed: -->
+- [x] Update `.github/workflows/publish.yml`: `upload-assets` job name, `cafleet-assets-v<tag>.zip` in both steps, renamed upload step <!-- completed: 2026-07-18T01:03 -->
 
 ### Step 5: Verification
 
-- [ ] `mise //cafleet:test` passes <!-- completed: -->
-- [ ] `mise //cafleet:lint` and `mise //cafleet:typecheck` pass <!-- completed: -->
-- [ ] Repo-wide sweep confirms no mention of `setup db`, `setup claude|codex|opencode`, home auto-detection, `cafleet-skills-v`, or the `skill_installs` name family outside `design-docs/` and `cafleet/src/cafleet/db/alembic/versions/` <!-- completed: -->
-- [ ] Smoke-check the schema-only invocation on a fresh DB: `cafleet setup --skip claude --skip codex --skip opencode` exits 0 and reports head `0003` <!-- completed: -->
-- [ ] Smoke-check upgrade data preservation: a DB at `0002` with a seeded `skill_installs` row migrates to `0003` with the row present in `asset_installs` <!-- completed: -->
+- [x] `mise //cafleet:test` passes <!-- completed: 2026-07-18T03:50 -->
+- [x] `mise //cafleet:lint` and `mise //cafleet:typecheck` pass <!-- completed: 2026-07-18T03:50 -->
+- [x] Repo-wide sweep confirms no mention of `setup db`, `setup claude|codex|opencode`, home auto-detection, `cafleet-skills-v`, or the `skill_installs` name family outside `design-docs/`, `cafleet/src/cafleet/db/alembic/versions/`, SPEC.md §8's migration-chain contract, and the migration data-preservation test in `tests/db/test_alembic_smoke.py` <!-- completed: 2026-07-18T03:50 -->
 
 ---
 
@@ -203,3 +201,7 @@ Per `.claude/rules/removal.md`, every mention of the removed surface is updated 
 | Date | Changes |
 |------|---------|
 | 2026-07-18 | Initial draft |
+| 2026-07-18 | Step-1 arbitration: extended the `skill_installs`-mention carve-out (SC #6 and the Step-5 sweep task) to SPEC.md §8's migration-chain contract — §8 must name the table that revisions `0001` and `0003` create and rename, same immutable-history rationale as the migration-script exemption. |
+| 2026-07-18 | Phase-D arbitration: extended the same carve-out to the migration data-preservation test in `tests/db/test_alembic_smoke.py` — the SC-5 test must seed and assert the pre-rename `skill_installs` table to prove the copy. |
+| 2026-07-18 | Admin decision: dropped the two Step-5 smoke-check tasks (schema-only fresh-DB run; seeded 0002→0003 upgrade). The environment cannot run branch code against a scratch DB without either migrating the live broker DB or operator-dispatched shell escapes, and the migration behavior is already covered by the data-preservation and chain-guard tests in `tests/db/test_alembic_smoke.py`. |
+| 2026-07-18 | Implementation complete: Reviewer approved on the first pass (no findings); admin approved; PR #203 opened. Status → Complete. |

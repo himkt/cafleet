@@ -1,4 +1,4 @@
-"""``cafleet setup`` — onboarding: migrate the DB + install the skills and presets."""
+"""``cafleet setup`` — onboarding: migrate the DB + install the coding-agent assets."""
 
 import importlib.metadata
 import json
@@ -11,9 +11,9 @@ from pathlib import Path, PurePosixPath
 
 import click
 
-from cafleet.broker.skill_installs import (
-    record_skill_install,
-    skill_installs_table_exists,
+from cafleet.broker.asset_installs import (
+    asset_installs_table_exists,
+    record_asset_install,
 )
 from cafleet.db.init import run_db_init
 
@@ -38,28 +38,8 @@ PRESET_ARCHIVE_SOURCES = {
 }
 
 SCHEMA_PREFLIGHT_ERROR = (
-    "the database schema is missing or outdated; "
-    "run 'cafleet setup' or 'cafleet setup db' first"
+    "the database schema is missing or outdated; run 'cafleet setup' first"
 )
-
-
-def _resolve_targets(agents: tuple[str, ...]) -> list[str]:
-    """Resolve the assets targets: the named agents, or auto-detection."""
-    if agents:
-        return list(dict.fromkeys(agents))
-
-    detected = [
-        agent
-        for agent, skills_dir in AGENT_SKILLS_DIRS.items()
-        if skills_dir.expanduser().parent.exists()
-    ]
-    if not detected:
-        raise click.ClickException(
-            "no coding-agent homes detected (looked for ~/.claude, ~/.codex, "
-            "~/.config/opencode); install a coding agent first, or run "
-            "'cafleet setup <agent>'"
-        )
-    return detected
 
 
 def _http_get(req: urllib.request.Request, *, on_404: str | None = None) -> bytes:
@@ -85,7 +65,7 @@ def _http_get(req: urllib.request.Request, *, on_404: str | None = None) -> byte
 
 
 def _resolve_download_url(cli_version: str) -> str:
-    """Look up the release for ``cli_version`` and return its skills asset URL."""
+    """Look up the release for ``cli_version`` and return its assets-archive URL."""
     api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{cli_version}"
     req = urllib.request.Request(
         api_url,
@@ -93,7 +73,7 @@ def _resolve_download_url(cli_version: str) -> str:
     )
     body = _http_get(req, on_404=f"no release found for version {cli_version}")
 
-    asset_name = f"cafleet-skills-v{cli_version}.zip"
+    asset_name = f"cafleet-assets-v{cli_version}.zip"
     try:
         assets = json.loads(body)["assets"]
         for asset in assets:
@@ -111,7 +91,7 @@ def _download_and_extract(download_url: str, dest_root: Path) -> Path:
     Raises ``click.ClickException`` on any network or archive failure, before
     the caller removes any target.
     """
-    archive_path = dest_root / "skills.zip"
+    archive_path = dest_root / "assets.zip"
     req = urllib.request.Request(download_url, headers={"User-Agent": "cafleet"})
     archive_path.write_bytes(_http_get(req))
 
@@ -189,7 +169,7 @@ def _install_assets(targets: list[str], cli_version: str) -> None:
             has_preset = agent in AGENT_PRESET_TARGETS
             if has_preset:
                 _install_preset(agent, extract_root)
-            record_skill_install(agent, cli_version)
+            record_asset_install(agent, cli_version)
             click.echo(
                 f"{agent}: installed {', '.join(SKILL_DIRS)} "
                 f"(v{cli_version}) -> {AGENT_SKILLS_DIRS[agent]}"
@@ -201,21 +181,28 @@ def _install_assets(targets: list[str], cli_version: str) -> None:
                 )
 
 
-def _run_assets_half(agents: tuple[str, ...]) -> None:
-    """Pre-flight the schema, resolve targets, install, and record versions."""
-    if not skill_installs_table_exists():
+def _run_assets_half(targets: list[str]) -> None:
+    """Pre-flight the schema, then install and record versions per target."""
+    if not asset_installs_table_exists():
         raise click.ClickException(SCHEMA_PREFLIGHT_ERROR)
     cli_version = importlib.metadata.version("cafleet")
-    targets = _resolve_targets(agents)
     _install_assets(targets, cli_version)
 
 
-@click.group("setup", invoke_without_command=True)
-@click.pass_context
-def setup(ctx: click.Context) -> None:
-    """Migrate the database schema and install the coding-agent skills and presets."""
-    if ctx.invoked_subcommand is not None:
-        return
+@click.command("setup")
+@click.option(
+    "--skip",
+    "skip",
+    multiple=True,
+    type=click.Choice(["claude", "codex", "opencode"]),
+    help="Skip the named agent's assets install (repeatable).",
+)
+def setup(skip: tuple[str, ...]) -> None:
+    """Migrate the database schema and install the coding-agent assets
+    (skills and presets).
+    """
+    skipped = set(skip)
+    targets = [agent for agent in AGENT_SKILLS_DIRS if agent not in skipped]
 
     failures: list[str] = []
 
@@ -225,32 +212,14 @@ def setup(ctx: click.Context) -> None:
         click.echo(f"db half failed: {exc.format_message()}")
         failures.append("db")
 
-    try:
-        _run_assets_half(())
-    except click.ClickException as exc:
-        click.echo(f"assets half failed: {exc.format_message()}")
-        failures.append("assets")
+    if not targets:
+        click.echo("assets half skipped (all agents skipped)")
+    else:
+        try:
+            _run_assets_half(targets)
+        except click.ClickException as exc:
+            click.echo(f"assets half failed: {exc.format_message()}")
+            failures.append("assets")
 
     if failures:
         raise click.ClickException(f"{' and '.join(failures)} half failed")
-
-
-@setup.command("db")
-def setup_db() -> None:
-    """Initialize or migrate the registry database to the head revision."""
-    run_db_init()
-
-
-def _make_agent_command(agent: str) -> click.Command:
-    def run_agent() -> None:
-        _run_assets_half((agent,))
-
-    run_agent.__doc__ = (
-        f"Install the skills (and preset, where one exists) for {agent} only, "
-        "skipping home auto-detection."
-    )
-    return click.command(agent)(run_agent)
-
-
-for _agent in AGENT_SKILLS_DIRS:
-    setup.add_command(_make_agent_command(_agent))
