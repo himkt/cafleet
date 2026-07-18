@@ -1,7 +1,7 @@
 # Herdr Pane Rearrange on `cafleet member delete`
 
 **Status**: Approved
-**Progress**: 11/19 tasks complete
+**Progress**: 15/19 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -192,10 +192,10 @@ The verification is the layout read itself: a single pane with an empty `splits`
 
 ### Step 3: Implementation (`cafleet/src/cafleet/multiplexer/herdr.py`)
 
-- [ ] Extract `_read_tab_layout(expected_tab_id)` and `_equalize_column(column, splits)` from `_resize_focused_tab_column`, preserving the create path's observable command sequence. <!-- completed: -->
-- [ ] Add `_pane_tab_id(pane_id)` (best-effort pre-close tab read, `None` on any failure) and `_rebalance_after_close(target_tab_id)` / `_resize_after_close(target_tab_id)` with the column case table (≥ 2 → equalize, 1 → no-op, 0 → full-width restore). <!-- completed: -->
-- [ ] Add `_restore_director_full_width(panes, splits)` with the residue guards and the single corrective resize. <!-- completed: -->
-- [ ] Wire the pre-close `_pane_tab_id` read and `self._rebalance_after_close(target_tab_id)` into `kill_pane` around `_run_tolerating_missing`. <!-- completed: -->
+- [x] Extract `_read_tab_layout(expected_tab_id)` and `_equalize_column(column, splits)` from `_resize_focused_tab_column`, preserving the create path's observable command sequence. <!-- completed: 2026-07-18T06:46 -->
+- [x] Add `_pane_tab_id(pane_id)` (best-effort pre-close tab read, `None` on any failure) and `_rebalance_after_close(target_tab_id)` / `_resize_after_close(target_tab_id)` with the column case table (≥ 2 → equalize, 1 → no-op, 0 → full-width restore). <!-- completed: 2026-07-18T06:46 -->
+- [x] Add `_restore_director_full_width(panes, splits)` with the residue guards and the single corrective resize. <!-- completed: 2026-07-18T06:46 -->
+- [x] Wire the pre-close `_pane_tab_id` read and `self._rebalance_after_close(target_tab_id)` into `kill_pane` around `_run_tolerating_missing`. <!-- completed: 2026-07-18T06:46 -->
 
 ### Step 4: Verification
 

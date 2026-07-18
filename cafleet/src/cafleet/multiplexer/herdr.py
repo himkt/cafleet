@@ -216,34 +216,46 @@ class HerdrMultiplexer:
             return
 
     def _resize_focused_tab_column(self) -> None:
-        # A right column of N stacked members is a right-leaning chain of `down`
-        # splits: split_k separates member_k from the {member_{k+1}…} subtree
-        # below it. Equal heights ⇔ split_k has ratio 1/(N-k) (top → 1/N, …,
-        # bottom pair → 1/2). `herdr pane resize --amount` is a signed delta on a
-        # split's ratio (1:1), so each split is driven to its target by a single
-        # resize whose amount is computed arithmetically — no inference.
         current = _run_json(["herdr", "pane", "current"])
         try:
             tab_id = current["pane"]["tab_id"]
         except KeyError as exc:
             raise HerdrError(f"herdr pane current missing {exc} field") from exc
-        try:
-            layout = _run_json(["herdr", "pane", "layout"])["layout"]
-            if layout["tab_id"] != tab_id:
-                return  # focus moved between the two reads — leave the layout alone
-            panes = layout["panes"]
-            splits = layout["splits"]
-        except KeyError as exc:
-            raise HerdrError(f"herdr pane layout missing {exc} field") from exc
+        read = self._read_tab_layout(tab_id)
+        if read is None:
+            return  # focus moved between the two reads — leave the layout alone
+        panes, splits = read
         # The right column is every pane outside the leftmost (Director) column.
         min_x = min(p["rect"]["x"] for p in panes)
         column = sorted(
             (p for p in panes if p["rect"]["x"] != min_x),
             key=lambda p: p["rect"]["y"],
         )
-        n = len(column)
-        if n < 2:
+        if len(column) < 2:
             return
+        self._equalize_column(column, splits)
+
+    def _read_tab_layout(
+        self, expected_tab_id: str
+    ) -> tuple[list[dict], list[dict]] | None:
+        """Return (panes, splits) when the focused-tab layout reported by
+        `herdr pane layout` is the expected tab, else None."""
+        try:
+            layout = _run_json(["herdr", "pane", "layout"])["layout"]
+            if layout["tab_id"] != expected_tab_id:
+                return None
+            return layout["panes"], layout["splits"]
+        except KeyError as exc:
+            raise HerdrError(f"herdr pane layout missing {exc} field") from exc
+
+    def _equalize_column(self, column: list[dict], splits: list[dict]) -> None:
+        # A right column of N stacked members is a right-leaning chain of `down`
+        # splits: split_k separates member_k from the {member_{k+1}…} subtree
+        # below it. Equal heights ⇔ split_k has ratio 1/(N-k) (top → 1/N, …,
+        # bottom pair → 1/2). `herdr pane resize --amount` is a signed delta on a
+        # split's ratio (1:1), so each split is driven to its target by a single
+        # resize whose amount is computed arithmetically — no inference.
+        n = len(column)
         col_x = column[0]["rect"]["x"]
         down_splits = sorted(
             (s for s in splits if s["direction"] == "down" and s["rect"]["x"] == col_x),
@@ -407,9 +419,75 @@ class HerdrMultiplexer:
             raise HerdrError(f"herdr pane list missing {exc} field") from exc
 
     def kill_pane(self, *, target_pane_id: str, ignore_missing: bool = False) -> None:
+        target_tab_id = self._pane_tab_id(target_pane_id)
         _run_tolerating_missing(
             ["herdr", "pane", "close", target_pane_id],
             ignore_missing=ignore_missing,
+        )
+        self._rebalance_after_close(target_tab_id)
+
+    def _pane_tab_id(self, pane_id: str) -> str | None:
+        """Best-effort pre-close read of the target pane's tab. None (the
+        rebalance skips) when the pane is already gone, the read fails, or the
+        envelope lacks the field — the close must proceed regardless."""
+        try:
+            return _run_json(["herdr", "pane", "get", pane_id])["pane"]["tab_id"]
+        except (HerdrError, KeyError):
+            return None
+
+    def _rebalance_after_close(self, target_tab_id: str | None) -> None:
+        """Best-effort: any HerdrError is swallowed so a layout failure never
+        fails a delete — the pane is already closed."""
+        if target_tab_id is None:
+            return  # no pre-close tab anchor — skip
+        try:
+            self._resize_after_close(target_tab_id)
+        except HerdrError:
+            return
+
+    def _resize_after_close(self, target_tab_id: str) -> None:
+        read = self._read_tab_layout(target_tab_id)
+        if read is None:
+            return  # focus is on another tab — never resize an unrelated layout
+        panes, splits = read
+        if not panes:
+            return
+        min_x = min(p["rect"]["x"] for p in panes)
+        column = sorted(
+            (p for p in panes if p["rect"]["x"] != min_x),
+            key=lambda p: p["rect"]["y"],
+        )
+        if len(column) >= 2:
+            self._equalize_column(column, splits)
+        elif not column:
+            self._restore_director_full_width(panes, splits)
+        # len(column) == 1: a lone member pane spans the column natively and the
+        # Director|column right split's ratio is unaffected by a down-close.
+
+    def _restore_director_full_width(
+        self, panes: list[dict], splits: list[dict]
+    ) -> None:
+        if len(panes) != 1:
+            return  # not the single-Director shape — leave it untouched
+        # Empty `splits` ⇒ the sole pane is already structurally full-width;
+        # any residue other than exactly one right split is anomalous.
+        if len(splits) != 1 or splits[0]["direction"] != "right":
+            return
+        delta = round(1.0 - splits[0]["ratio"], 4)
+        if delta < 1e-3:
+            return
+        _run(
+            [
+                "herdr",
+                "pane",
+                "resize",
+                "--pane",
+                panes[0]["pane_id"],
+                "--direction",
+                "right",
+                "--amount",
+                str(delta),
+            ]
         )
 
     def agent_status(self, *, target_pane_id: str) -> str | None:
