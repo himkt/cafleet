@@ -34,6 +34,15 @@ member's pane is never parked on a permission prompt, the wake nudge does not
 lead with `Esc` — unlike the message-delivery preview and `cafleet member ping`
 (see [Push notifications](../spec/multiplexer-backends.md#esc-safeguard)).
 
+The facilitation layer's re-engagement is itself **capture-gated**: before the
+Director fires a re-engagement keystroke at a member (`cafleet member ping`, a
+non-exempt `cafleet message send`, or a `cafleet message broadcast`), it takes
+a fresh read-only `cafleet member capture` of the target and classifies it on
+the same five-state rubric the monitoring member uses, firing only on
+`finished` or `stalled` — a pane classified `awaiting_user` or `working` has
+its round skipped and the entire send deferred to a later facilitation tick.
+The full gate lives in the `/cafleet` skill's `reference/supervision.md`.
+
 ## The watched set
 
 Enrollment covers the **root Director** (default interval **180 s**) and
@@ -90,7 +99,11 @@ On each wake it runs a routine bounded to two read/act commands — read-only
 
 Observation spans the Director and every due member, but actuation is
 Director-only: the monitoring member never keystrokes ordinary members —
-all member-driving routes back through the Director.
+all member-driving routes back through the Director, whose re-engagement is in
+turn capture-gated: a fresh `cafleet member capture` classified on the same
+five-state rubric, firing only on `finished` or `stalled`, skipping the round
+on `awaiting_user` or `working` (see the `/cafleet` skill's
+`reference/supervision.md`).
 
 ## Cadence and tick precision {#cadence-and-tick-precision}
 
