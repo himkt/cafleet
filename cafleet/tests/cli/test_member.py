@@ -79,7 +79,7 @@ def _precreate_opencode_preset(home):
     """Satisfy the opencode spawn precondition inside a redirected HOME.
 
     ``OpencodeAgent.ensure_available()`` requires ``~/.opencode/agents/
-    cafleet.md`` to exist (installed by ``cafleet setup opencode``); it never
+    cafleet.md`` to exist (installed by ``cafleet setup``); it never
     writes the file itself."""
     preset = home / ".opencode" / "agents" / "cafleet.md"
     preset.parent.mkdir(parents=True, exist_ok=True)
@@ -611,7 +611,7 @@ def test_member_create__opencode_missing_preset_fails_spawn_with_guidance(
     stub_coding_agent_binaries,
 ):
     # With no ~/.opencode/agents/cafleet.md installed, the spawn precondition
-    # fails with guidance to run `cafleet setup opencode` — and member create
+    # fails with guidance to run `cafleet setup` — and member create
     # writes no file.
     monkeypatch.setenv("HOME", str(tmp_path))
     fleet_id, director_id, runner = bootstrapped_fleet
@@ -624,7 +624,7 @@ def test_member_create__opencode_missing_preset_fails_spawn_with_guidance(
     )
     assert result.exit_code == 1, result.output
     assert "opencode agent preset not found at" in result.output
-    assert "run 'cafleet setup opencode' first" in result.output
+    assert "run 'cafleet setup' first" in result.output
     assert split_window_recorder == []
     assert not (tmp_path / ".opencode").exists()
 

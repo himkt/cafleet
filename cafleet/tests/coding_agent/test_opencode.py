@@ -168,7 +168,7 @@ def test_ensure_available_raises_when_binary_missing(tmp_path, monkeypatch):
 
 def test_ensure_available_raises_when_preset_missing(tmp_path, monkeypatch):
     """Binary on PATH but no ``~/.opencode/agents/cafleet.md``: the spawn
-    precondition fails with guidance to run ``cafleet setup opencode`` — and
+    precondition fails with guidance to run ``cafleet setup`` — and
     ``ensure_available`` writes no file."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
@@ -176,7 +176,7 @@ def test_ensure_available_raises_when_preset_missing(tmp_path, monkeypatch):
     preset = _preset_path(tmp_path)
     expected = (
         f"opencode agent preset not found at {preset}; "
-        "run 'cafleet setup opencode' first"
+        "run 'cafleet setup' first"
     )
     with pytest.raises(RuntimeError, match=f"^{re.escape(expected)}$"):
         OpencodeAgent().ensure_available()

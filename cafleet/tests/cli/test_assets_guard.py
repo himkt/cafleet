@@ -175,9 +175,11 @@ def test_guard_unchecked_homes_do_not_trigger(registry_db):
 # --------------------------------------------------------------------------- #
 
 
-def test_setup_db_is_exempt(registry_db):
+def test_setup_schema_only_is_exempt(registry_db):
     """The repair command must remain runnable with no install recorded."""
-    result = _run(["setup", "db"])
+    result = _run(
+        ["setup", "--skip", "claude", "--skip", "codex", "--skip", "opencode"]
+    )
 
     assert result.exit_code == 0, result.output
 

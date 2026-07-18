@@ -1,4 +1,4 @@
-"""Tests for ``run_db_init`` and the ``cafleet setup db`` CLI command."""
+"""Tests for ``run_db_init`` and the schema-only ``cafleet setup`` invocation."""
 
 import sqlite3
 from pathlib import Path
@@ -6,6 +6,10 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from cafleet import config
+
+SCHEMA_ONLY_ARGS = [
+    "setup", "--skip", "claude", "--skip", "codex", "--skip", "opencode",
+]
 
 
 def _table_names(db_path) -> set[str]:
@@ -27,8 +31,8 @@ def test_default_database_url_points_at_cafleet_v5_db():
     assert url == f"sqlite:///{expected}"
 
 
-def test_setup_db_creates_schema(tmp_path, monkeypatch):
-    """A fresh ``setup db`` creates the DB file and migrates it to head.
+def test_schema_only_setup_creates_schema(tmp_path, monkeypatch):
+    """A fresh schema-only setup creates the DB file and migrates it to head.
 
     DB path is placed under a not-yet-existing ``data/`` subdir so the
     ``Path.parent.mkdir(parents=True, exist_ok=True)`` path is exercised.
@@ -45,7 +49,7 @@ def test_setup_db_creates_schema(tmp_path, monkeypatch):
     from cafleet.cli import cli
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["setup", "db"])
+    result = runner.invoke(cli, SCHEMA_ONLY_ARGS)
 
     assert result.exit_code == 0, result.output
     assert db_file.parent.exists()
@@ -65,8 +69,8 @@ def test_setup_db_creates_schema(tmp_path, monkeypatch):
     assert "applied" in result.output.lower()
 
 
-def test_setup_db_idempotent(tmp_path, monkeypatch):
-    """A second ``setup db`` run is a no-op reporting ``Already at head``."""
+def test_schema_only_setup_idempotent(tmp_path, monkeypatch):
+    """A second schema-only run is a no-op reporting ``Already at head``."""
     db_file = tmp_path / "cafleet.db"
     monkeypatch.setattr(
         config.settings,
@@ -78,7 +82,7 @@ def test_setup_db_idempotent(tmp_path, monkeypatch):
 
     runner = CliRunner()
 
-    first = runner.invoke(cli, ["setup", "db"])
+    first = runner.invoke(cli, SCHEMA_ONLY_ARGS)
     assert first.exit_code == 0, first.output
 
     tables_after_first = _table_names(db_file)
@@ -93,7 +97,7 @@ def test_setup_db_idempotent(tmp_path, monkeypatch):
     finally:
         conn.close()
 
-    second = runner.invoke(cli, ["setup", "db"])
+    second = runner.invoke(cli, SCHEMA_ONLY_ARGS)
     assert second.exit_code == 0, second.output
     assert "already at head" in second.output.lower()
 
@@ -110,7 +114,7 @@ def test_setup_db_idempotent(tmp_path, monkeypatch):
     assert version_after_second == version_after_first
 
 
-def test_setup_db_errors_on_unversioned_db(tmp_path, monkeypatch):
+def test_schema_only_setup_errors_on_unversioned_db(tmp_path, monkeypatch):
     """A database with tables but no ``alembic_version`` is rejected, not
     auto-stamped -- silently stamping would lie about the revision and could
     mask schema mismatches at runtime.
@@ -132,17 +136,18 @@ def test_setup_db_errors_on_unversioned_db(tmp_path, monkeypatch):
     from cafleet.cli import cli
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["setup", "db"])
+    result = runner.invoke(cli, SCHEMA_ONLY_ARGS)
 
     assert result.exit_code == 1, result.output
     assert "alembic stamp head" in result.output
+    assert "db half failed" in result.output
 
     tables = _table_names(db_file)
     assert "legacy_squat" in tables
     assert "alembic_version" not in tables
 
 
-def test_setup_db_ahead_errors(tmp_path, monkeypatch):
+def test_schema_only_setup_ahead_errors(tmp_path, monkeypatch):
     """An ahead-of-head revision unknown to the local script directory is refused.
 
     Uses a fictional ``9999_future_revision`` that is unknown to the
@@ -171,7 +176,7 @@ def test_setup_db_ahead_errors(tmp_path, monkeypatch):
     from cafleet.cli import cli
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["setup", "db"])
+    result = runner.invoke(cli, SCHEMA_ONLY_ARGS)
 
     assert result.exit_code == 1, result.output
     output_lower = result.output.lower()
@@ -193,7 +198,7 @@ def test_run_db_init_creates_schema_at_head(tmp_path, monkeypatch, capsys):
     """``run_db_init()`` called directly creates the schema at head.
 
     Exercises the reusable helper the way ``cafleet setup``'s database half
-    invokes it -- no CLI runner, no skills mocking.
+    invokes it -- no CLI runner, no assets mocking.
     """
     db_file = tmp_path / "data" / "cafleet.db"
     monkeypatch.setattr(
@@ -261,8 +266,8 @@ def test_run_db_init_idempotent_reports_already_at_head(tmp_path, monkeypatch, c
     assert version_after_second == version_after_first
 
 
-def test_setup_db_delegates_to_run_db_init(monkeypatch):
-    """``cafleet setup db`` is a thin wrapper that calls ``run_db_init()``."""
+def test_schema_only_setup_delegates_to_run_db_init(monkeypatch):
+    """The schema-only invocation's db half is a thin ``run_db_init()`` call."""
     calls = []
 
     from cafleet.cli import setup as setup_module
@@ -272,7 +277,7 @@ def test_setup_db_delegates_to_run_db_init(monkeypatch):
     from cafleet.cli import cli
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["setup", "db"])
+    result = runner.invoke(cli, SCHEMA_ONLY_ARGS)
 
     assert result.exit_code == 0, result.output
     assert calls == [True]
