@@ -21,11 +21,11 @@ Required section. Convert every note (a constraint/caveat the inline value shoul
 | Note | Applies at |
 |------|-----------|
 | <the caveat, one row each> | `{token}` — `<skill>/<file>` § <base heading> |
-| *Pane-state capture cues* (below) — this backend's `awaiting_user` vs `finished` discriminators. | classification rubric rule 1 (`awaiting_user`) — `cafleet/roles/monitor.md` § On each wake; the pane-state taxonomy in `docs/concepts/monitoring.md`. |
+| *Pane-state capture cues* (below) — this backend's `awaiting_user` vs `finished` discriminators. | classification rubric rule 1 (`awaiting_user`) — `cafleet/roles/monitor.md` § On each wake; the pane-state taxonomy in `docs/concepts/monitoring.md`; the Director's pre-nudge capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response (the Director applies the cues of the **target member's** backend overlay). |
 
 ## Pane-state capture cues
 
-Required section. Give this backend's concrete capture-content discriminators for the two pane states a single capture most easily confuses — `awaiting_user` (classification rubric rule 1, the destructive-if-missed class) vs `finished` (rule 3) — so the monitoring member can tell them apart from pane text alone, never from native `agent_status`. Register a row for this table in the *Note → applies at* table above, bound to the rubric's rule 1.
+Required section. Give this backend's concrete capture-content discriminators for the two pane states a single capture most easily confuses — `awaiting_user` (classification rubric rule 1, the destructive-if-missed class) vs `finished` (rule 3) — so both consumers can tell them apart from pane text alone, never from native `agent_status`: the monitoring member's classification rubric and the Director's pre-nudge capture gate (`cafleet/reference/supervision.md` § Idle Semantics). Register a row for this table in the *Note → applies at* table above, bound to both consumers — the rubric's rule 1 and the Director's pre-nudge gate.
 
 | State | <backend> capture cue |
 |---|---|

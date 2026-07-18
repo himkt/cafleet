@@ -22,7 +22,7 @@ Every note names the base token/instruction it qualifies.
 |------|-----------|
 | `AskUserQuestion` takes ≤ 4 options/question; the built-in "Other" is the free-text path (don't add an explicit "Other"). Question shapes → form: choice among ≤ 4 labeled options; approve-or-revise (two options); continue-or-abort (two options); open-ended draft-comparison (2–4 full candidate bodies). | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions; `cafleet-design-doc/create/create.md` Step 2 question batch |
 | `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet`: register a sub-topic with `TaskCreate`, claim with `TaskUpdate` (owner + `in_progress`), complete with `TaskUpdate` (`completed`), check progress with `TaskList`. | `{task_coord}` — `cafleet-research/report/report.md` task coordination |
-| *Pane-state capture cues* (below) — the concrete claude-pane discriminators for `awaiting_user` vs `finished`. | classification rubric rule 1 (`awaiting_user`) — `cafleet/roles/monitor.md` § On each wake (step 2); the pane-state taxonomy in `docs/concepts/monitoring.md`. |
+| *Pane-state capture cues* (below) — the concrete claude-pane discriminators for `awaiting_user` vs `finished`. | classification rubric rule 1 (`awaiting_user`) — `cafleet/roles/monitor.md` § On each wake (step 2); the pane-state taxonomy in `docs/concepts/monitoring.md`; the Director's pre-nudge capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response (the Director applies the cues of the **target member's** backend overlay). |
 
 ## Pane-state capture cues
 

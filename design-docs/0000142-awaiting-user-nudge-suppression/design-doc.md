@@ -1,7 +1,7 @@
 # Suppress Director Nudges to Busy or Prompt-Parked Members
 
 **Status**: Approved
-**Progress**: 7/11 tasks complete
+**Progress**: 10/11 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -120,9 +120,9 @@ The monitoring member's behavior is untouched, satisfying the issue's first requ
 
 ### Step 3: Backend overlays
 
-- [ ] In `claude-overlay.md`, extend the *Pane-state capture cues* note's "applies at" binding to include the Director's pre-nudge gate (`supervision.md` § Idle Semantics / § Stall Response), noting the Director applies the cues of the **target member's** backend overlay, alongside the monitor's classification rubric. <!-- completed: -->
-- [ ] Apply the same "applies at" extension to `codex-overlay.md` and `opencode-overlay.md`. <!-- completed: -->
-- [ ] In `_template.md`, require the cue-table skeleton to name both consumers (monitor classification + Director pre-nudge gate). <!-- completed: -->
+- [x] In `claude-overlay.md`, extend the *Pane-state capture cues* note's "applies at" binding to include the Director's pre-nudge gate (`supervision.md` § Idle Semantics / § Stall Response), noting the Director applies the cues of the **target member's** backend overlay, alongside the monitor's classification rubric. <!-- completed: 2026-07-18T13:16 -->
+- [x] Apply the same "applies at" extension to `codex-overlay.md` and `opencode-overlay.md`. <!-- completed: 2026-07-18T13:16 -->
+- [x] In `_template.md`, require the cue-table skeleton to name both consumers (monitor classification + Director pre-nudge gate). <!-- completed: 2026-07-18T13:16 -->
 
 ### Step 4: Verification
 

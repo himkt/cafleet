@@ -22,7 +22,7 @@ Every note names the base token/instruction it qualifies.
 |------|-----------|
 | No in-pane prompt — a fleet member sends its question to the Director, which answers as a plain operator message. The `--agent cafleet` safety floor shows no popup; if a popup ever appears it is a regression to escalate, not a decision point. | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions |
 | No harness task list — track sub-topic registrations, claims, and completions as cafleet messages. | `{task_coord}` — `cafleet-research/report/report.md` task coordination |
-| *Pane-state capture cues* (below) — the concrete opencode-pane discriminators for `awaiting_user` vs `finished`. | classification rubric rule 1 (`awaiting_user`) — `cafleet/roles/monitor.md` § On each wake (step 2); the pane-state taxonomy in `docs/concepts/monitoring.md`. |
+| *Pane-state capture cues* (below) — the concrete opencode-pane discriminators for `awaiting_user` vs `finished`. | classification rubric rule 1 (`awaiting_user`) — `cafleet/roles/monitor.md` § On each wake (step 2); the pane-state taxonomy in `docs/concepts/monitoring.md`; the Director's pre-nudge capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response (the Director applies the cues of the **target member's** backend overlay). |
 
 ## Pane-state capture cues
 
