@@ -1,7 +1,7 @@
 # Deny-by-Default Bash Allowlist for the opencode Preset
 
 **Status**: Approved
-**Progress**: 5/8 tasks complete
+**Progress**: 8/8 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -10,12 +10,12 @@ Flip the `bash` permission map in `presets/opencode/cafleet.md` from allow-by-de
 
 ## Success Criteria
 
-- [ ] The `bash` map in `presets/opencode/cafleet.md` is exactly: the `"*": "deny"` base, the allowlist in § *New preset file content*, and the two `cafleet member exec` deny overrides — no `"ask"` values, and none of the previous explicit deny entries (`bash -c*`, `rm -rf*`, `curl*`, `wget*`, `git push*`, …) remain.
-- [ ] The `read` / `edit` maps and the seven scalar permission fields are byte-identical to their current values.
-- [ ] SPEC.md § *Exact preset file contents (verbatim)* matches the new checked-in file byte-for-byte.
-- [ ] `docs/spec/coding-agent-backends.md` and `docs/concepts/coding-agents.md` describe the deny-by-default allowlist posture; a repo-wide grep finds no remaining description of the opencode preset as allow-by-default or "deny-list only".
-- [ ] The Director/operator confirms the shipped allowlist is a one-to-one translation of `permissions.allow` modulo the recorded exclusions (`wget`; the ask-tier entries).
-- [ ] `mise //cafleet:test` passes.
+- [x] The `bash` map in `presets/opencode/cafleet.md` is exactly: the `"*": "deny"` base, the allowlist in § *New preset file content*, and the two `cafleet member exec` deny overrides — no `"ask"` values, and none of the previous explicit deny entries (`bash -c*`, `rm -rf*`, `curl*`, `wget*`, `git push*`, …) remain.
+- [x] The `read` / `edit` maps and the seven scalar permission fields are byte-identical to their current values.
+- [x] SPEC.md § *Exact preset file contents (verbatim)* matches the new checked-in file byte-for-byte.
+- [x] `docs/spec/coding-agent-backends.md` and `docs/concepts/coding-agents.md` describe the deny-by-default allowlist posture; a repo-wide grep finds no remaining description of the opencode preset as allow-by-default or "deny-list only".
+- [x] The Director/operator confirms the shipped allowlist is a one-to-one translation of `permissions.allow` modulo the recorded exclusions (`wget`; the ask-tier entries).
+- [x] `mise //cafleet:test` passes.
 
 ---
 
@@ -207,9 +207,9 @@ Per `documentation-maintenance.md`, all of the following update in this cycle, b
 
 ### Step 3: Verification
 
-- [ ] With the Director/operator (member panes are denied reading `~/.claude/settings.json`), diff the shipped allowlist against the `permissions.allow` `Bash(...)` entries and confirm the translation is one-to-one modulo the recorded exclusions (`wget`; the ask-tier entries of Decision 2) and the two member-exec deny overrides <!-- completed: -->
-- [ ] Repo-wide grep confirms no remaining allow-by-default / "deny-list only" description of the opencode preset outside this design doc and git history <!-- completed: -->
-- [ ] `mise //cafleet:test` passes <!-- completed: -->
+- [x] With the Director/operator (member panes are denied reading `~/.claude/settings.json`), diff the shipped allowlist against the `permissions.allow` `Bash(...)` entries and confirm the translation is one-to-one modulo the recorded exclusions (`wget`; the ask-tier entries of Decision 2) and the two member-exec deny overrides <!-- completed: 2026-07-18T05:17 -->
+- [x] Repo-wide grep confirms no remaining allow-by-default / "deny-list only" description of the opencode preset outside this design doc and git history <!-- completed: 2026-07-18T05:22 -->
+- [x] `mise //cafleet:test` passes <!-- completed: 2026-07-18T05:22 -->
 
 ---
 
