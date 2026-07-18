@@ -95,6 +95,26 @@ this differently:
   An unresolvable cwd fails the spawn loudly with `HerdrError`; there is no
   fallback directory.
 
+## Delete-time pane layout {#delete-time-pane-layout}
+
+Closing a member pane leaves the two backends asymmetric on layout reflow:
+
+- **tmux** issues a bare `kill-pane` and relies on the multiplexer's native
+  auto-fit — the remaining panes reclaim the freed space with no explicit
+  layout step.
+- **herdr** has no native reflow, so `kill_pane` restores the layout itself:
+  it reads the target pane's tab (`herdr pane get`) before the close, runs
+  `herdr pane close`, then rebalances best-effort, scoped to that tab. With
+  ≥ 2 members remaining, the member column is re-equalized to equal heights
+  (the same invariant the create path enforces); after the last member is
+  deleted, the Director pane is explicitly restored to full tab width when the
+  layout read shows a residual right split; a single remaining member needs no
+  resize. The rebalance silently skips on unexpected layout shapes and whenever
+  the focused-tab layout reports a different tab than the killed pane's — it
+  never resizes an unrelated tab. Any `HerdrError` during the rebalance is
+  swallowed: a layout failure never fails `member delete` — the pane is closed
+  and the member deregistered regardless.
+
 ## Push notifications {#push-notifications}
 
 CAFleet's delivery model is pull-based: recipients discover messages via

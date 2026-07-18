@@ -1881,8 +1881,33 @@ Each method's herdr realization:
   --direction up --amount <|delta|>`. Best-effort: any `HerdrError` is swallowed
   so a resize failure never fails a spawn. tmux is unaffected (still
   `select-layout main-vertical`).
-- **`kill_pane(*, target_pane_id, ignore_missing=False)`** — `herdr pane close
-  <pane_id>` through the `not_found`-tolerant runner.
+- **`kill_pane(*, target_pane_id, ignore_missing=False)`** — three phases.
+  (1) Pre-close tab read: `_pane_tab_id` runs `herdr pane get <pane_id>` and
+  returns `result.pane.tab_id`; **any** failure — a `HerdrError` (including
+  `pane_not_found` for a pane already gone) or a missing envelope field —
+  yields `None` and never blocks the close. (2) `herdr pane close <pane_id>`
+  through the `not_found`-tolerant runner; a close error not tolerated under
+  `ignore_missing` propagates unchanged and no rebalance runs.
+  (3) `_rebalance_after_close(target_tab_id)` — best-effort: any `HerdrError`
+  is swallowed so a layout failure never fails a delete (the pane is already
+  closed). Skips when `target_tab_id` is `None`. Otherwise it reads the
+  focused-tab layout via `_read_tab_layout(target_tab_id)` (`herdr pane
+  layout`; a `tab_id` mismatch returns `None` and skips — the rebalance never
+  resizes an unrelated tab's layout; a missing envelope field raises
+  `HerdrError`), returns on an empty pane list, and computes the member column
+  as the panes whose `rect.x` is not the minimum x, sorted by `y`. Column case
+  table: size ≥ 2 → `_equalize_column` (the `_equalize_focused_tab_column`
+  arithmetic above — `1/(N-k)` split targets, one signed resize per off-target
+  split, the `len(down_splits) != n - 1` malformed-chain skip); size 1 → no
+  resize (heights are trivially equal and the right split's ratio is unaffected
+  by a down-close); size 0 → `_restore_director_full_width`: with exactly one
+  pane and exactly one residual `right` split, emit one corrective `herdr pane
+  resize --pane <director> --direction right --amount <round(1.0 - ratio, 4)>`
+  (skipped when the delta `< 1e-3`); an empty `splits` list is already
+  structurally full-width (nothing emitted), and any other residue (multiple
+  splits, a non-`right` split, ≥ 2 panes) is skipped. The create path shares
+  `_read_tab_layout` / `_equalize_column` with `_equalize_focused_tab_column`;
+  tmux `kill_pane` stays a bare `kill-pane` (native auto-fit).
 - **`list_pane_ids() -> set`** — `herdr pane list` → the set of pane ids.
 - **`send_exit(*, target_pane_id, ignore_missing=False)`** — `herdr pane run
   <id> "/exit"`.
