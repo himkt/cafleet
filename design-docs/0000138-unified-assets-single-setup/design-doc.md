@@ -1,7 +1,7 @@
 # Unified Assets Concept and Single Setup Command
 
 **Status**: Approved
-**Progress**: 17/26 tasks complete
+**Progress**: 18/26 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -186,7 +186,7 @@ Per `.claude/rules/removal.md`, every mention of the removed surface is updated 
 
 ### Step 4: Publish workflow
 
-- [ ] Update `.github/workflows/publish.yml`: `upload-assets` job name, `cafleet-assets-v<tag>.zip` in both steps, renamed upload step <!-- completed: -->
+- [x] Update `.github/workflows/publish.yml`: `upload-assets` job name, `cafleet-assets-v<tag>.zip` in both steps, renamed upload step <!-- completed: 2026-07-18T01:03 -->
 
 ### Step 5: Verification
 
