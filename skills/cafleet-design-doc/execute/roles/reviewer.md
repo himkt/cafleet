@@ -10,7 +10,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}` / `{permission_flags}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}` / `{permission_flags}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root scratch / audit writes or fall back to `/tmp` |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema — your findings don't land as `COMMENT(reviewer): [TAG]` markers at the right pointer and your `complete (doc) — N issues` / `approved (doc)` signals get garbled |
 
@@ -20,7 +20,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 - Load the listed skills at startup. Skill loading: {skill_loader}.
 - **Fresh-context independence.** You have no implementation context — judge only what you can verify from the design document, the diff, and the checks you run. Do not take any member's word for a claim you can check yourself.
-- **Review the full branch diff against the design document.** Read the design document, then `git diff <base-branch>...HEAD` (the base branch name is the `BASE BRANCH:` line in your spawn prompt), and judge the change on three axes: (a) **design-doc compliance** — the implementation matches the Specification and every Implementation task; (b) **code quality** — including the project's `.claude/rules/code-quality.md` conventions; (c) **test adequacy** — the tests cover the specified behavior and would fail if it regressed.
+- **Review the full branch diff against the design document.** Read the design document, then `git diff <base-branch>...HEAD` (the base branch name is the `BASE BRANCH:` line in your spawn prompt), and judge the change on three axes: (a) **design-doc compliance** — the implementation matches the Specification and every Implementation task; (b) **code quality** — including the code-quality conventions in the host project's agent rules directory (`.claude/rules/code-quality.md` in this repo); (c) **test adequacy** — the tests cover the specified behavior and would fail if it regressed.
 - **Verify claims by running checks (read-execute scope).** You may run `mise //cafleet:test`, `mise //cafleet:lint`, and the other read-only mise tasks to verify what the diff and design doc claim. You never edit code to test a hypothesis.
 - **Findings land as markers, never as code edits.** Your only edits are `COMMENT(reviewer): [TAG] <body>` markers — source-anchored findings in the source/test file at `<file>:<line>`, spec-level findings at the affected design-doc paragraph.
 - **Approve only when no substantive issues remain.** Minor style preferences alone are not grounds for blocking approval.
@@ -71,4 +71,4 @@ A routed member may dispute a finding by counter-escalating; the Director arbitr
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your `claude` process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.
+The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.

@@ -72,7 +72,7 @@ Use the resolved `base` as `${BASE}` for the rest of the run. **Every** scratch 
 
 The procedure's positional branch also accepts an absolute path. If the path lies strictly under the inferred repo root, it is used verbatim as the task folder — the resolver does NOT walk ancestors or match skill-specific bucket patterns. If the path lies outside the repo root (or equals the repo root), the resolver yields the literal sentinel `<unset>` for `${BASE}`. **Consumer-strips contract**: because the resolver does not fold child paths, each consuming skill MUST canonicalize its argument to the actual task-folder path (relative or absolute) BEFORE resolving. For a **relative** argument: strip trailing filenames like `/design-doc.md`, strip leading bucket prefixes like `design-docs/`, then prepend its own bucket. For an **absolute** argument: apply only the trailing-filename strip — it is used verbatim as the task folder when it lies strictly under the repo root (no bucket prepend), otherwise it yields `<unset>`. When `${BASE}` is `<unset>`, the skill MUST guard every BASE-derived write with an explicit `${BASE} != <unset>` check, omit the `BASE:` line from any spawn prompt entirely, and never fall back to `/tmp`. The standardized loud-error message is `Error: BASE is <unset>; refusing to fall back to /tmp`.
 
-When CWD has no `.git` ancestor (typical when CWD is `$HOME` or under `$HOME/.claude`) AND a `TASK_NAME` is supplied, the resolution fails with `cannot resolve task-scope base-dir: no .git ancestor found from CWD <cwd>. cd to the repo root and retry.` — surface this error to the user and stop.
+When CWD has no `.git` ancestor (typical when CWD is `$HOME` or under a coding agent's user-level config directory, per base-dir.md's table) AND a `TASK_NAME` is supplied, the resolution fails with `cannot resolve task-scope base-dir: no .git ancestor found from CWD <cwd>. cd to the repo root and retry.` — surface this error to the user and stop.
 
 ### 2.2 Bootstrap a CAFleet fleet
 
@@ -250,7 +250,7 @@ Every spawn-prompt render is also the spawn-prompt audit artifact. The protocol:
 
 4. **The pre-spawn file IS the audit artifact**. There is no second post-spawn re-render. After `cafleet member create` succeeds, the file at `${BASE}/prompts/<role>-<UTC-compact>.md` is the permanent record of what was spawned and is never touched again. It carries the four `{...}` identity placeholders pre-substitution — that is expected; the CLI renders them at spawn.
 
-5. **Every write under `${BASE}`**. Audit files, scratch notes, figure artifacts, intermediate working files — every output the skill produces lands under `${BASE}` or a consumer-supplied absolute path. **Never `/tmp`** unless `${BASE}` itself is `/tmp/claude-code` (which is a legitimate base-dir choice when the user picked it via `AskUserQuestion`).
+5. **Every write under `${BASE}`**. Audit files, scratch notes, figure artifacts, intermediate working files — every output the skill produces lands under `${BASE}` or a consumer-supplied absolute path. **Never `/tmp`** unless `${BASE}` itself is `/tmp/cafleet` (which is a legitimate base-dir choice when the user picked it via the `{decision_surface}` prompt).
 
 6. **`${BASE} == <unset>` is a hard stop**, not a fallback. See § 3.6.
 
@@ -308,7 +308,7 @@ The recipient reads the cafleet body, navigates to the pointer, reads the standi
 
 ### 5.5 The role taxonomy
 
-The marker role identifier in `COMMENT(<role>)` is one of: `claude` (user-derived clarifications baked into the doc), `director`, `programmer`, `tester`, `reviewer`, `verifier`, `analyzer`, `drafter`. New roles for new skills SHOULD be added to this list; do not abbreviate. The `claude` role is reserved for the `cafleet-design-doc` skill's interview-workflow user-derived clarifications and its execute-workflow test-framework arbitration; do not use it for arbitrary "Claude said this" content.
+The marker role identifier in `COMMENT(<role>)` is one of: `user-relay` (user-derived clarifications baked into the doc), `director`, `programmer`, `tester`, `reviewer`, `verifier`, `analyzer`, `drafter`. New roles for new skills SHOULD be added to this list; do not abbreviate. The `user-relay` role is reserved for the `cafleet-design-doc` skill's interview-workflow user-derived clarifications and its execute-workflow test-framework arbitration; do not use it for arbitrary relayed content.
 
 ### 5.6 Anchorless status
 
@@ -430,7 +430,7 @@ cafleet message send --fleet-id 7 --from-member-id 11 --to-member-id 8 \
   --text "complete (doc) — summary 198 words, 3 risk areas"
 ```
 
-The Director polls, acks, reads `${BASE}/summary.md`, presents it to the user via `AskUserQuestion`. If the user approves, the Director tears down. If the user requests revisions, the Director sends:
+The Director polls, acks, reads `${BASE}/summary.md`, presents it to the user via the `{decision_surface}` prompt. If the user approves, the Director tears down. If the user requests revisions, the Director sends:
 
 ```bash
 cafleet message send --fleet-id 7 --from-member-id 8 --to-member-id 11 \
@@ -527,11 +527,11 @@ CAFleet runs members on three coding-agent backends — `claude`, `codex`, `open
 The split:
 
 - **Base — your `SKILL.md` and `roles/*.md`.** Write these so they read the same on any backend. State *what* to do in backend-agnostic terms; wherever behavior varies by backend, state the neutral behavior and point the agent at its overlay.
-- **Overlay — `skills/cafleet/reference/coding-agent/<name>.md`.** This is the single canonical home for every backend delta. Six deltas vary by backend: the decision surface (the `AskUserQuestion` analog or the plain-message fallback), the monitor model, the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, and the skill-loading recipe. Put each backend's concrete realization in its overlay; a new overlay starts from `reference/coding-agent/_template.md`.
+- **Overlay — `skills/cafleet/reference/coding-agent/<name>-overlay.md`.** This is the single canonical home for every backend delta. Six deltas vary by backend: the decision surface (the `AskUserQuestion` analog or the plain-message fallback), the monitor model, the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, and the skill-loading recipe. Put each backend's concrete realization in its overlay; a new overlay starts from `reference/coding-agent/_template.md`.
 
 Wire it up:
 
-1. **Point at the overlay.** `skills/cafleet/SKILL.md` carries the canonical "apply your coding-agent overlay" instruction; every sibling family `SKILL.md` carries a one-line pointer to `../cafleet/reference/coding-agent/<name>.md`. A new family skill adds the same pointer near its top.
+1. **Point at the overlay.** `skills/cafleet/SKILL.md` carries the canonical "apply your coding-agent overlay" instruction; every sibling family `SKILL.md` carries a one-line pointer to `../cafleet/reference/coding-agent/<name>-overlay.md`. A new family skill adds the same pointer near its top.
 2. **Stamp the backend into the spawn prompt.** Add a `CODING AGENT: {coding_agent}` line to the spawn prompt's identity block (next to `FLEET ID` / `BASE`). The CLI renders it to the resolved backend name at spawn — no Director-side substitution and no CLI change — so a spawned member knows which overlay to read. A standalone agent uses its own identity instead.
 3. **Keep the homes independent.** The agent-facing overlay home and the human-facing `docs/spec/coding-agent-backends.md` operator docs never cross-link in either direction. Restating an operational fact in both is fine; linking between them is not.
 

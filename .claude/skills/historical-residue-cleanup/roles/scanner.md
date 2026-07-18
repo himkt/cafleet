@@ -16,7 +16,7 @@ it — then Read every file below, in order, before your first substantive actio
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../../skills/cafleet/reference/coding-agent/<name>.md`](../../../../skills/cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{skill_loader}` / `{permission_flags}`, guess a wrong value, or ignore a backend note |
+| 1 | your overlay [`../../../../skills/cafleet/reference/coding-agent/<name>-overlay.md`](../../../../skills/cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{skill_loader}` / `{permission_flags}`, guess a wrong value, or ignore a backend note |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../../skills/cafleet/reference/base-dir.md) | the no-bypass write protocol and the `<unset>` contract — you mis-root your partial inventory or fall back to `/tmp` |
 | 3 | the `cafleet-design-doc` skill's [`reference/coordination.md`](../../../../skills/cafleet-design-doc/reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema (and the skill-local `scanner` role + `inventory` pointer) — your status hops mis-route |
 | 4 | this skill's [`reference/rubric.md`](../reference/rubric.md) | the fixed classification rubric — you mis-classify hits or over-delete |

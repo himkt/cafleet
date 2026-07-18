@@ -12,7 +12,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root your screenshots / review-log writes or fall back to `/tmp` |
 
 Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
@@ -27,7 +27,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 **Do NOT:** Edit `slide.md` or any other file; fix visual issues directly; modify the report or transcript; communicate with the user directly.
 
-**Browser lifecycle:** When the Director sends a `CLOSE:` message via `cafleet message send`, run `bun run agent-browser --session vr-batch-[start] close` and then reply `closed` via `cafleet message send` so the Director can proceed to `cafleet member delete`. Do NOT rely on the exit keystroke to trigger any post-shutdown action — once it arrives the claude process is shutting down and additional commands are not guaranteed to run. The Director's `bun run agent-browser close --all` cleanup safety net is a last-resort sweep, not the primary close path.
+**Browser lifecycle:** When the Director sends a `CLOSE:` message via `cafleet message send`, run `bun run agent-browser --session vr-batch-[start] close` and then reply `closed` via `cafleet message send` so the Director can proceed to `cafleet member delete`. Do NOT rely on the exit keystroke to trigger any post-shutdown action — once it arrives the coding-agent process is shutting down and additional commands are not guaranteed to run. The Director's `bun run agent-browser close --all` cleanup safety net is a last-resort sweep, not the primary close path.
 
 ## Communication Protocol
 

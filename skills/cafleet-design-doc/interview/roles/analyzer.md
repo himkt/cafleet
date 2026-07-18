@@ -10,7 +10,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}` / `{permission_flags}` (can't load the `cafleet` skill), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}` / `{permission_flags}` (can't load the `cafleet` skill), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the missing-`BASE` anchorless-status convention and the no-bypass write protocol — you mishandle a `BASE`-less spawn |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the anchorless-status and message-exemption rules — your one-time question-list payload and any status hop get mis-formatted |
 
@@ -87,4 +87,4 @@ Rules:
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your `claude` process is terminated — nothing is required of you.
+The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you.

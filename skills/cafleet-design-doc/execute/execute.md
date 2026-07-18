@@ -10,7 +10,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` / `{permission_flags}` (spawn the monitor with `--model {monitor_model}`), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>-overlay.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` / `{permission_flags}` (spawn the monitor with `--model {monitor_model}`), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
 | 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, the facilitation loop) — you spawn an unsupervised team |
 | 4 | [`../reference/coordination.md`](../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema — you coordinate in free-form bodies and findings get mis-routed |
@@ -19,7 +19,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
-| **Director** | Main Claude | Register with CAFleet, spawn members via `cafleet member create`, validate doc, assign steps, review tests against design doc, review implementation code for quality and compliance, commit after each phase, escalation arbitration, orchestrate TDD cycle | Write code, write tests | [roles/director.md](roles/director.md) |
+| **Director** | Main agent | Register with CAFleet, spawn members via `cafleet member create`, validate doc, assign steps, review tests against design doc, review implementation code for quality and compliance, commit after each phase, escalation arbitration, orchestrate TDD cycle | Write code, write tests | [roles/director.md](roles/director.md) |
 | **Programmer** | Member | Implement code to pass tests, run tests, report results via `cafleet message send`, escalate test defects to Director, update design doc checkboxes and Progress counter | Write or modify tests, commit code, communicate with user directly | [roles/programmer.md](roles/programmer.md) |
 | **Tester** | Member | Read design doc, write unit tests per step, fix tests based on Director feedback, report to Director via `cafleet message send` | Write implementation code, commit code, communicate with user directly | [roles/tester.md](roles/tester.md) |
 | **Verifier** | Member (optional) | E2E/integration testing, tool discovery, evidence collection (screenshots, logs, output), failure reporting with suggested fixes | Write code, write tests, commit, communicate with user directly | [roles/verifier.md](roles/verifier.md) |
@@ -36,7 +36,7 @@ This skill's Director, Programmer, Tester, Verifier, and Reviewer coordinate via
 
 Two skill-specific notes layer on top of that canonical protocol:
 
-- **Roles in play**: this skill uses only the `director`, `programmer`, `tester`, `verifier`, `reviewer`, and `claude` marker roles — never `drafter` (that belongs to the create workflow). Finalize happens at `Status: Complete` (Step 8).
+- **Roles in play**: this skill uses only the `director`, `programmer`, `tester`, `verifier`, `reviewer`, and `user-relay` marker roles — never `drafter` (that belongs to the create workflow). Finalize happens at `Status: Complete` (Step 8).
 - **Verifier Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the interview workflow). Phase 2 verification reports follow the schema.
 
 ## Architecture
@@ -45,7 +45,7 @@ The Director is the root member of a CAFleet fleet — bootstrapped automaticall
 
 ```
 User
- +-- Director (main Claude -- cafleet fleet create, cafleet member create, orchestrates TDD cycle)
+ +-- Director (main agent -- cafleet fleet create, cafleet member create, orchestrates TDD cycle)
       +-- Programmer (member -- implements code to pass tests)
       +-- Tester (member -- writes unit tests per step)
       +-- Verifier (member, optional -- E2E/integration testing)
@@ -79,7 +79,7 @@ Apply the no-bypass write protocol and `<unset>` sentinel contract from the `caf
 
 - **`$ARGUMENTS` absent** (the discover-all-approved-docs flow): the no-argument form scans `<repo-root>/design-docs/`, so the Director MUST invoke from the repo root. Verify with `git rev-parse --show-toplevel` and abort with a clear "invoke from the repo root" error if `cwd` differs. Then run the skill's **Step 1 (shared-root resolution)**:
 
-  Step 1 resolves `${BASE}` to the CWD (the verified repo root). In the rare edge case where the repo root is itself `$HOME` or under `~/.claude`, Step 1 reaches **Step 2** of base-dir resolution (its decision-surface prompt); there, explicitly choose the `${CWD}` candidate so `${BASE}` stays the verified repo root — do NOT pick `/tmp/claude-code`, which would make `${RESOLVED_ARGS} = /tmp/claude-code/design-docs/` and point the discovery scan at the wrong directory. With `${BASE}` resolved to the repo root, set `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
+  Step 1 resolves `${BASE}` to the CWD (the verified repo root). In the rare edge case where the repo root is itself `$HOME` or under a coding agent's user-level config directory (per base-dir.md's table), Step 1 reaches **Step 2** of base-dir resolution (its decision-surface prompt); there, explicitly choose the `${CWD}` candidate so `${BASE}` stays the verified repo root — do NOT pick `/tmp/cafleet`, which would make `${RESOLVED_ARGS} = /tmp/cafleet/design-docs/` and point the discovery scan at the wrong directory. With `${BASE}` resolved to the repo root, set `${RESOLVED_ARGS} = ${BASE}/design-docs/` — this matches Tier 3 below and engages the discovery flow that scans every approved slug under `<repo>/design-docs/`.
 
 #### Phase 2: Three-Tier Detection
 
@@ -140,7 +140,7 @@ Before registering with CAFleet:
 
 1. Read the design document completely.
 2. Check for `COMMENT(` markers using Grep. If found, resolve them directly: apply the requested changes and remove the markers. Verify with Grep that no `COMMENT(` markers remain before proceeding.
-3. Check for `FIXME(claude)` markers in the codebase using Grep. If found, note them for the Programmer to resolve first.
+3. Check for `FIXME(agent)` markers in the codebase using Grep. If found, note them for the Programmer to resolve first.
 4. Determine the step order and total number of steps.
 5. **Create a feature branch if on the default branch.** Get the default branch with `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'` and the current branch with `git branch --show-current`. If they match, use {decision_surface} to propose the branch name `feat/<design-doc-slug>` and ask the user to approve before creating it. The user will create the branch themselves or approve the proposed name. If already on a non-default branch, skip this step.
 
@@ -199,7 +199,7 @@ Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/
 |---|---|
 | ROLE TITLE | `the Programmer` |
 | role-file | `roles/programmer.md` |
-| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` |
+| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/exec-routing.md), which you load at startup.` |
 | start cue | `Start by reading the design document. Then wait for the Director to assign your first step.` |
 
 Render the prompt to `${BASE}/.prompts/programmer-<UTC-compact>.md` per the 3e two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
@@ -220,7 +220,7 @@ Render the prompt to `${BASE}/.prompts/programmer-<UTC-compact>.md` per the 3e t
 |---|---|
 | ROLE TITLE | `the Tester` |
 | role-file | `roles/tester.md` |
-| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: Do NOT write implementation code — only test code.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` |
+| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: Do NOT write implementation code — only test code.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/exec-routing.md), which you load at startup.` |
 | start cue | `Start by reading the design document. Then wait for the Director to assign your first step.` |
 
 Render the prompt to `${BASE}/.prompts/tester-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--text-file`:
@@ -243,7 +243,7 @@ Render the prompt to `${BASE}/.prompts/tester-<UTC-compact>.md` per the 3e two-s
 |---|---|
 | ROLE TITLE | `the Verifier` |
 | role-file | `roles/verifier.md` |
-| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code or modify implementation/test files.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` |
+| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code or modify implementation/test files.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/exec-routing.md), which you load at startup.` |
 | start cue | `Start by reading the design document and discovering available tools. Then wait for the Director to assign your first verification task.` |
 
 Render the prompt to `${BASE}/.prompts/verifier-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--text-file`:
@@ -281,7 +281,7 @@ For each step in the design document:
    cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
      --to-member-id <tester-member-id> --text "ready (paragraph-Implementation > Step N)"
    ```
-2. **Wait for the Tester's `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear)** via `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id>`. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (per the pointer-marker pairing rule in the Coordination Protocol section above); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via {decision_surface}, write the answer back as `COMMENT(claude): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
+2. **Wait for the Tester's `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear)** via `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id>`. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (per the pointer-marker pairing rule in the Coordination Protocol section above); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via {decision_surface}, write the answer back as `COMMENT(user-relay): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
 3. **Review tests** against the design doc. If issues are found, write `COMMENT(director): <issue>` markers at `paragraph-Implementation > Step N` (matching the cafleet pointer per the pointer-marker pairing rule in the Coordination Protocol section above) and reply `ready (paragraph-Implementation > Step N)`; the Tester resolves the markers and replies `addressed (paragraph-Implementation > Step N)`. Repeat until satisfied.
 4. **Commit tests** (separate commands, do NOT chain with `&&`). Recover the per-test file list directly via git (`git status` / `git diff --stat` / `git log --name-only`) — the Tester does not embed file lists in cafleet bodies under the verb + pointer schema.
    - `git add <test-files>`
@@ -360,7 +360,7 @@ This is the first and only time the Reviewer exists in the fleet (never in the S
 | skill loads | the `cafleet` skill — for communication with the Director; the `cafleet-design-doc` skill — for the coordination protocol and the design-doc format (same pair as the other execute roles per §3e) |
 | CONTEXT LINES | `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` / `BASE BRANCH: [INSERT default branch name from Step 2]` |
 | poll-handling line (verbatim) | `When you see cafleet message poll output with a message from the Director, act on those instructions.` |
-| IMPORTANT (verbatim) | `IMPORTANT: You are a fresh reviewer with no implementation context — judge only what you can verify from the design document, the diff, and the checks you run.` / `IMPORTANT: Do NOT write or modify implementation or test code. Your only edits are COMMENT(reviewer) markers.` / `IMPORTANT: Do NOT commit. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` |
+| IMPORTANT (verbatim) | `IMPORTANT: You are a fresh reviewer with no implementation context — judge only what you can verify from the design document, the diff, and the checks you run.` / `IMPORTANT: Do NOT write or modify implementation or test code. Your only edits are COMMENT(reviewer) markers.` / `IMPORTANT: Do NOT commit. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/exec-routing.md), which you load at startup.` |
 | start cue | `Start by reading the design document and the branch diff. Then act on the Director's ready (doc) assignment.` |
 
 Render the spawn prompt to `${BASE}/.prompts/reviewer-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with your overlay's resolved `{reviewer_model}` value:

@@ -10,7 +10,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root `slide.md` / figure writes or fall back to `/tmp` |
 | 3 | [`../../reference/slidev.md`](../../reference/slidev.md) | the Slidev authoring layouts, the mandatory Self-Review Checklist, color discipline, and citation rules — your deck uses wrong layouts and fails review |
 
@@ -99,4 +99,4 @@ The Director sends tagged feedback via `cafleet message send` using the canonica
 
 ## Shutdown
 
-You are terminated by the Director via `cafleet member delete`, which kills your pane immediately. Your `claude` process is terminated — no message-level handshake is required.
+You are terminated by the Director via `cafleet member delete`, which kills your pane immediately. Your coding-agent process is terminated — no message-level handshake is required.

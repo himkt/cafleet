@@ -10,7 +10,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{task_coord}` / `{decision_surface}` (spawn the monitor with `--model {monitor_model}`), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>-overlay.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{task_coord}` / `{decision_surface}` (spawn the monitor with `--model {monitor_model}`), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root the spawn-prompt audit files and `${OUTPUT_DIR}` or fall back to `/tmp` |
 | 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised team |
 
@@ -18,10 +18,10 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
-| **Director** | Main Claude | Bootstrap CAFleet fleet, spawn all members, relay Manager requests, review all deliverables, present to user | Write the report, decompose topics, conduct research | [roles/director.md](roles/director.md) |
-| **Manager** | claude pane (member) | Run orientation searches for landscape understanding and topic decomposition, request Scout/Researcher spawning from the Director, aggregate Scout and Researcher findings, compile report, revise | Conduct deep investigation — all substantive research MUST be delegated to Researchers | [roles/manager.md](roles/manager.md) |
-| **Scout** | claude pane (member) | Landscape mapping — broad discovery to expand knowledge before decomposition | Collect facts for the report, write report sections | [roles/scout.md](roles/scout.md) |
-| **Researcher** | claude pane (member) | Search exhaustively, collect facts with sources, filter misinformation, write findings to assigned file | Synthesize or write report sections | [roles/researcher.md](roles/researcher.md) |
+| **Director** | Main agent | Bootstrap CAFleet fleet, spawn all members, relay Manager requests, review all deliverables, present to user | Write the report, decompose topics, conduct research | [roles/director.md](roles/director.md) |
+| **Manager** | member pane (member) | Run orientation searches for landscape understanding and topic decomposition, request Scout/Researcher spawning from the Director, aggregate Scout and Researcher findings, compile report, revise | Conduct deep investigation — all substantive research MUST be delegated to Researchers | [roles/manager.md](roles/manager.md) |
+| **Scout** | member pane (member) | Landscape mapping — broad discovery to expand knowledge before decomposition | Collect facts for the report, write report sections | [roles/scout.md](roles/scout.md) |
+| **Researcher** | member pane (member) | Search exhaustively, collect facts with sources, filter misinformation, write findings to assigned file | Synthesize or write report sections | [roles/researcher.md](roles/researcher.md) |
 
 ## Additional resources
 
@@ -41,10 +41,10 @@ The Director is the root member of a CAFleet fleet — bootstrapped automaticall
 
 ```text
 User
- +-- Director (main Claude — runs cafleet fleet create, cafleet member create, drives the loop)
-      +-- manager (claude pane — compiles report, decomposes topic)
-      +-- scout-<NN> (claude pane — landscape mapping)
-      +-- researcher-NN (claude pane — deep investigation)
+ +-- Director (main agent — runs cafleet fleet create, cafleet member create, drives the loop)
+      +-- manager (member pane — compiles report, decomposes topic)
+      +-- scout-<NN> (member pane — landscape mapping)
+      +-- researcher-NN (member pane — deep investigation)
 ```
 
 Members cannot talk to the user directly — the Director always relays. Members cannot talk to each other directly either — Manager requests are always mediated by the Director (Manager → Director → Scout/Researcher, and Scout/Researcher → Director → Manager).

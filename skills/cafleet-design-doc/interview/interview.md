@@ -1,6 +1,6 @@
 # Design Doc Interview (CAFleet Edition)
 
-Validate an existing design document through structured, fine-grained Q&A across multiple sessions. The Director (main Claude) drives the conversation and writes annotations; an Analyzer member spawned via `cafleet member create` reads the document and returns the question list, then is torn down before the interview rounds begin. Discrepancies surface as inline `COMMENT(claude)` annotations in the design document. Multi-session splitting via `question.md` prevents context compaction for large interviews.
+Validate an existing design document through structured, fine-grained Q&A across multiple sessions. The Director (main agent) drives the conversation and writes annotations; an Analyzer member spawned via `cafleet member create` reads the document and returns the question list, then is torn down before the interview rounds begin. Discrepancies surface as inline `COMMENT(user-relay)` annotations in the design document. Multi-session splitting via `question.md` prevents context compaction for large interviews.
 
 ## Required reading
 
@@ -10,28 +10,28 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` (spawn the monitor with `--model {monitor_model}`), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>-overlay.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` (spawn the monitor with `--model {monitor_model}`), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root the spawn-prompt audit file and `question.md` or fall back to `/tmp` |
 | 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised Analyzer |
-| 4 | [`../reference/coordination.md`](../reference/coordination.md) | the `COMMENT(claude)` marker grammar and anchorless-status rules — your inline annotations are malformed |
+| 4 | [`../reference/coordination.md`](../reference/coordination.md) | the `COMMENT(user-relay)` marker grammar and anchorless-status rules — your inline annotations are malformed |
 
 Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
-| **Director (Interviewer)** | Main Claude | Resolve doc path, parse `question.md` progress, spawn Analyzer, drive decision-surface Q&A rounds, write answers + COMMENT annotations + progress marker | Read the document for question generation (delegated to Analyzer); conduct the Q&A rounds off {decision_surface} | (inline in this workflow body) |
+| **Director (Interviewer)** | Main agent | Resolve doc path, parse `question.md` progress, spawn Analyzer, drive decision-surface Q&A rounds, write answers + COMMENT annotations + progress marker | Read the document for question generation (delegated to Analyzer); conduct the Q&A rounds off {decision_surface} | (inline in this workflow body) |
 | **Analyzer** | CAFleet member spawned via `cafleet member create` | Read the design doc, return a flat numbered question list covering uncovered sections, then idle pending shutdown | Talk to the user; edit any file; persist state across spawns | [roles/analyzer.md](roles/analyzer.md) |
 
 ## Additional resources
 
 - For the document template, section guidelines, and quality standards, see: [../reference/guidelines.md](../reference/guidelines.md)
-- Output of the create workflow is the input to this skill; this skill's `COMMENT(claude)` markers are consumed by the create workflow's resume mode.
+- Output of the create workflow is the input to this skill; this skill's `COMMENT(user-relay)` markers are consumed by the create workflow's resume mode.
 
 ## Coordination Protocol
 
-This skill writes only `COMMENT(claude)` markers in the design document; the Director-Analyzer cafleet messages are exempt from the verb + pointer schema (the Analyzer's question list is a one-time multi-line payload, and the Director's user relay goes through {decision_surface}, not cafleet). The `COMMENT(role)` marker format, the `claude` role (the Director as user-mediator, carrying user-derived clarifications), and the one-per-issue / actionable rules are canonical in [../reference/coordination.md](../reference/coordination.md) § *COMMENT(role) Marker*.
+This skill writes only `COMMENT(user-relay)` markers in the design document; the Director-Analyzer cafleet messages are exempt from the verb + pointer schema (the Analyzer's question list is a one-time multi-line payload, and the Director's user relay goes through {decision_surface}, not cafleet). The `COMMENT(role)` marker format, the `user-relay` role (the Director as user-mediator, carrying user-derived clarifications), and the one-per-issue / actionable rules are canonical in [../reference/coordination.md](../reference/coordination.md) § *COMMENT(role) Marker*.
 
-Interview-specific: place each `COMMENT(claude)` marker on its own line immediately before the section it refers to (e.g. above `### Retry Strategy`); markers persist until the create workflow's resume mode resolves them (reads each marker, applies the fix, removes it).
+Interview-specific: place each `COMMENT(user-relay)` marker on its own line immediately before the section it refers to (e.g. above `### Retry Strategy`); markers persist until the create workflow's resume mode resolves them (reads each marker, applies the fix, removes it).
 
 ## Architecture
 
@@ -39,7 +39,7 @@ The Director is the root member of a CAFleet fleet — bootstrapped automaticall
 
 ```
 User
- +-- Director (main Claude -- cafleet fleet create, cafleet member create, drives Q&A, writes annotations)
+ +-- Director (main agent -- cafleet fleet create, cafleet member create, drives Q&A, writes annotations)
       +-- Analyzer (member -- spawned in tmux pane; returns question list; terminated)
 ```
 
@@ -200,7 +200,7 @@ After persisting the question list (Step 2g) — or directly when `SKIP_ANALYZER
 
 ### Step 4: Annotate & Update Progress (Director)
 
-1. **Annotate discrepancies**: For each discrepancy found, add a `COMMENT(claude): ...` annotation inline in the design document, immediately before the relevant content (per § *COMMENT(claude) Marker*). Use `Edit` to insert each annotation.
+1. **Annotate discrepancies**: For each discrepancy found, add a `COMMENT(user-relay): ...` annotation inline in the design document, immediately before the relevant content (per § *COMMENT(user-relay) Marker*). Use `Edit` to insert each annotation.
 2. **Update progress in `question.md`**: Append the section headings reviewed in this invocation to the JSON array inside `<!-- interview-progress: [...] -->` in `question.md` (NOT in the design document).
 3. **If final session** (every section in the design document is now in the progress array): remove the `<!-- interview-progress: [...] -->` line from `question.md` entirely.
 4. **Verify**: Use `Grep` on the design document to confirm all intended COMMENT annotations were written.

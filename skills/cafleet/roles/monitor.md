@@ -12,7 +12,7 @@ At startup, identify your coding agent first — your spawn prompt's `CODING AGE
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{bg_run}` / `{monitor_model}` / `{permission_flags}` (can't background the heartbeat), **or** guess a wrong/default value, **or** ignore a backend note |
+| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{bg_run}` / `{monitor_model}` / `{permission_flags}` (can't background the heartbeat), **or** guess a wrong/default value, **or** ignore a backend note |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + heartbeat mechanism you serve (Monitor Lifecycle, Idle Semantics, the 5-step facilitation loop) — you can't run the heartbeat or re-engage the Director correctly |
 
 Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
@@ -72,7 +72,7 @@ A wake is a single-line `[monitor] wake: N member(s) due — …` nudge keystrok
    ```
    The Director alone judges whether a `finished` member still owes assigned work — you cannot see the dispatch ledger, so you report and let the Director decide.
 
-   **Never re-engage a pane you classified `awaiting_user`, and that bar outranks every re-engage trigger.** When the Director's own pane is `awaiting_user`, send **nothing** this wake — no matter how many due members are `stalled` or `finished`. `message send` fires an inline preview whose keystroke leads with `Esc`, and that `Esc` exists to stop the trailing `Enter` from blindly *confirming* a prompt — the same keystroke would cancel a Director's pending `AskUserQuestion`. The suppressed report is not lost: the member stays due on its interval and stall-check cadences and re-surfaces, unchanged, on its next wake. If nothing is `stalled`/`finished` and the Director is not `awaiting_user`, do nothing and end your turn.
+   **Never re-engage a pane you classified `awaiting_user`, and that bar outranks every re-engage trigger.** When the Director's own pane is `awaiting_user`, send **nothing** this wake — no matter how many due members are `stalled` or `finished`. `message send` fires an inline preview whose keystroke leads with `Esc`, and that `Esc` exists to stop the trailing `Enter` from blindly *confirming* a prompt — the same keystroke would cancel a Director's pending `{decision_surface}` prompt. The suppressed report is not lost: the member stays due on its interval and stall-check cadences and re-surfaces, unchanged, on its next wake. If nothing is `stalled`/`finished` and the Director is not `awaiting_user`, do nothing and end your turn.
 
 ### The wake nudge you consume
 

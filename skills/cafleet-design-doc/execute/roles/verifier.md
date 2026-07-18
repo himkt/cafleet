@@ -10,7 +10,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}` / `{permission_flags}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}` / `{permission_flags}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root scratch / evidence / audit writes or fall back to `/tmp` |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema (and the Phase-1 discovery exemption) — your `COMMENT(verifier)` markers and `complete (doc)` / `escalating` reports get mis-routed |
 
@@ -34,7 +34,7 @@ You do NOT speak to the user directly; all communication goes through the Direct
 
 **Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules. **Phase 1 tool-discovery is exempt** from the schema — the inventory is a one-time discovery payload, not iterative coordination, so it rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the interview workflow). Phase 2 verification reports follow the schema.
 
-**Do NOT:** commit code or run git write operations; modify implementation or test files; communicate with the user directly; spawn subagents or run `claude` commands; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
+**Do NOT:** commit code or run git write operations; modify implementation or test files; communicate with the user directly; spawn subagents or run coding-agent CLI commands; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
 
 ## Workflow
 
@@ -79,4 +79,4 @@ If the best tool for a verification task is unavailable:
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your `claude` process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.
+The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.

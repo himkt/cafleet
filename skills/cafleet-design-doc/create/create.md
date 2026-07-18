@@ -10,7 +10,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` / `{permission_flags}` (spawn the monitor with `--model {monitor_model}`), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>-overlay.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` / `{permission_flags}` (spawn the monitor with `--model {monitor_model}`), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
 | 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, the 5-step facilitation loop) — you spawn an unsupervised team |
 | 4 | [`../reference/coordination.md`](../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema (and the Step-2 clarification exemption) — you coordinate in free-form bodies and findings get lost / mis-routed |
@@ -19,9 +19,9 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
-| **Director** | Main Claude | Register with CAFleet fleet, spawn members via `cafleet member create`, relay user answers, enforce clarification gate, orchestrate internal quality loop, present polished draft to user | Write the document, review it in detail | [roles/director.md](roles/director.md) |
-| **Drafter** | Member (claude) | Ask clarifying questions (via Director relay), read target codebase, write and revise the design document | Communicate with user directly (goes through Director), review own work | [roles/drafter.md](roles/drafter.md) |
-| **Reviewer** | Member (claude) | Critically review drafts for rule compliance, readability, completeness, correctness | Write the document, communicate with user | [roles/reviewer.md](roles/reviewer.md) |
+| **Director** | Main agent | Register with CAFleet fleet, spawn members via `cafleet member create`, relay user answers, enforce clarification gate, orchestrate internal quality loop, present polished draft to user | Write the document, review it in detail | [roles/director.md](roles/director.md) |
+| **Drafter** | Member | Ask clarifying questions (via Director relay), read target codebase, write and revise the design document | Communicate with user directly (goes through Director), review own work | [roles/drafter.md](roles/drafter.md) |
+| **Reviewer** | Member | Critically review drafts for rule compliance, readability, completeness, correctness | Write the document, communicate with user | [roles/reviewer.md](roles/reviewer.md) |
 
 ## Additional resources
 
@@ -34,7 +34,7 @@ This skill's Director, Drafter, and Reviewer coordinate via the verb + pointer s
 
 Two skill-specific notes layer on top of that canonical protocol:
 
-- **Roles in play**: this skill uses only the `director`, `drafter`, `reviewer`, and `claude` marker roles — never `programmer`, `tester`, or `verifier` (those belong to the execute workflow). Finalize happens at `Status: Approved` (Step 6).
+- **Roles in play**: this skill uses only the `director`, `drafter`, `reviewer`, and `user-relay` marker roles — never `programmer`, `tester`, or `verifier` (those belong to the execute workflow). Finalize happens at `Status: Approved` (Step 6).
 - **Clarification Exemption**: Director-to-Drafter messages during the **Step 2 clarification phase** are exempt from the verb + pointer schema. At clarification time the design doc does not yet exist (the Drafter is forbidden from creating any file before clarifying), so the Director's "User answers: ..." relay rides as a free-form multi-line cafleet body. From Step 3 onward (once the initial draft exists) every message falls back under the schema.
 
 ## Architecture
@@ -43,7 +43,7 @@ The Director is the root member of a CAFleet fleet — bootstrapped automaticall
 
 ```
 User
- +-- Director (main Claude -- cafleet fleet create, cafleet member create, orchestrates cycle)
+ +-- Director (main agent -- cafleet fleet create, cafleet member create, orchestrates cycle)
       +-- Drafter (member -- spawned in tmux pane; writes the design document)
       +-- Reviewer (member -- spawned in tmux pane; critically reviews the draft)
 ```
@@ -71,11 +71,11 @@ Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt. The audit-
 **Resume detection** (using resolved `${DOC_PATH}`):
 
 1. **File does not exist** → Fresh creation (proceed to Step 1 as normal).
-2. **File exists** → Check for `COMMENT(claude)` markers:
-   - Use Grep to search for `COMMENT(claude)` in the file. The grep is tightened to the `claude` role because user-derived clarifications are the only marker class that warrants resume-mode. Stale `COMMENT(reviewer)` / `COMMENT(director)` / `COMMENT(programmer)` markers from other workflows MUST NOT be misclassified as interview-resume. Note: the execute workflow also writes transient `COMMENT(claude): <choice>` markers for user arbitration (e.g., test-framework selection in `Phase 1`), but those are short-lived and removed by the routed member as part of the fix; under normal flow no `COMMENT(claude)` survives an in-progress execute run. If the user invokes the create workflow against a half-finished execute doc that happens to carry a transient `COMMENT(claude)`, treating it as resume-mode is acceptable — the Drafter will read and resolve the marker the same way it handles interview clarifications.
+2. **File exists** → Check for `COMMENT(user-relay)` markers:
+   - Use Grep to search for `COMMENT(user-relay)` in the file. The grep is tightened to the `user-relay` role because user-derived clarifications are the only marker class that warrants resume-mode. Stale `COMMENT(reviewer)` / `COMMENT(director)` / `COMMENT(programmer)` markers from other workflows MUST NOT be misclassified as interview-resume. Note: the execute workflow also writes transient `COMMENT(user-relay): <choice>` markers for user arbitration (e.g., test-framework selection in `Phase 1`), but those are short-lived and removed by the routed member as part of the fix; under normal flow no `COMMENT(user-relay)` survives an in-progress execute run. If the user invokes the create workflow against a half-finished execute doc that happens to carry a transient `COMMENT(user-relay)`, treating it as resume-mode is acceptable — the Drafter will read and resolve the marker the same way it handles interview clarifications.
 
-   - **`COMMENT(claude)` markers found** → This is **resume mode**. Proceed to Step 1 with the resume-specific Drafter spawn prompt. Set an internal flag `SKIP_CLARIFICATION=true` so Step 2 (clarification) is skipped.
-   - **No `COMMENT(claude)` markers found** → Inform the user: "No `COMMENT(claude)` markers found in the existing document." Present two options through {decision_surface}:
+   - **`COMMENT(user-relay)` markers found** → This is **resume mode**. Proceed to Step 1 with the resume-specific Drafter spawn prompt. Set an internal flag `SKIP_CLARIFICATION=true` so Step 2 (clarification) is skipped.
+   - **No `COMMENT(user-relay)` markers found** → Inform the user: "No `COMMENT(user-relay)` markers found in the existing document." Present two options through {decision_surface}:
      - **"Run quality review"**: Set internal flags `SKIP_CLARIFICATION=true` and `QUALITY_REVIEW_ONLY=true`. Skip Step 2 entirely and enter Step 3 by immediately routing the existing `${DOC_PATH}` to the Reviewer via `cafleet message send` (no new draft is produced; the Drafter is only involved later if the Reviewer requests revisions).
      - **"Start fresh"**: Treat as new creation, ignoring the existing file. Ensure `SKIP_CLARIFICATION` and `QUALITY_REVIEW_ONLY` are unset, then proceed to Step 1 as normal.
 
@@ -177,7 +177,7 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 
 **Skip this step entirely when `SKIP_CLARIFICATION=true`** (set by Step 0 in resume mode or quality-review-only mode). Resume mode: the COMMENT markers serve as the clarification and the Drafter already has all the information needed. Quality-review-only mode: the Drafter is not producing a new draft at all — proceed directly to Step 3 by routing the existing `${DOC_PATH}` to the Reviewer.
 
-> **Clarification Exemption**: Director-to-Drafter messages during this step are exempt from the verb + pointer schema documented in [the Coordination Protocol section above](#coordination-protocol). At clarification time the design doc does not yet exist (the Drafter is forbidden from creating any file before clarifying), so there is no in-doc target for `COMMENT(claude)` markers — the user-answer relay rides as a free-form multi-line cafleet body. From Step 3 onward (once the initial draft exists) every message falls back under the schema.
+> **Clarification Exemption**: Director-to-Drafter messages during this step are exempt from the verb + pointer schema documented in [the Coordination Protocol section above](#coordination-protocol). At clarification time the design doc does not yet exist (the Drafter is forbidden from creating any file before clarifying), so there is no in-doc target for `COMMENT(user-relay)` markers — the user-answer relay rides as a free-form multi-line cafleet body. From Step 3 onward (once the initial draft exists) every message falls back under the schema.
 
 1. Wait for the Drafter's clarifying questions. The broker's inline-preview keystroke on the Drafter's `message send`, and your own periodic `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id>`, will surface the Drafter's message once it arrives.
 2. `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --message-id <message-id>` each received message after reading it.

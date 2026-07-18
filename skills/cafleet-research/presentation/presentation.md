@@ -10,7 +10,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` / `{bg_run}` / `{bg_stop}` (spawn the monitor with `--model {monitor_model}` or can't background the Slidev server), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>-overlay.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` / `{bg_run}` / `{bg_stop}` (spawn the monitor with `--model {monitor_model}` or can't background the Slidev server), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root the spawn-prompt audit files or fall back to `/tmp` |
 | 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised team |
 
@@ -18,10 +18,10 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
-| **Director** | Main Claude | Bootstrap CAFleet fleet, spawn members, review all deliverables, demand revisions, run Slidev server lifecycle and `agent-browser close --all` safety net | Create slides/transcript, conduct research, modify report, run agent-browser browser-operation commands (except close --all) | [roles/director.md](roles/director.md) |
-| **Presentation** | claude pane (reads the `../reference/slidev.md` and `../reference/visualization.md` pages) | Create Slidev presentation from report using the `../reference/slidev.md` page | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
-| **Transcript** | claude pane | Create reading transcript with 1:1 slide correspondence | Invent data, modify report, conduct research | [roles/transcript.md](roles/transcript.md) |
-| **Visual Reviewer** | claude pane — one per batch | Capture screenshots/snapshots of assigned slides using the agent-browser CLI (`bun run agent-browser ...`) with a per-batch named session (`--session vr-batch-<start>`), identify visual issues including aesthetic quality, report findings to Director | Edit slide.md, modify report, fix issues directly | [roles/visual-reviewer.md](roles/visual-reviewer.md) |
+| **Director** | Main agent | Bootstrap CAFleet fleet, spawn members, review all deliverables, demand revisions, run Slidev server lifecycle and `agent-browser close --all` safety net | Create slides/transcript, conduct research, modify report, run agent-browser browser-operation commands (except close --all) | [roles/director.md](roles/director.md) |
+| **Presentation** | member pane (reads the `../reference/slidev.md` and `../reference/visualization.md` pages) | Create Slidev presentation from report using the `../reference/slidev.md` page | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
+| **Transcript** | member pane | Create reading transcript with 1:1 slide correspondence | Invent data, modify report, conduct research | [roles/transcript.md](roles/transcript.md) |
+| **Visual Reviewer** | member pane — one per batch | Capture screenshots/snapshots of assigned slides using the agent-browser CLI (`bun run agent-browser ...`) with a per-batch named session (`--session vr-batch-<start>`), identify visual issues including aesthetic quality, report findings to Director | Edit slide.md, modify report, fix issues directly | [roles/visual-reviewer.md](roles/visual-reviewer.md) |
 
 ## Prerequisites
 
@@ -35,10 +35,10 @@ The Director is the root member of a CAFleet fleet — bootstrapped automaticall
 
 ```text
 User
- +-- Director (main Claude — runs cafleet fleet create, cafleet member create, runs Slidev background server)
-      +-- presentation (claude pane — authors slide.md; reads the slidev.md + visualization.md reference pages)
-      +-- transcript   (claude pane — authors transcript.md)
-      +-- vr-batch-<start> (claude pane — captures + reports on one slide batch; per-batch spawn/delete)
+ +-- Director (main agent — runs cafleet fleet create, cafleet member create, runs Slidev background server)
+      +-- presentation (member pane — authors slide.md; reads the slidev.md + visualization.md reference pages)
+      +-- transcript   (member pane — authors transcript.md)
+      +-- vr-batch-<start> (member pane — captures + reports on one slide batch; per-batch spawn/delete)
 ```
 
 Members cannot talk to the user directly — the Director always relays.
@@ -195,10 +195,10 @@ Once Step 2 converges on an approved slide deck and transcript, the Director run
 
 **Server Startup (once):**
 
-**Calling-pane working directory: a directory that contains the Slidev `package.json` (typically the host project root).** Bun resolves `node_modules/` and `package.json` from the calling directory directly — no `--cwd` plumbing or sidecar directory. Project-specific task wrappers (e.g., `mise` tasks) that capture invariants like `--frozen-lockfile` belong in the host project's `.claude/rules/`, not in this skill body.
+**Calling-pane working directory: a directory that contains the Slidev `package.json` (typically the host project root).** Bun resolves `node_modules/` and `package.json` from the calling directory directly — no `--cwd` plumbing or sidecar directory. Project-specific task wrappers (e.g., `mise` tasks) that capture invariants like `--frozen-lockfile` belong in the host project's agent rules directory (`.claude/rules/` in this repo), not in this skill body.
 
-1. Install bun dependencies — refer to your host project's `.claude/rules/` for the canonical command (it typically wraps `bun install --frozen-lockfile`).
-2. Start the Slidev dev server **as a backgrounded process** — refer to your host project's `.claude/rules/` for the canonical launcher. The underlying invocation is `bun run slidev --open false <folder>/slide.md` (the `--open false` flag is required for headless review) and the launcher MUST PTY-wrap stdout (e.g., via `script -qfc`) so Slidev does not exit on detecting a non-TTY. **Record the background process handle** your coding agent returns when it backgrounds the process — the overall Step 5 of this skill (*Finalize & Clean Up*, further down the page) needs it to stop the server cleanly without falling back on `pkill`. Run the backgrounded process via {bg_run}; stop it at teardown via {bg_stop}.
+1. Install bun dependencies — refer to your host project's agent rules directory (`.claude/rules/` in this repo) for the canonical command (it typically wraps `bun install --frozen-lockfile`).
+2. Start the Slidev dev server **as a backgrounded process** — refer to your host project's agent rules directory (`.claude/rules/` in this repo) for the canonical launcher. The underlying invocation is `bun run slidev --open false <folder>/slide.md` (the `--open false` flag is required for headless review) and the launcher MUST PTY-wrap stdout (e.g., via `script -qfc`) so Slidev does not exit on detecting a non-TTY. **Record the background process handle** your coding agent returns when it backgrounds the process — the overall Step 5 of this skill (*Finalize & Clean Up*, further down the page) needs it to stop the server cleanly without falling back on `pkill`. Run the backgrounded process via {bg_run}; stop it at teardown via {bg_stop}.
 3. Set `<server_url>` to the Slidev dev server URL (default: `http://localhost:3030`). Use this value when spawning Visual Reviewers.
 4. Create the persistent screenshots directory: write `<folder>/.screenshots/.keep` (empty file) using the Write tool. This is a one-time operation per presentation-workflow run; do NOT delete or wipe it on subsequent batches. agent-browser does not auto-create parent directories when given an explicit `screenshot <path>`, so this step is required for VR's per-slide capture to succeed.
 5. The Director MUST NOT run `bun run agent-browser --session vr-batch-* open|snapshot|screenshot|wait|close` (or the equivalent `bun run agent-browser ...`) directly — agent-browser's browser-operation commands are exclusively for Visual Reviewers (the only exception is the `close --all` safety net in Step 5 *Finalize & Clean Up*). The Director MAY run `console` and `errors` for diagnostics if needed (e.g., investigating a stuck VR), but should prefer letting the VR do it.

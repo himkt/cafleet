@@ -2,7 +2,7 @@
 
 Mechanics for inter-member coordination. The design document is the substantive communication medium; `cafleet message send --text` carries only a single-line **verb + pointer** poke. Substantive content (feedback, reports, escalation reasons, review items) lives in inline `COMMENT(role)` markers in the design doc — except for source-anchored review findings, which are annotated in the source file at `<file>:<line>` because that is where the finding lives.
 
-**Scope.** The verb + pointer schema applies to the create and execute workflows. Two exchanges are **exempt** and ride as free-form multi-line bodies: the create workflow's **Step-2 clarification exchange** (the Drafter's clarifying questions + the Director's user-answers relay, before the design doc exists), and the interview workflow's Director-Analyzer messages (which share only the inline `COMMENT(claude)` marker convention — the Analyzer's question-list deliverable is a multi-line payload).
+**Scope.** The verb + pointer schema applies to the create and execute workflows. Two exchanges are **exempt** and ride as free-form multi-line bodies: the create workflow's **Step-2 clarification exchange** (the Drafter's clarifying questions + the Director's user-answers relay, before the design doc exists), and the interview workflow's Director-Analyzer messages (which share only the inline `COMMENT(user-relay)` marker convention — the Analyzer's question-list deliverable is a multi-line payload).
 
 ## Core Principle
 
@@ -87,7 +87,7 @@ Roles:
 
 | Role | Who writes it | When |
 |:--|:--|:--|
-| `claude` | The Director acting as user-mediator (existing convention from the interview workflow) | Carries user-derived clarifications. Existing usage unchanged. |
+| `user-relay` | The Director acting as user-mediator (existing convention from the interview workflow) | Carries user-derived clarifications. Existing usage unchanged. |
 | `director` | The Director | Spec resolution notes, Director judgments, ambiguity arbitration, Phase C code-review feedback in the execute workflow. |
 | `drafter` | The Drafter | Spec ambiguities the Drafter cannot resolve and needs Director input on. |
 | `reviewer` | The Reviewer | Design-doc review findings in the create workflow; code-review findings at `<file>:<line>` in the execute workflow — both tagged with the existing `[COMPLIANCE]` / `[GAP]` / `[UNCLEAR]` / `[INCORRECT]` / `[IMPROVEMENT]` taxonomy inside the marker body. |
@@ -124,7 +124,7 @@ If a member finds themselves needing to send anchorless status updates frequentl
 
 When the design doc moves to `Status: Approved` (the create workflow Step 6) or `Status: Complete` (the execute workflow Step 8):
 
-1. Issue markers (`COMMENT(role)` for `reviewer`, `director`, `drafter`, `programmer`, `tester`, `verifier`, `claude`) MUST already be resolved per `skills/cafleet-design-doc/reference/guidelines.md` § *Completeness Check* — the existing rule "No `COMMENT(` markers remain" stays.
+1. Issue markers (`COMMENT(role)` for `reviewer`, `director`, `drafter`, `programmer`, `tester`, `verifier`, `user-relay`) MUST already be resolved per `skills/cafleet-design-doc/reference/guidelines.md` § *Completeness Check* — the existing rule "No `COMMENT(` markers remain" stays.
 2. Status markers do not exist in the design doc by construction (split), so there is nothing to strip.
 3. `COMMENT(reviewer)` markers in source files are removed by the routed member as part of each fix commit; finalize-time validation only needs to confirm the design doc is marker-free.
 

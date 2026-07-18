@@ -10,7 +10,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}` / `{permission_flags}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}` / `{permission_flags}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root scratch / audit writes or fall back to `/tmp` |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema — you can't read the `COMMENT(director)` markers you're routed or place `COMMENT(programmer)` escalation markers, and your `complete` / `escalating` signals get mis-routed |
 
@@ -34,7 +34,7 @@ You do NOT speak to the user directly; all communication goes through the Direct
 
 **Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules.
 
-**Do NOT:** commit code or run git write operations; modify test files; communicate with the user directly; spawn subagents or run `claude` commands; fix specification issues without Director approval; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
+**Do NOT:** commit code or run git write operations; modify test files; communicate with the user directly; spawn subagents or run coding-agent CLI commands; fix specification issues without Director approval; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
 
 ## Workflow
 
@@ -44,9 +44,9 @@ When the Director assigns FIXME resolution as a preliminary task (before the TDD
 
 #### Step 1: List All FIXMEs
 
-Use Grep to find all FIXME(claude) comments:
+Use Grep to find all FIXME(agent) comments:
 ```
-FIXME(claude)
+FIXME(agent)
 ```
 
 #### Step 2: Fix Each Issue
@@ -54,17 +54,17 @@ FIXME(claude)
 For each FIXME:
 1. Read the FIXME comment and understand the issue
 2. Implement the fix
-3. Replace `FIXME(claude): description` with `DONE(claude): what was fixed`
+3. Replace `FIXME(agent): description` with `DONE(agent): what was fixed`
 4. Repeat for all FIXMEs
 
 #### Step 3: Report to Director
 
-After fixing all FIXMEs, send `complete (doc)` via `cafleet message send`. The DONE(claude) comments themselves are the inline trail — do NOT enumerate them in the cafleet body. Wait for the Director's `ready (doc)` confirmation.
+After fixing all FIXMEs, send `complete (doc)` via `cafleet message send`. The DONE(agent) comments themselves are the inline trail — do NOT enumerate them in the cafleet body. Wait for the Director's `ready (doc)` confirmation.
 
 #### Step 4: Cleanup DONE Comments
 
 When the Director sends `ready (doc)` to confirm the FIXME fixes are acceptable:
-1. Remove all `DONE(claude)` comments from the codebase
+1. Remove all `DONE(agent)` comments from the codebase
 2. Send `complete (doc)` via `cafleet message send`
 
 **Only proceed to the TDD cycle after all FIXMEs are resolved and confirmed.**
@@ -113,4 +113,4 @@ If tests fail and you believe the test is defective (your implementation matches
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your `claude` process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.
+The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.

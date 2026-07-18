@@ -92,7 +92,7 @@ codebase. Some tips for new contributors:
    under `design-docs/NNNNNNN-<slug>/`.
 2. Invoke the `cafleet-design-doc` skill (interview workflow) with the path
    `design-docs/NNNNNNN-<slug>` — fine-grained Q&A pass that annotates the
-   doc with `COMMENT(claude)` markers for the create workflow's resume mode
+   doc with `COMMENT(user-relay)` markers for the create workflow's resume mode
    to absorb.
 3. Invoke the `cafleet-design-doc` skill (execute workflow) with the path
    `design-docs/NNNNNNN-<slug>` — TDD-cycle implementation pass (Director /

@@ -10,12 +10,12 @@ Register a new member and spawn a coding-agent pane in the Director's own tmux w
 
 ```bash
 cafleet member create --fleet-id <fleet-id> \
-  --name Claude-B --description "Reviewer for PR #42" \
-  --text-file /abs/path/to/<BASE>/.prompts/claude-b-20260514T145000Z.md
+  --name Reviewer-B --description "Reviewer for PR #42" \
+  --text-file /abs/path/to/<BASE>/.prompts/reviewer-b-20260514T145000Z.md
 
 cafleet member create --fleet-id <fleet-id> \
-  --name Codex-A --description "Reviewer for PR #42" --coding-agent codex \
-  --text-file /abs/path/to/<BASE>/.prompts/codex-a-20260514T145000Z.md
+  --name Reviewer-C --description "Reviewer for PR #42" --coding-agent codex \
+  --text-file /abs/path/to/<BASE>/.prompts/reviewer-c-20260514T145000Z.md
 
 cafleet member create --fleet-id <fleet-id> \
   --name monitor --description "Monitoring member: owns the heartbeat" \
@@ -33,7 +33,7 @@ cafleet member create --fleet-id <fleet-id> \
 | `--text` | no | Inline spawn prompt. Mutually exclusive with `--text-file`; exactly one of the two is required. |
 | `--text-file` | no | Path to a UTF-8 file used as the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Mutually exclusive with `--text`; exactly one of the two is required. Path/file errors are catalogued in [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 
-The per-backend spawn argv is in [`cli-options.md`](../../../docs/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the denied-command fallback is [`reference/exec-routing.md`](exec-routing.md). Per-backend deltas: [`claude`](coding-agent/claude.md) / [`codex`](coding-agent/codex.md) / [`opencode`](coding-agent/opencode.md).
+The per-backend spawn argv is in [`cli-options.md`](../../../docs/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the denied-command fallback is [`reference/exec-routing.md`](exec-routing.md). Per-backend deltas: [`claude`](coding-agent/claude-overlay.md) / [`codex`](coding-agent/codex-overlay.md) / [`opencode`](coding-agent/opencode-overlay.md).
 
 ### Model-name-to-backend inference
 
@@ -128,7 +128,7 @@ CODING AGENT: {coding_agent}
 ‹START CUE›
 ```
 
-Rendering is **two-stage**: the Director substitutes the values it already knows as literals before the call (`BASE`, the absolute role-file path, the cafleet-load purpose phrase), then the CLI substitutes the four identity placeholders shown in the skeleton above (`{member_id}` is the member's own newly-allocated id, which only the CLI can fill). The Director must leave **no stray single braces** other than those four. After spawn the member sees literal labeled lines — `FLEET ID: 24`, `DIRECTOR MEMBER ID: 84`, `YOUR MEMBER ID: 88`, `CODING AGENT: claude` — and uses those integers on every `cafleet` command. There is no `COMMUNICATION PROTOCOL` command-example block: the member learns poll/send/ack command shapes from the `cafleet` skill and its role file. The `CODING AGENT:` line keeps the spawned binary and the overlay selector in lockstep for every role: when `--coding-agent` is omitted at spawn, the CLI records — and `{coding_agent}` renders — the backend inherited from the Director's placement row (see [`roles/monitor.md`](../roles/monitor.md) for the monitoring member's spawn). The member reads its overlay `coding-agent/<name>.md` deterministically from this line and resolves it onto the base — materializing each `{placeholder}` to its overlay value (or the documented default) and applying each bound note before emitting, per the cafleet `SKILL.md` § *Resolve your overlay*.
+Rendering is **two-stage**: the Director substitutes the values it already knows as literals before the call (`BASE`, the absolute role-file path, the cafleet-load purpose phrase), then the CLI substitutes the four identity placeholders shown in the skeleton above (`{member_id}` is the member's own newly-allocated id, which only the CLI can fill). The Director must leave **no stray single braces** other than those four. After spawn the member sees literal labeled lines — `FLEET ID: 24`, `DIRECTOR MEMBER ID: 84`, `YOUR MEMBER ID: 88`, `CODING AGENT: claude` — and uses those integers on every `cafleet` command. There is no `COMMUNICATION PROTOCOL` command-example block: the member learns poll/send/ack command shapes from the `cafleet` skill and its role file. The `CODING AGENT:` line keeps the spawned binary and the overlay selector in lockstep for every role: when `--coding-agent` is omitted at spawn, the CLI records — and `{coding_agent}` renders — the backend inherited from the Director's placement row (see [`roles/monitor.md`](../roles/monitor.md) for the monitoring member's spawn). The member reads its overlay `coding-agent/<name>-overlay.md` deterministically from this line and resolves it onto the base — materializing each `{placeholder}` to its overlay value (or the documented default) and applying each bound note before emitting, per the cafleet `SKILL.md` § *Resolve your overlay*.
 
 Per-role delta slots (each consuming skill's spawn section fills these):
 
@@ -146,7 +146,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 - Programmer: `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.`
 - Tester: `IMPORTANT: Do NOT write implementation code — only test code.` (plus the Programmer no-commit line).
 - Verifier: `IMPORTANT: Do NOT commit code or modify implementation/test files.`
-- All execute roles: `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` and `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`
+- All execute roles: `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/exec-routing.md), which you load at startup.` and `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`
 - Drafter (normal mode): `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.` and `Do NOT create any design document file until you have received answers.`; (resume mode) `Do NOT ask clarifying questions — the COMMENTs contain the needed information.`
 
 **Member Create — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved per [`reference/base-dir.md`](base-dir.md)) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--text-file` write at `<BASE>/.prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
@@ -189,7 +189,7 @@ cafleet member capture --fleet-id <fleet-id> --member-id <member-id> --lines 200
 
 ## Answering a member's relayed question
 
-A fleet member never talks to the user. When it needs a recorded user reaction (approve / choose / confirm / continue-or-abort), it relays the question to the Director via `cafleet message send`, and the Director asks the user through {decision_surface}. The Director forwards the user's answer back to the member as an ordinary `cafleet message send` (which the member consumes on its next poll) — not a pane keystroke. The question-shape taxonomy is a backend delta — see your overlay (`coding-agent/<name>.md`). The canonical user-reaction rule is the `cafleet` skill § *Soliciting user reactions*.
+A fleet member never talks to the user. When it needs a recorded user reaction (approve / choose / confirm / continue-or-abort), it relays the question to the Director via `cafleet message send`, and the Director asks the user through {decision_surface}. The Director forwards the user's answer back to the member as an ordinary `cafleet message send` (which the member consumes on its next poll) — not a pane keystroke. The question-shape taxonomy is a backend delta — see your overlay (`coding-agent/<name>-overlay.md`). The canonical user-reaction rule is the `cafleet` skill § *Soliciting user reactions*.
 
 ## Member Exec
 
