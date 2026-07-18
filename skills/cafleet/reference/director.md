@@ -146,7 +146,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 - Programmer: `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.`
 - Tester: `IMPORTANT: Do NOT write implementation code — only test code.` (plus the Programmer no-commit line).
 - Verifier: `IMPORTANT: Do NOT commit code or modify implementation/test files.`
-- All execute roles: `IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.` and `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`
+- All execute roles: `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/exec-routing.md), which you load at startup.` and `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`
 - Drafter (normal mode): `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.` and `Do NOT create any design document file until you have received answers.`; (resume mode) `Do NOT ask clarifying questions — the COMMENTs contain the needed information.`
 
 **Member Create — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved per [`reference/base-dir.md`](base-dir.md)) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--text-file` write at `<BASE>/.prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
