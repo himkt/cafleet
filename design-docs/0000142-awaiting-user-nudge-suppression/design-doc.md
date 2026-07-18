@@ -10,11 +10,11 @@ A Director today can `cafleet member ping` or `cafleet message send` a member wh
 
 ## Success Criteria
 
-- [ ] `skills/cafleet/reference/supervision.md` prescribes the pre-nudge capture gate: every Director `cafleet member ping`, every non-exempt `cafleet message send`, and every `cafleet message broadcast` (all recipients) is preceded by a fresh `cafleet member capture` at `--lines 120`, classified on the existing five-state rubric using the target member's backend overlay cues, and fires only on `finished` or `stalled`.
-- [ ] A target classified `working` or `awaiting_user` has its nudge skipped for that round with the entire send deferred; the deferred send is re-evaluated with a fresh capture on a later facilitation tick, and skipped rounds do not count toward the 2-nudge escalation threshold.
-- [ ] The monitor-side suppression rule (never re-engage an `awaiting_user` pane; send nothing when the Director's pane is `awaiting_user`) is preserved verbatim in `roles/monitor.md`, `docs/concepts/monitoring.md`, and the wake-nudge payload string.
-- [ ] All three backend overlays and `_template.md` bind their *Pane-state capture cues* to both consumers: the monitor's classification rubric and the Director's pre-nudge gate.
-- [ ] No runtime change: the wake-nudge payload strings in `tmux.py` / `herdr.py` and the `cafleet/tests/multiplexer/` suite (`test_tmux.py`, `test_herdr.py`, `test_tmux_send_inline_preview.py`) are verified unchanged.
+- [x] `skills/cafleet/reference/supervision.md` prescribes the pre-nudge capture gate: every Director `cafleet member ping`, every non-exempt `cafleet message send`, and every `cafleet message broadcast` (all recipients) is preceded by a fresh `cafleet member capture` at `--lines 120`, classified on the existing five-state rubric using the target member's backend overlay cues, and fires only on `finished` or `stalled`.
+- [x] A target classified `working` or `awaiting_user` has its nudge skipped for that round with the entire send deferred; the deferred send is re-evaluated with a fresh capture on a later facilitation tick, and skipped rounds do not count toward the 2-nudge escalation threshold.
+- [x] The monitor-side suppression rule (never re-engage an `awaiting_user` pane; send nothing when the Director's pane is `awaiting_user`) is preserved verbatim in `roles/monitor.md`, `docs/concepts/monitoring.md`, and the wake-nudge payload string.
+- [x] All three backend overlays and `_template.md` bind their *Pane-state capture cues* to both consumers: the monitor's classification rubric and the Director's pre-nudge gate.
+- [x] No runtime change: the wake-nudge payload strings in `tmux.py` / `herdr.py` and the `cafleet/tests/multiplexer/` suite (`test_tmux.py`, `test_herdr.py`, `test_tmux_send_inline_preview.py`) are verified unchanged.
 
 ---
 
