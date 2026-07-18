@@ -1,6 +1,6 @@
 # Coding-Agent-Neutral Spawn Prompts and Skill-Wide Neutrality Sweep
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 32/32 tasks complete
 **Last Updated**: 2026-07-18
 
@@ -270,3 +270,4 @@ The three scope expansions touch these non-`skills/` surfaces — the complete s
 | 2026-07-18 | Initial draft |
 | 2026-07-18 | Review round 1: Success Criterion #2 rephrased to block scope; § 2 base-dir `~/.claude` line inventory (9, 38, 39, 49); `DONE(claude)` inventory extended to `programmer.md:62,67`; identity-mapping keep-list count corrected to 10 with sites enumerated |
 | 2026-07-18 | Status → Approved |
+| 2026-07-18 | Executed: all 9 steps implemented (32/32 tasks), 5 gate-check stragglers fixed, Reviewer approved round 1, PR #209 opened. Status → Complete |
