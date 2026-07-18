@@ -1,7 +1,7 @@
 # Coding-Agent-Neutral Spawn Prompts and Skill-Wide Neutrality Sweep
 
 **Status**: Approved
-**Progress**: 14/32 tasks complete
+**Progress**: 20/32 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -230,12 +230,12 @@ The three scope expansions touch these non-`skills/` surfaces — the complete s
 
 ### Step 5: Rename the marker-role tokens
 
-- [ ] `skills/cafleet-design-doc/reference/coordination.md`: role table `claude` → `user-relay`, line 5 mention <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/interview/interview.md:3,16,28,32,34,203` <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/create/create.md:74,75,77,78,180` <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/execute.md:143` (FIXME→agent), `:284` (COMMENT→user-relay) <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/roles/tester.md:49`, `director.md:26`, `programmer.md:47,49,57,62,67` (FIXME/DONE→agent) <!-- completed: -->
-- [ ] `docs/contributing.md:95` <!-- completed: -->
+- [x] `skills/cafleet-design-doc/reference/coordination.md`: role table `claude` → `user-relay`, line 5 mention <!-- completed: 2026-07-18T11:29 -->
+- [x] `skills/cafleet-design-doc/interview/interview.md:3,16,28,32,34,203` <!-- completed: 2026-07-18T11:29 -->
+- [x] `skills/cafleet-design-doc/create/create.md:74,75,77,78,180` <!-- completed: 2026-07-18T11:29 -->
+- [x] `skills/cafleet-design-doc/execute/execute.md:143` (FIXME→agent), `:284` (COMMENT→user-relay) <!-- completed: 2026-07-18T11:29 -->
+- [x] `skills/cafleet-design-doc/execute/roles/tester.md:49`, `director.md:26`, `programmer.md:47,49,57,62,67` (FIXME/DONE→agent) <!-- completed: 2026-07-18T11:29 -->
+- [x] `docs/contributing.md:95` <!-- completed: 2026-07-18T11:29 -->
 
 ### Step 6: Claude-first wording sweep
 

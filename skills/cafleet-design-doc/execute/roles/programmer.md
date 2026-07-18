@@ -44,9 +44,9 @@ When the Director assigns FIXME resolution as a preliminary task (before the TDD
 
 #### Step 1: List All FIXMEs
 
-Use Grep to find all FIXME(claude) comments:
+Use Grep to find all FIXME(agent) comments:
 ```
-FIXME(claude)
+FIXME(agent)
 ```
 
 #### Step 2: Fix Each Issue
@@ -54,17 +54,17 @@ FIXME(claude)
 For each FIXME:
 1. Read the FIXME comment and understand the issue
 2. Implement the fix
-3. Replace `FIXME(claude): description` with `DONE(claude): what was fixed`
+3. Replace `FIXME(agent): description` with `DONE(agent): what was fixed`
 4. Repeat for all FIXMEs
 
 #### Step 3: Report to Director
 
-After fixing all FIXMEs, send `complete (doc)` via `cafleet message send`. The DONE(claude) comments themselves are the inline trail — do NOT enumerate them in the cafleet body. Wait for the Director's `ready (doc)` confirmation.
+After fixing all FIXMEs, send `complete (doc)` via `cafleet message send`. The DONE(agent) comments themselves are the inline trail — do NOT enumerate them in the cafleet body. Wait for the Director's `ready (doc)` confirmation.
 
 #### Step 4: Cleanup DONE Comments
 
 When the Director sends `ready (doc)` to confirm the FIXME fixes are acceptable:
-1. Remove all `DONE(claude)` comments from the codebase
+1. Remove all `DONE(agent)` comments from the codebase
 2. Send `complete (doc)` via `cafleet message send`
 
 **Only proceed to the TDD cycle after all FIXMEs are resolved and confirmed.**

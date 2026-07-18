@@ -46,7 +46,7 @@ Before writing any tests, determine the test framework to use:
 2. **Check configuration files** (e.g., `pytest.ini`, `pyproject.toml`, `jest.config.*`, `vitest.config.*`, `Cargo.toml` for `[dev-dependencies]`, `go.mod`)
 3. **Check project's `CLAUDE.md`** for testing conventions or preferences
 4. **If deterministic** → use the detected framework. Proceed silently to Phase 2 — no cafleet message is sent for a deterministic detection.
-5. **If ambiguous** → Send `blocked (doc)` via `cafleet message send` and write a `COMMENT(tester): framework selection ambiguous — found <evidence>; need user arbitration` marker near the top of the doc body. The marker location MUST match the cafleet pointer (`doc` ⇒ doc-top) per the pointer-marker pairing rule in `../../reference/coordination.md`. The Director relays via {decision_surface}, writes the answer back as `COMMENT(claude): <choice>` at the same location, and sends `ready (doc)`. Resume Phase 2 once the Director's `ready (doc)` lands.
+5. **If ambiguous** → Send `blocked (doc)` via `cafleet message send` and write a `COMMENT(tester): framework selection ambiguous — found <evidence>; need user arbitration` marker near the top of the doc body. The marker location MUST match the cafleet pointer (`doc` ⇒ doc-top) per the pointer-marker pairing rule in `../../reference/coordination.md`. The Director relays via {decision_surface}, writes the answer back as `COMMENT(user-relay): <choice>` at the same location, and sends `ready (doc)`. Resume Phase 2 once the Director's `ready (doc)` lands.
 
 This detection only needs to happen once per project. After the framework is determined, use it for all subsequent steps.
 
