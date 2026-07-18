@@ -1,6 +1,6 @@
 # Suppress Director Nudges to Busy or Prompt-Parked Members
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 11/11 tasks complete
 **Last Updated**: 2026-07-18
 
@@ -136,3 +136,4 @@ The monitoring member's behavior is untouched, satisfying the issue's first requ
 |------|---------|
 | 2026-07-18 | Initial draft |
 | 2026-07-18 | Reviewer round 1: normative gate capture depth (`--lines 120`); target-member backend overlay cues; `message broadcast` gating; reply exemption narrowed to reply-soliciting messages; member→Director scope-out made explicit; deferred-send holding clause; test-verification surface widened to `cafleet/tests/multiplexer/` |
+| 2026-07-18 | Implementation complete: all 11 tasks and 5 success criteria verified, Reviewer approved (round 1), PR #210 opened |
