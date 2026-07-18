@@ -18,10 +18,10 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
-| **Director** | Main Claude | Bootstrap CAFleet fleet, spawn members, review all deliverables, demand revisions, run Slidev server lifecycle and `agent-browser close --all` safety net | Create slides/transcript, conduct research, modify report, run agent-browser browser-operation commands (except close --all) | [roles/director.md](roles/director.md) |
-| **Presentation** | claude pane (reads the `../reference/slidev.md` and `../reference/visualization.md` pages) | Create Slidev presentation from report using the `../reference/slidev.md` page | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
-| **Transcript** | claude pane | Create reading transcript with 1:1 slide correspondence | Invent data, modify report, conduct research | [roles/transcript.md](roles/transcript.md) |
-| **Visual Reviewer** | claude pane — one per batch | Capture screenshots/snapshots of assigned slides using the agent-browser CLI (`bun run agent-browser ...`) with a per-batch named session (`--session vr-batch-<start>`), identify visual issues including aesthetic quality, report findings to Director | Edit slide.md, modify report, fix issues directly | [roles/visual-reviewer.md](roles/visual-reviewer.md) |
+| **Director** | Main agent | Bootstrap CAFleet fleet, spawn members, review all deliverables, demand revisions, run Slidev server lifecycle and `agent-browser close --all` safety net | Create slides/transcript, conduct research, modify report, run agent-browser browser-operation commands (except close --all) | [roles/director.md](roles/director.md) |
+| **Presentation** | member pane (reads the `../reference/slidev.md` and `../reference/visualization.md` pages) | Create Slidev presentation from report using the `../reference/slidev.md` page | Invent data, modify report, conduct research | [roles/presentation.md](roles/presentation.md) |
+| **Transcript** | member pane | Create reading transcript with 1:1 slide correspondence | Invent data, modify report, conduct research | [roles/transcript.md](roles/transcript.md) |
+| **Visual Reviewer** | member pane — one per batch | Capture screenshots/snapshots of assigned slides using the agent-browser CLI (`bun run agent-browser ...`) with a per-batch named session (`--session vr-batch-<start>`), identify visual issues including aesthetic quality, report findings to Director | Edit slide.md, modify report, fix issues directly | [roles/visual-reviewer.md](roles/visual-reviewer.md) |
 
 ## Prerequisites
 
@@ -35,10 +35,10 @@ The Director is the root member of a CAFleet fleet — bootstrapped automaticall
 
 ```text
 User
- +-- Director (main Claude — runs cafleet fleet create, cafleet member create, runs Slidev background server)
-      +-- presentation (claude pane — authors slide.md; reads the slidev.md + visualization.md reference pages)
-      +-- transcript   (claude pane — authors transcript.md)
-      +-- vr-batch-<start> (claude pane — captures + reports on one slide batch; per-batch spawn/delete)
+ +-- Director (main agent — runs cafleet fleet create, cafleet member create, runs Slidev background server)
+      +-- presentation (member pane — authors slide.md; reads the slidev.md + visualization.md reference pages)
+      +-- transcript   (member pane — authors transcript.md)
+      +-- vr-batch-<start> (member pane — captures + reports on one slide batch; per-batch spawn/delete)
 ```
 
 Members cannot talk to the user directly — the Director always relays.

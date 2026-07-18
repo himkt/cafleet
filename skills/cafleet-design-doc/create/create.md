@@ -19,7 +19,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
-| **Director** | Main Claude | Register with CAFleet fleet, spawn members via `cafleet member create`, relay user answers, enforce clarification gate, orchestrate internal quality loop, present polished draft to user | Write the document, review it in detail | [roles/director.md](roles/director.md) |
+| **Director** | Main agent | Register with CAFleet fleet, spawn members via `cafleet member create`, relay user answers, enforce clarification gate, orchestrate internal quality loop, present polished draft to user | Write the document, review it in detail | [roles/director.md](roles/director.md) |
 | **Drafter** | Member (claude) | Ask clarifying questions (via Director relay), read target codebase, write and revise the design document | Communicate with user directly (goes through Director), review own work | [roles/drafter.md](roles/drafter.md) |
 | **Reviewer** | Member (claude) | Critically review drafts for rule compliance, readability, completeness, correctness | Write the document, communicate with user | [roles/reviewer.md](roles/reviewer.md) |
 
@@ -43,7 +43,7 @@ The Director is the root member of a CAFleet fleet — bootstrapped automaticall
 
 ```
 User
- +-- Director (main Claude -- cafleet fleet create, cafleet member create, orchestrates cycle)
+ +-- Director (main agent -- cafleet fleet create, cafleet member create, orchestrates cycle)
       +-- Drafter (member -- spawned in tmux pane; writes the design document)
       +-- Reviewer (member -- spawned in tmux pane; critically reviews the draft)
 ```

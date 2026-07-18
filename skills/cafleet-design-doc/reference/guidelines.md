@@ -52,7 +52,7 @@
 
 ## Core Principle
 
-**Comprehensive with structured readability.** Write a document complete enough that Claude can implement the feature by reading only this document. Use structured formatting (tables, lists, code blocks) to keep it scannable. Every sentence must earn its place, but prefer completeness over brevity when it prevents implementation guesswork.
+**Comprehensive with structured readability.** Write a document complete enough that an agent can implement the feature by reading only this document. Use structured formatting (tables, lists, code blocks) to keep it scannable. Every sentence must earn its place, but prefer completeness over brevity when it prevents implementation guesswork.
 
 ## Formatting Guidelines
 

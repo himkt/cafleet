@@ -1,7 +1,7 @@
 # Coding-Agent-Neutral Spawn Prompts and Skill-Wide Neutrality Sweep
 
 **Status**: Approved
-**Progress**: 20/32 tasks complete
+**Progress**: 27/32 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -239,13 +239,13 @@ The three scope expansions touch these non-`skills/` surfaces — the complete s
 
 ### Step 6: Claude-first wording sweep
 
-- [ ] Shutdown boilerplate in the 12 role files listed in § 6: "Your coding-agent process is terminated" <!-- completed: -->
-- [ ] `Main Claude` → `Main agent` and `main Claude` → `main agent` in the 5 workflow bodies (§ 6 lines) <!-- completed: -->
-- [ ] `claude pane` → `member pane` in `report/report.md` and `presentation/presentation.md` (§ 6 lines) <!-- completed: -->
-- [ ] Do-NOT lists in `execute/roles/{programmer,tester,verifier}.md:37`: "run coding-agent CLI commands" <!-- completed: -->
-- [ ] `execute/roles/tester.md:47`: project-instructions file (`CLAUDE.md` / `AGENTS.md`) <!-- completed: -->
-- [ ] `cafleet-research/reference/visualization.md:12` and `cafleet-design-doc/reference/guidelines.md:55` neutral phrasing <!-- completed: -->
-- [ ] `cafleet/reference/director.md:12-18`: role-based example member names (`Reviewer-B` / `Reviewer-C`) and matching `.prompts/` file names <!-- completed: -->
+- [x] Shutdown boilerplate in the 12 role files listed in § 6: "Your coding-agent process is terminated" <!-- completed: 2026-07-18T11:33 -->
+- [x] `Main Claude` → `Main agent` and `main Claude` → `main agent` in the 5 workflow bodies (§ 6 lines) <!-- completed: 2026-07-18T11:33 -->
+- [x] `claude pane` → `member pane` in `report/report.md` and `presentation/presentation.md` (§ 6 lines) <!-- completed: 2026-07-18T11:33 -->
+- [x] Do-NOT lists in `execute/roles/{programmer,tester,verifier}.md:37`: "run coding-agent CLI commands" <!-- completed: 2026-07-18T11:33 -->
+- [x] `execute/roles/tester.md:47`: project-instructions file (`CLAUDE.md` / `AGENTS.md`) <!-- completed: 2026-07-18T11:33 -->
+- [x] `cafleet-research/reference/visualization.md:12` and `cafleet-design-doc/reference/guidelines.md:55` neutral phrasing <!-- completed: 2026-07-18T11:33 -->
+- [x] `cafleet/reference/director.md:12-18`: role-based example member names (`Reviewer-B` / `Reviewer-C`) and matching `.prompts/` file names <!-- completed: 2026-07-18T11:33 -->
 
 ### Step 7: Layout-agnostic `.claude/rules/` phrasing
 

@@ -76,4 +76,4 @@ Your spawn prompt includes an `OUTPUT FILE` path (e.g., `researches/[topic-slug]
 
 ## Shutdown
 
-You are terminated by the Director via `cafleet member delete`, which kills your pane immediately. Your `claude` process is terminated — no message-level handshake is required.
+You are terminated by the Director via `cafleet member delete`, which kills your pane immediately. Your coding-agent process is terminated — no message-level handshake is required.

@@ -34,7 +34,7 @@ You do NOT speak to the user directly; all communication goes through the Direct
 
 **Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules.
 
-**Do NOT:** commit code or run git write operations; write implementation code; communicate with the user directly; spawn subagents or run `claude` commands; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
+**Do NOT:** commit code or run git write operations; write implementation code; communicate with the user directly; spawn subagents or run coding-agent CLI commands; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
 
 ## Workflow
 
@@ -44,7 +44,7 @@ Before writing any tests, determine the test framework to use:
 
 1. **Check existing tests** in the project (e.g., `tests/` directory, `*_test.*` files, `__tests__/` directory)
 2. **Check configuration files** (e.g., `pytest.ini`, `pyproject.toml`, `jest.config.*`, `vitest.config.*`, `Cargo.toml` for `[dev-dependencies]`, `go.mod`)
-3. **Check project's `CLAUDE.md`** for testing conventions or preferences
+3. **Check the project-instructions file (`CLAUDE.md` / `AGENTS.md`, per your harness)** for testing conventions or preferences
 4. **If deterministic** → use the detected framework. Proceed silently to Phase 2 — no cafleet message is sent for a deterministic detection.
 5. **If ambiguous** → Send `blocked (doc)` via `cafleet message send` and write a `COMMENT(tester): framework selection ambiguous — found <evidence>; need user arbitration` marker near the top of the doc body. The marker location MUST match the cafleet pointer (`doc` ⇒ doc-top) per the pointer-marker pairing rule in `../../reference/coordination.md`. The Director relays via {decision_surface}, writes the answer back as `COMMENT(user-relay): <choice>` at the same location, and sends `ready (doc)`. Resume Phase 2 once the Director's `ready (doc)` lands.
 
@@ -84,4 +84,4 @@ When the Director sends `ready (paragraph-Implementation > Step N)` after a Prog
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your `claude` process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.
+The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.

@@ -34,7 +34,7 @@ You do NOT speak to the user directly; all communication goes through the Direct
 
 **Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules.
 
-**Do NOT:** commit code or run git write operations; modify test files; communicate with the user directly; spawn subagents or run `claude` commands; fix specification issues without Director approval; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
+**Do NOT:** commit code or run git write operations; modify test files; communicate with the user directly; spawn subagents or run coding-agent CLI commands; fix specification issues without Director approval; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
 
 ## Workflow
 
@@ -113,4 +113,4 @@ If tests fail and you believe the test is defective (your implementation matches
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your `claude` process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.
+The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.

@@ -10,12 +10,12 @@ Register a new member and spawn a coding-agent pane in the Director's own tmux w
 
 ```bash
 cafleet member create --fleet-id <fleet-id> \
-  --name Claude-B --description "Reviewer for PR #42" \
-  --text-file /abs/path/to/<BASE>/.prompts/claude-b-20260514T145000Z.md
+  --name Reviewer-B --description "Reviewer for PR #42" \
+  --text-file /abs/path/to/<BASE>/.prompts/reviewer-b-20260514T145000Z.md
 
 cafleet member create --fleet-id <fleet-id> \
-  --name Codex-A --description "Reviewer for PR #42" --coding-agent codex \
-  --text-file /abs/path/to/<BASE>/.prompts/codex-a-20260514T145000Z.md
+  --name Reviewer-C --description "Reviewer for PR #42" --coding-agent codex \
+  --text-file /abs/path/to/<BASE>/.prompts/reviewer-c-20260514T145000Z.md
 
 cafleet member create --fleet-id <fleet-id> \
   --name monitor --description "Monitoring member: owns the heartbeat" \

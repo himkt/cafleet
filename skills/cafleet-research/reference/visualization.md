@@ -9,7 +9,7 @@ The skill writes a self-contained Python script that imports matplotlib. The run
 
 ### 0. Resolve directories
 
-**CRITICAL — placeholder convention.** `${FIGURE_BASE}`, `${BASE}`, `${CODE_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` are **template placeholders, NOT shell environment variables** — resolve each to a concrete absolute path in your head and write that literal path into the script via the Write tool. Do NOT use `export FIGURE_BASE=...` or any shell variable assignment (Bash calls in Claude Code are ephemeral, so values do not persist between calls).
+**CRITICAL — placeholder convention.** `${FIGURE_BASE}`, `${BASE}`, `${CODE_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` are **template placeholders, NOT shell environment variables** — resolve each to a concrete absolute path in your head and write that literal path into the script via the Write tool. Do NOT use `export FIGURE_BASE=...` or any shell variable assignment (Bash calls in coding-agent harnesses are ephemeral, so values do not persist between calls).
 
 **Resolve `${BASE}` in this order:**
 
