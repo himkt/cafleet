@@ -72,7 +72,7 @@ A wake is a single-line `[monitor] wake: N member(s) due — …` nudge keystrok
    ```
    The Director alone judges whether a `finished` member still owes assigned work — you cannot see the dispatch ledger, so you report and let the Director decide.
 
-   **Never re-engage a pane you classified `awaiting_user`, and that bar outranks every re-engage trigger.** When the Director's own pane is `awaiting_user`, send **nothing** this wake — no matter how many due members are `stalled` or `finished`. `message send` fires an inline preview whose keystroke leads with `Esc`, and that `Esc` exists to stop the trailing `Enter` from blindly *confirming* a prompt — the same keystroke would cancel a Director's pending `AskUserQuestion`. The suppressed report is not lost: the member stays due on its interval and stall-check cadences and re-surfaces, unchanged, on its next wake. If nothing is `stalled`/`finished` and the Director is not `awaiting_user`, do nothing and end your turn.
+   **Never re-engage a pane you classified `awaiting_user`, and that bar outranks every re-engage trigger.** When the Director's own pane is `awaiting_user`, send **nothing** this wake — no matter how many due members are `stalled` or `finished`. `message send` fires an inline preview whose keystroke leads with `Esc`, and that `Esc` exists to stop the trailing `Enter` from blindly *confirming* a prompt — the same keystroke would cancel a Director's pending `{decision_surface}` prompt. The suppressed report is not lost: the member stays due on its interval and stall-check cadences and re-surfaces, unchanged, on its next wake. If nothing is `stalled`/`finished` and the Director is not `awaiting_user`, do nothing and end your turn.
 
 ### The wake nudge you consume
 

@@ -2,11 +2,11 @@
 
 Read this file for the base-directory resolution procedure and the no-bypass write protocol. This procedure is the single authoritative resolver for every CAFleet scratch / audit / figure path. The resolution outcome (`${BASE}`) is the only legitimate root for those writes. Consuming skills MUST NOT compute `${BASE}` independently and MUST NOT fall back to `/tmp` when resolution returns the `<unset>` sentinel.
 
-`/tmp/claude-code` remains a perfectly valid resolved `${BASE}` when this procedure explicitly selects it via the `AskUserQuestion` branch — only **bypassing** base-dir to write to `/tmp` without its consent is forbidden.
+`/tmp/cafleet` remains a perfectly valid resolved `${BASE}` when this procedure explicitly selects it via the `{decision_surface}` branch — only **bypassing** base-dir to write to `/tmp` without its consent is forbidden.
 
 ## Procedure
 
-This procedure resolves `${BASE}` using only `git rev-parse --show-toplevel` (Bash) and `AskUserQuestion`. It writes nothing at resolution time. Claude's job is to (a) pick the task-scope branch (Step 0) when the consuming skill operates on a per-task folder, otherwise the shared-root branch (Step 1); and (b) drive `AskUserQuestion` (Step 2) only when Step 1 reaches branch 3 (CWD is `$HOME` or under `~/.claude`).
+This procedure resolves `${BASE}` using only `git rev-parse --show-toplevel` (Bash) and `{decision_surface}`. It writes nothing at resolution time. The resolving agent's job is to (a) pick the task-scope branch (Step 0) when the consuming skill operates on a per-task folder, otherwise the shared-root branch (Step 1); and (b) drive the `{decision_surface}` prompt (Step 2) only when Step 1 reaches branch 3 (CWD is `$HOME` or under a coding agent's user-level config directory).
 
 ### Step 0. Task-scope resolution (preferred for task-aware consuming skills)
 
@@ -34,25 +34,32 @@ Skipping canonicalization resolves the wrong BASE — a directory literally name
 
 When the consuming skill has no per-task folder convention (the shared-root case):
 
-1. Determine the CWD and `$HOME`. Let `claude_subdir = $HOME/.claude`.
-2. **If the CWD is neither `$HOME` itself nor `claude_subdir` (`~/.claude`) nor any directory under `~/.claude`** → `${BASE}` is the CWD itself (the working directory, **not** the repo root). Done. (Only `$HOME` exactly and the `~/.claude` subtree fall through to Step 2 — an ordinary project elsewhere under `$HOME` resolves here.)
-3. **Otherwise** (CWD is `$HOME` exactly, or `~/.claude` / any directory under it) → go to Step 2 with candidates `[/tmp/claude-code, <CWD>]`.
+1. Determine the CWD and `$HOME`. The user-level config directories are checked for **all** backends regardless of which one is resolving — resolution needs no backend identity, and a Director of one backend whose CWD sits inside another backend's config dir is still in an operator-config location, not a project:
 
-### Step 2. AskUserQuestion (only when Step 1 reaches branch 3)
+   | Backend | User-level config dir |
+   |:--|:--|
+   | claude | `~/.claude` |
+   | codex | `~/.codex` |
+   | opencode | `~/.config/opencode` |
 
-Present the candidates via `AskUserQuestion` ("Select the base directory for output files:"):
+2. **If the CWD is neither `$HOME` itself nor a config dir from the table nor any directory under one** → `${BASE}` is the CWD itself (the working directory, **not** the repo root). Done. (Only `$HOME` exactly and the config-dir subtrees fall through to Step 2 — an ordinary project elsewhere under `$HOME` resolves here.)
+3. **Otherwise** (CWD is `$HOME` exactly, or a config dir from the table / any directory under one) → go to Step 2 with candidates `[/tmp/cafleet, <CWD>]`.
 
-- `/tmp/claude-code (recommended)` → `${BASE} = /tmp/claude-code`
+### Step 2. Decision-surface prompt (only when Step 1 reaches branch 3)
+
+Present the candidates via `{decision_surface}` ("Select the base directory for output files:"):
+
+- `/tmp/cafleet (recommended)` → `${BASE} = /tmp/cafleet`
 - `${CWD}` → `${BASE} = ${CWD}` (the CWD literal from the candidates list)
 - `Other` (free text) → `${BASE} = user input` (resolve against `${CWD}` if relative)
 
-The chosen value is `${BASE}`. Nothing is persisted; if the procedure reloads in the same `$HOME` / `~/.claude` CWD, this branch re-prompts.
+The chosen value is `${BASE}`. Nothing is persisted; if the procedure reloads in the same `$HOME` / config-dir CWD, this branch re-prompts.
 
 ## No-bypass write protocol
 
 Every CAFleet member, every consumer skill, and every Director MUST follow this protocol for scratch / audit / figure / spawn-prompt-render writes:
 
-1. **Every write under `${BASE}` or an explicit consumer-supplied absolute target.** Scratch (pre-spawn renders of spawn prompts at `${BASE}/.prompts/<role>-<UTC-compact>.md`, working notes), audit files, figure artifacts, and any other ephemeral output MUST land under `${BASE}` or under a consumer-supplied absolute path — e.g., the design-doc directory delivered to spawned members via `[INSERT abs design-doc directory]`, or the research folder delivered via `[INSERT abs research folder]`. Never `/tmp` unless `${BASE}` itself is `/tmp/claude-code` (which is a legitimate base-dir choice).
+1. **Every write under `${BASE}` or an explicit consumer-supplied absolute target.** Scratch (pre-spawn renders of spawn prompts at `${BASE}/.prompts/<role>-<UTC-compact>.md`, working notes), audit files, figure artifacts, and any other ephemeral output MUST land under `${BASE}` or under a consumer-supplied absolute path — e.g., the design-doc directory delivered to spawned members via `[INSERT abs design-doc directory]`, or the research folder delivered via `[INSERT abs research folder]`. Never `/tmp` unless `${BASE}` itself is `/tmp/cafleet` (which is a legitimate base-dir choice).
 
 2. **`${BASE} == <unset>` is a hard stop, not a fallback.** If `${BASE}` is the literal sentinel `<unset>` (absolute-path argument branch), any code that tries to compute a path from `${BASE}` MUST abort with `Error: BASE is <unset>; refusing to fall back to /tmp`. The loud failure is the safety net for sites that forgot to guard explicitly.
 

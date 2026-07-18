@@ -1,7 +1,7 @@
 # Coding-Agent-Neutral Spawn Prompts and Skill-Wide Neutrality Sweep
 
 **Status**: Approved
-**Progress**: 2/32 tasks complete
+**Progress**: 6/32 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -209,10 +209,10 @@ The three scope expansions touch these non-`skills/` surfaces — the complete s
 
 ### Step 2: Generalize base-dir resolution
 
-- [ ] `skills/cafleet/reference/base-dir.md`: per-backend config-dir table replacing `claude_subdir`, all four `~/.claude` lines rewritten (9, 38, 39, 49 per § 2), `{decision_surface}` for every `AskUserQuestion` naming (incl. the Step 2 heading), "The resolving agent's job", `/tmp/cafleet` on lines 5, 39, 45, 55 <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/execute.md:82`: config-dir phrasing + `/tmp/cafleet` (×2) <!-- completed: -->
-- [ ] `skills/cafleet/reference/supervision.md:33`: "a pending `{decision_surface}` prompt" <!-- completed: -->
-- [ ] `skills/cafleet/roles/monitor.md:75`: "a Director's pending `{decision_surface}` prompt" <!-- completed: -->
+- [x] `skills/cafleet/reference/base-dir.md`: per-backend config-dir table replacing `claude_subdir`, all four `~/.claude` lines rewritten (9, 38, 39, 49 per § 2), `{decision_surface}` for every `AskUserQuestion` naming (incl. the Step 2 heading), "The resolving agent's job", `/tmp/cafleet` on lines 5, 39, 45, 55 <!-- completed: 2026-07-18T11:14 -->
+- [x] `skills/cafleet-design-doc/execute/execute.md:82`: config-dir phrasing + `/tmp/cafleet` (×2) <!-- completed: 2026-07-18T11:14 -->
+- [x] `skills/cafleet/reference/supervision.md:33`: "a pending `{decision_surface}` prompt" <!-- completed: 2026-07-18T11:14 -->
+- [x] `skills/cafleet/roles/monitor.md:75`: "a Director's pending `{decision_surface}` prompt" <!-- completed: 2026-07-18T11:14 -->
 
 ### Step 3: Finish the `/tmp/cafleet` rename
 
