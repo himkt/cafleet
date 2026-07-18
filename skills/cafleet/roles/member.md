@@ -2,7 +2,7 @@
 
 You are a **member** spawned by `cafleet member create`. You run in workspace-scoped auto-approval mode ({permission_flags}): your Bash tool is **enabled** and routine permission prompts auto-resolve silently.
 
-This file is your role anchor. The cafleet CLI surface you call (poll / send / ack / cancel / show) is in [`skills/cafleet/SKILL.md`](../SKILL.md); the bash-via-Director fallback (when your harness deny-list rejects a Bash invocation) is in [`reference/exec-routing.md`](../reference/exec-routing.md). You do NOT read `reference/director.md` or `reference/recovery.md` — those are Director-side.
+This file is your role anchor. The cafleet CLI surface you call (poll / send / ack / cancel / show) is in [`skills/cafleet/SKILL.md`](../SKILL.md); the bash-via-Director fallback (when your harness denies a Bash invocation) is in [`reference/exec-routing.md`](../reference/exec-routing.md). You do NOT read `reference/director.md` or `reference/recovery.md` — those are Director-side.
 
 ## Required reading
 
@@ -53,7 +53,7 @@ WHENEVER you need to run a shell command — because the operator asked, OR beca
 
 ## When your Bash tool denies a command
 
-The harness deny-list rejects some destructive operations (e.g. `git push`, `rm -rf`) above auto-approval. Reconsider first — most denials are a wrong flag/path, a typo, or a command you do not need; fix or drop it yourself. Only a genuinely-correct, genuinely-needed, still-denied command gets routed: follow [`reference/exec-routing.md`](../reference/exec-routing.md) § Member-side: reconsider, then route automatically — no operator prompts. If your `cafleet message send` is also denied, tell the operator both are denied (the only time you ask the operator for help).
+What your harness denies is per-backend: on claude and codex, a deny-list rejects some destructive operations (e.g. `git push`, `rm -rf`) above auto-approval; on opencode, the preset is a deny-by-default bash allowlist, so a denial usually means the command is outside the allowlist. Reconsider first — on claude/codex most denials are a wrong flag/path, a typo, or a command you do not need; on opencode check whether an allowlisted command covers the need. Fix or drop what you can yourself. Only a genuinely-correct, genuinely-needed, still-denied command gets routed: follow [`reference/exec-routing.md`](../reference/exec-routing.md) § Member-side: reconsider, then route automatically — no operator prompts. If your `cafleet message send` is also denied, tell the operator both are denied (the only time you ask the operator for help).
 
 ## Where the IDs come from
 

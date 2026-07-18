@@ -22,11 +22,12 @@ The flag means slightly different things per command:
   every role — inherits the spawning Director's placement backend (an explicit
   value still wins).
 
-Each backend is spawned with flags that enable its Bash tool and auto-resolve
-routine permission prompts, so members run cafleet (and any shell command)
-directly. The per-backend spawn argv, auto-approval posture, and sandbox
-trade-offs are specified in
-[Coding-agent backends](../spec/coding-agent-backends.md).
+Each backend is spawned with flags that enable its Bash tool with no runtime
+permission prompts. claude and codex members run cafleet (and any shell
+command) directly; opencode members run only the commands on their preset's
+deny-by-default bash allowlist and route everything else to the Director.
+The per-backend spawn argv, auto-approval posture, and sandbox trade-offs are
+specified in [Coding-agent backends](../spec/coding-agent-backends.md).
 
 ## cafleet usage from a member pane
 
@@ -56,5 +57,6 @@ pages linked above.
   and `opencode` panes do not display the member name in their pane title.
   The `pane_id` column of `cafleet member list` is ground truth for all three.
 - **Sandbox isolation.** Only `codex` provides OS-level (kernel-enforced)
-  isolation. `claude` and `opencode` rely on deny-list-only safety floors;
-  operators who need kernel-enforced isolation should use the `codex` backend.
+  isolation. `claude` relies on a deny-list safety floor and `opencode` on a
+  deny-by-default bash allowlist — neither is kernel-enforced; operators who
+  need kernel-enforced isolation should use the `codex` backend.

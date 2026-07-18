@@ -1,6 +1,6 @@
 # Routing Bash via the Director
 
-The bash-via-Director protocol is the **fallback** for the harness deny-list. Members run cafleet and any shell command directly via the Bash tool by default (workspace-scoped auto-approval — see [`roles/member.md`](../roles/member.md)). The fallback fires only when the coding-agent harness deny-list rejects a Bash invocation (e.g. `git push`, `rm -rf`): the member auto-routes a plain CAFleet message to its Director, which dispatches the command into the member's pane via `cafleet member exec` (keystrokes literal `! <cmd>` + `Enter`, honored by `claude` / `codex` / `opencode`).
+The bash-via-Director protocol is the **fallback** for a harness-denied command. Members run shell commands directly via the Bash tool by default (workspace-scoped auto-approval — see [`roles/member.md`](../roles/member.md)); how often the fallback fires is per-backend. For claude and codex members, denial is the rare case — the harness deny-list rejects a few destructive operations (e.g. `git push`, `rm -rf`). For opencode members, whose preset is a deny-by-default bash allowlist, denial is the common case for any un-allowlisted command, and routing workflow commands (`mise`, `mkdir`, …) through the Director is the routine path, not a rare destructive-command event. Either way the member auto-routes a plain CAFleet message to its Director, which dispatches the command into the member's pane via `cafleet member exec` (keystrokes literal `! <cmd>` + `Enter`, honored by `claude` / `codex` / `opencode`).
 
 ## The two primitives
 
@@ -11,7 +11,7 @@ The bash-via-Director protocol is the **fallback** for the harness deny-list. Me
 
 ## Member-side: reconsider, then route
 
-Most denials are a wrong flag, wrong path, or an unnecessary command — fix or drop it yourself first. Only a genuinely-correct, genuinely-needed, still-denied command gets routed:
+Reconsider first: on claude and codex a denial is usually a wrong flag, wrong path, or an unnecessary command; on opencode it usually means the command is outside the allowlist — check whether an allowlisted command covers the need. Fix or drop what you can yourself. Only a genuinely-correct, genuinely-needed, still-denied command gets routed:
 
 1. Send a plain CAFleet message to the Director:
    ```bash
