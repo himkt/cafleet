@@ -39,7 +39,7 @@ cd cafleet
 
 mise //:uv-sync
 mise //cafleet:install    # editable uv tool install of the cafleet CLI
-cafleet setup db          # migrate the database schema (idempotent)
+cafleet setup --skip claude --skip codex --skip opencode   # migrate the database schema only (idempotent)
 
 mise //cafleet:lint       # ruff check + ruff format --check
 mise //cafleet:format     # ruff check --fix + ruff format
@@ -58,7 +58,7 @@ reinstalls from the committed lockfile and cannot update it.
 
 ### Installing the skills from your checkout
 
-`cafleet setup` installs the skills from a published Release, so it is the
+`cafleet setup` installs the assets from a published Release, so it is the
 **end-user (installed-CLI)** path. Contributors working from a clone install
 the skills from the working tree instead:
 

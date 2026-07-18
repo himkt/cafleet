@@ -65,9 +65,8 @@ trust_level = "trusted"
 ### The `cafleet` rules file {#cafleet-rules-file}
 
 `~/.codex/rules/cafleet.rules` grants the auto-approval posture for `cafleet`
-commands. It ships as a static file in the skills release archive
-(`presets/codex/cafleet.rules`) and is installed by `cafleet setup` (or
-`cafleet setup codex`):
+commands. It ships as a static file in the assets release archive
+(`presets/codex/cafleet.rules`) and is installed by `cafleet setup`:
 
 ```text
 prefix_rule(pattern = ["cafleet"], decision = "allow")
@@ -107,13 +106,13 @@ Example values: `anthropic/claude-sonnet-4-6`, `openai/gpt-5.5`.
 ### The `cafleet` agent preset {#cafleet-agent-preset}
 
 `--agent cafleet` binds the member to `~/.opencode/agents/cafleet.md`. The
-preset ships as a static file in the skills release archive
+preset ships as a static file in the assets release archive
 (`presets/opencode/cafleet.md`) and is installed — overwriting any existing
-copy — by `cafleet setup` (or `cafleet setup opencode`); to refresh after a
-CAFleet upgrade, re-run it. The preset is a spawn precondition: the spawn argv
-references `--agent cafleet`, so `cafleet member create --coding-agent
-opencode` fails with `opencode agent preset not found at <preset>; run
-'cafleet setup opencode' first` when the file is missing.
+copy — by `cafleet setup`; to refresh after a CAFleet upgrade, re-run it. The
+preset is a spawn precondition: the spawn argv references `--agent cafleet`,
+so `cafleet member create --coding-agent opencode` fails with `opencode agent
+preset not found at <preset>; run 'cafleet setup' first` when the file is
+missing.
 
 The preset's ruleset lists a catch-all `"*": "allow"` first, then specific
 denies (`sudo*`, `rm -rf*`, `curl*`, `git push*`, `**/.env`, …). opencode

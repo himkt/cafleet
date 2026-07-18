@@ -324,7 +324,7 @@ The unified shapes:
 | `last_tick_at` | optional string | |
 | `tick_seconds` | integer | DDL default 5 |
 
-**SkillInstalls** (`coding_agent` TEXT PK, not autoincrement, not FK-linked)
+**AssetInstalls** (`coding_agent` TEXT PK, not autoincrement, not FK-linked)
 
 | Field | Type | Notes |
 |---|---|---|
@@ -332,7 +332,7 @@ The unified shapes:
 | `cafleet_version` | string | the `importlib.metadata.version("cafleet")` string at install time |
 | `installed_at` | string | UTC ISO-8601 with microsecond precision |
 
-Writes are upserts. Rows are written by the assets half of `cafleet setup` — bare or per-agent (`setup claude` / `setup codex` / `setup opencode`) — after each home's skills and preset (where one exists) install successfully, so a row attests skills + preset; `cafleet setup db` never touches the rows. The rows feed the stale-skills guard on every fleet-scoped command group and the `cafleet doctor` skills report.
+Writes are upserts. Rows are written by the assets half of `cafleet setup` — one row per target agent (`claude`, `codex`, `opencode`, minus any `--skip`ped agent) — after that agent's skills and preset (where one exists) install successfully, so a row attests skills + preset; the db half never touches the rows. The rows feed the stale-assets guard on every fleet-scoped command group and the `cafleet doctor` assets report.
 
 ### 5.3 Enums (literal string contracts)
 
@@ -811,7 +811,7 @@ HTTP status); permission errors gate authorization. The exit-code policy is
 
 ### 6.3 CLI
 
-**Scope:** the entire `cafleet` command tree (25 commands across 5 groups + 3
+**Scope:** the entire `cafleet` command tree (23 commands across 4 groups + 3
 top-level commands — §1, §10), the shared option guards, and the `member create`
 spawn orchestration + rollback ladder. Orchestration glue only — it wires
 broker/multiplexer/output/coding-agent. The command/option checklist is §10; this
@@ -938,36 +938,36 @@ available (`ensure_available()`), discovers the pane context
 (`context_discovery()`), and reads the backend's presence env var (`TMUX` for
 tmux, `HERDR_ENV` for herdr). Emits a JSON object under a `multiplexer` key
 carrying `backend`, `session`, `window_id`, `pane_id`, `presence_var`, and
-`presence_value` (or the equivalent text block), followed by the skills-install
+`presence_value` (or the equivalent text block), followed by the assets-install
 report.
 
-**Skills-install report.** Read all `skill_installs` rows (or detect a missing
-table). In text mode, append a `skills:` block after the `multiplexer:` block:
+**Assets-install report.** Read all `asset_installs` rows (or detect a missing
+table). In text mode, append an `assets:` block after the `multiplexer:` block:
 
 ```
-skills:
+assets:
   cli_version: 0.6.0
   claude:      0.6.0 (2026-07-04T00:12:09.123456+00:00) ok
   codex:       0.5.0 (2026-06-20T10:00:00.987654+00:00) STALE
 ```
 
-One line per recorded `skill_installs` row, format `<agent>:  <version>
+One line per recorded `asset_installs` row, format `<agent>:  <version>
 (<installed_at verbatim>) ok|STALE` where `ok` means the recorded version equals
 the runtime CLI version, `STALE` means it differs. `installed_at` is printed
 **verbatim** (microsecond precision, exactly as stored). When no rows exist (or
 the table is missing):
 
 ```
-skills:
-  (no skills install recorded; run 'cafleet setup')
+assets:
+  (no assets install recorded; run 'cafleet setup')
 ```
 
-In JSON mode, a `"skills"` key sibling to `"multiplexer"`:
+In JSON mode, a `"assets"` key sibling to `"multiplexer"`:
 
 ```json
 {
   "multiplexer": { "backend": "tmux", "session": "...", "window_id": "...", "pane_id": "...", "presence_var": "TMUX", "presence_value": "..." },
-  "skills": {
+  "assets": {
     "cli_version": "0.6.0",
     "installs": [
       {"coding_agent": "claude", "cafleet_version": "0.6.0", "installed_at": "2026-07-04T00:12:09.123456+00:00", "current": true},
@@ -980,7 +980,7 @@ In JSON mode, a `"skills"` key sibling to `"multiplexer"`:
 `installs` is an empty array when no rows exist. `current` is `true` when the
 recorded `cafleet_version` equals the runtime CLI version, else `false`. Rows
 in `installs` are ordered by ascending `coding_agent`. `doctor` is exempt from
-the stale-skills guard — it reports instead of blocking.
+the stale-assets guard — it reports instead of blocking.
 
 #### `fleet` group
 
@@ -1265,10 +1265,19 @@ errors propagate unwrapped.
 
 #### `setup`
 
-`setup` is a Click **group** with `invoke_without_command=True`. Bare `cafleet
-setup` takes **no** options. The `setup` group is the single schema-management
-entry point. Bare invocation reads the CLI's own version and runs two
-independent halves, **in order** (db first, then assets):
+`setup` is a plain Click **command** (no subcommands) — the single onboarding
+and schema-management entry point. Command help: `Migrate the database schema
+and install the coding-agent assets (skills and presets).` It takes no
+positional arguments — `cafleet setup <word>` fails with Click's standard
+`Got unexpected extra argument (<word>)` error — and does not accept
+`--fleet-id`.
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--skip AGENT` | no | Repeatable. `click.Choice(["claude", "codex", "opencode"])`; an unknown value fails with Click's standard invalid-choice error (exit 2). Duplicates are deduplicated. Help: `Skip the named agent's assets install (repeatable).` |
+
+Reads the CLI's own version and runs two independent halves, **in order** (db
+first, then assets):
 
 - **DB half** — initialize or migrate the registry via the db-migration driver
   (§8): force a sync SQLite URL, create the DB file's parent directory, and
@@ -1276,89 +1285,51 @@ independent halves, **in order** (db first, then assets):
   application error, print `db half failed: <message>` and record the
   failure. If the db half failed, the assets half fails its schema pre-flight and
   both halves are reported failed.
-- **Assets half** — resolve install targets, then download the release archive
-  and install the skills plus each target's bundled preset (where one exists),
-  upserting one `skill_installs` row per home after that home's install
-  succeeds. On an application error, print `assets half failed: <message>`
-  and record the failure.
-- If anything failed → application error `<failed halves joined by ' and '> half
-  failed` (exit 1; db listed first, matching run order — e.g. `db and assets
-  half failed`).
+- **Assets half** — targets are the fixed list `claude`, `codex`, `opencode`
+  (in that order) minus the `--skip`ped agents (no home auto-detection: each
+  target's agent directories are created as needed). Downloads the release
+  archive and installs the skills plus each target's bundled preset (where one
+  exists), upserting one `asset_installs` row per target after that target's
+  install succeeds. On an application error, print `assets half failed:
+  <message>` and record the failure. When all three agents are skipped, the
+  half is skipped entirely: the command echoes `assets half skipped (all
+  agents skipped)` and the half counts as **not-run** — it cannot contribute a
+  failure.
+- If anything that ran failed → application error `<failed halves joined by '
+  and '> half failed` (exit 1; db listed first, matching run order — e.g. `db
+  and assets half failed`).
 
-The group callback no-ops unless `ctx.invoked_subcommand is None`, so the
-subcommands never trigger the bare-setup sequence.
+##### Schema-only invocation
 
-##### `setup db` subcommand
+`cafleet setup --skip claude --skip codex --skip opencode` is the documented
+contributor/CI path: it is deterministic (independent of which agent homes
+exist), runs the db half only (the assets half is skipped and cannot
+contribute a failure), and never contacts GitHub — so it works on unreleased
+dev versions. It never records `asset_installs` rows.
 
-No options. Runs the db-migration driver (§8) only: forces a sync SQLite URL,
-creates the DB file's parent directory, and applies the bundled migrations up
-to the head revision (idempotent). Success output, by prior DB state:
+##### Shared helpers (the assets half)
 
-```
-Created <db_file> and applied migrations to head (<head>).   # fresh DB
-Upgraded from <old_rev> to <head>.                           # behind head
-Already at head (<head>); nothing to do.                     # at head
-```
-
-It refuses two states with an application error (exit 1): a DB with existing
-tables but no `alembic_version` table, and a DB whose recorded revision is
-unknown to the bundled migration chain:
-
-```
-Error: DB has existing tables but no alembic_version. Run `alembic stamp head` manually if you are sure the schema matches.
-Error: DB schema is at revision <rev> which is unknown to this version of cafleet. Refusing to downgrade automatically.
-```
-
-Never touches `skill_installs` rows (the schema migration creates the table
-but `setup db` records nothing).
-
-##### Per-agent subcommands (`setup claude` / `setup codex` / `setup opencode`)
-
-One subcommand per coding-agent name, registered from the coding-agent names so
-all three share one implementation. No options. Reads the CLI's own version.
-Pre-flight: the `skill_installs` table must exist, else exit 1 with:
-
-```
-Error: the database schema is missing or outdated; run 'cafleet setup' or 'cafleet setup db' first
-```
-
-After the pre-flight, runs the assets half for exactly the named agent —
-auto-detection is skipped and the agent's home is created if missing — exactly
-as the bare assets half does per detected home. Per-home success output (the
-preset line appears for codex and opencode only):
-
-```
-<agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>) -> <skills dir>
-<agent>: installed preset (v<version>) -> <target>
-```
-
-An install failure aborts the loop; rows recorded for homes completed before
-the failure remain.
-
-##### Shared helpers (bare `setup` and the per-agent subcommands)
-
-**resolve-targets** (a per-agent subcommand yields exactly its literal agent;
-bare `setup` auto-detects each known coding-agent home whose parent dir exists;
-none → application error `no coding-agent homes detected (looked for ~/.claude,
-~/.codex, ~/.config/opencode); install a coding agent first, or run 'cafleet
-setup <agent>'`);
+**resolve-targets** (the fixed list `claude`, `codex`, `opencode` minus the
+`--skip`ped agents, in that fixed order; all three skipped → the assets half
+is skipped entirely, per above);
 **resolve-download-url** (GET the GitHub release for the tag matching the CLI
 version, 30 s timeout; 404 → `no release found for version <version>`; other
 HTTP/network error → `could not reach the GitHub API (<reason>)`; find asset
-`cafleet-skills-v<version>.zip`; parse failure → `could not parse the GitHub API
-response`; missing asset → `asset <asset_name> not found in release
-<version>`); **download-and-extract** (download to a temp zip; **reject any
-member whose path is absolute or contains a `..` component** with `archive
-member '<member>' has an unsafe path; rejecting the archive`; a
-malformed/unreadable archive → `release asset is malformed`; validate the
-extracted `skills/` dir contains exactly the three skill dirs `cafleet`,
-`cafleet-design-doc`, `cafleet-research`, and that both preset archive sources
-`presets/opencode/cafleet.md` and `presets/codex/cafleet.rules` are regular
-files in the extracted root, else `release asset is malformed`);
-**install-skills** (per target, copy each skill dir into the agent's skills dir,
-removing any existing copy first; a filesystem error → `failed to install skills
-into <skills_dir>: <error>`; success prints `<agent>: installed <skill dirs
-joined by ', '> (v<version>) -> <skills dir>`);
+`cafleet-assets-v<version>.zip`; parse failure → `could not parse the GitHub API
+response`; missing asset → `asset cafleet-assets-v<version>.zip not found in
+release <version>`); **download-and-extract** (download to a temp file named
+`assets.zip`; **reject any member whose path is absolute or contains a `..`
+component** with `archive member '<member>' has an unsafe path; rejecting the
+archive`; a malformed/unreadable archive → `release asset is malformed`;
+validate the extracted `skills/` dir contains exactly the three skill dirs
+`cafleet`, `cafleet-design-doc`, `cafleet-research`, and that both preset
+archive sources `presets/opencode/cafleet.md` and `presets/codex/cafleet.rules`
+are regular files in the extracted root, else `release asset is malformed`);
+**install-skills** (per target, create the target's skills dir as needed, then
+copy each skill dir into it, removing any existing copy first; a filesystem
+error → `failed to install skills into <skills_dir>: <error>`; success prints
+`<agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>)
+-> <skills dir>`);
 **install-preset** (per target with a preset — codex: archive source
 `presets/codex/cafleet.rules` → `~/.codex/rules/cafleet.rules`; opencode:
 `presets/opencode/cafleet.md` → `~/.opencode/agents/cafleet.md`; claude has
@@ -1368,36 +1339,43 @@ existing target in this explicit check order — `is_symlink()` → unlink; else
 because `is_dir()` follows symlinks and `shutil.rmtree` refuses them) — then
 copy the archive source in; a filesystem error → `failed to install preset into
 <target>: <error>`; success prints `<agent>: installed preset (v<version>) ->
-<target>`). A target's `skill_installs` row is upserted only after both its
-skills and its preset (where one exists) install successfully — the row attests
-skills + preset. Known skills dirs: `claude` →
-`~/.claude/skills`, `codex` → `~/.codex/skills`, `opencode` →
+<target>`). A target's `asset_installs` row is upserted only after both its
+skills and its preset (where one exists) install successfully. Known skills
+dirs: `claude` → `~/.claude/skills`, `codex` → `~/.codex/skills`, `opencode` →
 `~/.config/opencode/skills`.
 
-#### Stale-skills guard
+Assets-half pre-flight: the `asset_installs` table must exist, else the half
+fails with `the database schema is missing or outdated; run 'cafleet setup'
+first`. (The db half always runs first within the same command, so this fires
+only after a db-half failure or an externally broken schema.)
+
+An install failure aborts the loop; rows recorded before the failure remain.
+
+#### Stale-assets guard
 
 Every fleet-scoped command group — `fleet`, `member`, `message`, and `monitor`
-— validates the recorded skills installs at the top of its group callback,
+— validates the recorded assets installs at the top of its group callback,
 before any subcommand body runs:
 
-1. If the DB file, the `skill_installs` table, or all rows are missing, exit 1
+1. If the DB file, the `asset_installs` table, or all rows are missing, exit 1
    with:
    ```
-   Error: no skills install is recorded; run 'cafleet setup' first
+   Error: no assets install is recorded; run 'cafleet setup' first
    ```
 
 2. If any recorded `cafleet_version` differs from the runtime CLI version
    (simple string inequality — a downgrade also triggers), exit 1 with the
    stale agents listed in ascending `coding_agent` order:
    ```
-   Error: stale skills detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall
+   Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall
    ```
 
 3. Otherwise proceed silently.
 
-Homes with no recorded row (an agent that was never installed) are not checked.
-Exempt surfaces: `setup` (must remain runnable to repair), `doctor` (reports
-instead of blocking), and `server` (human-facing WebUI, not fleet-scoped).
+Agents with no recorded row (an agent that was never installed) are not
+checked. Exempt surfaces: `setup` (must remain runnable to repair), `doctor`
+(reports instead of blocking), and `server` (human-facing WebUI, not
+fleet-scoped).
 
 **Help interaction.** Group-level help (`cafleet fleet --help`) is parsed
 eagerly before the callback runs and always works — even under a missing or
@@ -2262,7 +2240,7 @@ positional.
 #### codex rules file
 
 The codex auto-approval rules for `cafleet` commands are a static file shipped
-in the skills release archive as `presets/codex/cafleet.rules` and installed to
+in the assets release archive as `presets/codex/cafleet.rules` and installed to
 `~/.codex/rules/cafleet.rules` (expanding `~`) by the assets half of `setup`
 (§6.3), overwriting any existing target. The file is not a spawn precondition —
 codex's `ensure_available` is PATH-check-only — and codex loads every `*.rules`
@@ -2282,20 +2260,20 @@ prefix_rule(
 
 #### opencode preset
 
-The `cafleet` agent definition is a static file shipped in the skills release
+The `cafleet` agent definition is a static file shipped in the assets release
 archive as `presets/opencode/cafleet.md` and installed to
 `~/.opencode/agents/cafleet.md` (expanding `~`) by the assets half of `setup`
 (§6.3), overwriting any existing target. **Two opencode base directories serve
 two distinct purposes** and are not interchangeable: the agent preset lives
 under `~/.opencode/`, which is opencode's mandated `--agent cafleet` discovery
-path; `setup`'s skills install + home auto-detection (§6.3) use
-`~/.config/opencode/`, cafleet's own skills-install / home-detection target.
-Both paths are correct for their purpose — keep each as written.
+path; `setup`'s skills install (§6.3) targets `~/.config/opencode/`, cafleet's
+own skills-install target for the opencode agent. Both paths are correct for
+their purpose — keep each as written.
 
 The preset is a spawn precondition (the spawn argv references `--agent
 cafleet`): opencode's `ensure_available` verifies the file exists at the
 install target and raises `opencode agent preset not found at {preset}; run
-'cafleet setup opencode' first` when it does not.
+'cafleet setup' first` when it does not.
 
 #### Exact preset file contents (verbatim)
 
@@ -2375,7 +2353,7 @@ heading and its blank line); the file ends with exactly one trailing newline.
 - opencode model format: `--model for the opencode backend must be
   '<provider-id>/<model-id>' (got '{model}').`
 - missing opencode preset: `opencode agent preset not found at {preset}; run
-  'cafleet setup opencode' first`
+  'cafleet setup' first`
 
 ### 6.8 WebUI + Config
 
@@ -2393,7 +2371,7 @@ configured HTTP application:
 
 1. Constructs an app titled `CAFleet Admin`, version `0.1.0`. **This `0.1.0` is a
    hardcoded literal, independent of the CLI's package version.** The CLI
-   `--version` output and `setup`'s skills-release tag (§6.3) read the **installed
+   `--version` output and `setup`'s assets-release tag (§6.3) read the **installed
    package version** dynamically; the WebUI app-version string does not track it.
    Keep them decoupled.
 2. **Registers the `/api/*` router before mounting the static file server.**
@@ -2680,22 +2658,27 @@ AUTOINCREMENT, and the create-order quirk are in §6.1.
 - `idx_messages_owner_member_status_ts` on `messages(owner_member_id, status_timestamp)`
 - `idx_messages_from_member_status_ts` on `messages(from_member_id, status_timestamp)`
 
-**The migration chain.** Two linear revisions: the initial revision `0001`
-(no predecessor) and `0002` (`down_revision` `0001`; head), which drops the
-`member_placements.coding_agent` DDL default via a batch `alter_column`.
+**The migration chain.** Three linear revisions: the initial revision `0001`
+(no predecessor), `0002` (`down_revision` `0001`), which drops the
+`member_placements.coding_agent` DDL default via a batch `alter_column`, and
+`0003` (`down_revision` `0002`; head), which renames the `skill_installs`
+table to `asset_installs` (create `asset_installs`, copy every row across,
+drop `skill_installs`; the `downgrade()` reverses the same three steps) —
+data-preserving in both directions; the columns are unchanged.
 `0001` creates the full §5.2 schema in one step, in this order:
 
 1. `members` (+ `idx_members_fleet_status`) — created **first** because every
    other FK-bearing table references it; `members.fleet_id` forward-references
    the still-uncreated `fleets` (§6.1). AUTOINCREMENT.
 2. `fleets` — AUTOINCREMENT.
-3. `skill_installs` — TEXT PK `coding_agent`, no AUTOINCREMENT, no FK
-   constraint. Columns: `coding_agent` TEXT PK, `cafleet_version` TEXT NOT
-   NULL, `installed_at` TEXT NOT NULL. Upsert semantics; rows written by the
-   assets half of `setup` (bare or per-agent) after each home's skills and
-   preset (where one exists) install successfully — the row attests skills +
-   preset; never written by `setup db`. Feeds the stale-skills guard and
-   `doctor`.
+3. `skill_installs` (renamed to `asset_installs` by revision `0003`) — TEXT PK
+   `coding_agent`, no AUTOINCREMENT, no FK constraint. Columns: `coding_agent`
+   TEXT PK, `cafleet_version` TEXT NOT NULL, `installed_at` TEXT NOT NULL.
+   Upsert semantics; rows written by the assets half of `setup` — one row per
+   target agent (the fixed list `claude`, `codex`, `opencode` minus any
+   `--skip`ped agent) — after that target's skills and preset (where one
+   exists) install successfully — the row attests skills + preset; never
+   written by the db half. Feeds the stale-assets guard and `doctor`.
 4. `member_placements` — PK=FK `member_id`, not AUTOINCREMENT; `backend` DDL
    default `"tmux"`; `0001` creates `coding_agent` with a DDL default
    `"claude"` that revision `0002` removes (no default at head).
@@ -2709,21 +2692,19 @@ AUTOINCREMENT, and the create-order quirk are in §6.1.
 A fresh DB starts with **no rows in any application table** (only
 `alembic_version` holds its single revision row); monitor enrollment is written
 at runtime (the Director at 180s by `create_fleet`, pane-bound members at 720s
-by `register_member`, §6.2), never seeded by the schema. `skill_installs` rows
+by `register_member`, §6.2), never seeded by the schema. `asset_installs` rows
 are written at install time, not by the schema.
 
-**`setup` db-migration driver** (the DB half of `setup` and the whole of
-`setup db`, §6.3). Procedure: (1) derive a sync SQLite URL by forcing the
-drivername to `sqlite`; (2) extract the DB file path — if empty → application
-error `database URL has no file path`; (3) create the file's parent directory;
-(4) inspect the DB: existing tables but no `alembic_version` → the
-unversioned-DB refusal (§6.3); a recorded revision unknown to the bundled
-chain → the ahead-of-head refusal (§6.3); (5) already at head
-(`current_rev == head_rev`) → print `Already at head (<head>); nothing to do.`
-and stop; (6) otherwise upgrade to
-head and print the created/upgraded line (§6.3). The driver's engine is
-disposed when the command finishes (success or failure). The same driver runs
-for bare `setup`'s db half and for `setup db` — both print the same lines.
+**`setup` db-migration driver** (the db half of `setup`, §6.3). Procedure: (1)
+derive a sync SQLite URL by forcing the drivername to `sqlite`; (2) extract the
+DB file path — if empty → application error `database URL has no file path`;
+(3) create the file's parent directory; (4) inspect the DB: existing tables but
+no `alembic_version` → the unversioned-DB refusal (§6.3); a recorded revision
+unknown to the bundled chain → the ahead-of-head refusal (§6.3); (5) already at
+head (`current_rev == head_rev`) → print `Already at head (<head>); nothing to
+do.` and stop; (6) otherwise upgrade to head and print the created/upgraded
+line (§6.3). The driver's engine is disposed when the command finishes
+(success or failure).
 
 ---
 
@@ -2767,7 +2748,7 @@ for bare `setup`'s db half and for `setup db` — both print the same lines.
 
 ## 10. CLI command checklist
 
-The full command surface — **25 commands across 5 groups + 3 top-level commands**.
+The full command surface — **23 commands across 4 groups + 3 top-level commands**.
 Each must be reproduced with identical option names, types, defaults,
 required-ness, documented-vs-hidden status, output shapes, and exit codes. Every
 interaction flag is now **documented** (there are no hidden flags). Per-command
@@ -2778,10 +2759,8 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 
 **Top-level:**
 
-- [ ] `cafleet setup` (bare group invocation: no options; runs db half then assets half)
-- [ ] `cafleet setup db` (no options; db migration only; prints the created/upgraded/already-at-head line)
-- [ ] `cafleet setup claude` / `cafleet setup codex` / `cafleet setup opencode` (one subcommand per agent, no options; assets half for exactly that agent; pre-flight requires `skill_installs` table)
-- [ ] `cafleet doctor` (`--json`; emits tmux block + skills-install report)
+- [ ] `cafleet setup` (`--skip AGENT` repeatable choice; no positional arguments; runs the db half then the assets half for the fixed target list claude/codex/opencode minus the skipped agents)
+- [ ] `cafleet doctor` (`--json`; emits tmux block + assets-install report)
 - [ ] `cafleet server` (`--host`=settings.broker_host, `--port`=settings.broker_port)
 
 **`fleet`:**
@@ -2848,18 +2827,18 @@ The decisions that shape this surface (full rationale in the design doc):
 - **`--fleet-id` is a required option with no environment default** (§6.3); a
   missing value is the shared callback's exit-1 error.
 - **One error/exit model** (§7.2): usage → exit 2, application/runtime → exit 1.
-- **Alembic-migrated schema** (§8): a linear chain (`0001 → 0002`)
+- **Alembic-migrated schema** (§8): a linear chain (`0001 → 0002 → 0003`)
   with the current revision recorded in `alembic_version`; no
-  cross-implementation DB interoperability. Re-running `cafleet setup` (or
-  `setup db`) on a database created by this chain applies any pending
+  cross-implementation DB interoperability. Re-running `cafleet setup` (the db
+  half runs first) on a database created by this chain applies any pending
   migrations in place and preserves all existing rows, message history
   included; it refuses to auto-downgrade an ahead-of-head database and
   refuses an unversioned database with existing tables. Upgrade path: after
   `uv tool upgrade cafleet`, the first fleet-scoped command errors with the
-  stale-skills message and instructs the operator to run `cafleet setup`
+  stale-assets message and instructs the operator to run `cafleet setup`
   to reinstall.
-- **Stale-skills guard** (§6.3): every fleet-scoped group callback validates
-  recorded `skill_installs` versions against the runtime CLI version before any
+- **Stale-assets guard** (§6.3): every fleet-scoped group callback validates
+  recorded `asset_installs` versions against the runtime CLI version before any
   subcommand body runs; missing/stale → hard error (exit 1); exempt: `setup`,
   `doctor`, `server`.
 - **Nullable `to_member_id`** (§5.5): `NULL` on `broadcast_summary` rows; no `0`
@@ -2875,9 +2854,9 @@ The decisions that shape this surface (full rationale in the design doc):
 Choices left unconstrained by the contract (each underlying behavior is fully
 specified in the cited section):
 
-- **CLI (§6.3):** the `--coding-agent`/`--role` choice sets and the per-agent
-  `setup` subcommand names may be hardcoded to `claude`/`codex`/`opencode` or
-  data-driven off the registry — an implementation choice.
+- **CLI (§6.3):** the `--coding-agent`/`--role`/`--skip` choice sets may be
+  hardcoded to `claude`/`codex`/`opencode` or data-driven off the registry —
+  an implementation choice.
 - **Multiplexer (§6.5):** `env` argument ordering in `split_window` is not
   behaviorally significant (tmux treats `-e` flags as a set).
 - **Coding agents (§6.7):** the backend registry may be a name→backend map or a

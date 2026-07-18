@@ -8,7 +8,7 @@ Agent Teams reinvented for collaborative coding across multiple coding-agent bac
 
 ```bash
 uv tool install cafleet     # or: pip install cafleet
-cafleet setup               # migrate the database schema + install the skills and presets
+cafleet setup               # migrate the database schema + install the assets (skills and presets)
 ```
 
 Full guide: <https://himkt.github.io/cafleet/quickstart/>

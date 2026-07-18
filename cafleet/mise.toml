@@ -35,7 +35,7 @@ description = "Build the cafleet wheel into cafleet/dist/ (the explicit --out-di
 [tasks.makemigration]
 usage = 'arg "<message>" help="Message passed to alembic revision -m"'
 run = 'uv run --package cafleet alembic -c src/cafleet/db/alembic/alembic.ini revision --autogenerate -m "$usage_message"'
-description = "Autogenerate an Alembic migration into src/cafleet/db/alembic/versions/. Requires the DB at head first (run `cafleet setup db`). The env.py process_revision_directives hook mints the next zero-padded sequential id (000N). Pass the message positionally, e.g. `mise //cafleet:makemigration \"add widget table\"`. Autogenerate cannot detect renames (it emits drop+add) — review and hand-edit the generated file."
+description = "Autogenerate an Alembic migration into src/cafleet/db/alembic/versions/. Requires the DB at head first (run `cafleet setup --skip claude --skip codex --skip opencode`). The env.py process_revision_directives hook mints the next zero-padded sequential id (000N). Pass the message positionally, e.g. `mise //cafleet:makemigration \"add widget table\"`. Autogenerate cannot detect renames (it emits drop+add) — review and hand-edit the generated file."
 
 [tasks.publish]
 run = [
