@@ -14,7 +14,7 @@ The skill writes a self-contained Python script that imports matplotlib. The run
 **Resolve `${BASE}` in this order:**
 
 1. **Calling-context override**: If a parent skill's spawn prompt told you the figure base directory (e.g., the presentation workflow passes its research folder as the figure base), use that path literally as `${BASE}`. Skip base-dir resolution.
-2. **Otherwise**: Read the `cafleet` skill's `reference/base-dir.md` and follow its procedure (no path argument; CWD-based inference applies). Use the resolved `${BASE}` verbatim — scripts and data land under `${BASE}/.figures/{code,data}` while rendered charts land under `${BASE}/figures/output`, whatever `${BASE}` resolved to (repo root, `/tmp/claude-code`, etc.).
+2. **Otherwise**: Read the `cafleet` skill's `reference/base-dir.md` and follow its procedure (no path argument; CWD-based inference applies). Use the resolved `${BASE}` verbatim — scripts and data land under `${BASE}/.figures/{code,data}` while rendered charts land under `${BASE}/figures/output`, whatever `${BASE}` resolved to (repo root, `/tmp/cafleet`, etc.).
 
 **Derive the subdirectories** (each is a literal path string you will embed in the script):
 
@@ -24,7 +24,7 @@ The skill writes a self-contained Python script that imports matplotlib. The run
 
 If the directories do not exist yet, the Write tool auto-creates parent directories when you write the script file — do NOT call `mkdir`.
 
-All subsequent steps use `${CODE_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` as literal resolved paths. Rendered charts live under the visible `${BASE}/figures/output`, while scripts and data live under the hidden `${BASE}/.figures/{code,data}`; never directly at `${BASE}` and never at `/tmp` unless `${BASE}` itself is `/tmp/claude-code`.
+All subsequent steps use `${CODE_DIR}`, `${OUTPUT_DIR}`, and `${DATA_DIR}` as literal resolved paths. Rendered charts live under the visible `${BASE}/figures/output`, while scripts and data live under the hidden `${BASE}/.figures/{code,data}`; never directly at `${BASE}` and never at `/tmp` unless `${BASE}` itself is `/tmp/cafleet`.
 
 **Font:** No setup needed. The theme font `Noto Sans` is available as a system font. Scripts set `plt.rcParams['font.family'] = 'Noto Sans'` (see template below).
 
@@ -41,7 +41,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # REPLACE these with literal paths from Step 0 resolution.
-# e.g. pathlib.Path("/tmp/claude-code/researches/foo/figures/output")
+# e.g. pathlib.Path("/tmp/cafleet/researches/foo/figures/output")
 OUTPUT_DIR = pathlib.Path("${OUTPUT_DIR}")
 DATA_DIR = pathlib.Path("${DATA_DIR}")
 

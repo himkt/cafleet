@@ -1,7 +1,7 @@
 # Coding-Agent-Neutral Spawn Prompts and Skill-Wide Neutrality Sweep
 
 **Status**: Approved
-**Progress**: 6/32 tasks complete
+**Progress**: 8/32 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -216,8 +216,8 @@ The three scope expansions touch these non-`skills/` surfaces — the complete s
 
 ### Step 3: Finish the `/tmp/cafleet` rename
 
-- [ ] `skills/cafleet-research/reference/visualization.md:17,27,44` <!-- completed: -->
-- [ ] `.claude/skills/skill-author/SKILL.md:253`; search skill-author for any other base-dir restatement (`~/.claude` branch, `AskUserQuestion`) and align it with § 2 <!-- completed: -->
+- [x] `skills/cafleet-research/reference/visualization.md:17,27,44` <!-- completed: 2026-07-18T11:16 -->
+- [x] `.claude/skills/skill-author/SKILL.md:253`; search skill-author for any other base-dir restatement (`~/.claude` branch, `AskUserQuestion`) and align it with § 2 <!-- completed: 2026-07-18T11:19 -->
 
 ### Step 4: Rename the overlay files and lookup scheme
 
