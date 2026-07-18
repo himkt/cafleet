@@ -4,7 +4,7 @@ import click
 
 from cafleet import broker, output
 from cafleet.cli._helpers import (
-    ensure_skills_current,
+    ensure_assets_current,
     fleet_id_option,
     from_member_id_option,
     full_flag,
@@ -20,7 +20,7 @@ from cafleet.cli._text_input import read_text_input
 @click.group()
 def message() -> None:
     """Message broker commands."""
-    ensure_skills_current()
+    ensure_assets_current()
 
 
 def _require_member_in_fleet(member_id: int, fleet_id: int) -> None:

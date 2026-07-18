@@ -1,7 +1,7 @@
 # Unified Assets Concept and Single Setup Command
 
 **Status**: Approved
-**Progress**: 7/26 tasks complete
+**Progress**: 15/26 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -167,14 +167,14 @@ Per `.claude/rules/removal.md`, every mention of the removed surface is updated 
 
 ### Step 2: Data layer — rename + migration (lands as one unit)
 
-- [ ] Rename `SkillInstall` → `AssetInstall` (`__tablename__ = "asset_installs"`) in `cafleet/src/cafleet/db/models.py` <!-- completed: -->
-- [ ] Rename `broker/skill_installs.py` → `broker/asset_installs.py`; rename the three functions per the naming map; inspect `asset_installs` <!-- completed: -->
-- [ ] Update imports in `cli/_helpers.py`, `cli/doctor.py`, and `cli/setup.py`; rename `ensure_skills_current` → `ensure_assets_current` with the new guard messages, updating its importers `cli/fleet.py`, `cli/member.py`, `cli/message.py`, and `cli/monitor.py` <!-- completed: -->
-- [ ] Update `doctor`: `_assets_report`, JSON key `"assets"`, text section `assets:`, empty-state line, docstrings <!-- completed: -->
-- [ ] Generate migration `0003` with `mise //cafleet:makemigration "rename skill_installs to asset_installs"` (DB at head first) and hand-edit to the create + copy + drop `upgrade()` / mirrored `downgrade()` in the Specification <!-- completed: -->
-- [ ] Update the chain-guard tests in `tests/db/test_alembic_smoke.py` (3-revision chain, head `0003`, `asset_installs` assertions including the expected head-table set in `test_alembic_upgrade_head_creates_expected_tables`) <!-- completed: -->
-- [ ] Rename `tests/broker/test_skill_installs.py` → `tests/broker/test_asset_installs.py`; update `tests/conftest.py` and `tests/_helpers.py` to the new model/table names <!-- completed: -->
-- [ ] Update guard/doctor string assertions in `tests/cli/test_skills_guard.py` (rename the file to `test_assets_guard.py`) and `tests/cli/test_doctor.py` <!-- completed: -->
+- [x] Rename `SkillInstall` → `AssetInstall` (`__tablename__ = "asset_installs"`) in `cafleet/src/cafleet/db/models.py` <!-- completed: 2026-07-18T00:47 -->
+- [x] Rename `broker/skill_installs.py` → `broker/asset_installs.py`; rename the three functions per the naming map; inspect `asset_installs` <!-- completed: 2026-07-18T00:47 -->
+- [x] Update imports in `cli/_helpers.py`, `cli/doctor.py`, and `cli/setup.py`; rename `ensure_skills_current` → `ensure_assets_current` with the new guard messages, updating its importers `cli/fleet.py`, `cli/member.py`, `cli/message.py`, and `cli/monitor.py` <!-- completed: 2026-07-18T00:47 -->
+- [x] Update `doctor`: `_assets_report`, JSON key `"assets"`, text section `assets:`, empty-state line, docstrings <!-- completed: 2026-07-18T00:47 -->
+- [x] Generate migration `0003` with `mise //cafleet:makemigration "rename skill_installs to asset_installs"` (DB at head first) and hand-edit to the create + copy + drop `upgrade()` / mirrored `downgrade()` in the Specification <!-- completed: 2026-07-18T00:50 -->
+- [x] Update the chain-guard tests in `tests/db/test_alembic_smoke.py` (3-revision chain, head `0003`, `asset_installs` assertions including the expected head-table set in `test_alembic_upgrade_head_creates_expected_tables`) <!-- completed: 2026-07-18T00:42 -->
+- [x] Rename `tests/broker/test_skill_installs.py` → `tests/broker/test_asset_installs.py`; update `tests/conftest.py` and `tests/_helpers.py` to the new model/table names <!-- completed: 2026-07-18T00:42 -->
+- [x] Update guard/doctor string assertions in `tests/cli/test_skills_guard.py` (rename the file to `test_assets_guard.py`) and `tests/cli/test_doctor.py` <!-- completed: 2026-07-18T00:42 -->
 
 ### Step 3: CLI collapse
 

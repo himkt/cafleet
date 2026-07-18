@@ -1,4 +1,4 @@
-"""``cafleet doctor`` — multiplexer pane-identity and skills-install diagnostics."""
+"""``cafleet doctor`` — multiplexer pane-identity and assets-install diagnostics."""
 
 import importlib.metadata
 import os
@@ -6,9 +6,9 @@ import os
 import click
 
 from cafleet import output
-from cafleet.broker.skill_installs import (
-    list_skill_installs,
-    skill_installs_table_exists,
+from cafleet.broker.asset_installs import (
+    asset_installs_table_exists,
+    list_asset_installs,
 )
 from cafleet.cli._helpers import ensure_multiplexer_or_die, json_flag
 from cafleet.multiplexer import MultiplexerError
@@ -16,13 +16,13 @@ from cafleet.multiplexer import MultiplexerError
 _PRESENCE_ENV = {"tmux": "TMUX", "herdr": "HERDR_ENV"}
 
 
-def _skills_report() -> dict:
+def _assets_report() -> dict:
     cli_version = importlib.metadata.version("cafleet")
     installs = []
-    if skill_installs_table_exists():
+    if asset_installs_table_exists():
         installs = [
             {**row, "current": row["cafleet_version"] == cli_version}
-            for row in list_skill_installs()
+            for row in list_asset_installs()
         ]
     return {"cli_version": cli_version, "installs": installs}
 
@@ -30,7 +30,7 @@ def _skills_report() -> dict:
 @click.command("doctor")
 @json_flag
 def doctor(json_output: bool) -> None:
-    """Print the resolved multiplexer backend, pane identifiers, and skills report."""
+    """Print the resolved multiplexer backend, pane identifiers, and assets report."""
     mux = ensure_multiplexer_or_die()
 
     try:
@@ -40,7 +40,7 @@ def doctor(json_output: bool) -> None:
 
     presence_var = _PRESENCE_ENV[mux.name]
     presence_value = os.environ.get(presence_var, "")
-    skills = _skills_report()
+    assets = _assets_report()
 
     if json_output:
         click.echo(
@@ -54,7 +54,7 @@ def doctor(json_output: bool) -> None:
                         "presence_var": presence_var,
                         "presence_value": presence_value,
                     },
-                    "skills": skills,
+                    "assets": assets,
                 },
             )
         )
@@ -65,12 +65,12 @@ def doctor(json_output: bool) -> None:
         click.echo(f"  window_id:     {pane_ctx.window_id}")
         click.echo(f"  pane_id:       {pane_ctx.pane_id}")
         click.echo(f"  presence:      {presence_var}={presence_value}")
-        click.echo("skills:")
-        if not skills["installs"]:
-            click.echo("  (no skills install recorded; run 'cafleet setup')")
+        click.echo("assets:")
+        if not assets["installs"]:
+            click.echo("  (no assets install recorded; run 'cafleet setup')")
         else:
-            click.echo(f"  {'cli_version:':<13}{skills['cli_version']}")
-            for row in skills["installs"]:
+            click.echo(f"  {'cli_version:':<13}{assets['cli_version']}")
+            for row in assets["installs"]:
                 verdict = "ok" if row["current"] else "STALE"
                 click.echo(
                     f"  {row['coding_agent'] + ':':<13}{row['cafleet_version']} "

@@ -4,7 +4,7 @@ import click
 
 from cafleet import broker, output
 from cafleet.cli._helpers import (
-    ensure_skills_current,
+    ensure_assets_current,
     fleet_id_option,
     full_flag,
     json_flag,
@@ -16,7 +16,7 @@ from cafleet.multiplexer import MultiplexerError, resolve_multiplexer
 @click.group()
 def fleet() -> None:
     """Fleet management commands."""
-    ensure_skills_current()
+    ensure_assets_current()
 
 
 @fleet.command("create")

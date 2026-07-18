@@ -9,8 +9,8 @@ import click
 from cafleet import broker, output
 from cafleet.broker import _shared
 from cafleet.cli._helpers import (
+    ensure_assets_current,
     ensure_multiplexer_or_die,
-    ensure_skills_current,
     fleet_id_option,
     full_flag,
     json_flag,
@@ -26,7 +26,7 @@ from cafleet.multiplexer import MultiplexerError, resolve_multiplexer
 @click.group()
 def member():
     """Manage multiplexer-backed members (Director only)."""
-    ensure_skills_current()
+    ensure_assets_current()
 
 
 def _require_member_pane(placement: dict, member_id: int, action: str) -> str:

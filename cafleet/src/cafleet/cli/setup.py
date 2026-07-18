@@ -11,9 +11,9 @@ from pathlib import Path, PurePosixPath
 
 import click
 
-from cafleet.broker.skill_installs import (
-    record_skill_install,
-    skill_installs_table_exists,
+from cafleet.broker.asset_installs import (
+    asset_installs_table_exists,
+    record_asset_install,
 )
 from cafleet.db.init import run_db_init
 
@@ -189,7 +189,7 @@ def _install_assets(targets: list[str], cli_version: str) -> None:
             has_preset = agent in AGENT_PRESET_TARGETS
             if has_preset:
                 _install_preset(agent, extract_root)
-            record_skill_install(agent, cli_version)
+            record_asset_install(agent, cli_version)
             click.echo(
                 f"{agent}: installed {', '.join(SKILL_DIRS)} "
                 f"(v{cli_version}) -> {AGENT_SKILLS_DIRS[agent]}"
@@ -203,7 +203,7 @@ def _install_assets(targets: list[str], cli_version: str) -> None:
 
 def _run_assets_half(agents: tuple[str, ...]) -> None:
     """Pre-flight the schema, resolve targets, install, and record versions."""
-    if not skill_installs_table_exists():
+    if not asset_installs_table_exists():
         raise click.ClickException(SCHEMA_PREFLIGHT_ERROR)
     cli_version = importlib.metadata.version("cafleet")
     targets = _resolve_targets(agents)

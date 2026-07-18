@@ -114,8 +114,8 @@ class MonitorRuntime(Base):
     )
 
 
-class SkillInstall(Base):
-    __tablename__ = "skill_installs"
+class AssetInstall(Base):
+    __tablename__ = "asset_installs"
 
     coding_agent: Mapped[str] = mapped_column(String, primary_key=True)
     cafleet_version: Mapped[str] = mapped_column(String, nullable=False)
