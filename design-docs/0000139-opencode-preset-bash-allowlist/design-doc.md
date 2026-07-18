@@ -1,6 +1,6 @@
 # Deny-by-Default Bash Allowlist for the opencode Preset
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 8/8 tasks complete
 **Last Updated**: 2026-07-18
 
@@ -220,3 +220,4 @@ Per `documentation-maintenance.md`, all of the following update in this cycle, b
 | 2026-07-18 | Initial draft |
 | 2026-07-18 | Review round 1: body wording corrected, safety-floor caveat reframed as rewrite-not-drop, exec-routing/member-role surfaces added, translation-verification task added; `!`-dispatch bypass verification escalated to the Director |
 | 2026-07-18 | `!`-dispatch soundness precondition recorded as satisfied by documented contract (Director resolution); drafter/director markers cleared |
+| 2026-07-18 | Executed: documentation, preset, and verification steps complete (8/8); all Success Criteria verified; Reviewer approved round 1; PR #205 opened; Status → Complete |
