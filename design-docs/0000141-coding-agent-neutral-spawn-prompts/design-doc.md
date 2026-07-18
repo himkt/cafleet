@@ -1,7 +1,7 @@
 # Coding-Agent-Neutral Spawn Prompts and Skill-Wide Neutrality Sweep
 
 **Status**: Approved
-**Progress**: 30/32 tasks complete
+**Progress**: 31/32 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -255,7 +255,7 @@ The three scope expansions touch these non-`skills/` surfaces — the complete s
 
 ### Step 8: slidev.md three-backend discovery table
 
-- [ ] Replace lines 11-13 with the § 8 three-backend hints; verify the opencode install path against `cafleet setup`'s install targets before landing <!-- completed: -->
+- [x] Replace lines 11-13 with the § 8 three-backend hints; verify the opencode install path against `cafleet setup`'s install targets before landing <!-- completed: 2026-07-18T11:37 -->
 
 ### Step 9: Verification sweep
 

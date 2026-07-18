@@ -8,9 +8,10 @@ Theme location: `slidev/theme/` next to this reference page. For Slidev syntax, 
 ---
 theme: <cafleet-plugin-install-dir>/skills/cafleet-research/reference/slidev/theme
 # Replace <cafleet-plugin-install-dir> with the absolute path to the installed cafleet plugin's directory on this machine.
-# Discovery hints:
-#   - Claude Code:  ~/.claude/plugins/cache/cafleet/cafleet/<version>/   (run `claude plugin list` to find <version>)
-#   - Codex:        the path printed by `codex plugin list` for the cafleet plugin
+# Discovery hints (per coding-agent backend):
+#   - claude:    ~/.claude/plugins/cache/cafleet/cafleet/<version>/   (run `claude plugin list` to find <version>)
+#   - codex:     the path printed by `codex plugin list` for the cafleet plugin
+#   - opencode:  ~/.config/opencode/skills/   (cafleet skills install dir; no plugin cache)
 # The skill is install-location-agnostic; the absolute path resolves at Slidev render time.
 title: <Presentation Title>
 author: <Author Name>
