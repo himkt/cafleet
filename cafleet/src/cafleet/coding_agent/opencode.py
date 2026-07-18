@@ -13,7 +13,7 @@ class OpencodeAgent:
         if not preset.is_file():
             raise RuntimeError(
                 f"opencode agent preset not found at {preset}; "
-                "run 'cafleet setup opencode' first"
+                "run 'cafleet setup' first"
             )
 
     def validate_model(self, model: str | None) -> None:

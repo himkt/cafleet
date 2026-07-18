@@ -50,7 +50,12 @@ PREFLIGHT_ERROR = (
 )
 
 SCHEMA_ONLY_ARGS = (
-    "--skip", "claude", "--skip", "codex", "--skip", "opencode",
+    "--skip",
+    "claude",
+    "--skip",
+    "codex",
+    "--skip",
+    "opencode",
 )
 ASSETS_SKIPPED_LINE = "assets half skipped (all agents skipped)"
 
@@ -235,12 +240,7 @@ def _run_setup(args=()):
 
 def _only(agent):
     """``--skip`` args narrowing the assets half to exactly ``agent``."""
-    return [
-        arg
-        for other in AGENTS
-        if other != agent
-        for arg in ("--skip", other)
-    ]
+    return [arg for other in AGENTS if other != agent for arg in ("--skip", other)]
 
 
 def _skills_line(agent, skills_dir, version=CLI_VERSION):
@@ -830,9 +830,7 @@ def test_missing_asset_message(homes, registry_db, monkeypatch):
     result = _run_setup(_only("claude"))
 
     assert result.exit_code == 1, result.output
-    assert (
-        f"asset {ASSET_NAME} not found in release {CLI_VERSION}" in result.output
-    )
+    assert f"asset {ASSET_NAME} not found in release {CLI_VERSION}" in result.output
     assert "Error: assets half failed" in result.output
 
 

@@ -174,10 +174,7 @@ def test_ensure_available_raises_when_preset_missing(tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
     preset = _preset_path(tmp_path)
-    expected = (
-        f"opencode agent preset not found at {preset}; "
-        "run 'cafleet setup' first"
-    )
+    expected = f"opencode agent preset not found at {preset}; run 'cafleet setup' first"
     with pytest.raises(RuntimeError, match=f"^{re.escape(expected)}$"):
         OpencodeAgent().ensure_available()
 

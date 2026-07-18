@@ -8,7 +8,13 @@ from click.testing import CliRunner
 from cafleet import config
 
 SCHEMA_ONLY_ARGS = [
-    "setup", "--skip", "claude", "--skip", "codex", "--skip", "opencode",
+    "setup",
+    "--skip",
+    "claude",
+    "--skip",
+    "codex",
+    "--skip",
+    "opencode",
 ]
 
 

@@ -1,7 +1,7 @@
 # Unified Assets Concept and Single Setup Command
 
 **Status**: Approved
-**Progress**: 15/26 tasks complete
+**Progress**: 17/26 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -178,8 +178,8 @@ Per `.claude/rules/removal.md`, every mention of the removed surface is updated 
 
 ### Step 3: CLI collapse
 
-- [ ] Rewrite `cli/setup.py`: plain `click.command` with repeatable deduplicated `--skip` (`click.Choice`); delete the group, `setup_db`, `_make_agent_command`, `_resolve_targets`, and the detection error; targets = fixed three-agent list minus skips; skip-all echoes `assets half skipped (all agents skipped)` and counts as not-run; new preflight string; asset name `cafleet-assets-v<version>.zip`; temp filename `assets.zip` <!-- completed: -->
-- [ ] Update the opencode missing-preset error in `coding_agent/opencode.py` to `run 'cafleet setup' first` <!-- completed: -->
+- [x] Rewrite `cli/setup.py`: plain `click.command` with repeatable deduplicated `--skip` (`click.Choice`); delete the group, `setup_db`, `_make_agent_command`, `_resolve_targets`, and the detection error; targets = fixed three-agent list minus skips; skip-all echoes `assets half skipped (all agents skipped)` and counts as not-run; new preflight string; asset name `cafleet-assets-v<version>.zip`; temp filename `assets.zip` <!-- completed: 2026-07-18T01:05 -->
+- [x] Update the opencode missing-preset error in `coding_agent/opencode.py` to `run 'cafleet setup' first` <!-- completed: 2026-07-18T01:05 -->
 - [ ] Rework `tests/cli/test_setup.py`: default install covers all three agents; `--skip` (single, repeated, duplicate, all-three, invalid-choice) cases; removed-subcommand invocations fail with Click's extra-argument error; new asset name; missing-release/asset still exit 1 <!-- completed: -->
 - [ ] Update `tests/db/test_init.py` to drive the DB half via the schema-only invocation instead of `setup db` <!-- completed: -->
 - [ ] Update `tests/cli/test_member.py` and `tests/coding_agent/test_opencode.py` for the new opencode error string <!-- completed: -->
