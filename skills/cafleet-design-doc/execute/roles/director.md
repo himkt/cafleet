@@ -119,7 +119,7 @@ When a member pauses on a decision-prompt pane frame awaiting a user reaction, t
 
 ### Routing member bash requests
 
-Programmer / Tester / Verifier / Reviewer members are spawned in workspace-scoped auto-approval mode ({permission_flags}; Bash tool enabled, permission prompts auto-resolve), so they run shell commands directly by default. The bash-via-Director protocol is the fallback when a member's Bash invocation is rejected by the Claude Code harness deny-list (destructive operations such as `git push`). In that case the member auto-routes by sending a plain shell-command request via `cafleet message send`, and the Director responds by sending `! <command>` keystrokes through `cafleet member exec`. Process such requests one at a time in poll order. Full invocation + flag layout in the `cafleet` skill § Routing Bash via the Director.
+Programmer / Tester / Verifier / Reviewer members are spawned in workspace-scoped auto-approval mode ({permission_flags}; Bash tool enabled, permission prompts auto-resolve), so they run shell commands directly by default. The bash-via-Director protocol is the fallback when a member's Bash invocation is denied by its coding-agent harness (destructive operations such as `git push` on claude/codex; any command outside the preset's deny-by-default allowlist on opencode). In that case the member auto-routes by sending a plain shell-command request via `cafleet message send`, and the Director responds by sending `! <command>` keystrokes through `cafleet member exec`. Process such requests one at a time in poll order. Full invocation + flag layout in the `cafleet` skill § Routing Bash via the Director.
 
 ### Skill-specific milestones
 

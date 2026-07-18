@@ -22,8 +22,10 @@ version/config requirements.
 
 Shared contract:
 
-- All three postures enable the Bash tool and auto-resolve routine permission
-  prompts, so members run cafleet (and any shell command) directly.
+- All three postures enable the Bash tool with no runtime permission prompts.
+  claude and codex members run cafleet (and any shell command) directly;
+  opencode members run cafleet and the other commands on the preset's
+  deny-by-default allowlist, and route everything else to the Director.
 - All three honor the leading-`!` shell shortcut that
   [`cafleet member exec`](cli-options.md#member-exec) uses.
 - `--model <m>` from `cafleet member create` is inserted immediately before
@@ -114,23 +116,32 @@ so `cafleet member create --coding-agent opencode` fails with `opencode agent
 preset not found at <preset>; run 'cafleet setup' first` when the file is
 missing.
 
-The preset's ruleset lists a catch-all `"*": "allow"` first, then specific
-denies (`sudo*`, `rm -rf*`, `curl*`, `git push*`, `**/.env`, …). opencode
-selects the **last** matching rule, so this order is the safety floor —
-every check resolves to `allow` or `deny`, never `ask`. A permission popup
-in an opencode pane is therefore a regression escape, not a runtime decision:
-capture the pane, escalate, and extend the deny-list — do not answer the
+The preset's `bash` ruleset is deny-by-default: a `"*": "deny"` base first,
+then an explicit allowlist translated from the operator's Claude Code
+`permissions.allow` set (`cafleet *`, read-only `gh` queries plus the PR
+comment/review endpoints, non-destructive `git` subcommands, file-inspection
+utilities, and Python project tooling), then two final `cafleet member exec`
+deny overrides placed after `"cafleet *"`. opencode selects the **last**
+matching rule, so this order is the safety floor — every check resolves to
+`allow` or `deny`, never `ask`. A permission popup in an opencode pane is
+therefore a regression escape, not a runtime decision: capture the pane,
+escalate, and extend the allowlist by operator decision — do not answer the
 popup ad hoc.
 
 ### Safety-floor caveats {#safety-floor-caveats}
 
-The posture is deny-list only, with no OS-level sandbox:
+The posture is a deny-by-default allowlist, with no OS-level sandbox:
 
 - **MCP-contributed tools bypass the permission evaluator.** cafleet ships no
   MCP stanzas; operators MUST NOT add MCP servers to any opencode config
   their machine loads.
-- Un-enumerated shell wrappers, in-language eval, and side-channel egress
-  also bypass the deny-list. For kernel-enforced isolation, use the `codex`
-  backend.
+- Standalone un-enumerated commands fall to the `"*": "deny"` base, but
+  bypasses under allowed globs persist: argument-space abuse and shell
+  chaining inside a `cmd *` match (a compound line whose leading tokens match
+  an allowed glob, e.g. `git log --stat; curl … | sh` matching `git log *`),
+  and interpreter/hook execution via allowed tooling (`uv run pytest *`
+  executes workspace-writable test code; `git commit *` runs `.git/hooks`) —
+  unless opencode's per-sub-command evaluation of compound lines is verified
+  and recorded here. For kernel-enforced isolation, use the `codex` backend.
 
 Validated against `opencode 1.15.5` (the minimum supported version).
