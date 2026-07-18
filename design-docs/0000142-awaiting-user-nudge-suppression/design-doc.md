@@ -1,7 +1,7 @@
 # Suppress Director Nudges to Busy or Prompt-Parked Members
 
 **Status**: Approved
-**Progress**: 1/11 tasks complete
+**Progress**: 7/11 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -111,12 +111,12 @@ The monitoring member's behavior is untouched, satisfying the issue's first requ
 
 ### Step 2: Supervision reference
 
-- [ ] In `supervision.md` § Idle Semantics, replace the know-based prohibition bullet ("never keystroke a member you know to be awaiting a user answer") with the affirmative gate rule per § Specification: capture first (at the normative `--lines 120` depth, using the target member's backend overlay cues), nudge only on `finished` / `stalled`, skip the round on `awaiting_user` / `working`; narrow the reply-exemption bullet to replies to reply-soliciting messages (questions/blockers), routing replies to progress-only messages through the gate; reword the `finished`/`stalled` re-engagement bullets to route through the gate. <!-- completed: -->
-- [ ] In `supervision.md`, include `cafleet message broadcast` in the gate rule: a broadcast fires only when every recipient's fresh capture classifies `finished` or `stalled`; otherwise defer the entire broadcast or split it into per-recipient gated unicasts. <!-- completed: -->
-- [ ] In `supervision.md` § How ordinary members are woken, bind the manual-recovery path (path 2: `cafleet member ping` / re-sent instruction) to the gate. <!-- completed: -->
-- [ ] In `supervision.md` § Team-facilitation instructions step 4, make the capture sub-step (c) the gating precondition for the send sub-step (d): (d) fires only for a member whose (c) capture classified `finished` or `stalled`. <!-- completed: -->
-- [ ] In `supervision.md` § Stall Response, add the gate as a precondition of every nudge (a Stage-2 capture doubles as the gate capture only when taken at `--lines 120` and still fresh), add the deferred-send semantics (defer the entire send; hold deferred sends and re-evaluate each with a fresh capture on the next facilitation tick), and amend § Escalation to count only fired nudges. <!-- completed: -->
-- [ ] In `supervision.md` § Quick Reference, annotate the "Message member" and "Manual inbox-poll nudge" rows with the gate precondition ("gated: fresh capture must classify finished/stalled"). <!-- completed: -->
+- [x] In `supervision.md` § Idle Semantics, replace the know-based prohibition bullet ("never keystroke a member you know to be awaiting a user answer") with the affirmative gate rule per § Specification: capture first (at the normative `--lines 120` depth, using the target member's backend overlay cues), nudge only on `finished` / `stalled`, skip the round on `awaiting_user` / `working`; narrow the reply-exemption bullet to replies to reply-soliciting messages (questions/blockers), routing replies to progress-only messages through the gate; reword the `finished`/`stalled` re-engagement bullets to route through the gate. <!-- completed: 2026-07-18T13:13 -->
+- [x] In `supervision.md`, include `cafleet message broadcast` in the gate rule: a broadcast fires only when every recipient's fresh capture classifies `finished` or `stalled`; otherwise defer the entire broadcast or split it into per-recipient gated unicasts. <!-- completed: 2026-07-18T13:13 -->
+- [x] In `supervision.md` § How ordinary members are woken, bind the manual-recovery path (path 2: `cafleet member ping` / re-sent instruction) to the gate. <!-- completed: 2026-07-18T13:14 -->
+- [x] In `supervision.md` § Team-facilitation instructions step 4, make the capture sub-step (c) the gating precondition for the send sub-step (d): (d) fires only for a member whose (c) capture classified `finished` or `stalled`. <!-- completed: 2026-07-18T13:14 -->
+- [x] In `supervision.md` § Stall Response, add the gate as a precondition of every nudge (a Stage-2 capture doubles as the gate capture only when taken at `--lines 120` and still fresh), add the deferred-send semantics (defer the entire send; hold deferred sends and re-evaluate each with a fresh capture on the next facilitation tick), and amend § Escalation to count only fired nudges. <!-- completed: 2026-07-18T13:15 -->
+- [x] In `supervision.md` § Quick Reference, annotate the "Message member" and "Manual inbox-poll nudge" rows with the gate precondition ("gated: fresh capture must classify finished/stalled"). <!-- completed: 2026-07-18T13:15 -->
 
 ### Step 3: Backend overlays
 
