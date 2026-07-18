@@ -1,7 +1,7 @@
 # Herdr Pane Rearrange on `cafleet member delete`
 
-**Status**: Approved
-**Progress**: 0/19 tasks complete
+**Status**: Complete
+**Progress**: 17/17 tasks complete
 **Last Updated**: 2026-07-18
 
 ## Overview
@@ -10,13 +10,13 @@
 
 ## Success Criteria
 
-- [ ] After `cafleet member delete` closes a herdr member pane with ≥ 2 members remaining, the member-column panes are re-equalized to equal heights (the create-path invariant).
-- [ ] After the last member pane is deleted, the Director pane's full-tab-width state is explicitly verified from the layout read, with a corrective resize issued when a residual right split remains.
-- [ ] A layout failure (any `HerdrError` during the rebalance) never fails `member delete` — the pane is closed and the member deregistered regardless.
-- [ ] The rebalance only ever resizes the killed pane's tab: when the focused-tab layout reports a different tab, no resize is emitted.
-- [ ] The tmux backend's delete path is unchanged: a bare `tmux kill-pane` with no layout step.
-- [ ] The `Multiplexer` Protocol, the `member delete` CLI path, and the CLI-level call-order contract (`kill_pane` → `deregister_member`) are unchanged.
-- [ ] `docs/spec/multiplexer-backends.md`, `SPEC.md`, `docs/concepts/member-lifecycle.md`, and `docs/api/multiplexer.md` document the delete-time layout behavior; `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
+- [x] After `cafleet member delete` closes a herdr member pane with ≥ 2 members remaining, the member-column panes are re-equalized to equal heights (the create-path invariant).
+- [x] After the last member pane is deleted, the Director pane's full-tab-width state is explicitly verified from the layout read, with a corrective resize issued when a residual right split remains.
+- [x] A layout failure (any `HerdrError` during the rebalance) never fails `member delete` — the pane is closed and the member deregistered regardless.
+- [x] The rebalance only ever resizes the killed pane's tab: when the focused-tab layout reports a different tab, no resize is emitted.
+- [x] The tmux backend's delete path is unchanged: a bare `tmux kill-pane` with no layout step.
+- [x] The `Multiplexer` Protocol, the `member delete` CLI path, and the CLI-level call-order contract (`kill_pane` → `deregister_member`) are unchanged.
+- [x] `docs/spec/multiplexer-backends.md` and `SPEC.md` document the delete-time layout behavior (the concept and API pages instruct member deletion only); `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
 
@@ -173,34 +173,32 @@ The verification is the layout read itself: a single pane with an empty `splits`
 
 ### Step 1: Documentation
 
-- [ ] `docs/spec/multiplexer-backends.md`: add a "Delete-time pane layout" section documenting the asymmetry — tmux relies on native auto-fit after `kill-pane`; herdr's `kill_pane` reads the target's tab (`herdr pane get`), closes the pane, then runs a best-effort rebalance scoped to that tab (column re-equalization for ≥ 2 members, explicit Director full-width restore after the last member, silent skip on unexpected shapes or when the focused-tab layout is a different tab). <!-- completed: -->
-- [ ] `SPEC.md`: update the herdr `kill_pane` entry (~line 1884) to specify the pre-close `_pane_tab_id` read, `herdr pane close`, then the `_rebalance_after_close` algorithm (target-tab-scoped layout read with skip-on-mismatch, the column case table, the full-width restore rule, best-effort `HerdrError` swallowing), alongside the existing `_equalize_focused_tab_column` algorithm section. <!-- completed: -->
-- [ ] `docs/concepts/member-lifecycle.md`: note that member deletion restores the pane layout on backends without native reflow (herdr). <!-- completed: -->
-- [ ] `docs/api/multiplexer.md`: note on `kill_pane` that backends may restore the window layout after the close as a backend-internal detail (herdr does; tmux relies on native auto-fit). <!-- completed: -->
+- [x] `docs/spec/multiplexer-backends.md`: add a "Delete-time pane layout" section documenting the asymmetry — tmux relies on native auto-fit after `kill-pane`; herdr's `kill_pane` reads the target's tab (`herdr pane get`), closes the pane, then runs a best-effort rebalance scoped to that tab (column re-equalization for ≥ 2 members, explicit Director full-width restore after the last member, silent skip on unexpected shapes or when the focused-tab layout is a different tab). <!-- completed: 2026-07-18T06:37 -->
+- [x] `SPEC.md`: update the herdr `kill_pane` entry (~line 1884) to specify the pre-close `_pane_tab_id` read, `herdr pane close`, then the `_rebalance_after_close` algorithm (target-tab-scoped layout read with skip-on-mismatch, the column case table, the full-width restore rule, best-effort `HerdrError` swallowing), alongside the existing `_equalize_focused_tab_column` algorithm section. <!-- completed: 2026-07-18T06:37 -->
 
 ### Step 2: Tests (`tests/multiplexer/test_herdr.py`)
 
-- [ ] `kill_pane` rebalance sequence: with a seeded 3-member post-close layout, `kill_pane` emits the pre-close `pane get <target>`, `pane close`, then the `pane layout` read, then the deterministic `1/(N-k)` resize deltas (mirroring the create-path equalize tests at `test_herdr.py:307-398`). <!-- completed: -->
-- [ ] Already-balanced column after close → the read pair runs but no `pane resize` is emitted. <!-- completed: -->
-- [ ] Single remaining member (`n == 1`) → no resize emitted. <!-- completed: -->
-- [ ] Last member deleted, residual right split (e.g. ratio 0.62) → exactly one corrective resize `--pane <director> --direction right --amount 0.38`. <!-- completed: -->
-- [ ] Last member deleted, single pane with empty `splits` → no resize emitted; anomalous residue (multiple splits, or a non-right residual split, or ≥ 2 panes all at `min_x`) → no resize emitted. <!-- completed: -->
-- [ ] Tab scoping: the layout read reports a `tab_id` different from the pre-close target tab (focus on an unrelated tab) → no resize emitted; a pane already gone at the pre-close `pane get` (`pane_not_found`, `ignore_missing=True`) → the close is tolerated and no layout read or resize is emitted. <!-- completed: -->
-- [ ] Best-effort semantics: a `HerdrError` from the pre-close `pane get` yields `None` and the close still runs (no rebalance); a `HerdrError` from the layout read or a resize is swallowed and `kill_pane` still succeeds; a non-tolerated close error propagates and no rebalance commands are emitted; the malformed-chain guard skips. Update the existing `kill_pane` argv tests (`test_herdr.py:434-462`) to seed the pre-close `pane get` and rebalance read responses. <!-- completed: -->
-- [ ] Create-path regression: the existing `split_window` / `_equalize_focused_tab_column` tests pass unchanged (the `_read_tab_layout` / `_equalize_column` extraction is behavior-preserving). <!-- completed: -->
-- [ ] CLI regression: `tests/cli/test_member_delete.py` passes unchanged, including the `["kill_pane", "deregister_member"]` call-order assertion. <!-- completed: -->
+- [x] `kill_pane` rebalance sequence: with a seeded 3-member post-close layout, `kill_pane` emits the pre-close `pane get <target>`, `pane close`, then the `pane layout` read, then the deterministic `1/(N-k)` resize deltas (mirroring the create-path equalize tests at `test_herdr.py:307-398`). <!-- completed: 2026-07-18T15:40 -->
+- [x] Already-balanced column after close → the read pair runs but no `pane resize` is emitted. <!-- completed: 2026-07-18T15:40 -->
+- [x] Single remaining member (`n == 1`) → no resize emitted. <!-- completed: 2026-07-18T15:40 -->
+- [x] Last member deleted, residual right split (e.g. ratio 0.62) → exactly one corrective resize `--pane <director> --direction right --amount 0.38`. <!-- completed: 2026-07-18T15:40 -->
+- [x] Last member deleted, single pane with empty `splits` → no resize emitted; anomalous residue (multiple splits, or a non-right residual split, or ≥ 2 panes all at `min_x`) → no resize emitted. <!-- completed: 2026-07-18T15:40 -->
+- [x] Tab scoping: the layout read reports a `tab_id` different from the pre-close target tab (focus on an unrelated tab) → no resize emitted; a pane already gone at the pre-close `pane get` (`pane_not_found`, `ignore_missing=True`) → the close is tolerated and no layout read or resize is emitted. <!-- completed: 2026-07-18T15:40 -->
+- [x] Best-effort semantics: a `HerdrError` from the pre-close `pane get` yields `None` and the close still runs (no rebalance); a `HerdrError` from the layout read or a resize is swallowed and `kill_pane` still succeeds; a non-tolerated close error propagates and no rebalance commands are emitted; the malformed-chain guard skips. Update the existing `kill_pane` argv tests (`test_herdr.py:434-462`) to seed the pre-close `pane get` and rebalance read responses. <!-- completed: 2026-07-18T15:40 -->
+- [x] Create-path regression: the existing `split_window` / `_equalize_focused_tab_column` tests pass unchanged (the `_read_tab_layout` / `_equalize_column` extraction is behavior-preserving). <!-- completed: 2026-07-18T06:49 -->
+- [x] CLI regression: `tests/cli/test_member_delete.py` passes unchanged, including the `["kill_pane", "deregister_member"]` call-order assertion. <!-- completed: 2026-07-18T06:49 -->
 
 ### Step 3: Implementation (`cafleet/src/cafleet/multiplexer/herdr.py`)
 
-- [ ] Extract `_read_tab_layout(expected_tab_id)` and `_equalize_column(column, splits)` from `_resize_focused_tab_column`, preserving the create path's observable command sequence. <!-- completed: -->
-- [ ] Add `_pane_tab_id(pane_id)` (best-effort pre-close tab read, `None` on any failure) and `_rebalance_after_close(target_tab_id)` / `_resize_after_close(target_tab_id)` with the column case table (≥ 2 → equalize, 1 → no-op, 0 → full-width restore). <!-- completed: -->
-- [ ] Add `_restore_director_full_width(panes, splits)` with the residue guards and the single corrective resize. <!-- completed: -->
-- [ ] Wire the pre-close `_pane_tab_id` read and `self._rebalance_after_close(target_tab_id)` into `kill_pane` around `_run_tolerating_missing`. <!-- completed: -->
+- [x] Extract `_read_tab_layout(expected_tab_id)` and `_equalize_column(column, splits)` from `_resize_focused_tab_column`, preserving the create path's observable command sequence. <!-- completed: 2026-07-18T06:46 -->
+- [x] Add `_pane_tab_id(pane_id)` (best-effort pre-close tab read, `None` on any failure) and `_rebalance_after_close(target_tab_id)` / `_resize_after_close(target_tab_id)` with the column case table (≥ 2 → equalize, 1 → no-op, 0 → full-width restore). <!-- completed: 2026-07-18T06:46 -->
+- [x] Add `_restore_director_full_width(panes, splits)` with the residue guards and the single corrective resize. <!-- completed: 2026-07-18T06:46 -->
+- [x] Wire the pre-close `_pane_tab_id` read and `self._rebalance_after_close(target_tab_id)` into `kill_pane` around `_run_tolerating_missing`. <!-- completed: 2026-07-18T06:46 -->
 
 ### Step 4: Verification
 
-- [ ] `mise //cafleet:test` passes. <!-- completed: -->
-- [ ] `mise //cafleet:lint` and `mise //cafleet:typecheck` pass. <!-- completed: -->
+- [x] `mise //cafleet:test` passes. <!-- completed: 2026-07-18T06:49 -->
+- [x] `mise //cafleet:lint` and `mise //cafleet:typecheck` pass. <!-- completed: 2026-07-18T06:49 -->
 
 ---
 
@@ -210,3 +208,5 @@ The verification is the layout read itself: a single pane with an empty `splits`
 |------|---------|
 | 2026-07-18 | Initial draft |
 | 2026-07-18 | Review round 1: rebalance scoped to the killed pane's tab via a pre-close `pane get` anchor (decision #7); collapsed the full-width-restore residue guards |
+| 2026-07-18 | Implementation complete: all tasks and success criteria met; Reviewer approved in 1 round; PR #206 |
+| 2026-07-18 | User review: backend layout behavior is documented only in `docs/spec/multiplexer-backends.md` and `SPEC.md`; the concept and API pages instruct member deletion without backend layout notes |
