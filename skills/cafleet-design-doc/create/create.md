@@ -23,11 +23,6 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 | **Drafter** | Member | Ask clarifying questions (via Director relay), read target codebase, write and revise the design document | Communicate with user directly (goes through Director), review own work | [roles/drafter.md](roles/drafter.md) |
 | **Reviewer** | Member | Critically review drafts for rule compliance, readability, completeness, correctness | Write the document, communicate with user | [roles/reviewer.md](roles/reviewer.md) |
 
-## Additional resources
-
-- For the document template, section guidelines, and quality standards, see: [../reference/guidelines.md](../reference/guidelines.md)
-- For the inter-member coordination protocol (verb + pointer schema, `COMMENT(role)` markers), see: [../reference/coordination.md](../reference/coordination.md)
-
 ## Coordination Protocol
 
 This skill's Director, Drafter, and Reviewer coordinate via the verb + pointer schema and `COMMENT(role)` markers defined canonically in [../reference/coordination.md](../reference/coordination.md) — the single source of truth for the 6 verbs, the 3 pointer forms, the message format, the `COMMENT(role)` marker grammar, the issue/status split, anchorless status, finalize-time cleanup, and Director per-file detail recovery.
@@ -72,7 +67,7 @@ Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt. The audit-
 
 1. **File does not exist** → Fresh creation (proceed to Step 1 as normal).
 2. **File exists** → Check for `COMMENT(user-relay)` markers:
-   - Use Grep to search for `COMMENT(user-relay)` in the file. The grep is tightened to the `user-relay` role because user-derived clarifications are the only marker class that warrants resume-mode. Stale `COMMENT(reviewer)` / `COMMENT(director)` / `COMMENT(programmer)` markers from other workflows MUST NOT be misclassified as interview-resume. Note: the execute workflow also writes transient `COMMENT(user-relay): <choice>` markers for user arbitration (e.g., test-framework selection in `Phase 1`), but those are short-lived and removed by the routed member as part of the fix; under normal flow no `COMMENT(user-relay)` survives an in-progress execute run. If the user invokes the create workflow against a half-finished execute doc that happens to carry a transient `COMMENT(user-relay)`, treating it as resume-mode is acceptable — the Drafter will read and resolve the marker the same way it handles interview clarifications.
+   - Use Grep to search for `COMMENT(user-relay)` in the file. The grep is tightened to the `user-relay` role because user-derived clarifications are the only marker class that warrants resume-mode. Stale `COMMENT(reviewer)` / `COMMENT(director)` / `COMMENT(programmer)` markers from other workflows MUST NOT be misclassified as interview-resume. (The execute workflow's transient `COMMENT(user-relay): <choice>` arbitration markers are removed by the routed member under normal flow; if one survives into a create invocation, treating it as resume-mode is acceptable — the Drafter reads and resolves it like an interview clarification.)
 
    - **`COMMENT(user-relay)` markers found** → This is **resume mode**. Proceed to Step 1 with the resume-specific Drafter spawn prompt. Set an internal flag `SKIP_CLARIFICATION=true` so Step 2 (clarification) is skipped.
    - **No `COMMENT(user-relay)` markers found** → Inform the user: "No `COMMENT(user-relay)` markers found in the existing document." Present two options through {decision_surface}:
@@ -177,7 +172,7 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 
 **Skip this step entirely when `SKIP_CLARIFICATION=true`** (set by Step 0 in resume mode or quality-review-only mode). Resume mode: the COMMENT markers serve as the clarification and the Drafter already has all the information needed. Quality-review-only mode: the Drafter is not producing a new draft at all — proceed directly to Step 3 by routing the existing `${DOC_PATH}` to the Reviewer.
 
-> **Clarification Exemption**: Director-to-Drafter messages during this step are exempt from the verb + pointer schema documented in [the Coordination Protocol section above](#coordination-protocol). At clarification time the design doc does not yet exist (the Drafter is forbidden from creating any file before clarifying), so there is no in-doc target for `COMMENT(user-relay)` markers — the user-answer relay rides as a free-form multi-line cafleet body. From Step 3 onward (once the initial draft exists) every message falls back under the schema.
+> **Clarification Exemption** ([Coordination Protocol above](#coordination-protocol)): Director-to-Drafter messages in this step ride as free-form multi-line cafleet bodies — the design doc does not yet exist. From Step 3 onward every message falls back under the schema.
 
 1. Wait for the Drafter's clarifying questions. The broker's inline-preview keystroke on the Drafter's `message send`, and your own periodic `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id>`, will surface the Drafter's message once it arrives.
 2. `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --message-id <message-id>` each received message after reading it.
@@ -227,21 +222,15 @@ See [roles/director.md](roles/director.md) for user interaction rules (COMMENT h
 
 ### Step 5: User Feedback Loop (Director)
 
-Process the user's selection:
+Process the user's selection per [roles/director.md](roles/director.md) § User Interaction Rules:
 
-- **"Scan for COMMENT markers"**:
-  1. **Immediately** scan the document with Grep for `COMMENT(` markers — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
-  2. **If markers are found**: Route the Drafter to read and resolve the markers in-doc with `ready (doc)` — no marker content is quoted in the cafleet body:
-     ```bash
-     cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
-       --to-member-id <drafter-member-id> --text "ready (doc)"
-     ```
-     After the Drafter replies `addressed (doc)` and removes the markers, verify with Grep that no `COMMENT(` markers remain. Then re-enter the quality loop (Step 3) and re-present (Step 4).
-  3. **If no markers are found**: Explain the COMMENT marker convention to the user — markers follow the pattern `# COMMENT(username): feedback` placed directly in the design document file. Show the file path so the user can edit it. Then re-prompt with the same three-option pattern (Approve / Scan for COMMENT markers / built-in Other).
-
-- **Free-text response**: Use LLM reasoning — not keyword matching — to distinguish between:
-  - **Abort intent** (user wants to stop or cancel the process): Trigger the Abort Flow — follow the Shutdown Protocol (Step 6) without Drafter finalization.
-  - **Non-abort intent** (user providing verbal feedback or asking a question): Explain that feedback should be provided via COMMENT markers in the design document, then re-prompt with the same three-option pattern.
+- **"Scan for COMMENT markers"**: scan immediately with Grep — the selection itself is the signal, do NOT wait for the user to confirm they are done editing. If markers are found, route the Drafter with `ready (doc)`:
+  ```bash
+  cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
+    --to-member-id <drafter-member-id> --text "ready (doc)"
+  ```
+  After the Drafter replies `addressed (doc)` and removes the markers, verify with Grep that no `COMMENT(` markers remain, then re-enter the quality loop (Step 3) and re-present (Step 4). If no markers are found, follow the role file's no-markers step (explain the marker convention, show the file path, re-prompt with the same three-option pattern).
+- **Free-text response**: judge abort vs non-abort intent per the role file (LLM reasoning, not keyword matching). Abort intent → the Abort Flow (Shutdown Protocol, Step 6, without Drafter finalization); non-abort → explain the COMMENT-marker channel and re-prompt.
 
 No round limit — loop continues until approved or aborted.
 

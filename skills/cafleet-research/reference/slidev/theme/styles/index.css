@@ -15,8 +15,8 @@
 
   /* Neutral */
   --c-text: oklch(20.5% 0 0);                     /* neutral-900 */
-  --c-text-secondary: oklch(55.6% 0 0);           /* neutral-500 — shared secondary metadata color for existing consumers */
-  --c-text-muted: oklch(55.6% 0 0);               /* neutral-500 — muted alias; safe until consumers are explicitly migrated */
+  --c-text-secondary: oklch(55.6% 0 0);           /* neutral-500 — secondary metadata color */
+  --c-text-muted: oklch(55.6% 0 0);               /* neutral-500 — alias of --c-text-secondary */
   --c-bg: #fff;                                    /* white */
   --c-border: oklch(87% 0 0);                     /* neutral-300 */
 

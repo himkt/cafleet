@@ -1,6 +1,6 @@
 # Design Doc Execute (CAFleet Edition)
 
-Implement features based on a design document using up to five roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), Verifier (E2E/integration testing), and Reviewer (fresh post-implementation review). Every inter-member message is persisted in SQLite and auditable. The Director judges which members to spawn based on the nature of the implementation tasks. For each step, the Tester writes unit tests first, the Director reviews and approves them, then the Programmer implements code to pass the tests. The Director also reviews the Programmer's implementation for code quality and design doc compliance before committing. After all TDD steps, the Verifier performs E2E/integration verification (Phase D) if spawned. When every Implementation task and Success Criterion is complete, Step 5 spawns a fresh Reviewer member that reviews the full branch diff and drives a review-and-revise loop with the implementing members until it approves. Step 6 presents the Reviewer-approved change to the user (admin) for approval, Step 7 pushes the feature branch and opens a PR, and Step 8 finalizes, commits the completion marker, pushes it (when the branch is tracked on origin), and tears the team down.
+Implement features based on a design document using up to five roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), Verifier (E2E/integration testing), and Reviewer (fresh post-implementation review). Every inter-member message is persisted in SQLite and auditable. The Director judges which members to spawn from the nature of the implementation tasks and drives a per-step TDD cycle: the Tester writes unit tests, the Director reviews and approves them, the Programmer implements to pass them, and the Director reviews the implementation before committing. After all TDD steps, the Verifier (if spawned) runs Phase D E2E verification; Step 5 spawns a fresh Reviewer that reviews the full branch diff and loops until it approves; Step 6 presents the change to the user; Step 7 pushes the branch and opens a PR; Step 8 finalizes and tears the team down.
 
 ## Required reading
 
@@ -237,7 +237,7 @@ Render the prompt to `${BASE}/.prompts/tester-<UTC-compact>.md` per the 3e two-s
 
 **Verifier spawn prompt (if needed):**
 
-> **Phase 1 exemption**: The Verifier's first message — a tool-and-MCP inventory — is a one-time discovery payload, not iterative coordination, and rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the interview workflow). Phase 2 verification reports follow the verb + pointer + `COMMENT(verifier)` schema documented in [the Coordination Protocol section above](#coordination-protocol).
+> **Phase 1 exemption** ([Coordination Protocol above](#coordination-protocol)): the Verifier's first message — the tool-and-MCP inventory — rides as a free-form multi-line cafleet body; Phase 2 verification reports follow the schema.
 
 | Slot | Verifier |
 |---|---|

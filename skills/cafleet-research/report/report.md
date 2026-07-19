@@ -261,7 +261,7 @@ Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol* (firs
 
 ### web-researcher
 
-This skill ships an embedded agent spec for parallel web research that returns structured summaries with sources. The canonical spec lives in [`roles/web-researcher.md`](roles/web-researcher.md). Read that file and paste its spec body (the prose under the frontmatter) verbatim into the dispatch recipe below.
+This skill ships an embedded agent spec for parallel web research that returns structured summaries with sources. The canonical spec lives in [`roles/web-researcher.md`](roles/web-researcher.md).
 
 #### Dispatching this agent
 

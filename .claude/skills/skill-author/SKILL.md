@@ -119,11 +119,7 @@ For each member you spawn, follow the **two-step render-to-file pattern**:
 
    Capture the printed `member_id` from the JSON response and substitute it for the member's id in every subsequent `cafleet ...` call **the Director** makes that targets it. (The member itself learns its own id from the literal `YOUR MEMBER ID:` line the CLI rendered into its prompt — § 3.2.)
 
-#### Why the two-step pattern instead of inline `--text`?
-
-`cafleet member create` accepts the spawn prompt either inline via `--text` or via `--text-file <abs path>`. The inline `--text` form passes the prompt to `tmux split-window` as a single positional argument; tmux fails with `command too long` once the shell-quoted prompt grows past a few KB, and cafleet rolls back the member registration. Real role files are typically 5–15 KB and the spawn prompt that includes them often pushes well past 20 KB. `--text-file` reads the file inside the cafleet process and writes the text to the new pane through a separate path that is not size-limited.
-
-Use `--text-file` always. The inline `--text` form exists only as the documented fallback when `${BASE}` is `<unset>` and the audit-file write is impossible (see § 4).
+Use `--text-file` for every spawn — § 3.4 explains the `command too long` cliff; inline `--text` is the documented fallback only for the `${BASE} == <unset>` case (§ 3.5, § 4).
 
 #### Path-by-reference for role files
 
@@ -209,17 +205,13 @@ A Director may *also* embed the literal `fleet_id` and `director_member_id` (whi
 
 A common mistake is to leave a literal `[INSERT abs path to roles/<role>.md]` in the rendered file because the Director forgot to compute the absolute path. The member then opens a file that does not exist on its first turn. Spot-check the rendered files in `${BASE}/prompts/` before continuing.
 
-### 3.4 The path-by-reference rule (one more time)
-
-Spawn prompt body references the role file by absolute path. The role file lives in `<your skill dir>/roles/<role>.md`. Compute the absolute path once at Director startup and substitute it into every spawn prompt that needs it. Do NOT inline the role file content.
-
-### 3.5 The `command too long` cliff and `--text-file`
+### 3.4 The `command too long` cliff and `--text-file`
 
 `tmux split-window` accepts the spawn prompt as a single positional argument. Linux's `ARG_MAX` (the `execve()` argument-list size limit) and tmux's own command parser combine to fail with `command too long` once the shell-quoted prompt grows past a few KB. Even with role content not inlined, a prompt with multiple `[INSERT …]` substitutions + the identity block + role-specific assignment text often exceeds the limit.
 
 `--text-file <abs path>` sidesteps this. cafleet reads the file inside its own process and writes the text to the new pane through a separate path that is not size-limited. **Use `--text-file` for every spawn.** The inline `--text` form is the documented fallback only for the `${BASE} == <unset>` case where the file write is impossible.
 
-### 3.6 The `${BASE} == <unset>` skip semantics
+### 3.5 The `${BASE} == <unset>` skip semantics
 
 When the base-dir resolution yields the `unset` outcome (absolute-path argument outside the repo root, or equal to the repo root itself), `${BASE}` is the literal sentinel string `<unset>`. The skill MUST:
 
@@ -252,9 +244,9 @@ Every spawn-prompt render is also the spawn-prompt audit artifact. The protocol:
 
 5. **Every write under `${BASE}`**. Audit files, scratch notes, figure artifacts, intermediate working files — every output the skill produces lands under `${BASE}` or a consumer-supplied absolute path. **Never `/tmp`** unless `${BASE}` itself is `/tmp/cafleet` (which is a legitimate base-dir choice when the user picked it via the `{decision_surface}` prompt).
 
-6. **`${BASE} == <unset>` is a hard stop**, not a fallback. See § 3.6.
+6. **`${BASE} == <unset>` is a hard stop**, not a fallback. See § 3.5.
 
-This protocol is the single most-violated rule in past CAFleet-orchestrated skills. Authors routinely forget the same-second collision rule and overwrite the previous member's audit file when spawning two members in a tick. Authors routinely forget the `<unset>` sentinel and crash with a Path-with-`<`-in-it error. Read the rules above before writing any file write code.
+This protocol is the most easily violated rule in CAFleet-orchestrated skills. Authors routinely forget the same-second collision rule and overwrite the previous member's audit file when spawning two members in a tick. Authors routinely forget the `<unset>` sentinel and crash with a Path-with-`<`-in-it error. Read the rules above before writing any file write code.
 
 ---
 
@@ -498,7 +490,7 @@ Fix: when `${BASE} == <unset>`, drop the `BASE:` line from the spawn prompt body
 
 Symptom: scratch and audit files appear under `/tmp/<random>/prompts/...` instead of under `${BASE}`. The user cannot find their per-task evidence after the run.
 
-Fix: never fall back to `/tmp` silently. The `<unset>` sentinel is a hard stop, not a fallback. If `${BASE}` is `<unset>`, abort with the standardized error `Error: BASE is <unset>; refusing to fall back to /tmp` (or, for spawned members, follow the skip + inline-fallback branch in § 3.6).
+Fix: never fall back to `/tmp` silently. The `<unset>` sentinel is a hard stop, not a fallback. If `${BASE}` is `<unset>`, abort with the standardized error `Error: BASE is <unset>; refusing to fall back to /tmp` (or, for spawned members, follow the skip + inline-fallback branch in § 3.5).
 
 ### 7.7 Calling `cafleet fleet delete` before `cafleet member delete`
 

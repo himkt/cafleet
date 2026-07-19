@@ -7,11 +7,8 @@ icon: lucide/database
 ## Backend
 
 Everything is persisted in a single SQLite database accessed through
-SQLAlchemy 2.x with the sync `pysqlite` driver. Schema changes are managed
-by Alembic, bundled inside the `cafleet` wheel and applied via
-`cafleet setup` (schema-only: `cafleet setup --skip claude --skip codex
---skip opencode`). There is no separate database daemon to operate, monitor,
-or back up — the database is a single file.
+SQLAlchemy 2.x with the sync `pysqlite` driver. There is no separate database
+daemon to operate, monitor, or back up — the database is a single file.
 
 The default database path is `~/.local/share/cafleet/cafleet_v5.db` (XDG state
 directory), expanded once at config load time. Override with the

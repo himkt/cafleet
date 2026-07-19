@@ -59,10 +59,6 @@ When you offer the operator a list of options ("(1) you run it via `!`, (2) rout
 
 The CLI renders these into your spawn prompt as literal `FLEET ID:` / `YOUR MEMBER ID:` / `DIRECTOR MEMBER ID:` lines. They should already be in your context. If they are genuinely missing, say so explicitly and ask the operator. Do **not** guess UUIDs.
 
-## Why this rule is associated with the Bash tool
-
-The Bash tool is the entry point for every shell-execution request. If you can pause at the moment of "I want to run a command" and check this rule, you cannot fall into the failure modes of fake markup, silent stalling, or unnecessary Director-routing. **Treat this rule as a precondition for every Bash invocation.**
-
 ## Director side (for completeness)
 
 If you are the **Director** (not a member), this rule applies in reverse only when a member auto-routes a denied command to you.

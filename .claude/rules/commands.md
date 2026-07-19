@@ -20,7 +20,6 @@
 
 - Use full-path notation: `mise //[package]:[task]`. Do NOT use short-form `mise <task>`.
 - Do NOT use `mise run <task>` — the `run` subcommand is unnecessary.
-- Run all tasks from the project root. No `cd` required.
 - **mise tasks forward positional args to the underlying command.** When you need to pass pytest args (test selectors, `-x`, `-v`, etc.), pass them directly to the mise task — do NOT fall back to `uv run python -m pytest` to "get more control". Examples:
   - Run one test: `mise //cafleet:test tests/cli/test_fleet.py::test_my_case`
   - Stop on first failure with verbose output: `mise //cafleet:test -xvs tests/test_my.py`
