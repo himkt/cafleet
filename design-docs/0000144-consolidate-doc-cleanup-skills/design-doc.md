@@ -1,7 +1,7 @@
 # 0000144 — Consolidate Doc-Cleanup Skills into `clean-docs` (Three Workflows)
 
 **Status**: Approved
-**Progress**: 6/16 tasks complete
+**Progress**: 9/16 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -166,9 +166,9 @@ Role files adapt from the existing skills with two systematic changes: spine cit
 
 ### Step 4: `affirmative/` workflow
 
-- [ ] Create `affirmative/affirmative.md` — trigger scenario, full-read judgment mechanics, `findings.md` artifact spec, the P4 BEHAVIOR-AFFECTING protocol, and the legitimacy carve-outs. <!-- completed: -->
-- [ ] Create `affirmative/roles/scanner.md` and `affirmative/roles/reviewer.md`, adapted from the old `clean-docs` roles and scoped to P1/P2/P4. <!-- completed: -->
-- [ ] Create `affirmative/reference/rubric.md` — the P1/P2/P4 classes with P2 absorbing negative-voice rephrasing (§3), citing `reference/review-format.md` for the shared format and guardrails. <!-- completed: -->
+- [x] Create `affirmative/affirmative.md` — trigger scenario, full-read judgment mechanics, `findings.md` artifact spec, the P4 BEHAVIOR-AFFECTING protocol, and the legitimacy carve-outs. <!-- completed: 2026-07-19T02:50 -->
+- [x] Create `affirmative/roles/scanner.md` and `affirmative/roles/reviewer.md`, adapted from the old `clean-docs` roles and scoped to P1/P2/P4. <!-- completed: 2026-07-19T02:50 -->
+- [x] Create `affirmative/reference/rubric.md` — the P1/P2/P4 classes with P2 absorbing negative-voice rephrasing (§3), citing `reference/review-format.md` for the shared format and guardrails. <!-- completed: 2026-07-19T02:50 -->
 
 ### Step 5: `simplification/` workflow
 
