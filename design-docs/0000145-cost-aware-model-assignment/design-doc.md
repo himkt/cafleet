@@ -1,7 +1,7 @@
 # Cost-Aware CAFleet Model Assignment
 
 **Status**: Approved
-**Progress**: 0/29 tasks complete
+**Progress**: 5/29 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -300,12 +300,12 @@ The skill owns catalog maintenance; the CAFleet Director owns per-task selection
 
 ### Step 1: Define and seed the catalog
 
-- [ ] Add `skills/cafleet/reference/model-catalog.md` with its canonical Markdown envelope, schema version 1 payload, approved-source metadata, and active direct Claude/Codex records populated from current official source data. <!-- completed: -->
-- [ ] Add a pure Markdown-payload parser/validator with no package-data configuration or fallback catalog copy; remove duplicated model-price/capability claims from `skills/cafleet/reference/director.md`. <!-- completed: -->
-- [ ] Represent gateway models without an approved actual price as token-only manual records or `unknown`/`not-applicable` rate cards, and exclude them from automatic comparisons. <!-- completed: -->
+- [x] Add `skills/cafleet/reference/model-catalog.md` with its canonical Markdown envelope, schema version 1 payload, approved-source metadata, and active direct Claude/Codex records populated from current official source data. <!-- completed: 2026-07-19T12:22 -->
+- [x] Add a pure Markdown-payload parser/validator with no package-data configuration or fallback catalog copy; remove duplicated model-price/capability claims from `skills/cafleet/reference/director.md`. <!-- completed: 2026-07-19T12:22 -->
+- [x] Represent gateway models without an approved actual price as token-only manual records or `unknown`/`not-applicable` rate cards, and exclude them from automatic comparisons. <!-- completed: 2026-07-19T12:22 -->
 
-- [ ] Add exact backend/token-to-provider-SKU mappings, alias validation, reviewed capability-policy provenance, and normalized rate-card/context/cache validation. <!-- completed: -->
-- [ ] Add schema-version migration handling plus role-profile/token-profile validation for every current workflow role. <!-- completed: -->
+- [x] Add exact backend/token-to-provider-SKU mappings, alias validation, reviewed capability-policy provenance, and normalized rate-card/context/cache validation. <!-- completed: 2026-07-19T12:22 -->
+- [x] Add schema-version migration handling plus role-profile/token-profile validation for every current workflow role. <!-- completed: 2026-07-19T12:22 -->
 
 ### Step 2: Implement deterministic selection
 

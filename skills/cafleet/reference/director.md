@@ -28,7 +28,7 @@ cafleet member create --fleet-id <fleet-id> \
 | `--name` | yes | Display name of the new member. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; also recorded as `placement.coding_agent`. When omitted, the member — every role — inherits **your** (the spawning Director's) backend from your placement row, so an unflagged team runs on the same backend as its Director. An explicit value always wins. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent, or with `opencode agent preset not found at <preset>; run 'cafleet setup' first` when the opencode agent preset is missing. |
-| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend and lists a per-backend example; the *Available models per backend* tables below list the common models for each backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
+| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend; the model catalog at [`model-catalog.md`](model-catalog.md) lists the models for each backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary (omitted → the binary's default; spawn-time only, never persisted). claude: `low`, `medium`, `high`, `xhigh`, `max` (spawned as `--effort <level>`); codex: `minimal`, `low`, `medium`, `high`, `xhigh` (spawned as `--config=model_reasoning_effort=<level>`); opencode: unsupported — any value exits 2 with `opencode does not support reasoning effort.`. An unknown level exits 2 before any side effect. The per-backend level set is your overlay's `{effort_levels}` value. |
 | `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `member_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop watches the Director and members on their own intervals and wakes the monitoring member when one is due — see [`reference/supervision.md`](supervision.md)). An ordinary `--role member` with a pane IS enrolled. The LLM is still set by `--model` (the Director passes the monitor model `{monitor_model}`); the backend follows the general inheritance rule when `--coding-agent` is omitted (see the `--coding-agent` row). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see [`roles/monitor.md`](../roles/monitor.md) for the canonical prompt and first-in/first-out lifecycle. |
 | `--text` | no | Inline spawn prompt. Mutually exclusive with `--text-file`; exactly one of the two is required. |
@@ -49,42 +49,11 @@ When the operator names a model rather than a backend ("please create a member w
 
 The rows apply as ordered precedence — the first match wins. This matters for the slash case: `anthropic/claude-sonnet-4-6` contains both `claude` and a `/`, and row 1 (slash → opencode) wins over row 3 — the provider-prefixed form is the explicit "use opencode" signal; opencode is never inferred from a bare name.
 
-### Available models per backend
+### Model catalog
 
-**Claude Code (`--coding-agent claude`)** — simple list:
+Model availability, reviewed capability policy, and standard token-price estimates for every backend live in the machine-readable catalog at [`reference/model-catalog.md`](model-catalog.md), maintained via the `cafleet-model-catalog-refresh` skill. Consult the catalog for the current model set and its canonical spawn tokens; pass a catalog token to `--model` exactly as mapped there.
 
-| Model | For | Intelligence |
-|---|---|---|
-| `fable` | Fable 5 — hardest, longest-running tasks | highest |
-| `opus` | Opus 4.8 (1M context) — everyday, complex tasks | high |
-| `sonnet` | Sonnet 5 — efficient for routine tasks | medium |
-| `haiku` | Haiku 4.5 — fastest for quick answers | low |
-
-**Codex (`--coding-agent codex`)**:
-
-| Model | Notes | Intelligence |
-|---|---|---|
-| `gpt-5.6-sol` | latest frontier agentic coding model; default / recommended | highest |
-| `gpt-5.6-terra` | balanced agentic coding model for everyday work | high |
-| `gpt-5.6-luna` | fast and affordable agentic coding model | medium |
-| `gpt-5.5` | frontier model for complex coding, research, and real-world work | high |
-| `gpt-5.4` | strong model for everyday coding | medium |
-| `gpt-5.4-mini` | fast, efficient mini — responsive tasks and subagents | low |
-
-**OpenCode Zen (`--coding-agent opencode`)** — the OpenCode Zen catalog ([opencode.ai/docs/zen](https://opencode.ai/docs/zen/)). Every Zen model is passed with the `opencode/` gateway prefix, i.e. `opencode/<model-id>` (e.g. `opencode/gpt-5.5`, `opencode/claude-sonnet-4-6`, `opencode/gemini-3.5-flash`). The Models column lists the bare `<model-id>`; prepend `opencode/`:
-
-| Provider | Models (pass as `opencode/<model-id>`) |
-|---|---|
-| OpenAI | `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.3-codex` |
-| Anthropic | `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5` |
-| Google | `gemini-3.5-flash` |
-
-Other providers: Qwen, DeepSeek, Kimi, GLM, MiniMax, Grok.
-Free (limited beta): Big Pickle, DeepSeek V4 Flash Free, MiMo-V2.5 Free, North Mini Code Free, Nemotron 3 Ultra Free.
-
-Intelligence ranking within the Zen catalog: `gpt-5.5-pro` highest, then `gpt-5.5` / `claude-opus-4-8`, then the mid-tier `gpt-5.4` / `claude-sonnet-4-6`, then the fast tier. The per-backend `{reviewer_model}` values are `opus` for claude, `gpt-5.6-sol` for codex, and `opencode/gpt-5.5-pro` for opencode.
-
-The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`; the Zen catalog above is normalized to the `opencode/` gateway prefix, and the direct-provider examples elsewhere in `director.md` / `coding-agents.md` stay valid.
+The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`; OpenCode Zen models are normalized to the `opencode/` gateway prefix, and gateway models without an approved price source remain manual-only in the catalog.
 
 **Identity substitution (`str.format`)**: the four-placeholder `str.format` render (and the brace-doubling rule) is canonical in the cafleet [`SKILL.md`](../SKILL.md) § *Spawned-member identity via `str.format` substitution*. Director-side deltas: an unknown placeholder raises a `UsageError` listing the four supported names, a malformed brace expression raises the distinct "double literal braces" `UsageError`, and both (exit 2) roll back the just-registered member.
 
