@@ -33,6 +33,12 @@ Shared contract:
   models, so newly released models need no cafleet release. Omitted, no model
   tokens are emitted and the binary uses its configured default. (The opencode
   backend additionally validates the value's format — see below.)
+- `--effort <level>` from `cafleet member create` forwards a reasoning-effort
+  level, emitted immediately after the model tokens (before the prompt).
+  Unlike `--model`, the accepted level set is validated per backend at create
+  time — an unknown level exits 2 before any registration or multiplexer side
+  effect. Omitted, no effort tokens are emitted and the argv is byte-identical
+  to the no-effort form. opencode does not support the flag — see below.
 - A missing binary fails the spawn: exit 1 with
   `Error: binary <name> not found on PATH`.
 - Only `claude` sets the pane title (via `--name`); locate `codex` and
@@ -43,6 +49,11 @@ Shared contract:
 `--permission-mode dontAsk` is the reference auto-approval posture the other
 backends match. Example `--model` values: `haiku`, `sonnet`, `opus`, `fable`.
 
+Reasoning-effort levels: `low`, `medium`, `high`, `xhigh`, `max`, forwarded
+as `--effort <level>` immediately after the model tokens. An unknown level
+fails at create time with exit 2 and
+`Error: --effort for the claude backend must be one of low, medium, high, xhigh, max (got '<value>').`
+
 ## Codex {#codex}
 
 `--sandbox workspace-write` confines writes to the workspace under a
@@ -51,6 +62,12 @@ kernel-enforced sandbox — codex is the only backend with one.
 write-up: <https://developers.openai.com/codex/agent-approvals-security>).
 Example `--model` values: `gpt-5.6-sol` (default), `gpt-5.6-terra`,
 `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`.
+
+Reasoning-effort levels: `minimal`, `low`, `medium`, `high`, `xhigh`,
+forwarded as the single token `--config=model_reasoning_effort=<level>`
+immediately after the model tokens. An unknown level fails at create time
+with exit 2 and
+`Error: --effort for the codex backend must be one of minimal, low, medium, high, xhigh (got '<value>').`
 
 Two `~/.codex/config.toml` requirements, covered in
 [Quickstart § Configure](../quickstart.md#codex): `network_access = true`
@@ -104,6 +121,10 @@ long-lived, observable pane like the other backends. The prompt is passed via
 Violations fail at create time with exit 2 and
 `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').`
 Example values: `anthropic/claude-sonnet-4-6`, `openai/gpt-5.5`.
+
+opencode exposes no reasoning-effort control: `--effort` with this backend
+fails at create time with exit 2 and
+`Error: opencode does not support reasoning effort.`, before any side effect.
 
 ### The `cafleet` agent preset {#cafleet-agent-preset}
 

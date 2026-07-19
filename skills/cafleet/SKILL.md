@@ -65,6 +65,7 @@ Used only when your overlay omits a token or your backend is unknown. Each defau
 | `{task_coord}` | cafleet messages |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading the skill's `SKILL.md` + your overlay by absolute path |
+| `{effort_levels}` | unsupported — omit `--effort` |
 
 ## Required Flags
 

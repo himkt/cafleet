@@ -13,6 +13,7 @@ Substitute these into the base `{…}` placeholders.
 | `{task_coord}` | cafleet messages |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading the cafleet `SKILL.md` core + this overlay by the absolute paths the spawn prompt provides |
+| `{effort_levels}` | `minimal`, `low`, `medium`, `high`, `xhigh` (spawn flag `--effort <level>`, forwarded as `--config=model_reasoning_effort=<level>`) |
 
 ## Note → applies at
 

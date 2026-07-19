@@ -13,6 +13,7 @@ Substitute these into the base `{…}` placeholders.
 | `{task_coord}` | the harness task list |
 | `{pane_title}` | `claude --name <member-name>` sets `#{pane_title}` to the member name |
 | `{skill_loader}` | the Skill tool (dispatch sub-agents via the Agent tool) |
+| `{effort_levels}` | `low`, `medium`, `high`, `xhigh`, `max` (spawn flag `--effort <level>`) |
 
 ## Note → applies at
 

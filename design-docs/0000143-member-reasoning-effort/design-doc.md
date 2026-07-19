@@ -1,8 +1,8 @@
 # Member Reasoning Effort (`--effort` on `member create`)
 
 **Status**: Approved
-**Progress**: 0/17 tasks complete
-**Last Updated**: 2026-07-18
+**Progress**: 6/17 tasks complete
+**Last Updated**: 2026-07-19
 
 ## Overview
 
@@ -163,12 +163,12 @@ The documented default (overlay silent / backend unknown) added to `skills/cafle
 
 ### Step 1: Documentation
 
-- [ ] `docs/concepts/coding-agents.md`: add a "Reasoning effort" subsection beside "Model selection" (flag, per-backend mapping) and an entry under "Known asymmetries (intentional non-goals)" stating opencode does not support effort <!-- completed: -->
-- [ ] `docs/spec/coding-agent-backends.md`: add effort to the spawn-argv table / shared contract, the claude and codex sections (levels + exact argv form), and the opencode section (unsupported + error string) <!-- completed: -->
-- [ ] `docs/spec/cli-options.md`: add the `--effort` row to the `member create` flag table and the three exact error strings to the error catalogue <!-- completed: -->
-- [ ] `SPEC.md`: update the member-create option list, the validation step (validate_model then validate_effort), the per-backend argv construction, the error-string catalogue, and the member-create flag checklist <!-- completed: -->
-- [ ] `skills/cafleet/reference/director.md` (flag table) and `skills/cafleet/reference/cli.md` (member-create prose): document `--effort` with the per-backend level sets and the opencode rejection <!-- completed: -->
-- [ ] Overlays: add the `{effort_levels}` row to `skills/cafleet/reference/coding-agent/_template.md`, `claude-overlay.md`, `codex-overlay.md`, and `opencode-overlay.md` (opencode: unsupported — omit `--effort`); add the `{effort_levels}` documented default to `skills/cafleet/SKILL.md` § Resolve your overlay <!-- completed: -->
+- [x] `docs/concepts/coding-agents.md`: add a "Reasoning effort" subsection beside "Model selection" (flag, per-backend mapping) and an entry under "Known asymmetries (intentional non-goals)" stating opencode does not support effort <!-- completed: 2026-07-19T00:45 -->
+- [x] `docs/spec/coding-agent-backends.md`: add effort to the spawn-argv table / shared contract, the claude and codex sections (levels + exact argv form), and the opencode section (unsupported + error string) <!-- completed: 2026-07-19T00:45 -->
+- [x] `docs/spec/cli-options.md`: add the `--effort` row to the `member create` flag table and the three exact error strings to the error catalogue <!-- completed: 2026-07-19T00:45 -->
+- [x] `SPEC.md`: update the member-create option list, the validation step (validate_model then validate_effort), the per-backend argv construction, the error-string catalogue, and the member-create flag checklist <!-- completed: 2026-07-19T00:46 -->
+- [x] `skills/cafleet/reference/director.md` (flag table) and `skills/cafleet/reference/cli.md` (member-create prose): document `--effort` with the per-backend level sets and the opencode rejection <!-- completed: 2026-07-19T00:47 -->
+- [x] Overlays: add the `{effort_levels}` row to `skills/cafleet/reference/coding-agent/_template.md`, `claude-overlay.md`, `codex-overlay.md`, and `opencode-overlay.md` (opencode: unsupported — omit `--effort`); add the `{effort_levels}` documented default to `skills/cafleet/SKILL.md` § Resolve your overlay <!-- completed: 2026-07-19T00:48 -->
 
 ### Step 2: Backend protocol and implementations
 

@@ -547,6 +547,7 @@ one root Director by construction, so no override flag exists.
 | `--description` | yes | One-sentence purpose. |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; when omitted, the member — every role — inherits the spawning Director's placement backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. |
 | `--model` | no | Model forwarded to the backend binary's own `--model` flag — see [Model selection](../concepts/coding-agents.md#model-selection). |
+| `--effort` | no | Reasoning-effort level forwarded to the backend binary (claude: `low`, `medium`, `high`, `xhigh`, `max`; codex: `minimal`, `low`, `medium`, `high`, `xhigh`; opencode: unsupported). Validated per backend before any side effect — see [Reasoning effort](../concepts/coding-agents.md#reasoning-effort). |
 | `--role` | no | `member` (default) or `monitor`. `monitor` spawns the fleet's single dedicated monitoring member; a second spawn is rejected. See [Monitoring](../concepts/monitoring.md#the-monitoring-member). |
 | `--full` | no | Switches the non-JSON output to the 6-line labeled block. |
 | `--text` | no | Inline spawn prompt (backend-neutral template). Exactly one of `--text` / `--text-file`. |
@@ -770,6 +771,9 @@ never pinged). Exits 1 for a not-in-fleet or not-enrolled member.
 | `--text-file <path>` to an unreadable file | `Error: --text-file <path>: file is not readable.` (exit 1) |
 | `--text-file <path>` to a file containing invalid UTF-8 | `Error: --text-file <path>: file is not valid UTF-8.` (exit 1) |
 | `member create --coding-agent opencode --model` with a value violating the `<provider-id>/<model-id>` format | `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` (exit 2; fires before any side effect) |
+| `member create --effort` with a level unknown to the claude backend | `Error: --effort for the claude backend must be one of low, medium, high, xhigh, max (got '<value>').` (exit 2; fires before any side effect) |
+| `member create --coding-agent codex --effort` with an unknown level | `Error: --effort for the codex backend must be one of minimal, low, medium, high, xhigh (got '<value>').` (exit 2; fires before any side effect) |
+| `member create --coding-agent opencode --effort` with any value | `Error: opencode does not support reasoning effort.` (exit 2; fires before any side effect) |
 | `member create` with an unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` (exit 2; the just-registered member is rolled back) |
 | `member create` with a malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` (exit 2; the just-registered member is rolled back) |
 | `member create --role monitor` when the fleet already has an active monitoring member | `Error: fleet <id> already has an active monitoring member (member <existing-id>); only one is allowed.` (exit 1) |
