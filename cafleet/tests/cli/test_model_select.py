@@ -279,6 +279,42 @@ def test_invalid_catalog_error(skill_root):
     assert json.loads(result.output)["error"]["code"] == "MODEL_CATALOG_INVALID"
 
 
+def test_schema_invalid_role_profile_is_catalog_invalid(skill_root):
+    payload = _default_payload()
+    payload["role_profiles"]["wizard"] = {
+        "task_kind": "monitoring",
+        "requires": {"monitor": 2},
+        "token_profile": "small",
+    }
+    catalog_path = _write_catalog(skill_root, payload)
+    result = _run(_select_args(catalog_path, "--role", "drafter", "--json"))
+    assert result.exit_code == 1, result.output
+    assert json.loads(result.output)["error"]["code"] == "MODEL_CATALOG_INVALID"
+
+
+def test_triggered_by_recorded_in_audit(skill_root):
+    catalog_path = _write_catalog(skill_root, _default_payload())
+    result = _run(
+        _select_args(
+            catalog_path,
+            "--role",
+            "drafter",
+            "--triggered-by",
+            "cost efficiency mode",
+            "--json",
+        )
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["triggered_by"] == "cost efficiency mode"
+
+
+def test_absent_trigger_recorded_as_null(skill_root):
+    catalog_path = _write_catalog(skill_root, _default_payload())
+    result = _run(_select_args(catalog_path, "--role", "drafter", "--json"))
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["triggered_by"] is None
+
+
 def test_no_eligible_candidate_error_lists_exclusions(skill_root):
     weak = make_model(sku="weak-model", rank=10, levels=uniform_levels(coding=3))
     catalog_path = _write_catalog(skill_root, _fresh(catalog_with([weak])))

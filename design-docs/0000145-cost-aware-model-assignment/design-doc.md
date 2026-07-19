@@ -1,7 +1,7 @@
 # Cost-Aware CAFleet Model Assignment
 
 **Status**: Approved
-**Progress**: 21/29 tasks complete
+**Progress**: 26/29 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -338,12 +338,12 @@ The skill owns catalog maintenance; the CAFleet Director owns per-task selection
 
 ### Step 6: Test the feature
 
-- [ ] Add unit tests for schema validation/migration, catalog freshness, pricing arithmetic, rate-card context limits, unknown costs, capability floors, stable ties, monitor/reviewer policy exceptions, and explicit overrides. <!-- completed: -->
-- [ ] Add CLI/schema tests for structured success/error/audit envelopes including `catalog_asset`, malformed profiles, stale/missing catalog errors, no-candidate errors, no-trigger compatibility, and missing/current/stale/skipped/mismatched candidate asset replicas while both top-level and subcommand help remain usable. <!-- completed: -->
-- [ ] Add workflow/Director tests or fixtures proving selected backend/model flags are forwarded unchanged to the existing `member create` path, legacy fixed pins do not bypass selection, and audit artifacts obey base-directory rules including the `<unset>` failure path. <!-- completed: -->
-- [ ] Test the Markdown parser's sentinel/canonical-JSON contract and prove an installed wheel requires the exact deployed skill-asset path, matching asset manifest, and matching catalog fingerprint rather than carrying or falling back to a packaged catalog copy. <!-- completed: -->
+- [x] Add unit tests for schema validation/migration, catalog freshness, pricing arithmetic, rate-card context limits, unknown costs, capability floors, stable ties, monitor/reviewer policy exceptions, and explicit overrides. <!-- completed: 2026-07-19T13:15 -->
+- [x] Add CLI/schema tests for structured success/error/audit envelopes including `catalog_asset`, malformed profiles, stale/missing catalog errors, no-candidate errors, no-trigger compatibility, and missing/current/stale/skipped/mismatched candidate asset replicas while both top-level and subcommand help remain usable. <!-- completed: 2026-07-19T13:15 -->
+- [x] Add workflow/Director tests or fixtures proving selected backend/model flags are forwarded unchanged to the existing `member create` path, legacy fixed pins do not bypass selection, and audit artifacts obey base-directory rules including the `<unset>` failure path. <!-- completed: 2026-07-19T13:15 -->
+- [x] Test the Markdown parser's sentinel/canonical-JSON contract and prove an installed wheel requires the exact deployed skill-asset path, matching asset manifest, and matching catalog fingerprint rather than carrying or falling back to a packaged catalog copy. <!-- completed: 2026-07-19T13:15 -->
 
-- [ ] Add replacement-flow tests for self-report, Reviewer finding, capture fallback, capability-floor increase, old-member deletion before respawn, same-task/model prohibition, and the two-replacement escalation cap. <!-- completed: -->
+- [x] Add replacement-flow tests for self-report, Reviewer finding, capture fallback, capability-floor increase, old-member deletion before respawn, same-task/model prohibition, and the two-replacement escalation cap. <!-- completed: 2026-07-19T13:15 -->
 
 ### Step 7: Verify and document rollout
 
