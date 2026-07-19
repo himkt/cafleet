@@ -1,14 +1,16 @@
-# Sweep pattern catalog (canonical)
+# Sweep pattern catalog — residue workflow (canonical)
 
-The multi-pass sweep each scanner runs over its slice. `roles/scanner.md` cites
-this page. The catalog is a **floor, not a ceiling**: the scanner hand-inspects
-the surrounding context of every hit and may classify a hit no pattern named.
+The multi-pass sweep each scanner runs over its slice.
+[`../roles/scanner.md`](../roles/scanner.md) cites this page. The catalog is a
+**floor, not a ceiling**: the scanner hand-inspects the surrounding context of
+every hit and may classify a hit no pattern named.
 
 ## Scope: whole tracked tree minus the exempt set
 
 Sweep **tracked files only** — a multi-pass `git grep` over the tracked tree
-naturally excludes untracked generated output such as `webui/dist`. Exclude the
-R2 exempt set from every pass:
+naturally excludes untracked generated output such as `webui/dist`. The exempt
+set is canonical in the umbrella [`SKILL.md`](../../SKILL.md) § *Scope and
+exempt set*; exclude it from every pass:
 
 - `design-docs/` — the historical record.
 - `researches/` — gitignored analysis (not tracked; already excluded).
@@ -17,12 +19,14 @@ R2 exempt set from every pass:
 - `cafleet/src/cafleet/webui/dist/**` — generated bundle, not authored prose.
 - Lock files (`uv.lock`, `bun.lock` / `bun.lockb`, `package-lock.json`, …).
 
-Everything else tracked is in scope (R3): `docs/`, `README.md`, `SPEC.md`,
+Everything else tracked is in scope, per the umbrella's scope statement: any
+tracked file outside the exempt set is swept — `docs/`, `README.md`, `SPEC.md`,
 `skills/`, `.claude/`, `cafleet/src/`, `cafleet/tests/`, `admin/src/`, and root
-files like `CLAUDE.md`, `pyproject.toml`, `mise.toml`, `package.json`. This list
-is illustrative — any tracked file outside the exempt set is swept.
+files like `CLAUDE.md`, `pyproject.toml`, `mise.toml`, `package.json` are
+illustrative, not an exhaustive allow-list.
 
-A convenient exclusion form for a `git grep`:
+The `:(exclude)` pathspec below is the **mechanical embodiment** of the
+umbrella's canonical exempt-set list — one authority, no second list to drift:
 
 ```
 git grep -nIiP -e '<pattern>' -- \
@@ -54,7 +58,7 @@ matches nothing without `-P`. `-n` prints line numbers; `-I` skips binary files.
 | `backfill\|pre-existing` | migration-backfill narration in prose (keep migration *filenames*) |
 | `this replaces\|renamed from\|inverted by\|after design` | replacement / rename / trajectory narration |
 
-## Multi-pass discipline (R4)
+## Multi-pass discipline
 
 - Run **every** pass over the slice — a single grep is never sufficient.
 - Hand-inspect **every** hit with its surrounding context before classifying

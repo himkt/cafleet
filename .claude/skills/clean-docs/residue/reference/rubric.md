@@ -1,8 +1,10 @@
-# Classification rubric (canonical)
+# Classification rubric — residue workflow (canonical)
 
-Every swept hit lands in **exactly one** class. Both `roles/scanner.md` and
-`roles/reviewer.md` cite this page as the single source of truth. The scanner
-classifies; the reviewer re-checks the classification before any edit lands.
+Every swept hit lands in **exactly one** class. Both
+[`../roles/scanner.md`](../roles/scanner.md) and
+[`../roles/reviewer.md`](../roles/reviewer.md) cite this page as the single
+source of truth. The scanner classifies; the reviewer re-checks the
+classification before any edit lands.
 
 ## The three classes
 
@@ -49,11 +51,14 @@ in this benign / KEEP / exempt class before declaring the sweep clean.
 
 ## Invariants this rubric enforces
 
-- **No runtime behavior removed.** No class-(a) or class-(b) action ever deletes a
-  flag, table, column, code path, or live assertion — only sentinel framing and
-  narration prose.
-- **No live coverage lost.** A class-(a) deletion of a mixed test keeps every live
-  assertion; a class-(b) reword keeps the behavior description and the test.
-- **No new narration introduced (R1).** Every reworded string reads as a clean
-  present-tense statement of current behavior — no "previously / now / no longer
-  (as past) / formerly", no "this replaces X", no "renamed from Y".
+The umbrella [`SKILL.md`](../../SKILL.md)'s three invariants, realized per class:
+
+- **No runtime behavior removed (invariant 1).** No class-(a) or class-(b) action
+  ever deletes a flag, table, column, code path, or live assertion — only sentinel
+  framing and narration prose. A residue run is strictly zero-behavior-change.
+- **No live coverage lost (invariant 2).** A class-(a) deletion of a mixed test
+  keeps every live assertion; a class-(b) reword keeps the behavior description
+  and the test.
+- **No new narration introduced (invariant 3, R1).** Every reworded string reads
+  as a clean present-tense statement of current behavior — no "previously / now /
+  no longer (as past) / formerly", no "this replaces X", no "renamed from Y".
