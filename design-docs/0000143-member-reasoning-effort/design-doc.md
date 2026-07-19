@@ -1,6 +1,6 @@
 # Member Reasoning Effort (`--effort` on `member create`)
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 17/17 tasks complete
 **Last Updated**: 2026-07-19
 
@@ -198,3 +198,4 @@ The documented default (overlay silent / backend unknown) added to `skills/cafle
 |------|---------|
 | 2026-07-18 | Initial draft |
 | 2026-07-18 | Review round 1: codex levels re-verified against the Codex CLI config reference (`xhigh` added); recorded the client-side-enum rationale; opencode error string gains a trailing period; opencode `build_spawn_argv` asserts `effort is None`; concrete help string and help-budget values specified |
+| 2026-07-19 | Implementation complete: 17/17 tasks, all success criteria verified (1014 tests, lint, typecheck), Reviewer approved round 1, PR #212 opened |
