@@ -1,4 +1,4 @@
-# Residue Workflow — Historical-Residue Cleanup
+# Residue Workflow — Historical Residue Cleanup
 
 Sweep the tracked tree for **historical narration** (past-state prose, "this
 replaces X", "renamed from Y", design-number provenance citations, trajectory

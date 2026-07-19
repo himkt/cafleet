@@ -1,7 +1,7 @@
 # 0000144 — Consolidate Doc-Cleanup Skills into `clean-docs` (Three Workflows)
 
 **Status**: Approved
-**Progress**: 9/16 tasks complete
+**Progress**: 16/16 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -172,19 +172,19 @@ Role files adapt from the existing skills with two systematic changes: spine cit
 
 ### Step 5: `simplification/` workflow
 
-- [ ] Create `simplification/simplification.md` — trigger scenario, full-read judgment mechanics, `findings.md` artifact spec, strict zero-behavior-change statement. <!-- completed: -->
-- [ ] Create `simplification/roles/scanner.md` and `simplification/roles/reviewer.md`, adapted and scoped to P3/P5. <!-- completed: -->
-- [ ] Create `simplification/reference/rubric.md` — the P3/P5 classes with the narrowed P5 (verbosity only, 30%+ baseline, style-only-churn drop rule), citing `reference/review-format.md`. <!-- completed: -->
+- [x] Create `simplification/simplification.md` — trigger scenario, full-read judgment mechanics, `findings.md` artifact spec, strict zero-behavior-change statement. <!-- completed: 2026-07-19T02:53 -->
+- [x] Create `simplification/roles/scanner.md` and `simplification/roles/reviewer.md`, adapted and scoped to P3/P5. <!-- completed: 2026-07-19T02:53 -->
+- [x] Create `simplification/reference/rubric.md` — the P3/P5 classes with the narrowed P5 (verbosity only, 30%+ baseline, style-only-churn drop rule), citing `reference/review-format.md`. <!-- completed: 2026-07-19T02:53 -->
 
 ### Step 6: Removal cleanup
 
-- [ ] Delete `.claude/skills/historical-residue-cleanup/` (SKILL.md, both roles, both reference pages) in the same change. <!-- completed: -->
-- [ ] Delete the old single-skill layout files the §6 tree drops: `.claude/skills/clean-docs/roles/scanner.md`, `.claude/skills/clean-docs/roles/reviewer.md`, and `.claude/skills/clean-docs/reference/rubric.md` (replaced by the per-workflow roles and rubrics). <!-- completed: -->
-- [ ] Verify zero mentions and layout: `git grep -i "historical-residue"` over the tracked tree minus `design-docs/` returns nothing, and `git ls-files .claude/skills/clean-docs` matches the §6 layout exactly. <!-- completed: -->
+- [x] Delete `.claude/skills/historical-residue-cleanup/` (SKILL.md, both roles, both reference pages) in the same change. <!-- completed: 2026-07-19T02:55 -->
+- [x] Delete the old single-skill layout files the §6 tree drops: `.claude/skills/clean-docs/roles/scanner.md`, `.claude/skills/clean-docs/roles/reviewer.md`, and `.claude/skills/clean-docs/reference/rubric.md` (replaced by the per-workflow roles and rubrics). <!-- completed: 2026-07-19T02:55 -->
+- [x] Verify zero mentions and layout: `git grep -i "historical-residue"` over the tracked tree minus `design-docs/` returns nothing, and `git ls-files .claude/skills/clean-docs` matches the §6 layout exactly. <!-- completed: 2026-07-19T02:56 -->
 
 ### Step 7: Load + dispatch verification
 
-- [ ] Confirm the skill loads via the Skill tool; its `description` triggers on each workflow's §2 phrasings and dispatch routes each family to the right workflow body; no `{token}` leaks in any user-facing string. <!-- completed: -->
+- [x] Confirm the skill loads via the Skill tool; its `description` triggers on each workflow's §2 phrasings and dispatch routes each family to the right workflow body; no `{token}` leaks in any user-facing string. <!-- completed: 2026-07-19T02:57 -->
 
 ---
 
