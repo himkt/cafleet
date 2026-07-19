@@ -685,11 +685,22 @@ def _parse_date(value: object, where: str) -> date:
 
 
 class ModelSelectionError(Exception):
-    """A selection request failed; ``code`` is the stable error-contract code."""
+    """A selection request failed; ``code`` is the stable error-contract code.
 
-    def __init__(self, code: str, message: str) -> None:
+    ``candidates`` carries the examined candidate records (with exclusion
+    reasons) when candidate enumeration occurred before the failure.
+    """
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        candidates: tuple[CandidateRecord, ...] = (),
+    ) -> None:
         super().__init__(message)
         self.code = code
+        self.candidates = candidates
 
 
 @dataclass(frozen=True)
@@ -733,6 +744,7 @@ class ManualOverrideResult:
     policy: str
     backend: str | None
     model: str
+    model_key: str | None
     canonical_token: str | None
     estimated_usd: float | None
     estimate_status: str
@@ -778,6 +790,7 @@ def select_model(
         raise ModelSelectionError(
             "MODEL_NO_ELIGIBLE_CANDIDATE",
             f"no catalog candidate meets every constraint for role {role!r}",
+            candidates=candidates,
         )
     if role == "reviewer":
         policy = "reviewer_maximum_capability"
@@ -856,6 +869,7 @@ def select_replacement(
         raise ModelSelectionError(
             "MODEL_UPGRADE_UNAVAILABLE",
             f"no strictly stronger eligible replacement for {failed_model_key!r}",
+            candidates=candidates,
         )
     best_model, best_cost = min(eligible, key=_cost_order)
     return SelectionResult(
@@ -908,6 +922,7 @@ def resolve_manual_override(
             policy="manual_override",
             backend=backend,
             model=model,
+            model_key=None,
             canonical_token=None,
             estimated_usd=None,
             estimate_status="unavailable",
@@ -922,6 +937,7 @@ def resolve_manual_override(
         policy="manual_override",
         backend=catalog_model.backend,
         model=canonical_token,
+        model_key=catalog_model.key,
         canonical_token=canonical_token,
         estimated_usd=estimated_usd,
         estimate_status="ok" if estimated_usd is not None else "unavailable",

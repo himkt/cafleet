@@ -1,7 +1,7 @@
 # Cost-Aware CAFleet Model Assignment
 
 **Status**: Approved
-**Progress**: 10/29 tasks complete
+**Progress**: 14/29 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -317,10 +317,10 @@ The skill owns catalog maintenance; the CAFleet Director owns per-task selection
 
 ### Step 3: Expose the selection interface
 
-- [ ] Add `cafleet/src/cafleet/cli/model.py`, require absolute `--catalog skills/cafleet/reference/model-catalog.md`, and register `cafleet model select` in `cafleet/src/cafleet/cli/__init__.py`. <!-- completed: -->
-- [ ] Provide human-readable and `--json` output, validation errors with candidate exclusion reasons, and no shell-command synthesis. <!-- completed: -->
-- [ ] Document the exact `cost efficiency mode` trigger, manual override semantics, and estimated-cost limitations in CLI help and documentation. <!-- completed: -->
-- [ ] Call `ensure_assets_current()` at `model select` execution after Click parses arguments (not in help rendering), and validate the explicit loaded-skill-root catalog path against its release asset manifest/hash. <!-- completed: -->
+- [x] Add `cafleet/src/cafleet/cli/model.py`, require absolute `--catalog skills/cafleet/reference/model-catalog.md`, and register `cafleet model select` in `cafleet/src/cafleet/cli/__init__.py`. <!-- completed: 2026-07-19T12:58 -->
+- [x] Provide human-readable and `--json` output, validation errors with candidate exclusion reasons, and no shell-command synthesis. <!-- completed: 2026-07-19T12:58 -->
+- [x] Document the exact `cost efficiency mode` trigger, manual override semantics, and estimated-cost limitations in CLI help and documentation. <!-- completed: 2026-07-19T12:58 -->
+- [x] Call `ensure_assets_current()` at `model select` execution after Click parses arguments (not in help rendering), and validate the explicit loaded-skill-root catalog path against its release asset manifest/hash. <!-- completed: 2026-07-19T12:58 -->
 
 ### Step 4: Integrate Directors and audits
 
