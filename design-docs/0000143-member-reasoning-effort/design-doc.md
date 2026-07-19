@@ -1,7 +1,7 @@
 # Member Reasoning Effort (`--effort` on `member create`)
 
 **Status**: Approved
-**Progress**: 6/17 tasks complete
+**Progress**: 10/17 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -172,10 +172,10 @@ The documented default (overlay silent / backend unknown) added to `skills/cafle
 
 ### Step 2: Backend protocol and implementations
 
-- [ ] `coding_agent/base.py`: add `validate_effort` to the `CodingAgent` Protocol and the `effort` keyword (with docstring) to `build_spawn_argv` <!-- completed: -->
-- [ ] `coding_agent/claude.py`: `EFFORT_LEVELS` tuple, `validate_effort`, `--effort` argv emission after the model block <!-- completed: -->
-- [ ] `coding_agent/codex.py`: `EFFORT_LEVELS` tuple, `validate_effort`, single-token `--config=model_reasoning_effort=<level>` emission after the model block <!-- completed: -->
-- [ ] `coding_agent/opencode.py`: `validate_effort` raising `ValueError("opencode does not support reasoning effort.")`; `build_spawn_argv` gains the `effort` kwarg and asserts `effort is None` <!-- completed: -->
+- [x] `coding_agent/base.py`: add `validate_effort` to the `CodingAgent` Protocol and the `effort` keyword (with docstring) to `build_spawn_argv` <!-- completed: 2026-07-19T00:53 -->
+- [x] `coding_agent/claude.py`: `EFFORT_LEVELS` tuple, `validate_effort`, `--effort` argv emission after the model block <!-- completed: 2026-07-19T00:53 -->
+- [x] `coding_agent/codex.py`: `EFFORT_LEVELS` tuple, `validate_effort`, single-token `--config=model_reasoning_effort=<level>` emission after the model block <!-- completed: 2026-07-19T00:53 -->
+- [x] `coding_agent/opencode.py`: `validate_effort` raising `ValueError("opencode does not support reasoning effort.")`; `build_spawn_argv` gains the `effort` kwarg and asserts `effort is None` <!-- completed: 2026-07-19T00:53 -->
 
 ### Step 3: CLI wiring
 

@@ -49,8 +49,25 @@ class CodingAgent(Protocol):
         """
         ...
 
+    def validate_effort(self, effort: str | None) -> None:
+        """Raise ValueError if ``effort`` is not acceptable to this backend.
+
+        ``None`` (flag omitted) is always valid. Backends without a
+        reasoning-effort control reject every non-None value. Called by
+        ``member create`` before any registration or tmux side effect.
+
+        Raises:
+            ValueError: If ``effort`` is not in the backend's level set.
+        """
+        ...
+
     def build_spawn_argv(
-        self, prompt: str, *, display_name: str, model: str | None = None
+        self,
+        prompt: str,
+        *,
+        display_name: str,
+        model: str | None = None,
+        effort: str | None = None,
     ) -> list[str]:
         """Return the argv list passed to the multiplexer's ``split_window``.
 
@@ -66,6 +83,11 @@ class CodingAgent(Protocol):
                 emitted immediately before the prompt tokens. ``None`` (flag
                 omitted) emits no model tokens, keeping the argv byte-identical
                 to the no-model form so the binary uses its own default model.
+            effort: Reasoning-effort level forwarded via the backend's
+                reasoning-effort flag, emitted immediately after the model
+                tokens. ``None`` (flag omitted) emits no effort tokens,
+                keeping the argv byte-identical to the no-effort form so the
+                binary uses its own default.
 
         Returns:
             argv list ready to hand to ``Multiplexer.split_window``.
