@@ -97,6 +97,7 @@ def _invoke_member_create(
     name: str = "Member",
     json_output: bool = False,
     model: str | None = None,
+    effort: str | None = None,
     role: str | None = None,
     stdin: bytes | None = None,
 ):
@@ -114,6 +115,8 @@ def _invoke_member_create(
         args.extend(["--coding-agent", coding_agent])
     if model is not None:
         args.extend(["--model", model])
+    if effort is not None:
+        args.extend(["--effort", effort])
     if role is not None:
         args.extend(["--role", role])
     if text_file is not None:
@@ -600,6 +603,235 @@ def test_member_create__opencode_invalid_model_wins_over_missing_binary(
     assert result.exit_code == 2, result.output
     assert "--model for the opencode backend must be" in result.output
     assert "not found on PATH" not in result.output
+    assert split_window_recorder == []
+
+
+# --- member create --effort ------------------------------
+
+
+def test_member_create__effort_claude_tokens_between_name_and_prompt(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        text="hello",
+        name="Drafter",
+        effort="high",
+    )
+    assert result.exit_code == 0, result.output
+    assert split_window_recorder[0]["command"] == [
+        "claude",
+        "--permission-mode",
+        "dontAsk",
+        "--name",
+        "Drafter",
+        "--effort",
+        "high",
+        "hello",
+    ]
+
+
+def test_member_create__effort_claude_tokens_after_model_tokens(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        text="hello",
+        name="Drafter",
+        model="sonnet",
+        effort="max",
+    )
+    assert result.exit_code == 0, result.output
+    assert split_window_recorder[0]["command"] == [
+        "claude",
+        "--permission-mode",
+        "dontAsk",
+        "--name",
+        "Drafter",
+        "--model",
+        "sonnet",
+        "--effort",
+        "max",
+        "hello",
+    ]
+
+
+def test_member_create__effort_codex_single_config_token(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        coding_agent="codex",
+        text="hello",
+        name="Codex-Member",
+        effort="minimal",
+    )
+    assert result.exit_code == 0, result.output
+    assert split_window_recorder[0]["command"] == [
+        "codex",
+        "--ask-for-approval",
+        "never",
+        "--sandbox",
+        "workspace-write",
+        "--config=model_reasoning_effort=minimal",
+        "hello",
+    ]
+
+
+@pytest.mark.parametrize("coding_agent", ["claude", "codex", "opencode"])
+def test_member_create__no_effort_flag_emits_no_effort_token(
+    tmp_path,
+    monkeypatch,
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+    coding_agent,
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _precreate_opencode_preset(tmp_path)
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        coding_agent=coding_agent,
+        text="hello",
+        name="Plain-Member",
+    )
+    assert result.exit_code == 0, result.output
+    command = split_window_recorder[0]["command"]
+    assert "--effort" not in command
+    assert all(
+        not token.startswith("--config=model_reasoning_effort") for token in command
+    )
+
+
+def test_member_create__claude_invalid_effort_exits_2_with_no_side_effects(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    # `minimal` is a codex-only level — client-side enum validation rejects it
+    # for claude before registration and any tmux call.
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        text="hello",
+        name="Rejected-Member",
+        effort="minimal",
+    )
+    assert result.exit_code == 2, result.output
+    assert (
+        "Error: --effort for the claude backend must be one of "
+        "low, medium, high, xhigh, max (got 'minimal')." in result.output
+    )
+    assert split_window_recorder == []
+    names = [member["name"] for member in broker.list_roster(fleet_id)]
+    assert "Rejected-Member" not in names
+
+
+def test_member_create__codex_invalid_effort_exits_2_with_no_side_effects(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    # `max` is a claude-only level — the codex set tops out at `xhigh`.
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        coding_agent="codex",
+        text="hello",
+        name="Rejected-Member",
+        effort="max",
+    )
+    assert result.exit_code == 2, result.output
+    assert (
+        "Error: --effort for the codex backend must be one of "
+        "minimal, low, medium, high, xhigh (got 'max')." in result.output
+    )
+    assert split_window_recorder == []
+    names = [member["name"] for member in broker.list_roster(fleet_id)]
+    assert "Rejected-Member" not in names
+
+
+def test_member_create__opencode_any_effort_exits_2_with_no_side_effects(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    # No preset / HOME setup needed: validation precedes ensure_available.
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        coding_agent="opencode",
+        text="hello",
+        name="Rejected-Member",
+        effort="high",
+    )
+    assert result.exit_code == 2, result.output
+    assert "Error: opencode does not support reasoning effort." in result.output
+    assert split_window_recorder == []
+    names = [member["name"] for member in broker.list_roster(fleet_id)]
+    assert "Rejected-Member" not in names
+
+
+def test_member_create__invalid_effort_wins_over_missing_binary(
+    bootstrapped_fleet,
+    split_window_recorder,
+    monkeypatch,
+):
+    # validate_effort runs before ensure_available: with the binary absent AND
+    # the level unknown, the effort error (exit 2) is the one reported.
+    monkeypatch.setattr("cafleet.coding_agent.base.shutil.which", lambda _: None)
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        text="hello",
+        name="Rejected-Member",
+        effort="bogus",
+    )
+    assert result.exit_code == 2, result.output
+    assert "--effort for the claude backend must be one of" in result.output
+    assert "not found on PATH" not in result.output
+    assert split_window_recorder == []
+
+
+def test_member_create__opencode_invalid_model_wins_over_effort(
+    bootstrapped_fleet,
+    split_window_recorder,
+    stub_coding_agent_binaries,
+):
+    # validate_model runs immediately before validate_effort: with both a
+    # malformed model and a (categorically rejected) effort, the model error
+    # is the one reported.
+    fleet_id, director_id, runner = bootstrapped_fleet
+    result = _invoke_member_create(
+        runner,
+        fleet_id,
+        coding_agent="opencode",
+        text="hello",
+        name="Rejected-Member",
+        model="no-slash",
+        effort="high",
+    )
+    assert result.exit_code == 2, result.output
+    assert "--model for the opencode backend must be" in result.output
+    assert "does not support reasoning effort" not in result.output
     assert split_window_recorder == []
 
 

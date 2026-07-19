@@ -26,10 +26,21 @@ class OpencodeAgent:
                 f"'<provider-id>/<model-id>' (got '{model}')."
             )
 
+    def validate_effort(self, effort: str | None) -> None:
+        if effort is None:
+            return
+        raise ValueError("opencode does not support reasoning effort.")
+
     def build_spawn_argv(
-        self, prompt: str, *, display_name: str, model: str | None = None
+        self,
+        prompt: str,
+        *,
+        display_name: str,
+        model: str | None = None,
+        effort: str | None = None,
     ) -> list[str]:
         del display_name
+        assert effort is None, "opencode effort must be rejected by validate_effort"
         argv = [self.binary_name, "--agent", "cafleet"]
         if model is not None:
             argv.extend(["--model", model])

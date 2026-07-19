@@ -206,7 +206,8 @@ Edges (who depends on whom):
    rolls back the persisted message on a failed keystroke. Truncation happens
    broker-side; the keystroke mechanics are multiplexer-side.
 2. **CLI ↔ multiplexer ↔ coding-agent member-create.** `cafleet member create`
-   (§6.3) sequences: resolve backend → `validate_model` → resolve the prompt
+   (§6.3) sequences: resolve backend → `validate_model` → `validate_effort` →
+   resolve the prompt
    body via the shared `--text` / `--text-file` reader → `ensure_available`
    → broker `register_member` (placement with `mux_pane_id` unset) → substitute
    `{fleet_id}` / `{member_id}` / `{director_member_id}` / `{coding_agent}`
@@ -1083,7 +1084,9 @@ fleet row. Options: `--name` (string, required), `--description` (string,
 required), `--coding-agent` (choice, optional — omitted → inherit the
 Director's placement backend; the help default text reads `inherits the
 Director's backend`),
-`--model` (string, optional), `--role` (choice over `member`/`monitor`,
+`--model` (string, optional), `--effort` (string, optional — reasoning-effort
+level, validated per backend; help text `Reasoning-effort level (claude, codex
+only).`), `--role` (choice over `member`/`monitor`,
 default `member`, shown in help), the shared `--text` / `--text-file` body pair
 (exactly one required; §6.3 [text-body input](#text-body-input)), and `--full`.
 Sequence:
@@ -1096,7 +1099,8 @@ Sequence:
    the fleet with 'cafleet fleet create'.`. The resolved id feeds the monitor
    backend inheritance and the spawn-prompt substitution; no override flag
    exists. Then resolve the coding agent; look up the backend.
-2. **Model validation** — validate `--model`; a failure → usage error (exit 2)
+2. **Model and effort validation** — validate `--model`, then `--effort`
+   (`validate_model` then `validate_effort`); a failure → usage error (exit 2)
    with the backend's message, **before any registration or tmux side effect**.
 3. **Resolve the body** — via the shared `--text` / `--text-file` reader (§6.3
    [text-body input](#text-body-input)): exactly-one-required, `-` stdin, abs /
@@ -1122,7 +1126,7 @@ Sequence:
    **deregister-with-warning, then re-raise the original error unwrapped** —
    preserving both the exact message and its exit code.
 7. **Build the spawn argv** from the backend (the rendered prompt from step 6,
-   display name, model).
+   display name, model, effort).
 8. **Split the pane** — split the window to obtain the pane id. The only
    forwarded env var is `CAFLEET_DATABASE_URL` (when set); identity travels in
    the rendered prompt (step 6), not the environment. tmux error →
@@ -2204,17 +2208,27 @@ Each exposes two read-only properties and three methods:
   the backend's message (§6.3). This is distinct from the broker/messaging
   value-errors of §7.2, which the CLI wraps to **exit 1** — do **not** route a
   `validate_model` failure through the generic value-error→exit-1 path.
-- **`build_spawn_argv(prompt, display_name, model)`** — returns the full argv
-  vector (binary + flags + prompt) for the multiplexer's window-split.
+- **`validate_effort(effort)`** — `effort` is optional; raises a value-error if
+  the level is not acceptable to this backend; a `None` effort (flag omitted)
+  is always valid. Backends without a reasoning-effort control reject every
+  non-None value. Same exit-code note as `validate_model`: `member create`
+  translates the value-error to a **usage error (exit 2)** with the backend's
+  message (§6.3).
+- **`build_spawn_argv(prompt, display_name, model, effort)`** — returns the
+  full argv vector (binary + flags + prompt) for the multiplexer's
+  window-split.
 
 **Ordering invariant:** the consumer (`member create`) MUST call them in the
-order **`validate_model` → `ensure_available` → `build_spawn_argv`**, so a
-malformed model fails before any precondition check or registration side
-effect.
+order **`validate_model` → `validate_effort` → `ensure_available` →
+`build_spawn_argv`**, so a malformed model or effort fails before any
+precondition check or registration side effect.
 
 **No-model byte-identity:** when `model` is `None`, `build_spawn_argv` emits
 **no** `--model` tokens at all — the argv is identical to the no-model form.
-Never emit an empty `--model ""`.
+Never emit an empty `--model ""`. When `effort` is `None`, no effort tokens
+are emitted; the argv is byte-identical to the no-effort form. A non-`None`
+invalid level never reaches argv construction — `validate_effort` rejects it
+first (exit 2, before any side effect).
 
 #### Registry resolution
 
@@ -2227,21 +2241,29 @@ Each entry's key equals that backend's own `name` property.
 #### Per-backend `build_spawn_argv` (exact, token-by-token)
 
 **claude** — `validate_model` pass-through (accepts any string; the binary
-validates). `ensure_available` PATH check on `claude` only. claude is the
+validates). `validate_effort` enum check over the module-level
+`EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")`; an unknown level
+raises the claude effort value-error (see § Contract error strings).
+`ensure_available` PATH check on `claude` only. claude is the
 **only** backend that honors `display_name` (via `--name`).
 
 ```
 ["claude", "--permission-mode", "dontAsk", "--name", <display_name>]
   (+ ["--model", <model>]  if model is not None)
+  (+ ["--effort", <effort>]  if effort is not None)
   (+ <prompt>)                                       # bare trailing positional
 ```
 
-**codex** — `validate_model` pass-through. `ensure_available` PATH check on
+**codex** — `validate_model` pass-through. `validate_effort` enum check over
+the module-level `EFFORT_LEVELS = ("minimal", "low", "medium", "high",
+"xhigh")`; an unknown level raises the codex effort value-error (see
+§ Contract error strings). `ensure_available` PATH check on
 `codex` only. `display_name` is silently ignored.
 
 ```
 ["codex", "--ask-for-approval", "never", "--sandbox", "workspace-write"]
   (+ ["--model", <model>]  if model is not None)
+  (+ ["--config=model_reasoning_effort=<effort>"]  if effort is not None)  # ONE token
   (+ <prompt>)                                       # bare trailing positional
 ```
 
@@ -2250,7 +2272,11 @@ validates). `ensure_available` PATH check on `claude` only. claude is the
 non-empty, else value-error `--model for the opencode backend must be
 '<provider-id>/<model-id>' (got '{model}').`. (`"openai/gpt-4"` accepted;
 `"a/b/c"` accepted as provider `a` / model `b/c`; `"a/"`, `"/b"`, `"abc"`
-rejected.) `ensure_available` PATH check on `opencode` **first**, then verify
+rejected.) `validate_effort` rejects **every** non-None value with the
+opencode effort value-error (see § Contract error strings) — the backend has
+no reasoning-effort control, so `build_spawn_argv` never receives a non-None
+`effort` and never emits effort tokens (it asserts `effort is None`).
+`ensure_available` PATH check on `opencode` **first**, then verify
 the preset file exists at `~/.opencode/agents/cafleet.md` (see § opencode
 preset). `display_name` is silently ignored; the prompt is passed
 as a `--prompt <prompt>` flag pair (two tokens), unlike claude/codex's bare
@@ -2405,6 +2431,11 @@ heading and its blank line); the file ends with exactly one trailing newline.
 - PATH miss: `binary {binary_name} not found on PATH`
 - opencode model format: `--model for the opencode backend must be
   '<provider-id>/<model-id>' (got '{model}').`
+- claude effort level: `--effort for the claude backend must be one of low,
+  medium, high, xhigh, max (got '{effort}').`
+- codex effort level: `--effort for the codex backend must be one of minimal,
+  low, medium, high, xhigh (got '{effort}').`
+- opencode effort: `opencode does not support reasoning effort.`
 - missing opencode preset: `opencode agent preset not found at {preset}; run
   'cafleet setup' first`
 
@@ -2825,7 +2856,7 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 
 **`member`:**
 
-- [ ] `cafleet member create` (no identity flag — Director auto-resolved; `--name`, `--description`, `--coding-agent`, `--model`, `--role`=member, `--text` / `--text-file` xor-required, `--full`, `--json`)
+- [ ] `cafleet member create` (no identity flag — Director auto-resolved; `--name`, `--description`, `--coding-agent`, `--model`, `--effort`, `--role`=member, `--text` / `--text-file` xor-required, `--full`, `--json`)
 - [ ] `cafleet member delete` (`--member-id` target, `--json`; pane path kills immediately and always exits 0; placementless target → registry soft-delete, exit 0)
 - [ ] `cafleet member show` (`--member-id` target, `--full`, `--json`)
 - [ ] `cafleet member list` (`--json`)

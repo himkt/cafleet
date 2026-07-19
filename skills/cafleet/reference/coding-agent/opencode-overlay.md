@@ -13,6 +13,7 @@ Substitute these into the base `{…}` placeholders.
 | `{task_coord}` | cafleet messages |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading the cafleet `SKILL.md` core + this overlay by the absolute paths the spawn prompt provides |
+| `{effort_levels}` | unsupported — omit `--effort` |
 
 ## Note → applies at
 

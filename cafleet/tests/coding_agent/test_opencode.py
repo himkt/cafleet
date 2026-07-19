@@ -147,6 +147,46 @@ def test_validate_model_rejects_malformed_with_exact_message(model):
 
 
 # ---------------------------------------------------------------------------
+# validate_effort — opencode exposes no reasoning-effort control
+# ---------------------------------------------------------------------------
+
+
+def test_validate_effort_none_is_valid():
+    """``None`` (flag omitted) is valid — absence means backend default."""
+    assert OpencodeAgent().validate_effort(None) is None
+
+
+@pytest.mark.parametrize(
+    "effort",
+    ["low", "medium", "high", "xhigh", "max", "minimal", "", "anything"],
+)
+def test_validate_effort_rejects_every_non_none_value_with_exact_message(effort):
+    """Every non-``None`` value — including levels valid on other backends and
+    the empty string — is rejected with the documented error message."""
+    expected = "opencode does not support reasoning effort."
+    with pytest.raises(ValueError, match=f"^{re.escape(expected)}$"):
+        OpencodeAgent().validate_effort(effort)
+
+
+def test_build_spawn_argv_accepts_effort_none_unchanged():
+    """``effort=None`` is accepted and emits nothing — argv identical to the
+    keyword-omitted form."""
+    impl = OpencodeAgent()
+    assert impl.build_spawn_argv(
+        "p", display_name="x", effort=None
+    ) == impl.build_spawn_argv("p", display_name="x")
+
+
+def test_build_spawn_argv_asserts_on_non_none_effort():
+    """A non-``None`` effort reaching ``build_spawn_argv`` is a can't-happen
+    state (``validate_effort`` rejects it first) — the invariant fails loudly."""
+    with pytest.raises(
+        AssertionError, match="opencode effort must be rejected by validate_effort"
+    ):
+        OpencodeAgent().build_spawn_argv("p", display_name="x", effort="high")
+
+
+# ---------------------------------------------------------------------------
 # ensure_available — PATH probe + preset-existence spawn precondition
 # ---------------------------------------------------------------------------
 

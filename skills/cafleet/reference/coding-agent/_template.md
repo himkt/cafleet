@@ -13,6 +13,7 @@ Substitute these into the base `{…}` placeholders. Each value must be a short 
 | `{task_coord}` | <this backend's task-list primitive, or "cafleet messages"> |
 | `{pane_title}` | <any `--name`-style pane-title analog, or "no `--name` analog"> |
 | `{skill_loader}` | <the skill-loader, or the read-by-absolute-path fallback, as a noun phrase> |
+| `{effort_levels}` | <this backend's accepted reasoning-effort levels and spawn flag for `cafleet member create --effort`, or "unsupported — omit `--effort`"> |
 
 ## Note → applies at
 

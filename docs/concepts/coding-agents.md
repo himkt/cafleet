@@ -51,7 +51,24 @@ omit it and the binary uses its own default. Validation and the accepted
 model-name format are per-backend and documented on the backend reference
 pages linked above.
 
+## Reasoning effort
+
+`cafleet member create --effort <level>` forwards a reasoning-effort level to
+the spawned backend binary: claude via `--effort <level>` (levels `low`,
+`medium`, `high`, `xhigh`, `max`) and codex via
+`--config=model_reasoning_effort=<level>` (levels `minimal`, `low`, `medium`,
+`high`, `xhigh`). Unlike `--model`, the accepted level set is validated per
+backend at create time, before any registration or multiplexer side effect;
+omit the flag and the binary uses its own default. The opencode backend does
+not support reasoning effort (see the asymmetry below). The exact argv forms
+and error strings are specified in
+[Coding-agent backends](../spec/coding-agent-backends.md).
+
 ## Known asymmetries (intentional non-goals) {#known-asymmetries-intentional-non-goals}
+
+- **Reasoning effort.** Only `claude` and `codex` expose a reasoning-effort
+  control. `--effort` with the `opencode` backend exits 2 with
+  `opencode does not support reasoning effort.` before any side effect.
 
 - **Pane title.** Only the `claude` spawn argv carries `--name`, so `codex`
   and `opencode` panes do not display the member name in their pane title.
