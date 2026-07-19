@@ -1,7 +1,7 @@
 # 0000144 — Consolidate Doc-Cleanup Skills into `clean-docs` (Three Workflows)
 
 **Status**: Approved
-**Progress**: 2/16 tasks complete
+**Progress**: 3/16 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -156,7 +156,7 @@ Role files adapt from the existing skills with two systematic changes: spine cit
 
 ### Step 2: Shared judgment reference
 
-- [ ] Create `reference/review-format.md` — apply-ready row format, KEEP guardrails, decision procedure, and reviewer verdict flow, shared by the affirmative and simplification workflows (§5). <!-- completed: -->
+- [x] Create `reference/review-format.md` — apply-ready row format, KEEP guardrails, decision procedure, and reviewer verdict flow, shared by the affirmative and simplification workflows (§5). <!-- completed: 2026-07-19T02:38 -->
 
 ### Step 3: `residue/` workflow
 
