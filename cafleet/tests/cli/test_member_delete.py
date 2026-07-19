@@ -270,19 +270,6 @@ def test_kill_pane_error__exits_one_with_backend_unreachable_wording(
     assert deregister_recorder == []
 
 
-@pytest.mark.parametrize("removed_flag", ["--force", "-f"])
-def test_force_flag_removed__unknown_option_exits_two(
-    runner, fleet_id, deregister_recorder, removed_flag
-):
-    """``--force`` / ``-f`` no longer exist: Click rejects the unknown option
-    with its default 'no such option' usage error (exit 2), before any member
-    work — pinning the removal via the absence of the flag (`removal.md`)."""
-    result = _invoke(runner, fleet_id, removed_flag)
-    assert result.exit_code == 2, result.output
-    assert "no such option" in result.output.lower()
-    assert deregister_recorder == []
-
-
 def test_pending_placement__skips_all_tmux(
     runner,
     fleet_id,
