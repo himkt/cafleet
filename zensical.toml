@@ -18,6 +18,7 @@ nav = [
         { "Storage" = "concepts/storage.md" },
         { "Member lifecycle" = "concepts/member-lifecycle.md" },
         { "Coding agents" = "concepts/coding-agents.md" },
+        { "Model selection" = "concepts/model-selection.md" },
         { "Monitoring" = "concepts/monitoring.md" },
     ] },
     { "Specification" = [

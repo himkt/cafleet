@@ -129,6 +129,7 @@ cafleet
 ├── db              connection factory, Alembic migration chain
 ├── multiplexer     Multiplexer interface, tmux + herdr backends, resolver, keystrokes
 ├── coding-agent    coding-agent interface + claude/codex/opencode
+├── model-selection model-catalog parser + deterministic selector (pure, I/O-free)
 ├── output          render + formatter layers
 ├── broker          data-access layer
 ├── monitor         heartbeat loop
@@ -2569,6 +2570,58 @@ truncation scope — is specified in §7.1.
    `{"members"|"messages": [...]}`.
 6. **PATCH TOCTOU collapses to 404**, not 500.
 
+### 6.9 Model selection (`cafleet model`)
+
+A pure domain module (`model_selection`) plus a `cafleet model` CLI group with
+one subcommand, `model select`. The domain half performs no I/O; the CLI half
+owns file access, the asset-fingerprint checks, and backend readiness.
+
+**Catalog contract.** The catalog is a Markdown document whose sole machine
+payload is one canonical-JSON fenced block (sorted keys, two-space indentation,
+UTF-8, terminating newline) immediately after the single sentinel line
+`<!-- cafleet-model-catalog: v1 -->`. `parse_catalog_markdown(text)` rejects a
+missing/duplicate/misplaced marker, a duplicate or non-JSON payload block,
+non-canonical serialization, and every schema violation: schema version ≠ 1
+without a registered pure migration; token profiles other than exactly
+`small`/`standard`/`large` with the four non-negative integer components;
+unknown role-profile keys, task kinds, capability dimensions, or token
+profiles; sources other than exactly the two approved URLs with ISO timestamps
+and 64-hex hashes; duplicate model keys, provider SKUs, global ranks, or
+`(backend, token)` pairs; a token mapped to an unknown/inactive model or a
+backend mismatch; an active model without exactly one `primary` token;
+capability levels outside 0–5 or provenance other than `maintainer_judgment`;
+and malformed rate cards (unknown status, missing components, a `supported`
+component without a non-negative price, an `unsupported` component with one,
+or invalid dates). The Python wheel carries no catalog copy; the deployed
+skill replica is the only runtime source.
+
+**Selection.** `select_model(catalog, role, ready_backends, now, …)` resolves
+the role profile, applies raise-only `requires` overrides and per-component
+token-estimate replacement, enforces per-source UTC freshness (`retrieved_at`
+at most `freshness_days` before `now` and at most five minutes after), and
+enumerates every catalog model into a candidate record with an exclusion
+reason. Pricing uses the least-cost active `known` rate card whose date window
+contains the selection date, whose `max_total_tokens` covers the estimate
+total, and whose components support every nonzero token count
+(`tokens / 1_000_000 × usd_per_mtok`, summed). Policies: ordinary roles
+minimize cost with ties broken by higher `global_rank` then lexical key;
+`monitor` minimizes cost over monitor-capable models; `reviewer` maximizes
+`global_rank` then lower cost then lexical key. `resolve_manual_override`
+resolves a model pin through the token map (conflicting backend pin rejected;
+unmapped token permitted with `estimate_status: "unavailable"`).
+`select_replacement` raises each failed capability floor by one, requires a
+strictly greater `global_rank` than the failed model, skips attempted model
+keys, and minimizes cost within the stronger set. The selected record carries
+the canonical primary token as `selected.model` and never an automatic effort.
+
+**CLI boundary.** Options, envelope shapes, exit codes, the ten-code stable
+error contract, the loaded-skill-root/asset-manifest validation, and the
+per-candidate backend replica checks are specified in
+`docs/spec/cli-options.md` § `cafleet model`. The group callback performs no
+work (help renders before `cafleet setup`); execution requires at least one
+recorded assets install, while per-backend staleness only excludes that
+backend from the candidate set.
+
 ---
 
 ## 7. Cross-cutting concerns
@@ -2798,7 +2851,7 @@ line (§6.3). The driver's engine is disposed when the command finishes
 
 ## 10. CLI command checklist
 
-The full command surface — **23 commands across 4 groups + 3 top-level commands**.
+The full command surface — **24 commands across 5 groups + 3 top-level commands**.
 Each must be reproduced with identical option names, types, defaults,
 required-ness, documented-vs-hidden status, output shapes, and exit codes. Every
 interaction flag is now **documented** (there are no hidden flags). Per-command
@@ -2839,6 +2892,10 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 - [ ] `cafleet message cancel` (`--member-id`, `--message-id`, `--full`, `--json`)
 - [ ] `cafleet message show` (`--member-id`, `--message-id`, `--full`, `--json`)
 
+**`model`:**
+
+- [ ] `cafleet model select` (`--catalog` required absolute path, exactly one of `--role` / `--model`, `--coding-agent`, `--effort`, `--requires` repeatable `dimension=level`, the four `--estimated-*-tokens` integers, `--triggered-by`, `--json`; error envelope + exit-code contract in §6.9 / docs/spec/cli-options.md)
+
 **`monitor`:**
 
 - [ ] `cafleet monitor start` (`--tick`≥1=5)
@@ -2849,8 +2906,8 @@ Every `member *`, `message *`, and `monitor *` command, plus `fleet
 show` and `fleet delete`, takes the **required `--fleet-id` option** (integer);
 a missing `--fleet-id` is the shared callback's application error (exit 1,
 §6.3). It is omitted from the per-command rows above to avoid repetition.
-`setup`, `doctor`, `server`, `fleet create`, and `fleet list` do **not** take
-`--fleet-id`.
+`setup`, `doctor`, `server`, `fleet create`, `fleet list`, and `model select`
+do **not** take `--fleet-id`.
 
 ---
 
