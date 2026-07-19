@@ -1,7 +1,7 @@
 # Cost-Aware CAFleet Model Assignment
 
 **Status**: Approved
-**Progress**: 26/29 tasks complete
+**Progress**: 29/29 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -10,15 +10,15 @@ Add an opt-in Director responsibility that chooses the least-cost CAFleet member
 
 ## Success Criteria
 
-- [ ] A Director can deterministically select a backend and model from a local catalog for an ordinary member when `cost efficiency mode` is present.
-- [ ] Selection minimizes estimated USD token cost only among models that meet every required task-capability floor and runtime-availability constraint.
-- [ ] Monitor selection chooses the least-cost catalog model that meets the catalog's monitor baseline; reviewer selection chooses the highest-ranked eligible catalog model.
-- [ ] An explicit Director or user `--coding-agent`, `--model`, or `--effort` remains an override and is recorded rather than silently replaced.
-- [ ] The committed catalog records source URLs, retrieval time, pricing basis, capability rationale, freshness state, and the input/output/cached-token prices needed for an estimate.
-- [ ] A refresh skill updates the catalog using only the supplied official Anthropic and OpenAI documentation sources, requires maintainer review, and never silently changes a selection policy.
-- [ ] Missing, stale, unsupported, or incomparable data fails closed for automatic cost selection and produces an actionable decision record.
-- [ ] Evidence that a member is underpowered produces a bounded, auditable escalation to a strictly more capable eligible replacement, or a user decision when no such replacement is available.
-- [ ] Unit and CLI tests cover eligibility, pricing arithmetic, special roles, overrides, stale catalogs, deterministic ties, and no-regression behavior when the trigger is absent.
+- [x] A Director can deterministically select a backend and model from a local catalog for an ordinary member when `cost efficiency mode` is present.
+- [x] Selection minimizes estimated USD token cost only among models that meet every required task-capability floor and runtime-availability constraint.
+- [x] Monitor selection chooses the least-cost catalog model that meets the catalog's monitor baseline; reviewer selection chooses the highest-ranked eligible catalog model.
+- [x] An explicit Director or user `--coding-agent`, `--model`, or `--effort` remains an override and is recorded rather than silently replaced.
+- [x] The committed catalog records source URLs, retrieval time, pricing basis, capability rationale, freshness state, and the input/output/cached-token prices needed for an estimate.
+- [x] A refresh skill updates the catalog using only the supplied official Anthropic and OpenAI documentation sources, requires maintainer review, and never silently changes a selection policy.
+- [x] Missing, stale, unsupported, or incomparable data fails closed for automatic cost selection and produces an actionable decision record.
+- [x] Evidence that a member is underpowered produces a bounded, auditable escalation to a strictly more capable eligible replacement, or a user decision when no such replacement is available.
+- [x] Unit and CLI tests cover eligibility, pricing arithmetic, special roles, overrides, stale catalogs, deterministic ties, and no-regression behavior when the trigger is absent.
 
 ---
 
@@ -347,9 +347,9 @@ The skill owns catalog maintenance; the CAFleet Director owns per-task selection
 
 ### Step 7: Verify and document rollout
 
-- [ ] Run the full CAFleet test suite plus formatting and type checks; verify all existing manual `member create` tests remain byte-for-byte compatible when selection is not invoked. <!-- completed: -->
-- [ ] Exercise representative dry runs for routine, normal, high-risk, monitor, reviewer, explicit-override, stale-catalog, and unsupported-gateway cases; review the generated decision records. <!-- completed: -->
-- [ ] Publish maintainer guidance for the 30-day refresh cadence and require catalog review in changes that alter a model's capability class or rank. <!-- completed: -->
+- [x] Run the full CAFleet test suite plus formatting and type checks; verify all existing manual `member create` tests remain byte-for-byte compatible when selection is not invoked. <!-- completed: 2026-07-19T13:34 --> (1189 passed via `mise //cafleet:test`; `mise //cafleet:lint` and `mise //cafleet:typecheck` clean; the pre-existing `member create` suites pass unchanged — no-selection spawns are byte-identical.)
+- [x] Exercise representative dry runs for routine, normal, high-risk, monitor, reviewer, explicit-override, stale-catalog, and unsupported-gateway cases; review the generated decision records. <!-- completed: 2026-07-19T13:34 --> (Verifier report `.verifier/verification-report.md`: Director-sanctioned matrix substitution with named pytest evidence per case, plus live read-only E2E fail-closed probes and catalog-price verification against both approved sources.)
+- [x] Publish maintainer guidance for the 30-day refresh cadence and require catalog review in changes that alter a model's capability class or rank. <!-- completed: 2026-07-19T13:34 --> (`skills/cafleet-model-catalog-refresh/SKILL.md` § Cadence and staleness + § Refresh procedure step 3; mirrored in the catalog preamble and `docs/concepts/model-selection.md`.)
 
 ---
 
