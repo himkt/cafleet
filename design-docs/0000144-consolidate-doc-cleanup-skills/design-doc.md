@@ -1,6 +1,6 @@
 # 0000144 — Consolidate Doc-Cleanup Skills into `clean-docs` (Three Workflows)
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 16/16 tasks complete
 **Last Updated**: 2026-07-19
 
@@ -10,16 +10,16 @@ Consolidate the two project-local cleanup skills `.claude/skills/clean-docs` and
 
 ## Success Criteria
 
-- [ ] The merged skill exists at `.claude/skills/clean-docs/` with an umbrella `SKILL.md` and three workflow directories (`residue/`, `affirmative/`, `simplification/`), each with `<workflow>/<workflow>.md` and per-workflow `roles/` (scanner, reviewer) — matching the `skills/cafleet-design-doc` dispatcher + `<workflow>/<workflow>.md` + `<workflow>/roles/` shape — and extending that shape with per-workflow `reference/` pages.
-- [ ] The shared orchestration spine (team shape, per-run process, spawn-prompt skeleton, exempt set, invariants, coordination extensions, `${BASE}` convention, backend-neutrality) is stated **once** in the umbrella `SKILL.md`; no workflow body or role file restates it.
-- [ ] Exactly one workflow runs per invocation, dispatched by user phrasing; each workflow's trigger phrasing is distinct (§2) and the frontmatter `description` triggers all three families.
-- [ ] The class-to-workflow split is explicit (§3): residue owns classes (a)/(b)/(c); affirmative owns P1/P2/P4; simplification owns P3/P5 — with the stated boundary tie-break for candidates matching more than one workflow.
-- [ ] The three invariants (no contract/behavior lost, no live test coverage lost, no new narration) apply to every workflow; the P4 fallback→fail-fast behavior-change carve-out exists **only** in the affirmative workflow — residue and simplification runs are strictly zero-behavior-change.
-- [ ] The residue workflow preserves its guarantees verbatim in meaning: multi-pass pattern-catalog sweep with hand-inspection, `inventory.md` audit record (file→action tables + KEEP list + known-benign subsection), and provable completeness (post-apply re-sweep yields zero unaccounted matches).
-- [ ] The judgment workflows (affirmative, simplification) preserve theirs: full-file judgment read, apply-ready rows per the shared row format, merged `findings.md` review gate, and the observations escalation channel.
-- [ ] Removal is total: `git grep -i "historical-residue"` over the tracked tree minus `design-docs/` returns zero hits; `.claude/skills/historical-residue-cleanup/` and the old single-skill layout files (`roles/scanner.md`, `roles/reviewer.md`, `reference/rubric.md` at the `clean-docs` root) are deleted in the same change, and the final `.claude/skills/clean-docs/` tree matches the §6 layout exactly.
-- [ ] Backend-neutrality is preserved: `SKILL.md`, workflow bodies, and `roles/*.md` use only `{…}` overlay tokens for backend-varying behavior; every spawn prompt carries the `CODING AGENT: {coding_agent}` line; relative overlay/base-dir/coordination links are correct at the new directory depths.
-- [ ] The skill loads via the Skill tool with no `{token}` leaks in any user-facing string. No dogfood run is required.
+- [x] The merged skill exists at `.claude/skills/clean-docs/` with an umbrella `SKILL.md` and three workflow directories (`residue/`, `affirmative/`, `simplification/`), each with `<workflow>/<workflow>.md` and per-workflow `roles/` (scanner, reviewer) — matching the `skills/cafleet-design-doc` dispatcher + `<workflow>/<workflow>.md` + `<workflow>/roles/` shape — and extending that shape with per-workflow `reference/` pages.
+- [x] The shared orchestration spine (team shape, per-run process, spawn-prompt skeleton, exempt set, invariants, coordination extensions, `${BASE}` convention, backend-neutrality) is stated **once** in the umbrella `SKILL.md`; no workflow body or role file restates it.
+- [x] Exactly one workflow runs per invocation, dispatched by user phrasing; each workflow's trigger phrasing is distinct (§2) and the frontmatter `description` triggers all three families.
+- [x] The class-to-workflow split is explicit (§3): residue owns classes (a)/(b)/(c); affirmative owns P1/P2/P4; simplification owns P3/P5 — with the stated boundary tie-break for candidates matching more than one workflow.
+- [x] The three invariants (no contract/behavior lost, no live test coverage lost, no new narration) apply to every workflow; the P4 fallback→fail-fast behavior-change carve-out exists **only** in the affirmative workflow — residue and simplification runs are strictly zero-behavior-change.
+- [x] The residue workflow preserves its guarantees verbatim in meaning: multi-pass pattern-catalog sweep with hand-inspection, `inventory.md` audit record (file→action tables + KEEP list + known-benign subsection), and provable completeness (post-apply re-sweep yields zero unaccounted matches).
+- [x] The judgment workflows (affirmative, simplification) preserve theirs: full-file judgment read, apply-ready rows per the shared row format, merged `findings.md` review gate, and the observations escalation channel.
+- [x] Removal is total: `git grep -i "historical-residue"` over the tracked tree minus `design-docs/` returns zero hits; `.claude/skills/historical-residue-cleanup/` and the old single-skill layout files (`roles/scanner.md`, `roles/reviewer.md`, `reference/rubric.md` at the `clean-docs` root) are deleted in the same change, and the final `.claude/skills/clean-docs/` tree matches the §6 layout exactly.
+- [x] Backend-neutrality is preserved: `SKILL.md`, workflow bodies, and `roles/*.md` use only `{…}` overlay tokens for backend-varying behavior; every spawn prompt carries the `CODING AGENT: {coding_agent}` line; relative overlay/base-dir/coordination links are correct at the new directory depths.
+- [x] The skill loads via the Skill tool with no `{token}` leaks in any user-facing string. No dogfood run is required.
 
 ---
 
@@ -194,3 +194,4 @@ Role files adapt from the existing skills with two systematic changes: spine cit
 |------|---------|
 | 2026-07-19 | Initial draft — consolidates the two cleanup skills into `clean-docs` with three workflows (residue / affirmative / simplification) per user clarification; spine stated once in the umbrella `SKILL.md`; total removal of the `historical-residue-cleanup` name |
 | 2026-07-19 | Reviewer pass: precedent-shape claim corrected (per-workflow `reference/` is an extension, not a match); P4 coverage rule reconciled across §3/spine/parameter table (named coverage; "uncovered" needs explicit reviewer acceptance); patterns.md pathspec pinned as embodiment of the canonical umbrella exempt set with R2/R3/R4 labels replaced; removal reasoning corrected (sibling pointer eliminated by the Step-1 rewrite); added deletion of the old-layout `clean-docs` files + exact-tree verification (15→16 tasks) |
+| 2026-07-19 | Implementation complete: all 16 tasks and 10 success criteria done via the execute workflow (Programmer-only team); fresh Reviewer approved in 1 round; PR #214 opened; Status → Complete |
