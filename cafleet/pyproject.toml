@@ -1,6 +1,6 @@
 [project]
 name = "cafleet"
-version = "0.18.2"
+version = "0.19.0"
 description = "Message broker and member registry for coding agents"
 requires-python = ">=3.12"
 dependencies = [
