@@ -42,8 +42,9 @@ _PER_SUBCOMMAND_BUDGETS: dict[tuple[str, ...], int] = {
     # member create's wide option column (the --coding-agent
     # [claude|codex|opencode] metavar) wraps the --fleet-id help to two lines,
     # so it gains 2 lines rather than 1. Added --text/--text-file and the
-    # now-visible --full increase this.
-    ("member", "create"): 20,
+    # now-visible --full increase this; --effort renders as one more
+    # single-line row.
+    ("member", "create"): 21,
     ("member", "list"): 10,
     ("member", "show"): 10,
     ("member", "capture"): 11,
