@@ -265,9 +265,13 @@ archive next to the skills:
 
 Per target:
 
-1. The three skill directories are delete-and-reinstalled into the agent's
-   skills dir; a failure aborts with `failed to install skills into
-   <skills_dir>: <error>`.
+1. The four skill directories (`cafleet`, `cafleet-design-doc`,
+   `cafleet-research`, `cafleet-model-catalog-refresh`) are
+   delete-and-reinstalled into the agent's skills dir; the cafleet directory
+   carries `asset-manifest.json` and `reference/model-catalog.md`
+   byte-for-byte into every replica, and an archive missing any skill dir or
+   either cafleet asset member is rejected as `release asset is malformed`. A
+   failure aborts with `failed to install skills into <skills_dir>: <error>`.
 2. For agents with a bundled preset (codex, opencode), the preset is installed
    to its target, overwriting whatever exists there — a regular file, a
    directory, or a symlink. A filesystem error aborts with `failed to install
@@ -278,7 +282,7 @@ Per target:
    only):
 
 ```
-<agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>) -> <skills dir>
+<agent>: installed cafleet, cafleet-design-doc, cafleet-research, cafleet-model-catalog-refresh (v<version>) -> <skills dir>
 <agent>: installed preset (v<version>) -> <target>
 ```
 

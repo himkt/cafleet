@@ -1,7 +1,7 @@
 # Cost-Aware CAFleet Model Assignment
 
 **Status**: Approved
-**Progress**: 18/29 tasks complete
+**Progress**: 21/29 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -331,10 +331,10 @@ The skill owns catalog maintenance; the CAFleet Director owns per-task selection
 
 ### Step 5: Add the refresh skill
 
-- [ ] Create `skills/cafleet-model-catalog-refresh/SKILL.md` with the exact official-source allowlist, repository-source-only editing, retrieval, parsing, review, approval, validation, stale-data, and release-coupled deployment workflow. <!-- completed: -->
+- [x] Create `skills/cafleet-model-catalog-refresh/SKILL.md` with the exact official-source allowlist, repository-source-only editing, retrieval, parsing, review, approval, validation, stale-data, and release-coupled deployment workflow. <!-- completed: 2026-07-19T13:12 -->
 
-- [ ] Ensure refresh failures make no catalog edit and that the skill records source hashes/effective dates without reproducing long provider text. <!-- completed: -->
-- [ ] Add `cafleet-model-catalog-refresh` to `SKILL_DIRS`; update setup output/docs, release archive-layout fixtures, and per-backend install/overwrite tests so the fourth skill and the catalog manifest are distributed atomically. <!-- completed: -->
+- [x] Ensure refresh failures make no catalog edit and that the skill records source hashes/effective dates without reproducing long provider text. <!-- completed: 2026-07-19T13:12 -->
+- [x] Add `cafleet-model-catalog-refresh` to `SKILL_DIRS`; update setup output/docs, release archive-layout fixtures, and per-backend install/overwrite tests so the fourth skill and the catalog manifest are distributed atomically. <!-- completed: 2026-07-19T13:12 -->
 
 ### Step 6: Test the feature
 

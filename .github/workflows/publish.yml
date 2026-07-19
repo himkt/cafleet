@@ -24,6 +24,25 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Write the cafleet asset manifest
+        env:
+          CAFLEET_RELEASE_VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          python3 - <<'EOF'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          catalog = Path("skills/cafleet/reference/model-catalog.md").read_bytes()
+          manifest = {
+              "cafleet_version": os.environ["CAFLEET_RELEASE_VERSION"],
+              "catalog_sha256": hashlib.sha256(catalog).hexdigest(),
+          }
+          Path("skills/cafleet/asset-manifest.json").write_text(
+              json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+          )
+          EOF
       - name: Package skills and presets directories
         run: zip -r "cafleet-assets-v${{ github.event.release.tag_name }}.zip" skills presets
       - name: Upload assets archive to the release
