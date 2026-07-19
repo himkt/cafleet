@@ -27,7 +27,7 @@ cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id> --json
 
 ### `--json` (per-subcommand, machine-parseable)
 
-`--json` switches CLI output from text to JSON: compact single-line encoding (no whitespace; non-ASCII like the `…` suffix emitted as UTF-8), cheap to pipe into `jq` from a Director loop. It is a per-subcommand flag, written trailing — after all other flags:
+`--json` switches CLI output from text to JSON: compact single-line encoding (no whitespace; non-ASCII like the `…` suffix emitted as UTF-8), cheap to pipe into `jq` from a Director loop:
 
 ```bash
 cafleet message poll --fleet-id <fleet-id> --member-id <m> --json

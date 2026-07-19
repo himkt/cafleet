@@ -113,10 +113,6 @@ contract. The one hard requirement is that the monitor's "SQLite write lock
 serializes claims" assumption (§6.2) is preserved, whatever threading or
 concurrency model is used.
 
-The behavioral requirements below are independent of this choice: any
-implementation that preserves the interface and observable semantics of §1 is
-conformant, regardless of its threading or concurrency model.
-
 ---
 
 ## 3. Module layout
@@ -2344,31 +2340,6 @@ around command names and `.env`):
   "permission": {
     "bash": {
       "*": "deny",
-      "gh api repos/*/*/issues/*/comments": "allow",
-      "gh api repos/*/*/issues/*/comments *": "allow",
-      "gh api repos/*/*/issues/*/comments/* *": "allow",
-      "gh api repos/*/*/pulls/comments/* *": "allow",
-      "gh api repos/*/*/pulls/*/comments": "allow",
-      "gh api repos/*/*/pulls/*/comments *": "allow",
-      "gh api repos/*/*/pulls/*/comments/* *": "allow",
-      "gh api repos/*/*/pulls/*/reviews": "allow",
-      "gh api repos/*/*/pulls/*/reviews *": "allow",
-      "gh api repos/*/*/pulls/*/reviews/* *": "allow",
-      "gh api repos/*/*/pulls/*/requested_reviewers": "allow",
-      "gh api repos/*/*/pulls/*/requested_reviewers *": "allow",
-      "gh auth status": "allow",
-      "gh issue list *": "allow",
-      "gh issue view *": "allow",
-      "gh pr checks *": "allow",
-      "gh pr edit * --add-reviewer @copilot": "allow",
-      "gh pr diff *": "allow",
-      "gh pr list": "allow",
-      "gh pr list *": "allow",
-      "gh pr view *": "allow",
-      "gh repo view *": "allow",
-      "gh run list *": "allow",
-      "gh run view *": "allow",
-      "gh search *": "allow",
       "git add *": "allow",
       "git commit *": "allow",
       "git diff *": "allow",
@@ -2381,9 +2352,6 @@ around command names and `.env`):
       "grep *": "allow",
       "ls": "allow",
       "ls *": "allow",
-      "printf *": "allow",
-      "sleep": "allow",
-      "sleep *": "allow",
       "stat *": "allow",
       "tree": "allow",
       "tree *": "allow",
@@ -2394,8 +2362,6 @@ around command names and `.env`):
       "uv sync --frozen *": "allow",
       "wc *": "allow",
       "cafleet *": "allow",
-      "cafleet member exec": "deny",
-      "cafleet member exec *": "deny"
     },
     "read": {
       "*": "allow",

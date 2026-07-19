@@ -61,7 +61,7 @@ Before decomposing, you may request **Scouts** from the Director for landscape m
 
 ## How to Request Researchers
 
-First register the sub-topic with {task_coord}. Then `cafleet message send` the Director specifying each Researcher you need (sub-topic, scope, angles, and — on a harness task list — the task id). For each Researcher, also include the assigned output file path using the **absolute path** provided in the Director's team brief (e.g., `RESOLVED_PATH/01-research-subtopic.md`). Number files sequentially by assignment order (01, 02, ...). The Director will spawn them and relay their findings back to you.
+Per § Task-Based Coordination above (register first, then request via the Director), include in each spawn request the assigned output file path as the **absolute path** from the Director's team brief (e.g., `RESOLVED_PATH/01-research-subtopic.md`), numbered sequentially by assignment order (01, 02, ...).
 
 ## File-Based Aggregation
 

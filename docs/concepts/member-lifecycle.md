@@ -7,11 +7,11 @@ icon: lucide/users
 The `cafleet member` CLI group wraps the two-step "register + spawn a
 tmux pane" recipe behind `cafleet member create` and persists the member-to-pane
 mapping in the `member_placements` table. An ordinary member is an active
-registry row with a placement row, other than the fleet's root Director —
-spawned by a Director via `cafleet member create`, linking it to a specific
-tmux pane, window, and session. The root Director is not an ordinary member —
-it is bootstrapped internally by `cafleet fleet create` (keeping its own
-placement row, since it is pane-bound).
+registry row with a placement row other than the fleet's root Director,
+spawned by a Director via `cafleet member create` and linked to a specific
+tmux pane, window, and session. The root Director is instead bootstrapped
+internally by `cafleet fleet create`, keeping its own placement row since it
+is pane-bound.
 
 **Single-Director invariant**: A fleet has exactly one Director — the root
 Director recorded in `fleets.director_member_id` at `fleet create` time. Only

@@ -52,9 +52,9 @@ mise //admin:install      # reinstall WebUI deps from the committed lockfile
 ```
 
 To change the WebUI's dependencies, edit `admin/package.json` and run plain
-`bun install` inside `admin/` to regenerate `admin/bun.lock`.
-`mise //admin:install` runs `bun install --frozen-lockfile`, so it only
-reinstalls from the committed lockfile and cannot update it.
+`bun install` inside `admin/` to regenerate `admin/bun.lock` —
+`mise //admin:install` installs with `--frozen-lockfile` and cannot update
+the lockfile.
 
 ### Installing the skills from your checkout
 

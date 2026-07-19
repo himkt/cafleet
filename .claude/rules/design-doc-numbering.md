@@ -17,10 +17,6 @@ Example: `design-docs/0000001-a2a-registry-broker/design-doc.md`
 - Use 7-digit zero-padding (e.g., `0000001`, `0000002`, `0000003`)
 - The slug should be a kebab-case short description of the feature
 
-## How to find the next number
-
-Look at existing directories in `design-docs/` and use the next sequential number.
-
 ---
 
 For the documentation-first implementation order and the first-class documentation targets (README, SPEC, docs, skills), see `documentation-maintenance.md`.

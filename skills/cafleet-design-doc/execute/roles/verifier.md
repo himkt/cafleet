@@ -40,7 +40,7 @@ You do NOT speak to the user directly; all communication goes through the Direct
 
 ### Phase 1: Tool Discovery
 
-At startup, perform tool discovery. **This phase is exempt from the verb + pointer schema** — the inventory is a one-time discovery payload, not iterative coordination, so the first message rides as a free-form multi-line cafleet body. Subsequent Phase 2 verification reports follow the schema.
+At startup, perform tool discovery. This phase is exempt from the verb + pointer schema (§ Communication Protocol above).
 
 1. List all available tools and check for `mcp__*` prefixed tools (MCP servers for browser automation, HTTP clients, etc.)
 2. Check the system-reminder for available skills

@@ -47,15 +47,7 @@ When the operator names a model rather than a backend ("please create a member w
 | Claude alias or `claude-*` full name — `fable`, `opus`, `sonnet`, `haiku`, `claude-opus-4-8`, … | `claude` | `--coding-agent claude --model <name>` (omitting the flag inherits your own backend, which matches only when you are a claude Director) |
 | Any other bare name — no shape match (e.g. `gemini-2.5-pro`, `o3-mini`) | none — do NOT infer | Ask the operator for the explicit `--coding-agent` + `--model` pair |
 
-Followed by the routing rule as ordered precedence:
-
-> Resolve the backend in this order — the first match wins:
-> 1. **Name contains a `/`** → `opencode`. The provider-prefixed form is the explicit "use opencode" signal; opencode is never inferred from a bare name.
-> 2. **Name matches `gpt-*`** → `codex`.
-> 3. **Name is a Claude alias (`fable` / `opus` / `sonnet` / `haiku`) or a `claude-*` full name** → `claude` (pass `--coding-agent claude`; omitting the flag inherits your own backend instead).
-> 4. **Anything else** → do not infer; ask the operator for the explicit `--coding-agent` + `--model` pair.
-
-Precedence matters for the slash case: `anthropic/claude-sonnet-4-6` contains both `claude` and a `/`, and rule 1 (slash → opencode) wins over rule 3.
+The rows apply as ordered precedence — the first match wins. This matters for the slash case: `anthropic/claude-sonnet-4-6` contains both `claude` and a `/`, and row 1 (slash → opencode) wins over row 3 — the provider-prefixed form is the explicit "use opencode" signal; opencode is never inferred from a bare name.
 
 ### Available models per backend
 

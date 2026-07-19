@@ -93,16 +93,13 @@ MCP-server rule.
 
 ### Trust the working directory
 
-Coding agents ask for a trust confirmation the first time they start in a
-directory they have not seen before. Trust the workspace in advance: launch
-your coding agent once in the working directory the member panes will run in
-and accept its first-run prompt, or add a trust entry to the agent's
-configuration file (see your agent's reference page). Trust is granted per
-directory, so each git worktree needs its own approval.
-
-This prevents a spawn-time stall: in an untrusted directory, the agent's
-first-run trust prompt stalls a freshly spawned member — the member ignores
-every incoming message until the prompt is cleared.
+Coding agents ask for a trust confirmation the first time they start in a new
+directory, and that first-run prompt stalls a freshly spawned member — it
+ignores every incoming message until the prompt is cleared. Trust the
+workspace in advance: launch your coding agent once in the working directory
+the member panes will run in and accept the prompt, or add a trust entry to
+the agent's configuration file (see your agent's reference page). Trust is
+granted per directory, so each git worktree needs its own approval.
 
 ## Simple example — invoke from a coding agent
 

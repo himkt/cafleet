@@ -24,7 +24,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 - **Make the final call** on when quality is sufficient. You are accountable to the user for this decision.
 - **Do not modify the report.** The report is a finalized input. If changes are needed, escalate to the user via {decision_surface} (per the Report Modification Policy below).
 - **Do not run agent-browser browser-operation commands directly.** Never invoke `bun run agent-browser --session vr-batch-<start> open|snapshot|screenshot|wait|close` from the Director thread. Slide capture, navigation, and lifecycle commands — including server readiness checks — are exclusively the Visual Reviewer's responsibility. Two narrow exceptions exist: (1) the `bun run agent-browser close --all` safety net in the cleanup step; (2) diagnostic-only `console` and `errors` against an existing `vr-batch-<start>` session when investigating a stuck or unresponsive Visual Reviewer (prefer asking the VR to run them and report back; only run them yourself if the VR is not responding).
-- **Clean up when done** per the § Shutdown Protocol below (first-out: delete the monitoring member first (its heartbeat dies with the pane) → members, VR after its close handshake → `agent-browser close --all` + stop the Slidev dev server via {bg_stop} (never the broad `pkill -f slidev`) → `cafleet fleet delete`).
+- **Clean up when done** per § Shutdown Protocol below (first-out).
 
 ## Communication Protocol
 

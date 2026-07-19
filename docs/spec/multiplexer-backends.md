@@ -20,10 +20,6 @@ The pane is also cafleet's only push channel: message delivery stays pull-based
 broker keystrokes a best-effort inline preview into the recipient's pane after
 persisting a message — see [Push notifications](#push-notifications).
 
-The rest of this page specifies the contract: how a backend is resolved, how
-failures surface, what the optional capabilities are, and the exact
-push-notification mechanics.
-
 ## Backend selection {#backend-selection}
 
 Every call site resolves its backend through `resolve_multiplexer()`

@@ -99,11 +99,8 @@ On each wake it runs a routine bounded to two read/act commands — read-only
 
 Observation spans the Director and every due member, but actuation is
 Director-only: the monitoring member never keystrokes ordinary members —
-all member-driving routes back through the Director, whose re-engagement is in
-turn capture-gated: a fresh `cafleet member capture` classified on the same
-five-state rubric, firing only on `finished` or `stalled`, skipping the round
-on `awaiting_user` or `working` (see the `/cafleet` skill's
-`reference/supervision.md`).
+all member-driving routes back through the Director, whose re-engagement is
+itself capture-gated (see *Heartbeat vs facilitation* above).
 
 ## Cadence and tick precision {#cadence-and-tick-precision}
 
