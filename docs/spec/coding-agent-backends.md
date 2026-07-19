@@ -139,12 +139,10 @@ missing.
 
 The preset's `bash` ruleset is deny-by-default: a `"*": "deny"` base first,
 then an explicit allowlist translated from the operator's Claude Code
-`permissions.allow` set (`cafleet *`, read-only `gh` queries plus the PR
-comment/review endpoints, non-destructive `git` subcommands, file-inspection
-utilities, and Python project tooling), then two final `cafleet member exec`
-deny overrides placed after `"cafleet *"`. opencode selects the **last**
-matching rule, so this order is the safety floor — every check resolves to
-`allow` or `deny`, never `ask`. A permission popup in an opencode pane is
+`permissions.allow` set (`cafleet *`, non-destructive `git` subcommands,
+file-inspection utilities, and Python project tooling). opencode selects the
+**last** matching rule, so this order is the safety floor — every check
+resolves to `allow` or `deny`, never `ask`. A permission popup in an opencode pane is
 therefore a regression escape, not a runtime decision: capture the pane,
 escalate, and extend the allowlist by operator decision — do not answer the
 popup ad hoc.
