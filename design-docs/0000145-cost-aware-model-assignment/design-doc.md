@@ -1,7 +1,7 @@
 # Cost-Aware CAFleet Model Assignment
 
 **Status**: Approved
-**Progress**: 14/29 tasks complete
+**Progress**: 18/29 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -324,10 +324,10 @@ The skill owns catalog maintenance; the CAFleet Director owns per-task selection
 
 ### Step 4: Integrate Directors and audits
 
-- [ ] Update the shared Director role/reference and every CAFleet-native workflow Director instruction to classify the role task, invoke selection before spawning, and pass returned flags to `member create`; remove the legacy monitor/reviewer model placeholders from overlays, defaults, supervision, and workflow examples. <!-- completed: -->
-- [ ] Preserve the existing monitor-first gate and spawn-prompt artifact flow; add guarded two-phase `.selection/<selection_id>.pending.json` and final-result artifacts under the already resolved task base. <!-- completed: -->
-- [ ] Implement cost-mode fail-closed behavior and Director-relayed operator choice when no qualifying candidate exists. <!-- completed: -->
-- [ ] Implement the Director/Reviewer underpowered-member protocol: evidence marker, bounded handoff/capture, old-member deletion, higher-rank replacement, resumptive assignment, and two-replacement cap. <!-- completed: -->
+- [x] Update the shared Director role/reference and every CAFleet-native workflow Director instruction to classify the role task, invoke selection before spawning, and pass returned flags to `member create`; remove the legacy monitor/reviewer model placeholders from overlays, defaults, supervision, and workflow examples. <!-- completed: 2026-07-19T12:56 -->
+- [x] Preserve the existing monitor-first gate and spawn-prompt artifact flow; add guarded two-phase `.selection/<selection_id>.pending.json` and final-result artifacts under the already resolved task base. <!-- completed: 2026-07-19T12:56 -->
+- [x] Implement cost-mode fail-closed behavior and Director-relayed operator choice when no qualifying candidate exists. <!-- completed: 2026-07-19T12:56 -->
+- [x] Implement the Director/Reviewer underpowered-member protocol: evidence marker, bounded handoff/capture, old-member deletion, higher-rank replacement, resumptive assignment, and two-replacement cap. <!-- completed: 2026-07-19T12:56 -->
 
 ### Step 5: Add the refresh skill
 

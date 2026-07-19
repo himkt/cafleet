@@ -35,7 +35,7 @@ Read your overlay and **resolve** it before your first action.
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../skills/cafleet/reference/coding-agent/<name>-overlay.md`](../../../skills/cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{monitor_model}` / `{reviewer_model}` / `{skill_loader}` / `{decision_surface}`, guess a wrong value, or ignore a backend note |
+| 1 | your overlay [`../../../skills/cafleet/reference/coding-agent/<name>-overlay.md`](../../../skills/cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{skill_loader}` / `{decision_surface}`, guess a wrong value, or ignore a backend note |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../skills/cafleet/reference/base-dir.md) | the task-scope BASE resolution, the no-bypass write protocol, and the `<unset>` contract — you mis-root run artifacts or fall back to `/tmp` |
 | 3 | the `cafleet-design-doc` skill's [`reference/coordination.md`](../../../skills/cafleet-design-doc/reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema and this skill's extensions (`scanner` role, per-workflow run pointer) — your status hops mis-route |
 
@@ -125,7 +125,7 @@ User → /clean-docs (one workflow)
      ├─ monitor    (first-in, --role monitor; heartbeat; gates the first ordinary spawn)
      ├─ scanner-1  (owns a disjoint file slice: scan → propose → apply after gate)
      ├─ scanner-N  (…)
-     └─ reviewer   (the workflow's guard, --model {reviewer_model})
+     └─ reviewer   (the workflow's guard; model from cafleet model select --role reviewer)
 ```
 
 | Role | Responsibility |
@@ -162,11 +162,12 @@ extensions, since a run produces a run artifact, not a design document:
    `researches/clean-docs-<workflow>-<UTC-compact>/` (gitignored, one folder
    per run).
 2. **Bootstrap** — `cafleet doctor` (gating), `cafleet fleet create`; spawn the
-   monitor first (`--role monitor --model {monitor_model}`, members spawned
+   monitor first (`--role monitor`, backend/model from the pre-spawn
+   `cafleet model select --role monitor` step; members spawned
    `{permission_flags}`), gate on `ready: monitor live`.
 3. **Spawn workers** — scanners (one per disjoint slice) and the reviewer
-   (`--model {reviewer_model}`), each from a rendered prompt at
-   `${BASE}/.prompts/<role>-<UTC-compact>.md`.
+   (backend/model from `cafleet model select --role reviewer`), each from a
+   rendered prompt at `${BASE}/.prompts/<role>-<UTC-compact>.md`.
 4. **Scan (fan-out)** — each scanner runs the workflow's **scan mechanics**
    (parameter table below) over its slice and writes its partial artifact under
    `${BASE}`, with a separate *Observations* section.
@@ -258,8 +259,8 @@ canonical skeleton, not from this one.
 ## Backend-neutrality
 
 `SKILL.md`, the workflow bodies, and every `<workflow>/roles/*.md` are
-backend-neutral: they use `{monitor_model}` / `{reviewer_model}` /
-`{skill_loader}` / `{decision_surface}` / `{permission_flags}` tokens resolved
+backend-neutral: they use `{skill_loader}` / `{decision_surface}` /
+`{permission_flags}` tokens resolved
 from `../../../skills/cafleet/reference/coding-agent/<name>-overlay.md`, and
 every member's spawn-prompt identity block carries a
 `CODING AGENT: {coding_agent}` line so the member resolves its overlay. Role

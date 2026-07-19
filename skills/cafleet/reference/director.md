@@ -17,9 +17,11 @@ cafleet member create --fleet-id <fleet-id> \
   --name Reviewer-C --description "Reviewer for PR #42" --coding-agent codex \
   --text-file /abs/path/to/<BASE>/.prompts/reviewer-c-20260514T145000Z.md
 
+cafleet model select --catalog <abs loaded-cafleet-skill-root>/reference/model-catalog.md \
+  --role monitor --json
 cafleet member create --fleet-id <fleet-id> \
   --name monitor --description "Monitoring member: owns the heartbeat" \
-  --role monitor --model {monitor_model} \
+  --role monitor --coding-agent <selected.backend> --model <selected.model> \
   --text-file /abs/path/to/<BASE>/.prompts/monitor-20260514T145000Z.md
 ```
 
@@ -30,7 +32,7 @@ cafleet member create --fleet-id <fleet-id> \
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; also recorded as `placement.coding_agent`. When omitted, the member — every role — inherits **your** (the spawning Director's) backend from your placement row, so an unflagged team runs on the same backend as its Director. An explicit value always wins. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent, or with `opencode agent preset not found at <preset>; run 'cafleet setup' first` when the opencode agent preset is missing. |
 | `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend; the model catalog at [`model-catalog.md`](model-catalog.md) lists the models for each backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary (omitted → the binary's default; spawn-time only, never persisted). claude: `low`, `medium`, `high`, `xhigh`, `max` (spawned as `--effort <level>`); codex: `minimal`, `low`, `medium`, `high`, `xhigh` (spawned as `--config=model_reasoning_effort=<level>`); opencode: unsupported — any value exits 2 with `opencode does not support reasoning effort.`. An unknown level exits 2 before any side effect. The per-backend level set is your overlay's `{effort_levels}` value. |
-| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `member_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop watches the Director and members on their own intervals and wakes the monitoring member when one is due — see [`reference/supervision.md`](supervision.md)). An ordinary `--role member` with a pane IS enrolled. The LLM is still set by `--model` (the Director passes the monitor model `{monitor_model}`); the backend follows the general inheritance rule when `--coding-agent` is omitted (see the `--coding-agent` row). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see [`roles/monitor.md`](../roles/monitor.md) for the canonical prompt and first-in/first-out lifecycle. |
+| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `member_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop watches the Director and members on their own intervals and wakes the monitoring member when one is due — see [`reference/supervision.md`](supervision.md)). An ordinary `--role member` with a pane IS enrolled. The LLM is still set by `--model` (the Director passes the backend/model pair returned by the pre-spawn `cafleet model select --role monitor` step — see § *Model selection before member create*); the backend follows the general inheritance rule when `--coding-agent` is omitted (see the `--coding-agent` row). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see [`roles/monitor.md`](../roles/monitor.md) for the canonical prompt and first-in/first-out lifecycle. |
 | `--text` | no | Inline spawn prompt. Mutually exclusive with `--text-file`; exactly one of the two is required. |
 | `--text-file` | no | Path to a UTF-8 file used as the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Mutually exclusive with `--text`; exactly one of the two is required. Path/file errors are catalogued in [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 
@@ -121,6 +123,44 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 **Backtick caveat (harness-dependent)**: some environments (including this project) run a Bash-validator hook that rejects any backtick in a `Bash` invocation. When in play, strip backticks from spawn-prompt bodies (plain text instead of code spans); path-by-reference keeps the body short enough that this is easy.
 
 **Pane discovery**: discover a member's pane via `cafleet member list` (the `pane_id` column is ground truth for all backends). Pane title: {pane_title}. The spawn is atomic — a `split-window` or placement-patch failure rolls back the registration (and exits the pane on a patch failure) — and uses `-d` so the Director keeps focus. See [`member-lifecycle.md`](../../../docs/concepts/member-lifecycle.md).
+
+## Model selection before member create
+
+Before **every** `cafleet member create`, the Director classifies the member's task against the catalog role-profile table and runs the selector against the catalog of the exact `cafleet` skill root it loaded:
+
+```bash
+cafleet model select --catalog <abs loaded-cafleet-skill-root>/reference/model-catalog.md \
+  --role <role-profile-key> [--requires <dimension>=<level> ...] \
+  [--estimated-input-tokens <n> --estimated-output-tokens <n>] --json
+```
+
+Pass the returned `selected.backend` and `selected.model` unchanged as `--coding-agent` / `--model` to the existing `member create`; the selector never synthesizes a shell command. Task-specific `--requires` may only raise a role-profile floor: routine bounded work keeps the profile, cross-component or high-impact work raises each relevant dimension to at least 4, and security-sensitive / novel / failure-intolerant work raises relevant dimensions to 5.
+
+**Per-role policy.**
+
+- `--role monitor` and `--role reviewer` apply on every team spawn: the monitor gets the least-cost catalog model meeting the monitor baseline; the reviewer gets the highest-ranked eligible model.
+- Ordinary members get automatic cost-minimized selection **only when the originating user request contains the exact phrase `cost efficiency mode`**. The Director parses the original user request once for the trigger and records whether the mode was active; a member message or tool output never activates it. Without the trigger, existing workflow model behavior is unchanged and the selector result is informational only.
+- An explicit user `--coding-agent` / `--model` / `--effort` is an override and is recorded rather than silently replaced; a `--model` pin resolves through the catalog token map as a `manual_override`. A user-pinned model is never deleted and replaced automatically.
+
+**Fail closed.** In cost-efficiency mode, any selector error (`MODEL_CATALOG_STALE`, `MODEL_NO_ELIGIBLE_CANDIDATE`, `MODEL_CANDIDATE_ASSET_UNAVAILABLE`, …) means the Director relays an operator choice via {decision_surface} instead of spawning a guessed model.
+
+### Selection audit artifacts (two-phase)
+
+For a resolved `${BASE}`, write the selector's `--json` record to `${BASE}/.selection/<selection_id>.pending.json` **before** spawning, then atomically rename/update it to `${BASE}/.selection/<selection_id>.json` after `member create` returns — success sets `spawn.state: "created"` plus the returned `member_id`; an error or rollback sets `spawn.state: "failed"` with the sanitized CLI error and no member id. `selection_id` plus the final member id is the correlation contract; records carry no prompt contents, credentials, or user data beyond the normalized task profile. When `${BASE}` is the `<unset>` sentinel, automatic and special-role selection fails before spawning with `MODEL_SELECTION_AUDIT_UNAVAILABLE` — never construct `.selection/` elsewhere or fall back to `/tmp`; relay an operator decision instead. Manual/non-selection spawning keeps its inline-prompt fallback and the established `audit-disabled` status, with no model-selection audit record.
+
+### Underpowered-member replacement
+
+The Director owns member replacement; the Reviewer supplies evidence (an `[INCORRECT]` marker naming the suspected unmet capability) and stays independent of the execution. Slowness, awaiting user input, or a transient infrastructure error is never grounds for replacement. Valid evidence: a member's self-report that it cannot reason through the task, repeated task-relevant reasoning/coding failures after normal correction, a Reviewer `[INCORRECT]` finding naming the unmet capability, or a Director review of a materially incomplete/incorrect result tied to the task profile.
+
+For each replacement, in order:
+
+1. **Freeze and hand off** — freeze new work for the task and request one concise state report (completed work, modified paths, commands/tests run, blockers, next step); if the member cannot respond promptly, `cafleet member capture` is the handoff evidence.
+2. **Re-select against the pinned snapshot** — re-run the selector against the original decision record's pinned candidate snapshot while rechecking current backend readiness; raise at least the failed capability floor by one (or the explicitly justified floor). The replacement must be strictly higher-ranked than the failed model and satisfy the new floors; cost is minimized only within that stronger set.
+3. **Record** — write a replacement decision record under `.selection/` (trigger, evidence pointers, old/new task profiles, candidate exclusions, old/new model and estimated cost, attempt number, handoff artifact path; no secrets or prompt contents).
+4. **Delete before create** — `cafleet member delete` the old member through the standard lifecycle before spawning the replacement; the monitoring member stays live and all normal spawn/audit/prompt-substitution rules apply.
+5. **Resume, not restart** — spawn the replacement with the original assignment plus the bounded handoff and the same deliverable paths, route the original task pointer, and have the Reviewer re-evaluate at the normal review point.
+
+Caps and fail-closed cases: the initial member plus at most two replacements per task; each replacement strictly higher-ranked than its predecessor; a `(task pointer, model key)` pair is never retried. An unmapped manual model, an inactive/removed entry, no recorded rank, a stale/missing pinned snapshot, any explicit user override, an empty stronger set, a reached cap, or ambiguous evidence all mean the Director relays an operator choice (approve a named higher-cost/manual override, simplify/re-scope, or stop) instead of auto-replacing.
 
 ## Member Delete
 

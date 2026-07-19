@@ -5,8 +5,6 @@ Substitute these into the base `{…}` placeholders.
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | the AskUserQuestion tool |
-| `{monitor_model}` | `haiku` |
-| `{reviewer_model}` | `opus` |
 | `{permission_flags}` | `--permission-mode dontAsk` |
 | `{bg_run}` | the Bash tool's `run_in_background: true` |
 | `{bg_stop}` | `TaskStop` |
@@ -38,6 +36,6 @@ When a capture shows neither cleanly (e.g. a box scrolled partly out of the capt
 
 ## Worked resolution
 
-The canonical monitor-spawn command, fully resolved for this backend:
+The canonical monitor-spawn command, fully resolved for this backend — the backend/model pair comes from the Director's pre-spawn `cafleet model select --role monitor` step, not from this overlay:
 
-`cafleet member create --role monitor --model haiku --text-file <rendered monitor prompt>` (members spawned `--permission-mode dontAsk`).
+`cafleet member create --role monitor --coding-agent <selected.backend> --model <selected.model> --text-file <rendered monitor prompt>` (members spawned `--permission-mode dontAsk`).

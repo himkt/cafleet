@@ -4,7 +4,7 @@ cafleet skill instructions are backend-neutral by default. Write the base — ev
 
 ## Where backend specifics live
 
-Backend-specific deltas live in `skills/cafleet/reference/coding-agent/<name>-overlay.md`, one overlay per backend (`claude`, `codex`, `opencode`), with the canonical skeleton in `_template.md`. Each overlay carries that backend's concrete realization of the six deltas: the decision surface, the per-role model pins (monitor + reviewer), the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, and the skill-loading recipe.
+Backend-specific deltas live in `skills/cafleet/reference/coding-agent/<name>-overlay.md`, one overlay per backend (`claude`, `codex`, `opencode`), with the canonical skeleton in `_template.md`. Each overlay carries that backend's concrete realization of the backend deltas: the decision surface, the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, the effort levels, and the skill-loading recipe. Model policy is not an overlay delta — model availability, capability policy, and prices live in the model catalog (`skills/cafleet/reference/model-catalog.md`) and every spawn's backend/model pair comes from the Director's pre-spawn `cafleet model select` step.
 
 ## How the base and overlay connect
 
@@ -14,7 +14,7 @@ Every base instruction that varies by backend states the neutral behavior and po
 2. **Apply notes.** At each base instruction named in the overlay's *Note → applies at* table, follow that note's caveat there.
 3. **Self-check at emission.** A literal `{token}` in any command run, any message sent, or anything shown to the user is a defect — resolve it before emitting.
 
-Skip resolution and the agent emits a literal `{monitor_model}` / `{permission_flags}`, guesses a wrong or default value, or ignores a backend note — the three application-failure modes the resolve step closes. The canonical procedure, with the resolution order, lives in `skills/cafleet/SKILL.md` § *Resolve your overlay*.
+Skip resolution and the agent emits a literal `{skill_loader}` / `{permission_flags}`, guesses a wrong or default value, or ignores a backend note — the three application-failure modes the resolve step closes. The canonical procedure, with the resolution order, lives in `skills/cafleet/SKILL.md` § *Resolve your overlay*.
 
 **Documented defaults.** When an overlay omits a token, or an agent cannot identify its backend, each token has a documented backend-neutral default: the lowest-common-denominator form that functions on every backend (message-only coordination, POSIX backgrounding, a neutral mode description). This is a legitimate default per `affirmative-writing.md` — absence of an overlay value is an expected, valid state with a well-defined correct behavior — not an error-swallowing fallback. The default table is canonical in `skills/cafleet/SKILL.md` § *Resolve your overlay*.
 

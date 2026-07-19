@@ -21,7 +21,7 @@ Before your first action other than these Reads, Read every file in the **Load-b
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{monitor_model}` / `{permission_flags}`, **or** guess a wrong/default value (spawn the monitor on the wrong model), **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{skill_loader}` / `{permission_flags}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | [`reference/base-dir.md`](reference/base-dir.md) — if you write any scratch / audit / figure file | the no-bypass write protocol and the `<unset>` contract — you mis-root every write or fall back to `/tmp` |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**
@@ -57,8 +57,6 @@ Used only when your overlay omits a token or your backend is unknown. Each defau
 | Token | Documented default (overlay silent / backend unknown) |
 |-------|-------------------------------------------------------|
 | `{decision_surface}` | a Director-relayed operator message (a member always routes to the Director) |
-| `{monitor_model}` | the spawning Director's own model (inherit the parent) — a safe floor, possibly cost-suboptimal |
-| `{reviewer_model}` | the spawning Director's own model (inherit the parent) — a safe floor, possibly intelligence-suboptimal |
 | `{permission_flags}` | describe the mode neutrally as "workspace-scoped auto-approval" — for prose uses only; spawn-flag construction never falls here |
 | `{bg_run}` | a backgrounded `!` shell command |
 | `{bg_stop}` | killing the recorded background process |
@@ -92,7 +90,7 @@ CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFL
 
 ## Team supervision
 
-When a Director spawns a team, the **FIRST** member created is the dedicated monitoring member (`cafleet member create --role monitor --model {monitor_model} --text-file <rendered monitor prompt>`). It owns the heartbeat and gates every ordinary `member create` behind its `ready: monitor live` handshake. The Director never runs `cafleet monitor start` itself.
+When a Director spawns a team, the **FIRST** member created is the dedicated monitoring member (`cafleet member create --role monitor --coding-agent <selected.backend> --model <selected.model> --text-file <rendered monitor prompt>`, where the backend/model pair comes from the pre-spawn `cafleet model select --catalog <loaded-cafleet-skill-root>/reference/model-catalog.md --role monitor --json` step — see [`reference/director.md`](reference/director.md) § *Model selection before member create*). It owns the heartbeat and gates every ordinary `member create` behind its `ready: monitor live` handshake. The Director never runs `cafleet monitor start` itself.
 
 For the full governance + heartbeat mechanism (Core Principle, Communication Model, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, Stall Response, Cleanup, the 5-step facilitation loop, Monitor Lifecycle), Read [`reference/supervision.md`](reference/supervision.md).
 
