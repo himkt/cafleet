@@ -1,7 +1,7 @@
 # 0000144 — Consolidate Doc-Cleanup Skills into `clean-docs` (Three Workflows)
 
 **Status**: Approved
-**Progress**: 0/16 tasks complete
+**Progress**: 2/16 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -151,8 +151,8 @@ Role files adapt from the existing skills with two systematic changes: spine cit
 
 ### Step 1: Umbrella `SKILL.md`
 
-- [ ] Rewrite `.claude/skills/clean-docs/SKILL.md`: frontmatter (`name: clean-docs`, a `description` triggering all three §2 families + the members-load line) and the dispatch table with the one-workflow-per-run rule and the `{decision_surface}` ambiguity rule. <!-- completed: -->
-- [ ] State the shared spine once in `SKILL.md` (§4): the three invariants with the affirmative-only P4 carve-out, scope/exempt set, team shape, coordination extensions, the parameterized 8-step per-run process with the workflow parameter table, the observations channel, the `${BASE}` convention, the spawn-prompt skeleton, and backend-neutrality with the required-reading block. <!-- completed: -->
+- [x] Rewrite `.claude/skills/clean-docs/SKILL.md`: frontmatter (`name: clean-docs`, a `description` triggering all three §2 families + the members-load line) and the dispatch table with the one-workflow-per-run rule and the `{decision_surface}` ambiguity rule. <!-- completed: 2026-07-19T02:36 -->
+- [x] State the shared spine once in `SKILL.md` (§4): the three invariants with the affirmative-only P4 carve-out, scope/exempt set, team shape, coordination extensions, the parameterized 8-step per-run process with the workflow parameter table, the observations channel, the `${BASE}` convention, the spawn-prompt skeleton, and backend-neutrality with the required-reading block. <!-- completed: 2026-07-19T02:36 -->
 
 ### Step 2: Shared judgment reference
 
