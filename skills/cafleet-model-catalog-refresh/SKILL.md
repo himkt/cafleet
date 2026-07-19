@@ -73,12 +73,11 @@ refresh a running Director's asset copy. To deploy a refreshed catalog, the
 maintainer:
 
 1. Bumps the CAFleet release version.
-2. Builds the wheel and `cafleet-assets-v<version>.zip` containing the
-   refreshed repository source, the matching
-   `skills/cafleet/asset-manifest.json` (with `cafleet_version` and
-   `catalog_sha256`, the SHA-256 of the full catalog Markdown bytes), and all
-   skill directories — the catalog and manifest are distributed atomically with
-   the skills.
+2. Updates the committed `skills/cafleet/asset-manifest.json` — `cafleet_version`
+   set to the new release version and `catalog_sha256` to the SHA-256 of the
+   full catalog Markdown bytes — then builds the wheel and
+   `cafleet-assets-v<version>.zip` containing the repository `skills/` tree, so
+   the catalog and its manifest are distributed atomically with the skills.
 3. Publishes the release. Each active backend upgrades to that CLI version and
    runs `cafleet setup`, which overwrites its installed `cafleet` skill replica
    and records the matching asset version.
