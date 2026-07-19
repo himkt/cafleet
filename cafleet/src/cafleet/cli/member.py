@@ -192,6 +192,13 @@ def _resolve_coding_agent(
     help="Model passed to the backend binary.",
 )
 @click.option(
+    "--effort",
+    "effort",
+    type=str,
+    default=None,
+    help="Reasoning-effort level (claude, codex only).",
+)
+@click.option(
     "--role",
     "role",
     type=click.Choice(["member", "monitor"]),
@@ -209,6 +216,7 @@ def member_create(
     description,
     coding_agent,
     model,
+    effort,
     role,
     text,
     text_file,
@@ -228,6 +236,7 @@ def member_create(
 
     try:
         agent.validate_model(model)
+        agent.validate_effort(effort)
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
 
@@ -284,7 +293,9 @@ def member_create(
         _deregister_with_warning(new_member_id, fleet_id=fleet_id)
         raise
 
-    spawn_command = agent.build_spawn_argv(prompt, display_name=name, model=model)
+    spawn_command = agent.build_spawn_argv(
+        prompt, display_name=name, model=model, effort=effort
+    )
 
     try:
         db_url = os.environ.get("CAFLEET_DATABASE_URL")

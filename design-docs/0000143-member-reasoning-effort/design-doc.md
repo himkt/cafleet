@@ -1,7 +1,7 @@
 # Member Reasoning Effort (`--effort` on `member create`)
 
 **Status**: Approved
-**Progress**: 10/17 tasks complete
+**Progress**: 11/17 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -179,7 +179,7 @@ The documented default (overlay silent / backend unknown) added to `skills/cafle
 
 ### Step 3: CLI wiring
 
-- [ ] `cli/member.py`: add the `--effort` option, call `agent.validate_effort(effort)` immediately after `agent.validate_model(model)` with the same `UsageError` wrapping, and pass `effort=effort` to `build_spawn_argv` <!-- completed: -->
+- [x] `cli/member.py`: add the `--effort` option, call `agent.validate_effort(effort)` immediately after `agent.validate_model(model)` with the same `UsageError` wrapping, and pass `effort=effort` to `build_spawn_argv` <!-- completed: 2026-07-19T00:58 -->
 
 ### Step 4: Tests and verification
 
