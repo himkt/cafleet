@@ -1,7 +1,7 @@
 # 0000144 — Consolidate Doc-Cleanup Skills into `clean-docs` (Three Workflows)
 
 **Status**: Approved
-**Progress**: 3/16 tasks complete
+**Progress**: 6/16 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -160,9 +160,9 @@ Role files adapt from the existing skills with two systematic changes: spine cit
 
 ### Step 3: `residue/` workflow
 
-- [ ] Create `residue/residue.md` — trigger scenario, sweep mechanics, `inventory.md` artifact spec (tables + KEEP list + known-benign + Observations), and the provable-completeness guarantee; Required-reading block with corrected link depths. <!-- completed: -->
-- [ ] Create `residue/roles/scanner.md` and `residue/roles/reviewer.md`, adapted from the old skill's roles: spine content replaced by citations to the umbrella `SKILL.md`, links re-depthed, skill-load lines naming `clean-docs`. <!-- completed: -->
-- [ ] Move `reference/rubric.md` and `reference/patterns.md` into `residue/reference/`, content preserved in meaning, internal links updated; replace the standalone-era R2/R3/R4 labels with citations to the umbrella's exempt set and scope (R1 survives as invariant 3), and mark patterns.md's `:(exclude)` pathspec as the mechanical embodiment of the umbrella's canonical exempt-set list (§5). <!-- completed: -->
+- [x] Create `residue/residue.md` — trigger scenario, sweep mechanics, `inventory.md` artifact spec (tables + KEEP list + known-benign + Observations), and the provable-completeness guarantee; Required-reading block with corrected link depths. <!-- completed: 2026-07-19T02:44 -->
+- [x] Create `residue/roles/scanner.md` and `residue/roles/reviewer.md`, adapted from the old skill's roles: spine content replaced by citations to the umbrella `SKILL.md`, links re-depthed, skill-load lines naming `clean-docs`. <!-- completed: 2026-07-19T02:44 -->
+- [x] Move `reference/rubric.md` and `reference/patterns.md` into `residue/reference/`, content preserved in meaning, internal links updated; replace the standalone-era R2/R3/R4 labels with citations to the umbrella's exempt set and scope (R1 survives as invariant 3), and mark patterns.md's `:(exclude)` pathspec as the mechanical embodiment of the umbrella's canonical exempt-set list (§5). <!-- completed: 2026-07-19T02:44 -->
 
 ### Step 4: `affirmative/` workflow
 
