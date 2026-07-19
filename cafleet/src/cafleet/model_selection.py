@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -682,3 +682,449 @@ def _parse_date(value: object, where: str) -> date:
         raise CatalogInvalidError(
             f"{where} is not a valid ISO 8601 date: {value!r}"
         ) from exc
+
+
+class ModelSelectionError(Exception):
+    """A selection request failed; ``code`` is the stable error-contract code."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class TokenEstimate:
+    input: int
+    cached_input: int
+    cache_write: int
+    output: int
+
+
+@dataclass(frozen=True)
+class CandidateRecord:
+    key: str
+    eligible: bool
+    reason: str | None
+    estimated_usd: float | None
+
+
+@dataclass(frozen=True)
+class SelectedModel:
+    key: str
+    backend: str
+    model: str
+    canonical_token: str
+    effort: str | None
+    estimated_usd: float
+
+
+@dataclass(frozen=True)
+class SelectionResult:
+    policy: str
+    role: str
+    task_profile: Mapping[str, int]
+    token_estimate: TokenEstimate
+    candidates: tuple[CandidateRecord, ...]
+    selected: SelectedModel
+
+
+@dataclass(frozen=True)
+class ManualOverrideResult:
+    policy: str
+    backend: str | None
+    model: str
+    canonical_token: str | None
+    estimated_usd: float | None
+    estimate_status: str
+
+
+def select_model(
+    catalog: Catalog,
+    *,
+    role: str,
+    ready_backends: frozenset[str],
+    now: datetime,
+    requires: Mapping[str, int] | None = None,
+    token_estimate: Mapping[str, int] | None = None,
+    backend: str | None = None,
+) -> SelectionResult:
+    """Deterministically select a model for ``role`` per the catalog's policies.
+
+    Ordinary roles minimize estimated USD cost among capability-eligible models;
+    ``monitor`` selects the least-cost monitor-capable model; ``reviewer`` selects
+    the highest global rank among reviewer-capable models.
+    """
+    task_profile = _resolve_task_profile(catalog, role, requires)
+    role_profile = catalog.role_profiles[role]
+    estimate = _resolve_token_estimate(
+        token_estimate, catalog.token_profiles[role_profile.token_profile]
+    )
+    if backend is not None and backend not in _BACKENDS:
+        raise ModelSelectionError(
+            "MODEL_SELECTION_INVALID_REQUEST", f"unknown backend override {backend!r}"
+        )
+    _require_fresh(catalog, now)
+    requested = _BACKENDS if backend is None else frozenset({backend})
+    candidate_backends = requested & ready_backends
+    if not candidate_backends:
+        raise ModelSelectionError(
+            "MODEL_BACKEND_UNAVAILABLE",
+            "no requested candidate backend passes its readiness contract",
+        )
+    candidates, eligible = _enumerate_candidates(
+        catalog, candidate_backends, task_profile, estimate, now
+    )
+    if not eligible:
+        raise ModelSelectionError(
+            "MODEL_NO_ELIGIBLE_CANDIDATE",
+            f"no catalog candidate meets every constraint for role {role!r}",
+        )
+    if role == "reviewer":
+        policy = "reviewer_maximum_capability"
+        order = _reviewer_order
+    elif role == "monitor":
+        policy = "monitor_minimum_cost"
+        order = _cost_order
+    else:
+        policy = "cost_minimized_subject_to_capability"
+        order = _cost_order
+    best_model, best_cost = min(eligible, key=order)
+    return SelectionResult(
+        policy=policy,
+        role=role,
+        task_profile=task_profile,
+        token_estimate=estimate,
+        candidates=candidates,
+        selected=_selected(catalog, best_model, best_cost),
+    )
+
+
+def select_replacement(
+    catalog: Catalog,
+    *,
+    role: str,
+    failed_model_key: str,
+    failed_dimensions: list[str] | tuple[str, ...],
+    ready_backends: frozenset[str],
+    now: datetime,
+    requires: Mapping[str, int] | None = None,
+    token_estimate: Mapping[str, int] | None = None,
+    attempted_model_keys: frozenset[str] = frozenset(),
+) -> SelectionResult:
+    """Select a strictly stronger replacement after an underpowered-member failure.
+
+    Raises each failed capability floor by one, requires a strictly greater
+    global rank than the failed model, skips already-attempted models, and
+    minimizes cost only within that stronger eligible set.
+    """
+    task_profile = _resolve_task_profile(catalog, role, requires)
+    models_by_key = {model.key: model for model in catalog.models}
+    if failed_model_key not in models_by_key:
+        raise ModelSelectionError(
+            "MODEL_SELECTION_INVALID_REQUEST",
+            f"failed model {failed_model_key!r} is not a catalog model",
+        )
+    failed_rank = models_by_key[failed_model_key].capability.global_rank
+    for dimension in failed_dimensions:
+        if dimension not in CAPABILITY_DIMENSIONS:
+            raise ModelSelectionError(
+                "MODEL_SELECTION_INVALID_REQUEST",
+                f"unknown failed capability dimension {dimension!r}",
+            )
+        task_profile[dimension] = min(5, task_profile.get(dimension, 0) + 1)
+    role_profile = catalog.role_profiles[role]
+    estimate = _resolve_token_estimate(
+        token_estimate, catalog.token_profiles[role_profile.token_profile]
+    )
+    _require_fresh(catalog, now)
+    candidate_backends = _BACKENDS & ready_backends
+    if not candidate_backends:
+        raise ModelSelectionError(
+            "MODEL_BACKEND_UNAVAILABLE",
+            "no requested candidate backend passes its readiness contract",
+        )
+    candidates, eligible = _enumerate_candidates(
+        catalog,
+        candidate_backends,
+        task_profile,
+        estimate,
+        now,
+        min_rank_exclusive=failed_rank,
+        excluded_keys=attempted_model_keys | {failed_model_key},
+    )
+    if not eligible:
+        raise ModelSelectionError(
+            "MODEL_UPGRADE_UNAVAILABLE",
+            f"no strictly stronger eligible replacement for {failed_model_key!r}",
+        )
+    best_model, best_cost = min(eligible, key=_cost_order)
+    return SelectionResult(
+        policy="replacement_upgrade",
+        role=role,
+        task_profile=task_profile,
+        token_estimate=estimate,
+        candidates=candidates,
+        selected=_selected(catalog, best_model, best_cost),
+    )
+
+
+def resolve_manual_override(
+    catalog: Catalog,
+    *,
+    model: str,
+    now: datetime,
+    backend: str | None = None,
+    token_estimate: Mapping[str, int] | None = None,
+) -> ManualOverrideResult:
+    """Resolve an explicit model pin through the exact token map.
+
+    A mapped token fixes the backend and yields an estimate only when the
+    catalog is fresh, a valid rate card exists, and a token estimate was given;
+    an unmapped token stays permitted for the manual spawn path with
+    ``estimate_status: "unavailable"``. A backend pin that conflicts with the
+    token's mapped backend is rejected.
+    """
+    if backend is not None and backend not in _BACKENDS:
+        raise ModelSelectionError(
+            "MODEL_SELECTION_INVALID_REQUEST", f"unknown backend override {backend!r}"
+        )
+    matches = [entry for entry in catalog.model_tokens if entry.token == model]
+    if backend is not None:
+        backend_matches = [entry for entry in matches if entry.backend == backend]
+        if not backend_matches and matches:
+            raise ModelSelectionError(
+                "MODEL_SELECTION_INVALID_REQUEST",
+                f"model {model!r} is mapped to backend"
+                f" {matches[0].backend!r}, not {backend!r}",
+            )
+        matches = backend_matches
+    if len({entry.model_key for entry in matches}) > 1:
+        raise ModelSelectionError(
+            "MODEL_SELECTION_INVALID_REQUEST",
+            f"model {model!r} is ambiguous across backends; pass an explicit backend",
+        )
+    if not matches:
+        return ManualOverrideResult(
+            policy="manual_override",
+            backend=backend,
+            model=model,
+            canonical_token=None,
+            estimated_usd=None,
+            estimate_status="unavailable",
+        )
+    catalog_model = next(m for m in catalog.models if m.key == matches[0].model_key)
+    canonical_token = _primary_tokens(catalog)[catalog_model.key]
+    estimated_usd = None
+    if token_estimate is not None and _stale_reason(catalog, now) is None:
+        estimate = _resolve_token_estimate(token_estimate, None)
+        estimated_usd = _best_card_cost(catalog_model, estimate, now)
+    return ManualOverrideResult(
+        policy="manual_override",
+        backend=catalog_model.backend,
+        model=canonical_token,
+        canonical_token=canonical_token,
+        estimated_usd=estimated_usd,
+        estimate_status="ok" if estimated_usd is not None else "unavailable",
+    )
+
+
+def _resolve_task_profile(
+    catalog: Catalog, role: str, requires: Mapping[str, int] | None
+) -> dict[str, int]:
+    if role not in catalog.role_profiles:
+        raise ModelSelectionError(
+            "MODEL_SELECTION_INVALID_REQUEST", f"unknown role {role!r}"
+        )
+    merged = dict(catalog.role_profiles[role].requires)
+    for dimension, level in (requires or {}).items():
+        if dimension not in CAPABILITY_DIMENSIONS:
+            raise ModelSelectionError(
+                "MODEL_SELECTION_INVALID_REQUEST",
+                f"unknown capability dimension {dimension!r}",
+            )
+        if not _is_int(level) or not 1 <= level <= 5:
+            raise ModelSelectionError(
+                "MODEL_SELECTION_INVALID_REQUEST",
+                f"required level for {dimension!r} must be an integer in 1..5",
+            )
+        floor = merged.get(dimension, 0)
+        if level < floor:
+            raise ModelSelectionError(
+                "MODEL_SELECTION_INVALID_REQUEST",
+                f"required level {level} for {dimension!r} is below the"
+                f" role-profile floor {floor}",
+            )
+        merged[dimension] = level
+    return merged
+
+
+def _resolve_token_estimate(
+    token_estimate: Mapping[str, int] | None, profile: TokenProfile | None
+) -> TokenEstimate:
+    components = (
+        {name: getattr(profile, name) for name in _TOKEN_COMPONENTS}
+        if profile is not None
+        else dict.fromkeys(_TOKEN_COMPONENTS, 0)
+    )
+    for name, value in (token_estimate or {}).items():
+        if name not in _TOKEN_COMPONENTS:
+            raise ModelSelectionError(
+                "MODEL_SELECTION_INVALID_REQUEST",
+                f"unknown token-estimate component {name!r}",
+            )
+        if not _is_int(value) or value < 0:
+            raise ModelSelectionError(
+                "MODEL_SELECTION_INVALID_REQUEST",
+                f"token estimate for {name!r} must be a non-negative integer",
+            )
+        components[name] = value
+    return TokenEstimate(**components)
+
+
+def _stale_reason(catalog: Catalog, now: datetime) -> str | None:
+    for name, source in catalog.sources.items():
+        age = now - source.retrieved_at
+        if age > timedelta(days=catalog.freshness_days):
+            return (
+                f"source {name!r} was retrieved more than"
+                f" {catalog.freshness_days} days before selection time"
+            )
+        if -age > timedelta(minutes=5):
+            return f"source {name!r} was retrieved more than five minutes after selection time"
+    return None
+
+
+def _require_fresh(catalog: Catalog, now: datetime) -> None:
+    reason = _stale_reason(catalog, now)
+    if reason is not None:
+        raise ModelSelectionError("MODEL_CATALOG_STALE", reason)
+
+
+def _enumerate_candidates(
+    catalog: Catalog,
+    candidate_backends: frozenset[str],
+    task_profile: Mapping[str, int],
+    estimate: TokenEstimate,
+    now: datetime,
+    *,
+    min_rank_exclusive: int | None = None,
+    excluded_keys: frozenset[str] = frozenset(),
+) -> tuple[tuple[CandidateRecord, ...], list[tuple[CatalogModel, float]]]:
+    records = []
+    eligible = []
+    for model in catalog.models:
+        cost = None
+        if not model.active:
+            reason = "inactive model"
+        elif model.backend not in candidate_backends:
+            reason = f"backend {model.backend!r} is not a ready requested backend"
+        elif model.key in excluded_keys:
+            reason = "model already attempted for this task"
+        elif (
+            min_rank_exclusive is not None
+            and model.capability.global_rank <= min_rank_exclusive
+        ):
+            reason = (
+                f"global_rank {model.capability.global_rank} is not strictly"
+                f" greater than the failed model's {min_rank_exclusive}"
+            )
+        else:
+            reason = _capability_shortfall(model, task_profile)
+            if reason is None:
+                cost = _best_card_cost(model, estimate, now)
+                if cost is None:
+                    reason = "no active known rate card supports the token estimate"
+        records.append(
+            CandidateRecord(
+                key=model.key,
+                eligible=reason is None,
+                reason=reason,
+                estimated_usd=cost,
+            )
+        )
+        if reason is None and cost is not None:
+            eligible.append((model, cost))
+    return tuple(records), eligible
+
+
+def _capability_shortfall(
+    model: CatalogModel, task_profile: Mapping[str, int]
+) -> str | None:
+    for dimension in CAPABILITY_DIMENSIONS:
+        required = task_profile.get(dimension)
+        if required is None:
+            continue
+        level = model.capability.levels[dimension]
+        if level < required:
+            return f"{dimension} capability {level} < {required}"
+    return None
+
+
+def _best_card_cost(
+    model: CatalogModel, estimate: TokenEstimate, now: datetime
+) -> float | None:
+    selection_date = now.astimezone(UTC).date()
+    costs = []
+    for card in model.rate_cards:
+        if card.status != "known":
+            continue
+        if card.effective_from > selection_date:
+            continue
+        if card.effective_until is not None and card.effective_until < selection_date:
+            continue
+        cost = _card_cost(card, estimate)
+        if cost is not None:
+            costs.append(cost)
+    if not costs:
+        return None
+    return min(costs)
+
+
+def _card_cost(card: RateCard, estimate: TokenEstimate) -> float | None:
+    total = (
+        estimate.input + estimate.cached_input + estimate.cache_write + estimate.output
+    )
+    if total > card.max_total_tokens:
+        return None
+    cost = 0.0
+    for name in _TOKEN_COMPONENTS:
+        tokens = getattr(estimate, name)
+        component = card.components[name]
+        if component.mode == "unsupported":
+            if tokens:
+                return None
+            continue
+        if component.usd_per_mtok is None:
+            raise CatalogInvalidError(
+                f"supported component {name!r} on rate card {card.id!r} has no price"
+            )
+        cost += tokens / 1_000_000 * component.usd_per_mtok
+    return cost
+
+
+def _cost_order(candidate: tuple[CatalogModel, float]) -> tuple[float, int, str]:
+    model, cost = candidate
+    return (cost, -model.capability.global_rank, model.key)
+
+
+def _reviewer_order(candidate: tuple[CatalogModel, float]) -> tuple[int, float, str]:
+    model, cost = candidate
+    return (-model.capability.global_rank, cost, model.key)
+
+
+def _primary_tokens(catalog: Catalog) -> dict[str, str]:
+    return {
+        entry.model_key: entry.token for entry in catalog.model_tokens if entry.primary
+    }
+
+
+def _selected(catalog: Catalog, model: CatalogModel, cost: float) -> SelectedModel:
+    canonical_token = _primary_tokens(catalog)[model.key]
+    return SelectedModel(
+        key=model.key,
+        backend=model.backend,
+        model=canonical_token,
+        canonical_token=canonical_token,
+        effort=None,
+        estimated_usd=cost,
+    )

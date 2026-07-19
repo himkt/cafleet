@@ -1,7 +1,7 @@
 # Cost-Aware CAFleet Model Assignment
 
 **Status**: Approved
-**Progress**: 5/29 tasks complete
+**Progress**: 10/29 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -309,11 +309,11 @@ The skill owns catalog maintenance; the CAFleet Director owns per-task selection
 
 ### Step 2: Implement deterministic selection
 
-- [ ] Add pure task-profile, candidate, pricing-estimate, selection-result, and typed error models in `cafleet/src/cafleet/model_selection.py`. <!-- completed: -->
-- [ ] Implement capability filtering, effective-date/freshness checks, normal cost minimization, monitor minimum-cost selection, reviewer maximum-capability selection, stable ties, and override handling. <!-- completed: -->
-- [ ] Define conservative catalog role token defaults and include their use in returned audit data. <!-- completed: -->
-- [ ] Add a replacement-selection mode that raises failed capability floors, requires strictly greater rank, prohibits repeated model/task pairs, and returns a typed no-upgrade result. <!-- completed: -->
-- [ ] Separate manual-override validation from automatic selection and inject the existing per-backend readiness contract into the CLI boundary. <!-- completed: -->
+- [x] Add pure task-profile, candidate, pricing-estimate, selection-result, and typed error models in `cafleet/src/cafleet/model_selection.py`. <!-- completed: 2026-07-19T12:35 -->
+- [x] Implement capability filtering, effective-date/freshness checks, normal cost minimization, monitor minimum-cost selection, reviewer maximum-capability selection, stable ties, and override handling. <!-- completed: 2026-07-19T12:35 -->
+- [x] Define conservative catalog role token defaults and include their use in returned audit data. <!-- completed: 2026-07-19T12:35 -->
+- [x] Add a replacement-selection mode that raises failed capability floors, requires strictly greater rank, prohibits repeated model/task pairs, and returns a typed no-upgrade result. <!-- completed: 2026-07-19T12:35 -->
+- [x] Separate manual-override validation from automatic selection and inject the existing per-backend readiness contract into the CLI boundary. <!-- completed: 2026-07-19T12:35 -->
 
 ### Step 3: Expose the selection interface
 
