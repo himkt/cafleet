@@ -23,6 +23,7 @@ Contract notes for the implementation under test (``cafleet.cli.setup``):
   ``cafleet.cli.setup.run_db_init``.
 """
 
+import hashlib
 import importlib.metadata
 import io
 import json
@@ -39,7 +40,12 @@ from click.testing import CliRunner
 from cafleet import config
 
 AGENTS = ("claude", "codex", "opencode")
-SKILL_DIR_NAMES = ("cafleet", "cafleet-design-doc", "cafleet-research")
+SKILL_DIR_NAMES = (
+    "cafleet",
+    "cafleet-design-doc",
+    "cafleet-research",
+    "cafleet-model-catalog-refresh",
+)
 CLI_VERSION = "0.12.2"
 ASSET_NAME = f"cafleet-assets-v{CLI_VERSION}.zip"
 DOWNLOAD_URL = f"https://example.invalid/download/{ASSET_NAME}"
@@ -67,6 +73,23 @@ PRESET_ARCHIVE_MEMBERS = {
     "codex": ("presets/codex/cafleet.rules", CODEX_RULES_CONTENT),
 }
 
+CATALOG_MEMBER = "skills/cafleet/reference/model-catalog.md"
+MANIFEST_MEMBER = "skills/cafleet/asset-manifest.json"
+CATALOG_CONTENT = "# CAFleet Model Catalog\n"
+MANIFEST_CONTENT = (
+    json.dumps(
+        {
+            "cafleet_version": CLI_VERSION,
+            "catalog_sha256": hashlib.sha256(
+                CATALOG_CONTENT.encode("utf-8")
+            ).hexdigest(),
+        },
+        sort_keys=True,
+        indent=2,
+    )
+    + "\n"
+)
+
 
 def _make_assets_zip(
     *,
@@ -75,14 +98,17 @@ def _make_assets_zip(
     extra_files=(),
     raw_members=None,
     preset_agents=("opencode", "codex"),
+    cafleet_manifest=True,
+    cafleet_catalog=True,
 ) -> bytes:
     """Build an in-memory release archive (``skills/`` + ``presets/``).
 
     ``raw_members`` bypasses the canonical layout and writes the named members
     verbatim (used for zip-slip cases). Otherwise the archive unpacks to
     ``skills/<name>/...`` for each entry in ``skill_dirs`` plus any ``extra_*``,
-    and one preset file per agent in ``preset_agents`` (drop an agent to build
-    an archive missing that preset).
+    the cafleet catalog + asset manifest (droppable via ``cafleet_catalog`` /
+    ``cafleet_manifest``), and one preset file per agent in ``preset_agents``
+    (drop an agent to build an archive missing that preset).
     """
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -93,6 +119,11 @@ def _make_assets_zip(
             for name in skill_dirs:
                 zf.writestr(f"skills/{name}/SKILL.md", f"# {name}\n")
                 zf.writestr(f"skills/{name}/reference/page.md", "ref\n")
+            if "cafleet" in skill_dirs:
+                if cafleet_catalog:
+                    zf.writestr(CATALOG_MEMBER, CATALOG_CONTENT)
+                if cafleet_manifest:
+                    zf.writestr(MANIFEST_MEMBER, MANIFEST_CONTENT)
             for name in extra_dirs:
                 zf.writestr(f"skills/{name}/SKILL.md", "x\n")
             for name in extra_files:
@@ -736,7 +767,7 @@ def test_zip_slip_member_rejected_nothing_extracted(
 def test_extra_entry_under_skills_is_malformed(
     homes, registry_db, monkeypatch, zip_bytes
 ):
-    """Any entry under ``skills/`` beyond the three skill dirs is malformed."""
+    """Any entry under ``skills/`` beyond the four skill dirs is malformed."""
     _mock_release(monkeypatch, zip_bytes=zip_bytes)
 
     result = _run_setup(_only("claude"))
@@ -746,7 +777,7 @@ def test_extra_entry_under_skills_is_malformed(
 
 
 def test_missing_skill_dir_is_malformed(homes, registry_db, monkeypatch):
-    """A ``skills/`` holding only two of the three skill dirs is malformed."""
+    """A ``skills/`` holding only a subset of the four skill dirs is malformed."""
     _mock_release(
         monkeypatch,
         zip_bytes=_make_assets_zip(skill_dirs=("cafleet", "cafleet-design-doc")),
@@ -756,6 +787,87 @@ def test_missing_skill_dir_is_malformed(homes, registry_db, monkeypatch):
 
     assert result.exit_code == 1, result.output
     assert "malformed" in result.output.lower()
+
+
+def test_missing_refresh_skill_dir_is_malformed(homes, registry_db, monkeypatch):
+    """An archive with the legacy three skill dirs (no refresh skill) is malformed."""
+    _mock_release(
+        monkeypatch,
+        zip_bytes=_make_assets_zip(
+            skill_dirs=("cafleet", "cafleet-design-doc", "cafleet-research")
+        ),
+    )
+
+    result = _run_setup(_only("claude"))
+
+    assert result.exit_code == 1, result.output
+    assert "malformed" in result.output.lower()
+    assert _asset_install_rows(registry_db) == []
+
+
+@pytest.mark.parametrize(
+    "zip_kwargs",
+    [{"cafleet_manifest": False}, {"cafleet_catalog": False}],
+    ids=["missing-asset-manifest", "missing-model-catalog"],
+)
+def test_archive_missing_catalog_member_is_malformed(
+    homes, registry_db, monkeypatch, zip_kwargs
+):
+    """The cafleet asset manifest and model catalog ship in every archive; an
+    archive lacking either is malformed and records no install."""
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip(**zip_kwargs))
+
+    result = _run_setup(_only("claude"))
+
+    assert result.exit_code == 1, result.output
+    assert "malformed" in result.output.lower()
+    assert _asset_install_rows(registry_db) == []
+
+
+def test_installed_replicas_carry_manifest_and_catalog(
+    homes, preset_targets, registry_db, monkeypatch
+):
+    """Every per-backend cafleet replica receives the asset manifest and the
+    model catalog byte-for-byte — the atomic-distribution guarantee."""
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
+
+    result = _run_setup()
+
+    assert result.exit_code == 0, result.output
+    for agent in AGENTS:
+        replica = homes[agent] / "cafleet"
+        assert (replica / "asset-manifest.json").read_text(
+            encoding="utf-8"
+        ) == MANIFEST_CONTENT
+        assert (replica / "reference" / "model-catalog.md").read_text(
+            encoding="utf-8"
+        ) == CATALOG_CONTENT
+
+
+def test_reinstall_overwrites_stale_replica_manifest_and_catalog(
+    homes, registry_db, monkeypatch
+):
+    """A pre-existing replica's manifest and catalog are replaced by the
+    archive copies on reinstall, so stale fingerprints never survive setup."""
+    stale_replica = homes["claude"] / "cafleet"
+    (stale_replica / "reference").mkdir(parents=True)
+    (stale_replica / "asset-manifest.json").write_text(
+        '{"cafleet_version": "0.0.1"}\n', encoding="utf-8"
+    )
+    (stale_replica / "reference" / "model-catalog.md").write_text(
+        "stale catalog\n", encoding="utf-8"
+    )
+    _mock_release(monkeypatch, zip_bytes=_make_assets_zip())
+
+    result = _run_setup(_only("claude"))
+
+    assert result.exit_code == 0, result.output
+    assert (stale_replica / "asset-manifest.json").read_text(
+        encoding="utf-8"
+    ) == MANIFEST_CONTENT
+    assert (stale_replica / "reference" / "model-catalog.md").read_text(
+        encoding="utf-8"
+    ) == CATALOG_CONTENT
 
 
 @pytest.mark.parametrize(
