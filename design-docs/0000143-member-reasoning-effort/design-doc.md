@@ -1,7 +1,7 @@
 # Member Reasoning Effort (`--effort` on `member create`)
 
 **Status**: Approved
-**Progress**: 11/17 tasks complete
+**Progress**: 17/17 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -10,13 +10,13 @@ Add a backend-neutral `--effort <level>` option to `cafleet member create` (GitH
 
 ## Success Criteria
 
-- [ ] `cafleet member create ... --effort high` on the claude backend spawns an argv containing `--effort high`; on the codex backend, `--config=model_reasoning_effort=high`.
-- [ ] An invalid level for the selected backend exits 2 with a `UsageError` naming the accepted levels, before any registration or multiplexer side effect.
-- [ ] `--effort` with the opencode backend exits 2 with the message `opencode does not support reasoning effort.`, before any side effect.
-- [ ] When `--effort` is omitted, the spawn argv is byte-identical to today's (no effort tokens; the backend binary's own default applies).
-- [ ] No DB schema change: `member show` / `member list`, the webui API, and the Alembic chain are untouched.
-- [ ] SPEC.md, `docs/spec/cli-options.md`, `docs/spec/coding-agent-backends.md`, `docs/concepts/coding-agents.md`, the cafleet skill pages, and all four coding-agent overlays document the flag; the opencode overlay explicitly marks effort as unsupported.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
+- [x] `cafleet member create ... --effort high` on the claude backend spawns an argv containing `--effort high`; on the codex backend, `--config=model_reasoning_effort=high`.
+- [x] An invalid level for the selected backend exits 2 with a `UsageError` naming the accepted levels, before any registration or multiplexer side effect.
+- [x] `--effort` with the opencode backend exits 2 with the message `opencode does not support reasoning effort.`, before any side effect.
+- [x] When `--effort` is omitted, the spawn argv is byte-identical to today's (no effort tokens; the backend binary's own default applies).
+- [x] No DB schema change: `member show` / `member list`, the webui API, and the Alembic chain are untouched.
+- [x] SPEC.md, `docs/spec/cli-options.md`, `docs/spec/coding-agent-backends.md`, `docs/concepts/coding-agents.md`, the cafleet skill pages, and all four coding-agent overlays document the flag; the opencode overlay explicitly marks effort as unsupported.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
 
@@ -183,12 +183,12 @@ The documented default (overlay silent / backend unknown) added to `skills/cafle
 
 ### Step 4: Tests and verification
 
-- [ ] `tests/coding_agent/test_protocol.py`: per-backend `validate_effort` accept/reject cases and argv assertions (claude `--effort` tokens, codex single `--config=` token, omitted-effort argv unchanged) <!-- completed: -->
-- [ ] `tests/coding_agent/test_opencode.py`: `validate_effort` rejects every non-None value with the exact message <!-- completed: -->
-- [ ] `tests/cli/test_member.py`: `--effort` happy path per backend, invalid-level exit 2 before registration/multiplexer side effects, opencode rejection exit 2 <!-- completed: -->
-- [ ] `tests/cli/test_help_budget.py`: bump `_PER_SUBCOMMAND_BUDGETS[("member", "create")]` from 20 to 21 (the new single-line option row); keep the aggregate byte budget at 6500 — if the ~80-byte row pushes the aggregate assertion over, set it to 6600 in the same change (pre-authorized here). No `_UNHIDDEN_FLAGS` change (see § CLI surface) <!-- completed: -->
-- [ ] Run `mise //cafleet:test` <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` and `mise //cafleet:typecheck` <!-- completed: -->
+- [x] `tests/coding_agent/test_protocol.py`: per-backend `validate_effort` accept/reject cases and argv assertions (claude `--effort` tokens, codex single `--config=` token, omitted-effort argv unchanged) <!-- completed: 2026-07-19T01:00 -->
+- [x] `tests/coding_agent/test_opencode.py`: `validate_effort` rejects every non-None value with the exact message <!-- completed: 2026-07-19T01:00 -->
+- [x] `tests/cli/test_member.py`: `--effort` happy path per backend, invalid-level exit 2 before registration/multiplexer side effects, opencode rejection exit 2 <!-- completed: 2026-07-19T01:00 -->
+- [x] `tests/cli/test_help_budget.py`: bump `_PER_SUBCOMMAND_BUDGETS[("member", "create")]` from 20 to 21 (the new single-line option row); keep the aggregate byte budget at 6500 — if the ~80-byte row pushes the aggregate assertion over, set it to 6600 in the same change (pre-authorized here). No `_UNHIDDEN_FLAGS` change (see § CLI surface) <!-- completed: 2026-07-19T01:00 -->
+- [x] Run `mise //cafleet:test` <!-- completed: 2026-07-19T01:00 -->
+- [x] Run `mise //cafleet:lint` and `mise //cafleet:typecheck` <!-- completed: 2026-07-19T01:01 -->
 
 ---
 
