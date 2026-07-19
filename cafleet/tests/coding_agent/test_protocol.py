@@ -9,9 +9,11 @@ that the multiplexer's ``split_window`` expects when launching the
 coding-agent process.
 """
 
+import re
+
 import pytest
 
-from cafleet.coding_agent import CODING_AGENTS, CodingAgent
+from cafleet.coding_agent import CODING_AGENTS, CodingAgent, claude, codex
 
 
 @pytest.fixture(autouse=True)
@@ -198,3 +200,137 @@ def test_validate_model__claude_codex_accept_any_string(name, model):
 def test_validate_model__none_is_always_valid(name):
     """``None`` (flag omitted) is valid for every backend."""
     assert CODING_AGENTS[name].validate_model(None) is None
+
+
+# --- ``effort`` keyword: EFFORT_LEVELS + validate_effort + argv emission ---
+
+
+def test_claude_effort_levels__pinned_tuple():
+    """Module-level tuple constant, ordered as documented."""
+    assert claude.EFFORT_LEVELS == ("low", "medium", "high", "xhigh", "max")
+
+
+def test_codex_effort_levels__pinned_tuple():
+    """Module-level tuple constant — the Codex CLI ``model_reasoning_effort``
+    value list, ordered as documented."""
+    assert codex.EFFORT_LEVELS == ("minimal", "low", "medium", "high", "xhigh")
+
+
+@pytest.mark.parametrize("name", list(CODING_AGENTS))
+def test_validate_effort__none_is_always_valid(name):
+    """``None`` (flag omitted) is valid for every backend, opencode included."""
+    assert CODING_AGENTS[name].validate_effort(None) is None
+
+
+@pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max"])
+def test_validate_effort__claude_accepts_each_level(effort):
+    assert CODING_AGENTS["claude"].validate_effort(effort) is None
+
+
+@pytest.mark.parametrize("effort", ["minimal", "low", "medium", "high", "xhigh"])
+def test_validate_effort__codex_accepts_each_level(effort):
+    assert CODING_AGENTS["codex"].validate_effort(effort) is None
+
+
+@pytest.mark.parametrize("effort", ["minimal", "MAX", "", "   ", "no-such"])
+def test_validate_effort__claude_rejects_unknown_with_exact_message(effort):
+    """Client-side enum validation (unlike ``validate_model``'s pass-through):
+    ``minimal`` is codex-only, matching is case-sensitive, empty and
+    whitespace-only strings are rejected too."""
+    expected = (
+        "--effort for the claude backend must be one of "
+        f"low, medium, high, xhigh, max (got '{effort}')."
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(expected)}$"):
+        CODING_AGENTS["claude"].validate_effort(effort)
+
+
+@pytest.mark.parametrize("effort", ["max", "MEDIUM", "", "   ", "no-such"])
+def test_validate_effort__codex_rejects_unknown_with_exact_message(effort):
+    """``max`` is claude-only; the codex set tops out at ``xhigh``."""
+    expected = (
+        "--effort for the codex backend must be one of "
+        f"minimal, low, medium, high, xhigh (got '{effort}')."
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(expected)}$"):
+        CODING_AGENTS["codex"].validate_effort(effort)
+
+
+@pytest.mark.parametrize("name", list(CODING_AGENTS))
+def test_build_spawn_argv__effort_none_explicit_is_byte_identical_to_pinned(name):
+    """``effort=None`` emits no effort tokens — same argv as omitting the
+    keyword, for every backend (opencode must accept the kwarg too)."""
+    argv = CODING_AGENTS[name].build_spawn_argv(
+        "PROMPT_TEXT", display_name="Bob", effort=None
+    )
+    assert argv == _PINNED_ARGV_WITHOUT_MODEL[name]
+
+
+def test_claude_build_spawn_argv__effort_set_byte_exact():
+    """``--effort <level>`` lands where the model tokens would end — between
+    ``--name <display>`` and the prompt when no model is given."""
+    impl = CODING_AGENTS["claude"]
+    assert impl.build_spawn_argv("PROMPT_TEXT", display_name="Bob", effort="high") == [
+        "claude",
+        "--permission-mode",
+        "dontAsk",
+        "--name",
+        "Bob",
+        "--effort",
+        "high",
+        "PROMPT_TEXT",
+    ]
+
+
+def test_claude_build_spawn_argv__model_and_effort_byte_exact():
+    """Effort tokens are emitted immediately after the model tokens."""
+    impl = CODING_AGENTS["claude"]
+    assert impl.build_spawn_argv(
+        "PROMPT_TEXT", display_name="Bob", model="sonnet", effort="max"
+    ) == [
+        "claude",
+        "--permission-mode",
+        "dontAsk",
+        "--name",
+        "Bob",
+        "--model",
+        "sonnet",
+        "--effort",
+        "max",
+        "PROMPT_TEXT",
+    ]
+
+
+def test_codex_build_spawn_argv__effort_set_byte_exact():
+    """The codex mapping is a single ``--config=model_reasoning_effort=<level>``
+    token (the issue #211 spelling), not a flag/value pair."""
+    impl = CODING_AGENTS["codex"]
+    assert impl.build_spawn_argv(
+        "PROMPT_TEXT", display_name="ignored", effort="minimal"
+    ) == [
+        "codex",
+        "--ask-for-approval",
+        "never",
+        "--sandbox",
+        "workspace-write",
+        "--config=model_reasoning_effort=minimal",
+        "PROMPT_TEXT",
+    ]
+
+
+def test_codex_build_spawn_argv__model_and_effort_byte_exact():
+    """Effort token is emitted immediately after the model tokens."""
+    impl = CODING_AGENTS["codex"]
+    assert impl.build_spawn_argv(
+        "PROMPT_TEXT", display_name="ignored", model="gpt-5.4-mini", effort="xhigh"
+    ) == [
+        "codex",
+        "--ask-for-approval",
+        "never",
+        "--sandbox",
+        "workspace-write",
+        "--model",
+        "gpt-5.4-mini",
+        "--config=model_reasoning_effort=xhigh",
+        "PROMPT_TEXT",
+    ]
