@@ -1,8 +1,5 @@
 """``cafleet model`` — cost-aware model selection against the deployed catalog."""
 
-import hashlib
-import importlib.metadata
-import json
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,12 +7,7 @@ from pathlib import Path
 import click
 
 from cafleet import output
-from cafleet.broker.asset_installs import (
-    asset_installs_table_exists,
-    list_asset_installs,
-)
-from cafleet.cli._helpers import json_flag
-from cafleet.cli.setup import AGENT_SKILLS_DIRS
+from cafleet.cli._helpers import ensure_assets_current, json_flag
 from cafleet.coding_agent import CODING_AGENTS
 from cafleet.model_selection import (
     CandidateRecord,
@@ -121,26 +113,17 @@ def model_select(
     approved sources. They are planning estimates only — not a subscription,
     marketplace, regional, or negotiated invoice guarantee.
     """
-    _ensure_any_assets_install()
+    ensure_assets_current()
     now = datetime.now(UTC)
     token_estimate = _token_estimate_from_flags(
         input_tokens, cached_input_tokens, cache_write_tokens, output_tokens
     )
     try:
         catalog_path = _validated_catalog_path(catalog_arg)
-        catalog_bytes, catalog_sha, manifest_sha = _validated_catalog_asset(
-            catalog_path
-        )
         try:
-            catalog = parse_catalog_markdown(catalog_bytes.decode("utf-8"))
+            catalog = parse_catalog_markdown(catalog_path.read_bytes().decode("utf-8"))
         except (CatalogInvalidError, UnicodeDecodeError) as exc:
             raise ModelSelectionError("MODEL_CATALOG_INVALID", str(exc)) from exc
-        catalog_asset = {
-            "path": str(catalog_path),
-            "cafleet_version": importlib.metadata.version("cafleet"),
-            "manifest_sha256": manifest_sha,
-            "catalog_sha256": catalog_sha,
-        }
         if coding_agent is not None and coding_agent not in CODING_AGENTS:
             raise ModelSelectionError(
                 "MODEL_SELECTION_INVALID_REQUEST",
@@ -155,7 +138,9 @@ def model_select(
                 token_estimate=token_estimate,
             )
             _validate_effort(result.backend, effort)
-            payload = _manual_payload(result, effort, triggered_by, catalog_asset, now)
+            payload = _manual_payload(
+                result, effort, triggered_by, str(catalog_path), now
+            )
         else:
             if role is None:
                 raise ModelSelectionError(
@@ -163,19 +148,15 @@ def model_select(
                     "either --role or --model is required",
                 )
             requires = _parse_requires(requires_args)
-            ready_backends, asset_dropped = _ready_backends(coding_agent, manifest_sha)
-            try:
-                result = select_model(
-                    catalog,
-                    role=role,
-                    ready_backends=ready_backends,
-                    now=now,
-                    requires=requires,
-                    token_estimate=token_estimate,
-                    backend=coding_agent,
-                )
-            except ModelSelectionError as exc:
-                raise _remap_asset_dropped(exc, asset_dropped) from exc
+            result = select_model(
+                catalog,
+                role=role,
+                ready_backends=_ready_backends(coding_agent),
+                now=now,
+                requires=requires,
+                token_estimate=token_estimate,
+                backend=coding_agent,
+            )
             _validate_effort(result.selected.backend, effort)
             payload = _selection_payload(
                 result,
@@ -183,7 +164,7 @@ def model_select(
                 effort,
                 triggered_by,
                 token_estimate is not None,
-                catalog_asset,
+                str(catalog_path),
                 now,
             )
     except ModelSelectionError as exc:
@@ -226,143 +207,25 @@ def _validated_catalog_path(catalog_arg: str) -> Path:
     return path
 
 
-def _validated_catalog_asset(catalog_path: Path) -> tuple[bytes, str, str]:
-    """Enforce the loaded-skill-root layout and the release asset fingerprint."""
-    skill_root = catalog_path.parent.parent
-    if (
-        catalog_path.name != "model-catalog.md"
-        or catalog_path.parent.name != "reference"
-        or skill_root.name != "cafleet"
-    ):
-        raise ModelSelectionError(
-            "MODEL_CATALOG_ASSET_MISMATCH",
-            f"catalog path {str(catalog_path)!r} is not under a deployed"
-            " cafleet skill root (<root>/cafleet/reference/model-catalog.md)",
-        )
-    manifest_path = skill_root / "asset-manifest.json"
-    if not manifest_path.is_file():
-        raise ModelSelectionError(
-            "MODEL_CATALOG_ASSET_MISMATCH",
-            f"no asset manifest at {str(manifest_path)!r}",
-        )
-    manifest_bytes = manifest_path.read_bytes()
-    try:
-        manifest = json.loads(manifest_bytes)
-        manifest_version = manifest["cafleet_version"]
-        manifest_catalog_sha = manifest["catalog_sha256"]
-    except (json.JSONDecodeError, TypeError, KeyError) as exc:
-        raise ModelSelectionError(
-            "MODEL_CATALOG_ASSET_MISMATCH",
-            f"asset manifest {str(manifest_path)!r} is malformed",
-        ) from exc
-    runtime_version = importlib.metadata.version("cafleet")
-    if manifest_version != runtime_version:
-        raise ModelSelectionError(
-            "MODEL_CATALOG_ASSET_MISMATCH",
-            f"asset manifest version {manifest_version!r} does not match"
-            f" the installed CLI version {runtime_version!r}",
-        )
-    catalog_bytes = catalog_path.read_bytes()
-    catalog_sha = hashlib.sha256(catalog_bytes).hexdigest()
-    if catalog_sha != manifest_catalog_sha:
-        raise ModelSelectionError(
-            "MODEL_CATALOG_ASSET_MISMATCH",
-            "catalog file hash does not match the release manifest fingerprint",
-        )
-    manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
-    return catalog_bytes, catalog_sha, manifest_sha
-
-
-def _ensure_any_assets_install() -> None:
-    """Require a recorded assets install; per-backend staleness is a candidate
-    exclusion in ``_ready_backends``, not a command-level failure."""
-    rows = list_asset_installs() if asset_installs_table_exists() else []
-    if not rows:
-        raise click.ClickException(
-            "no assets install is recorded; run 'cafleet setup' first"
-        )
-
-
-def _ready_backends(
-    coding_agent: str | None, manifest_sha: str
-) -> tuple[frozenset[str], frozenset[str]]:
-    """Resolve the runtime-ready, asset-matched candidate backend set.
-
-    Returns ``(ready, asset_dropped)`` where ``asset_dropped`` holds the
-    binary-ready backends excluded for lacking a current matching skill replica.
-    """
+def _ready_backends(coding_agent: str | None) -> frozenset[str]:
+    """Resolve the runtime-ready candidate backend set via each backend's
+    existing readiness contract."""
     requested = (
         frozenset(CODING_AGENTS) if coding_agent is None else frozenset({coding_agent})
     )
-    installs = {
-        row["coding_agent"]: row["cafleet_version"] for row in list_asset_installs()
-    }
-    runtime_version = importlib.metadata.version("cafleet")
-    binary_ready = set()
     ready = set()
     for backend in sorted(requested):
         try:
             CODING_AGENTS[backend].ensure_available()
         except RuntimeError:
             continue
-        binary_ready.add(backend)
-        if installs.get(backend) != runtime_version:
-            continue
-        replica_root = AGENT_SKILLS_DIRS[backend].expanduser() / "cafleet"
-        if _replica_matches(replica_root, manifest_sha):
-            ready.add(backend)
-    if not binary_ready:
+        ready.add(backend)
+    if not ready:
         raise ModelSelectionError(
             "MODEL_BACKEND_UNAVAILABLE",
             "no requested candidate backend passes its readiness contract",
         )
-    if not ready:
-        raise ModelSelectionError(
-            "MODEL_CANDIDATE_ASSET_UNAVAILABLE",
-            "every otherwise eligible backend lacks a current matching"
-            " CAFleet skill replica",
-        )
-    return frozenset(ready), frozenset(binary_ready - ready)
-
-
-def _remap_asset_dropped(
-    exc: ModelSelectionError, asset_dropped: frozenset[str]
-) -> ModelSelectionError:
-    """A no-eligible-candidate failure whose every candidate was excluded for an
-    asset-dropped backend is the candidate-asset error, not a capability one."""
-    if (
-        exc.code != "MODEL_NO_ELIGIBLE_CANDIDATE"
-        or not exc.candidates
-        or not all(
-            candidate.key.split(":", 1)[0] in asset_dropped
-            for candidate in exc.candidates
-        )
-    ):
-        return exc
-    return ModelSelectionError(
-        "MODEL_CANDIDATE_ASSET_UNAVAILABLE",
-        "every otherwise eligible backend lacks a current matching"
-        " CAFleet skill replica",
-        candidates=exc.candidates,
-    )
-
-
-def _replica_matches(replica_root: Path, director_manifest_sha: str) -> bool:
-    """A candidate replica matches when its full manifest hash equals the
-    Director replica's and its catalog hashes to its own manifest value."""
-    manifest_path = replica_root / "asset-manifest.json"
-    catalog_path = replica_root / "reference" / "model-catalog.md"
-    if not manifest_path.is_file() or not catalog_path.is_file():
-        return False
-    manifest_bytes = manifest_path.read_bytes()
-    if hashlib.sha256(manifest_bytes).hexdigest() != director_manifest_sha:
-        return False
-    try:
-        manifest_catalog_sha = json.loads(manifest_bytes)["catalog_sha256"]
-    except (json.JSONDecodeError, TypeError, KeyError):
-        return False
-    catalog_sha = hashlib.sha256(catalog_path.read_bytes()).hexdigest()
-    return catalog_sha == manifest_catalog_sha
+    return frozenset(ready)
 
 
 def _validate_effort(backend: str | None, effort: str | None) -> None:
@@ -464,7 +327,7 @@ def _selection_payload(
     effort: str | None,
     triggered_by: str | None,
     explicit_estimate: bool,
-    catalog_asset: dict,
+    catalog_path: str,
     now: datetime,
 ) -> dict:
     return {
@@ -503,7 +366,7 @@ def _selection_payload(
                 ]
             },
         },
-        "catalog_asset": catalog_asset,
+        "catalog_path": catalog_path,
         "spawn": {"state": "pending", "member_id": None, "error": None},
     }
 
@@ -512,7 +375,7 @@ def _manual_payload(
     result: ManualOverrideResult,
     effort: str | None,
     triggered_by: str | None,
-    catalog_asset: dict,
+    catalog_path: str,
     now: datetime,
 ) -> dict:
     return {
@@ -528,7 +391,7 @@ def _manual_payload(
             "effort": effort,
             "estimated_usd": result.estimated_usd,
         },
-        "catalog_asset": catalog_asset,
+        "catalog_path": catalog_path,
         "spawn": {"state": "pending", "member_id": None, "error": None},
     }
 

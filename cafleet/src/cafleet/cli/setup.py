@@ -18,17 +18,7 @@ from cafleet.broker.asset_installs import (
 from cafleet.db.init import run_db_init
 
 GITHUB_REPO = "himkt/cafleet"
-SKILL_DIRS = (
-    "cafleet",
-    "cafleet-design-doc",
-    "cafleet-research",
-    "cafleet-model-catalog-refresh",
-)
-
-CAFLEET_ASSET_MEMBERS = (
-    "cafleet/asset-manifest.json",
-    "cafleet/reference/model-catalog.md",
-)
+SKILL_DIRS = ("cafleet", "cafleet-design-doc", "cafleet-research")
 HTTP_TIMEOUT = 30  # seconds; applied to every urlopen (release lookup + download)
 
 AGENT_SKILLS_DIRS = {
@@ -127,9 +117,6 @@ def _download_and_extract(download_url: str, dest_root: Path) -> Path:
         entry.is_dir() for entry in entries
     ):
         raise click.ClickException("release asset is malformed")
-    for member in CAFLEET_ASSET_MEMBERS:
-        if not (skills_root / member).is_file():
-            raise click.ClickException("release asset is malformed")
     for source in PRESET_ARCHIVE_SOURCES.values():
         if not (extract_root / source).is_file():
             raise click.ClickException("release asset is malformed")

@@ -1,17 +1,12 @@
 """Shared builders for the ``cafleet model select`` CLI test files: deployed
-skill-replica writers with matching asset manifests, and invocation shorthands."""
+catalog writers and invocation shorthands."""
 
-import hashlib
-import importlib.metadata
-import json
 from datetime import UTC, datetime, timedelta
 
 from click.testing import CliRunner
 
 from cafleet.cli import cli
 from tests.model_selection._helpers import catalog_markdown
-
-RUNTIME_VERSION = importlib.metadata.version("cafleet")
 
 
 def stamp(delta=timedelta()):
@@ -25,27 +20,11 @@ def fresh(payload):
     return payload
 
 
-def write_manifest(root, catalog_text, *, version=RUNTIME_VERSION):
-    manifest = {
-        "cafleet_version": version,
-        "catalog_sha256": hashlib.sha256(catalog_text.encode("utf-8")).hexdigest(),
-    }
-    (root / "asset-manifest.json").write_text(
-        json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-    )
-
-
-def write_replica(root, catalog_text, *, version=RUNTIME_VERSION):
-    """Materialize a deployed cafleet skill replica: catalog + matching manifest."""
+def write_catalog(root, payload):
     (root / "reference").mkdir(parents=True, exist_ok=True)
     catalog_path = root / "reference" / "model-catalog.md"
-    catalog_path.write_text(catalog_text, encoding="utf-8")
-    write_manifest(root, catalog_text, version=version)
+    catalog_path.write_text(catalog_markdown(payload), encoding="utf-8")
     return catalog_path
-
-
-def write_catalog(root, payload):
-    return write_replica(root, catalog_markdown(payload))
 
 
 def run_cli(args):

@@ -32,9 +32,8 @@ payload is one canonical-JSON fenced block behind the
 - **Sources** — the two approved official pricing pages (Anthropic and OpenAI)
   with retrieval timestamps and content hashes. A source older than
   `freshness_days` disables automatic selection until a maintainer refreshes
-  the catalog through the `cafleet-model-catalog-refresh` skill and ships it in
-  a release; deployed replicas are fingerprinted by
-  `skills/cafleet/asset-manifest.json`.
+  the catalog through the repository's `cafleet-model-catalog-refresh` skill
+  and ships it in a release.
 
 Prices are standard direct-provider USD API rates — planning estimates, not a
 subscription, marketplace, regional, or negotiated invoice guarantee.
@@ -59,10 +58,9 @@ Two roles are policy exceptions on **every** team spawn, trigger or not:
 ## Selection and eligibility
 
 A model is an automatic candidate only when it is active with a mapped token,
-its backend is runtime-ready **and** carries a current matching skill replica
-(a recorded up-to-date assets install whose replica manifest and catalog
-fingerprints match the Director's), a `known` rate card is active for the
-selection date and token volume, and every required capability floor is met.
+its backend passes its runtime readiness contract, a `known` rate card is
+active for the selection date and token volume, and every required capability
+floor is met.
 Ordinary selection minimizes the estimated USD cost over the four token
 components; ties break by higher global rank, then lexical model key.
 

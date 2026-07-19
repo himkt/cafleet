@@ -1,7 +1,7 @@
 # Cost-Aware CAFleet Model Assignment
 
 **Status**: Complete
-**Progress**: 29/29 tasks complete
+**Progress**: 32/32 tasks complete
 **Last Updated**: 2026-07-19
 
 ## Overview
@@ -64,9 +64,9 @@ The catalog is a Markdown document with one deterministic machine payload, not a
 
 The repository file is the release source; it is not a runtime default. Each `cafleet setup` release asset copies the entire `skills/cafleet/` directory independently to `~/.claude/skills/cafleet`, `~/.codex/skills/cafleet`, and `~/.config/opencode/skills/cafleet`. A Director derives its absolute catalog path from the exact `cafleet` skill root it loaded: `<loaded-cafleet-skill-root>/reference/model-catalog.md`. It passes that path explicitly to `cafleet model select`; the selector has no package-resource, repository, or CWD fallback. The Python wheel therefore contains parser/selection code but no catalog copy, and the loaded deployed CAFleet skill asset is the only runtime catalog source.
 
-Each release asset includes canonical `skills/cafleet/asset-manifest.json` with `cafleet_version` and `catalog_sha256` (the SHA-256 of the full Markdown catalog bytes). The manifest is a committed repository file maintained by the maintainer at release time — the release workflow packages it verbatim and never generates it. `manifest_sha256` always means the SHA-256 of the complete canonical manifest-file bytes, not a field inside the manifest. Before selection, `cafleet model select` validates that its explicit catalog path has the required loaded-skill-root layout, that its sibling manifest matches the installed CLI/asset version, and that the actual file hash equals the manifest hash. The audit record includes `catalog_asset: {path, cafleet_version, manifest_sha256, catalog_sha256}` in addition to the normalized catalog snapshot. This makes the exact deployed replica and its catalog fingerprint observable without creating a second catalog source.
+The catalog is distributed as an ordinary reference page of the `cafleet` skill — no release manifest, content fingerprint, or sidecar file accompanies it. Before selection, `cafleet model select` validates only that its explicit `--catalog` path is absolute and a readable regular file, and that the file parses as a valid, fresh catalog. The audit record includes `catalog_path` in addition to the normalized catalog snapshot and the per-source content hashes carried inside the payload.
 
-Candidate backend eligibility is stricter than binary readiness. For every backend that survives model/capability filtering, the CLI requires a current `asset_installs` row for that backend, its installed `AGENT_SKILLS_DIRS[backend]/cafleet/asset-manifest.json`, and that replica's `cafleet_version`, `catalog_sha256`, and full manifest hash all match the Director replica. It also verifies that replica's `reference/model-catalog.md` hashes to its manifest value. A skipped/unrecorded, stale, missing, or mismatched backend is excluded before ranking, even if `CODING_AGENTS[backend].ensure_available()` succeeds. Version 1 is the only accepted schema at launch; a future schema version requires an explicit pure migration function from each supported predecessor, fixture tests for the migration, and an atomic rewrite of the Markdown payload before validation. An unknown or unmigratable version is a hard catalog error.
+Candidate backend eligibility equals the existing backend readiness contract: for every backend that survives model/capability filtering, the CLI calls `CODING_AGENTS[backend].ensure_available()` and excludes a failing backend before ranking. Version 1 is the only accepted schema at launch; a future schema version requires an explicit pure migration function from each supported predecessor, fixture tests for the migration, and an atomic rewrite of the Markdown payload before validation. An unknown or unmigratable version is a hard catalog error.
 
 ```json
 {
@@ -191,7 +191,7 @@ where \(\widehat{C}\) is the estimated standard USD token cost for the task's in
 
 The selector performs the following deterministic steps.
 
-1. The CLI orchestration layer resolves the requested/manual backend candidates, calls each candidate's existing `CODING_AGENTS[backend].ensure_available()` contract, and applies the per-candidate installed-skill asset check above. It supplies the resulting runtime-ready, asset-matched backend set to the pure, I/O-free domain selector; this preserves OpenCode preset checks and prevents selection of a backend that lacks the matching CAFleet role skills.
+1. The CLI orchestration layer resolves the requested/manual backend candidates and calls each candidate's existing `CODING_AGENTS[backend].ensure_available()` contract. It supplies the resulting runtime-ready backend set to the pure, I/O-free domain selector; this preserves the OpenCode preset checks.
 2. For automatic and special-role policies, load, migrate, and validate the catalog; reject stale/invalid data before candidate selection. Resolve the role profile, normalize only permitted requirement increases, and fill absent token values from its named token profile.
 3. Normalize override shape before branching. A model pin, with or without its matching backend pin, is a full manual bypass: validate the existing backend/model/effort contract and spawn as current CAFleet does; return `manual_override` with an estimate only when a fresh mapped rate card exists, otherwise `estimate_status: unavailable`. An explicitly marked full workflow `manual_override` has the same behavior. A backend-only override remains a ready-backend candidate filter during active ordinary cost mode and monitor/reviewer policy selection; an effort-only override is post-selection validation and does not alter ranking. Outside an active ordinary/special policy, backend-only and effort-only fields retain current unpinned spawn behavior. This manual-bypass path is unavailable to an unmarked legacy workflow pin; automatic and special-role policies otherwise fail closed on stale data.
 
@@ -204,8 +204,6 @@ In `--json` mode, every failure writes this common envelope to stdout before exi
 |---|---:|---|
 | `MODEL_SELECTION_INVALID_REQUEST` | 2 | Unknown role/dimension, invalid override combination, negative token value, or invalid effort request. |
 | `MODEL_CATALOG_PATH_UNAVAILABLE` | 1 | The required absolute Markdown catalog path is absent, unreadable, or not a regular file. |
-| `MODEL_CATALOG_ASSET_MISMATCH` | 1 | The catalog is not under the loaded skill root, its asset manifest/version is stale, or its file hash differs from the release manifest. |
-| `MODEL_CANDIDATE_ASSET_UNAVAILABLE` | 1 | Every otherwise eligible backend lacks a current matching CAFleet skill replica. |
 | `MODEL_CATALOG_INVALID` | 1 | Missing, malformed, unmigratable, or schema-invalid catalog. |
 | `MODEL_CATALOG_STALE` | 1 | A required source fails the UTC freshness rule for automatic/special selection. |
 | `MODEL_BACKEND_UNAVAILABLE` | 1 | No requested candidate passes its existing backend readiness contract. |
@@ -233,7 +231,7 @@ Human mode uses the same code in the Click error text. In cost-efficiency mode t
   "selection_id": "sel_20260719_001",
   "selected": {"key": "codex:gpt-5.6-luna", "backend": "codex", "model": "gpt-5.6-luna", "canonical_token": "gpt-5.6-luna", "effort": null, "estimated_usd": 0.048},
   "catalog": {"schema_version": 1, "generated_at": "...", "source_hashes": {"openai": "...", "anthropic": "..."}, "snapshot": {"eligible_models": "full normalized candidate records"}},
-  "catalog_asset": {"path": "/home/user/.codex/skills/cafleet/reference/model-catalog.md", "cafleet_version": "0.19.0", "manifest_sha256": "64-lowercase-hex-sha256-of-manifest-bytes", "catalog_sha256": "64-lowercase-hex-sha256-of-catalog-markdown-bytes"},
+  "catalog_path": "/home/user/.codex/skills/cafleet/reference/model-catalog.md",
   "spawn": {"state": "pending", "member_id": null, "error": null}
 }
 ```
@@ -271,7 +269,7 @@ The initial member plus at most two replacements are allowed per task. Each repl
 
 ### Catalog refresh skill and maintenance
 
-Create a dedicated repository skill at `skills/cafleet-model-catalog-refresh/SKILL.md`. It is invoked by a maintainer to refresh the local catalog; it is not run automatically during a member spawn. Its hard requirements are:
+Create a dedicated project-local skill at `.claude/skills/cafleet-model-catalog-refresh/SKILL.md`. It is a maintainer tool of this repository — not distributed by `cafleet setup`, not part of the release skill assets — invoked by a maintainer to refresh the local catalog; it is not run automatically during a member spawn. Its hard requirements are:
 
 1. Fetch only the two user-approved official sources: `https://platform.claude.com/docs/en/about-claude/pricing` and `https://developers.openai.com/api/docs/pricing`. Do not use search results, third-party price sites, social posts, or scraped gateway prices as catalog authority.
 2. Record URL, retrieval timestamp, content hash, relevant standard token prices, date-limited pricing, and availability/deprecation qualifiers. Capability levels and global ranks are separately reviewed maintainer policy; do not present the pricing pages as benchmark evidence or copy long provider text into the repository.
@@ -280,7 +278,7 @@ Create a dedicated repository skill at `skills/cafleet-model-catalog-refresh/SKI
 5. Update the payload's `generated_at` only after successful validation and approval. If either approved source cannot be fetched or parsed, leave the Markdown catalog unchanged, report the error, and let it become stale rather than fabricating values.
 6. Refresh the catalog at least every 30 days and whenever the user asks for a refresh. Stale data disables automatic cost selection until a maintainer refreshes, commits the repository source, and completes the release/deployment transaction below.
 
-Catalog refresh deployment is release-coupled: the maintainer bumps the CAFleet release version, updates the committed `skills/cafleet/asset-manifest.json` (`cafleet_version` plus the new catalog SHA-256), builds the wheel and `cafleet-assets-v<version>.zip` containing the refreshed repository source, that committed manifest, and all skill directories, then publishes that release. Each active backend upgrades to that CLI version and runs `cafleet setup`, which overwrites its installed `cafleet` skill replica and records the matching asset version. The maintainer verifies that the catalog SHA-256 in every installed replica equals the release manifest fingerprint. There is no catalog-only sync path in this iteration; a committed source file alone does not refresh a running Director's asset copy.
+Catalog refresh deployment is release-coupled: the maintainer bumps the CAFleet release version, builds the wheel and `cafleet-assets-v<version>.zip` containing the refreshed `skills/` tree (the catalog rides inside `skills/cafleet/reference/` like every other reference page), then publishes that release. Each active backend upgrades to that CLI version and runs `cafleet setup`, which overwrites its installed `cafleet` skill replica. There is no catalog-only sync path in this iteration; a committed source file alone does not refresh a running Director's asset copy.
 
 The skill owns catalog maintenance; the CAFleet Director owns per-task selection; `member create` remains the execution boundary.
 
@@ -351,6 +349,12 @@ The skill owns catalog maintenance; the CAFleet Director owns per-task selection
 - [x] Exercise representative dry runs for routine, normal, high-risk, monitor, reviewer, explicit-override, stale-catalog, and unsupported-gateway cases; review the generated decision records. <!-- completed: 2026-07-19T13:34 --> (Verifier report `.verifier/verification-report.md`: Director-sanctioned matrix substitution with named pytest evidence per case, plus live read-only E2E fail-closed probes and catalog-price verification against both approved sources.)
 - [x] Publish maintainer guidance for the 30-day refresh cadence and require catalog review in changes that alter a model's capability class or rank. <!-- completed: 2026-07-19T13:34 --> (`skills/cafleet-model-catalog-refresh/SKILL.md` § Cadence and staleness + § Refresh procedure step 3; mirrored in the catalog preamble and `docs/concepts/model-selection.md`.)
 
+### Step 8: Post-approval revision — plain catalog page, project-local refresh skill
+
+- [x] Move the refresh skill to `.claude/skills/cafleet-model-catalog-refresh/SKILL.md` (project-local maintainer tool); remove `cafleet-model-catalog-refresh` from `SKILL_DIRS` and restore the three-skill archive contract in setup and its tests. <!-- completed: 2026-07-19T13:55 -->
+- [x] Remove the asset-manifest machinery: delete `skills/cafleet/asset-manifest.json`, the loaded-skill-root/fingerprint validation, the `MODEL_CATALOG_ASSET_MISMATCH` and `MODEL_CANDIDATE_ASSET_UNAVAILABLE` codes, and the per-candidate replica checks; candidate backends are filtered by `ensure_available()` only and the audit record carries `catalog_path`. <!-- completed: 2026-07-19T13:55 -->
+- [x] Sync `SPEC.md`, `docs/spec/cli-options.md`, `docs/concepts/model-selection.md`, `docs/contributing.md`, and the test suites to the plain-reference-page contract. <!-- completed: 2026-07-19T13:55 -->
+
 ---
 
 ## Changelog
@@ -362,3 +366,4 @@ The skill owns catalog maintenance; the CAFleet Director owns per-task selection
 | 2026-07-19 | Defined release-coupled propagation, per-backend skill replicas, asset-manifest fingerprinting, and refresh-skill asset distribution. |
 | 2026-07-19 | Implementation complete: 29/29 tasks, all Success Criteria verified, Verifier Phase D PASS, Reviewer approved (round 1), PR #216 opened. |
 | 2026-07-19 | Post-approval revision: the asset manifest is a committed repository file updated by the maintainer at release time; the release workflow packages it verbatim and never generates it. |
+| 2026-07-19 | Post-approval revision 2: the catalog is a plain `cafleet` reference page with no manifest or fingerprint validation, and the refresh skill is project-local under `.claude/skills/` (out of `SKILL_DIRS` and the release assets). |

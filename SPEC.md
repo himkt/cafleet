@@ -1322,20 +1322,15 @@ release <version>`); **download-and-extract** (download to a temp file named
 `assets.zip`; **reject any member whose path is absolute or contains a `..`
 component** with `archive member '<member>' has an unsafe path; rejecting the
 archive`; a malformed/unreadable archive → `release asset is malformed`;
-validate the extracted `skills/` dir contains exactly the four skill dirs
-`cafleet`, `cafleet-design-doc`, `cafleet-research`,
-`cafleet-model-catalog-refresh`, that the cafleet asset members
-`skills/cafleet/asset-manifest.json` and
-`skills/cafleet/reference/model-catalog.md` are regular files, and that both
-preset archive sources `presets/opencode/cafleet.md` and
-`presets/codex/cafleet.rules` are regular files in the extracted root, else
-`release asset is malformed`);
+validate the extracted `skills/` dir contains exactly the three skill dirs
+`cafleet`, `cafleet-design-doc`, `cafleet-research`, and that both preset
+archive sources `presets/opencode/cafleet.md` and `presets/codex/cafleet.rules`
+are regular files in the extracted root, else `release asset is malformed`);
 **install-skills** (per target, create the target's skills dir as needed, then
-copy each skill dir into it, removing any existing copy first — the cafleet
-dir copy carries the asset manifest and model catalog byte-for-byte into every
-replica; a filesystem error → `failed to install skills into <skills_dir>:
-<error>`; success prints `<agent>: installed cafleet, cafleet-design-doc,
-cafleet-research, cafleet-model-catalog-refresh (v<version>) -> <skills dir>`);
+copy each skill dir into it, removing any existing copy first; a filesystem
+error → `failed to install skills into <skills_dir>: <error>`; success prints
+`<agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>)
+-> <skills dir>`);
 **install-preset** (per target with a preset — codex: archive source
 `presets/codex/cafleet.rules` → `~/.codex/rules/cafleet.rules`; opencode:
 `presets/opencode/cafleet.md` → `~/.opencode/agents/cafleet.md`; claude has
@@ -2579,7 +2574,7 @@ truncation scope — is specified in §7.1.
 
 A pure domain module (`model_selection`) plus a `cafleet model` CLI group with
 one subcommand, `model select`. The domain half performs no I/O; the CLI half
-owns file access, the asset-fingerprint checks, and backend readiness.
+owns file access and backend readiness.
 
 **Catalog contract.** The catalog is a Markdown document whose sole machine
 payload is one canonical-JSON fenced block (sorted keys, two-space indentation,
@@ -2619,13 +2614,14 @@ strictly greater `global_rank` than the failed model, skips attempted model
 keys, and minimizes cost within the stronger set. The selected record carries
 the canonical primary token as `selected.model` and never an automatic effort.
 
-**CLI boundary.** Options, envelope shapes, exit codes, the ten-code stable
-error contract, the loaded-skill-root/asset-manifest validation, and the
-per-candidate backend replica checks are specified in
-`docs/spec/cli-options.md` § `cafleet model`. The group callback performs no
-work (help renders before `cafleet setup`); execution requires at least one
-recorded assets install, while per-backend staleness only excludes that
-backend from the candidate set.
+**CLI boundary.** Options, envelope shapes, exit codes, and the eight-code
+stable error contract are specified in `docs/spec/cli-options.md` § `cafleet
+model`. The catalog is an ordinary reference page of the deployed `cafleet`
+skill: `--catalog` must be an absolute path to a readable regular file, and no
+manifest or fingerprint accompanies it. The group callback performs no work
+(help renders before `cafleet setup`); execution runs the standard stale-assets
+guard, and candidate backends are filtered by each backend's existing
+readiness contract.
 
 ---
 

@@ -1,9 +1,7 @@
-"""``cafleet model select`` — CLI boundary: explicit catalog path validation
-against the release asset manifest, JSON success/error envelopes, human output
-without shell synthesis, override flags, and the deferred assets guard."""
+"""``cafleet model select`` — CLI boundary: explicit catalog path validation,
+JSON success/error envelopes, human output without shell synthesis, override
+flags, and the deferred assets guard."""
 
-import hashlib
-import importlib.metadata
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -18,8 +16,6 @@ from tests.model_selection._helpers import (
     make_model,
     uniform_levels,
 )
-
-RUNTIME_VERSION = importlib.metadata.version("cafleet")
 
 
 def _stamp(delta=timedelta()):
@@ -47,7 +43,7 @@ def _default_payload():
 
 @pytest.fixture
 def skill_root(tmp_path, monkeypatch):
-    """A deployed-replica cafleet skill root under a redirected HOME, with every
+    """A deployed cafleet skill root under a redirected HOME, with every
     coding-agent binary discoverable."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
@@ -56,20 +52,9 @@ def skill_root(tmp_path, monkeypatch):
     return root
 
 
-def _write_manifest(root, catalog_text):
-    manifest = {
-        "cafleet_version": RUNTIME_VERSION,
-        "catalog_sha256": hashlib.sha256(catalog_text.encode("utf-8")).hexdigest(),
-    }
-    manifest_text = json.dumps(manifest, sort_keys=True, indent=2) + "\n"
-    (root / "asset-manifest.json").write_text(manifest_text, encoding="utf-8")
-
-
 def _write_catalog(root, payload):
-    text = catalog_markdown(payload)
     catalog_path = root / "reference" / "model-catalog.md"
-    catalog_path.write_text(text, encoding="utf-8")
-    _write_manifest(root, text)
+    catalog_path.write_text(catalog_markdown(payload), encoding="utf-8")
     return catalog_path
 
 
@@ -108,17 +93,11 @@ def test_select_json_success_envelope(skill_root):
     }
 
 
-def test_select_json_catalog_asset_fingerprints(skill_root):
+def test_select_json_records_catalog_path(skill_root):
     catalog_path = _write_catalog(skill_root, _default_payload())
-    catalog_bytes = catalog_path.read_bytes()
-    manifest_bytes = (skill_root / "asset-manifest.json").read_bytes()
     result = _run(_select_args(catalog_path, "--role", "drafter", "--json"))
     assert result.exit_code == 0, result.output
-    asset = json.loads(result.output)["catalog_asset"]
-    assert asset["path"] == str(catalog_path)
-    assert asset["cafleet_version"] == RUNTIME_VERSION
-    assert asset["catalog_sha256"] == hashlib.sha256(catalog_bytes).hexdigest()
-    assert asset["manifest_sha256"] == hashlib.sha256(manifest_bytes).hexdigest()
+    assert json.loads(result.output)["catalog_path"] == str(catalog_path)
 
 
 def test_select_token_flags_replace_profile(skill_root):
@@ -208,28 +187,6 @@ def test_missing_catalog_file_path_unavailable(skill_root):
     )
 
 
-def test_stale_manifest_version_is_asset_mismatch(skill_root):
-    catalog_path = _write_catalog(skill_root, _default_payload())
-    manifest_path = skill_root / "asset-manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["cafleet_version"] = "0.0.1"
-    manifest_path.write_text(
-        json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-    )
-    result = _run(_select_args(catalog_path, "--role", "drafter", "--json"))
-    assert result.exit_code == 1, result.output
-    assert json.loads(result.output)["error"]["code"] == "MODEL_CATALOG_ASSET_MISMATCH"
-
-
-def test_tampered_catalog_hash_is_asset_mismatch(skill_root):
-    catalog_path = _write_catalog(skill_root, _default_payload())
-    with catalog_path.open("a", encoding="utf-8") as fh:
-        fh.write("\ntampered trailing line\n")
-    result = _run(_select_args(catalog_path, "--role", "drafter", "--json"))
-    assert result.exit_code == 1, result.output
-    assert json.loads(result.output)["error"]["code"] == "MODEL_CATALOG_ASSET_MISMATCH"
-
-
 def test_relative_catalog_path_rejected(skill_root):
     _write_catalog(skill_root, _default_payload())
     result = _run(
@@ -249,16 +206,20 @@ def test_relative_catalog_path_rejected(skill_root):
     )
 
 
-def test_catalog_outside_skill_root_layout_is_asset_mismatch(skill_root, tmp_path):
+def test_catalog_outside_skill_root_is_still_a_valid_source(skill_root, tmp_path):
     rogue_root = tmp_path / "random"
     rogue_root.mkdir()
-    text = catalog_markdown(_default_payload())
     catalog_path = rogue_root / "model-catalog.md"
-    catalog_path.write_text(text, encoding="utf-8")
-    _write_manifest(rogue_root, text)
+    catalog_path.write_text(catalog_markdown(_default_payload()), encoding="utf-8")
     result = _run(_select_args(catalog_path, "--role", "drafter", "--json"))
-    assert result.exit_code == 1, result.output
-    assert json.loads(result.output)["error"]["code"] == "MODEL_CATALOG_ASSET_MISMATCH"
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["selected"]["key"] == "claude:cheap-model"
+
+
+def test_select_without_catalog_flag_is_missing_option_error(skill_root):
+    result = _run(["model", "select", "--role", "drafter"])
+    assert result.exit_code == 2, result.output
+    assert "--catalog" in result.output
 
 
 def test_stale_source_error(skill_root):
@@ -273,7 +234,6 @@ def test_stale_source_error(skill_root):
 def test_invalid_catalog_error(skill_root):
     catalog_path = skill_root / "reference" / "model-catalog.md"
     catalog_path.write_text("not a catalog at all\n", encoding="utf-8")
-    _write_manifest(skill_root, "not a catalog at all\n")
     result = _run(_select_args(catalog_path, "--role", "drafter", "--json"))
     assert result.exit_code == 1, result.output
     assert json.loads(result.output)["error"]["code"] == "MODEL_CATALOG_INVALID"

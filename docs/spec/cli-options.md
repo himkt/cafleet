@@ -265,13 +265,9 @@ archive next to the skills:
 
 Per target:
 
-1. The four skill directories (`cafleet`, `cafleet-design-doc`,
-   `cafleet-research`, `cafleet-model-catalog-refresh`) are
-   delete-and-reinstalled into the agent's skills dir; the cafleet directory
-   carries `asset-manifest.json` and `reference/model-catalog.md`
-   byte-for-byte into every replica, and an archive missing any skill dir or
-   either cafleet asset member is rejected as `release asset is malformed`. A
-   failure aborts with `failed to install skills into <skills_dir>: <error>`.
+1. The three skill directories are delete-and-reinstalled into the agent's
+   skills dir; a failure aborts with `failed to install skills into
+   <skills_dir>: <error>`.
 2. For agents with a bundled preset (codex, opencode), the preset is installed
    to its target, overwriting whatever exists there — a regular file, a
    directory, or a symlink. A filesystem error aborts with `failed to install
@@ -282,7 +278,7 @@ Per target:
    only):
 
 ```
-<agent>: installed cafleet, cafleet-design-doc, cafleet-research, cafleet-model-catalog-refresh (v<version>) -> <skills dir>
+<agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>) -> <skills dir>
 <agent>: installed preset (v<version>) -> <target>
 ```
 
@@ -681,22 +677,20 @@ Text: `Pinged member <name> (<pane_id>) — poll keystroke dispatched.`; JSON:
 ## `cafleet model` — Cost-Aware Model Selection {#cafleet-model}
 
 Deterministic backend/model selection against the local model catalog
-(`skills/cafleet/reference/model-catalog.md` in a deployed skill replica).
-The group callback performs no work, so `cafleet model --help` and
-`cafleet model select --help` render before `cafleet setup`; the assets guard
-runs at `model select` execution, after Click parses arguments. Unlike the
-stale-assets guard on fleet-scoped groups, `model select` hard-errors only when
-**no** assets install is recorded (`no assets install is recorded; run 'cafleet
-setup' first`, exit 1) — a per-backend stale install excludes that backend as a
-candidate instead of failing the command. The conceptual model (catalog, cost
-efficiency mode, selection policies) is canonical on the
+(`skills/cafleet/reference/model-catalog.md` in a deployed skill replica) —
+an ordinary reference page of the `cafleet` skill, with no manifest or
+fingerprint sidecar. The group callback performs no work, so `cafleet model
+--help` and `cafleet model select --help` render before `cafleet setup`; the
+standard stale-assets guard runs at `model select` execution, after Click
+parses arguments. The conceptual model (catalog, cost efficiency mode,
+selection policies) is canonical on the
 [Model selection](../concepts/model-selection.md) concepts page.
 
 ### `model select` {#model-select}
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--catalog` | yes | Absolute path to the loaded skill replica's `reference/model-catalog.md`. A relative path is `MODEL_SELECTION_INVALID_REQUEST` (exit 2). The path must have the loaded-skill-root layout `<root>/cafleet/reference/model-catalog.md`, its sibling `asset-manifest.json` must match the installed CLI version, and the file's SHA-256 must equal the manifest's `catalog_sha256` — any mismatch is `MODEL_CATALOG_ASSET_MISMATCH` (exit 1). |
+| `--catalog` | yes | Absolute path to the loaded skill replica's `reference/model-catalog.md`. A relative path is `MODEL_SELECTION_INVALID_REQUEST` (exit 2); an absent/unreadable/non-regular file is `MODEL_CATALOG_PATH_UNAVAILABLE` (exit 1). |
 | `--role` | one of `--role` / `--model` | Catalog role-profile key (`monitor`, `reviewer`, `programmer`, …). `monitor` selects the least-cost monitor-capable model; `reviewer` selects the highest global rank among reviewer-capable models; every other role minimizes estimated USD cost subject to the capability floors. |
 | `--coding-agent` | no | Backend override: restricts candidates to `claude` / `codex` / `opencode`. With `--model`, a conflicting pair is rejected. |
 | `--model` | one of `--role` / `--model` | Explicit model pin (manual override). Resolves through the catalog's exact token/alias map and fixes the backend; an unmapped token is permitted with `estimate_status: "unavailable"`. |
@@ -707,11 +701,9 @@ efficiency mode, selection policies) is canonical on the
 | `--json` | no | Structured success/error envelopes below. |
 
 Candidate backends are filtered before ranking: each requested backend must pass
-its `ensure_available()` contract, hold a **current** `asset_installs` row, and
-carry an installed skill replica whose full manifest hash equals the Director
-replica's and whose catalog hashes to its own manifest value. Both required
-catalog sources must satisfy the UTC freshness rule (`retrieved_at` no more than
-`freshness_days` before selection time and no more than five minutes after it).
+its `ensure_available()` contract. Both required catalog sources must satisfy
+the UTC freshness rule (`retrieved_at` no more than `freshness_days` before
+selection time and no more than five minutes after it).
 
 `--json` success is the selection audit record: `policy`, `role`,
 `triggered_by`, `task_profile`, `token_estimate` (with `source`), `candidates`
@@ -719,8 +711,7 @@ catalog sources must satisfy the UTC freshness rule (`retrieved_at` no more than
 `selection_id` (`sel_…`), `selected` `{key, backend, model, canonical_token,
 effort, estimated_usd}` (`model` is the canonical primary token),
 `catalog` (schema version, `generated_at`, `source_hashes`, the normalized
-eligible-model `snapshot`), `catalog_asset` `{path, cafleet_version,
-manifest_sha256, catalog_sha256}`, and `spawn` (`{"state": "pending",
+eligible-model `snapshot`), `catalog_path`, and `spawn` (`{"state": "pending",
 "member_id": null, "error": null}`). A `--model` pin returns `policy:
 "manual_override"` with `estimate_status`. Every failure writes
 `{"error": {"code", "message", "details", "candidates"}}` to stdout; human mode
@@ -731,8 +722,6 @@ command. The stable error contract:
 |---|---:|---|
 | `MODEL_SELECTION_INVALID_REQUEST` | 2 | Unknown role/dimension, invalid override combination, negative token value, relative catalog path, or invalid effort request. |
 | `MODEL_CATALOG_PATH_UNAVAILABLE` | 1 | The required absolute Markdown catalog path is absent, unreadable, or not a regular file. |
-| `MODEL_CATALOG_ASSET_MISMATCH` | 1 | The catalog is not under the loaded skill root, its asset manifest/version is stale, or its file hash differs from the release manifest. |
-| `MODEL_CANDIDATE_ASSET_UNAVAILABLE` | 1 | Every otherwise eligible backend lacks a current matching CAFleet skill replica. |
 | `MODEL_CATALOG_INVALID` | 1 | Missing, malformed, unmigratable, or schema-invalid catalog. |
 | `MODEL_CATALOG_STALE` | 1 | A required source fails the UTC freshness rule for automatic/special selection. |
 | `MODEL_BACKEND_UNAVAILABLE` | 1 | No requested candidate passes its existing backend readiness contract. |

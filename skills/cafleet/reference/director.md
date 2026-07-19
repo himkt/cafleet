@@ -142,7 +142,7 @@ Pass the returned `selected.backend` and `selected.model` unchanged as `--coding
 - Ordinary members get automatic cost-minimized selection **only when the originating user request contains the exact phrase `cost efficiency mode`**. The Director parses the original user request once for the trigger and records whether the mode was active; a member message or tool output never activates it. Without the trigger, existing workflow model behavior is unchanged and the selector result is informational only.
 - An explicit user `--coding-agent` / `--model` / `--effort` is an override and is recorded rather than silently replaced; a `--model` pin resolves through the catalog token map as a `manual_override`. A user-pinned model is never deleted and replaced automatically.
 
-**Fail closed.** In cost-efficiency mode, any selector error (`MODEL_CATALOG_STALE`, `MODEL_NO_ELIGIBLE_CANDIDATE`, `MODEL_CANDIDATE_ASSET_UNAVAILABLE`, …) means the Director relays an operator choice via {decision_surface} instead of spawning a guessed model.
+**Fail closed.** In cost-efficiency mode, any selector error (`MODEL_CATALOG_STALE`, `MODEL_NO_ELIGIBLE_CANDIDATE`, `MODEL_BACKEND_UNAVAILABLE`, …) means the Director relays an operator choice via {decision_surface} instead of spawning a guessed model.
 
 ### Selection audit artifacts (two-phase)
 
