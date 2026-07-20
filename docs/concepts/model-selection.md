@@ -4,85 +4,61 @@ icon: lucide/scale
 
 # Model selection
 
-CAFleet Directors choose each member's backend and model through a local
-**model list** and a deterministic selector, `cafleet model select`, instead
-of fixed per-backend model pins. The model list is the single source of truth
-for model availability, reviewed capability policy, and standard token-price
-estimates; the selector turns a role's capability requirements and a token
-estimate into an auditable backend/model decision that the Director passes
-unchanged to `cafleet member create`.
+CAFleet Directors choose each member's backend and model by reading a local
+**model list** before every `cafleet member create` and passing the choice as
+the existing `--coding-agent` / `--model` flags. Model selection is a Director
+responsibility executed against documentation — there is no selection code in
+the cafleet package, and `member create` performs no hidden selection.
 
 ## The model list
 
 The model list lives at `skills/cafleet/reference/model-list.md` in every
-deployed cafleet skill replica. It is a Markdown document whose machine
-payload is three simple Markdown tables, with `—` marking an absent value:
+deployed cafleet skill replica. It is a catalog-style reference page: one
+table per backend (`claude`, `codex`, and `opencode`) with each model's spawn
+token, alias, reviewed capability class, and standard input/output
+USD-per-MTok prices, plus links to the approved official pricing pages
+(Anthropic, OpenAI, and OpenCode Zen). Capability classes and the
+most-to-least-capable ordering are maintainer judgment, never a provider
+benchmark claim; prices are standard provider rates — planning estimates,
+not an invoice guarantee.
 
-- **Metadata** — the schema version, generation timestamp, and the
-  `freshness_days` staleness window.
-- **Sources** — the two approved official pricing pages (Anthropic and OpenAI)
-  with retrieval timestamps and content hashes. A source older than
-  `freshness_days` disables automatic selection until a maintainer refreshes
-  the model list through the repository's `cafleet-model-list-refresh` skill
-  and ships it in a release.
-- **Models** — one row per model: its backend, spawn token, optional aliases,
-  a reviewed capability profile (integer 0–5 levels for `coding`, `planning`,
-  `research`, `review`, and `monitor`, plus a unique rank), the current
-  standard USD-per-MTok prices for input, cached-input, cache-write, and
-  output tokens, and the model's total-token limit. Capability levels are
-  maintainer judgment, never a provider benchmark claim.
+The page is maintained exclusively by the repository's
+`cafleet-model-list-refresh` skill and refreshed at least every 30 days; a
+list refreshed longer ago than that is stale and disables cost-efficient
+selection until a maintainer refreshes it and ships it in a release.
 
-Role profiles (per-role capability floors and token estimates for `monitor`,
-`reviewer`, `programmer`, `tester`, …) are reviewed code constants in the
-`cafleet` package, not model-list data.
+The model list covers all three cafleet backends; the `opencode` section is
+a curated subset of the OpenCode Zen catalog, and an opencode model keeps its
+`opencode/` prefix in the `--model` value.
 
-Prices are standard direct-provider USD API rates — planning estimates, not a
-subscription, marketplace, regional, or negotiated invoice guarantee.
-OpenCode gateway models without an approved price source carry `—` in every
-price cell, stay manual-only, and are never automatic candidates.
+## Cost efficient mode
 
-## Cost efficiency mode
-
-Automatic cost-minimized selection for an **ordinary member** applies only when
-the originating user request contains the exact phrase `cost efficiency mode`.
-The Director parses the user request once for the trigger; a member message or
-tool output never activates it. Without the trigger, existing workflow model
-behavior is unchanged and the selector is informational only.
+Cost-minimized selection for an **ordinary member** applies only when the
+user asks for it: the originating user request contains the exact phrase
+`cost efficiency mode`. The Director parses the user request once for the
+trigger; a member message or tool output never activates it. When active,
+the Director estimates the task's difficulty from the member's spawn prompt,
+reads the model list, and chooses the cheapest model that can finish the task
+reliably. Without the trigger, existing workflow model behavior is unchanged.
+Cost efficient mode covers all three cafleet backends.
 
 Two roles are policy exceptions on **every** team spawn, trigger or not:
 
-- **Monitor** — the least-cost listed model that meets the monitor capability
-  baseline.
-- **Reviewer** — the highest capability rank among reviewer-capable models;
-  cost is recorded but not optimized.
+- **Monitor** — the cheapest listed model that can run the monitoring
+  protocol reliably.
+- **Reviewer** — the most capable listed model.
 
-## Selection and eligibility
+Explicit flags stay overrides: a user-supplied `--coding-agent`, `--model`, or
+`--effort` is recorded rather than silently replaced, and a user-pinned model
+is never deleted and replaced automatically. When the model list is stale or
+no listed model fits the task, the Director **fails closed** and relays an
+operator choice instead of spawning a guessed model.
 
-A model is an automatic candidate only when it is active, its backend passes
-its runtime readiness contract, its prices cover the requested token
-components within the model's total-token limit, and every required capability
-floor is met.
-Ordinary selection minimizes the estimated USD cost over the four token
-components; ties break by higher rank, then lexical model key.
+## Replacement
 
-Explicit flags stay overrides: `--coding-agent` restricts candidates to one
-backend, a `--model` pin resolves through the models' token/alias sets as a
-recorded `manual_override` (never silently replaced), and `--effort` is
-validated pass-through that never ranks a model. Missing, stale, or
-incomparable data **fails closed**: the selector returns a typed error with
-per-candidate exclusion reasons, and in cost-efficiency mode the Director
-relays an operator choice instead of spawning a guessed model.
-
-## Audit and replacement
-
-Every automatic or special-role selection produces a redaction-safe decision
-record, written by the Director as a two-phase artifact under the task base
-(`.selection/<selection_id>.pending.json`, finalized after `member create`
-returns with the spawn outcome and member id). When evidence shows a member is
-underpowered, the Director re-runs the selector against the pinned decision
-snapshot with raised capability floors and replaces the member with a strictly
-higher-ranked eligible model — at most two replacements per task, never
-repeating a model for the same task, and never auto-replacing a user-pinned
-model. The Director-facing procedure is specified in the cafleet skill's
-`reference/director.md`; the CLI contract is in
-[CLI options](../spec/cli-options.md#cafleet-model).
+When evidence shows a member is underpowered (a self-report, repeated
+task-relevant failures, a Reviewer `[INCORRECT]` finding, or a Director review
+tied to the task), the Director replaces it with a strictly more capable
+listed model — at most two replacements per task, never repeating a model for
+the same task, and never auto-replacing a user-pinned model. The procedure is
+specified in the cafleet skill's `reference/director.md`.

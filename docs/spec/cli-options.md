@@ -40,7 +40,6 @@ subcommand rejects it with `No such option`.
 | `member capture` | Capture the tail of a member's pane | yes | `--member-id` | [member capture](#member-capture) |
 | `member exec` | Dispatch a shell command into a member's pane | yes | `--member-id` | [member exec](#member-exec) |
 | `member ping` | Inject an inbox-poll keystroke into a member's pane | yes | `--member-id` | [member ping](#member-ping) |
-| `model select` | Select a backend and model from the local model list | no | none | [model select](#model-select) |
 | `monitor start` | Run the per-fleet scheduler loop in-process (launch as a background task) | yes | none | [monitor start](#monitor-start) |
 | `monitor status` | Show monitor liveness and the per-member schedule | yes | none | [monitor status](#monitor-status) |
 | `monitor config` | Show or edit a member's monitor schedule | yes | `--member-id` | [monitor config](#monitor-config) |
@@ -673,61 +672,6 @@ operator-controlled body — which is why `member ping` sits in
 
 Text: `Pinged member <name> (<pane_id>) — poll keystroke dispatched.`; JSON:
 `{member_id, pane_id}`. A keystroke non-delivery exits 1.
-
-## `cafleet model` — Cost-Aware Model Selection {#cafleet-model}
-
-Deterministic backend/model selection against the local model list
-(`skills/cafleet/reference/model-list.md` in a deployed skill replica) —
-an ordinary reference page of the `cafleet` skill, with no manifest or
-fingerprint sidecar. The group callback performs no work, so `cafleet model
---help` and `cafleet model select --help` render before `cafleet setup`; the
-standard stale-assets guard runs at `model select` execution, after Click
-parses arguments. The conceptual model (the model list, cost efficiency mode,
-selection policies) is canonical on the
-[Model selection](../concepts/model-selection.md) concepts page.
-
-### `model select` {#model-select}
-
-| Flag | Required | Notes |
-|---|---|---|
-| `--model-list` | yes | Absolute path to the loaded skill replica's `reference/model-list.md`. A relative path is `MODEL_SELECTION_INVALID_REQUEST` (exit 2); an absent/unreadable/non-regular file is `MODEL_LIST_PATH_UNAVAILABLE` (exit 1). |
-| `--role` | one of `--role` / `--model` | Role-profile key (`monitor`, `reviewer`, `programmer`, …), a reviewed code constant of the selector. `monitor` selects the least-cost monitor-capable model; `reviewer` selects the highest rank among reviewer-capable models; every other role minimizes estimated USD cost subject to the capability floors. |
-| `--coding-agent` | no | Backend override: restricts candidates to `claude` / `codex` / `opencode`. With `--model`, a conflicting pair is rejected. |
-| `--model` | one of `--role` / `--model` | Explicit model pin (manual override). Resolves through the active models' token/alias sets and fixes the backend; an unmapped token is permitted with `estimate_status: "unavailable"`; a token shared by several backends requires `--coding-agent`. |
-| `--effort` | no | Pass-through validated against the selected backend's effort contract after selection; never selects or ranks a model. Invalid → `MODEL_SELECTION_INVALID_REQUEST` (exit 2). |
-| `--requires` | no, repeatable | `dimension=level`; may only raise a role-profile floor (below-profile, unknown dimension, or a level outside 1–5 is rejected). |
-| `--estimated-input-tokens` / `--estimated-cached-input-tokens` / `--estimated-cache-write-tokens` / `--estimated-output-tokens` | no | Non-negative integers replacing the role token profile per component. |
-| `--triggered-by` | no | Recorded activation phrase for the audit trail. |
-| `--json` | no | Structured success/error envelopes below. |
-
-Candidate backends are filtered before ranking: each requested backend must pass
-its `ensure_available()` contract. Both required model-list sources must satisfy
-the UTC freshness rule (`retrieved_at` no more than `freshness_days` before
-selection time and no more than five minutes after it).
-
-`--json` success is the selection audit record: `policy`, `role`,
-`triggered_by`, `task_profile`, `token_estimate` (with `source`), `candidates`
-(each examined key with `eligible` and its `reason` or `estimated_usd`),
-`selection_id` (`sel_…`), `selected` `{key, backend, model, effort,
-estimated_usd}` (`model` is the row's spawn token),
-`model_list` (schema version, `generated_at`, `source_hashes`, the normalized
-eligible-model `snapshot`), `model_list_path`, and `spawn` (`{"state":
-"pending", "member_id": null, "error": null}`). A `--model` pin returns
-`policy: "manual_override"` with `estimate_status`. Every failure writes
-`{"error": {"code", "message", "details", "candidates"}}` to stdout; human mode
-carries the same code in the error text. No output mode synthesizes a shell
-command. The stable error contract:
-
-| Code | Exit code | Meaning |
-|---|---:|---|
-| `MODEL_SELECTION_INVALID_REQUEST` | 2 | Unknown role/dimension, invalid override combination, negative token value, relative model-list path, or invalid effort request. |
-| `MODEL_LIST_PATH_UNAVAILABLE` | 1 | The required absolute Markdown model-list path is absent, unreadable, or not a regular file. |
-| `MODEL_LIST_INVALID` | 1 | Missing, malformed, or schema-invalid model list. |
-| `MODEL_LIST_STALE` | 1 | A required source fails the UTC freshness rule for automatic/special selection. |
-| `MODEL_BACKEND_UNAVAILABLE` | 1 | No requested candidate passes its existing backend readiness contract. |
-| `MODEL_NO_ELIGIBLE_CANDIDATE` | 1 | Ready listed candidates exist but none meets price, token-limit, or capability constraints. |
-| `MODEL_SELECTION_AUDIT_UNAVAILABLE` | 1 | Automatic/special selection with `BASE == <unset>` (Director-side audit precondition). |
-| `MODEL_UPGRADE_UNAVAILABLE` | 1 | A bounded replacement has no stronger candidate in its pinned snapshot. |
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 

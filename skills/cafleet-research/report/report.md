@@ -29,7 +29,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Prerequisites
 
-The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill (reading its `reference/supervision.md`) and embeds it into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor` with the backend/model from the pre-spawn `cafleet model select --role monitor` step) that owns the heartbeat and re-engages the Director on demand — see Step 1.
+The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill (reading its `reference/supervision.md`) and embeds it into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor` with the backend/model chosen per the `cafleet` skill's `reference/director.md` § *Model selection before member create*) that owns the heartbeat and re-engages the Director on demand — see Step 1.
 
 ## Output
 
@@ -84,7 +84,7 @@ Capture `fleet_id` and `director.member_id` from the response. Treat `fleet_id` 
 
 ### Step 1: Supervision Model (Director — spawn the monitoring member first)
 
-Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor` plus the `--coding-agent`/`--model` pair returned by the pre-spawn `cafleet model select --model-list <abs loaded-cafleet-skill-root>/reference/model-list.md --role monitor --json` step (the `cafleet` skill's `reference/director.md` § *Model selection before member create*). It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor` plus the `--coding-agent`/`--model` pair the Director chose from the model list (the `cafleet` skill's `reference/director.md` § *Model selection before member create*). It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
 See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the conditional idle-nudge routine) and lifecycle. The monitoring member is deleted first in the Step 8 teardown (first-out).
 

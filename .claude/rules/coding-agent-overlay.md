@@ -4,7 +4,7 @@ cafleet skill instructions are backend-neutral by default. Write the base — ev
 
 ## Where backend specifics live
 
-Backend-specific deltas live in `skills/cafleet/reference/coding-agent/<name>-overlay.md`, one overlay per backend (`claude`, `codex`, `opencode`), with the canonical skeleton in `_template.md`. Each overlay carries that backend's concrete realization of the backend deltas: the decision surface, the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, the effort levels, and the skill-loading recipe. Model policy is not an overlay delta — model availability, capability policy, and prices live in the model list (`skills/cafleet/reference/model-list.md`) and every spawn's backend/model pair comes from the Director's pre-spawn `cafleet model select` step.
+Backend-specific deltas live in `skills/cafleet/reference/coding-agent/<name>-overlay.md`, one overlay per backend (`claude`, `codex`, `opencode`), with the canonical skeleton in `_template.md`. Each overlay carries that backend's concrete realization of the backend deltas: the decision surface, the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, the effort levels, and the skill-loading recipe. Model policy is not an overlay delta — model availability, capability policy, and prices live in the model list (`skills/cafleet/reference/model-list.md`) and every spawn's backend/model pair is the Director's pre-spawn choice from that list.
 
 ## How the base and overlay connect
 

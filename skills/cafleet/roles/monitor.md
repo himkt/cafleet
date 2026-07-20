@@ -96,5 +96,5 @@ Identity reaches you as literal labeled lines in your spawn prompt — `FLEET ID
 
 Your spawn prompt is built from the SAME canonical skeleton ordinary members use — [`reference/director.md`](../reference/director.md) § Canonical spawn-prompt skeleton — plus a per-role delta. You are the skeleton **plus a delta**, not an exception. The monitor delta:
 
-- Pass `--role monitor` plus the `--coding-agent <selected.backend> --model <selected.model>` pair returned by the Director's pre-spawn `cafleet model select --role monitor` step ([`reference/director.md`](../reference/director.md) § *Model selection before member create*); the CLI renders the resolved backend into your `CODING AGENT:` line via the `{coding_agent}` placeholder, so it matches the binary you run on.
+- Pass `--role monitor` plus the `--coding-agent <chosen backend> --model <chosen model>` pair the Director chose per its pre-spawn monitor policy ([`reference/director.md`](../reference/director.md) § *Model selection before member create*); the CLI renders the resolved backend into your `CODING AGENT:` line via the `{coding_agent}` placeholder, so it matches the binary you run on.
 - Apply your overlay's deltas (`{bg_run}`, `{permission_flags}`) on top of this role — the overlay is Required-reading row #1 (above); `<name>` is the backend named on your `CODING AGENT:` line.

@@ -129,7 +129,6 @@ cafleet
 ├── db              connection factory, Alembic migration chain
 ├── multiplexer     Multiplexer interface, tmux + herdr backends, resolver, keystrokes
 ├── coding-agent    coding-agent interface + claude/codex/opencode
-├── model-selection model-list parser + deterministic selector (pure, I/O-free)
 ├── output          render + formatter layers
 ├── broker          data-access layer
 ├── monitor         heartbeat loop
@@ -2570,65 +2569,6 @@ truncation scope — is specified in §7.1.
    `{"members"|"messages": [...]}`.
 6. **PATCH TOCTOU collapses to 404**, not 500.
 
-### 6.9 Model selection (`cafleet model`)
-
-A pure domain module (`model_selection`) plus a `cafleet model` CLI group with
-one subcommand, `model select`. The domain half performs no I/O; the CLI half
-owns file access and backend readiness.
-
-**Model-list contract.** The model list is a Markdown document whose machine
-payload is three `##` sections in fixed order — `Metadata`, `Sources`,
-`Models` — each holding exactly one Markdown table (exact expected column
-header, a separator row, data rows) and nothing else but blank lines; free
-prose is permitted only before the first section. The `Metadata` table carries
-the fixed-order `Field | Value` rows `schema_version`, `generated_at`,
-`freshness_days`. The `Models` table has the columns `Backend`, `Model`,
-`Aliases` (comma-separated, `—` for none), `Active` (`yes`/`no`), `Rank`
-(unique integer), the five capability levels `Cod`/`Pln`/`Rsc`/`Rev`/`Mon`
-(integers 0–5), the four USD-per-MTok prices `In`/`Cached`/`Write`/`Out`
-(non-negative decimals, `—` for an unpriced component), and `Max tokens`
-(positive integer). A model's key is derived as `<backend>:<model>`; its spawn
-tokens are the `Model` cell plus its aliases. Role profiles and token
-profiles are reviewed code constants (`ROLE_PROFILES`, `TOKEN_PROFILES`) in
-the domain module, not model-list data. `parse_model_list_markdown(text)`
-rejects a missing, duplicate, out-of-order, or unknown section; a wrong column
-header; a missing/malformed separator row; a wrong cell count; table lines
-outside a section or non-table prose inside one; malformed cells; schema
-version ≠ 1; sources other than exactly the two approved URLs with
-timezone-aware ISO timestamps and 64-hex hashes; an empty `Models` table;
-an unknown backend; and duplicate model keys, ranks, or `(backend, token)`
-pairs. The Python wheel carries no model-list copy; the deployed skill
-replica is the only runtime source.
-
-**Selection.** `select_model(model_list, role, ready_backends, now, …)`
-resolves the role profile, applies raise-only `requires` overrides and
-per-component token-estimate replacement, enforces per-source UTC freshness
-(`retrieved_at` at most `freshness_days` before `now` and at most five
-minutes after), and enumerates every listed model into a candidate record
-with an exclusion reason. A candidate is priced only when the estimate total
-is within `Max tokens` and every nonzero token component is priced
-(`tokens / 1_000_000 × usd_per_mtok`, summed); a fully unpriced row is never
-an automatic candidate. Policies: ordinary roles minimize cost with ties
-broken by higher rank then lexical key; `monitor` minimizes cost over
-monitor-capable models; `reviewer` maximizes rank then lower cost then
-lexical key. `resolve_manual_override` resolves a model pin through the
-active models' token/alias sets (conflicting backend pin rejected; a token
-shared by several backends requires a backend pin; an unmapped token is
-permitted with `estimate_status: "unavailable"`). `select_replacement` raises
-each failed capability floor by one, requires a strictly greater rank than
-the failed model, skips attempted model keys, and minimizes cost within the
-stronger set. The selected record carries the row's `Model` cell as
-`selected.model` and never an automatic effort.
-
-**CLI boundary.** Options, envelope shapes, exit codes, and the eight-code
-stable error contract are specified in `docs/spec/cli-options.md` § `cafleet
-model`. The model list is an ordinary reference page of the deployed `cafleet`
-skill: `--model-list` must be an absolute path to a readable regular file, and
-no manifest or fingerprint accompanies it. The group callback performs no work
-(help renders before `cafleet setup`); execution runs the standard stale-assets
-guard, and candidate backends are filtered by each backend's existing
-readiness contract.
-
 ---
 
 ## 7. Cross-cutting concerns
@@ -2899,10 +2839,6 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 - [ ] `cafleet message cancel` (`--member-id`, `--message-id`, `--full`, `--json`)
 - [ ] `cafleet message show` (`--member-id`, `--message-id`, `--full`, `--json`)
 
-**`model`:**
-
-- [ ] `cafleet model select` (`--model-list` required absolute path, exactly one of `--role` / `--model`, `--coding-agent`, `--effort`, `--requires` repeatable `dimension=level`, the four `--estimated-*-tokens` integers, `--triggered-by`, `--json`; error envelope + exit-code contract in §6.9 / docs/spec/cli-options.md)
-
 **`monitor`:**
 
 - [ ] `cafleet monitor start` (`--tick`≥1=5)
@@ -2913,7 +2849,7 @@ Every `member *`, `message *`, and `monitor *` command, plus `fleet
 show` and `fleet delete`, takes the **required `--fleet-id` option** (integer);
 a missing `--fleet-id` is the shared callback's application error (exit 1,
 §6.3). It is omitted from the per-command rows above to avoid repetition.
-`setup`, `doctor`, `server`, `fleet create`, `fleet list`, and `model select`
+`setup`, `doctor`, `server`, `fleet create`, and `fleet list`
 do **not** take `--fleet-id`.
 
 ---

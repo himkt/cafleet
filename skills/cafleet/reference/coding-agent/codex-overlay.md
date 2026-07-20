@@ -36,6 +36,6 @@ When a capture cannot cleanly separate the two, apply the ambiguity tie-break an
 
 ## Worked resolution
 
-The canonical monitor-spawn command, fully resolved for this backend — the backend/model pair comes from the Director's pre-spawn `cafleet model select --role monitor` step, not from this overlay:
+The canonical monitor-spawn command, fully resolved for this backend — the backend/model pair is the Director's pre-spawn choice from the model list (`reference/director.md` § *Model selection before member create*), not from this overlay:
 
-`cafleet member create --role monitor --coding-agent <selected.backend> --model <selected.model> --text-file <rendered monitor prompt>` (members spawned `--ask-for-approval never --sandbox workspace-write`).
+`cafleet member create --role monitor --coding-agent <chosen backend> --model <chosen model> --text-file <rendered monitor prompt>` (members spawned `--ask-for-approval never --sandbox workspace-write`).

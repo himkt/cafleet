@@ -125,7 +125,7 @@ User → /clean-docs (one workflow)
      ├─ monitor    (first-in, --role monitor; heartbeat; gates the first ordinary spawn)
      ├─ scanner-1  (owns a disjoint file slice: scan → propose → apply after gate)
      ├─ scanner-N  (…)
-     └─ reviewer   (the workflow's guard; model from cafleet model select --role reviewer)
+     └─ reviewer   (the workflow's guard; model chosen per the cafleet reviewer policy)
 ```
 
 | Role | Responsibility |
@@ -162,11 +162,11 @@ extensions, since a run produces a run artifact, not a design document:
    `researches/clean-docs-<workflow>-<UTC-compact>/` (gitignored, one folder
    per run).
 2. **Bootstrap** — `cafleet doctor` (gating), `cafleet fleet create`; spawn the
-   monitor first (`--role monitor`, backend/model from the pre-spawn
-   `cafleet model select --role monitor` step; members spawned
-   `{permission_flags}`), gate on `ready: monitor live`.
+   monitor first (`--role monitor`, backend/model chosen per the `cafleet`
+   skill's `reference/director.md` § *Model selection before member create*;
+   members spawned `{permission_flags}`), gate on `ready: monitor live`.
 3. **Spawn workers** — scanners (one per disjoint slice) and the reviewer
-   (backend/model from `cafleet model select --role reviewer`), each from a
+   (backend/model chosen per the same reference's reviewer policy), each from a
    rendered prompt at `${BASE}/.prompts/<role>-<UTC-compact>.md`.
 4. **Scan (fan-out)** — each scanner runs the workflow's **scan mechanics**
    (parameter table below) over its slice and writes its partial artifact under

@@ -2,16 +2,16 @@
 name: cafleet-model-list-refresh
 description: >-
   Refresh the CAFleet model list at skills/cafleet/reference/model-list.md
-  from the two approved official pricing sources. Use when a maintainer asks to
+  from the approved official pricing sources. Use when a maintainer asks to
   refresh, update, or re-verify the model list, its token prices, or its
-  source freshness, or when automatic model selection reports a stale model
-  list (MODEL_LIST_STALE). Maintainer-invoked only — never run automatically
-  during a member spawn.
+  freshness, or when a Director reports the list was last refreshed more than
+  30 days ago. Maintainer-invoked only — never run automatically during a
+  member spawn.
 ---
 
 # CAFleet Model List Refresh
 
-Refresh the repository's model list — the three tables of
+Refresh the repository's model list — the per-backend model tables of
 `skills/cafleet/reference/model-list.md` — from the approved official
 sources, under explicit maintainer review. The repository file is the release
 source: a running Director reads only its deployed skill replica, so a refresh
@@ -19,55 +19,77 @@ reaches Directors exclusively through the release/deployment transaction below.
 
 ## Approved sources (exhaustive allowlist)
 
-Fetch **only** these two official pages. Search results, third-party price
-sites, social posts, and scraped gateway prices are never model-list authority.
+Fetch **only** these three official pages. Search results, third-party price
+sites, and social posts are never model-list authority.
 
-| Source key | URL |
-|---|---|
-| `anthropic` | `https://platform.claude.com/docs/en/about-claude/pricing` |
-| `openai` | `https://developers.openai.com/api/docs/pricing` |
+| Source | Backend it feeds | URL |
+|---|---|---|
+| Anthropic pricing | `claude` | `https://platform.claude.com/docs/en/about-claude/pricing` |
+| OpenAI pricing | `codex` | `https://developers.openai.com/api/docs/pricing` |
+| OpenCode Zen models and pricing | `opencode` | `https://opencode.ai/docs/zen/` |
 
 ## Refresh procedure
 
-1. **Fetch** both approved sources. For each, record the URL, the retrieval
-   timestamp (UTC), and the SHA-256 content hash of the retrieved snapshot.
-   If either source cannot be fetched or parsed, **stop**: leave the Markdown
-   model list unchanged, report the error, and let it become stale rather
-   than fabricating values.
-2. **Extract pricing facts only**: the currently effective standard token
-   prices (input, cached-input, cache-write, output, USD per MTok), each
-   model's context limit, and availability/deprecation qualifiers. Each model
-   row carries one current price set; when a source announces a dated price
-   change, refresh again when it takes effect. Do not copy long provider text
-   into the repository, and do not present the pricing pages as benchmark
-   evidence — they are pricing/availability sources only.
-3. **Reapply the capability rubric explicitly.** Capability levels and ranks
-   are reviewed maintainer judgment, not provider benchmark claims. The
-   maintainer must review every changed capability level, rank, model
-   availability, and pricing basis; changing a level or rank requires reviewed
-   policy approval in the same pull request. A new model row remains
-   `Active: no` until it has all required fields and a reviewed
-   classification. Gateway models without an approved actual price keep `—`
-   in every price cell and stay manual-only.
-4. **Validate before writing**: the fixed table layout (the `Metadata`,
-   `Sources`, and `Models` sections in order, each with its exact column
-   header), the source allowlist, price units and non-negative values,
-   backend/model syntax, unique keys/tokens/ranks, and source freshness.
-   `cafleet model select --model-list <abs path> --role monitor --json`
-   against the candidate file is a convenient end-to-end validation probe.
+1. **Fetch** all three approved sources. If any source cannot be fetched or
+   parsed, **stop**: leave the model list unchanged, report the error, and
+   let it become stale rather than fabricating values.
+2. **Extract pricing facts only**: the currently effective standard input and
+   output prices (USD per MTok) and availability/deprecation qualifiers. Do
+   not copy long provider text into the repository, and do not present the
+   pricing pages as benchmark evidence — they are pricing/availability
+   sources only.
+3. **Refresh the `claude` and `codex` tables** from their provider pricing
+   pages, and **refresh the `opencode` table** with the dedicated procedure
+   below — the Zen catalog behaves differently from the two provider pages,
+   so follow that procedure exactly.
+4. **Reapply the capability classes explicitly.** The `Class` descriptions
+   and the most-to-least-capable row ordering are reviewed maintainer
+   judgment, not provider benchmark claims; changing a class or the ordering
+   requires reviewed policy approval in the same pull request. Every row
+   carries both prices from its approved source.
 5. **Propose, then apply atomically.** Generate a concise proposed diff and
    require explicit maintainer approval before rewriting the tables in
    `skills/cafleet/reference/model-list.md`. Preserve the prescribed preamble
-   verbatim; update the `Metadata` table's `generated_at` only after
-   successful validation and approval. A failed refresh makes **no** edit.
+   verbatim; update the preamble's *last refreshed* date only after approval.
+   A failed refresh makes **no** edit.
+
+## OpenCode Zen procedure (the `opencode` table)
+
+The `opencode` backend is priced by the OpenCode Zen page, and its catalog
+behaves differently from the two provider pages: model IDs differ from
+display names, the page lists many models while cafleet curates a few, and
+free stealth/preview models appear and disappear. On **every** refresh, even
+when the claude/codex prices are unchanged:
+
+1. **Price from the Zen page only.** Zen's own USD-per-MTok rates are the
+   billing rates for the `opencode` backend. Never price a Zen model from the
+   upstream vendor's page (Anthropic, OpenAI, DeepSeek, …) — the Zen rate is
+   the one cafleet members are billed at.
+2. **Copy the Zen model ID exactly; never slugify the display name.** The
+   page shows a display name ("GLM 5.2", "Kimi K2.7 Code") and a distinct
+   model ID (`glm-5.2`, `kimi-k2.7-code`). The row's `--model` value is
+   `opencode/<zen-model-id>` — the literal `opencode/` prefix followed by the
+   ID copied verbatim from the page. A hand-derived slug that does not match
+   the Zen ID fails at spawn time.
+3. **Re-verify every curated row against the page.** For each existing row,
+   confirm the model is still listed on Zen and its price is current. A
+   delisted model's row is removed in the same refresh.
+4. **Handle free models by their published price.** A model Zen offers free
+   for a limited time is priced `0.00` in both columns. When the free offer
+   ends: update the row to the newly published Zen price, or remove the row
+   if the model disappears or has no published price.
+5. **Keep the table a curated subset.** Do not mirror the full Zen catalog —
+   keep a handful of reviewed models spanning the price range. Adding or
+   removing a curated model is a reviewed policy change, approved in the same
+   pull request like any class or ordering change.
 
 ## Cadence and staleness
 
-Refresh the model list at least every 30 days (`freshness_days`) and whenever
-the user asks for a refresh. Stale source data disables automatic cost
-selection (`MODEL_LIST_STALE`) until a maintainer refreshes the model list,
-commits the repository source, and completes the release/deployment
-transaction.
+Refresh the model list at least every 30 days and whenever the user asks for
+a refresh. A stale list disables cost-efficient selection — the Director
+fails closed and relays an operator choice — until a maintainer refreshes the
+model list, commits the repository source, and completes the
+release/deployment transaction.
 
 ## Release-coupled deployment
 
@@ -85,6 +107,6 @@ maintainer:
 
 ## Ownership boundary
 
-This skill owns model-list maintenance; the CAFleet Director owns per-task
-selection (`cafleet model select`); `cafleet member create` remains the
-execution boundary.
+This skill owns model-list maintenance; the CAFleet Director owns per-spawn
+selection by reading the list; `cafleet member create` remains the execution
+boundary.

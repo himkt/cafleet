@@ -1,50 +1,58 @@
 # CAFleet Model List
 
-The machine-readable source of truth for CAFleet model availability, reviewed
-capability policy, and standard token-price estimates. The tables below are
-maintained exclusively by the `cafleet-model-list-refresh` skill from the two
-approved official pricing sources recorded in the Sources table. Capability
-levels (0–5 per dimension) and the unique global rank are reviewed maintainer
-judgment, not provider benchmark claims. Prices are standard direct-provider
-USD API rates per MTok and are estimates, not an invoice guarantee; a row with
-`—` in every price cell (for example a gateway model without an approved
-source price) is visible for diagnostics but never an automatic-selection
-candidate. A `—` in the Aliases cell means the model has no alias; the `Model`
-cell is always a valid spawn token, and a model's key is `<backend>:<model>`.
-Role and token profiles are reviewed code constants in the `cafleet` package,
-not model-list data.
-
-## Metadata
-
-| Field | Value |
-|---|---|
-| schema_version | 1 |
-| generated_at | 2026-07-19T12:12:20Z |
-| freshness_days | 30 |
+The catalog of models a Director may pass to `cafleet member create --model`,
+with standard API prices and the official sources. A Director reads this page
+before every spawn and applies the selection policy in
+[`roles/director.md`](../roles/director.md) § *Model selection* /
+[`reference/director.md`](director.md) § *Model selection before member
+create*. The tables are maintained exclusively by the
+`cafleet-model-list-refresh` skill from the official pricing pages linked
+below — refreshed at least every 30 days (last refreshed: 2026-07-20).
+Prices are standard provider USD rates per MTok and are planning estimates,
+not an invoice guarantee. The list covers the `claude`, `codex`, and
+`opencode` backends; opencode models route through OpenCode Zen and keep the
+`opencode/` prefix in their `--model` value.
 
 ## Sources
 
-| Source | URL | Retrieved at | Content SHA-256 |
+- [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing)
+- [OpenAI pricing](https://developers.openai.com/api/docs/pricing)
+- [OpenCode Zen models and pricing](https://opencode.ai/docs/zen/)
+
+## claude
+
+Rows are ordered most → least capable. Either the model name or its alias is a
+valid `--model` token.
+
+| Model | Alias | Class | Input $/MTok | Output $/MTok |
+|---|---|---|---|---|
+| claude-fable-5 | fable | Mythos-class frontier; highest capability on every dimension | 10.00 | 50.00 |
+| claude-opus-4-8 | opus | Everyday frontier; strong coding, planning, and review | 5.00 | 25.00 |
+| claude-sonnet-5 | sonnet | Efficient mid tier for routine work | 2.00 | 10.00 |
+| claude-haiku-4-5 | haiku | Fast low-cost tier; monitoring and quick bounded tasks | 1.00 | 5.00 |
+
+## codex
+
+| Model | Class | Input $/MTok | Output $/MTok |
 |---|---|---|---|
-| anthropic | https://platform.claude.com/docs/en/about-claude/pricing | 2026-07-19T12:12:20Z | 465c891550c135716901a2679c1c7a693b03fe3d2eac2aff200f9f7f745a1ea3 |
-| openai | https://developers.openai.com/api/docs/pricing | 2026-07-19T12:12:20Z | 6b5ed5e1cdd1edded9e5cc4b187f1603d150318b9a03191bd549a8790c193b9d |
+| gpt-5.6-sol | Latest frontier agentic coding tier; strongest reviewer | 5.00 | 30.00 |
+| gpt-5.5 | Frontier tier for complex coding and research work | 5.00 | 30.00 |
+| gpt-5.6-terra | Balanced agentic coding tier for everyday work | 2.50 | 15.00 |
+| gpt-5.4 | Strong everyday coding tier | 2.50 | 15.00 |
+| gpt-5.6-luna | Fast affordable agentic coding tier | 1.00 | 6.00 |
+| gpt-5.4-mini | Fast efficient mini tier for responsive tasks and subagents | 0.75 | 4.50 |
 
-## Models
+## opencode
 
-| Backend | Model | Aliases | Active | Rank | Cod | Pln | Rsc | Rev | Mon | In | Cached | Write | Out | Max tokens |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| claude | claude-fable-5 | fable | yes | 100 | 5 | 5 | 5 | 5 | 5 | 10.0 | 1.0 | 12.5 | 50.0 | 1000000 |
-| claude | claude-opus-4-8 | opus | yes | 85 | 5 | 5 | 4 | 5 | 5 | 5.0 | 0.5 | 6.25 | 25.0 | 1000000 |
-| claude | claude-sonnet-5 | sonnet | yes | 70 | 4 | 4 | 4 | 4 | 4 | 2.0 | 0.2 | 2.5 | 10.0 | 1000000 |
-| claude | claude-haiku-4-5 | haiku | yes | 40 | 2 | 2 | 2 | 1 | 4 | 1.0 | 0.1 | 1.25 | 5.0 | 200000 |
-| codex | gpt-5.6-sol | — | yes | 90 | 5 | 5 | 4 | 5 | 4 | 5.0 | 0.5 | 0.0 | 30.0 | 400000 |
-| codex | gpt-5.6-terra | — | yes | 75 | 4 | 4 | 4 | 4 | 4 | 2.5 | 0.25 | 0.0 | 15.0 | 400000 |
-| codex | gpt-5.6-luna | — | yes | 55 | 3 | 3 | 3 | 3 | 4 | 1.0 | 0.1 | 0.0 | 6.0 | 400000 |
-| codex | gpt-5.5 | — | yes | 80 | 5 | 5 | 4 | 4 | 4 | 5.0 | 0.5 | 0.0 | 30.0 | 400000 |
-| codex | gpt-5.4 | — | yes | 60 | 4 | 3 | 3 | 3 | 4 | 2.5 | 0.25 | 0.0 | 15.0 | 400000 |
-| codex | gpt-5.4-mini | — | yes | 30 | 2 | 2 | 2 | 2 | 3 | 0.75 | 0.075 | 0.0 | 4.5 | 400000 |
-| opencode | opencode/gpt-5.5-pro | — | yes | 82 | 5 | 5 | 4 | 5 | 4 | — | — | — | — | 400000 |
-| opencode | opencode/gpt-5.5 | — | yes | 78 | 5 | 5 | 4 | 4 | 4 | — | — | — | — | 400000 |
-| opencode | opencode/claude-opus-4-8 | — | yes | 76 | 5 | 5 | 4 | 5 | 5 | — | — | — | — | 1000000 |
-| opencode | opencode/claude-sonnet-4-6 | — | yes | 65 | 4 | 4 | 4 | 4 | 4 | — | — | — | — | 1000000 |
-| opencode | opencode/claude-haiku-4-5 | — | yes | 35 | 2 | 2 | 2 | 1 | 4 | — | — | — | — | 200000 |
+A curated subset of the [OpenCode Zen](https://opencode.ai/docs/zen/)
+catalog; the `opencode/` prefix is part of the `--model` value. A price of
+0.00 is an explicitly free model, currently offered by Zen for a limited
+time.
+
+| Model | Class | Input $/MTok | Output $/MTok |
+|---|---|---|---|
+| opencode/glm-5.2 | Strong general coding tier | 1.40 | 4.40 |
+| opencode/kimi-k2.7-code | Strong agentic tier tuned for code | 0.95 | 4.00 |
+| opencode/qwen3.5-plus | Efficient mid tier for routine work | 0.20 | 1.20 |
+| opencode/big-pickle | Stealth preview model; capability unverified | 0.00 | 0.00 |
+| opencode/deepseek-v4-flash-free | Fast light tier for quick bounded tasks | 0.00 | 0.00 |

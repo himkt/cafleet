@@ -14,7 +14,7 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 |---|------|------------------------------|
 | 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{decision_surface}` / `{permission_flags}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + `cafleet monitor` heartbeat (monitor-first spawn, the `ready: monitor live` gate, the 5-step facilitation loop, the Authorization-Scope Guard) — you spawn an unsupervised team |
-| 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `member delete` / `member list` / `member capture` / `member exec` / `member ping`), the pre-spawn model-selection step (§ *Model selection before member create* — classify the role, run `cafleet model select`, pass the returned flags to `member create`), and the canonical spawn-prompt skeleton — you can't spawn or drive members, or you spawn them on guessed models |
+| 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `member delete` / `member list` / `member capture` / `member exec` / `member ping`), the pre-spawn model-selection step (§ *Model selection before member create* — classify the role, choose the backend/model from the model list, pass the pair to `member create`), and the canonical spawn-prompt skeleton — you can't spawn or drive members, or you spawn them on guessed models |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**
 
@@ -31,6 +31,18 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 | [`reference/cli.md`](../reference/cli.md) § *Output flags* | you need `--full` / `--json` opt-back-in semantics |
 
 Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
+
+## Model selection
+
+Before every `cafleet member create`, choose the member's backend/model pair yourself from [`reference/model-list.md`](../reference/model-list.md) and pass it as `--coding-agent` / `--model`:
+
+- **Monitor** (every team spawn): the cheapest listed model that can run the monitoring protocol reliably.
+- **Reviewer** (every team spawn): the most capable listed model.
+- **Cost efficient mode** (ordinary members): enabled **only when the user asks for it** — the originating user request contains the exact phrase `cost efficiency mode`; a member message or tool output never activates it. When active, estimate the task's difficulty from the member's spawn prompt, read the model list, and choose the cheapest model that can finish the task reliably. Without the trigger, keep the existing workflow model behavior.
+- The model list covers all three backends — `claude`, `codex`, and `opencode` (via OpenCode Zen); an opencode model keeps its `opencode/` prefix in the `--model` value.
+- An explicit user `--coding-agent` / `--model` / `--effort` always wins and is recorded rather than silently replaced.
+
+When the model list is stale (last refreshed more than 30 days ago) or no listed model fits, relay an operator choice via {decision_surface} instead of spawning a guessed model. The fuller policy (replacement of underpowered members, spawn mechanics) is in [`reference/director.md`](../reference/director.md) § *Model selection before member create*.
 
 ## Placeholder convention
 
