@@ -16,9 +16,10 @@ most → least capable.
 
 ## Sources
 
-- [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing)
+- [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing.md)
 - [OpenAI pricing](https://developers.openai.com/api/docs/pricing)
-- [OpenCode Zen models and pricing](https://opencode.ai/docs/zen/)
+- [Codex model availability](https://learn.chatgpt.com/docs/models.md)
+- [OpenCode Zen models and pricing](https://opencode.ai/docs/zen.md)
 
 ## Monitor and reviewer defaults
 
@@ -28,7 +29,7 @@ Per backend, the cheapest model that can run the monitoring protocol reliably
 | Backend | Monitor | Reviewer |
 |---|---|---|
 | claude | claude-haiku-4-5 | claude-fable-5 |
-| codex | gpt-5.4-mini | gpt-5.6-sol |
+| codex | gpt-5.6-luna | gpt-5.6-sol |
 | opencode | opencode/deepseek-v4-flash-free | opencode/glm-5.2 |
 
 ## claude
@@ -49,14 +50,14 @@ Either the model name or its alias is a valid `--model` token.
 | gpt-5.6-sol | Latest frontier agentic coding tier; strongest reviewer | 5.00 | 30.00 |
 | gpt-5.5 | Frontier tier for complex coding and research work | 5.00 | 30.00 |
 | gpt-5.6-terra | Balanced agentic coding tier for everyday work | 2.50 | 15.00 |
-| gpt-5.4 | Strong everyday coding tier | 2.50 | 15.00 |
 | gpt-5.6-luna | Fast affordable agentic coding tier | 1.00 | 6.00 |
-| gpt-5.4-mini | Fast efficient mini tier for responsive tasks and subagents | 0.75 | 4.50 |
 
 ## opencode
 
-A curated subset of the [OpenCode Zen](https://opencode.ai/docs/zen/)
-catalog; the `opencode/` prefix is part of the `--model` value. A price of
+A curated subset of the [OpenCode Zen](https://opencode.ai/docs/zen.md)
+catalog; the `opencode/` prefix is part of the `--model` value. Any other
+`<provider-id>/<model-id>` value remains a manual spawn with explicit
+`--coding-agent opencode --model` flags on `member create`. A price of
 0.00 is an explicitly free model, currently offered by Zen for a limited
 time.
 

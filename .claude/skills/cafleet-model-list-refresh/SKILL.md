@@ -19,14 +19,15 @@ reaches Directors exclusively through the release/deployment transaction below.
 
 ## Approved sources (exhaustive allowlist)
 
-Fetch **only** these three official pages. Search results, third-party price
+Fetch **only** these four official pages. Search results, third-party price
 sites, and social posts are never model-list authority.
 
 | Source | Backend it feeds | URL |
 |---|---|---|
-| Anthropic pricing | `claude` | `https://platform.claude.com/docs/en/about-claude/pricing` |
-| OpenAI pricing | `codex` | `https://developers.openai.com/api/docs/pricing` |
-| OpenCode Zen models and pricing | `opencode` | `https://opencode.ai/docs/zen/` |
+| Anthropic pricing | `claude` | `https://platform.claude.com/docs/en/about-claude/pricing.md` |
+| OpenAI pricing | `codex` (prices) | `https://developers.openai.com/api/docs/pricing` |
+| Codex model availability | `codex` (availability) | `https://learn.chatgpt.com/docs/models.md` |
+| OpenCode Zen models and pricing | `opencode` | `https://opencode.ai/docs/zen.md` |
 
 ## Refresh procedure
 
@@ -40,14 +41,24 @@ sites, and social posts are never model-list authority.
    sources only.
 3. **Refresh the `claude` and `codex` tables** from their provider pricing
    pages, and **refresh the `opencode` table** with the dedicated procedure
-   below — the Zen catalog behaves differently from the two provider pages,
-   so follow that procedure exactly.
+   below — the Zen catalog behaves differently from the provider pages, so
+   follow that procedure exactly. For `codex`, pricing and availability come
+   from different pages: price each model from the OpenAI pricing page, but
+   take Codex availability from the Codex models page
+   (`https://learn.chatgpt.com/docs/models.md`) — the table carries only the
+   models Codex currently offers in its model picker. A model absent there
+   or demoted to a **legacy model** (reachable only via `codex -m` /
+   `config.toml`) is removed from the table even when the pricing page
+   still prices it; legacy models remain manual pass-through `--model`
+   values.
 4. **Reapply the capability classes explicitly.** The `Class` descriptions
    and the most-to-least-capable row ordering are reviewed maintainer
    judgment, not provider benchmark claims; changing a class or the ordering
    requires reviewed policy approval in the same pull request. Every row
    carries both prices from its approved source. Re-derive the *Monitor and
-   reviewer defaults* table from the refreshed backend tables.
+   reviewer defaults* table from the refreshed backend tables, and mirror its
+   values into each backend overlay's `{monitor_model}` / `{reviewer_model}`
+   rows (`skills/cafleet/reference/coding-agent/<name>-overlay.md`).
 5. **Propose, then apply atomically.** Generate a concise proposed diff and
    require explicit maintainer approval before rewriting the tables in
    `skills/cafleet/reference/model-list.md`. Preserve the prescribed preamble

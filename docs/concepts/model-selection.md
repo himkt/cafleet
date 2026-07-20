@@ -17,7 +17,8 @@ deployed cafleet skill replica. It is a catalog-style reference page: one
 table per backend (`claude`, `codex`, and `opencode`), ordered most → least
 capable, with each model's spawn token, its alias (claude models), reviewed
 capability class, and standard input/output USD-per-MTok prices, plus links
-to the approved official pricing pages (Anthropic, OpenAI, and OpenCode Zen).
+to the approved official source pages (Anthropic and OpenAI pricing, Codex
+availability, and OpenCode Zen).
 Capability classes and the ordering are maintainer judgment, never a provider
 benchmark claim; prices are standard provider rates — planning estimates,
 not an invoice guarantee.

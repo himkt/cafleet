@@ -29,7 +29,7 @@ Read your overlay and **resolve** it before your first action.
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../../skills/cafleet/reference/coding-agent/<name>-overlay.md`](../../../../skills/cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{skill_loader}` / `{decision_surface}`, guess a wrong value, or ignore a backend note |
+| 1 | your overlay [`../../../../skills/cafleet/reference/coding-agent/<name>-overlay.md`](../../../../skills/cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{monitor_model}` / `{reviewer_model}` / `{skill_loader}`, guess a wrong value, or ignore a backend note |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../../skills/cafleet/reference/base-dir.md) | the task-scope BASE resolution, the no-bypass write protocol, and the `<unset>` contract — you mis-root run artifacts or fall back to `/tmp` |
 | 3 | the `cafleet-design-doc` skill's [`reference/coordination.md`](../../../../skills/cafleet-design-doc/reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema and the clean-docs extensions (`scanner` role, `findings` pointer) — your status hops mis-route |
 | 4 | this workflow's [`reference/rubric.md`](reference/rubric.md) | the P3/P5 classes, the 30%+ baseline, and the style-only-churn drop rule — you propose churn or mis-scope voice rewrites |

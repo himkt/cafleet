@@ -43,7 +43,7 @@ When the operator names a model rather than a backend ("please create a member w
 | Model name shape | Backend | Flags to pass |
 |---|---|---|
 | Contains a `/` — provider-prefixed (e.g. `opencode/gpt-5.5`, `anthropic/claude-sonnet-4-6`) | `opencode` | `--coding-agent opencode --model <provider-id>/<model-id>` |
-| `gpt-*` (e.g. `gpt-5.6-terra`, `gpt-5.4-mini`) | `codex` | `--coding-agent codex --model <name>` |
+| `gpt-*` (e.g. `gpt-5.6-terra`, `gpt-5.6-luna`) | `codex` | `--coding-agent codex --model <name>` |
 | Claude alias or `claude-*` full name — `fable`, `opus`, `sonnet`, `haiku`, `claude-opus-4-8`, … | `claude` | `--coding-agent claude --model <name>` (omitting the flag inherits your own backend, which matches only when you are a claude Director) |
 | Any other bare name — no shape match (e.g. `gemini-2.5-pro`, `o3-mini`) | none — do NOT infer | Ask the operator for the explicit `--coding-agent` + `--model` pair |
 
@@ -53,7 +53,7 @@ The rows apply as ordered precedence — the first match wins. This matters for 
 
 Model availability, reviewed capability classes, standard token prices, and the official source links live in the model list at [`reference/model-list.md`](model-list.md), maintained via the `cafleet-model-list-refresh` skill. Consult the model list for the current model set and its spawn tokens; pass a listed model name or alias to `--model` exactly as written there.
 
-The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`. The model list's `opencode` section carries a curated subset of the OpenCode Zen catalog; any other provider-prefixed value remains a manual spawn with explicit `--coding-agent opencode --model` flags on `member create`.
+The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`.
 
 **Identity substitution (`str.format`)**: the four-placeholder `str.format` render (and the brace-doubling rule) is canonical in the cafleet [`SKILL.md`](../SKILL.md) § *Spawned-member identity via `str.format` substitution*. Director-side deltas: an unknown placeholder raises a `UsageError` listing the four supported names, a malformed brace expression raises the distinct "double literal braces" `UsageError`, and both (exit 2) roll back the just-registered member.
 

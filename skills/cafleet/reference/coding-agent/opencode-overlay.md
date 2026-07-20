@@ -12,6 +12,8 @@ Substitute these into the base `{…}` placeholders.
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading the cafleet `SKILL.md` core + this overlay by the absolute paths the spawn prompt provides |
 | `{effort_levels}` | unsupported — omit `--effort` |
+| `{monitor_model}` | `opencode/deepseek-v4-flash-free` |
+| `{reviewer_model}` | `opencode/glm-5.2` |
 
 ## Note → applies at
 
@@ -36,6 +38,6 @@ When a capture cannot cleanly separate the two, apply the ambiguity tie-break an
 
 ## Worked resolution
 
-The canonical monitor-spawn command, fully resolved for this backend — the backend/model pair is the Director's pre-spawn choice from the model list (`reference/director.md` § *Model selection before member create*), not from this overlay:
+The canonical monitor-spawn command, fully resolved for this backend:
 
-`cafleet member create --role monitor --coding-agent <chosen backend> --model <chosen model> --text-file <rendered monitor prompt>` (members spawned `--agent cafleet`).
+`cafleet member create --role monitor --coding-agent opencode --model opencode/deepseek-v4-flash-free --text-file <rendered monitor prompt>` (members spawned `--agent cafleet`).

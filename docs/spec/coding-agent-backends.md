@@ -61,7 +61,7 @@ kernel-enforced sandbox — codex is the only backend with one.
 `--ask-for-approval never` disables interactive approval prompts (upstream
 write-up: <https://developers.openai.com/codex/agent-approvals-security>).
 Example `--model` values: `gpt-5.6-sol` (default), `gpt-5.6-terra`,
-`gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`.
+`gpt-5.6-luna`, `gpt-5.5`.
 
 Reasoning-effort levels: `minimal`, `low`, `medium`, `high`, `xhigh`,
 forwarded as the single token `--config=model_reasoning_effort=<level>`

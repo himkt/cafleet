@@ -12,6 +12,8 @@ Substitute these into the base `{…}` placeholders.
 | `{pane_title}` | `claude --name <member-name>` sets `#{pane_title}` to the member name |
 | `{skill_loader}` | the Skill tool (dispatch sub-agents via the Agent tool) |
 | `{effort_levels}` | `low`, `medium`, `high`, `xhigh`, `max` (spawn flag `--effort <level>`) |
+| `{monitor_model}` | `claude-haiku-4-5` |
+| `{reviewer_model}` | `claude-fable-5` |
 
 ## Note → applies at
 
@@ -36,6 +38,6 @@ When a capture shows neither cleanly (e.g. a box scrolled partly out of the capt
 
 ## Worked resolution
 
-The canonical monitor-spawn command, fully resolved for this backend — the backend/model pair is the Director's pre-spawn choice from the model list (`reference/director.md` § *Model selection before member create*), not from this overlay:
+The canonical monitor-spawn command, fully resolved for this backend:
 
-`cafleet member create --role monitor --coding-agent <chosen backend> --model <chosen model> --text-file <rendered monitor prompt>` (members spawned `--permission-mode dontAsk`).
+`cafleet member create --role monitor --coding-agent claude --model claude-haiku-4-5 --text-file <rendered monitor prompt>` (members spawned `--permission-mode dontAsk`).
