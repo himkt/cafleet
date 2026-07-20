@@ -1,11 +1,10 @@
 # CAFleet Model List
 
 The catalog of models a Director may pass to `cafleet member create --model`,
-with standard API prices and the official sources. A Director reads this page
-before every spawn and applies the selection policy in
-[`roles/director.md`](../roles/director.md) § *Model selection* /
-[`reference/director.md`](director.md) § *Model selection before member
-create*. The tables are maintained exclusively by the
+with standard API prices and the official sources. The selection policy —
+cost efficiency mode, the monitor/reviewer rules — lives in
+[`roles/director.md`](../roles/director.md) § *Model selection*, not on this
+page. The tables are maintained exclusively by the
 `cafleet-model-list-refresh` skill from the official pricing pages linked
 below — refreshed at least every 30 days (last refreshed: 2026-07-20).
 Prices are standard provider USD rates per MTok and are planning estimates,
@@ -23,12 +22,13 @@ most → least capable.
 
 ## Monitor and reviewer defaults
 
-Per backend, the cheapest model that can run the monitoring protocol reliably
-(monitor) and the most capable model (reviewer); re-derived on every refresh:
+Each backend's current `{monitor_model}` / `{reviewer_model}` value — the
+overlays mirror this table, and every refresh keeps it in sync with the
+tables below:
 
 | Backend | Monitor | Reviewer |
 |---|---|---|
-| claude | claude-haiku-4-5 | claude-fable-5 |
+| claude | haiku | fable |
 | codex | gpt-5.6-luna | gpt-5.6-sol |
 | opencode | opencode/deepseek-v4-flash-free | opencode/glm-5.2 |
 

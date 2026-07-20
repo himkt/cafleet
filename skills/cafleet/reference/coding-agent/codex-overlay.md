@@ -5,6 +5,8 @@ Substitute these into the base `{…}` placeholders.
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
+| `{monitor_model}` | `gpt-5.6-luna` |
+| `{reviewer_model}` | `gpt-5.6-sol` |
 | `{permission_flags}` | `--ask-for-approval never --sandbox workspace-write` |
 | `{bg_run}` | a backgrounded `!` shell command |
 | `{bg_stop}` | killing the recorded background process |
@@ -12,8 +14,6 @@ Substitute these into the base `{…}` placeholders.
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading the cafleet `SKILL.md` core + this overlay by the absolute paths the spawn prompt provides |
 | `{effort_levels}` | `minimal`, `low`, `medium`, `high`, `xhigh` (spawn flag `--effort <level>`, forwarded as `--config=model_reasoning_effort=<level>`) |
-| `{monitor_model}` | `gpt-5.6-luna` |
-| `{reviewer_model}` | `gpt-5.6-sol` |
 
 ## Note → applies at
 
@@ -40,4 +40,4 @@ When a capture cannot cleanly separate the two, apply the ambiguity tie-break an
 
 The canonical monitor-spawn command, fully resolved for this backend:
 
-`cafleet member create --role monitor --coding-agent codex --model gpt-5.6-luna --text-file <rendered monitor prompt>` (members spawned `--ask-for-approval never --sandbox workspace-write`).
+`cafleet member create --role monitor --model gpt-5.6-luna --text-file <rendered monitor prompt>` (members spawned `--ask-for-approval never --sandbox workspace-write`).

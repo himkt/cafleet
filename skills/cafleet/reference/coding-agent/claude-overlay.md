@@ -5,6 +5,8 @@ Substitute these into the base `{…}` placeholders.
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | the AskUserQuestion tool |
+| `{monitor_model}` | `haiku` |
+| `{reviewer_model}` | `fable` |
 | `{permission_flags}` | `--permission-mode dontAsk` |
 | `{bg_run}` | the Bash tool's `run_in_background: true` |
 | `{bg_stop}` | `TaskStop` |
@@ -12,8 +14,6 @@ Substitute these into the base `{…}` placeholders.
 | `{pane_title}` | `claude --name <member-name>` sets `#{pane_title}` to the member name |
 | `{skill_loader}` | the Skill tool (dispatch sub-agents via the Agent tool) |
 | `{effort_levels}` | `low`, `medium`, `high`, `xhigh`, `max` (spawn flag `--effort <level>`) |
-| `{monitor_model}` | `claude-haiku-4-5` |
-| `{reviewer_model}` | `claude-fable-5` |
 
 ## Note → applies at
 
@@ -40,4 +40,4 @@ When a capture shows neither cleanly (e.g. a box scrolled partly out of the capt
 
 The canonical monitor-spawn command, fully resolved for this backend:
 
-`cafleet member create --role monitor --coding-agent claude --model claude-haiku-4-5 --text-file <rendered monitor prompt>` (members spawned `--permission-mode dontAsk`).
+`cafleet member create --role monitor --model haiku --text-file <rendered monitor prompt>` (members spawned `--permission-mode dontAsk`).

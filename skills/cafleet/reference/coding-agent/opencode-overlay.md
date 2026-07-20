@@ -5,6 +5,8 @@ Substitute these into the base `{…}` placeholders.
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
+| `{monitor_model}` | `opencode/deepseek-v4-flash-free` |
+| `{reviewer_model}` | `opencode/glm-5.2` |
 | `{permission_flags}` | `--agent cafleet` |
 | `{bg_run}` | a backgrounded `!` shell command |
 | `{bg_stop}` | killing the recorded background process |
@@ -12,8 +14,6 @@ Substitute these into the base `{…}` placeholders.
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading the cafleet `SKILL.md` core + this overlay by the absolute paths the spawn prompt provides |
 | `{effort_levels}` | unsupported — omit `--effort` |
-| `{monitor_model}` | `opencode/deepseek-v4-flash-free` |
-| `{reviewer_model}` | `opencode/glm-5.2` |
 
 ## Note → applies at
 
@@ -40,4 +40,4 @@ When a capture cannot cleanly separate the two, apply the ambiguity tie-break an
 
 The canonical monitor-spawn command, fully resolved for this backend:
 
-`cafleet member create --role monitor --coding-agent opencode --model opencode/deepseek-v4-flash-free --text-file <rendered monitor prompt>` (members spawned `--agent cafleet`).
+`cafleet member create --role monitor --model opencode/deepseek-v4-flash-free --text-file <rendered monitor prompt>` (members spawned `--agent cafleet`).

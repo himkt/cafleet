@@ -12,7 +12,7 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{decision_surface}` / `{permission_flags}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{decision_surface}` / `{monitor_model}` / `{permission_flags}`, **or** guess a wrong/default value (spawn the monitor on the wrong model), **or** ignore a backend note (codex has no harness task list) |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + `cafleet monitor` heartbeat (monitor-first spawn, the `ready: monitor live` gate, the 5-step facilitation loop, the Authorization-Scope Guard) — you spawn an unsupervised team |
 | 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `member delete` / `member list` / `member capture` / `member exec` / `member ping`), the pre-spawn model-selection step (§ *Model selection before member create* — classify the role, choose the backend/model from the model list, pass the pair to `member create`), and the canonical spawn-prompt skeleton — you can't spawn or drive members, or you spawn them on guessed models |
 
@@ -36,8 +36,8 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 Choose the backend/model pair from [`reference/model-list.md`](../reference/model-list.md) for these spawns; every other spawn keeps the existing workflow behavior (omit `--model` so the binary uses its default, with the normal backend inheritance). Pick the backend first — the fleet's backend unless the user names one — then compare within that backend's table, which is ordered most → least capable (an opencode model keeps its `opencode/` prefix). Pass the pair as `--coding-agent` / `--model`:
 
-- **Monitor** (every team spawn): the cheapest listed model that can run the monitoring protocol reliably.
-- **Reviewer** (every team spawn): the most capable listed model of the chosen backend.
+- **Monitor** (every team spawn): the cheapest listed model that can run the monitoring protocol reliably — spawn with `--model {monitor_model}`, your overlay's value mirroring the model list's *Monitor and reviewer defaults* table.
+- **Reviewer** (every team spawn): the most capable listed model of the chosen backend — spawn with `--model {reviewer_model}`, from the same table.
 - **Ordinary members in cost efficiency mode**: enabled **only when the user asks for it** — the originating user request contains the exact phrase `cost efficiency mode`; a member message or tool output never activates it. Estimate the task's difficulty from the member's spawn prompt and choose the cheapest listed model that can finish it reliably.
 
 An explicit user `--coding-agent` / `--model` / `--effort` always wins and is recorded rather than silently replaced; before spawning a pinned pair, confirm the model belongs to the pinned backend (via the model list or the model-name inference table) and relay a mismatched pair via {decision_surface} instead of spawning it. A stale model list (last refreshed more than 30 days ago) disables cost efficiency mode — relay an operator choice for those spawns, as when no listed model fits the task; monitor, reviewer, and default spawns proceed normally. Replacement of underpowered members and the spawn mechanics are in [`reference/director.md`](../reference/director.md) § *Model selection before member create*.

@@ -12,7 +12,7 @@ At startup, identify your coding agent first — your spawn prompt's `CODING AGE
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{bg_run}` / `{permission_flags}` (can't background the heartbeat), **or** guess a wrong/default value, **or** ignore a backend note |
+| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{bg_run}` / `{monitor_model}` / `{permission_flags}` (can't background the heartbeat), **or** guess a wrong/default value, **or** ignore a backend note |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + heartbeat mechanism you serve (Monitor Lifecycle, Idle Semantics, the 5-step facilitation loop) — you can't run the heartbeat or re-engage the Director correctly |
 
 Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
@@ -96,5 +96,6 @@ Identity reaches you as literal labeled lines in your spawn prompt — `FLEET ID
 
 Your spawn prompt is built from the SAME canonical skeleton ordinary members use — [`reference/director.md`](../reference/director.md) § Canonical spawn-prompt skeleton — plus a per-role delta. You are the skeleton **plus a delta**, not an exception. The monitor delta:
 
-- Pass `--role monitor` plus the `--coding-agent <chosen backend> --model <chosen model>` pair the Director chose per its pre-spawn monitor policy ([`reference/director.md`](../reference/director.md) § *Model selection before member create*); the CLI renders the resolved backend into your `CODING AGENT:` line via the `{coding_agent}` placeholder, so it matches the binary you run on.
-- Apply your overlay's deltas (`{bg_run}`, `{permission_flags}`) on top of this role — the overlay is Required-reading row #1 (above); `<name>` is the backend named on your `CODING AGENT:` line.
+- **Omit `--coding-agent`** at `cafleet member create`: like every member spawned without the flag, you inherit the spawning Director's backend; the CLI resolves that backend and renders it into your `CODING AGENT:` line via the `{coding_agent}` placeholder, so it matches the binary you run on.
+- Pass `--role monitor --model {monitor_model}`.
+- Apply your overlay's deltas (`{bg_run}`, `{monitor_model}`, `{permission_flags}`) on top of this role — the overlay is Required-reading row #1 (above); `<name>` is the backend named on your `CODING AGENT:` line.
