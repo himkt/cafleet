@@ -15,7 +15,7 @@ def _director_text():
 
 def test_director_documents_pre_spawn_selection_step():
     text = _director_text()
-    assert "cafleet model select --catalog" in text
+    assert "cafleet model select --model-list" in text
     assert "--role monitor" in text
 
 

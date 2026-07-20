@@ -4,41 +4,42 @@ icon: lucide/scale
 
 # Model selection
 
-CAFleet Directors choose each member's backend and model through a local,
-versioned **model catalog** and a deterministic selector, `cafleet model
-select`, instead of fixed per-backend model pins. The catalog is the single
-source of truth for model availability, reviewed capability policy, and
-standard token-price estimates; the selector turns a role's capability
-requirements and a token estimate into an auditable backend/model decision that
-the Director passes unchanged to `cafleet member create`.
+CAFleet Directors choose each member's backend and model through a local
+**model list** and a deterministic selector, `cafleet model select`, instead
+of fixed per-backend model pins. The model list is the single source of truth
+for model availability, reviewed capability policy, and standard token-price
+estimates; the selector turns a role's capability requirements and a token
+estimate into an auditable backend/model decision that the Director passes
+unchanged to `cafleet member create`.
 
-## The model catalog
+## The model list
 
-The catalog lives at `skills/cafleet/reference/model-catalog.md` in every
-deployed cafleet skill replica. It is a Markdown document whose sole machine
-payload is one canonical-JSON fenced block behind the
-`<!-- cafleet-model-catalog: v1 -->` sentinel, carrying:
+The model list lives at `skills/cafleet/reference/model-list.md` in every
+deployed cafleet skill replica. It is a Markdown document whose machine
+payload is three simple Markdown tables, with `—` marking an absent value:
 
-- **Models** — one record per provider billing SKU, with a reviewed capability
-  profile (integer 0–5 levels for `coding`, `planning`, `research`, `review`,
-  and `monitor`, plus a unique `global_rank`) and date-windowed **rate cards**
-  holding standard USD-per-MTok prices for input, cached-input, cache-write,
-  and output tokens. Capability levels are maintainer judgment, never a
-  provider benchmark claim.
-- **Token map** — the exact CLI-token/alias map. Every active model has one
-  canonical (`primary`) spawn token, returned as `selected.model`.
-- **Role profiles** — per-workflow-role capability floors and token profiles
-  (`monitor`, `reviewer`, `programmer`, `tester`, …).
+- **Metadata** — the schema version, generation timestamp, and the
+  `freshness_days` staleness window.
 - **Sources** — the two approved official pricing pages (Anthropic and OpenAI)
   with retrieval timestamps and content hashes. A source older than
   `freshness_days` disables automatic selection until a maintainer refreshes
-  the catalog through the repository's `cafleet-model-catalog-refresh` skill
+  the model list through the repository's `cafleet-model-list-refresh` skill
   and ships it in a release.
+- **Models** — one row per model: its backend, spawn token, optional aliases,
+  a reviewed capability profile (integer 0–5 levels for `coding`, `planning`,
+  `research`, `review`, and `monitor`, plus a unique rank), the current
+  standard USD-per-MTok prices for input, cached-input, cache-write, and
+  output tokens, and the model's total-token limit. Capability levels are
+  maintainer judgment, never a provider benchmark claim.
+
+Role profiles (per-role capability floors and token estimates for `monitor`,
+`reviewer`, `programmer`, `tester`, …) are reviewed code constants in the
+`cafleet` package, not model-list data.
 
 Prices are standard direct-provider USD API rates — planning estimates, not a
 subscription, marketplace, regional, or negotiated invoice guarantee.
-OpenCode gateway models without an approved price source stay manual-only with
-`unknown` rate cards and are never automatic candidates.
+OpenCode gateway models without an approved price source carry `—` in every
+price cell, stay manual-only, and are never automatic candidates.
 
 ## Cost efficiency mode
 
@@ -50,27 +51,27 @@ behavior is unchanged and the selector is informational only.
 
 Two roles are policy exceptions on **every** team spawn, trigger or not:
 
-- **Monitor** — the least-cost catalog model that meets the monitor capability
+- **Monitor** — the least-cost listed model that meets the monitor capability
   baseline.
-- **Reviewer** — the highest global capability rank among reviewer-capable
-  models; cost is recorded but not optimized.
+- **Reviewer** — the highest capability rank among reviewer-capable models;
+  cost is recorded but not optimized.
 
 ## Selection and eligibility
 
-A model is an automatic candidate only when it is active with a mapped token,
-its backend passes its runtime readiness contract, a `known` rate card is
-active for the selection date and token volume, and every required capability
+A model is an automatic candidate only when it is active, its backend passes
+its runtime readiness contract, its prices cover the requested token
+components within the model's total-token limit, and every required capability
 floor is met.
 Ordinary selection minimizes the estimated USD cost over the four token
-components; ties break by higher global rank, then lexical model key.
+components; ties break by higher rank, then lexical model key.
 
 Explicit flags stay overrides: `--coding-agent` restricts candidates to one
-backend, a `--model` pin resolves through the token map as a recorded
-`manual_override` (never silently replaced), and `--effort` is validated
-pass-through that never ranks a model. Missing, stale, or incomparable data
-**fails closed**: the selector returns a typed error with per-candidate
-exclusion reasons, and in cost-efficiency mode the Director relays an operator
-choice instead of spawning a guessed model.
+backend, a `--model` pin resolves through the models' token/alias sets as a
+recorded `manual_override` (never silently replaced), and `--effort` is
+validated pass-through that never ranks a model. Missing, stale, or
+incomparable data **fails closed**: the selector returns a typed error with
+per-candidate exclusion reasons, and in cost-efficiency mode the Director
+relays an operator choice instead of spawning a guessed model.
 
 ## Audit and replacement
 

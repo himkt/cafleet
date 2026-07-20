@@ -1,24 +1,24 @@
 # Cost-Aware CAFleet Model Assignment
 
 **Status**: Complete
-**Progress**: 32/32 tasks complete
-**Last Updated**: 2026-07-19
+**Progress**: 35/35 tasks complete
+**Last Updated**: 2026-07-20
 
 ## Overview
 
-Add an opt-in Director responsibility that chooses the least-cost CAFleet member model that satisfies a task's required capability profile and can replace an underpowered member with a stronger eligible model. The feature is activated only when the user's request contains the exact phrase `cost efficiency mode`; monitoring members remain the cheapest monitor-capable model and reviewers remain the most capable eligible model. A local, versioned catalog will replace the current prose-only model table as the source of truth for model availability, reviewed capability policy, and token-price estimates.
+Add an opt-in Director responsibility that chooses the least-cost CAFleet member model that satisfies a task's required capability profile and can replace an underpowered member with a stronger eligible model. The feature is activated only when the user's request contains the exact phrase `cost efficiency mode`; monitoring members remain the cheapest monitor-capable model and reviewers remain the most capable eligible model. A local, versioned model list will replace the current prose-only model table as the source of truth for model availability, reviewed capability policy, and token-price estimates.
 
 ## Success Criteria
 
-- [x] A Director can deterministically select a backend and model from a local catalog for an ordinary member when `cost efficiency mode` is present.
+- [x] A Director can deterministically select a backend and model from a local model list for an ordinary member when `cost efficiency mode` is present.
 - [x] Selection minimizes estimated USD token cost only among models that meet every required task-capability floor and runtime-availability constraint.
-- [x] Monitor selection chooses the least-cost catalog model that meets the catalog's monitor baseline; reviewer selection chooses the highest-ranked eligible catalog model.
+- [x] Monitor selection chooses the least-cost listed model that meets the monitor baseline; reviewer selection chooses the highest-ranked eligible listed model.
 - [x] An explicit Director or user `--coding-agent`, `--model`, or `--effort` remains an override and is recorded rather than silently replaced.
-- [x] The committed catalog records source URLs, retrieval time, pricing basis, capability rationale, freshness state, and the input/output/cached-token prices needed for an estimate.
-- [x] A refresh skill updates the catalog using only the supplied official Anthropic and OpenAI documentation sources, requires maintainer review, and never silently changes a selection policy.
+- [x] The committed model list records source URLs, retrieval time, freshness state, and the input/output/cached-token prices needed for an estimate; capability levels are reviewed maintainer judgment.
+- [x] A refresh skill updates the model list using only the supplied official Anthropic and OpenAI documentation sources, requires maintainer review, and never silently changes a selection policy.
 - [x] Missing, stale, unsupported, or incomparable data fails closed for automatic cost selection and produces an actionable decision record.
 - [x] Evidence that a member is underpowered produces a bounded, auditable escalation to a strictly more capable eligible replacement, or a user decision when no such replacement is available.
-- [x] Unit and CLI tests cover eligibility, pricing arithmetic, special roles, overrides, stale catalogs, deterministic ties, and no-regression behavior when the trigger is absent.
+- [x] Unit and CLI tests cover eligibility, pricing arithmetic, special roles, overrides, stale model lists, deterministic ties, and no-regression behavior when the trigger is absent.
 
 ---
 
@@ -56,105 +56,65 @@ A user-pinned model is never deleted and replaced automatically. If credible und
 
 `eligible` always means that the selected model is mapped to the requested backend, the backend satisfies its complete existing CAFleet readiness contract, the catalog data is fresh, and the record has the fields required by the role's policy.
 
-### Local model catalog
+### Local model list
 
-Create one machine-readable source of truth at `skills/cafleet/reference/model-catalog.md`. It replaces the prose model lists in `skills/cafleet/reference/director.md`, which will retain only model-name/backend rules and a link to the catalog/refresh skill; do not maintain a second, drifting list.
+Create one machine-readable source of truth at `skills/cafleet/reference/model-list.md`. It replaces the prose model lists in `skills/cafleet/reference/director.md`, which will retain only model-name/backend rules and a link to the model list/refresh skill; do not maintain a second, drifting list.
 
-The catalog is a Markdown document with one deterministic machine payload, not a JSON file packaged with Python. Its human-readable preamble identifies the catalog and its maintenance rule; it then contains exactly one line `<!-- cafleet-model-catalog: v1 -->` immediately followed by exactly one `json` fenced block. That block is the sole authoritative data object: it is canonical JSON (sorted keys, two-space indentation, UTF-8, terminating newline), is never split across blocks, and must contain no comments. The parser rejects a missing/duplicate/misplaced marker, a non-JSON or duplicate payload block, or non-canonical serialization. The JSON object illustrated below is the contents of that sole payload block.
+The model list is a Markdown document whose machine payload is a fixed set of simple Markdown tables embedded in the skill reference page, not a JSON file packaged with Python. Its human-readable preamble identifies the model list and its maintenance rule; it is followed by exactly three `##` sections in fixed order — `Metadata`, `Sources`, `Models` — each containing exactly one Markdown table with an exact expected column header and nothing else but blank lines. The `Metadata` table carries `schema_version`, `generated_at`, and `freshness_days` as fixed-order `Field | Value` rows. Cells are plain scalars: integers and USD-per-MTok decimals as literals, booleans as `yes`/`no`, and the em dash `—` for an absent value (an unpriced component or an alias-free model). Each `Models` row carries the model's backend, spawn token (`Model`), optional comma-separated aliases, active flag, unique rank, the five capability levels, the four current standard prices, and the model's total-token limit; a model's `key` is derived as `<backend>:<model>`. Role profiles and token profiles are reviewed code constants in `cafleet/model_selection.py`, not model-list data. The parser rejects a missing, duplicate, out-of-order, or unknown section, a wrong column header, a missing or malformed separator row, a row with the wrong cell count, table lines outside a section or prose inside one, and any malformed cell. The tables illustrated below are the machine payload.
 
-The repository file is the release source; it is not a runtime default. Each `cafleet setup` release asset copies the entire `skills/cafleet/` directory independently to `~/.claude/skills/cafleet`, `~/.codex/skills/cafleet`, and `~/.config/opencode/skills/cafleet`. A Director derives its absolute catalog path from the exact `cafleet` skill root it loaded: `<loaded-cafleet-skill-root>/reference/model-catalog.md`. It passes that path explicitly to `cafleet model select`; the selector has no package-resource, repository, or CWD fallback. The Python wheel therefore contains parser/selection code but no catalog copy, and the loaded deployed CAFleet skill asset is the only runtime catalog source.
+The repository file is the release source; it is not a runtime default. Each `cafleet setup` release asset copies the entire `skills/cafleet/` directory independently to `~/.claude/skills/cafleet`, `~/.codex/skills/cafleet`, and `~/.config/opencode/skills/cafleet`. A Director derives its absolute model-list path from the exact `cafleet` skill root it loaded: `<loaded-cafleet-skill-root>/reference/model-list.md`. It passes that path explicitly to `cafleet model select`; the selector has no package-resource, repository, or CWD fallback. The Python wheel therefore contains parser/selection code but no model-list copy, and the loaded deployed CAFleet skill asset is the only runtime source.
 
-The catalog is distributed as an ordinary reference page of the `cafleet` skill — no release manifest, content fingerprint, or sidecar file accompanies it. Before selection, `cafleet model select` validates only that its explicit `--catalog` path is absolute and a readable regular file, and that the file parses as a valid, fresh catalog. The audit record includes `catalog_path` in addition to the normalized catalog snapshot and the per-source content hashes carried inside the payload.
+The model list is distributed as an ordinary reference page of the `cafleet` skill — no release manifest, content fingerprint, or sidecar file accompanies it. Before selection, `cafleet model select` validates only that its explicit `--model-list` path is absolute and a readable regular file, and that the file parses as a valid, fresh model list. The audit record includes `model_list_path` in addition to the normalized snapshot and the per-source content hashes carried inside the payload.
 
-Candidate backend eligibility equals the existing backend readiness contract: for every backend that survives model/capability filtering, the CLI calls `CODING_AGENTS[backend].ensure_available()` and excludes a failing backend before ranking. Version 1 is the only accepted schema at launch; a future schema version requires an explicit pure migration function from each supported predecessor, fixture tests for the migration, and an atomic rewrite of the Markdown payload before validation. An unknown or unmigratable version is a hard catalog error.
+Candidate backend eligibility equals the existing backend readiness contract: for every backend that survives model/capability filtering, the CLI calls `CODING_AGENTS[backend].ensure_available()` and excludes a failing backend before ranking. Version 1 is the only accepted schema; an unknown version is a hard model-list error.
 
-```json
-{
-  "schema_version": 1,
-  "generated_at": "2026-07-19T00:00:00Z",
-  "freshness_days": 30,
-  "currency": "USD",
-  "token_profiles": {
-    "small": {"input": 4000, "cached_input": 0, "cache_write": 0, "output": 1000},
-    "standard": {"input": 12000, "cached_input": 0, "cache_write": 0, "output": 6000},
-    "large": {"input": 24000, "cached_input": 0, "cache_write": 0, "output": 12000}
-  },
-  "role_profiles": {
-    "monitor": {"task_kind": "monitoring", "requires": {"monitor": 2}, "token_profile": "small"},
-    "reviewer": {"task_kind": "review", "requires": {"review": 4, "planning": 3}, "token_profile": "standard"}
-  },
-  "sources": {
-    "anthropic": {
-      "url": "https://platform.claude.com/docs/en/about-claude/pricing",
-      "retrieved_at": "2026-07-19T00:00:00Z",
-      "content_sha256": "..."
-    },
-    "openai": {
-      "url": "https://developers.openai.com/api/docs/pricing",
-      "retrieved_at": "2026-07-19T00:00:00Z",
-      "content_sha256": "..."
-    }
-  },
-  "models": [
-    {
-      "key": "codex:gpt-5.6-luna",
-      "backend": "codex",
-      "provider_sku": "gpt-5.6-luna",
-      "provider": "openai",
-      "active": true,
-      "capability": {
-        "global_rank": 30,
-        "levels": {"coding": 3, "planning": 3, "research": 3, "review": 2, "monitor": 4},
-        "provenance": {"type": "maintainer_judgment", "rationale": "Reviewed classification; not a provider benchmark claim.", "reviewed_at": "2026-07-19T00:00:00Z"}
-      },
-      "rate_cards": [{
-        "id": "standard_short",
-        "status": "known",
-        "max_total_tokens": 128000,
-        "components": {
-          "input": {"mode": "supported", "usd_per_mtok": 1.0},
-          "cached_input": {"mode": "supported", "usd_per_mtok": 0.1},
-          "cache_write": {"mode": "supported", "usd_per_mtok": 1.25},
-          "output": {"mode": "supported", "usd_per_mtok": 6.0}
-        },
-        "effective_from": "2026-07-19",
-        "effective_until": null,
-        "pricing_source": "openai"
-      }],
-      "availability": {"requires_backend": "codex"}
-    }
-  ],
-  "model_tokens": [{"backend": "codex", "token": "gpt-5.6-luna", "model_key": "codex:gpt-5.6-luna", "primary": true}]
-}
+```markdown
+## Metadata
+
+| Field | Value |
+|---|---|
+| schema_version | 1 |
+| generated_at | 2026-07-19T00:00:00Z |
+| freshness_days | 30 |
+
+## Sources
+
+| Source | URL | Retrieved at | Content SHA-256 |
+|---|---|---|---|
+| anthropic | https://platform.claude.com/docs/en/about-claude/pricing | 2026-07-19T00:00:00Z | <64-hex hash> |
+| openai | https://developers.openai.com/api/docs/pricing | 2026-07-19T00:00:00Z | <64-hex hash> |
+
+## Models
+
+| Backend | Model | Aliases | Active | Rank | Cod | Pln | Rsc | Rev | Mon | In | Cached | Write | Out | Max tokens |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| codex | gpt-5.6-luna | — | yes | 55 | 3 | 3 | 3 | 3 | 4 | 1.0 | 0.1 | 0.0 | 6.0 | 400000 |
 ```
 
 Required constraints:
 
-- `token_profiles` has exactly the named profiles `small`, `standard`, and `large`; every component is a non-negative integer token count and the four components are disjoint. `role_profiles` has only the currently supported role keys enumerated in the normative table below, uses a listed `task_kind`, a non-empty `requires` map, and one valid token-profile name. The monitor/reviewer baselines are their profile requirements; a Director may increase, never decrease, them.
-- Every active selectable model has one `key` for one provider billing SKU. `model_tokens` is the sole exact CLI-token/alias map: every `(backend, token)` is unique, points to one active model key with the same backend, and candidate enumeration operates on model keys rather than tokens. A provider SKU can have several aliases but appears once, so aliases cannot double-count or receive a price intended for another SKU. Every active model key has exactly one map entry with `primary: true`; that token is the canonical spawn token returned as `selected.model` and passed to `member create`. Diagnostics may display all aliases but must identify the canonical token. The initial inclusion authority is the finite set of model tokens currently documented in `skills/cafleet/reference/director.md` for direct Claude and Codex backends; arbitrary pass-through strings remain manual-only.
-
-- Capability levels are integers 0–5 for exactly `coding`, `planning`, `research`, `review`, and `monitor`; a model is eligible only when every requested dimension is at least the required level. `global_rank` is a unique, deterministic ordering used only by the reviewer exception and ties are broken by `key`. Capability provenance is always `maintainer_judgment`; the two approved provider pages are pricing/availability sources only. Changing a level or rank requires reviewed policy approval in the same pull request.
-- A rate card is active when its UTC date range contains the selection date and `total_tokens = input + cached_input + cache_write + output` is at most `max_total_tokens`. The components map has all four keys. `supported` requires a non-negative USD-per-MTok number; `unsupported` requires `null` and makes the card ineligible if that component's requested tokens are nonzero; a supported component with `0` is an explicitly free component. The selector chooses the least-cost active eligible card for the model and never treats a missing component as zero.
-- Automatic cost selection requires a `known` rate card; `unknown` and `not-applicable` cards remain visible in diagnostics but cannot be candidates. Existing OpenCode gateway model tokens remain manual-only with unknown cost unless their actual gateway price can be evidenced by an approved source.
-- Catalog freshness is evaluated independently for both required sources in UTC: each `retrieved_at` must be no more than `freshness_days` before selection time and no more than five minutes after it. `generated_at` is audit metadata only; a newly generated catalog with either stale source is stale. Effective dates select cards, not freshness; no active price card is a separate error.
-- The validator rejects an invalid/missing migration, duplicate keys or tokens, an unknown profile/task kind/dimension, an invalid source URL/hash, an invalid rate card, stale required source, or no eligible model. It never silently falls back to a high-cost default.
+- Every active selectable model has one row (one `key`) for one provider billing SKU. The row's `Model` cell plus its aliases are the model's exact CLI spawn tokens: every `(backend, token)` pair is unique, so aliases cannot double-count or receive a price intended for another SKU. `selected.model` is the row's `Model` cell, passed to `member create`. The initial inclusion authority is the finite set of model tokens currently documented in `skills/cafleet/reference/director.md` for direct Claude and Codex backends; arbitrary pass-through strings remain manual-only.
+- Capability levels are integers 0–5 for exactly `coding`, `planning`, `research`, `review`, and `monitor`; a model is eligible only when every requested dimension is at least the required level. `Rank` is a unique, deterministic ordering used by the reviewer exception and tie-breaking. Capability levels and ranks are reviewed maintainer judgment; the two approved provider pages are pricing/availability sources only. Changing a level or rank requires reviewed policy approval in the same pull request.
+- Each row prices all four token components at the currently effective standard rate. A priced component is a non-negative USD-per-MTok number; an unpriced component (`—`) makes the model ineligible if that component's requested tokens are nonzero; a priced component with `0` is an explicitly free component. A row whose components are all `—` (for example an OpenCode gateway model without an approved source price) stays visible in diagnostics but is never an automatic candidate. `total_tokens = input + cached_input + cache_write + output` must be at most `Max tokens`. The selector never treats a missing component as zero.
+- Freshness is evaluated independently for both required sources in UTC: each `retrieved_at` must be no more than `freshness_days` before selection time and no more than five minutes after it. `generated_at` is audit metadata only; a newly generated model list with either stale source is stale.
+- The validator rejects an unknown schema version, duplicate keys/ranks/tokens, an unknown backend or dimension value, an invalid source URL/hash, an invalid price cell, a stale required source, or no eligible model. It never silently falls back to a high-cost default.
 
 ### Task profile and selection algorithm
 
-Add `cafleet/model_selection.py` as a pure domain module and a `cafleet model select` CLI group. The CLI file boundary reads the explicit Markdown path, while a pure `parse_catalog_markdown(text)` function validates/extracts the sentinel payload and hands a typed catalog to the I/O-free selector. The Director calls it before each `member create`; the selection result supplies the already-supported `--coding-agent` and `--model` flags to that existing command. Effort is never automatically selected: a manual effort override is independently passed to the existing backend validator after model selection.
+Add `cafleet/model_selection.py` as a pure domain module and a `cafleet model select` CLI group. The CLI file boundary reads the explicit Markdown path, while a pure `parse_model_list_markdown(text)` function validates/extracts the model-list tables and hands a typed model list to the I/O-free selector. The Director calls it before each `member create`; the selection result supplies the already-supported `--coding-agent` and `--model` flags to that existing command. Effort is never automatically selected: a manual effort override is independently passed to the existing backend validator after model selection.
 
 The CLI accepts a role, task profile, token estimate, and output mode. A minimal interface is:
 
 ```text
 cafleet model select \
-  --catalog /absolute/path/to/skills/cafleet/reference/model-catalog.md \
+  --model-list /absolute/path/to/skills/cafleet/reference/model-list.md \
   --role programmer \
   --estimated-input-tokens 12000 \
   --estimated-output-tokens 6000 \
   --json
 ```
 
-`--role` is one of the following catalog role-profile keys. The listed requirements and profile are the required defaults; repeated `--requires dimension=level` can only raise a listed or previously-zero dimension to 1–5, and explicit token counts can only replace the profile with non-negative integers. There is no free-form `--task-kind` or `--complexity` selector input: `task_kind` is a normative audit label owned by the role profile.
+`--role` is one of the following role-profile keys, defined as reviewed code constants in the domain module. The listed requirements and profile are the required defaults; repeated `--requires dimension=level` can only raise a listed or previously-zero dimension to 1–5, and explicit token counts can only replace the profile with non-negative integers. There is no free-form `--task-kind` or `--complexity` selector input: `task_kind` is a normative audit label owned by the role profile.
 
 | Role-profile key | Task kind | Default requirements | Token profile |
 |---|---|---|---|
@@ -173,9 +133,9 @@ cafleet model select \
 | `presentation` | `presentation_authoring` | planning 3, research 2, review 2 | standard |
 | `visual_reviewer` | `visual_review` | review 4, planning 2 | standard |
 
-The Director may make only documented task-specific increases: routine bounded work may retain the profile, cross-component or high-impact work raises each relevant dimension to at least 4, and security-sensitive/novel/failure-intolerant work raises relevant dimensions to 5. A requested value below the profile, an unknown role/dimension, or a token profile not present in the catalog is rejected.
+The Director may make only documented task-specific increases: routine bounded work may retain the profile, cross-component or high-impact work raises each relevant dimension to at least 4, and security-sensitive/novel/failure-intolerant work raises relevant dimensions to 5. A requested value below the profile or an unknown role/dimension is rejected.
 
-The selection problem is explicitly constrained cost minimization. For task \(t\), let \(r_t[d]\) be the required level in each capability dimension \(d\), let \(a(m)\) mean model \(m\) is active, fresh, and runnable in the available backend, and let \(q(m,d)\) be the catalog capability level. The eligible set is:
+The selection problem is explicitly constrained cost minimization. For task \(t\), let \(r_t[d]\) be the required level in each capability dimension \(d\), let \(a(m)\) mean model \(m\) is active, fresh, and runnable in the available backend, and let \(q(m,d)\) be the listed capability level. The eligible set is:
 
 \[
 E_t = \{m \mid a(m) \land pricing(m)=known \land \forall d,\ q(m,d) \ge r_t[d]\}
@@ -187,31 +147,31 @@ For ordinary members, the selected model is:
 m^* = \underset{m \in E_t}{\operatorname{argmin}}\; \widehat{C}(m,t)
 \]
 
-where \(\widehat{C}\) is the estimated standard USD token cost for the task's input, cached-input, cache-write, and output token estimates. This is the operational form of “least cost subject to task success”: catalog eligibility is a conservative, reviewed proxy for the capability needed to finish the task reliably, not a guarantee of success. Runtime evidence that the proxy was too weak invokes the underpowered-member escalation below and raises the task floor before a replacement is selected.
+where \(\widehat{C}\) is the estimated standard USD token cost for the task's input, cached-input, cache-write, and output token estimates. This is the operational form of “least cost subject to task success”: model-list eligibility is a conservative, reviewed proxy for the capability needed to finish the task reliably, not a guarantee of success. Runtime evidence that the proxy was too weak invokes the underpowered-member escalation below and raises the task floor before a replacement is selected.
 
 The selector performs the following deterministic steps.
 
 1. The CLI orchestration layer resolves the requested/manual backend candidates and calls each candidate's existing `CODING_AGENTS[backend].ensure_available()` contract. It supplies the resulting runtime-ready backend set to the pure, I/O-free domain selector; this preserves the OpenCode preset checks.
-2. For automatic and special-role policies, load, migrate, and validate the catalog; reject stale/invalid data before candidate selection. Resolve the role profile, normalize only permitted requirement increases, and fill absent token values from its named token profile.
-3. Normalize override shape before branching. A model pin, with or without its matching backend pin, is a full manual bypass: validate the existing backend/model/effort contract and spawn as current CAFleet does; return `manual_override` with an estimate only when a fresh mapped rate card exists, otherwise `estimate_status: unavailable`. An explicitly marked full workflow `manual_override` has the same behavior. A backend-only override remains a ready-backend candidate filter during active ordinary cost mode and monitor/reviewer policy selection; an effort-only override is post-selection validation and does not alter ranking. Outside an active ordinary/special policy, backend-only and effort-only fields retain current unpinned spawn behavior. This manual-bypass path is unavailable to an unmarked legacy workflow pin; automatic and special-role policies otherwise fail closed on stale data.
+2. For automatic and special-role policies, load and validate the model list; reject stale/invalid data before candidate selection. Resolve the role profile, normalize only permitted requirement increases, and fill absent token values from its named token profile.
+3. Normalize override shape before branching. A model pin, with or without its matching backend pin, is a full manual bypass: validate the existing backend/model/effort contract and spawn as current CAFleet does; return `manual_override` with an estimate only when a fresh mapped priced row exists, otherwise `estimate_status: unavailable`. An explicitly marked full workflow `manual_override` has the same behavior. A backend-only override remains a ready-backend candidate filter during active ordinary cost mode and monitor/reviewer policy selection; an effort-only override is post-selection validation and does not alter ranking. Outside an active ordinary/special policy, backend-only and effort-only fields retain current unpinned spawn behavior. This manual-bypass path is unavailable to an unmarked legacy workflow pin; automatic and special-role policies otherwise fail closed on stale data.
 
-4. Filter automatic candidates by active mapped token, ready backend, active known rate card, `max_total_tokens`, and every capability floor. For an ordinary member, compute `estimated_usd = input_tokens / 1_000_000 * input_price + cached_input_tokens / 1_000_000 * cached_input_price + cache_write_tokens / 1_000_000 * cache_write_price + output_tokens / 1_000_000 * output_price`; select the smallest estimate, then higher global rank, then lexical key.
-5. For a monitor, use its baseline and token profile then select the lowest cost. For a reviewer, use its baseline and select greatest global rank, then lower estimated cost, then lexical key. The selector returns the backend, exact catalog model token, no automatic effort, and the structured diagnostic; it never synthesizes a shell command.
+4. Filter automatic candidates by active row, ready backend, priced components, `Max tokens`, and every capability floor. For an ordinary member, compute `estimated_usd = input_tokens / 1_000_000 * input_price + cached_input_tokens / 1_000_000 * cached_input_price + cache_write_tokens / 1_000_000 * cache_write_price + output_tokens / 1_000_000 * output_price`; select the smallest estimate, then higher rank, then lexical key.
+5. For a monitor, use its baseline and token profile then select the lowest cost. For a reviewer, use its baseline and select greatest rank, then lower estimated cost, then lexical key. The selector returns the backend, exact listed model token, no automatic effort, and the structured diagnostic; it never synthesizes a shell command.
 
-In `--json` mode, every failure writes this common envelope to stdout before exiting: `{"error":{"code":"...","message":"...","details":{},"candidates":[]}}`. `candidates` contains each examined key and its exclusion reason when candidate enumeration occurred; `details` contains only normalized request/catalog metadata and never prompt text. The stable error contract is:
+In `--json` mode, every failure writes this common envelope to stdout before exiting: `{"error":{"code":"...","message":"...","details":{},"candidates":[]}}`. `candidates` contains each examined key and its exclusion reason when candidate enumeration occurred; `details` contains only normalized request/model-list metadata and never prompt text. The stable error contract is:
 
 | Code | Click exit code | Meaning |
 |---|---:|---|
 | `MODEL_SELECTION_INVALID_REQUEST` | 2 | Unknown role/dimension, invalid override combination, negative token value, or invalid effort request. |
-| `MODEL_CATALOG_PATH_UNAVAILABLE` | 1 | The required absolute Markdown catalog path is absent, unreadable, or not a regular file. |
-| `MODEL_CATALOG_INVALID` | 1 | Missing, malformed, unmigratable, or schema-invalid catalog. |
-| `MODEL_CATALOG_STALE` | 1 | A required source fails the UTC freshness rule for automatic/special selection. |
+| `MODEL_LIST_PATH_UNAVAILABLE` | 1 | The required absolute Markdown model-list path is absent, unreadable, or not a regular file. |
+| `MODEL_LIST_INVALID` | 1 | Missing, malformed, or schema-invalid model list. |
+| `MODEL_LIST_STALE` | 1 | A required source fails the UTC freshness rule for automatic/special selection. |
 | `MODEL_BACKEND_UNAVAILABLE` | 1 | No requested candidate passes its existing backend readiness contract. |
-| `MODEL_NO_ELIGIBLE_CANDIDATE` | 1 | Ready catalog candidates exist but none meets rate-card, price, or capability constraints. |
+| `MODEL_NO_ELIGIBLE_CANDIDATE` | 1 | Ready listed candidates exist but none meets price, token-limit, or capability constraints. |
 | `MODEL_SELECTION_AUDIT_UNAVAILABLE` | 1 | Automatic/special selection has `BASE == <unset>`. |
 | `MODEL_UPGRADE_UNAVAILABLE` | 1 | A bounded replacement has no stronger candidate in its pinned snapshot. |
 
-Human mode uses the same code in the Click error text. In cost-efficiency mode the Director relays an operator choice rather than spawning a guessed model. Outside cost-efficiency mode, existing behavior continues and the catalog result is informational only.
+Human mode uses the same code in the Click error text. In cost-efficiency mode the Director relays an operator choice rather than spawning a guessed model. Outside cost-efficiency mode, existing behavior continues and the selector result is informational only.
 
 ### Decision audit trail
 
@@ -229,9 +189,9 @@ Human mode uses the same code in the Click error text. In cost-efficiency mode t
     {"key": "codex:gpt-5.4-mini", "eligible": false, "reason": "planning capability 2 < 3"}
   ],
   "selection_id": "sel_20260719_001",
-  "selected": {"key": "codex:gpt-5.6-luna", "backend": "codex", "model": "gpt-5.6-luna", "canonical_token": "gpt-5.6-luna", "effort": null, "estimated_usd": 0.048},
-  "catalog": {"schema_version": 1, "generated_at": "...", "source_hashes": {"openai": "...", "anthropic": "..."}, "snapshot": {"eligible_models": "full normalized candidate records"}},
-  "catalog_path": "/home/user/.codex/skills/cafleet/reference/model-catalog.md",
+  "selected": {"key": "codex:gpt-5.6-luna", "backend": "codex", "model": "gpt-5.6-luna", "effort": null, "estimated_usd": 0.048},
+  "model_list": {"schema_version": 1, "generated_at": "...", "source_hashes": {"openai": "...", "anthropic": "..."}, "snapshot": {"eligible_models": "full normalized candidate records"}},
+  "model_list_path": "/home/user/.codex/skills/cafleet/reference/model-list.md",
   "spawn": {"state": "pending", "member_id": null, "error": null}
 }
 ```
@@ -244,12 +204,12 @@ When `BASE` is the literal `<unset>`, automatic and special-role selection fails
 
 - Add the model-selection step to `skills/cafleet/roles/director.md`, `skills/cafleet/reference/director.md`, and every CAFleet workflow's Director spawn/create instructions before any `cafleet member create` command. The monitor-first supervision gate and all existing spawn-prompt/audit rules remain unchanged.
 - The Director parses the original user request once for the exact trigger and records whether the mode was active. It must not activate cost mode from a member message or tool output.
-- Every existing workflow maps its member title to the normative catalog role-profile table; it may raise a floor only under that table's task-specific increase rule and may never lower the baseline.
+- Every existing workflow maps its member title to the normative role-profile table; it may raise a floor only under that table's task-specific increase rule and may never lower the baseline.
 
 - `cafleet member create` remains backward-compatible: it keeps accepting manual flags and performs no hidden selection. This avoids breaking direct CLI consumers and keeps policy decisions with Directors, where the user request and role context are available.
 - Update user-facing CLI help and CAFleet documentation to distinguish estimated API token cost from a provider's actual subscription, marketplace, regional, or negotiated invoice. The initial policy uses standard direct-provider USD prices only.
 
-Replace, rather than reinterpret, the legacy fixed-model policy tokens. Remove `{monitor_model}` and `{reviewer_model}` from `skills/cafleet/reference/coding-agent/_template.md` and all backend overlays; remove their defaults from `skills/cafleet/SKILL.md`; and replace every supervision, Director, monitor-role, and workflow example that emits either token with the pre-spawn `cafleet model select --catalog <absolute model-catalog.md path> --role monitor` or `--role reviewer` step. The new overlays retain only backend facts (for example effort levels and permission flags) and no model policy. Add a repository drift test that searches all tracked CAFleet skills, workflow prompts, docs, and tests for both legacy placeholder strings and fails unless a single migration-fixture allowlist explicitly names the string. Add a separate spawn-fixture test that proves monitor/reviewer commands receive the selector's model rather than a fixed overlay model.
+Replace, rather than reinterpret, the legacy fixed-model policy tokens. Remove `{monitor_model}` and `{reviewer_model}` from `skills/cafleet/reference/coding-agent/_template.md` and all backend overlays; remove their defaults from `skills/cafleet/SKILL.md`; and replace every supervision, Director, monitor-role, and workflow example that emits either token with the pre-spawn `cafleet model select --model-list <absolute model-list.md path> --role monitor` or `--role reviewer` step. The new overlays retain only backend facts (for example effort levels and permission flags) and no model policy. Add a repository drift test that searches all tracked CAFleet skills, workflow prompts, docs, and tests for both legacy placeholder strings and fails unless a single migration-fixture allowlist explicitly names the string. Add a separate spawn-fixture test that proves monitor/reviewer commands receive the selector's model rather than a fixed overlay model.
 
 #### Underpowered-member detection and replacement
 
@@ -260,32 +220,32 @@ Valid evidence is one or more of: the member's self-report that it cannot reason
 For each replacement, the Director follows this order:
 
 1. Freeze new work for the affected task and collect a bounded handoff: request one concise state report from the member (completed work, modified paths, commands/tests run, blockers, and next step). If it cannot respond promptly, capture its pane and use the capture as the handoff evidence.
-2. Pin the full normalized candidate snapshot (schema version, source hashes, exact model records/rate cards, original model key, and global ranks) from the original decision record for the lifetime of the task. Re-run the pure selector against that snapshot while rechecking current backend readiness; a catalog refresh cannot change rank history mid-attempt. Raise at least the failed capability floor by one, or to the Reviewer/Director's explicitly justified floor, and retain the same token estimate unless evidence requires a revised estimate. The replacement must have a strictly greater rank than the recorded failed model and satisfy the new floors. It may cost more; cost is minimized only within this stronger eligible set.
+2. Pin the full normalized candidate snapshot (schema version, source hashes, exact model records, original model key, and ranks) from the original decision record for the lifetime of the task. Re-run the pure selector against that snapshot while rechecking current backend readiness; a model-list refresh cannot change rank history mid-attempt. Raise at least the failed capability floor by one, or to the Reviewer/Director's explicitly justified floor, and retain the same token estimate unless evidence requires a revised estimate. The replacement must have a strictly greater rank than the recorded failed model and satisfy the new floors. It may cost more; cost is minimized only within this stronger eligible set.
 3. Write a replacement decision record containing the trigger, evidence pointers, old and new task profiles, candidate exclusions, old/new model and estimated cost, attempt number, and handoff artifact path. Do not include secrets or full prompt contents.
 4. Delete the old member through the standard `cafleet member delete` lifecycle before creating the replacement, preventing concurrent agents from editing the same task. The existing monitor remains live; all normal spawn, audit, and prompt-substitution rules apply to the new member.
 5. Spawn the replacement with the original assignment plus the bounded handoff and the same deliverable paths. It resumes the task rather than starting a parallel implementation. The Director routes the original task pointer and asks the Reviewer to re-evaluate the resumed output when the workflow normally reaches review.
 
 The initial member plus at most two replacements are allowed per task. Each replacement must be strictly higher-ranked than its predecessor, and a `(task pointer, model key)` pair may never be retried. If the failed member has an unmapped manual model, an inactive/removed entry, no recorded rank, a stale/missing pinned snapshot, or any explicit user override, the Director does not auto-replace it and instead relays a user decision. If the stronger eligible set is empty, the maximum is reached, or evidence remains ambiguous, the Director likewise fails closed and relays an operator choice: approve a named higher-cost/manual override, simplify/re-scope the task, or stop. Only the Director can delete or create members; the Reviewer supplies evidence and remains independent of the replacement execution.
 
-### Catalog refresh skill and maintenance
+### Model-list refresh skill and maintenance
 
-Create a dedicated project-local skill at `.claude/skills/cafleet-model-catalog-refresh/SKILL.md`. It is a maintainer tool of this repository — not distributed by `cafleet setup`, not part of the release skill assets — invoked by a maintainer to refresh the local catalog; it is not run automatically during a member spawn. Its hard requirements are:
+Create a dedicated project-local skill at `.claude/skills/cafleet-model-list-refresh/SKILL.md`. It is a maintainer tool of this repository — not distributed by `cafleet setup`, not part of the release skill assets — invoked by a maintainer to refresh the local model list; it is not run automatically during a member spawn. Its hard requirements are:
 
-1. Fetch only the two user-approved official sources: `https://platform.claude.com/docs/en/about-claude/pricing` and `https://developers.openai.com/api/docs/pricing`. Do not use search results, third-party price sites, social posts, or scraped gateway prices as catalog authority.
-2. Record URL, retrieval timestamp, content hash, relevant standard token prices, date-limited pricing, and availability/deprecation qualifiers. Capability levels and global ranks are separately reviewed maintainer policy; do not present the pricing pages as benchmark evidence or copy long provider text into the repository.
-3. Reapply the catalog capability rubric explicitly. The maintainer must review every changed capability level, global rank, model availability, pricing basis, and effective date. A new model remains inactive until it has all required fields and a reviewed classification.
-4. Validate the Markdown envelope, canonical JSON payload, schema, source allowlist, price units, non-negative values, date windows, backend/model syntax, unique keys, and catalog freshness. Generate a concise proposed diff and require explicit maintainer approval before atomically rewriting the one payload block in `skills/cafleet/reference/model-catalog.md`; preserve the prescribed preamble verbatim.
-5. Update the payload's `generated_at` only after successful validation and approval. If either approved source cannot be fetched or parsed, leave the Markdown catalog unchanged, report the error, and let it become stale rather than fabricating values.
-6. Refresh the catalog at least every 30 days and whenever the user asks for a refresh. Stale data disables automatic cost selection until a maintainer refreshes, commits the repository source, and completes the release/deployment transaction below.
+1. Fetch only the two user-approved official sources: `https://platform.claude.com/docs/en/about-claude/pricing` and `https://developers.openai.com/api/docs/pricing`. Do not use search results, third-party price sites, social posts, or scraped gateway prices as model-list authority.
+2. Record URL, retrieval timestamp, content hash, the currently effective standard token prices, and availability/deprecation qualifiers. Capability levels and ranks are separately reviewed maintainer policy; do not present the pricing pages as benchmark evidence or copy long provider text into the repository.
+3. Reapply the capability rubric explicitly. The maintainer must review every changed capability level, rank, model availability, and pricing basis. A new model remains inactive until it has all required fields and a reviewed classification.
+4. Validate the fixed table layout (the three required sections with their exact column headers), schema, source allowlist, price units, non-negative values, backend/model syntax, unique keys, and source freshness. Generate a concise proposed diff and require explicit maintainer approval before atomically rewriting the tables in `skills/cafleet/reference/model-list.md`; preserve the prescribed preamble verbatim.
+5. Update the `Metadata` table's `generated_at` only after successful validation and approval. If either approved source cannot be fetched or parsed, leave the Markdown model list unchanged, report the error, and let it become stale rather than fabricating values.
+6. Refresh the model list at least every 30 days and whenever the user asks for a refresh. Stale data disables automatic cost selection until a maintainer refreshes, commits the repository source, and completes the release/deployment transaction below.
 
-Catalog refresh deployment is release-coupled: the maintainer bumps the CAFleet release version, builds the wheel and `cafleet-assets-v<version>.zip` containing the refreshed `skills/` tree (the catalog rides inside `skills/cafleet/reference/` like every other reference page), then publishes that release. Each active backend upgrades to that CLI version and runs `cafleet setup`, which overwrites its installed `cafleet` skill replica. There is no catalog-only sync path in this iteration; a committed source file alone does not refresh a running Director's asset copy.
+Model-list refresh deployment is release-coupled: the maintainer bumps the CAFleet release version, builds the wheel and `cafleet-assets-v<version>.zip` containing the refreshed `skills/` tree (the model list rides inside `skills/cafleet/reference/` like every other reference page), then publishes that release. Each active backend upgrades to that CLI version and runs `cafleet setup`, which overwrites its installed `cafleet` skill replica. There is no model-list-only sync path in this iteration; a committed source file alone does not refresh a running Director's asset copy.
 
-The skill owns catalog maintenance; the CAFleet Director owns per-task selection; `member create` remains the execution boundary.
+The skill owns model-list maintenance; the CAFleet Director owns per-task selection; `member create` remains the execution boundary.
 
 ### Security, failure handling, and compatibility
 
-- Treat catalog files and refresh output as untrusted until schema and source allowlist validation complete. Never execute text extracted from provider pages.
-- Do not write price or capability data into the CAFleet database in this iteration. A committed catalog plus per-task hidden audit artifacts is sufficient and avoids schema migrations for frequently changing public data.
+- Treat model-list files and refresh output as untrusted until schema and source allowlist validation complete. Never execute text extracted from provider pages.
+- Do not write price or capability data into the CAFleet database in this iteration. A committed model list plus per-task hidden audit artifacts is sufficient and avoids schema migrations for frequently changing public data.
 - Selection must preserve existing permission flags, model-to-backend validation, spawn placeholder substitution, monitor lifecycle, and rollback behavior. It may only change the arguments that a Director chooses to send to `member create`.
 - The use of source hashes and effective dates makes changed external pricing observable. The system does not claim real-time or account-specific billing accuracy.
 
@@ -355,6 +315,12 @@ The skill owns catalog maintenance; the CAFleet Director owns per-task selection
 - [x] Remove the asset-manifest machinery: delete `skills/cafleet/asset-manifest.json`, the loaded-skill-root/fingerprint validation, the `MODEL_CATALOG_ASSET_MISMATCH` and `MODEL_CANDIDATE_ASSET_UNAVAILABLE` codes, and the per-candidate replica checks; candidate backends are filtered by `ensure_available()` only and the audit record carries `catalog_path`. <!-- completed: 2026-07-19T13:55 -->
 - [x] Sync `SPEC.md`, `docs/spec/cli-options.md`, `docs/concepts/model-selection.md`, `docs/contributing.md`, and the test suites to the plain-reference-page contract. <!-- completed: 2026-07-19T13:55 -->
 
+### Step 9: Post-approval revision — three-table model list, catalog→list rename
+
+- [x] Rename `model-catalog.md` → `model-list.md` and the refresh skill to `cafleet-model-list-refresh`; rename the CLI flag to `--model-list`, the error codes to `MODEL_LIST_*`, and the audit keys to `model_list` / `model_list_path`. <!-- completed: 2026-07-20T00:58 -->
+- [x] Collapse the payload to the three tables `Metadata` / `Sources` / `Models` with prices and aliases inline per model row; move role and token profiles to reviewed code constants; remove rate cards, the token map, `currency`, schema migrations, and the canonical-token concept. <!-- completed: 2026-07-20T00:58 -->
+- [x] Sync the parser/selector/CLI, the seeded model list, SPEC/docs/skills, and the consolidated test suites to the simplified contract. <!-- completed: 2026-07-20T00:58 -->
+
 ---
 
 ## Changelog
@@ -367,3 +333,5 @@ The skill owns catalog maintenance; the CAFleet Director owns per-task selection
 | 2026-07-19 | Implementation complete: 29/29 tasks, all Success Criteria verified, Verifier Phase D PASS, Reviewer approved (round 1), PR #216 opened. |
 | 2026-07-19 | Post-approval revision: the asset manifest is a committed repository file updated by the maintainer at release time; the release workflow packages it verbatim and never generates it. |
 | 2026-07-19 | Post-approval revision 2: the catalog is a plain `cafleet` reference page with no manifest or fingerprint validation, and the refresh skill is project-local under `.claude/skills/` (out of `SKILL_DIRS` and the release assets). |
+| 2026-07-20 | Post-approval revision 3: the machine payload is seven fixed Markdown tables embedded in the reference page (user directive), replacing the sentinel marker and canonical-JSON block; redundant structural fields (`key`, `availability`, provenance type, pricing source) are derived by the parser. |
+| 2026-07-20 | Post-approval revision 4 (user directive: simplify as much as possible): the catalog is renamed to the **model list** (`model-list.md`, `--model-list`, `MODEL_LIST_*` codes, `cafleet-model-list-refresh`); the payload collapses to three tables (`Metadata`, `Sources`, `Models`) with per-row prices and aliases; role/token profiles become reviewed code constants; rate cards, the token map, `currency`, schema migrations, and the canonical-token concept are removed. |

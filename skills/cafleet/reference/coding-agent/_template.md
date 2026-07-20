@@ -1,6 +1,6 @@
 # Overlay: <backend name>
 
-Substitute these into the base `{…}` placeholders. Each value must be a short noun phrase that reads correctly when substituted inline into a base sentence; push any constraint or caveat into the *Note → applies at* table below (a required section), where each note names the base token/instruction it qualifies. Overlays carry backend facts only — model policy lives in the model catalog (`reference/model-catalog.md`) and is applied through the Director's pre-spawn `cafleet model select` step, never through an overlay value.
+Substitute these into the base `{…}` placeholders. Each value must be a short noun phrase that reads correctly when substituted inline into a base sentence; push any constraint or caveat into the *Note → applies at* table below (a required section), where each note names the base token/instruction it qualifies. Overlays carry backend facts only — model policy lives in the model list (`reference/model-list.md`) and is applied through the Director's pre-spawn `cafleet model select` step, never through an overlay value.
 
 | Placeholder | Value |
 |---|---|

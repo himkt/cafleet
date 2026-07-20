@@ -165,7 +165,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 3b. Spawn the monitoring member (first-in)
 
-This team **keeps an active heartbeat**, so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor` plus the `--coding-agent`/`--model` pair returned by the pre-spawn `cafleet model select --catalog <abs loaded-cafleet-skill-root>/reference/model-catalog.md --role monitor --json` step (the `cafleet` skill's `reference/director.md` § *Model selection before member create*); it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `member create`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; the monitoring member is deleted first in Step 8's cleanup (first-out), which terminates the loop with its pane. See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
+This team **keeps an active heartbeat**, so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor` plus the `--coding-agent`/`--model` pair returned by the pre-spawn `cafleet model select --model-list <abs loaded-cafleet-skill-root>/reference/model-list.md --role monitor --json` step (the `cafleet` skill's `reference/director.md` § *Model selection before member create*); it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `member create`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; the monitoring member is deleted first in Step 8's cleanup (first-out), which terminates the loop with its pane. See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -366,7 +366,7 @@ This is the first and only time the Reviewer exists in the fleet (never in the S
 Render the spawn prompt to `${BASE}/.prompts/reviewer-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with the backend/model pair returned by the pre-spawn `cafleet model select --role reviewer` step:
 
    ```bash
-   cafleet model select --catalog <abs loaded-cafleet-skill-root>/reference/model-catalog.md \
+   cafleet model select --model-list <abs loaded-cafleet-skill-root>/reference/model-list.md \
      --role reviewer --json
    cafleet member create --fleet-id <fleet-id> \
      --name "Reviewer" \

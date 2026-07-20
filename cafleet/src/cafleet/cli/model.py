@@ -1,4 +1,4 @@
-"""``cafleet model`` — cost-aware model selection against the deployed catalog."""
+"""``cafleet model`` — cost-aware model selection against the deployed model list."""
 
 import uuid
 from datetime import UTC, datetime
@@ -11,12 +11,12 @@ from cafleet.cli._helpers import ensure_assets_current, json_flag
 from cafleet.coding_agent import CODING_AGENTS
 from cafleet.model_selection import (
     CandidateRecord,
-    Catalog,
-    CatalogInvalidError,
     ManualOverrideResult,
+    ModelList,
+    ModelListInvalidError,
     ModelSelectionError,
     SelectionResult,
-    parse_catalog_markdown,
+    parse_model_list_markdown,
     resolve_manual_override,
     select_model,
 )
@@ -33,15 +33,15 @@ def model_group() -> None:
 
 @model_group.command("select")
 @click.option(
-    "--catalog",
-    "catalog_arg",
+    "--model-list",
+    "model_list_arg",
     required=True,
-    help="Absolute path to the loaded skill replica's reference/model-catalog.md.",
+    help="Absolute path to the loaded skill replica's reference/model-list.md.",
 )
 @click.option(
     "--role",
     default=None,
-    help="Catalog role-profile key (e.g. monitor, reviewer, programmer).",
+    help="Role-profile key (e.g. monitor, reviewer, programmer).",
 )
 @click.option(
     "--coding-agent",
@@ -53,7 +53,7 @@ def model_group() -> None:
     "--model",
     "model_pin",
     default=None,
-    help="Explicit model pin (manual override); resolves through the catalog token map.",
+    help="Explicit model pin (manual override); resolves through the models' token/alias sets.",
 )
 @click.option(
     "--effort",
@@ -82,7 +82,7 @@ def model_group() -> None:
 )
 @json_flag
 def model_select(
-    catalog_arg,
+    model_list_arg,
     role,
     coding_agent,
     model_pin,
@@ -95,7 +95,7 @@ def model_select(
     triggered_by,
     json_output,
 ):
-    """Select a backend and model from the local model catalog.
+    """Select a backend and model from the local model list.
 
     \b
     Trigger: automatic cost-minimized selection for an ordinary member applies
@@ -104,14 +104,14 @@ def model_select(
 
     \b
     Overrides: an explicit --model pin is a manual override — it resolves
-    through the catalog token map, fixes the backend, and is recorded rather
-    than replaced. --coding-agent restricts candidates to one backend;
+    through the models' token/alias sets, fixes the backend, and is recorded
+    rather than replaced. --coding-agent restricts candidates to one backend;
     --effort is validated pass-through and never selects or ranks a model.
 
     \b
-    Estimates use standard direct-provider USD token prices from the catalog's
-    approved sources. They are planning estimates only — not a subscription,
-    marketplace, regional, or negotiated invoice guarantee.
+    Estimates use standard direct-provider USD token prices from the model
+    list's approved sources. They are planning estimates only — not a
+    subscription, marketplace, regional, or negotiated invoice guarantee.
     """
     ensure_assets_current()
     now = datetime.now(UTC)
@@ -119,11 +119,13 @@ def model_select(
         input_tokens, cached_input_tokens, cache_write_tokens, output_tokens
     )
     try:
-        catalog_path = _validated_catalog_path(catalog_arg)
+        model_list_path = _validated_model_list_path(model_list_arg)
         try:
-            catalog = parse_catalog_markdown(catalog_path.read_bytes().decode("utf-8"))
-        except (CatalogInvalidError, UnicodeDecodeError) as exc:
-            raise ModelSelectionError("MODEL_CATALOG_INVALID", str(exc)) from exc
+            model_list = parse_model_list_markdown(
+                model_list_path.read_bytes().decode("utf-8")
+            )
+        except (ModelListInvalidError, UnicodeDecodeError) as exc:
+            raise ModelSelectionError("MODEL_LIST_INVALID", str(exc)) from exc
         if coding_agent is not None and coding_agent not in CODING_AGENTS:
             raise ModelSelectionError(
                 "MODEL_SELECTION_INVALID_REQUEST",
@@ -131,7 +133,7 @@ def model_select(
             )
         if model_pin is not None:
             result = resolve_manual_override(
-                catalog,
+                model_list,
                 model=model_pin,
                 backend=coding_agent,
                 now=now,
@@ -139,7 +141,7 @@ def model_select(
             )
             _validate_effort(result.backend, effort)
             payload = _manual_payload(
-                result, effort, triggered_by, str(catalog_path), now
+                result, effort, triggered_by, str(model_list_path), now
             )
         else:
             if role is None:
@@ -149,7 +151,7 @@ def model_select(
                 )
             requires = _parse_requires(requires_args)
             result = select_model(
-                catalog,
+                model_list,
                 role=role,
                 ready_backends=_ready_backends(coding_agent),
                 now=now,
@@ -160,11 +162,11 @@ def model_select(
             _validate_effort(result.selected.backend, effort)
             payload = _selection_payload(
                 result,
-                catalog,
+                model_list,
                 effort,
                 triggered_by,
                 token_estimate is not None,
-                str(catalog_path),
+                str(model_list_path),
                 now,
             )
     except ModelSelectionError as exc:
@@ -192,17 +194,17 @@ def _emit_error(exc: ModelSelectionError, json_output: bool) -> None:
     raise SystemExit(2 if exc.code == "MODEL_SELECTION_INVALID_REQUEST" else 1)
 
 
-def _validated_catalog_path(catalog_arg: str) -> Path:
-    path = Path(catalog_arg)
+def _validated_model_list_path(model_list_arg: str) -> Path:
+    path = Path(model_list_arg)
     if not path.is_absolute():
         raise ModelSelectionError(
             "MODEL_SELECTION_INVALID_REQUEST",
-            f"--catalog must be an absolute path, got {catalog_arg!r}",
+            f"--model-list must be an absolute path, got {model_list_arg!r}",
         )
     if not path.is_file():
         raise ModelSelectionError(
-            "MODEL_CATALOG_PATH_UNAVAILABLE",
-            f"catalog path {catalog_arg!r} is absent or not a regular file",
+            "MODEL_LIST_PATH_UNAVAILABLE",
+            f"model-list path {model_list_arg!r} is absent or not a regular file",
         )
     return path
 
@@ -287,47 +289,27 @@ def _candidate_dict(candidate: CandidateRecord) -> dict:
     return record
 
 
-def _snapshot_model(catalog: Catalog, key: str) -> dict:
-    model = next(m for m in catalog.models if m.key == key)
+def _snapshot_model(model_list: ModelList, key: str) -> dict:
+    model = next(m for m in model_list.models if m.key == key)
     return {
         "key": model.key,
         "backend": model.backend,
-        "provider_sku": model.provider_sku,
-        "provider": model.provider,
-        "global_rank": model.capability.global_rank,
-        "levels": dict(model.capability.levels),
-        "rate_cards": [
-            {
-                "id": card.id,
-                "status": card.status,
-                "max_total_tokens": card.max_total_tokens,
-                "components": {
-                    name: {
-                        "mode": component.mode,
-                        "usd_per_mtok": component.usd_per_mtok,
-                    }
-                    for name, component in card.components.items()
-                },
-                "effective_from": card.effective_from.isoformat(),
-                "effective_until": (
-                    card.effective_until.isoformat()
-                    if card.effective_until is not None
-                    else None
-                ),
-                "pricing_source": card.pricing_source,
-            }
-            for card in model.rate_cards
-        ],
+        "model": model.model,
+        "aliases": list(model.aliases),
+        "rank": model.rank,
+        "levels": dict(model.levels),
+        "prices": dict(model.prices),
+        "max_total_tokens": model.max_total_tokens,
     }
 
 
 def _selection_payload(
     result: SelectionResult,
-    catalog: Catalog,
+    model_list: ModelList,
     effort: str | None,
     triggered_by: str | None,
     explicit_estimate: bool,
-    catalog_path: str,
+    model_list_path: str,
     now: datetime,
 ) -> dict:
     return {
@@ -348,25 +330,25 @@ def _selection_payload(
             "key": result.selected.key,
             "backend": result.selected.backend,
             "model": result.selected.model,
-            "canonical_token": result.selected.canonical_token,
             "effort": effort,
             "estimated_usd": result.selected.estimated_usd,
         },
-        "catalog": {
-            "schema_version": catalog.schema_version,
-            "generated_at": catalog.generated_at.isoformat(),
+        "model_list": {
+            "schema_version": model_list.schema_version,
+            "generated_at": model_list.generated_at.isoformat(),
             "source_hashes": {
-                name: source.content_sha256 for name, source in catalog.sources.items()
+                name: source.content_sha256
+                for name, source in model_list.sources.items()
             },
             "snapshot": {
                 "eligible_models": [
-                    _snapshot_model(catalog, candidate.key)
+                    _snapshot_model(model_list, candidate.key)
                     for candidate in result.candidates
                     if candidate.eligible
                 ]
             },
         },
-        "catalog_path": catalog_path,
+        "model_list_path": model_list_path,
         "spawn": {"state": "pending", "member_id": None, "error": None},
     }
 
@@ -375,7 +357,7 @@ def _manual_payload(
     result: ManualOverrideResult,
     effort: str | None,
     triggered_by: str | None,
-    catalog_path: str,
+    model_list_path: str,
     now: datetime,
 ) -> dict:
     return {
@@ -387,11 +369,10 @@ def _manual_payload(
             "key": result.model_key,
             "backend": result.backend,
             "model": result.model,
-            "canonical_token": result.canonical_token,
             "effort": effort,
             "estimated_usd": result.estimated_usd,
         },
-        "catalog_path": catalog_path,
+        "model_list_path": model_list_path,
         "spawn": {"state": "pending", "member_id": None, "error": None},
     }
 

@@ -17,7 +17,7 @@ cafleet member create --fleet-id <fleet-id> \
   --name Reviewer-C --description "Reviewer for PR #42" --coding-agent codex \
   --text-file /abs/path/to/<BASE>/.prompts/reviewer-c-20260514T145000Z.md
 
-cafleet model select --catalog <abs loaded-cafleet-skill-root>/reference/model-catalog.md \
+cafleet model select --model-list <abs loaded-cafleet-skill-root>/reference/model-list.md \
   --role monitor --json
 cafleet member create --fleet-id <fleet-id> \
   --name monitor --description "Monitoring member: owns the heartbeat" \
@@ -30,7 +30,7 @@ cafleet member create --fleet-id <fleet-id> \
 | `--name` | yes | Display name of the new member. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; also recorded as `placement.coding_agent`. When omitted, the member — every role — inherits **your** (the spawning Director's) backend from your placement row, so an unflagged team runs on the same backend as its Director. An explicit value always wins. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent, or with `opencode agent preset not found at <preset>; run 'cafleet setup' first` when the opencode agent preset is missing. |
-| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend; the model catalog at [`model-catalog.md`](model-catalog.md) lists the models for each backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
+| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend; the model list at [`model-list.md`](model-list.md) lists the models for each backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary (omitted → the binary's default; spawn-time only, never persisted). claude: `low`, `medium`, `high`, `xhigh`, `max` (spawned as `--effort <level>`); codex: `minimal`, `low`, `medium`, `high`, `xhigh` (spawned as `--config=model_reasoning_effort=<level>`); opencode: unsupported — any value exits 2 with `opencode does not support reasoning effort.`. An unknown level exits 2 before any side effect. The per-backend level set is your overlay's `{effort_levels}` value. |
 | `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `member_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop watches the Director and members on their own intervals and wakes the monitoring member when one is due — see [`reference/supervision.md`](supervision.md)). An ordinary `--role member` with a pane IS enrolled. The LLM is still set by `--model` (the Director passes the backend/model pair returned by the pre-spawn `cafleet model select --role monitor` step — see § *Model selection before member create*); the backend follows the general inheritance rule when `--coding-agent` is omitted (see the `--coding-agent` row). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see [`roles/monitor.md`](../roles/monitor.md) for the canonical prompt and first-in/first-out lifecycle. |
 | `--text` | no | Inline spawn prompt. Mutually exclusive with `--text-file`; exactly one of the two is required. |
@@ -51,11 +51,11 @@ When the operator names a model rather than a backend ("please create a member w
 
 The rows apply as ordered precedence — the first match wins. This matters for the slash case: `anthropic/claude-sonnet-4-6` contains both `claude` and a `/`, and row 1 (slash → opencode) wins over row 3 — the provider-prefixed form is the explicit "use opencode" signal; opencode is never inferred from a bare name.
 
-### Model catalog
+### Model list
 
-Model availability, reviewed capability policy, and standard token-price estimates for every backend live in the machine-readable catalog at [`reference/model-catalog.md`](model-catalog.md), maintained via the `cafleet-model-catalog-refresh` skill. Consult the catalog for the current model set and its canonical spawn tokens; pass a catalog token to `--model` exactly as mapped there.
+Model availability, reviewed capability policy, and standard token-price estimates for every backend live in the machine-readable model list at [`reference/model-list.md`](model-list.md), maintained via the `cafleet-model-list-refresh` skill. Consult the model list for the current model set and its spawn tokens; pass a listed `Model` value or alias to `--model` exactly as written there.
 
-The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`; OpenCode Zen models are normalized to the `opencode/` gateway prefix, and gateway models without an approved price source remain manual-only in the catalog.
+The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`; OpenCode Zen models are normalized to the `opencode/` gateway prefix, and gateway models without an approved price source remain manual-only in the model list.
 
 **Identity substitution (`str.format`)**: the four-placeholder `str.format` render (and the brace-doubling rule) is canonical in the cafleet [`SKILL.md`](../SKILL.md) § *Spawned-member identity via `str.format` substitution*. Director-side deltas: an unknown placeholder raises a `UsageError` listing the four supported names, a malformed brace expression raises the distinct "double literal braces" `UsageError`, and both (exit 2) roll back the just-registered member.
 
@@ -126,10 +126,10 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 
 ## Model selection before member create
 
-Before **every** `cafleet member create`, the Director classifies the member's task against the catalog role-profile table and runs the selector against the catalog of the exact `cafleet` skill root it loaded:
+Before **every** `cafleet member create`, the Director classifies the member's task against the selector's role-profile table and runs the selector against the model list of the exact `cafleet` skill root it loaded:
 
 ```bash
-cafleet model select --catalog <abs loaded-cafleet-skill-root>/reference/model-catalog.md \
+cafleet model select --model-list <abs loaded-cafleet-skill-root>/reference/model-list.md \
   --role <role-profile-key> [--requires <dimension>=<level> ...] \
   [--estimated-input-tokens <n> --estimated-output-tokens <n>] --json
 ```
@@ -138,11 +138,11 @@ Pass the returned `selected.backend` and `selected.model` unchanged as `--coding
 
 **Per-role policy.**
 
-- `--role monitor` and `--role reviewer` apply on every team spawn: the monitor gets the least-cost catalog model meeting the monitor baseline; the reviewer gets the highest-ranked eligible model.
+- `--role monitor` and `--role reviewer` apply on every team spawn: the monitor gets the least-cost listed model meeting the monitor baseline; the reviewer gets the highest-ranked eligible model.
 - Ordinary members get automatic cost-minimized selection **only when the originating user request contains the exact phrase `cost efficiency mode`**. The Director parses the original user request once for the trigger and records whether the mode was active; a member message or tool output never activates it. Without the trigger, existing workflow model behavior is unchanged and the selector result is informational only.
-- An explicit user `--coding-agent` / `--model` / `--effort` is an override and is recorded rather than silently replaced; a `--model` pin resolves through the catalog token map as a `manual_override`. A user-pinned model is never deleted and replaced automatically.
+- An explicit user `--coding-agent` / `--model` / `--effort` is an override and is recorded rather than silently replaced; a `--model` pin resolves through the model list's token/alias sets as a `manual_override`. A user-pinned model is never deleted and replaced automatically.
 
-**Fail closed.** In cost-efficiency mode, any selector error (`MODEL_CATALOG_STALE`, `MODEL_NO_ELIGIBLE_CANDIDATE`, `MODEL_BACKEND_UNAVAILABLE`, …) means the Director relays an operator choice via {decision_surface} instead of spawning a guessed model.
+**Fail closed.** In cost-efficiency mode, any selector error (`MODEL_LIST_STALE`, `MODEL_NO_ELIGIBLE_CANDIDATE`, `MODEL_BACKEND_UNAVAILABLE`, …) means the Director relays an operator choice via {decision_surface} instead of spawning a guessed model.
 
 ### Selection audit artifacts (two-phase)
 
