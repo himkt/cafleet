@@ -124,15 +124,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 
 ## Model selection before member create
 
-Before **every** `cafleet member create`, you (the Director) choose the member's backend/model pair yourself from the model list at [`reference/model-list.md`](model-list.md) — read from the exact `cafleet` skill root you loaded — and pass the choice as `--coding-agent` / `--model`. Model selection is a Director responsibility executed by reading the list; there is no selection CLI. The role-facing instruction (the monitor/reviewer policies and the `cost efficiency mode` trigger) is canonical in [`roles/director.md`](../roles/director.md) § *Model selection*:
-
-- **Monitor** (every team spawn): the cheapest listed model that can run the monitoring protocol reliably.
-- **Reviewer** (every team spawn): the most capable listed model.
-- **Ordinary members**: only in cost efficient mode (the originating user request contains the exact phrase `cost efficiency mode`), estimate the task's difficulty from the member's spawn prompt and choose the cheapest model that can finish the task reliably; without the trigger, existing workflow model behavior is unchanged.
-- The model list covers all three backends — `claude`, `codex`, and `opencode` (via OpenCode Zen); an opencode model keeps its `opencode/` prefix in the `--model` value.
-- An explicit user `--coding-agent` / `--model` / `--effort` is an override and is recorded rather than silently replaced; a user-pinned model is never deleted and replaced automatically.
-
-**Fail closed.** When the model list is stale (last refreshed more than 30 days ago) or no listed model fits the task, relay an operator choice via {decision_surface} instead of spawning a guessed model.
+The selection policy — the monitor/reviewer choices, cost efficiency mode and its exact trigger, the pick-backend-first / within-backend comparison rule, and the override and fail-closed rules — is canonical in [`roles/director.md`](../roles/director.md) § *Model selection*. Apply it against the model list of the exact `cafleet` skill root you loaded ([`reference/model-list.md`](model-list.md)) and pass the chosen pair to `member create`. A user-pinned model is never deleted and replaced automatically.
 
 ### Underpowered-member replacement
 
@@ -141,7 +133,7 @@ The Director owns member replacement; the Reviewer supplies evidence (an `[INCOR
 For each replacement, in order:
 
 1. **Freeze and hand off** — freeze new work for the task and request one concise state report (completed work, modified paths, commands/tests run, blockers, next step); if the member cannot respond promptly, `cafleet member capture` is the handoff evidence.
-2. **Re-select stronger** — pick from the model list a strictly more capable model than the failed one (per the list's capability ordering) that fits the task's now-demonstrated difficulty; choose the cheapest model within that stronger set.
+2. **Re-select stronger** — pick a strictly more capable model from the failed model's backend table (a row above the failed model) that fits the task's now-demonstrated difficulty; choose the cheapest model within that stronger set.
 3. **Record** — note the trigger, evidence pointers, old/new model, and attempt number in your coordination notes (no secrets or prompt contents).
 4. **Delete before create** — `cafleet member delete` the old member through the standard lifecycle before spawning the replacement; the monitoring member stays live and all normal spawn/audit/prompt-substitution rules apply.
 5. **Resume, not restart** — spawn the replacement with the original assignment plus the bounded handoff and the same deliverable paths, route the original task pointer, and have the Reviewer re-evaluate at the normal review point.

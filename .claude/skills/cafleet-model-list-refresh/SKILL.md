@@ -51,7 +51,9 @@ sites, and social posts are never model-list authority.
    require explicit maintainer approval before rewriting the tables in
    `skills/cafleet/reference/model-list.md`. Preserve the prescribed preamble
    verbatim; update the preamble's *last refreshed* date only after approval.
-   A failed refresh makes **no** edit.
+   That date is part of the page contract — the Director's staleness check
+   reads it, so every refresh keeps it present and current. A failed refresh
+   makes **no** edit.
 
 ## OpenCode Zen procedure (the `opencode` table)
 
@@ -86,10 +88,10 @@ when the claude/codex prices are unchanged:
 ## Cadence and staleness
 
 Refresh the model list at least every 30 days and whenever the user asks for
-a refresh. A stale list disables cost-efficient selection — the Director
-fails closed and relays an operator choice — until a maintainer refreshes the
-model list, commits the repository source, and completes the
-release/deployment transaction.
+a refresh. A stale list disables cost efficiency mode — the Director relays
+an operator choice for those spawns — until a maintainer refreshes the model
+list, commits the repository source, and completes the release/deployment
+transaction.
 
 ## Release-coupled deployment
 

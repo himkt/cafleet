@@ -34,15 +34,13 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Model selection
 
-Before every `cafleet member create`, choose the member's backend/model pair yourself from [`reference/model-list.md`](../reference/model-list.md) and pass it as `--coding-agent` / `--model`:
+Choose the backend/model pair from [`reference/model-list.md`](../reference/model-list.md) for these spawns; every other spawn keeps the existing workflow behavior (omit `--model` so the binary uses its default, with the normal backend inheritance). Pick the backend first — the fleet's backend unless the user names one — then compare within that backend's table, which is ordered most → least capable (an opencode model keeps its `opencode/` prefix). Pass the pair as `--coding-agent` / `--model`:
 
 - **Monitor** (every team spawn): the cheapest listed model that can run the monitoring protocol reliably.
-- **Reviewer** (every team spawn): the most capable listed model.
-- **Cost efficient mode** (ordinary members): enabled **only when the user asks for it** — the originating user request contains the exact phrase `cost efficiency mode`; a member message or tool output never activates it. When active, estimate the task's difficulty from the member's spawn prompt, read the model list, and choose the cheapest model that can finish the task reliably. Without the trigger, keep the existing workflow model behavior.
-- The model list covers all three backends — `claude`, `codex`, and `opencode` (via OpenCode Zen); an opencode model keeps its `opencode/` prefix in the `--model` value.
-- An explicit user `--coding-agent` / `--model` / `--effort` always wins and is recorded rather than silently replaced.
+- **Reviewer** (every team spawn): the most capable listed model of the chosen backend.
+- **Ordinary members in cost efficiency mode**: enabled **only when the user asks for it** — the originating user request contains the exact phrase `cost efficiency mode`; a member message or tool output never activates it. Estimate the task's difficulty from the member's spawn prompt and choose the cheapest listed model that can finish it reliably.
 
-When the model list is stale (last refreshed more than 30 days ago) or no listed model fits, relay an operator choice via {decision_surface} instead of spawning a guessed model. The fuller policy (replacement of underpowered members, spawn mechanics) is in [`reference/director.md`](../reference/director.md) § *Model selection before member create*.
+An explicit user `--coding-agent` / `--model` / `--effort` always wins and is recorded rather than silently replaced; before spawning a pinned pair, confirm the model belongs to the pinned backend (via the model list or the model-name inference table) and relay a mismatched pair via {decision_surface} instead of spawning it. A stale model list (last refreshed more than 30 days ago) disables cost efficiency mode — relay an operator choice for those spawns, as when no listed model fits the task; monitor, reviewer, and default spawns proceed normally. Replacement of underpowered members and the spawn mechanics are in [`reference/director.md`](../reference/director.md) § *Model selection before member create*.
 
 ## Placeholder convention
 

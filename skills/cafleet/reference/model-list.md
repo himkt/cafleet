@@ -11,7 +11,8 @@ below — refreshed at least every 30 days (last refreshed: 2026-07-20).
 Prices are standard provider USD rates per MTok and are planning estimates,
 not an invoice guarantee. The list covers the `claude`, `codex`, and
 `opencode` backends; opencode models route through OpenCode Zen and keep the
-`opencode/` prefix in their `--model` value.
+`opencode/` prefix in their `--model` value. Each backend's table is ordered
+most → least capable.
 
 ## Sources
 
@@ -21,8 +22,7 @@ not an invoice guarantee. The list covers the `claude`, `codex`, and
 
 ## claude
 
-Rows are ordered most → least capable. Either the model name or its alias is a
-valid `--model` token.
+Either the model name or its alias is a valid `--model` token.
 
 | Model | Alias | Class | Input $/MTok | Output $/MTok |
 |---|---|---|---|---|

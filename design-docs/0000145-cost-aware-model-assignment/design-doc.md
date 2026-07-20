@@ -1,7 +1,7 @@
 # Cost-Aware CAFleet Model Assignment
 
 **Status**: Complete
-**Progress**: 42/42 tasks complete
+**Progress**: 44/44 tasks complete
 **Last Updated**: 2026-07-20
 
 ## Overview
@@ -15,7 +15,7 @@ Add an opt-in Director responsibility that chooses the least-cost CAFleet member
 - [x] An explicit Director or user `--coding-agent`, `--model`, or `--effort` remains an override and is recorded rather than silently replaced.
 - [x] The committed model list records the official source links, the last-refreshed date, and standard input/output prices; capability classes are reviewed maintainer judgment.
 - [x] A refresh skill updates the model list using only the supplied official Anthropic, OpenAI, and OpenCode Zen documentation sources — with a dedicated procedure for the Zen-specific pitfalls (exact model IDs, the `opencode/` prefix, curated subset, limited-time free models) — requires maintainer review, and never silently changes a selection policy.
-- [x] A stale model list or a task no listed model fits fails closed: the Director relays an operator choice instead of spawning a guessed model.
+- [x] A stale model list disables cost efficiency mode, and a task no listed model fits fails closed: the Director relays an operator choice instead of spawning a guessed model.
 - [x] Evidence that a member is underpowered produces a bounded escalation to a strictly more capable listed replacement, or a user decision when no such replacement is available.
 - [x] The feature ships as documentation and skills only: the cafleet Python package and its tests are unchanged.
 
@@ -39,7 +39,7 @@ The initial catalog must be maintained locally from the official pricing and mod
 
 The following precedence is normative, highest first:
 
-1. A user-supplied explicit override wins. `--coding-agent` restricts eligible candidates to that backend; `--model` names a listed model token (or alias) and fixes both backend and model; any other token remains permitted through the existing manual `member create` path and is never a cost-mode result. `--effort` never selects or ranks a model: it is passed through only after the chosen backend's existing effort validation.
+1. A user-supplied explicit override wins. `--coding-agent` restricts eligible candidates to that backend; `--model` names a listed model token (or alias) and fixes both backend and model; a pinned backend/model pair whose model does not belong to the pinned backend is relayed to the user instead of spawned; any other token remains permitted through the existing manual `member create` path and is never a cost-mode result. `--effort` never selects or ranks a model: it is passed through only after the chosen backend's existing effort validation.
 2. A documented workflow override may win only when it is explicitly marked `manual_override` with a reason in the workflow definition. Legacy overlay placeholders such as `{monitor_model}` and `{reviewer_model}` are policy defaults, not overrides, and are removed by this design.
 3. The monitor/reviewer policies below run when neither of the preceding overrides applies. Ordinary-member automatic selection runs only when the trigger is active; otherwise existing unpinned workflow behavior runs unchanged.
 
@@ -50,29 +50,29 @@ A user-pinned model is never deleted and replaced automatically. If credible und
    | Role | Required policy | Cost-mode behavior |
    |---|---|---|
    | `monitor` | Use the cheapest listed model that can run the monitoring protocol reliably. | Applied regardless of the ordinary-member trigger; preserves the user's "cheapest model" requirement without selecting a model unable to run the monitoring protocol. |
-   | `reviewer` | Use the most capable listed model. | Applied regardless of the ordinary-member trigger; cost is not optimized. |
+   | `reviewer` | Use the most capable listed model of the chosen backend. | Applied regardless of the ordinary-member trigger; cost is not optimized. |
    | ordinary `member` | Use the cheapest listed model that can finish the task reliably, judged from the member's spawn prompt. | Applied only when `cost efficiency mode` is active. |
 
-`eligible` always means the model is listed for a backend that satisfies its existing CAFleet readiness contract and the model list is fresh. Cost efficient mode and the monitor/reviewer policies cover all three cafleet backends: `claude`, `codex`, and `opencode` (priced through OpenCode Zen, with the `opencode/` prefix in the model value).
+`eligible` always means the model is listed for a backend that satisfies its existing CAFleet readiness contract and the model list is fresh. The Director picks the backend first — the fleet's backend unless the user names one — and compares within that backend's table, which is ordered most → least capable. Cost efficiency mode and the monitor/reviewer policies cover all three cafleet backends: `claude`, `codex`, and `opencode` (priced through OpenCode Zen, with the `opencode/` prefix in the model value).
 
 ### Local model list
 
 Create one source of truth at `skills/cafleet/reference/model-list.md`. It replaces the prose model lists in `skills/cafleet/reference/director.md`, which will retain only model-name/backend rules and a link to the model list/refresh skill; do not maintain a second, drifting list.
 
-The model list is a catalog-style reference page read by the Director, not machine-parsed data: a preamble stating the maintenance rule, the 30-day freshness cadence, and the *last refreshed* date; a `Sources` section linking the three approved official pricing pages; and one table per backend (`claude`, `codex`, `opencode`) with each model's spawn token, alias (claude), reviewed capability class, and standard input/output USD-per-MTok prices. The `opencode` table is a curated subset of the OpenCode Zen catalog whose model values are `opencode/<zen-model-id>`. Rows are ordered most → least capable; capability classes and the ordering are reviewed maintainer judgment, and changing them requires reviewed policy approval in the same pull request. Every listed model name and alias is a valid `--model` token; arbitrary pass-through strings remain manual-only.
+The model list is a catalog-style reference page read by the Director, not machine-parsed data: a preamble stating the maintenance rule, the 30-day freshness cadence, and the *last refreshed* date; a `Sources` section linking the three approved official pricing pages; and one table per backend (`claude`, `codex`, `opencode`) with each model's spawn token, alias (claude), reviewed capability class, and standard input/output USD-per-MTok prices. The `opencode` table is a curated subset of the OpenCode Zen catalog whose model values are `opencode/<zen-model-id>`. Each backend's table is ordered most → least capable; capability classes and the ordering are reviewed maintainer judgment, and changing them requires reviewed policy approval in the same pull request. Every listed model name and alias is a valid `--model` token; arbitrary pass-through strings remain manual-only.
 
-The repository file is the release source; it is not a runtime default. Each `cafleet setup` release asset copies the entire `skills/cafleet/` directory independently to `~/.claude/skills/cafleet`, `~/.codex/skills/cafleet`, and `~/.config/opencode/skills/cafleet`; a Director reads the model list from the exact `cafleet` skill root it loaded, and the Python wheel contains no model-selection code and no model-list copy. The model list is distributed as an ordinary reference page of the `cafleet` skill — no release manifest, content fingerprint, or sidecar file accompanies it. A list last refreshed more than 30 days ago is stale and disables cost-efficient selection. Backend readiness stays where it always was: `cafleet member create` errors on a missing backend binary or preset.
+The repository file is the release source; it is not a runtime default. Each `cafleet setup` release asset copies the entire `skills/cafleet/` directory independently to `~/.claude/skills/cafleet`, `~/.codex/skills/cafleet`, and `~/.config/opencode/skills/cafleet`; a Director reads the model list from the exact `cafleet` skill root it loaded, and the Python wheel contains no model-selection code and no model-list copy. The model list is distributed as an ordinary reference page of the `cafleet` skill — no release manifest, content fingerprint, or sidecar file accompanies it. A list last refreshed more than 30 days ago is stale and disables cost efficiency mode. Backend readiness stays where it always was: `cafleet member create` errors on a missing backend binary or preset.
 
 ### Selection policy
 
 Model selection is a Director responsibility executed by reading the model list — no selection code, CLI, or tests exist in the cafleet package, and `cafleet member create` performs no hidden selection. Before every `member create` the Director:
 
 1. Reads the model list from the exact `cafleet` skill root it loaded.
-2. Applies the per-role policy: the monitor gets the cheapest listed model that can run the monitoring protocol reliably; the reviewer gets the most capable listed model; an ordinary member gets cost-efficient selection only when the trigger is active.
-3. In cost efficient mode, estimates the task's difficulty from the member's spawn prompt and chooses the cheapest listed model that can finish the task reliably — "least cost subject to task success", with the list's reviewed capability classes as the conservative proxy for required capability. Runtime evidence that the proxy was too weak invokes the underpowered-member escalation below.
+2. Applies the per-role policy: the monitor gets the cheapest listed model that can run the monitoring protocol reliably; the reviewer gets the most capable listed model of the chosen backend; an ordinary member gets cost efficiency mode only when the trigger is active — every other spawn keeps the existing workflow behavior with `--model` omitted.
+3. In cost efficiency mode, estimates the task's difficulty from the member's spawn prompt and chooses the cheapest listed model that can finish the task reliably — "least cost subject to task success", with the list's reviewed capability classes as the conservative proxy for required capability. Runtime evidence that the proxy was too weak invokes the underpowered-member escalation below.
 4. Passes the chosen pair as the existing `--coding-agent` / `--model` flags. Effort is never automatically selected: a manual effort override is passed through to the backend's existing effort validation.
 
-Fail closed: when the model list is stale, or no listed model fits the task on a ready backend, the Director relays an operator choice instead of spawning a guessed model. The role-facing instruction lives in `skills/cafleet/roles/director.md` § *Model selection*; the fuller policy (spawn mechanics, replacement) in `skills/cafleet/reference/director.md` § *Model selection before member create*. The spawn-prompt audit file at `${BASE}/.prompts/<role>-<UTC-compact>.md` remains the spawn's audit artifact; no separate selection record is produced.
+Fail closed: a stale model list disables cost efficiency mode, and a task no listed model fits gets an operator relay — the Director never spawns a guessed model; monitor, reviewer, and default spawns proceed normally on a stale list. The role-facing instruction lives in `skills/cafleet/roles/director.md` § *Model selection*; the fuller policy (spawn mechanics, replacement) in `skills/cafleet/reference/director.md` § *Model selection before member create*. The spawn-prompt audit file at `${BASE}/.prompts/<role>-<UTC-compact>.md` remains the spawn's audit artifact; no separate selection record is produced.
 
 ### Director and workflow integration
 
@@ -94,7 +94,7 @@ Valid evidence is one or more of: the member's self-report that it cannot reason
 For each replacement, the Director follows this order:
 
 1. Freeze new work for the affected task and collect a bounded handoff: request one concise state report from the member (completed work, modified paths, commands/tests run, blockers, and next step). If it cannot respond promptly, capture its pane and use the capture as the handoff evidence.
-2. Pick from the model list a strictly more capable model than the failed one (per the list's capability ordering) that fits the task's now-demonstrated difficulty, on a ready backend; choose the cheapest model within that stronger set. It may cost more than the failed model.
+2. Pick a strictly more capable model from the failed model's backend table (a row above the failed model) that fits the task's now-demonstrated difficulty; choose the cheapest model within that stronger set. It may cost more than the failed model.
 3. Note the trigger, evidence pointers, old/new model, attempt number, and handoff artifact path in the coordination notes. Do not include secrets or full prompt contents.
 4. Delete the old member through the standard `cafleet member delete` lifecycle before creating the replacement, preventing concurrent agents from editing the same task. The existing monitor remains live; all normal spawn, audit, and prompt-substitution rules apply to the new member.
 5. Spawn the replacement with the original assignment plus the bounded handoff and the same deliverable paths. It resumes the task rather than starting a parallel implementation. The Director routes the original task pointer and asks the Reviewer to re-evaluate the resumed output when the workflow normally reaches review.
@@ -211,6 +211,11 @@ The skill owns model-list maintenance; the CAFleet Director owns per-spawn selec
 - [x] Add an `opencode` section to the model list — a curated subset of the OpenCode Zen catalog with exact `opencode/<zen-model-id>` values (`opencode/glm-5.2`, `opencode/kimi-k2.7-code`, `opencode/qwen3.5-plus`, `opencode/big-pickle`, `opencode/deepseek-v4-flash-free`) and Zen's own prices — and extend the coverage statements to all three backends. <!-- completed: 2026-07-20T02:17 -->
 - [x] Add `https://opencode.ai/docs/zen/` to the refresh skill's source allowlist with a dedicated OpenCode Zen procedure: price from the Zen page only, copy the Zen model ID verbatim (never slugify the display name), re-verify every curated row on each refresh, price limited-time free models `0.00` and remove them when the offer ends without a published price, and keep the table a reviewed curated subset. <!-- completed: 2026-07-20T02:17 -->
 
+### Step 13: Post-approval revision — review fixes: one canonical policy, within-backend comparison
+
+- [x] Resolve the review findings by simplification: `roles/director.md` § *Model selection* becomes the single normative policy (reference/director.md and the concepts page point to or summarize it); the selection lead is scoped to the monitor/reviewer/cost-mode spawns while every other spawn keeps `--model` omitted; a pinned backend/model pair is consistency-checked and a mismatch relayed instead of spawned. <!-- completed: 2026-07-20T02:41 -->
+- [x] Define the comparison rule — pick the backend first, compare within that backend's table, each table ordered most → least capable (reviewer and replacement are within-backend) — scope staleness to disabling cost efficiency mode only, unify the spelling on `cost efficiency mode`, fix the alias attribution (claude only), and declare the *last refreshed* date part of the page contract in the refresh skill. <!-- completed: 2026-07-20T02:41 -->
+
 ---
 
 ## Changelog
@@ -228,3 +233,4 @@ The skill owns model-list maintenance; the CAFleet Director owns per-spawn selec
 | 2026-07-20 | Post-approval revision 5 (user directive): OpenCode has no approved cost source, so its rows and the unpriced-component machinery are removed; automatic selection (cost efficiency mode and the monitor/reviewer policies) covers the `claude` and `codex` backends, a manual `--model` pin may name any cafleet backend, and an OpenCode member is spawned manually through `member create`. |
 | 2026-07-20 | Post-approval revision 6 (user directive): the feature carries **no codebase change** — the `cafleet model select` CLI, the `model_selection` module, and all their tests are deleted; model selection is a Director responsibility executed by reading the model list, which becomes a catalog-style page (models, capability classes, input/output prices, and official source links); the cost-efficient instruction lives in `roles/director.md`. |
 | 2026-07-20 | Post-approval revision 7 (user directive): OpenCode joins the model list via OpenCode Zen (`https://opencode.ai/docs/zen/`) — a curated five-model `opencode` section with exact `opencode/<zen-model-id>` values and Zen prices; all three backends are covered by cost efficient mode, and the refresh skill gains a dedicated OpenCode Zen procedure for the Zen-specific pitfalls. |
+| 2026-07-20 | Post-approval revision 8 (code-review fixes): `roles/director.md` is the single normative policy; the pick-backend-first / within-backend comparison rule replaces the lost global ordering (each table ordered most → least capable); the selection lead is scoped so default spawns keep `--model` omitted; pinned backend/model pairs are consistency-checked with mismatches relayed; staleness disables cost efficiency mode only; the one spelling is `cost efficiency mode`; aliases are claude-only; the *last refreshed* date is declared part of the page contract. |
