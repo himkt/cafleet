@@ -5,7 +5,7 @@ Substitute these into the base `{…}` placeholders.
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
-| `{monitor_model}` | `gpt-5.4-mini` |
+| `{monitor_model}` | `gpt-5.6-luna` |
 | `{reviewer_model}` | `gpt-5.6-sol` |
 | `{permission_flags}` | `--ask-for-approval never --sandbox workspace-write` |
 | `{bg_run}` | a backgrounded `!` shell command |
@@ -40,4 +40,4 @@ When a capture cannot cleanly separate the two, apply the ambiguity tie-break an
 
 The canonical monitor-spawn command, fully resolved for this backend:
 
-`cafleet member create --role monitor --model gpt-5.4-mini --text-file <rendered monitor prompt>` (members spawned `--ask-for-approval never --sandbox workspace-write`).
+`cafleet member create --role monitor --model gpt-5.6-luna --text-file <rendered monitor prompt>` (members spawned `--ask-for-approval never --sandbox workspace-write`).

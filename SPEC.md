@@ -2798,7 +2798,7 @@ line (§6.3). The driver's engine is disposed when the command finishes
 
 ## 10. CLI command checklist
 
-The full command surface — **23 commands across 4 groups + 3 top-level commands**.
+The full command surface — **24 commands across 5 groups + 3 top-level commands**.
 Each must be reproduced with identical option names, types, defaults,
 required-ness, documented-vs-hidden status, output shapes, and exit codes. Every
 interaction flag is now **documented** (there are no hidden flags). Per-command
@@ -2849,8 +2849,8 @@ Every `member *`, `message *`, and `monitor *` command, plus `fleet
 show` and `fleet delete`, takes the **required `--fleet-id` option** (integer);
 a missing `--fleet-id` is the shared callback's application error (exit 1,
 §6.3). It is omitted from the per-command rows above to avoid repetition.
-`setup`, `doctor`, `server`, `fleet create`, and `fleet list` do **not** take
-`--fleet-id`.
+`setup`, `doctor`, `server`, `fleet create`, and `fleet list`
+do **not** take `--fleet-id`.
 
 ---
 

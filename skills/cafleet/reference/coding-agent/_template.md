@@ -5,8 +5,8 @@ Substitute these into the base `{…}` placeholders. Each value must be a short 
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | <this backend's recorded-user-reaction surface as a short noun phrase: its interactive prompt tool, or "a Director-relayed operator message" — a fleet member always routes its question to the Director> |
-| `{monitor_model}` | <cheapest capable model for the monitor on this backend> |
-| `{reviewer_model}` | <most intelligent model available on this backend, per the annotated table in `reference/director.md`> |
+| `{monitor_model}` | <this backend's monitor default from the model list's *Monitor and reviewer defaults* table> |
+| `{reviewer_model}` | <this backend's reviewer default from the same table> |
 | `{permission_flags}` | <the exact spawn flags for workspace-scoped auto-approval> |
 | `{bg_run}` | <this backend's primitive for running long-lived background work, as a noun phrase> |
 | `{bg_stop}` | <the matching stop primitive, as a noun phrase> |

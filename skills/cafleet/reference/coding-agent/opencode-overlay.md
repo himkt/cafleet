@@ -5,8 +5,8 @@ Substitute these into the base `{…}` placeholders.
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
-| `{monitor_model}` | `anthropic/claude-haiku-4-5` |
-| `{reviewer_model}` | `opencode/gpt-5.5-pro` |
+| `{monitor_model}` | `opencode/deepseek-v4-flash-free` |
+| `{reviewer_model}` | `opencode/glm-5.2` |
 | `{permission_flags}` | `--agent cafleet` |
 | `{bg_run}` | a backgrounded `!` shell command |
 | `{bg_stop}` | killing the recorded background process |
@@ -40,4 +40,4 @@ When a capture cannot cleanly separate the two, apply the ambiguity tie-break an
 
 The canonical monitor-spawn command, fully resolved for this backend:
 
-`cafleet member create --role monitor --model anthropic/claude-haiku-4-5 --text-file <rendered monitor prompt>` (members spawned `--agent cafleet`).
+`cafleet member create --role monitor --model opencode/deepseek-v4-flash-free --text-file <rendered monitor prompt>` (members spawned `--agent cafleet`).

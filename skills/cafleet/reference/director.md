@@ -28,9 +28,9 @@ cafleet member create --fleet-id <fleet-id> \
 | `--name` | yes | Display name of the new member. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; also recorded as `placement.coding_agent`. When omitted, the member — every role — inherits **your** (the spawning Director's) backend from your placement row, so an unflagged team runs on the same backend as its Director. An explicit value always wins. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent, or with `opencode agent preset not found at <preset>; run 'cafleet setup' first` when the opencode agent preset is missing. |
-| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend and lists a per-backend example; the *Available models per backend* tables below list the common models for each backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
+| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend; the model list at [`model-list.md`](model-list.md) lists the models for each backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary (omitted → the binary's default; spawn-time only, never persisted). claude: `low`, `medium`, `high`, `xhigh`, `max` (spawned as `--effort <level>`); codex: `minimal`, `low`, `medium`, `high`, `xhigh` (spawned as `--config=model_reasoning_effort=<level>`); opencode: unsupported — any value exits 2 with `opencode does not support reasoning effort.`. An unknown level exits 2 before any side effect. The per-backend level set is your overlay's `{effort_levels}` value. |
-| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `member_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop watches the Director and members on their own intervals and wakes the monitoring member when one is due — see [`reference/supervision.md`](supervision.md)). An ordinary `--role member` with a pane IS enrolled. The LLM is still set by `--model` (the Director passes the monitor model `{monitor_model}`); the backend follows the general inheritance rule when `--coding-agent` is omitted (see the `--coding-agent` row). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see [`roles/monitor.md`](../roles/monitor.md) for the canonical prompt and first-in/first-out lifecycle. |
+| `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `member_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop watches the Director and members on their own intervals and wakes the monitoring member when one is due — see [`reference/supervision.md`](supervision.md)). An ordinary `--role member` with a pane IS enrolled. The LLM is still set by `--model` (the Director passes the monitor model `{monitor_model}`, resolved from its overlay — see § *Model selection before member create*); the backend follows the general inheritance rule when `--coding-agent` is omitted (see the `--coding-agent` row). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see [`roles/monitor.md`](../roles/monitor.md) for the canonical prompt and first-in/first-out lifecycle. |
 | `--text` | no | Inline spawn prompt. Mutually exclusive with `--text-file`; exactly one of the two is required. |
 | `--text-file` | no | Path to a UTF-8 file used as the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Mutually exclusive with `--text`; exactly one of the two is required. Path/file errors are catalogued in [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 
@@ -43,48 +43,17 @@ When the operator names a model rather than a backend ("please create a member w
 | Model name shape | Backend | Flags to pass |
 |---|---|---|
 | Contains a `/` — provider-prefixed (e.g. `opencode/gpt-5.5`, `anthropic/claude-sonnet-4-6`) | `opencode` | `--coding-agent opencode --model <provider-id>/<model-id>` |
-| `gpt-*` (e.g. `gpt-5.6-terra`, `gpt-5.4-mini`) | `codex` | `--coding-agent codex --model <name>` |
+| `gpt-*` (e.g. `gpt-5.6-terra`, `gpt-5.6-luna`) | `codex` | `--coding-agent codex --model <name>` |
 | Claude alias or `claude-*` full name — `fable`, `opus`, `sonnet`, `haiku`, `claude-opus-4-8`, … | `claude` | `--coding-agent claude --model <name>` (omitting the flag inherits your own backend, which matches only when you are a claude Director) |
 | Any other bare name — no shape match (e.g. `gemini-2.5-pro`, `o3-mini`) | none — do NOT infer | Ask the operator for the explicit `--coding-agent` + `--model` pair |
 
 The rows apply as ordered precedence — the first match wins. This matters for the slash case: `anthropic/claude-sonnet-4-6` contains both `claude` and a `/`, and row 1 (slash → opencode) wins over row 3 — the provider-prefixed form is the explicit "use opencode" signal; opencode is never inferred from a bare name.
 
-### Available models per backend
+### Model list
 
-**Claude Code (`--coding-agent claude`)** — simple list:
+Model availability, reviewed capability classes, standard token prices, and the official source links live in the model list at [`reference/model-list.md`](model-list.md), maintained via the `cafleet-model-list-refresh` skill. Consult the model list for the current model set and its spawn tokens; pass a listed model name or alias to `--model` exactly as written there.
 
-| Model | For | Intelligence |
-|---|---|---|
-| `fable` | Fable 5 — hardest, longest-running tasks | highest |
-| `opus` | Opus 4.8 (1M context) — everyday, complex tasks | high |
-| `sonnet` | Sonnet 5 — efficient for routine tasks | medium |
-| `haiku` | Haiku 4.5 — fastest for quick answers | low |
-
-**Codex (`--coding-agent codex`)**:
-
-| Model | Notes | Intelligence |
-|---|---|---|
-| `gpt-5.6-sol` | latest frontier agentic coding model; default / recommended | highest |
-| `gpt-5.6-terra` | balanced agentic coding model for everyday work | high |
-| `gpt-5.6-luna` | fast and affordable agentic coding model | medium |
-| `gpt-5.5` | frontier model for complex coding, research, and real-world work | high |
-| `gpt-5.4` | strong model for everyday coding | medium |
-| `gpt-5.4-mini` | fast, efficient mini — responsive tasks and subagents | low |
-
-**OpenCode Zen (`--coding-agent opencode`)** — the OpenCode Zen catalog ([opencode.ai/docs/zen](https://opencode.ai/docs/zen/)). Every Zen model is passed with the `opencode/` gateway prefix, i.e. `opencode/<model-id>` (e.g. `opencode/gpt-5.5`, `opencode/claude-sonnet-4-6`, `opencode/gemini-3.5-flash`). The Models column lists the bare `<model-id>`; prepend `opencode/`:
-
-| Provider | Models (pass as `opencode/<model-id>`) |
-|---|---|
-| OpenAI | `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.3-codex` |
-| Anthropic | `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5` |
-| Google | `gemini-3.5-flash` |
-
-Other providers: Qwen, DeepSeek, Kimi, GLM, MiniMax, Grok.
-Free (limited beta): Big Pickle, DeepSeek V4 Flash Free, MiMo-V2.5 Free, North Mini Code Free, Nemotron 3 Ultra Free.
-
-Intelligence ranking within the Zen catalog: `gpt-5.5-pro` highest, then `gpt-5.5` / `claude-opus-4-8`, then the mid-tier `gpt-5.4` / `claude-sonnet-4-6`, then the fast tier. The per-backend `{reviewer_model}` values are `opus` for claude, `gpt-5.6-sol` for codex, and `opencode/gpt-5.5-pro` for opencode.
-
-The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`; the Zen catalog above is normalized to the `opencode/` gateway prefix, and the direct-provider examples elsewhere in `director.md` / `coding-agents.md` stay valid.
+The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`.
 
 **Identity substitution (`str.format`)**: the four-placeholder `str.format` render (and the brace-doubling rule) is canonical in the cafleet [`SKILL.md`](../SKILL.md) § *Spawned-member identity via `str.format` substitution*. Director-side deltas: an unknown placeholder raises a `UsageError` listing the four supported names, a malformed brace expression raises the distinct "double literal braces" `UsageError`, and both (exit 2) roll back the just-registered member.
 
@@ -152,6 +121,24 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 **Backtick caveat (harness-dependent)**: some environments (including this project) run a Bash-validator hook that rejects any backtick in a `Bash` invocation. When in play, strip backticks from spawn-prompt bodies (plain text instead of code spans); path-by-reference keeps the body short enough that this is easy.
 
 **Pane discovery**: discover a member's pane via `cafleet member list` (the `pane_id` column is ground truth for all backends). Pane title: {pane_title}. The spawn is atomic — a `split-window` or placement-patch failure rolls back the registration (and exits the pane on a patch failure) — and uses `-d` so the Director keeps focus. See [`member-lifecycle.md`](../../../docs/concepts/member-lifecycle.md).
+
+## Model selection before member create
+
+The selection policy — the monitor/reviewer choices, cost efficiency mode and its exact trigger, the pick-backend-first / within-backend comparison rule, and the override and fail-closed rules — is canonical in [`roles/director.md`](../roles/director.md) § *Model selection*. Apply it against the model list of the exact `cafleet` skill root you loaded ([`reference/model-list.md`](model-list.md)) and pass the chosen pair to `member create`. A user-pinned model is never deleted and replaced automatically.
+
+### Underpowered-member replacement
+
+The Director owns member replacement; the Reviewer supplies evidence (an `[INCORRECT]` marker naming the suspected unmet capability) and stays independent of the execution. Slowness, awaiting user input, or a transient infrastructure error is never grounds for replacement. Valid evidence: a member's self-report that it cannot reason through the task, repeated task-relevant reasoning/coding failures after normal correction, a Reviewer `[INCORRECT]` finding naming the unmet capability, or a Director review of a materially incomplete/incorrect result tied to the task profile.
+
+For each replacement, in order:
+
+1. **Freeze and hand off** — freeze new work for the task and request one concise state report (completed work, modified paths, commands/tests run, blockers, next step); if the member cannot respond promptly, `cafleet member capture` is the handoff evidence.
+2. **Re-select stronger** — pick a strictly more capable model from the failed model's backend table (a row above the failed model) that fits the task's now-demonstrated difficulty; choose the cheapest model within that stronger set.
+3. **Record** — note the trigger, evidence pointers, old/new model, and attempt number in your coordination notes (no secrets or prompt contents).
+4. **Delete before create** — `cafleet member delete` the old member through the standard lifecycle before spawning the replacement; the monitoring member stays live and all normal spawn/audit/prompt-substitution rules apply.
+5. **Resume, not restart** — spawn the replacement with the original assignment plus the bounded handoff and the same deliverable paths, route the original task pointer, and have the Reviewer re-evaluate at the normal review point.
+
+Caps and fail-closed cases: the initial member plus at most two replacements per task; each replacement strictly more capable than its predecessor; a `(task pointer, model)` pair is never retried. An unlisted manual model, any explicit user override, an empty stronger set, a reached cap, or ambiguous evidence all mean the Director relays an operator choice (approve a named higher-cost/manual override, simplify/re-scope, or stop) instead of auto-replacing.
 
 ## Member Delete
 
