@@ -46,7 +46,8 @@ sites, and social posts are never model-list authority.
    and the most-to-least-capable row ordering are reviewed maintainer
    judgment, not provider benchmark claims; changing a class or the ordering
    requires reviewed policy approval in the same pull request. Every row
-   carries both prices from its approved source.
+   carries both prices from its approved source. Re-derive the *Monitor and
+   reviewer defaults* table from the refreshed backend tables.
 5. **Propose, then apply atomically.** Generate a concise proposed diff and
    require explicit maintainer approval before rewriting the tables in
    `skills/cafleet/reference/model-list.md`. Preserve the prescribed preamble

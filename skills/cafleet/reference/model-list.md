@@ -20,6 +20,17 @@ most → least capable.
 - [OpenAI pricing](https://developers.openai.com/api/docs/pricing)
 - [OpenCode Zen models and pricing](https://opencode.ai/docs/zen/)
 
+## Monitor and reviewer defaults
+
+Per backend, the cheapest model that can run the monitoring protocol reliably
+(monitor) and the most capable model (reviewer); re-derived on every refresh:
+
+| Backend | Monitor | Reviewer |
+|---|---|---|
+| claude | claude-haiku-4-5 | claude-fable-5 |
+| codex | gpt-5.4-mini | gpt-5.6-sol |
+| opencode | opencode/deepseek-v4-flash-free | opencode/glm-5.2 |
+
 ## claude
 
 Either the model name or its alias is a valid `--model` token.
