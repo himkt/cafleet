@@ -106,6 +106,50 @@ def test_get_monitor__stale_row_reports_not_running_with_nulls(api_db, client):
     assert data["tick_seconds"] == 5  # the row exists (stale, not absent)
 
 
+def test_get_monitor__members_key_with_unchanged_runtime_keys(api_db, client):
+    # the additive top-level ``members`` key carries the shared builder's rows
+    # (including the oldest-pending pair) while the flat runtime keys stay
+    # unchanged for the SPA's sole consumer.
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    member_id = _register_member(fleet, name="alice")
+    watcher_id = _register_monitoring_member(fleet, pane_id="%7")["member_id"]
+    broker.claim_monitor_runtime(sid, os.getpid(), 5, datetime.now(UTC).isoformat())
+    broker.send_message(sid, director_id, member_id, "pending delivery")
+
+    resp = client.get("/api/monitor", headers=_headers(sid))
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+
+    # the existing flat runtime keys are unchanged
+    assert data["running"] is True
+    assert data["pid"] == os.getpid()
+    for key in ("tick_seconds", "last_tick_at", "last_tick_age_seconds", "started_at"):
+        assert key in data
+
+    members = {m["member_id"]: m for m in data["members"]}
+    # the watched set only — the monitoring member is the unenrolled watcher
+    assert set(members) == {director_id, member_id}
+    assert watcher_id not in members
+
+    m = members[member_id]
+    assert m["name"] == "alice"
+    assert m["role"] == "member"
+    assert m["interval_seconds"] == 720
+    assert m["enabled"] is True
+    assert m["pending_count"] == 1
+    assert m["oldest_pending_ts"] is not None
+    assert isinstance(m["oldest_pending_age_seconds"], int)
+    assert m["oldest_pending_age_seconds"] >= 0
+
+    d = members[director_id]
+    assert d["role"] == "director"
+    assert d["pending_count"] == 0
+    assert d["oldest_pending_ts"] is None
+    assert d["oldest_pending_age_seconds"] is None
+
+
 # --- GET /api/members folded monitor field ----------------------------------
 
 

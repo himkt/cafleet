@@ -81,6 +81,31 @@ def _monitor_config_row(db_file, member_id: int):
         conn.close()
 
 
+def _insert_pending_message(
+    db_file, owner_member_id: int, from_member_id: int, status_timestamp: str
+) -> None:
+    """Insert an ``input_required`` unicast delivery with a controlled
+    ``status_timestamp`` so the oldest-pending age is deterministic."""
+    conn = sqlite3.connect(str(db_file))
+    try:
+        conn.execute(
+            "INSERT INTO messages (owner_member_id, from_member_id, to_member_id, "
+            "type, created_at, status_state, status_timestamp, origin_message_id, "
+            "text) VALUES (?, ?, ?, 'unicast', ?, 'input_required', ?, NULL, "
+            "'pending')",
+            (
+                owner_member_id,
+                from_member_id,
+                owner_member_id,
+                status_timestamp,
+                status_timestamp,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _soft_delete_fleet(db_file, fleet_id: int) -> None:
     conn = sqlite3.connect(str(db_file))
     try:
@@ -304,6 +329,9 @@ def test_monitor_status__json_shape(fleet):
         # never pinged → ISO is null and the derived age is null (parity field)
         assert m["last_ping_at"] is None
         assert m["last_ping_age_seconds"] is None
+        # no pending delivery → the oldest-pending pair is null too
+        assert m["oldest_pending_ts"] is None
+        assert m["oldest_pending_age_seconds"] is None
         for key in ("name", "interval_seconds", "last_ping_at"):
             assert key in m
 
@@ -353,6 +381,48 @@ def test_monitor_status__last_ping_age_rendered(fleet):
     age = members[member_id]["last_ping_age_seconds"]
     assert isinstance(age, int)
     assert 115 <= age <= 200  # ~120 s, generous bounds for test timing
+
+
+def test_monitor_status__json_oldest_pending_fields(fleet):
+    db_file, runner, data = fleet
+    sid = data["fleet_id"]
+    director_id = data["director"]["member_id"]
+    member_id = _register_ordinary_member(sid)["member_id"]
+    _seed_runtime(db_file, sid, os.getpid())
+    # the member's oldest pending delivery is ~800 s old
+    pending = (datetime.now(UTC) - timedelta(seconds=800)).isoformat()
+    _insert_pending_message(db_file, member_id, director_id, pending)
+
+    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid), "--json"])
+    assert result.exit_code == 0, result.output
+    members = {m["member_id"]: m for m in json.loads(result.output)["members"]}
+
+    m = members[member_id]
+    assert m["pending_count"] == 1
+    assert m["oldest_pending_ts"] == pending
+    age = m["oldest_pending_age_seconds"]
+    assert isinstance(age, int)
+    assert 795 <= age <= 900  # ~800 s, generous bounds for test timing
+    # the Director has no pending delivery → both fields stay null
+    assert members[director_id]["oldest_pending_ts"] is None
+    assert members[director_id]["oldest_pending_age_seconds"] is None
+
+
+def test_monitor_status__text_renders_pending_age_not_iso(fleet):
+    db_file, runner, data = fleet
+    sid = data["fleet_id"]
+    director_id = data["director"]["member_id"]
+    member_id = _register_ordinary_member(sid)["member_id"]
+    _seed_runtime(db_file, sid, os.getpid())
+    pending = (datetime.now(UTC) - timedelta(seconds=800)).isoformat()
+    _insert_pending_message(db_file, member_id, director_id, pending)
+
+    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid)])
+    assert result.exit_code == 0, result.output
+    # the unacked column shows a human age, not the raw ISO timestamp
+    assert "unacked" in result.output
+    assert pending not in result.output
+    assert "s ago" in result.output
 
 
 def test_monitor_status__text_renders_last_ping_as_age_not_iso(fleet):

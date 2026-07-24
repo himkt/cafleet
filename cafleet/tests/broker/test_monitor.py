@@ -533,6 +533,82 @@ def test_list_monitor_targets__oldest_pending_ts_excludes_broadcast_summary(
     assert targets[director_id]["oldest_pending_ts"] is None
 
 
+# --- monitor_members_payload (shared status builder) ------------------------
+
+
+def test_monitor_members_payload__row_fields_and_roles():
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    member_id = _register_ordinary_member(fleet, name="quin", pane_id="%17")[
+        "member_id"
+    ]
+    watcher = _register_monitoring_member(fleet, name="watcher", pane_id="%18")
+
+    now = datetime.now(UTC)
+    rows = {r["member_id"]: r for r in broker.monitor_members_payload(sid, now)}
+    # the watched set only — the monitoring member is the unenrolled watcher
+    assert set(rows) == {director_id, member_id}
+    assert watcher["member_id"] not in rows
+
+    expected_keys = {
+        "member_id",
+        "name",
+        "role",
+        "interval_seconds",
+        "last_ping_at",
+        "last_ping_age_seconds",
+        "enabled",
+        "pending_count",
+        "oldest_pending_ts",
+        "oldest_pending_age_seconds",
+    }
+    for row in rows.values():
+        assert set(row) == expected_keys
+
+    assert rows[director_id]["role"] == "director"
+    m = rows[member_id]
+    assert m["role"] == "member"
+    assert m["name"] == "quin"
+    assert m["interval_seconds"] == 720
+    assert m["enabled"] is True
+    assert m["pending_count"] == 0
+    # never pinged / no pending delivery → the ISO fields and both derived ages are None
+    assert m["last_ping_at"] is None
+    assert m["last_ping_age_seconds"] is None
+    assert m["oldest_pending_ts"] is None
+    assert m["oldest_pending_age_seconds"] is None
+
+
+def test_monitor_members_payload__ages_computed_with_passed_now(broker_session):
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    member_id = _register_ordinary_member(fleet, name="rita", pane_id="%19")[
+        "member_id"
+    ]
+
+    now = datetime.now(UTC)
+    pinged = (now - timedelta(seconds=63)).isoformat()
+    broker.record_pings([member_id], pinged)
+    pending = (now - timedelta(seconds=811)).isoformat()
+    with broker_session() as s:
+        _add_message(s, member_id, director_id, status_timestamp=pending)
+        s.commit()
+
+    rows = {r["member_id"]: r for r in broker.monitor_members_payload(sid, now)}
+    m = rows[member_id]
+    # both ages derive from the single passed ``now``, so they are exact
+    assert m["last_ping_at"] == pinged
+    assert m["last_ping_age_seconds"] == 63
+    assert m["pending_count"] == 1
+    assert m["oldest_pending_ts"] == pending
+    assert m["oldest_pending_age_seconds"] == 811
+    d = rows[director_id]
+    assert d["oldest_pending_ts"] is None
+    assert d["oldest_pending_age_seconds"] is None
+
+
 def test_list_monitor_targets__excludes_deregistered_member():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
