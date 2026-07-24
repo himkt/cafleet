@@ -1,6 +1,6 @@
 # Remove Implementation File Path Mentions from User-Facing Docs
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 10/10 tasks complete
 **Last Updated**: 2026-07-25
 
@@ -232,3 +232,4 @@ Append one line to the § *First-class documentation targets* section:
 |------|---------|
 | 2026-07-24 | Initial draft |
 | 2026-07-24 | Reviewer round 1: corrected in-scope mention count to 11; trimmed R2's duplicated read-before-spawn clause; R6 drops the redundant API-reference link instead of duplicating it |
+| 2026-07-25 | Execution complete: all 10 tasks and 5 success criteria done; post-implementation Reviewer approved in 1 round; PR #223 opened |
