@@ -1,7 +1,7 @@
 # Monitor Unacked-Message Wake Reason
 
 **Status**: Approved
-**Progress**: 13/14 tasks complete
+**Progress**: 14/14 tasks complete
 **Last Updated**: 2026-07-24
 
 ## Overview
@@ -154,4 +154,4 @@ WebUI `GET /api/monitor` gains an additive top-level `"members"` key carrying th
 
 ### Step 6: Verification
 
-- [ ] Full pass: `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` <!-- completed: -->
+- [x] Full pass: `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` <!-- completed: 2026-07-24T12:36 -->
