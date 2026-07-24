@@ -1,7 +1,7 @@
 # Remove Implementation File Path Mentions from User-Facing Docs
 
 **Status**: Approved
-**Progress**: 2/10 tasks complete
+**Progress**: 5/10 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -209,9 +209,9 @@ Append one line to the § *First-class documentation targets* section:
 
 ### Step 2: Rewrite concepts/ pages
 
-- [ ] Apply R1 to `docs/concepts/overview.md` (three mermaid node labels) <!-- completed: -->
-- [ ] Apply R2 and R3 to `docs/concepts/model-selection.md` <!-- completed: -->
-- [ ] Apply R4 to `docs/concepts/monitoring.md` (three occurrences) <!-- completed: -->
+- [x] Apply R1 to `docs/concepts/overview.md` (three mermaid node labels) <!-- completed: 2026-07-25T00:44 -->
+- [x] Apply R2 and R3 to `docs/concepts/model-selection.md` <!-- completed: 2026-07-25T00:44 -->
+- [x] Apply R4 to `docs/concepts/monitoring.md` (three occurrences) <!-- completed: 2026-07-25T00:44 -->
 
 ### Step 3: Rewrite how-to/ and spec/ pages
 

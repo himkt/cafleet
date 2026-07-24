@@ -18,13 +18,12 @@ monitoring member kills its pane and the loop terminates with it.
 ## Heartbeat vs facilitation
 
 The monitor decides only the *when*. Everything requiring agent judgment stays
-the Director's job, defined in the `/cafleet` skill's
-`reference/supervision.md`:
+the Director's job, defined by the cafleet skill's supervision protocol:
 
 | Layer | Owns | Lives in |
 |---|---|---|
 | Heartbeat (the *when*) | which watched members are due; the wake keystroke into the monitoring member | the `cafleet monitor` loop |
-| Facilitation (the *what*) | poll → ACK → dispatch → health-check → escalate | the Director, per `/cafleet` `reference/supervision.md` |
+| Facilitation (the *what*) | poll → ACK → dispatch → health-check → escalate | the Director, per the cafleet skill's supervision protocol |
 
 The loop's only keystroke is a **wake nudge** into the monitoring member's own
 pane, naming each due member as `<role> <id> (<name>) [<reasons>]` (reasons:
@@ -41,7 +40,8 @@ a fresh read-only `cafleet member capture` of the target and classifies it on
 the same five-state rubric the monitoring member uses, firing only on
 `finished` or `stalled` — a pane classified `awaiting_user` or `working` has
 its round skipped and the entire send deferred to a later facilitation tick.
-The full gate lives in the `/cafleet` skill's `reference/supervision.md`.
+The full gate is part of the cafleet skill's supervision protocol, which the
+Director follows whenever it re-engages a member.
 
 ## The watched set
 
