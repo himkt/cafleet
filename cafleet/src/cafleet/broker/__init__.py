@@ -14,7 +14,6 @@ from cafleet.broker.members import (
 from cafleet.broker.messaging import (
     ack_message,
     broadcast_message,
-    cancel_message,
     poll_messages,
     send_message,
 )
@@ -51,7 +50,6 @@ __all__ = [
     "broadcast_message",
     "poll_messages",
     "ack_message",
-    "cancel_message",
     "list_inbox",
     "list_sent",
     "list_timeline",

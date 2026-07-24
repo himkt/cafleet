@@ -532,14 +532,13 @@ def member_capture(ctx, member_id, lines, ansi, json_output):
     "shell",
     is_flag=True,
     default=False,
-    help="Dispatch `! TEXT` via the coding agent's `!` shortcut instead of TEXT.",
+    help="Dispatch `! TEXT` (shell form) instead of TEXT.",
 )
 @click.argument("text")
 @json_flag
 @click.pass_context
 def member_prompt(ctx, member_id, shell, text, json_output):
-    """Keystroke TEXT into a member's pane as a submitted user turn (Director
-    only); with --shell, dispatch `! TEXT` via the coding agent's `!` shortcut."""
+    """Keystroke TEXT (or `! TEXT` with --shell) into a member's pane."""
     fleet_id = ctx.obj["fleet_id"]
 
     if "\n" in text or "\r" in text:

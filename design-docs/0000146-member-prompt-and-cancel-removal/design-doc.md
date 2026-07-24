@@ -1,7 +1,7 @@
 # `cafleet member prompt` and Removal of `member exec` / `message cancel`
 
 **Status**: Approved
-**Progress**: 15/28 tasks complete
+**Progress**: 17/28 tasks complete
 **Last Updated**: 2026-07-24
 
 ## Overview
@@ -165,8 +165,8 @@ The migration chain currently stands at three revisions (`0001` → `0002` → `
 
 ### Step 4: Cancel removal code
 
-- [ ] Delete `cancel_message` from `broker/messaging.py` and its `broker/__init__.py` export; inline `_transition_message_state` into `ack_message` preserving exact error strings; drop `/cancel` from the module-docstring summary and `canceled` from the poll docstring <!-- completed: -->
-- [ ] Delete the `message cancel` command from `cli/message.py` <!-- completed: -->
+- [x] Delete `cancel_message` from `broker/messaging.py` and its `broker/__init__.py` export; inline `_transition_message_state` into `ack_message` preserving exact error strings; drop `/cancel` from the module-docstring summary and `canceled` from the poll docstring <!-- completed: 2026-07-24T10:20 -->
+- [x] Delete the `message cancel` command from `cli/message.py` <!-- completed: 2026-07-24T10:20 -->
 
 ### Step 5: Admin WebUI
 

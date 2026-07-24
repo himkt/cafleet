@@ -157,31 +157,6 @@ def message_ack(ctx, member_id, message_id, full, quiet, json_output):
         raise click.ClickException(str(exc)) from exc
 
 
-@message.command("cancel")
-@fleet_id_option
-@member_id_option
-@click.option("--message-id", type=int, required=True, help="Message ID to cancel")
-@full_flag
-@json_flag
-@click.pass_context
-def message_cancel(ctx, member_id, message_id, full, json_output):
-    """Cancel (retract) a sent message."""
-    fleet_id = ctx.obj["fleet_id"]
-    try:
-        _require_member_in_fleet(member_id, fleet_id)
-        result = broker.cancel_message(member_id, message_id)
-        output.truncate_message_text(result, full=full)
-        rendered = output.render_messages_in_result(result, full=full)
-        if json_output:
-            click.echo(output.format_json(rendered))
-        else:
-            click.echo("Message canceled.\n" + output.format_message(result, full=full))
-    except click.ClickException:
-        raise
-    except Exception as exc:
-        raise click.ClickException(str(exc)) from exc
-
-
 @message.command("show")
 @fleet_id_option
 @member_id_option
