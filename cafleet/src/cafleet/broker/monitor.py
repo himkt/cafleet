@@ -202,12 +202,25 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
     ``find_monitoring_member``). Each dict carries ``member_id``, ``name``,
     ``is_director`` (derived from ``fleets.director_member_id``, used for the
     ``monitor status`` role label), ``pane_id``, ``interval_seconds``,
-    ``last_ping_at``, ``enabled`` (bool), and ``pending_count`` — the count of
+    ``last_ping_at``, ``enabled`` (bool), ``pending_count`` — the count of
     the member's ``input_required`` deliveries excluding ``broadcast_summary``
-    rows, a correlated subquery mirroring ``members.py``.
+    rows, a correlated subquery mirroring ``members.py`` — and
+    ``oldest_pending_ts`` — ``MIN(status_timestamp)`` over the same predicate
+    set (a second correlated subquery; ``None`` when the member has no pending
+    delivery).
     """
     pending_sq = (
         select(func.count(Message.message_id))
+        .where(
+            Message.owner_member_id == Member.member_id,
+            Message.status_state == "input_required",
+            _shared.NOT_BROADCAST_SUMMARY,
+        )
+        .correlate(Member)
+        .scalar_subquery()
+    )
+    oldest_pending_sq = (
+        select(func.min(Message.status_timestamp))
         .where(
             Message.owner_member_id == Member.member_id,
             Message.status_state == "input_required",
@@ -226,6 +239,7 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
             MonitorConfig.last_ping_at,
             MonitorConfig.enabled,
             pending_sq.label("pending_count"),
+            oldest_pending_sq.label("oldest_pending_ts"),
         )
         .join(MonitorConfig, MonitorConfig.member_id == Member.member_id)
         .join(MemberPlacement, MemberPlacement.member_id == Member.member_id)
@@ -244,6 +258,7 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
             "last_ping_at": row.last_ping_at,
             "enabled": bool(row.enabled),
             "pending_count": row.pending_count,
+            "oldest_pending_ts": row.oldest_pending_ts,
         }
         for row in rows
     ]

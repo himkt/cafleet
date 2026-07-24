@@ -1,7 +1,7 @@
 # Monitor Unacked-Message Wake Reason
 
 **Status**: Approved
-**Progress**: 5/14 tasks complete
+**Progress**: 7/14 tasks complete
 **Last Updated**: 2026-07-24
 
 ## Overview
@@ -134,8 +134,8 @@ WebUI `GET /api/monitor` gains an additive top-level `"members"` key carrying th
 
 ### Step 2: Broker
 
-- [ ] Add the `oldest_pending_ts` correlated `MIN(status_timestamp)` subquery to `list_monitor_targets` in `cafleet/src/cafleet/broker/monitor.py` and update its docstring <!-- completed: -->
-- [ ] Broker tests: `oldest_pending_ts` is `None` with no pending rows, picks the minimum `status_timestamp`, excludes acked (`completed`) and `broadcast_summary` rows <!-- completed: -->
+- [x] Add the `oldest_pending_ts` correlated `MIN(status_timestamp)` subquery to `list_monitor_targets` in `cafleet/src/cafleet/broker/monitor.py` and update its docstring <!-- completed: 2026-07-24T11:49 -->
+- [x] Broker tests: `oldest_pending_ts` is `None` with no pending rows, picks the minimum `status_timestamp`, excludes acked (`completed`) and `broadcast_summary` rows <!-- completed: 2026-07-24T11:49 -->
 
 ### Step 3: Monitor loop
 
