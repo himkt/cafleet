@@ -199,7 +199,7 @@ Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/
 |---|---|
 | ROLE TITLE | `the Programmer` |
 | role-file | `roles/programmer.md` |
-| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/exec-routing.md), which you load at startup.` |
+| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` |
 | start cue | `Start by reading the design document. Then wait for the Director to assign your first step.` |
 
 Render the prompt to `${BASE}/.prompts/programmer-<UTC-compact>.md` per the 3e two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
@@ -220,7 +220,7 @@ Render the prompt to `${BASE}/.prompts/programmer-<UTC-compact>.md` per the 3e t
 |---|---|
 | ROLE TITLE | `the Tester` |
 | role-file | `roles/tester.md` |
-| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: Do NOT write implementation code — only test code.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/exec-routing.md), which you load at startup.` |
+| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: Do NOT write implementation code — only test code.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` |
 | start cue | `Start by reading the design document. Then wait for the Director to assign your first step.` |
 
 Render the prompt to `${BASE}/.prompts/tester-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--text-file`:
@@ -243,7 +243,7 @@ Render the prompt to `${BASE}/.prompts/tester-<UTC-compact>.md` per the 3e two-s
 |---|---|
 | ROLE TITLE | `the Verifier` |
 | role-file | `roles/verifier.md` |
-| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code or modify implementation/test files.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/exec-routing.md), which you load at startup.` |
+| IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code or modify implementation/test files.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` |
 | start cue | `Start by reading the design document and discovering available tools. Then wait for the Director to assign your first verification task.` |
 
 Render the prompt to `${BASE}/.prompts/verifier-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with `--text-file`:
@@ -360,7 +360,7 @@ This is the first and only time the Reviewer exists in the fleet (never in the S
 | skill loads | the `cafleet` skill — for communication with the Director; the `cafleet-design-doc` skill — for the coordination protocol and the design-doc format (same pair as the other execute roles per §3e) |
 | CONTEXT LINES | `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` / `BASE BRANCH: [INSERT default branch name from Step 2]` |
 | poll-handling line (verbatim) | `When you see cafleet message poll output with a message from the Director, act on those instructions.` |
-| IMPORTANT (verbatim) | `IMPORTANT: You are a fresh reviewer with no implementation context — judge only what you can verify from the design document, the diff, and the checks you run.` / `IMPORTANT: Do NOT write or modify implementation or test code. Your only edits are COMMENT(reviewer) markers.` / `IMPORTANT: Do NOT commit. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/exec-routing.md), which you load at startup.` |
+| IMPORTANT (verbatim) | `IMPORTANT: You are a fresh reviewer with no implementation context — judge only what you can verify from the design document, the diff, and the checks you run.` / `IMPORTANT: Do NOT write or modify implementation or test code. Your only edits are COMMENT(reviewer) markers.` / `IMPORTANT: Do NOT commit. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` |
 | start cue | `Start by reading the design document and the branch diff. Then act on the Director's ready (doc) assignment.` |
 
 Render the spawn prompt to `${BASE}/.prompts/reviewer-<UTC-compact>.md` per the 3e two-step audit-file pattern, then spawn with your overlay's resolved `{reviewer_model}` value:

@@ -40,15 +40,7 @@ Environment variable controlling body truncation in the rendered envelope; defau
 
 ## Coding-agent backends
 
-Three backends — `claude`, `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent` (omitted → the member inherits the Director's backend). `--model <m>` pins the LLM, `--effort <level>` forwards a reasoning-effort level (claude: `low`–`max`; codex: `minimal`–`xhigh`; opencode: unsupported — any value exits 2), and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; all three flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md) (and [`roles/monitor.md`](../roles/monitor.md) plus [`reference/supervision.md`](supervision.md) for the monitor). All three honor the leading-`!` input shortcut, so `member exec` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent/claude-overlay.md) / [`codex`](coding-agent/codex-overlay.md) / [`opencode`](coding-agent/opencode-overlay.md).
-
-## Cancel (Retract)
-
-Retract a sent message that has not been acknowledged yet (sender-only). `--message-id` required.
-
-```bash
-cafleet message cancel --fleet-id <fleet-id> --member-id <my-member-id> --message-id <message-id>
-```
+Three backends — `claude`, `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent` (omitted → the member inherits the Director's backend). `--model <m>` pins the LLM, `--effort <level>` forwards a reasoning-effort level (claude: `low`–`max`; codex: `minimal`–`xhigh`; opencode: unsupported — any value exits 2), and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; all three flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md) (and [`roles/monitor.md`](../roles/monitor.md) plus [`reference/supervision.md`](supervision.md) for the monitor). All three honor the leading-`!` input shortcut, so `member prompt --shell` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent/claude-overlay.md) / [`codex`](coding-agent/codex-overlay.md) / [`opencode`](coding-agent/opencode-overlay.md).
 
 ## Show (Get Message)
 
@@ -138,11 +130,11 @@ Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters ever
    `--coding-agent <backend>` — substitute the coding agent you are actually running on: your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity (e.g. Claude Code → `claude`).
    Must run inside a tmux or herdr session (else exits 1 with `Error: cafleet fleet create must be run inside a tmux or herdr session`, writes nothing).
 
-2. **Discover, send, poll, ack** per the command sections above; append a trailing `--json` when parsing output. Director-side create/capture/exec/ping: [`reference/director.md`](director.md); shutdown ordering: [`reference/recovery.md`](recovery.md).
+2. **Discover, send, poll, ack** per the command sections above; append a trailing `--json` when parsing output. Director-side create/capture/prompt/ping: [`reference/director.md`](director.md); shutdown ordering: [`reference/recovery.md`](recovery.md).
 
 ## Message Lifecycle
 
-A `messages` row moves through three states: **input_required** (delivered, awaiting ACK) → **completed** (ACKed), or **canceled** (sender retracted before ACK). For broadcast threading (the `origin_message_id` self-reference shape), see § *Broadcast* above.
+A `messages` row moves through two states: **input_required** (delivered, awaiting ACK) → **completed** (ACKed). For broadcast threading (the `origin_message_id` self-reference shape), see § *Broadcast* above.
 
 ## Error Handling
 

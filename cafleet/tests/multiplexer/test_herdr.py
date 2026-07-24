@@ -979,29 +979,61 @@ def test_send_inline_preview__sanitizes_body_newlines(monkeypatch, herdr_run):
     assert body == "line1⏎line2⏎line3"
 
 
-# --- send_bash_command -----------------------------------------------------
+# --- send_prompt ------------------------------------------------------------
 
 
-def test_send_bash_command__argv_and_strip(herdr_run):
+def test_send_prompt__shell_form_argv_and_strip_no_esc(herdr_run):
+    """Shell form: one `pane run` carrying `! <stripped>` — no leading esc."""
     captured, set_returns = herdr_run
     set_returns("")
-    _herdr.send_bash_command(target_pane_id="wG:p1", command="  git status  ")
+    _herdr.send_prompt(target_pane_id="wG:p1", text="  git status  ", shell=True)
     assert captured == [["herdr", "pane", "run", "wG:p1", "! git status"]]
 
 
+def test_send_prompt__plain_form_esc_then_run(monkeypatch, herdr_run):
+    """Plain form: discrete esc (permission-prompt safeguard, settling first)
+    then `pane run <stripped>` — mirroring send_poll_trigger's esc-then-run
+    shape."""
+    captured, _set_returns = herdr_run
+    sleeps: list[float] = []
+    monkeypatch.setattr("time.sleep", lambda secs: sleeps.append(secs))
+    _herdr.send_prompt(target_pane_id="wG:p1", text="  please run /compact  ")
+    assert captured == [
+        ["herdr", "pane", "send-keys", "wG:p1", "esc"],
+        ["herdr", "pane", "run", "wG:p1", "please run /compact"],
+    ]
+    assert sleeps == [multiplexer_herdr._ESC_SETTLE_DELAY]
+
+
+def test_send_prompt__plain_bang_text_delivered_verbatim(monkeypatch, herdr_run):
+    """No content inspection: plain-form text beginning with `!` still takes
+    the plain mechanics (esc, verbatim payload — no double-prefixing)."""
+    captured, _set_returns = herdr_run
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    _herdr.send_prompt(target_pane_id="wG:p1", text="! git status")
+    assert captured == [
+        ["herdr", "pane", "send-keys", "wG:p1", "esc"],
+        ["herdr", "pane", "run", "wG:p1", "! git status"],
+    ]
+
+
+@pytest.mark.parametrize("shell", [True, False])
 @pytest.mark.parametrize(
-    ("command", "expected_match"),
+    ("text", "expected_match"),
     [
-        ("", "may not be empty"),
-        ("   ", "may not be empty"),
-        ("line1\nline2", "may not contain newlines"),
-        ("carriage\rreturn", "may not contain newlines"),
+        ("", "send_prompt: text may not be empty"),
+        ("   ", "send_prompt: text may not be empty"),
+        # Mux layer checks empty-first: a "\n"-only text strips to empty.
+        ("\n", "send_prompt: text may not be empty"),
+        ("line1\nline2", "send_prompt: text may not contain newlines"),
+        ("carriage\rreturn", "send_prompt: text may not contain newlines"),
     ],
 )
-def test_send_bash_command__validation(herdr_run, command, expected_match):
+def test_send_prompt__validation(monkeypatch, herdr_run, shell, text, expected_match):
     captured, _set_returns = herdr_run
+    monkeypatch.setattr("time.sleep", lambda _s: None)
     with pytest.raises(HerdrError, match=expected_match):
-        _herdr.send_bash_command(target_pane_id="wG:p1", command=command)
+        _herdr.send_prompt(target_pane_id="wG:p1", text=text, shell=shell)
     assert captured == []
 
 

@@ -74,13 +74,14 @@ def _send_literal_then_enter(
         # permission-approval prompt so the trailing ``Enter`` below cannot
         # blindly confirm it. Applied wherever the target pane MAY be parked on
         # such a prompt: ``send_poll_trigger`` (``cafleet member ping`` — a
-        # member that might be on a prompt) and ``send_inline_preview`` (every
-        # inbound ``message send`` / ``broadcast`` — any
-        # recipient, the Director included). It is NOT applied where a leading
-        # ``Esc`` would mis-fire — ``send_exit`` (``Esc`` before ``/exit``) and
-        # ``send_bash_command`` (``Esc`` before ``! <cmd>``) — nor where the pane
-        # is never on a prompt: ``send_wake_trigger`` (the monitoring member's own
-        # read-only pane).
+        # member that might be on a prompt), ``send_inline_preview`` (every
+        # inbound ``message send`` / ``broadcast`` — any recipient, the Director
+        # included), and ``send_prompt``'s plain form (a submitted user turn).
+        # It is NOT applied where a leading ``Esc`` would mis-fire —
+        # ``send_exit`` (``Esc`` before ``/exit``) and ``send_prompt``'s shell
+        # form (``Esc`` before ``! <cmd>``) — nor where the pane is never on a
+        # prompt: ``send_wake_trigger`` (the monitoring member's own read-only
+        # pane).
         _run_tolerating_pane_gone(
             ["tmux", "send-keys", "-t", target_pane_id, "Escape"],
             ignore_missing=ignore_missing,
@@ -317,15 +318,20 @@ class TmuxMultiplexer:
             target_pane_id=target_pane_id, payload=payload, esc_first=True
         )
 
-    def send_bash_command(self, *, target_pane_id: str, command: str) -> None:
-        """Send ``! <command>`` + Enter, routing shell via the coding agent's ``!`` shortcut."""
-        normalized_command = command.strip()
-        if not normalized_command:
-            raise TmuxError("send_bash_command: command may not be empty")
-        if "\n" in command or "\r" in command:
-            raise TmuxError("send_bash_command: command may not contain newlines")
+    def send_prompt(
+        self, *, target_pane_id: str, text: str, shell: bool = False
+    ) -> None:
+        """Send ``! <text>`` + Enter via the coding agent's ``!`` shortcut when
+        ``shell``; else lead with the ``Esc`` safeguard and submit ``text`` as a
+        real user turn."""
+        stripped = text.strip()
+        if not stripped:
+            raise TmuxError("send_prompt: text may not be empty")
+        if "\n" in text or "\r" in text:
+            raise TmuxError("send_prompt: text may not contain newlines")
+        payload = f"! {stripped}" if shell else stripped
         _send_literal_then_enter(
-            target_pane_id=target_pane_id, payload=f"! {normalized_command}"
+            target_pane_id=target_pane_id, payload=payload, esc_first=not shell
         )
 
     def capture_pane(self, *, target_pane_id: str, lines: int = 20) -> str:

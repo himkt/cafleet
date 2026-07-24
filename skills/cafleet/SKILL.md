@@ -28,7 +28,7 @@ Before your first action other than these Reads, Read every file in the **Load-b
 
 | Read | Read before you… | What you lose if you skip it |
 |------|------------------|------------------------------|
-| [`reference/exec-routing.md`](reference/exec-routing.md) | route a Bash-denied command to the Director | the dispatch shape — you stall or fabricate command output |
+| [`reference/prompt-routing.md`](reference/prompt-routing.md) | route a Bash-denied command to the Director | the dispatch shape — you stall or fabricate command output |
 | [`reference/recovery.md`](reference/recovery.md) | tear down or recover a member / fleet (also the Shutdown Protocol) | the first-out teardown order — you orphan panes / leak the fleet |
 | [`reference/cli.md`](reference/cli.md) § *Broadcast* | broadcast to the fleet or thread via `origin_message_id` | the broadcast send/ack semantics — your fan-out misfires or double-acks |
 
@@ -36,9 +36,9 @@ Before your first action other than these Reads, Read every file in the **Load-b
 
 | Read | When |
 |------|------|
-| [`reference/cli.md`](reference/cli.md) | you need a CLI subcommand beyond send/poll/ack — global options, output flags (`--full` / `--json` opt-back-in semantics, `CAFLEET_MAX_TEXT_LEN`), coding-agent backends, `message cancel` / `show` / `broadcast`, `member show` / `member list`, `doctor`, `fleet delete`, the typical workflow |
+| [`reference/cli.md`](reference/cli.md) | you need a CLI subcommand beyond send/poll/ack — global options, output flags (`--full` / `--json` opt-back-in semantics, `CAFLEET_MAX_TEXT_LEN`), coding-agent backends, `message show` / `broadcast`, `member show` / `member list`, `doctor`, `fleet delete`, the typical workflow |
 
-Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`member create` / `member delete` / `member list` / `member capture` / `member exec` / `member ping`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
+Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`member create` / `member delete` / `member list` / `member capture` / `member prompt` / `member ping`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
 
 Exhaustive per-subcommand flags, exit codes, and error strings live in [`docs/spec/cli-options.md`](../../docs/spec/cli-options.md).
 
@@ -72,7 +72,7 @@ Used only when your overlay omits a token or your backend is unknown. Each defau
 Every `cafleet` invocation that touches members or messages is **fleet-scoped** — it carries `--fleet-id` — and most additionally carry a member-identity flag with exactly one meaning per spelling:
 
 - `--fleet-id <int>` — per-subcommand (placed **after** the subcommand name), required on every `member *` / `message *` / `monitor *` subcommand plus `fleet show` / `fleet delete`. There is **no environment default**; a missing value exits 1 with the shared callback error naming `cafleet fleet create`. Rejected with `No such option` on `setup` / `fleet create` / `fleet list` / `server` / `doctor`.
-- `--member-id <int>` — **the member in question**: the requester on `message poll` / `ack` / `cancel` / `show`, the target on `member delete` / `show` / `capture` / `exec` / `ping`, and the member whose schedule is shown/edited on `monitor config`.
+- `--member-id <int>` — **the member in question**: the requester on `message poll` / `ack` / `show`, the target on `member delete` / `show` / `capture` / `prompt` / `ping`, and the member whose schedule is shown/edited on `monitor config`.
 - `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient** on `message send`; `message broadcast` takes the sender only. (`member create` takes **no** identity flag — the Director is auto-resolved from the fleet row; `member list`, `monitor start` / `monitor status`, and the `fleet *` commands take none either.)
 
 In the Director's own commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet member create` — never your own exported shell variables. `permissions.allow` matches Bash invocations as fixed strings, so an ad-hoc `export FLEET_ID=…; --fleet-id $FLEET_ID` breaks the match and forces prompts. See [`cli-options.md`](../../docs/spec/cli-options.md#fleet-id) for the rationale and [`permissions.allow` coverage](../../docs/spec/cli-options.md#permissionsallow-coverage) for the pattern set.

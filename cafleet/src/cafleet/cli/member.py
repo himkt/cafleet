@@ -524,21 +524,28 @@ def member_capture(ctx, member_id, lines, ansi, json_output):
         click.echo(content, nl=False, color=True if ansi else None)
 
 
-@member.command("exec")
+@member.command("prompt")
 @fleet_id_option
 @member_id_option
-@click.argument("command")
+@click.option(
+    "--shell",
+    "shell",
+    is_flag=True,
+    default=False,
+    help="Dispatch `! TEXT` (shell form) instead of TEXT.",
+)
+@click.argument("text")
 @json_flag
 @click.pass_context
-def member_exec(ctx, member_id, command, json_output):
-    """Dispatch a shell command via the coding agent's `!` shortcut."""
+def member_prompt(ctx, member_id, shell, text, json_output):
+    """Keystroke TEXT (or `! TEXT` with --shell) into a member's pane."""
     fleet_id = ctx.obj["fleet_id"]
 
-    if "\n" in command or "\r" in command:
-        raise click.UsageError("command may not contain newlines.")
-    if not command.strip():
-        raise click.UsageError("command may not be empty.")
-    command = command.strip()
+    if "\n" in text or "\r" in text:
+        raise click.UsageError("text may not contain newlines.")
+    if not text.strip():
+        raise click.UsageError("text may not be empty.")
+    text = text.strip()
 
     mux = ensure_multiplexer_or_die()
 
@@ -547,10 +554,10 @@ def member_exec(ctx, member_id, command, json_output):
         member_id,
     )
     member_id = target["member_id"]
-    pane_id = _require_member_pane(placement, member_id, "exec")
+    pane_id = _require_member_pane(placement, member_id, "prompt")
 
     try:
-        mux.send_bash_command(target_pane_id=pane_id, command=command)
+        mux.send_prompt(target_pane_id=pane_id, text=text, shell=shell)
     except MultiplexerError as exc:
         raise click.ClickException(f"send failed: {exc}") from exc
 
@@ -560,14 +567,14 @@ def member_exec(ctx, member_id, command, json_output):
                 {
                     "member_id": member_id,
                     "pane_id": pane_id,
-                    "command": command,
+                    "text": text,
+                    "shell": shell,
                 },
             )
         )
     else:
-        click.echo(
-            f"Sent bash command {command!r} to member {target['name']} ({pane_id})."
-        )
+        kind = "shell prompt" if shell else "prompt"
+        click.echo(f"Sent {kind} {text!r} to member {target['name']} ({pane_id}).")
 
 
 @member.command("ping")

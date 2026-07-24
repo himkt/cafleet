@@ -46,7 +46,7 @@ system, and the snippets below are the recommended starting points.
       "Skill(cafleet:cafleet-research)"
     ],
     "ask": [
-      "Bash(cafleet * member exec *)"
+      "Bash(cafleet * member prompt *)"
     ]
   }
 }
@@ -54,9 +54,9 @@ system, and the snippets below are the recommended starting points.
 
 The `Bash(cafleet *)` pattern is the single allow-everything entry that the
 literal `--fleet-id <int>` / `--member-id <int>` flag convention enables —
-one pattern covers every subcommand for every fleet. `cafleet member exec *`
-is moved to the `ask` list because it dispatches arbitrary shell commands on
-behalf of a member; the operator should confirm each invocation.
+one pattern covers every subcommand for every fleet. `cafleet member prompt *`
+is moved to the `ask` list because it keystrokes arbitrary text or shell
+commands into a member's pane; the operator should confirm each invocation.
 
 ### Codex
 
@@ -78,7 +78,7 @@ default SQLite DB directory. Use the absolute path matching
 `CAFLEET_DATABASE_URL` or the default XDG location.
 
 The Codex rules for `cafleet` commands — allow every subcommand, keep
-`cafleet member exec` prompting — are installed to
+`cafleet member prompt` prompting — are installed to
 `~/.codex/rules/cafleet.rules` by `cafleet setup`. See
 [Coding-agent backends § The `cafleet` rules file](spec/coding-agent-backends.md#cafleet-rules-file)
 for the rules, their precedence, and where operator customizations belong.

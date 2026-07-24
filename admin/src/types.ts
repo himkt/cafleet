@@ -24,7 +24,7 @@ export interface TimelineMessage {
   from_member_name: string;
   to_member_id: number;
   to_member_name: string;
-  status: "input_required" | "completed" | "canceled";
+  status: "input_required" | "completed";
   created_at: string;
   origin_message_id: number | null;
   status_timestamp: string;

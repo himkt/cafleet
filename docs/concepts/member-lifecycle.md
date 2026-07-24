@@ -75,13 +75,15 @@ The lifecycle ops live in the `member` group: `member create`, `member delete`,
 detail — kind, skills, placement block), and `member list` (every active
 registry entry of the fleet, with `kind` and `idle` columns). Keystroke
 interaction lives
-in the same group: `member capture`, `member exec`, and `member ping`.
+in the same group: `member capture`, `member prompt`, and `member ping`.
 `member create` takes no identity flag — the CLI resolves the
 Director from `fleets.director_member_id`; every other lifecycle verb targets
 its member by `--member-id`, scoped to the per-subcommand `--fleet-id`. See
 [CLI options](../spec/cli-options.md) for every flag and the shared
 resolution rules.
 
-`cafleet member exec` is the shell-dispatch primitive of the
-bash-via-Director fallback protocol — see
-[CLI options](../spec/cli-options.md#member-exec).
+`cafleet member prompt` keystrokes text into a member's pane: the plain form
+submits a direct user turn (for slash commands and other magic commands a
+broker message body cannot trigger), and the `--shell` form is the
+shell-dispatch primitive of the bash-via-Director fallback protocol — see
+[CLI options](../spec/cli-options.md#member-prompt).

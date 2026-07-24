@@ -18,7 +18,7 @@ Supervision happens over the CAFleet message broker: the Director `cafleet messa
 
 **Facilitation cue (load-bearing).** The monitor loop does **not** wake the Director (it wakes only the monitoring member — firing whenever a watched member is due on its own interval; see § The monitor heartbeat). When the Director is re-engaged on demand (§ The monitor heartbeat defines the two channels), **treat each such re-engagement as the cue to run the entire 5-step facilitation loop** (poll → ACK → dispatch → health-check → escalate), NOT to read the inbox and stop.
 
-The Director never polls a member's pane via raw `tmux`. Inspection is via `cafleet member capture`; write is via `cafleet member exec` / `cafleet member ping`. See [`SKILL.md`](../SKILL.md) and [`reference/cli.md`](cli.md) for the canonical command surface.
+The Director never polls a member's pane via raw `tmux`. Inspection is via `cafleet member capture`; write is via `cafleet member prompt` / `cafleet member ping`. See [`SKILL.md`](../SKILL.md) and [`reference/cli.md`](cli.md) for the canonical command surface.
 
 The Director's plain output is **not visible to members** — the only Director→member channel is `cafleet message send` (and the Director-only keystroke primitives above for special cases).
 
@@ -81,7 +81,7 @@ The gate is judgment applied at use time: knowledge from a monitor report or an 
 
 A `cafleet message broadcast` fires the same `Esc`-first preview into every recipient pane, and recipients cannot be skipped individually within one send — so the broadcast fires only when **every** recipient's fresh capture classifies `finished` or `stalled`; otherwise defer the entire broadcast, or replace it with per-recipient gated unicasts.
 
-**Exempt from the gate:** the immediate reply to a reply-soliciting message (bullet above), and `cafleet member exec` — member-requested shell dispatch per [`reference/exec-routing.md`](exec-routing.md), where the member is blocked *expecting* the keystroke.
+**Exempt from the gate:** the immediate reply to a reply-soliciting message (bullet above), and `cafleet member prompt --shell` — member-requested shell dispatch per [`reference/prompt-routing.md`](prompt-routing.md), where the member is blocked *expecting* the keystroke.
 
 ## Authorization-Scope Guard (CRITICAL)
 
@@ -157,7 +157,7 @@ On every supervision tick — whether fired by the monitoring member's on-demand
 
 When you receive any signal that a member may be stalled (the monitoring member's nudge, idle notification, user nudge), evaluate using this 2-stage protocol. **Every nudge is gate-preconditioned**: fire it only after a fresh capture classifies the target `finished` or `stalled` per § Idle Semantics → *The pre-nudge capture gate* — a monitor report is stale knowledge, never a substitute for the fresh capture.
 
-> **Bash request blocking case**: When `cafleet message poll` returns a member message asking for a shell command, dispatch via `cafleet member exec "<cmd>"` per [`reference/exec-routing.md`](exec-routing.md). Member blocks until the keystroke lands; process requests one at a time, don't skip ahead to other inbox items.
+> **Bash request blocking case**: When `cafleet message poll` returns a member message asking for a shell command, dispatch via `cafleet member prompt --shell "<cmd>"` per [`reference/prompt-routing.md`](prompt-routing.md). Member blocks until the keystroke lands; process requests one at a time, don't skip ahead to other inbox items.
 
 ### Stage 1 — Message-based check (`cafleet message poll`)
 
@@ -188,7 +188,7 @@ A Stage-2 capture doubles as the gate capture only when it was taken at `--lines
 
 If a member is still unresponsive after 2 **fired** nudges via `cafleet message send` AND `cafleet member capture` shows no forward progress in the terminal buffer, escalate to the user via {decision_surface} (per [`SKILL.md`](../SKILL.md) § *Soliciting user reactions*) with concrete options (e.g. re-nudge once more / re-spawn the member / drop its task). Only nudges that actually fired count toward the threshold: a round the gate skipped is not a nudge and never advances the count. A member that remains `awaiting_user` or `working` across many rounds is not "unresponsive" — it is parked on the user or making progress; keep skipping.
 
-The unblock primitives and their ordering — non-intrusive `cafleet message poll` → read-only `cafleet member capture` → authoritative `cafleet message send` → `cafleet member ping` (missed auto-fire / required post-`exec` follow-up) → `cafleet member exec "<cmd>"` (shell dispatch) → `cafleet member delete` (last resort, kills the pane immediately, never raw `tmux kill-pane`) → escalate to the user via {decision_surface} — are documented in [`reference/director.md`](director.md), [`reference/recovery.md`](recovery.md), [`reference/exec-routing.md`](exec-routing.md), and the § Quick Reference table below.
+The unblock primitives and their ordering — non-intrusive `cafleet message poll` → read-only `cafleet member capture` → authoritative `cafleet message send` → `cafleet member ping` (missed auto-fire / required post-shell-dispatch follow-up) → `cafleet member prompt --shell "<cmd>"` (shell dispatch) → `cafleet member delete` (last resort, kills the pane immediately, never raw `tmux kill-pane`) → escalate to the user via {decision_surface} — are documented in [`reference/director.md`](director.md), [`reference/recovery.md`](recovery.md), [`reference/prompt-routing.md`](prompt-routing.md), and the § Quick Reference table below.
 
 ## User Delegation Protocol
 
@@ -203,7 +203,7 @@ CAFleet members never talk to the user directly — the Director relays. This is
 - Decide on the user's behalf, even when the answer looks obvious.
 - Batch multiple members' questions into a single user prompt unless they are genuinely the same decision.
 - Summarize or paraphrase the user's answer when relaying — pass it through.
-- Print a fenced `bash` block of a pane command (`member exec` / `member ping`) for the user to paste — invoke any such primitive via the Director's own Bash tool; the coding agent's per-call permission prompt is the consent surface.
+- Print a fenced `bash` block of a pane command (`member prompt` / `member ping`) for the user to paste — invoke any such primitive via the Director's own Bash tool; the coding agent's per-call permission prompt is the consent surface.
 
 ## Cleanup Protocol
 
@@ -220,7 +220,7 @@ Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol (fir
 | ACK reply | `cafleet message ack --fleet-id <s> --member-id <director> --message-id <message>` | Unacknowledged messages accumulate; ACK every reply you act on |
 | Inspect stalled member | `cafleet member capture --fleet-id <s> --member-id <member>` | Replaces raw `tmux capture-pane` |
 | Manual inbox-poll nudge | `cafleet member ping --fleet-id <s> --member-id <member>` | Pre-approved; for missed auto-fires and post-`exec` chains. Gated: fresh capture must classify finished/stalled (§ Idle Semantics → *The pre-nudge capture gate*) |
-| Shell-dispatch on member's behalf | `cafleet member exec --fleet-id <s> --member-id <member> "<cmd>"` | Per [`reference/exec-routing.md`](exec-routing.md); follow with `member ping` |
+| Shell-dispatch on member's behalf | `cafleet member prompt --fleet-id <s> --member-id <member> --shell "<cmd>"` | Per [`reference/prompt-routing.md`](prompt-routing.md); follow with `member ping` |
 | Answer a member's relayed question | {decision_surface} → `cafleet message send` | Ask the user via {decision_surface} first, then relay the answer back to the member as a message; never decide silently |
 | Relay user input | {decision_surface} → `cafleet message send` | Pass-through; never substitute judgment |
 | Shut down team | [`reference/recovery.md`](recovery.md) § Shutdown Protocol | Delete monitoring member first (kills the heartbeat with its pane) → `member delete` each ordinary → `fleet delete` |

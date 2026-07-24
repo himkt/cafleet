@@ -17,7 +17,6 @@ const STATUS_CHIPS: Record<
 > = {
   input_required: { label: "pending", className: "bg-surface-hover text-text-muted" },
   completed: { label: "acked", className: "bg-success-soft text-success" },
-  canceled: { label: "canceled", className: "bg-danger-soft text-danger" },
 };
 
 function StatusChip({ status }: { status: TimelineMessage["status"] }) {

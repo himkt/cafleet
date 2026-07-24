@@ -119,35 +119,23 @@ def test_poll_messages__returns_flat_typed_message_dicts():
     assert "broadcast_summary" not in [m["type"] for m in sender_messages]
 
 
-@pytest.mark.parametrize(
-    ("action", "expected_state"),
-    [("ack", "completed"), ("cancel", "canceled")],
-)
-def test_ack_and_cancel__transition_and_round_trip(action, expected_state):
+def test_ack__transition_and_round_trip():
     sid, sender, recipient = _setup_two_members()
-    sent = broker.send_message(sid, sender, recipient, f"round trip {action}")
+    sent = broker.send_message(sid, sender, recipient, "round trip ack")
     mid = sent["message"]["message_id"]
 
-    if action == "ack":
-        result = broker.ack_message(recipient, mid)
-        unauthorized_actor = sender
-        unauthorized_call = broker.ack_message
-    else:
-        result = broker.cancel_message(sender, mid)
-        unauthorized_actor = recipient
-        unauthorized_call = broker.cancel_message
-
+    result = broker.ack_message(recipient, mid)
     _assert_flat_typed_shape(result["message"], expect_type="unicast")
-    assert result["message"]["status_state"] == expected_state
+    assert result["message"]["status_state"] == "completed"
 
     # poll now returns only un-acked deliveries; verify persistence via get_message.
     persisted = broker.get_message(sid, mid)["message"]
-    assert persisted["text"] == f"round trip {action}"
-    assert persisted["status_state"] == expected_state
+    assert persisted["text"] == "round trip ack"
+    assert persisted["status_state"] == "completed"
 
     sent2 = broker.send_message(sid, sender, recipient, "unauthorized check")
     with pytest.raises(PermissionError):
-        unauthorized_call(unauthorized_actor, sent2["message"]["message_id"])
+        broker.ack_message(sender, sent2["message"]["message_id"])
 
 
 @pytest.mark.parametrize("api", ["list_inbox", "list_sent", "list_timeline"])

@@ -1,4 +1,4 @@
-"""Message send/broadcast/poll/ack/cancel and inline-preview notification."""
+"""Message send/broadcast/poll/ack and inline-preview notification."""
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -264,7 +264,7 @@ def poll_messages(member_id: int) -> list[dict]:
     """Return un-acked deliveries addressed to ``member_id``, newest first.
 
     Only ``input_required`` messages are returned — once a delivery is ACKed
-    (``completed``) or canceled it no longer appears. ``broadcast_summary``
+    (``completed``) it no longer appears. ``broadcast_summary``
     rows are filtered out, as those belong to the broadcaster's own inbox
     and are not deliveries.
 
@@ -279,36 +279,6 @@ def poll_messages(member_id: int) -> list[dict]:
         Message.owner_member_id == member_id,
         status="input_required",
     )
-
-
-def _transition_message_state(
-    member_id: int,
-    message_id: int,
-    *,
-    expected_member_field: str,
-    new_state: str,
-    action_verb: str,
-    permission_error_msg: str,
-) -> dict:
-    with _shared.write_session() as session:
-        message_dict = _shared.read_message(session, message_id)
-        if message_dict is None:
-            raise ValueError(f"Message {message_id} not found")
-
-        if message_dict[expected_member_field] != member_id:
-            raise PermissionError(permission_error_msg)
-
-        if message_dict["status_state"] != "input_required":
-            raise ValueError(
-                f"Cannot {action_verb} message in state {message_dict['status_state']}"
-            )
-
-        message_dict["status_state"] = new_state
-        message_dict["status_timestamp"] = _shared.now_iso()
-
-        _save_message(session, message_dict)
-
-    return {"message": message_dict}
 
 
 def ack_message(member_id: int, message_id: int) -> dict:
@@ -326,36 +296,22 @@ def ack_message(member_id: int, message_id: int) -> dict:
             ``input_required`` state.
         PermissionError: If ``member_id`` is not the recipient.
     """
-    return _transition_message_state(
-        member_id,
-        message_id,
-        expected_member_field="owner_member_id",
-        new_state="completed",
-        action_verb="ACK",
-        permission_error_msg="Only the recipient can ACK a message",
-    )
+    with _shared.write_session() as session:
+        message_dict = _shared.read_message(session, message_id)
+        if message_dict is None:
+            raise ValueError(f"Message {message_id} not found")
 
+        if message_dict["owner_member_id"] != member_id:
+            raise PermissionError("Only the recipient can ACK a message")
 
-def cancel_message(member_id: int, message_id: int) -> dict:
-    """Transition a message from ``input_required`` to ``canceled`` for the sender.
+        if message_dict["status_state"] != "input_required":
+            raise ValueError(
+                f"Cannot ACK message in state {message_dict['status_state']}"
+            )
 
-    Args:
-        member_id: Sender member id; must match ``Message.from_member_id``.
-        message_id: Message id to cancel.
+        message_dict["status_state"] = "completed"
+        message_dict["status_timestamp"] = _shared.now_iso()
 
-    Returns:
-        Dict with ``message`` — the updated message dict.
+        _save_message(session, message_dict)
 
-    Raises:
-        ValueError: If the message does not exist or is not in
-            ``input_required`` state.
-        PermissionError: If ``member_id`` is not the sender.
-    """
-    return _transition_message_state(
-        member_id,
-        message_id,
-        expected_member_field="from_member_id",
-        new_state="canceled",
-        action_verb="cancel",
-        permission_error_msg="Only the sender can cancel a message",
-    )
+    return {"message": message_dict}
