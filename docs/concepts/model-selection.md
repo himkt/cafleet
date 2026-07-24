@@ -12,8 +12,8 @@ the cafleet package, and `member create` performs no hidden selection.
 
 ## The model list
 
-The model list lives at `skills/cafleet/reference/model-list.md` in every
-deployed cafleet skill replica. It is a catalog-style reference page: one
+The model list is a catalog-style reference page bundled with the cafleet
+skill — every deployed replica of the skill carries its own copy. It has one
 table per backend (`claude`, `codex`, and `opencode`), ordered most → least
 capable, with each model's spawn token, its alias (claude models), reviewed
 capability class, and standard input/output USD-per-MTok prices, plus links
@@ -65,5 +65,5 @@ task-relevant failures, a Reviewer `[INCORRECT]` finding, or a Director review
 tied to the task), the Director replaces it with a strictly more capable
 model from the same backend's table — at most two replacements per task,
 never repeating a model for the same task, and never auto-replacing a
-user-pinned model. The procedure is
-specified in the cafleet skill's `reference/director.md`.
+user-pinned model. The full step-by-step procedure is part of the cafleet
+skill's Director instructions, which the Director loads with the skill.

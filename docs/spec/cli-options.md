@@ -637,8 +637,8 @@ takes effect when it arrives as a direct user turn (slash commands, skill
 invocations, and other magic commands a broker message body cannot trigger).
 The `--shell` form keystrokes `! TEXT` so the coding agent's `!` shortcut runs
 the command natively — honored by all three backends; it is the dispatch half
-of the bash-via-Director fallback protocol, canonical in the cafleet skill's
-`reference/prompt-routing.md`. Broker messaging remains the canonical
+of the cafleet skill's bash-via-Director fallback protocol. Broker messaging
+remains the canonical
 coordination channel; the plain form is not a substitute for `message send`.
 
 | Flag / argument | Required | Notes |

@@ -1,8 +1,8 @@
 # Remove Implementation File Path Mentions from User-Facing Docs
 
-**Status**: Approved
-**Progress**: 0/10 tasks complete
-**Last Updated**: 2026-07-24
+**Status**: Complete
+**Progress**: 10/10 tasks complete
+**Last Updated**: 2026-07-25
 
 ## Overview
 
@@ -10,11 +10,11 @@ The `docs/` site mentions concrete repository file paths (source files, module d
 
 ## Success Criteria
 
-- [ ] Every in-scope path mention in the inventory below is rewritten per its specification — no mere deletions; each replacement is a self-contained explanation.
-- [ ] All exempt-class mentions (contributor instructions, `docs/api/*`, path-as-contract spec mentions, user-machine paths, user-repo deliverable locations) are untouched.
-- [ ] `.claude/rules/user-facing-docs.md` exists with the content specified below, and `.claude/rules/documentation-maintenance.md` carries a one-line cross-reference to it.
-- [ ] A final sweep of `docs/` finds no repo-internal implementation path outside the exempt classes.
-- [ ] `mise //:docs-build` succeeds after the edits.
+- [x] Every in-scope path mention in the inventory below is rewritten per its specification — no mere deletions; each replacement is a self-contained explanation.
+- [x] All exempt-class mentions (contributor instructions, `docs/api/*`, path-as-contract spec mentions, user-machine paths, user-repo deliverable locations) are untouched.
+- [x] `.claude/rules/user-facing-docs.md` exists with the content specified below, and `.claude/rules/documentation-maintenance.md` carries a one-line cross-reference to it.
+- [x] A final sweep of `docs/` finds no repo-internal implementation path outside the exempt classes.
+- [x] `mise //:docs-build` succeeds after the edits.
 
 ---
 
@@ -204,25 +204,25 @@ Append one line to the § *First-class documentation targets* section:
 
 ### Step 1: Add the project rule (documentation first)
 
-- [ ] Create `.claude/rules/user-facing-docs.md` with the content in § *New rule* <!-- completed: -->
-- [ ] Append the one-line cross-reference to `.claude/rules/documentation-maintenance.md` § *First-class documentation targets* <!-- completed: -->
+- [x] Create `.claude/rules/user-facing-docs.md` with the content in § *New rule* <!-- completed: 2026-07-25T00:42 -->
+- [x] Append the one-line cross-reference to `.claude/rules/documentation-maintenance.md` § *First-class documentation targets* <!-- completed: 2026-07-25T00:42 -->
 
 ### Step 2: Rewrite concepts/ pages
 
-- [ ] Apply R1 to `docs/concepts/overview.md` (three mermaid node labels) <!-- completed: -->
-- [ ] Apply R2 and R3 to `docs/concepts/model-selection.md` <!-- completed: -->
-- [ ] Apply R4 to `docs/concepts/monitoring.md` (three occurrences) <!-- completed: -->
+- [x] Apply R1 to `docs/concepts/overview.md` (three mermaid node labels) <!-- completed: 2026-07-25T00:44 -->
+- [x] Apply R2 and R3 to `docs/concepts/model-selection.md` <!-- completed: 2026-07-25T00:44 -->
+- [x] Apply R4 to `docs/concepts/monitoring.md` (three occurrences) <!-- completed: 2026-07-25T00:44 -->
 
 ### Step 3: Rewrite how-to/ and spec/ pages
 
-- [ ] Apply R5 to `docs/how-to/mixed-backend-team.md` <!-- completed: -->
-- [ ] Apply R6 to `docs/spec/multiplexer-backends.md` <!-- completed: -->
-- [ ] Apply R7 to `docs/spec/cli-options.md` <!-- completed: -->
+- [x] Apply R5 to `docs/how-to/mixed-backend-team.md` <!-- completed: 2026-07-25T00:45 -->
+- [x] Apply R6 to `docs/spec/multiplexer-backends.md` <!-- completed: 2026-07-25T00:45 -->
+- [x] Apply R7 to `docs/spec/cli-options.md` <!-- completed: 2026-07-25T00:45 -->
 
 ### Step 4: Verify
 
-- [ ] Sweep `docs/` for repo-internal path patterns (`.py`, `.md` outside docs-nav links, `src/`, `skills/`, `reference/`, module dotted paths) and confirm every remaining hit belongs to an exempt class in the taxonomy table <!-- completed: -->
-- [ ] Run `mise //:docs-build` and confirm the site builds cleanly <!-- completed: -->
+- [x] Sweep `docs/` for repo-internal path patterns (`.py`, `.md` outside docs-nav links, `src/`, `skills/`, `reference/`, module dotted paths) and confirm every remaining hit belongs to an exempt class in the taxonomy table <!-- completed: 2026-07-25T00:48 -->
+- [x] Run `mise //:docs-build` and confirm the site builds cleanly <!-- completed: 2026-07-25T00:48 -->
 
 ---
 
@@ -232,3 +232,4 @@ Append one line to the § *First-class documentation targets* section:
 |------|---------|
 | 2026-07-24 | Initial draft |
 | 2026-07-24 | Reviewer round 1: corrected in-scope mention count to 11; trimmed R2's duplicated read-before-spawn clause; R6 drops the redundant API-reference link instead of duplicating it |
+| 2026-07-25 | Execution complete: all 10 tasks and 5 success criteria done; post-implementation Reviewer approved in 1 round; PR #223 opened |
