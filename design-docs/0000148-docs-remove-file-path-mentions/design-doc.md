@@ -10,11 +10,11 @@ The `docs/` site mentions concrete repository file paths (source files, module d
 
 ## Success Criteria
 
-- [ ] Every in-scope path mention in the inventory below is rewritten per its specification — no mere deletions; each replacement is a self-contained explanation.
-- [ ] All exempt-class mentions (contributor instructions, `docs/api/*`, path-as-contract spec mentions, user-machine paths, user-repo deliverable locations) are untouched.
-- [ ] `.claude/rules/user-facing-docs.md` exists with the content specified below, and `.claude/rules/documentation-maintenance.md` carries a one-line cross-reference to it.
-- [ ] A final sweep of `docs/` finds no repo-internal implementation path outside the exempt classes.
-- [ ] `mise //:docs-build` succeeds after the edits.
+- [x] Every in-scope path mention in the inventory below is rewritten per its specification — no mere deletions; each replacement is a self-contained explanation.
+- [x] All exempt-class mentions (contributor instructions, `docs/api/*`, path-as-contract spec mentions, user-machine paths, user-repo deliverable locations) are untouched.
+- [x] `.claude/rules/user-facing-docs.md` exists with the content specified below, and `.claude/rules/documentation-maintenance.md` carries a one-line cross-reference to it.
+- [x] A final sweep of `docs/` finds no repo-internal implementation path outside the exempt classes.
+- [x] `mise //:docs-build` succeeds after the edits.
 
 ---
 
