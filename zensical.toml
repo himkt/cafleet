@@ -8,9 +8,9 @@ copyright = "Copyright © 2026 himkt"
 nav = [
     { "Quickstart" = "quickstart.md" },
     { "How-to guides" = [
-        { "Run a mixed-backend team" = "how-to/mixed-backend-team.md" },
-        { "Use the admin WebUI" = "how-to/use-the-webui.md" },
-        { "Design-doc-driven development" = "how-to/design-doc-development.md" },
+        { "Mixed-backend Team" = "how-to/mixed-backend-team.md" },
+        { "Spec Driven Dev" = "how-to/design-doc-development.md" },
+        { "Admin WebUI" = "how-to/use-the-webui.md" },
     ] },
     { "Concepts" = [
         { "Overview" = "concepts/overview.md" },
@@ -26,16 +26,16 @@ nav = [
         { "Message envelope" = "spec/message-envelope.md" },
         { "CLI options" = "spec/cli-options.md" },
         { "Multiplexer backends" = "spec/multiplexer-backends.md" },
+        { "Agent backends" = "spec/coding-agent-backends.md" },
         { "WebUI API" = "spec/webui-api.md" },
-        { "Coding-agent backends" = "spec/coding-agent-backends.md" },
     ] },
-    { "Contributing" = "contributing.md" },
     { "API Reference" = [
         { "broker" = "api/broker.md" },
         { "config" = "api/config.md" },
         { "coding_agent" = "api/coding-agent.md" },
         { "multiplexer" = "api/multiplexer.md" },
     ] },
+    { "Contributing" = "contributing.md" },
 ]
 
 # Theme
