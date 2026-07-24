@@ -1,6 +1,6 @@
 # Monitor Unacked-Message Wake Reason
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 14/14 tasks complete
 **Last Updated**: 2026-07-24
 
@@ -155,3 +155,9 @@ WebUI `GET /api/monitor` gains an additive top-level `"members"` key carrying th
 ### Step 6: Verification
 
 - [x] Full pass: `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` <!-- completed: 2026-07-24T12:36 -->
+
+---
+
+## Changelog
+
+- 2026-07-24: Implementation complete via the execute workflow (Director/Programmer/Tester/Verifier team, fresh Reviewer approved round 1; 1066 tests, lint, typecheck, and Phase D live E2E all pass). PR: https://github.com/himkt/cafleet/pull/221. Status → Complete.
