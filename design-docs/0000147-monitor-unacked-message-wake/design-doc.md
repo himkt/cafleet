@@ -1,7 +1,7 @@
 # Monitor Unacked-Message Wake Reason
 
 **Status**: Approved
-**Progress**: 7/14 tasks complete
+**Progress**: 9/14 tasks complete
 **Last Updated**: 2026-07-24
 
 ## Overview
@@ -139,8 +139,8 @@ WebUI `GET /api/monitor` gains an additive top-level `"members"` key carrying th
 
 ### Step 3: Monitor loop
 
-- [ ] Add `_last_unacked_wake_at`, `_flag_unacked_due`, the `monitor_tick` call ordering (after stall-check, before native status) and woke-gated commit, and the `run_monitor_loop` per-run clear in `cafleet/src/cafleet/monitor/loop.py` <!-- completed: -->
-- [ ] Loop tests: fresh-due flagging at exactly one interval, not-yet-stale skip, re-fire gate (absent entry due; entry younger than interval skipped), disabled/dead-pane skip, reason union with an interval-due member, commit gated on `woke` (true commits, false re-flags), unacked-only member excluded from `record_pings`, per-run map clear <!-- completed: -->
+- [x] Add `_last_unacked_wake_at`, `_flag_unacked_due`, the `monitor_tick` call ordering (after stall-check, before native status) and woke-gated commit, and the `run_monitor_loop` per-run clear in `cafleet/src/cafleet/monitor/loop.py` <!-- completed: 2026-07-24T11:55 -->
+- [x] Loop tests: fresh-due flagging at exactly one interval, not-yet-stale skip, re-fire gate (absent entry due; entry younger than interval skipped), disabled/dead-pane skip, reason union with an interval-due member, commit gated on `woke` (true commits, false re-flags), unacked-only member excluded from `record_pings`, per-run map clear <!-- completed: 2026-07-24T11:55 -->
 
 ### Step 4: Wake-nudge payload
 
