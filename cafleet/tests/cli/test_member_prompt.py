@@ -298,9 +298,9 @@ def test_send_failure__multiplexer_error_maps_to_send_failed_exit_one(
     assert "server exited unexpectedly" in out
 
 
-def test_member_exec__no_longer_parses(runner, fleet_id):
-    """``cafleet member exec`` is removed: Click's default unknown-subcommand
-    error (exit 2)."""
+def test_removed_exec_subcommand__no_longer_parses(runner, fleet_id):
+    """The removed exec subcommand no longer parses (Click's default
+    unknown-subcommand error, exit 2)."""
     result = runner.invoke(
         cli,
         [

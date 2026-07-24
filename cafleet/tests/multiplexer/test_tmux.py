@@ -591,9 +591,9 @@ def test_kill_pane__argv_and_ignore_missing_semantics(
             None,
         ),
         ("plain_rejects_tab", "\t", False, "send_prompt: text may not be empty", None),
-        # The mux layer checks empty-first (matching the former send_bash_command):
-        # a "\n"-only text strips to empty and raises the EMPTY error here, while
-        # the CLI layer's newline-first precedence raises the newline error.
+        # The mux layer checks empty-first: a "\n"-only text strips to empty and
+        # raises the EMPTY error here, while the CLI layer's newline-first
+        # precedence raises the newline error.
         (
             "shell_newline_only_hits_empty_check_first",
             "\n",

@@ -983,8 +983,7 @@ def test_send_inline_preview__sanitizes_body_newlines(monkeypatch, herdr_run):
 
 
 def test_send_prompt__shell_form_argv_and_strip_no_esc(herdr_run):
-    """Shell form: one `pane run` carrying `! <stripped>` — no leading esc,
-    exactly the former send_bash_command delivery."""
+    """Shell form: one `pane run` carrying `! <stripped>` — no leading esc."""
     captured, set_returns = herdr_run
     set_returns("")
     _herdr.send_prompt(target_pane_id="wG:p1", text="  git status  ", shell=True)

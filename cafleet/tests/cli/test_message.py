@@ -305,12 +305,12 @@ def test_message_ack_auth_check__accepts_valid_member(
     assert ack_calls == [(member_id, message_id)]
 
 
-# --- message cancel removal -------------------------------------------------
+# --- removed cancel subcommand ----------------------------------------------
 
 
 def test_message_cancel__no_longer_parses(runner, fleet_id, member_id, message_id):
-    """``cafleet message cancel`` is removed: Click's default unknown-subcommand
-    error (exit 2)."""
+    """The removed cancel subcommand no longer parses (Click's default
+    unknown-subcommand error, exit 2)."""
     result = runner.invoke(
         cli,
         [
