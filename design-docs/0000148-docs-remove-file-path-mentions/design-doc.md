@@ -1,8 +1,8 @@
 # Remove Implementation File Path Mentions from User-Facing Docs
 
 **Status**: Approved
-**Progress**: 0/10 tasks complete
-**Last Updated**: 2026-07-24
+**Progress**: 2/10 tasks complete
+**Last Updated**: 2026-07-25
 
 ## Overview
 
@@ -204,8 +204,8 @@ Append one line to the § *First-class documentation targets* section:
 
 ### Step 1: Add the project rule (documentation first)
 
-- [ ] Create `.claude/rules/user-facing-docs.md` with the content in § *New rule* <!-- completed: -->
-- [ ] Append the one-line cross-reference to `.claude/rules/documentation-maintenance.md` § *First-class documentation targets* <!-- completed: -->
+- [x] Create `.claude/rules/user-facing-docs.md` with the content in § *New rule* <!-- completed: 2026-07-25T00:42 -->
+- [x] Append the one-line cross-reference to `.claude/rules/documentation-maintenance.md` § *First-class documentation targets* <!-- completed: 2026-07-25T00:42 -->
 
 ### Step 2: Rewrite concepts/ pages
 
