@@ -10,13 +10,13 @@ Add a fourth monitor wake reason, `unacked`: a watched member whose oldest un-ac
 
 ## Success Criteria
 
-- [ ] A watched member (root Director included) with an `input_required` non-`broadcast_summary` delivery older than its own `monitor_config.interval_seconds` is woken with wake reason `unacked`, re-flagged every `interval_seconds` while the delivery stays un-acked, and stops being flagged once every such delivery is acked.
-- [ ] An unacked-only wake never advances `last_ping_at` (`record_pings` keeps excluding it), and `should_ping` remains interval-only.
-- [ ] The wake-nudge payload (byte-identical on tmux and herdr) instructs the watcher to report an `unacked`-tagged member unless its pane classifies `awaiting_user` or `unknown` — including `working` panes — and its closing re-engagement sentence lists that unacked report alongside stalled / finished.
-- [ ] `cafleet monitor status` (text + `--json`) and WebUI `GET /api/monitor` expose `oldest_pending_ts` / `oldest_pending_age_seconds` per watched member, alongside `pending_count`.
-- [ ] `skills/cafleet/reference/supervision.md` documents `cafleet member ping` as the canonical, capture-gated Director response to an unacked report.
-- [ ] No new setting, no new `CAFLEET_*` env var, no schema change, no Alembic migration.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
+- [x] A watched member (root Director included) with an `input_required` non-`broadcast_summary` delivery older than its own `monitor_config.interval_seconds` is woken with wake reason `unacked`, re-flagged every `interval_seconds` while the delivery stays un-acked, and stops being flagged once every such delivery is acked.
+- [x] An unacked-only wake never advances `last_ping_at` (`record_pings` keeps excluding it), and `should_ping` remains interval-only.
+- [x] The wake-nudge payload (byte-identical on tmux and herdr) instructs the watcher to report an `unacked`-tagged member unless its pane classifies `awaiting_user` or `unknown` — including `working` panes — and its closing re-engagement sentence lists that unacked report alongside stalled / finished.
+- [x] `cafleet monitor status` (text + `--json`) and WebUI `GET /api/monitor` expose `oldest_pending_ts` / `oldest_pending_age_seconds` per watched member, alongside `pending_count`.
+- [x] `skills/cafleet/reference/supervision.md` documents `cafleet member ping` as the canonical, capture-gated Director response to an unacked report.
+- [x] No new setting, no new `CAFLEET_*` env var, no schema change, no Alembic migration.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
 
