@@ -26,6 +26,7 @@ from cafleet.broker.monitor import (
     list_monitor_configs,
     list_monitor_targets,
     monitor_is_live,
+    monitor_members_payload,
     monitor_runtime_payload,
     read_monitor_runtime,
     record_pings,
@@ -65,5 +66,6 @@ __all__ = [
     "clear_monitor_runtime",
     "read_monitor_runtime",
     "monitor_is_live",
+    "monitor_members_payload",
     "monitor_runtime_payload",
 ]

@@ -32,6 +32,7 @@ def _never_pinged_payload():
                 "last_ping_age_seconds": None,
                 "enabled": True,
                 "pending_count": 0,
+                "oldest_pending_age_seconds": None,
             }
         ],
     }

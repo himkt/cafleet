@@ -43,6 +43,34 @@ def _iso_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _ts(seconds_ago: int) -> str:
+    return (datetime.now(UTC) - timedelta(seconds=seconds_ago)).isoformat()
+
+
+def _add_message(
+    s,
+    owner_member_id: int,
+    from_member_id: int,
+    *,
+    status_timestamp: str,
+    status_state: str = "input_required",
+    msg_type: str = "unicast",
+) -> None:
+    s.add(
+        Message(
+            owner_member_id=owner_member_id,
+            from_member_id=from_member_id,
+            to_member_id=owner_member_id if msg_type == "unicast" else None,
+            type=msg_type,
+            created_at=status_timestamp,
+            status_state=status_state,
+            status_timestamp=status_timestamp,
+            origin_message_id=None,
+            text="body",
+        )
+    )
+
+
 # --- enrollment on registration -------------------------------------------
 
 
@@ -340,6 +368,7 @@ def test_list_monitor_targets__director_and_members_shape():
     assert isinstance(m["enabled"], bool)
     assert m["enabled"] is True
     assert m["pending_count"] == 0
+    assert m["oldest_pending_ts"] is None
 
 
 def test_list_monitor_targets__pending_count_input_required_only():
@@ -391,6 +420,193 @@ def test_list_monitor_targets__pending_count_excludes_broadcast_summary(broker_s
 
     targets = {t["member_id"]: t for t in broker.list_monitor_targets(sid)}
     assert targets[member_id]["pending_count"] == 1
+
+
+def test_list_monitor_targets__oldest_pending_ts_none_without_pending():
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    member_id = _register_ordinary_member(fleet, name="lena", pane_id="%12")[
+        "member_id"
+    ]
+
+    targets = {t["member_id"]: t for t in broker.list_monitor_targets(sid)}
+    assert targets[member_id]["oldest_pending_ts"] is None
+    assert targets[director_id]["oldest_pending_ts"] is None
+
+
+def test_list_monitor_targets__oldest_pending_ts_picks_minimum(broker_session):
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    member_id = _register_ordinary_member(fleet, name="mona", pane_id="%13")[
+        "member_id"
+    ]
+
+    oldest = _ts(300)
+    with broker_session() as s:
+        _add_message(s, member_id, director_id, status_timestamp=_ts(100))
+        _add_message(s, member_id, director_id, status_timestamp=oldest)
+        _add_message(s, member_id, director_id, status_timestamp=_ts(200))
+        s.commit()
+
+    targets = {t["member_id"]: t for t in broker.list_monitor_targets(sid)}
+    assert targets[member_id]["oldest_pending_ts"] == oldest
+    assert targets[director_id]["oldest_pending_ts"] is None
+
+
+def test_list_monitor_targets__oldest_pending_ts_excludes_completed(broker_session):
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    member_id = _register_ordinary_member(fleet, name="nora", pane_id="%14")[
+        "member_id"
+    ]
+
+    pending = _ts(100)
+    with broker_session() as s:
+        # an older acked delivery never becomes the oldest pending
+        _add_message(
+            s,
+            member_id,
+            director_id,
+            status_timestamp=_ts(500),
+            status_state="completed",
+        )
+        _add_message(s, member_id, director_id, status_timestamp=pending)
+        s.commit()
+
+    targets = {t["member_id"]: t for t in broker.list_monitor_targets(sid)}
+    assert targets[member_id]["oldest_pending_ts"] == pending
+
+
+def test_list_monitor_targets__oldest_pending_ts_cleared_by_ack():
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    member_id = _register_ordinary_member(fleet, name="omar", pane_id="%15")[
+        "member_id"
+    ]
+
+    sent = broker.send_message(sid, director_id, member_id, "msg")
+    targets = {t["member_id"]: t for t in broker.list_monitor_targets(sid)}
+    assert targets[member_id]["oldest_pending_ts"] is not None
+
+    broker.ack_message(member_id, sent["message"]["message_id"])
+    targets = {t["member_id"]: t for t in broker.list_monitor_targets(sid)}
+    assert targets[member_id]["oldest_pending_ts"] is None
+
+
+def test_list_monitor_targets__oldest_pending_ts_excludes_broadcast_summary(
+    broker_session,
+):
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    member_id = _register_ordinary_member(fleet, name="pete", pane_id="%16")[
+        "member_id"
+    ]
+
+    real = _ts(100)
+    with broker_session() as s:
+        # an older broadcast_summary delivery never becomes the oldest pending
+        _add_message(
+            s,
+            member_id,
+            director_id,
+            status_timestamp=_ts(500),
+            msg_type="broadcast_summary",
+        )
+        _add_message(s, member_id, director_id, status_timestamp=real)
+        # a member whose only delivery is a broadcast_summary has no pending
+        _add_message(
+            s,
+            director_id,
+            member_id,
+            status_timestamp=_ts(400),
+            msg_type="broadcast_summary",
+        )
+        s.commit()
+
+    targets = {t["member_id"]: t for t in broker.list_monitor_targets(sid)}
+    assert targets[member_id]["oldest_pending_ts"] == real
+    assert targets[director_id]["oldest_pending_ts"] is None
+
+
+# --- monitor_members_payload (shared status builder) ------------------------
+
+
+def test_monitor_members_payload__row_fields_and_roles():
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    member_id = _register_ordinary_member(fleet, name="quin", pane_id="%17")[
+        "member_id"
+    ]
+    watcher = _register_monitoring_member(fleet, name="watcher", pane_id="%18")
+
+    now = datetime.now(UTC)
+    rows = {r["member_id"]: r for r in broker.monitor_members_payload(sid, now)}
+    # the watched set only — the monitoring member is the unenrolled watcher
+    assert set(rows) == {director_id, member_id}
+    assert watcher["member_id"] not in rows
+
+    expected_keys = {
+        "member_id",
+        "name",
+        "role",
+        "interval_seconds",
+        "last_ping_at",
+        "last_ping_age_seconds",
+        "enabled",
+        "pending_count",
+        "oldest_pending_ts",
+        "oldest_pending_age_seconds",
+    }
+    for row in rows.values():
+        assert set(row) == expected_keys
+
+    assert rows[director_id]["role"] == "director"
+    m = rows[member_id]
+    assert m["role"] == "member"
+    assert m["name"] == "quin"
+    assert m["interval_seconds"] == 720
+    assert m["enabled"] is True
+    assert m["pending_count"] == 0
+    # never pinged / no pending delivery → the ISO fields and both derived ages are None
+    assert m["last_ping_at"] is None
+    assert m["last_ping_age_seconds"] is None
+    assert m["oldest_pending_ts"] is None
+    assert m["oldest_pending_age_seconds"] is None
+
+
+def test_monitor_members_payload__ages_computed_with_passed_now(broker_session):
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    member_id = _register_ordinary_member(fleet, name="rita", pane_id="%19")[
+        "member_id"
+    ]
+
+    now = datetime.now(UTC)
+    pinged = (now - timedelta(seconds=63)).isoformat()
+    broker.record_pings([member_id], pinged)
+    pending = (now - timedelta(seconds=811)).isoformat()
+    with broker_session() as s:
+        _add_message(s, member_id, director_id, status_timestamp=pending)
+        s.commit()
+
+    rows = {r["member_id"]: r for r in broker.monitor_members_payload(sid, now)}
+    m = rows[member_id]
+    # both ages derive from the single passed ``now``, so they are exact
+    assert m["last_ping_at"] == pinged
+    assert m["last_ping_age_seconds"] == 63
+    assert m["pending_count"] == 1
+    assert m["oldest_pending_ts"] == pending
+    assert m["oldest_pending_age_seconds"] == 811
+    d = rows[director_id]
+    assert d["oldest_pending_ts"] is None
+    assert d["oldest_pending_age_seconds"] is None
 
 
 def test_list_monitor_targets__excludes_deregistered_member():

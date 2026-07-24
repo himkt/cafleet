@@ -341,11 +341,15 @@ class HerdrMultiplexer:
             "finished, stalled, working. For a member tagged stall-check, compare "
             "its capture against your previous stall-check capture of that pane, "
             "then keep the new capture as that pane's baseline; with no previous "
-            "stall-check capture, classify unknown. Never re-engage a pane "
+            "stall-check capture, classify unknown. For a member tagged unacked, "
+            "its oldest un-acked delivery has waited at least one full interval: "
+            "report it to the Director unless its pane classifies awaiting_user or "
+            "unknown — including working panes. Never re-engage a pane "
             "classified awaiting_user: when the Director is awaiting_user, send "
             "nothing this wake, whatever the other panes show. Otherwise re-engage "
             "the Director via cafleet message send when a due member is stalled or "
-            "finished, or the Director is finished with un-acked work."
+            "finished, when an unacked-tagged member is reportable per its rule "
+            "above, or the Director is finished with un-acked work."
         )
 
         # No esc: the monitoring member's own pane is never on a permission prompt.

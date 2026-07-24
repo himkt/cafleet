@@ -40,6 +40,14 @@ _last_member_status: dict[int, str | None] = {}
 # in ``run_monitor_loop``.
 _last_stall_check_at: dict[int, datetime] = {}
 
+# Per-process last successful unacked wake per member (tz-aware ``datetime``,
+# never persisted) — the re-fire gate: a member with a still-stale un-acked
+# delivery is re-flagged only once its own ``interval_seconds`` has elapsed since
+# the entry. Keyed by member, not by message, so a new stale episode beginning
+# less than one interval after a wake has its first wake delayed until the gate
+# reopens (bounded by one interval). Reset per run in ``run_monitor_loop``.
+_last_unacked_wake_at: dict[int, datetime] = {}
+
 
 class _Sentinel:
     """Identity-comparable tick-result marker with a readable repr."""
@@ -112,6 +120,11 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
     # trigger; it unions ``stall-check`` onto each stall-check-due watched member.
     _flag_stall_check_due(targets, due, now)
 
+    # Unacked-delivery cadence also runs on BOTH backends, after the stall-check
+    # flag and before the native trigger, so a multi-reason member's
+    # ``wake_reasons`` order is ``interval``, ``stall-check``, ``unacked``.
+    _flag_unacked_due(targets, due, now)
+
     pending_status: dict[int, str | None] = {}
     if isinstance(mux, AgentStateAware):
         pending_status = _flag_native_status_due(mux, targets, due)
@@ -133,13 +146,14 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
             # tick retries instead of silently skipping a check.
             #
             # ``record_pings`` receives only members whose reasons include
-            # ``interval`` or ``status:done`` — a stall-check-only member is
-            # EXCLUDED, keeping the ping cadence and the stall cadence
-            # independent. ``_last_stall_check_at`` is committed for every member
-            # whose reasons include ``stall-check``. ``pending_status`` holds the
-            # natively-flagged members' reads, committed on this same gate (the
-            # non-flagged reads were already committed in
-            # ``_flag_native_status_due``).
+            # ``interval`` or ``status:done`` — a stall-check-only or
+            # unacked-only member is EXCLUDED, keeping the ping cadence and the
+            # stall/unacked cadences independent. ``_last_stall_check_at`` is
+            # committed for every member whose reasons include ``stall-check``,
+            # and ``_last_unacked_wake_at`` for every member whose reasons
+            # include ``unacked``. ``pending_status`` holds the natively-flagged
+            # members' reads, committed on this same gate (the non-flagged reads
+            # were already committed in ``_flag_native_status_due``).
             ping_ids = [
                 t["member_id"]
                 for t in due
@@ -151,6 +165,8 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
             for target in due:
                 if "stall-check" in target["wake_reasons"]:
                     _last_stall_check_at[target["member_id"]] = now
+                if "unacked" in target["wake_reasons"]:
+                    _last_unacked_wake_at[target["member_id"]] = now
             # Visible heartbeat: one line per due member on the launching task's
             # stdout, each carrying its joined ``[<reasons>]`` suffix.
             for target in due:
@@ -239,6 +255,48 @@ def _flag_stall_check_due(targets: list[dict], due: list[dict], now: datetime) -
             due_ids.add(member_id)
 
 
+def _flag_unacked_due(targets: list[dict], due: list[dict], now: datetime) -> None:
+    """Union each unacked-due watched member into the due set (both backends).
+
+    An **enabled** watched live member is unacked-due when its oldest un-acked
+    delivery (``oldest_pending_ts``, from the same scan row) has waited at least
+    the member's OWN ``interval_seconds`` — the staleness threshold — AND its
+    re-fire gate passes: its ``_last_unacked_wake_at`` entry is absent, or at
+    least one full interval has elapsed since it. A delivery younger than one
+    interval never flags, so the normal deliver-then-ack cycle produces no
+    wakes. An unacked-due member already in the due set has ``unacked`` UNIONED
+    onto its existing ``wake_reasons``; a member not yet due is appended with
+    ``["unacked"]``.
+
+    This never commits ``_last_unacked_wake_at`` — that commit is gated on a
+    successful wake in ``monitor_tick``, so a failed keystroke re-flags the
+    member next tick (mirrors the ``record_pings`` gating).
+    """
+    due_ids = {t["member_id"] for t in due}
+    for target in targets:
+        if not target["enabled"]:
+            continue
+        if target["pane_id"] is None or not target["pane_alive"]:
+            continue
+        oldest = target["oldest_pending_ts"]
+        if oldest is None:
+            continue
+        interval = target["interval_seconds"]
+        age = (now - datetime.fromisoformat(oldest)).total_seconds()
+        if age < interval:
+            continue
+        member_id = target["member_id"]
+        last = _last_unacked_wake_at.get(member_id)
+        if last is not None and (now - last).total_seconds() < interval:
+            continue
+        if member_id in due_ids:
+            target["wake_reasons"].append("unacked")
+        else:
+            target["wake_reasons"] = ["unacked"]
+            due.append(target)
+            due_ids.add(member_id)
+
+
 _stop_requested = False
 
 
@@ -272,6 +330,7 @@ def run_monitor_loop(fleet_id: int, tick_seconds: int) -> None:
     _stop_requested = False
     _last_member_status.clear()
     _last_stall_check_at.clear()
+    _last_unacked_wake_at.clear()
     pid = os.getpid()
     if not broker.claim_monitor_runtime(
         fleet_id, pid, tick_seconds, datetime.now(UTC).isoformat()
