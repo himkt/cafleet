@@ -37,7 +37,6 @@ _PER_SUBCOMMAND_BUDGETS: dict[tuple[str, ...], int] = {
     ("message", "broadcast"): 12,
     ("message", "poll"): 10,
     ("message", "ack"): 12,
-    ("message", "cancel"): 11,
     ("message", "show"): 11,
     # member create's wide option column (the --coding-agent
     # [claude|codex|opencode] metavar) wraps the --fleet-id help to two lines,
@@ -49,7 +48,7 @@ _PER_SUBCOMMAND_BUDGETS: dict[tuple[str, ...], int] = {
     ("member", "show"): 10,
     ("member", "capture"): 11,
     ("member", "ping"): 10,
-    ("member", "exec"): 9,
+    ("member", "prompt"): 10,
     ("member", "delete"): 10,
 }
 

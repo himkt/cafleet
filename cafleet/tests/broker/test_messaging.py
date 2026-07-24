@@ -200,83 +200,50 @@ def test_poll_messages__only_returns_messages_for_specified_member():
     assert broker.poll_messages(sender) == []
 
 
-# --- ack_message / cancel_message ----------------------------------------
+# --- ack_message ----------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("action", "expected_state", "unauthorized_actor_role"),
-    [("ack", "completed", "sender"), ("cancel", "canceled", "recipient")],
-)
-def test_ack_cancel__state_transition_and_round_trip(
-    action, expected_state, unauthorized_actor_role
-):
+def test_ack__state_transition_and_round_trip():
     sid, sender, recipient = _setup_two_members()
-    sent = broker.send_message(sid, sender, recipient, f"round trip {action}")
+    sent = broker.send_message(sid, sender, recipient, "round trip ack")
     mid = sent["message"]["message_id"]
-    if action == "ack":
-        actor = recipient
-        call = broker.ack_message
-    else:
-        actor = sender
-        call = broker.cancel_message
-    result = call(actor, mid)
-    assert result["message"]["status_state"] == expected_state
+    result = broker.ack_message(recipient, mid)
+    assert result["message"]["status_state"] == "completed"
     # Persist + round-trip via get_message (poll now returns only un-acked).
     persisted = broker.get_message(sid, mid)["message"]
-    assert persisted["status_state"] == expected_state
-    assert persisted["text"] == f"round trip {action}"
+    assert persisted["status_state"] == "completed"
+    assert persisted["text"] == "round trip ack"
 
 
-@pytest.mark.parametrize(
-    "action",
-    ["ack", "cancel"],
-)
-def test_ack_cancel__updates_timestamp(action):
+def test_ack__updates_timestamp():
     sid, sender, recipient = _setup_two_members()
     sent = broker.send_message(sid, sender, recipient, "body")
     original_ts = sent["message"]["status_timestamp"]
-    if action == "ack":
-        result = broker.ack_message(recipient, sent["message"]["message_id"])
-    else:
-        result = broker.cancel_message(sender, sent["message"]["message_id"])
+    result = broker.ack_message(recipient, sent["message"]["message_id"])
     assert result["message"]["status_timestamp"] >= original_ts
 
 
-@pytest.mark.parametrize(
-    ("action", "wrong_actor_role"),
-    [("ack", "sender"), ("cancel", "recipient")],
-)
-def test_ack_cancel__authorization_boundary(action, wrong_actor_role):
+def test_ack__recipient_only_authorization_boundary():
     sid, sender, recipient = _setup_two_members()
     sent = broker.send_message(sid, sender, recipient, "body")
     mid = sent["message"]["message_id"]
-    wrong = sender if wrong_actor_role == "sender" else recipient
-    call = broker.ack_message if action == "ack" else broker.cancel_message
-    with pytest.raises(PermissionError):
-        call(wrong, mid)
+    with pytest.raises(PermissionError, match="Only the recipient can ACK a message"):
+        broker.ack_message(sender, mid)
 
 
-@pytest.mark.parametrize(
-    ("first_action", "second_action", "expected_match"),
-    [
-        ("ack", "ack", "Cannot ACK"),
-        ("ack", "cancel", "Cannot cancel"),
-        ("cancel", "cancel", "Cannot cancel"),
-        ("cancel", "ack", "Cannot ACK"),
-    ],
-)
-def test_ack_cancel__double_action_rejected(
-    first_action, second_action, expected_match
-):
+def test_ack__missing_message_raises_not_found():
+    _sid, _sender, recipient = _setup_two_members()
+    with pytest.raises(ValueError, match="Message 999999 not found"):
+        broker.ack_message(recipient, 999999)
+
+
+def test_ack__double_ack_rejected():
     sid, sender, recipient = _setup_two_members()
     sent = broker.send_message(sid, sender, recipient, "body")
     mid = sent["message"]["message_id"]
-    do_first = broker.ack_message if first_action == "ack" else broker.cancel_message
-    do_first(recipient if first_action == "ack" else sender, mid)
-    do_second = broker.ack_message if second_action == "ack" else broker.cancel_message
-    actor = recipient if second_action == "ack" else sender
-    with pytest.raises(ValueError, match=expected_match):
-        do_second(actor, mid)
+    broker.ack_message(recipient, mid)
+    with pytest.raises(ValueError, match="Cannot ACK message in state completed"):
+        broker.ack_message(recipient, mid)
 
 
 # --- get_message ----------------------------------------------------------

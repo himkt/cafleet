@@ -305,27 +305,12 @@ def test_message_ack_auth_check__accepts_valid_member(
     assert ack_calls == [(member_id, message_id)]
 
 
-# --- message_cancel_auth_check: ``message cancel`` must gate its
-# ``broker.cancel_message`` call on ``broker.verify_member_fleet``. ---
+# --- message cancel removal -------------------------------------------------
 
 
-def test_message_cancel_auth_check__rejects_unknown_member(
-    runner, fleet_id, member_id, message_id, monkeypatch
-):
-    cancel_calls: list[tuple] = []
-
-    def fake_verify(mid, sid):
-        assert mid == member_id
-        assert sid == fleet_id
-        return False
-
-    def fake_cancel_message(*args, **kwargs):
-        cancel_calls.append((args, kwargs))
-        return {"message": {}}
-
-    monkeypatch.setattr(broker, "verify_member_fleet", fake_verify)
-    monkeypatch.setattr(broker, "cancel_message", fake_cancel_message)
-
+def test_message_cancel__no_longer_parses(runner, fleet_id, member_id, message_id):
+    """``cafleet message cancel`` is removed: Click's default unknown-subcommand
+    error (exit 2)."""
     result = runner.invoke(
         cli,
         [
@@ -339,65 +324,8 @@ def test_message_cancel_auth_check__rejects_unknown_member(
             str(message_id),
         ],
     )
-    assert result.exit_code == 1, result.output
-    out = result.output or ""
-    assert str(member_id) in out
-    assert "is not in fleet" in out
-    assert str(fleet_id) in out
-    assert cancel_calls == [], (
-        "broker.cancel_message must not be invoked when verify_member_fleet fails"
-    )
-
-
-def test_message_cancel_auth_check__accepts_valid_member(
-    runner, fleet_id, member_id, message_id, monkeypatch
-):
-    verify_calls: list[tuple] = []
-    cancel_calls: list[tuple] = []
-
-    def fake_verify(mid, sid):
-        verify_calls.append((mid, sid))
-        return True
-
-    fake_message = {
-        "message": {
-            "message_id": message_id,
-            "owner_member_id": 999,
-            "from_member_id": member_id,
-            "to_member_id": 999,
-            "type": "unicast",
-            "created_at": "2026-05-01T00:00:00+00:00",
-            "status_state": "canceled",
-            "status_timestamp": "2026-05-01T00:00:00+00:00",
-            "origin_message_id": None,
-            "text": "cancel-me",
-        }
-    }
-
-    def fake_cancel_message(mid, message_id_arg):
-        cancel_calls.append((mid, message_id_arg))
-        return fake_message
-
-    monkeypatch.setattr(broker, "verify_member_fleet", fake_verify)
-    monkeypatch.setattr(broker, "cancel_message", fake_cancel_message)
-
-    result = runner.invoke(
-        cli,
-        [
-            "message",
-            "cancel",
-            "--fleet-id",
-            str(fleet_id),
-            "--member-id",
-            str(member_id),
-            "--message-id",
-            str(message_id),
-            "--json",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert verify_calls == [(member_id, fleet_id)]
-    assert cancel_calls == [(member_id, message_id)]
+    assert result.exit_code == 2, result.output
+    assert "No such command" in (result.output or "")
 
 
 # --- broker-error wrapping: an unexpected broker exception surfaces as a

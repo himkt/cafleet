@@ -178,7 +178,7 @@ def test_send_message__real_inline_preview_keystroke_is_esc_first(monkeypatch):
     )
 
     sid, sender, recipient = _setup_two_members()  # recipient pane is "%2"
-    result = broker.send_message(sid, sender, recipient, "cancel it (Esc)")
+    result = broker.send_message(sid, sender, recipient, "dismiss it (Esc)")
     assert result["notification_sent"] is True
 
     # Only the recipient's pane (%2) is keystroked; it receives Escape FIRST,
