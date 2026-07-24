@@ -1,7 +1,7 @@
 # `cafleet member prompt` and Removal of `member exec` / `message cancel`
 
 **Status**: Approved
-**Progress**: 19/28 tasks complete
+**Progress**: 22/28 tasks complete
 **Last Updated**: 2026-07-24
 
 ## Overview
@@ -175,9 +175,9 @@ The migration chain currently stands at three revisions (`0001` → `0002` → `
 
 ### Step 6: Data migration
 
-- [ ] Bring the DB to head (`cafleet setup --skip claude --skip codex --skip opencode`), run `mise //cafleet:makemigration "fold legacy canceled message status into completed"` (lands as `0004_<slug>.py`, `down_revision = "0003"`), hand-edit the `UPDATE` upgrade and no-op `downgrade()` with the irreversibility docstring <!-- completed: -->
-- [ ] Update `tests/db/test_alembic_smoke.py`: rename `test_three_revision_migration_chain_exists` to the four-revision counterpart (count 4, chain `0004` → `0003` → `0002` → `0001` → `None`) and `test_alembic_version_table_records_head_0003` to `…_head_0004` asserting `[("0004",)]` <!-- completed: -->
-- [ ] Correct `.claude/rules/database-migrations.md`'s stale chain-guard description to the four-revision guard names <!-- completed: -->
+- [x] Bring the DB to head (`cafleet setup --skip claude --skip codex --skip opencode`), run `mise //cafleet:makemigration "fold legacy canceled message status into completed"` (lands as `0004_<slug>.py`, `down_revision = "0003"`), hand-edit the `UPDATE` upgrade and no-op `downgrade()` with the irreversibility docstring <!-- completed: 2026-07-24T10:22 -->
+- [x] Update `tests/db/test_alembic_smoke.py`: rename `test_three_revision_migration_chain_exists` to the four-revision counterpart (count 4, chain `0004` → `0003` → `0002` → `0001` → `None`) and `test_alembic_version_table_records_head_0003` to `…_head_0004` asserting `[("0004",)]` <!-- completed: 2026-07-24T10:22 -->
+- [x] Correct `.claude/rules/database-migrations.md`'s stale chain-guard description to the four-revision guard names <!-- completed: 2026-07-24T10:22 -->
 
 ### Step 7: Tests + verification
 
