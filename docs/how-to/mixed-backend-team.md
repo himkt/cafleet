@@ -28,8 +28,8 @@ Once they are up, send each member a message asking it to report its
 backend, and confirm all three reply. Then tear the team down.
 ```
 
-Your agent loads the `cafleet` skill and reads its Director-only
-`reference/supervision.md` before spawning members.
+Your agent loads the `cafleet` skill and follows its Director-only
+supervision protocol before spawning members.
 
 The supervision tick is supplied by the monitoring member's `cafleet monitor`
 loop and works the same on **any** backend (`claude`, `codex`, or `opencode`);

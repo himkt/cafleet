@@ -5,9 +5,8 @@ icon: lucide/layout-grid
 # Multiplexer backends
 
 cafleet hosts every coding-agent member inside a **terminal-multiplexer pane**.
-The multiplexer is abstracted behind the `Multiplexer` Protocol
-(`cafleet.multiplexer.base`), so the spawn, keystroke-delivery, capture, and
-teardown paths are backend-neutral. Two backends ship today: **tmux** and
+The multiplexer is abstracted behind the `Multiplexer` Protocol, so the
+spawn, keystroke-delivery, capture, and teardown paths are backend-neutral. Two backends ship today: **tmux** and
 **herdr** ([herdr.dev](https://herdr.dev)). Both satisfy the same Protocol, so
 every `member *` path behaves identically regardless of which one is active.
 

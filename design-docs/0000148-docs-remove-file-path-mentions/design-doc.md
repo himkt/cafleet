@@ -1,7 +1,7 @@
 # Remove Implementation File Path Mentions from User-Facing Docs
 
 **Status**: Approved
-**Progress**: 5/10 tasks complete
+**Progress**: 8/10 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -215,9 +215,9 @@ Append one line to the § *First-class documentation targets* section:
 
 ### Step 3: Rewrite how-to/ and spec/ pages
 
-- [ ] Apply R5 to `docs/how-to/mixed-backend-team.md` <!-- completed: -->
-- [ ] Apply R6 to `docs/spec/multiplexer-backends.md` <!-- completed: -->
-- [ ] Apply R7 to `docs/spec/cli-options.md` <!-- completed: -->
+- [x] Apply R5 to `docs/how-to/mixed-backend-team.md` <!-- completed: 2026-07-25T00:45 -->
+- [x] Apply R6 to `docs/spec/multiplexer-backends.md` <!-- completed: 2026-07-25T00:45 -->
+- [x] Apply R7 to `docs/spec/cli-options.md` <!-- completed: 2026-07-25T00:45 -->
 
 ### Step 4: Verify
 
