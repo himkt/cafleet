@@ -4,6 +4,13 @@ icon: lucide/rocket
 
 # CAFleet
 
+<iframe
+    style="width: 100%; aspect-ratio: 16 / 9; border: 0;"
+    src="https://www.youtube.com/embed/cLLp-eoWFBg"
+    title="CAFleet demo video"
+    allowfullscreen>
+</iframe>
+
 Agent Teams reinvented for collaborative coding across multiple coding-agent
 backends, with full code transparency.
 
@@ -15,19 +22,4 @@ coding-agent backends — `claude` (Claude Code), `codex` (OpenAI Codex CLI), an
 `opencode` — coexist in the same fleet, for developers and operators running
 auditable multi-agent coding teams in tmux or herdr.
 
-- Persistent, auditable messages — [Storage](concepts/storage.md)
-- Pluggable multiplexer backends (tmux / herdr) — [Multiplexer backends](spec/multiplexer-backends.md)
-- Push notifications — [Multiplexer backends § Push notifications](spec/multiplexer-backends.md#push-notifications)
-- Monitoring member — [Monitoring](concepts/monitoring.md)
-- Design-doc-driven development (SDD skills) — [Design-doc-driven development](how-to/design-doc-development.md)
-
 [Quickstart :material-arrow-right:](quickstart/){ .md-button .md-button--primary }
-
-## Browse the docs
-
-- [Quickstart](quickstart.md) — install, configure, and run your first fleet.
-- [How-to guides](how-to/mixed-backend-team.md) — prompt-first task guides for common workflows.
-- [Concepts](concepts/overview.md) — architecture and the ideas behind it.
-- [Specification](spec/data-model.md) — data model, message envelope, CLI, multiplexer backends, WebUI API, and coding-agent backends.
-- [Contributing](contributing.md) — project layout, local development loop, and the design-doc-driven contribution flow.
-- [API Reference](api/broker.md) — Python API generated from source.
