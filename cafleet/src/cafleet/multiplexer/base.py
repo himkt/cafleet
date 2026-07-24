@@ -196,16 +196,22 @@ class Multiplexer(Protocol):
         """
         ...
 
-    def send_bash_command(self, *, target_pane_id: str, command: str) -> None:
-        """Keystroke ``! <command>`` + Enter into the pane.
+    def send_prompt(
+        self, *, target_pane_id: str, text: str, shell: bool = False
+    ) -> None:
+        """Keystroke ``text`` + Enter into the pane.
 
-        Uses the leading-``!`` shell-shortcut convention honored by every
+        The shell form (``shell=True``) keystrokes ``! <text>`` un-escaped,
+        using the leading-``!`` shell-shortcut convention honored by every
         supported coding-agent backend (``claude``, ``codex``, ``opencode``),
-        so a single keystroke path serves all backends.
+        so a single keystroke path serves all backends. The plain form
+        (``shell=False``) leads with the ``Esc`` permission-prompt safeguard
+        and submits ``text`` as a real user turn.
 
         Args:
             target_pane_id: Recipient pane id.
-            command: Shell command to dispatch on the member's behalf.
+            text: Single line of text to dispatch.
+            shell: Dispatch ``! <text>`` (shell form) instead of ``text``.
         """
         ...
 

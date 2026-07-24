@@ -376,13 +376,21 @@ class HerdrMultiplexer:
 
         return _best_effort(steps)
 
-    def send_bash_command(self, *, target_pane_id: str, command: str) -> None:
-        normalized_command = command.strip()
-        if not normalized_command:
-            raise HerdrError("send_bash_command: command may not be empty")
-        if "\n" in command or "\r" in command:
-            raise HerdrError("send_bash_command: command may not contain newlines")
-        _run(["herdr", "pane", "run", target_pane_id, f"! {normalized_command}"])
+    def send_prompt(
+        self, *, target_pane_id: str, text: str, shell: bool = False
+    ) -> None:
+        stripped = text.strip()
+        if not stripped:
+            raise HerdrError("send_prompt: text may not be empty")
+        if "\n" in text or "\r" in text:
+            raise HerdrError("send_prompt: text may not contain newlines")
+        if shell:
+            _run(["herdr", "pane", "run", target_pane_id, f"! {stripped}"])
+        else:
+            # Mirrors send_poll_trigger's esc-then-run shape: the discrete esc is
+            # the permission-prompt safeguard for the submitted user turn.
+            self._send_esc(target_pane_id)
+            _run(["herdr", "pane", "run", target_pane_id, stripped])
 
     def capture_pane(self, *, target_pane_id: str, lines: int = 20) -> str:
         # `herdr pane read` prints the raw terminal buffer (not a JSON envelope),

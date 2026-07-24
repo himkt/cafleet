@@ -1,7 +1,7 @@
 # `cafleet member prompt` and Removal of `member exec` / `message cancel`
 
 **Status**: Approved
-**Progress**: 13/28 tasks complete
+**Progress**: 15/28 tasks complete
 **Last Updated**: 2026-07-24
 
 ## Overview
@@ -160,8 +160,8 @@ The migration chain currently stands at three revisions (`0001` → `0002` → `
 
 ### Step 3: CLI + multiplexer code
 
-- [ ] Replace `send_bash_command` with `send_prompt(*, target_pane_id, text, shell=False)` in `multiplexer/base.py`, `tmux.py` (`esc_first=not shell`), `herdr.py` (esc-then-run plain form); update the tmux Esc-doctrine comment <!-- completed: -->
-- [ ] Add `member prompt` to `cli/member.py` (flags, validation, output shapes per spec); delete `member_exec` <!-- completed: -->
+- [x] Replace `send_bash_command` with `send_prompt(*, target_pane_id, text, shell=False)` in `multiplexer/base.py`, `tmux.py` (`esc_first=not shell`), `herdr.py` (esc-then-run plain form); update the tmux Esc-doctrine comment <!-- completed: 2026-07-24T10:15 -->
+- [x] Add `member prompt` to `cli/member.py` (flags, validation, output shapes per spec); delete `member_exec` <!-- completed: 2026-07-24T10:15 -->
 
 ### Step 4: Cancel removal code
 
