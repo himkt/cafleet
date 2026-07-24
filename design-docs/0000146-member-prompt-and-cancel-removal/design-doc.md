@@ -10,11 +10,11 @@ Introduce a Director-only CLI subcommand `cafleet member prompt` that keystrokes
 
 ## Success Criteria
 
-- [ ] `cafleet member prompt` dispatches both forms with the specified keystroke mechanics (plain: Esc-safeguarded user turn; `--shell`: un-escaped `! <text>`, byte-identical to former `member exec` delivery) on both multiplexer backends.
-- [ ] `cafleet member exec` and `cafleet message cancel` no longer parse (Click's default `No such command` error, exit 2).
-- [ ] The `canceled` status value is absent from source, tests, docs, skills, presets, and the admin WebUI; the message lifecycle is exactly `input_required` → `completed` via `message ack`.
-- [ ] Alembic migration `0004` folds legacy `status_state = 'canceled'` rows into `completed`; the chain-guard tests assert the four-revision chain with head `0004`.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass; a repo-wide `git grep` (tracked files only — gitignored trees like `site/` and `researches/` are excluded by construction) for `member exec`, `member_exec`, `send_bash_command`, `message cancel`, `cancel_message`, and `canceled` returns no hits outside `design-docs/` — for the `canceled` term only, additionally excluding the `0004` migration file (`cafleet/src/cafleet/db/alembic/versions/0004_*.py`) and `SPEC.md`'s migration-chain description, whose contract text necessarily carries the literal legacy value being folded.
+- [x] `cafleet member prompt` dispatches both forms with the specified keystroke mechanics (plain: Esc-safeguarded user turn; `--shell`: un-escaped `! <text>`, byte-identical to former `member exec` delivery) on both multiplexer backends.
+- [x] `cafleet member exec` and `cafleet message cancel` no longer parse (Click's default `No such command` error, exit 2).
+- [x] The `canceled` status value is absent from source, tests, docs, skills, presets, and the admin WebUI; the message lifecycle is exactly `input_required` → `completed` via `message ack`.
+- [x] Alembic migration `0004` folds legacy `status_state = 'canceled'` rows into `completed`; the chain-guard tests assert the four-revision chain with head `0004`.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass; a repo-wide `git grep` (tracked files only — gitignored trees like `site/` and `researches/` are excluded by construction) for `member exec`, `member_exec`, `send_bash_command`, `message cancel`, `cancel_message`, and `canceled` returns no hits outside `design-docs/` — for the `canceled` term only, additionally excluding the `0004` migration file (`cafleet/src/cafleet/db/alembic/versions/0004_*.py`) and `SPEC.md`'s migration-chain description, whose contract text necessarily carries the literal legacy value being folded.
 
 ---
 
