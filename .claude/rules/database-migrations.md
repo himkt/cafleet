@@ -23,4 +23,4 @@ mise //cafleet:makemigration "short description of the change"
 
 ## Update the chain guard
 
-After adding a migration, update the chain-guard test in `tests/db/test_alembic_smoke.py` (currently `test_single_initial_migration_revision_exists`, asserting the single fresh initial revision `0001` with `down_revision = None`) — bump the expected count, rename the test to match the new chain length, and add the new revision id plus its `down_revision` link. That snapshot keeps the chain sequential and linear.
+After adding a migration, update the chain-guard tests in `tests/db/test_alembic_smoke.py` (currently `test_four_revision_migration_chain_exists`, asserting the linear chain `0004` → `0003` → `0002` → `0001` → `None`, and `test_alembic_version_table_records_head_0004`, asserting the recorded head) — bump the expected count, rename both tests to match the new chain length and head, and add the new revision id plus its `down_revision` link. That snapshot keeps the chain sequential and linear.

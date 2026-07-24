@@ -1,7 +1,7 @@
 # `cafleet member prompt` and Removal of `member exec` / `message cancel`
 
 **Status**: Approved
-**Progress**: 6/28 tasks complete
+**Progress**: 13/28 tasks complete
 **Last Updated**: 2026-07-24
 
 ## Overview
@@ -150,13 +150,13 @@ The migration chain currently stands at three revisions (`0001` → `0002` → `
 
 ### Step 2: Skills, rules, presets
 
-- [ ] Rename `skills/cafleet/reference/exec-routing.md` → `prompt-routing.md`; rewrite per the routing-protocol spec (two-primitives table, `prompt --shell → ping → ack` serialization, plain-form no-ping semantics) <!-- completed: -->
-- [ ] Update every cross-reference to `exec-routing.md` and every `member exec` mention across `skills/cafleet/` (SKILL.md, `reference/cli.md`, `reference/director.md`, `reference/supervision.md`, `reference/recovery.md`, `roles/member.md`, `roles/director.md`, `roles/monitor.md`) <!-- completed: -->
-- [ ] Remove `message cancel` / `canceled` mentions from `skills/cafleet/` (SKILL.md On-demand row, `--member-id` semantics, `reference/cli.md`) and `skills/cafleet-design-doc/` role/workflow files <!-- completed: -->
-- [ ] Add plain-form usage guidance (direct-user-turn / slash-command use case) to the rewritten routing page and the Director-facing skill pages <!-- completed: -->
-- [ ] Rewrite `.claude/rules/bash-tool.md` Director-side sections around `member prompt --shell` <!-- completed: -->
-- [ ] Replace the "a canceled message no longer appears" illustrative example in `.claude/skills/clean-docs/residue/reference/rubric.md` with one not referencing the removed status <!-- completed: -->
-- [ ] Update `presets/codex/cafleet.rules` (`prefix_rule` for `member prompt`) and `presets/opencode/cafleet.md` (allowlist exception) <!-- completed: -->
+- [x] Rename `skills/cafleet/reference/exec-routing.md` → `prompt-routing.md`; rewrite per the routing-protocol spec (two-primitives table, `prompt --shell → ping → ack` serialization, plain-form no-ping semantics) <!-- completed: 2026-07-24T10:05 -->
+- [x] Update every cross-reference to `exec-routing.md` and every `member exec` mention across `skills/cafleet/` (SKILL.md, `reference/cli.md`, `reference/director.md`, `reference/supervision.md`, `reference/recovery.md`, `roles/member.md`, `roles/director.md`, `roles/monitor.md`) <!-- completed: 2026-07-24T10:05 -->
+- [x] Remove `message cancel` / `canceled` mentions from `skills/cafleet/` (SKILL.md On-demand row, `--member-id` semantics, `reference/cli.md`) and `skills/cafleet-design-doc/` role/workflow files <!-- completed: 2026-07-24T10:05 -->
+- [x] Add plain-form usage guidance (direct-user-turn / slash-command use case) to the rewritten routing page and the Director-facing skill pages <!-- completed: 2026-07-24T10:05 -->
+- [x] Rewrite `.claude/rules/bash-tool.md` Director-side sections around `member prompt --shell` <!-- completed: 2026-07-24T10:09 -->
+- [x] Replace the "a canceled message no longer appears" illustrative example in `.claude/skills/clean-docs/residue/reference/rubric.md` with one not referencing the removed status <!-- completed: 2026-07-24T10:09 -->
+- [x] Update `presets/codex/cafleet.rules` (`prefix_rule` for `member prompt`) and `presets/opencode/cafleet.md` (allowlist exception) <!-- completed: 2026-07-24T10:05 -->
 
 ### Step 3: CLI + multiplexer code
 

@@ -47,9 +47,9 @@ cafleet message send --fleet-id <fleet-id> --from-member-id <my-member-id> \
   --text "Please run \`<command>\` for me — my Bash tool denied it (<denial reason if known>)."
 ```
 
-Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet member exec <command>`, which keystrokes `! <command>` + Enter into your pane via Claude Code's `!` shortcut. The captured stdout/stderr lands in your next-turn context.
+Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet member prompt --shell "<command>"`, which keystrokes `! <command>` + Enter into your pane via Claude Code's `!` shortcut. The captured stdout/stderr lands in your next-turn context.
 
-If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member exec <command>` from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
+If the `cafleet message send` itself is also denied by the harness, surface that to the operator as a single fact ("my Bash and my cafleet are both denied; please dispatch via `cafleet member prompt --shell '<command>'` from your Director pane") — but that is the **only** time you ask the operator for help. Anything else, route through the Director silently.
 
 ### Why no operator-prompts-for-routing
 
@@ -70,12 +70,14 @@ cafleet member ping --fleet-id <fleet-id> \
   --member-id <member-id>
 ```
 
-For the **shell-dispatch fallback** (a member auto-routed a denied command and needs the Director to dispatch arbitrary shell on its behalf), the Director's primitive is `cafleet member exec`. This subcommand carries the operator-controlled command as a positional argument, so it remains under `permissions.ask` for per-call confirmation:
+For the **shell-dispatch fallback** (a member auto-routed a denied command and needs the Director to dispatch arbitrary shell on its behalf), the Director's primitive is `cafleet member prompt --shell`. This subcommand carries the operator-controlled text as a positional argument, so it remains under `permissions.ask` for per-call confirmation:
 
 ```bash
-cafleet member exec --fleet-id <fleet-id> \
+cafleet member prompt --fleet-id <fleet-id> \
   --member-id <member-id> \
-  "<command>"
+  --shell "<command>"
 ```
 
-See `skills/cafleet/SKILL.md` § Routing Bash via the Director for the full shell-dispatch protocol, serialization rules, and the cross-fleet boundary (a `--member-id` outside `--fleet-id` returns "not found"; there is no caller-auth check — any member in the fleet is a valid target).
+Follow every successful shell dispatch with `cafleet member ping` against the same member — the bang output only stages in the pane; the ping advances the member's turn to consume it. The plain form (no `--shell`) keystrokes `TEXT` Esc-safeguarded as a submitted user turn — for slash commands and other magic commands a broker message body cannot trigger — and needs no ping.
+
+See the cafleet skill's `reference/prompt-routing.md` (§ Routing Bash via the Director) for the full shell-dispatch protocol, serialization rules (`prompt --shell → ping → ack → next`), and the cross-fleet boundary (a `--member-id` outside `--fleet-id` returns "not found"; there is no caller-auth check — any member in the fleet is a valid target).

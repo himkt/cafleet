@@ -1,8 +1,8 @@
 # tmux-backed member commands (`cafleet member *`)
 
-Reference page for the Director-only lifecycle and pane-interaction commands — `member create`, `member delete`, `member list`, `member capture`, `member exec`, `member ping`. All run inside a tmux or herdr session, scoped to the per-subcommand `--fleet-id` (`member list` and `member show` are registry reads with no multiplexer requirement). `member create` takes **no identity flag** — the CLI auto-resolves the spawning Director from `fleets.director_member_id`; every other lifecycle verb identifies its **target** by `--member-id`.
+Reference page for the Director-only lifecycle and pane-interaction commands — `member create`, `member delete`, `member list`, `member capture`, `member prompt`, `member ping`. All run inside a tmux or herdr session, scoped to the per-subcommand `--fleet-id` (`member list` and `member show` are registry reads with no multiplexer requirement). `member create` takes **no identity flag** — the CLI auto-resolves the spawning Director from `fleets.director_member_id`; every other lifecycle verb identifies its **target** by `--member-id`.
 
-Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/exec-routing.md`.
+Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/prompt-routing.md`.
 
 ## Member Create
 
@@ -34,7 +34,7 @@ cafleet member create --fleet-id <fleet-id> \
 | `--text` | no | Inline spawn prompt. Mutually exclusive with `--text-file`; exactly one of the two is required. |
 | `--text-file` | no | Path to a UTF-8 file used as the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Mutually exclusive with `--text`; exactly one of the two is required. Path/file errors are catalogued in [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 
-The per-backend spawn argv is in [`cli-options.md`](../../../docs/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the denied-command fallback is [`reference/exec-routing.md`](exec-routing.md). Per-backend deltas: [`claude`](coding-agent/claude-overlay.md) / [`codex`](coding-agent/codex-overlay.md) / [`opencode`](coding-agent/opencode-overlay.md).
+The per-backend spawn argv is in [`cli-options.md`](../../../docs/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the denied-command fallback is [`reference/prompt-routing.md`](prompt-routing.md). Per-backend deltas: [`claude`](coding-agent/claude-overlay.md) / [`codex`](coding-agent/codex-overlay.md) / [`opencode`](coding-agent/opencode-overlay.md).
 
 ### Model-name-to-backend inference
 
@@ -108,7 +108,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 - Programmer: `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.`
 - Tester: `IMPORTANT: Do NOT write implementation code — only test code.` (plus the Programmer no-commit line).
 - Verifier: `IMPORTANT: Do NOT commit code or modify implementation/test files.`
-- All execute roles: `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/exec-routing.md), which you load at startup.` and `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`
+- All execute roles: `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` and `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`
 - Drafter (normal mode): `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.` and `Do NOT create any design document file until you have received answers.`; (resume mode) `Do NOT ask clarifying questions — the COMMENTs contain the needed information.`
 
 **Member Create — Scratch and audit files**: Spawn-related scratch (working notes, intermediate renders) MUST be written under `${BASE}` (resolved per [`reference/base-dir.md`](base-dir.md)) or under the skill's resolved output directory — never `/tmp`. The pre-spawn `--text-file` write at `<BASE>/.prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
@@ -171,23 +171,27 @@ cafleet member capture --fleet-id <fleet-id> --member-id <member-id> --lines 200
 
 A fleet member never talks to the user. When it needs a recorded user reaction (approve / choose / confirm / continue-or-abort), it relays the question to the Director via `cafleet message send`, and the Director asks the user through {decision_surface}. The Director forwards the user's answer back to the member as an ordinary `cafleet message send` (which the member consumes on its next poll) — not a pane keystroke. The question-shape taxonomy is a backend delta — see your overlay (`coding-agent/<name>-overlay.md`). The canonical user-reaction rule is the `cafleet` skill § *Soliciting user reactions*.
 
-## Member Exec
+## Member Prompt
 
-Director-only shell-dispatch primitive: keystrokes `! <command>` + `Enter` so the coding agent's `!` shortcut runs the command natively (all three backends honor it). The positional `COMMAND` is a single shell command (leading/trailing whitespace stripped; pipes / `&&` / `;` / `$(...)` / backticks not special-cased; empty or newline-containing commands exit 2). See [`reference/exec-routing.md`](exec-routing.md) for the full fallback protocol and [`cli-options.md`](../../../docs/spec/cli-options.md#member-exec) for validation.
+Director-only keystroke primitive with two forms. The positional `TEXT` is a single line (leading/trailing whitespace stripped; pipes / `&&` / `;` / `$(...)` / backticks not special-cased; empty or newline-containing text exits 2). See [`reference/prompt-routing.md`](prompt-routing.md) for the full fallback protocol and [`cli-options.md`](../../../docs/spec/cli-options.md#member-prompt) for validation.
+
+- **`--shell`**: keystrokes `! TEXT` + `Enter` (no Esc) so the coding agent's `!` shortcut runs the command natively (all three backends honor it) — the shell-dispatch half of the bash-via-Director fallback.
+- **Plain** (no `--shell`): keystrokes `Esc` → `TEXT` → `Enter`, submitting `TEXT` as a real user turn in the member's pane. Use it for text that only takes effect as a direct user turn — slash commands, skill invocations, and other magic commands a broker message body cannot trigger. Broker messaging remains the canonical coordination channel; the plain form is not a substitute for `message send` and is not a stall-recovery or urgent-redirect primitive.
 
 ```bash
-cafleet member exec --fleet-id <fleet-id> --member-id <member-id> "git log -1 --oneline"
+cafleet member prompt --fleet-id <fleet-id> --member-id <member-id> --shell "git log -1 --oneline"
+cafleet member prompt --fleet-id <fleet-id> --member-id <member-id> "/compact"
 ```
 
-### Required follow-up: `cafleet member ping`
+### Required follow-up: `cafleet member ping` (shell form only)
 
-After every successful `cafleet member exec` (exit 0), the Director MUST immediately invoke `cafleet member ping` against the same member. `member exec` only stages the bang-command's stdout/stderr as context for the member's next turn — it does not advance the turn. The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll` (poll polls the Director's own inbox; ping injects the keystroke into the member's pane).
+After every successful `cafleet member prompt --shell` (exit 0), the Director MUST immediately invoke `cafleet member ping` against the same member. The shell form only stages the bang-command's stdout/stderr as context for the member's next turn — it does not advance the turn. The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll` (poll polls the Director's own inbox; ping injects the keystroke into the member's pane).
 
-Skip the ping only on non-zero `member exec` exit (the dispatch did not complete; the supervision tick is the safety net). For a series of execs on the same member, the ping follows each one, not only the last.
+Skip the ping only on non-zero `member prompt` exit (the dispatch did not complete; the supervision tick is the safety net). For a series of shell dispatches on the same member, the ping follows each one, not only the last. The plain form needs no ping — the submitted turn opens the member's turn directly.
 
 ## Member Ping (manual inbox-poll nudge)
 
-Keystrokes **`Esc` → `cafleet … message poll` → `Enter`** into a member's pane (the leading `Esc` dismisses any pending permission-approval prompt, so the trailing `Enter` cannot blindly confirm it) for re-poking a member that missed the broker's auto-fired inline preview. The action is fully fixed by the command — no operator-controlled body — so it sits in `permissions.allow` while `member exec` stays in `permissions.ask`. Keystroke mechanics: [`multiplexer-backends.md`](../../../docs/spec/multiplexer-backends.md#esc-safeguard).
+Keystrokes **`Esc` → `cafleet … message poll` → `Enter`** into a member's pane (the leading `Esc` dismisses any pending permission-approval prompt, so the trailing `Enter` cannot blindly confirm it) for re-poking a member that missed the broker's auto-fired inline preview. The action is fully fixed by the command — no operator-controlled body — so it sits in `permissions.allow` while `member prompt` stays in `permissions.ask`. Keystroke mechanics: [`multiplexer-backends.md`](../../../docs/spec/multiplexer-backends.md#esc-safeguard).
 
 ```bash
 cafleet member ping --fleet-id <fleet-id> --member-id <member-id>
@@ -196,6 +200,6 @@ cafleet member ping --fleet-id <fleet-id> --member-id <member-id>
 ## Cross-references
 
 - For broadcast send/ack semantics, see [`reference/cli.md`](cli.md) § *Broadcast*.
-- For the bash-via-Director fallback protocol, see [`reference/exec-routing.md`](exec-routing.md).
+- For the bash-via-Director fallback protocol, see [`reference/prompt-routing.md`](prompt-routing.md).
 - For crash/disconnect/idle recovery flows including the Shutdown Protocol, see [`reference/recovery.md`](recovery.md).
 - For `--full` / `--json` opt-back-in semantics, see [`reference/cli.md`](cli.md) § *Output flags*.

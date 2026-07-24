@@ -20,7 +20,7 @@ Present-tense English that trips a broad sweep pattern but is **not** historical
 narration — reword nothing. The scanner confirms each remaining sweep hit falls
 in this benign / KEEP / exempt class before declaring the sweep clean.
 
-- `no longer` used as *current* behavior — "a canceled message no longer appears",
+- `no longer` used as *current* behavior — "a deleted member no longer appears",
   "the loop no longer owns the slot". Present-tense description of what happens
   now, not a "formerly X" narration.
 - `used to` meaning *utilized to* (not *formerly*).

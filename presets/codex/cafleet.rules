@@ -1,7 +1,7 @@
 prefix_rule(pattern = ["cafleet"], decision = "allow")
 
 prefix_rule(
-    pattern = ["cafleet", "member", "exec"],
+    pattern = ["cafleet", "member", "prompt"],
     decision = "prompt",
-    justification = "cafleet member exec runs arbitrary commands on a member",
+    justification = "cafleet member prompt keystrokes arbitrary text or shell commands into a member pane",
 )
