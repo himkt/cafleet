@@ -574,9 +574,7 @@ def member_prompt(ctx, member_id, shell, text, json_output):
         )
     else:
         kind = "shell prompt" if shell else "prompt"
-        click.echo(
-            f"Sent {kind} {text!r} to member {target['name']} ({pane_id})."
-        )
+        click.echo(f"Sent {kind} {text!r} to member {target['name']} ({pane_id}).")
 
 
 @member.command("ping")

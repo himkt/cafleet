@@ -1,7 +1,7 @@
 # `cafleet member prompt` and Removal of `member exec` / `message cancel`
 
 **Status**: Approved
-**Progress**: 22/28 tasks complete
+**Progress**: 28/28 tasks complete
 **Last Updated**: 2026-07-24
 
 ## Overview
@@ -181,12 +181,12 @@ The migration chain currently stands at three revisions (`0001` → `0002` → `
 
 ### Step 7: Tests + verification
 
-- [ ] Rewrite `tests/cli/test_member_exec.py` as `tests/cli/test_member_prompt.py`: both forms' dispatch, validation errors, output shapes, target-resolution errors, absence guard for `member exec` (Click `No such command` error) <!-- completed: -->
-- [ ] Update `tests/multiplexer/test_tmux.py` / `test_herdr.py`: `send_prompt` both forms, Esc-first assertions (plain: esc; shell: no esc), fail-fast validation <!-- completed: -->
-- [ ] Remove cancel tests from `tests/broker/test_messaging.py` and `tests/cli/test_message.py`; add the `message cancel` absence guard <!-- completed: -->
-- [ ] Update `tests/broker/test_typed_columns.py`, `tests/broker/test_inline_preview.py`, `tests/broker/test_asset_installs.py` (codex rules content), `tests/cli/test_help_budget.py` (subcommand lists) <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` <!-- completed: -->
-- [ ] Repo-wide `git grep` sweep (tracked files only) for `member exec`, `member_exec`, `send_bash_command`, `message cancel`, `cancel_message`, `canceled` — no hits outside `design-docs/`; for the `canceled` term only, additionally exclude `cafleet/src/cafleet/db/alembic/versions/0004_*.py` and `SPEC.md`'s migration-chain description (their contract text necessarily carries the literal legacy value being folded) <!-- completed: -->
+- [x] Rewrite `tests/cli/test_member_exec.py` as `tests/cli/test_member_prompt.py`: both forms' dispatch, validation errors, output shapes, target-resolution errors, absence guard for `member exec` (Click `No such command` error) <!-- completed: 2026-07-24T10:30 -->
+- [x] Update `tests/multiplexer/test_tmux.py` / `test_herdr.py`: `send_prompt` both forms, Esc-first assertions (plain: esc; shell: no esc), fail-fast validation <!-- completed: 2026-07-24T10:30 -->
+- [x] Remove cancel tests from `tests/broker/test_messaging.py` and `tests/cli/test_message.py`; add the `message cancel` absence guard <!-- completed: 2026-07-24T10:30 -->
+- [x] Update `tests/broker/test_typed_columns.py`, `tests/broker/test_inline_preview.py`, `tests/broker/test_asset_installs.py` (codex rules content), `tests/cli/test_help_budget.py` (subcommand lists) <!-- completed: 2026-07-24T10:30 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` <!-- completed: 2026-07-24T10:30 -->
+- [x] Repo-wide `git grep` sweep (tracked files only) for `member exec`, `member_exec`, `send_bash_command`, `message cancel`, `cancel_message`, `canceled` — no hits outside `design-docs/`; for the `canceled` term only, additionally exclude `cafleet/src/cafleet/db/alembic/versions/0004_*.py` and `SPEC.md`'s migration-chain description (their contract text necessarily carries the literal legacy value being folded) <!-- completed: 2026-07-24T10:28 -->
 
 ---
 

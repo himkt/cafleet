@@ -22,8 +22,7 @@ def upgrade() -> None:
     # stays untouched — it records when the row reached its terminal state,
     # which remains true after the fold.
     op.execute(
-        "UPDATE messages SET status_state = 'completed' "
-        "WHERE status_state = 'canceled'"
+        "UPDATE messages SET status_state = 'completed' WHERE status_state = 'canceled'"
     )
 
 
