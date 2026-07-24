@@ -1,6 +1,6 @@
 # `cafleet member prompt` and Removal of `member exec` / `message cancel`
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 28/28 tasks complete
 **Last Updated**: 2026-07-24
 
@@ -198,3 +198,4 @@ The migration chain currently stands at three revisions (`0001` → `0002` → `
 | 2026-07-24 | Review round 1: CLI validation precedence pinned newline-first; migration renumbered `0002` → `0004` (four-revision chain guards, head-version test); `_transition_message_state` inlined into `ack_message`; module-docstring `/cancel` drop made explicit; sweep switched to `git grep`; clean-docs rubric example and stale `database-migrations.md` chain-guard description added to scope |
 | 2026-07-24 | User approved — Status: Approved |
 | 2026-07-24 | Director arbitration (Programmer escalation): the `canceled` sweep term in Step 7 and Success Criterion 5 now excludes the `0004` migration file and `SPEC.md`'s migration-chain description — their contract text necessarily carries the literal legacy value being folded |
+| 2026-07-24 | Implementation complete: 28/28 tasks, all Success Criteria verified (Phase D E2E + Reviewer round-1 approval), PR #220 opened — Status: Complete |
