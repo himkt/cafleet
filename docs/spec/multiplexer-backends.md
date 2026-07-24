@@ -57,10 +57,10 @@ nothing new.
 On the herdr backend the monitor loop point-reads each watched member's native
 agent status per tick and flags it due when the status transitions into `done`
 — the sole wake-on-status state (`_WAKE_ON_STATUS = ("done",)`) — in addition
-to the interval and stall-check triggers. A transition into `blocked` is
-recorded but never flags a wake: a blocked member is awaiting a user answer and
-must not be woken about. On the tmux backend the capability is absent, so
-members come due by interval and stall-check only. No DB column backs the
+to the interval, stall-check, and unacked triggers. A transition into `blocked`
+is recorded but never flags a wake: a blocked member is awaiting a user answer
+and must not be woken about. On the tmux backend the capability is absent, so
+members come due by interval, stall-check, and unacked only. No DB column backs the
 native status; the
 last-seen state lives only in the running loop's memory. See
 [Monitoring](../concepts/monitoring.md).

@@ -718,9 +718,12 @@ documented non-match, not an error mask.
 - **`list_monitor_targets(fleet_id)`** — one row per **active, enrolled** member
   (the watched set; the monitoring member is excluded by the monitor_config
   join). Each row: `{member_id, name, is_director, pane_id, interval_seconds,
-  last_ping_at, enabled, pending_count}`, where `pending_count` counts messages
-  with `owner_member_id = member_id`, `status_state = "input_required"`, `type !=
-  "broadcast_summary"`.
+  last_ping_at, enabled, pending_count, oldest_pending_ts}`, where
+  `pending_count` counts messages with `owner_member_id = member_id`,
+  `status_state = "input_required"`, `type != "broadcast_summary"`, and
+  `oldest_pending_ts` is `MIN(status_timestamp)` over the same predicate set
+  (a second correlated scalar subquery; `None` when the member has no pending
+  delivery).
 
 #### Monitor — runtime claim / heartbeat / clear + liveness
 
@@ -754,6 +757,16 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
   tick_seconds, last_tick_at, last_tick_age_seconds, started_at}`, with the
   process fields null when the monitor is not live (no row, or a stale/cleared
   heartbeat).
+- **`monitor_members_payload(fleet_id, now)`** — the per-member rows shared by
+  `cafleet monitor status` and the WebUI `GET /api/monitor` (both call this
+  builder so the two payloads cannot drift): one dict per
+  `list_monitor_targets` row — `{member_id, name, role, interval_seconds,
+  last_ping_at, last_ping_age_seconds, enabled, pending_count,
+  oldest_pending_ts, oldest_pending_age_seconds}` — with `role` =
+  `"director"`/`"member"` from `is_director`, and `last_ping_age_seconds` /
+  `oldest_pending_age_seconds` computed against the single supplied `now`
+  (whole seconds, integer-truncated; `None` when the source timestamp is
+  `None`).
 - **`delete_fleet_monitor_rows(session, fleet_id)`** /
   **`delete_member_monitor_row(session, member_id)`** (in caller's transaction) —
   in-transaction cascade deletes: the fleet variant deletes the fleet's
@@ -1243,10 +1256,12 @@ A shared `_require_live_fleet` guard fetches the fleet; missing or soft-deleted
   time. Not running / no row → a not-running payload (`running` false; `pid`,
   `last_tick_at`, `last_tick_age_seconds`, `started_at` null; `tick_seconds`
   from the row when present, else null). Else a live payload with
-  `last_tick_age_seconds`. Per-member rows from the monitor targets, each
-  carrying `member_id`, `name`, `interval_seconds`, `last_ping_at`,
-  `last_ping_age_seconds`, `enabled`, `pending_count`, and a `role` of
-  `director`/`member`. Payload `{runtime, members}`.
+  `last_tick_age_seconds`. Per-member rows from the shared
+  `monitor_members_payload` builder (§6.2), each carrying `member_id`, `name`,
+  `interval_seconds`, `last_ping_at`, `last_ping_age_seconds`, `enabled`,
+  `pending_count`, `oldest_pending_ts`, `oldest_pending_age_seconds`, and a
+  `role` of `director`/`member`; the builder receives the same `now` passed to
+  `monitor_runtime_payload`. Payload `{runtime, members}`.
 - **config** — `--member-id` (integer, required), `--interval` (integer ≥1,
   optional), `--enable` / `--disable` (boolean, default `false`). `--enable`
   with `--disable` → usage error `--enable and --disable are mutually
@@ -1545,7 +1560,9 @@ Every field is read with required access unless marked optional; required access
 - **Monitor-status payload**: `{runtime, members}`. `runtime.running` (bool, req);
   when true also `pid`, `last_tick_age_seconds`, `tick_seconds`, `started_at`.
   Each member: `member_id`, `name`, `role`, `interval_seconds`,
-  `last_ping_age_seconds` (int | null), `enabled` (bool), `pending_count`.
+  `last_ping_at` (str | null), `last_ping_age_seconds` (int | null), `enabled`
+  (bool), `pending_count`, `oldest_pending_ts` (str | null),
+  `oldest_pending_age_seconds` (int | null).
 - **Monitor-config** (`format_monitor_config`): `member_id`, `interval_seconds`,
   `enabled` (bool), `last_ping_at` (str | null; `-` when null).
 
@@ -1621,7 +1638,9 @@ last tick <last_tick_age_seconds>s ago, tick <tick_seconds>s, started
 column header and separator, then one row per member, left-justified: `member_id`
 9, `name` 11, `role` 8, then `<interval_seconds>s` width 8, the humanized
 ping-age width 9 (ASCII `-` when null), then `yes`/`no` for `enabled` width 7,
-then `pending_count` with no padding.
+then `pending_count` width 7 (header `pending`), then the humanized ping-age
+over `oldest_pending_age_seconds` (`<n>s ago`; ASCII `-` when null) with no
+padding (last column, header `unacked`).
 
 `format_monitor_config` — one line: `member <member_id>: interval
 <interval_seconds>s, <state>, last_ping <last_ping>` where `<state>` is
@@ -1724,13 +1743,13 @@ Director's `MultiplexerContext` and passes it directly.
 - **`send_wake_trigger(*, target_pane_id, due_members, director_member_id) ->
   bool`** — best-effort; the **sole** keystroke the monitor loop fires. Each due
   entry has `member_id`, `name`, `is_director`, `wake_reasons` (an ordered, deduped
-  `list[str]` drawn from `{"interval", "status:done", "stall-check"}`). tmux missing
+  `list[str]` drawn from `{"interval", "status:done", "stall-check", "unacked"}`). tmux missing
   → `false`; `noun = "member"` if one due else `"members"`; build `due_list` by joining
   with `", "`, each `<"director" if is_director else "member"> <member_id> (<sanitized
   name>) [<wake_reasons joined by ",">]`; single-line payload (note the em-dash,
   `{N}` = count):
   ```
-  [monitor] wake: {N} {noun} due — {due_list}. Capture each named pane read-only, with the Director pane ({director_member_id}) always inspected. From capture content only, classify each pane in this precedence order: awaiting_user, unknown, finished, stalled, working. For a member tagged stall-check, compare its capture against your previous stall-check capture of that pane, then keep the new capture as that pane's baseline; with no previous stall-check capture, classify unknown. Never re-engage a pane classified awaiting_user: when the Director is awaiting_user, send nothing this wake, whatever the other panes show. Otherwise re-engage the Director via cafleet message send when a due member is stalled or finished, or the Director is finished with un-acked work.
+  [monitor] wake: {N} {noun} due — {due_list}. Capture each named pane read-only, with the Director pane ({director_member_id}) always inspected. From capture content only, classify each pane in this precedence order: awaiting_user, unknown, finished, stalled, working. For a member tagged stall-check, compare its capture against your previous stall-check capture of that pane, then keep the new capture as that pane's baseline; with no previous stall-check capture, classify unknown. For a member tagged unacked, its oldest un-acked delivery has waited at least one full interval: report it to the Director unless its pane classifies awaiting_user or unknown — including working panes. Never re-engage a pane classified awaiting_user: when the Director is awaiting_user, send nothing this wake, whatever the other panes show. Otherwise re-engage the Director via cafleet message send when a due member is stalled or finished, when an unacked-tagged member is reportable per its rule above, or the Director is finished with un-acked work.
   ```
   literal-then-Enter, `timeout=5`s, **Esc-first=NO** (an Esc would self-interrupt
   the monitoring member); any error → `false`. The payload carries no backtick, no
@@ -1997,7 +2016,8 @@ constants are public.
 
 Pure function of one watched-member scan row (`member_id`, `name`, `is_director`,
 `pane_id` optional, `interval_seconds`, `last_ping_at` optional ISO string,
-`enabled`, `pending_count`, `pane_alive`) and a tz-aware UTC `now`. Branch
+`enabled`, `pending_count`, `oldest_pending_ts` optional ISO string,
+`pane_alive`) and a tz-aware UTC `now`. Branch
 conditions, in short-circuit order:
 
 1. `enabled` false → false.
@@ -2009,8 +2029,9 @@ conditions, in short-circuit order:
    is **immediately due** — the elapsed check is skipped entirely.
 
 `is_director` is **not** consulted (retained only for status labeling);
-`pending_count` is **not** consulted (due-ness is interval-driven). The
-monitoring member never appears as a `target` — it is the unenrolled watcher.
+`pending_count` and `oldest_pending_ts` are **not** consulted (due-ness is
+interval-driven). The monitoring member never appears as a `target` — it is
+the unenrolled watcher.
 
 #### `monitor_tick(fleet_id, now)`
 
@@ -2031,7 +2052,8 @@ One scan pass, steps in order:
    members; never the monitoring member): set `target.pane_alive = (target.pane_id
    ∈ live_panes)`, then if `should_ping(target, now)` add it to the due set with an
    `interval` wake-reason. Each due target carries `wake_reasons: list[str]`,
-   ordered and deduped, drawn from `{"interval", "status:done", "stall-check"}`:
+   ordered and deduped, drawn from `{"interval", "status:done", "stall-check",
+   "unacked"}`:
    - **Stall-check trigger.** When `monitor_stall_interval > 0`, additionally flag
      each **enabled** watched live member that is stall-check due — its
      `_last_stall_check_at` entry absent (first tick) or `now -
@@ -2039,6 +2061,17 @@ One scan pass, steps in order:
      set with a `stall-check` reason (see § *Stall-detection cadence* below). When
      `monitor_stall_interval == 0` this branch is skipped and no `stall-check`
      reason is ever emitted.
+   - **Unacked-delivery trigger.** Additionally flag each **enabled** watched live
+     member whose oldest un-acked delivery is stale — its scan row's
+     `oldest_pending_ts` is non-null and `now − oldest_pending_ts ≥
+     interval_seconds` (the member's own interval, read from the same row) — and
+     whose re-fire gate passes — its `_last_unacked_wake_at` entry is absent, or
+     `now − _last_unacked_wake_at[id] ≥ interval_seconds` — unioning it into the
+     due set with an `unacked` reason (see § *Unacked-delivery due trigger*
+     below). This trigger runs after the stall-check trigger and before the
+     native trigger, so a multi-reason member's `wake_reasons` order is
+     `interval`, `stall-check`, `unacked` (the native trigger below only appends
+     fresh targets).
    - **Native `done` trigger (`AgentStateAware` backend, herdr only).** Additionally
      point-read each **enabled** watched live member's `agent_status`, and union into
      the due set any member whose status **transitioned into** `done` since the loop's
@@ -2054,11 +2087,14 @@ One scan pass, steps in order:
    - If `woke` is true:
      - call the broker's `record_pings` with `now-as-ISO` and **only** the due
        members whose `wake_reasons` include `interval` or `status:done` (a
-       stall-check-only member is **excluded**, keeping the ping cadence and the
-       stall cadence independent), advancing their `last_ping_at` **only** on a
+       stall-check-only or unacked-only member is **excluded**, keeping the ping
+       cadence and the stall/unacked cadences independent), advancing their
+       `last_ping_at` **only** on a
        successful wake, so a just-flagged member is not due again next tick;
      - commit `_last_stall_check_at[id] = now` for **every** due member whose reasons
        include `stall-check`;
+     - commit `_last_unacked_wake_at[id] = now` for **every** due member whose
+       reasons include `unacked`;
      - emit one stdout heartbeat line per due member, appending that member's joined
        `wake_reasons` as a ` [<reasons joined by ",">]` suffix before ` -> wake
        monitor`, with this **exact** format:
@@ -2069,14 +2105,15 @@ One scan pass, steps in order:
        payload). The only native-status reason that can appear is `status:done`,
        since a `blocked` transition never flags a wake.
    - If `woke` is false: do **not** record pings, do **not** commit
-     `_last_stall_check_at`, and do **not** echo — the due members stay flagged, so
+     `_last_stall_check_at` or `_last_unacked_wake_at`, and do **not** echo — the
+     due members stay flagged, so
      the next tick retries (no wake-storm, no silent skip).
    - No live watcher to wake: nothing is recorded.
 7. Return `CONTINUE`.
 
-**Critical ordering invariant:** `record_pings`, the `_last_stall_check_at`
-commit, and the heartbeat echo are all gated behind `woke == true`. Preserve this
-gating exactly.
+**Critical ordering invariant:** `record_pings`, the `_last_stall_check_at` and
+`_last_unacked_wake_at` commits, and the heartbeat echo are all gated behind
+`woke == true`. Preserve this gating exactly.
 
 #### Native agent-state due trigger (herdr only)
 
@@ -2142,14 +2179,49 @@ column and is never persisted. On **both** backends:
    baseline one interval early — the wake itself is not extra, since the root
    Director is interval-due on tick 1 regardless.
 
+#### Unacked-delivery due trigger
+
+Independent of the interval trigger, reusing each member's own
+`interval_seconds` as both the staleness threshold and the re-fire period — no
+new setting and no new `CAFLEET_*` env var (`CAFLEET_MONITOR_STALL_INTERVAL=0`
+disables only stall-check and does **not** affect `unacked`; `enabled = 0`
+silences the member from **all** triggers). The loop owns a process-local
+`_last_unacked_wake_at: dict[member_id, datetime]`, **cleared per run** in
+`run_monitor_loop` (the same lifecycle as `_last_member_status` and
+`_last_stall_check_at`); it backs no DB column and is never persisted. On
+**both** backends:
+
+1. Each tick, an **enabled** watched live member is **unacked-due** when its
+   scan row's `oldest_pending_ts` is non-null and `now − oldest_pending_ts ≥
+   interval_seconds` (the member's own interval, read from the same row) — a
+   delivery younger than one interval is never flagged, so the normal
+   deliver-then-ack cycle produces no wakes —
+2. **and** the re-fire gate passes: the member's `_last_unacked_wake_at` entry
+   is absent, or `now − _last_unacked_wake_at[id] ≥ interval_seconds`. An
+   unacked-due member is unioned into the due set with an `unacked` reason; the
+   member re-flags every `interval_seconds` while a stale un-acked delivery
+   remains and stops once every such delivery is acked.
+3. `_last_unacked_wake_at[id]` is committed to `now` **only on a successful
+   wake** (`woke == True`), for every due member whose reasons include
+   `unacked` — mirroring the `record_pings` gating, so a failed keystroke
+   re-flags the member next tick.
+4. An **unacked-only** member (its `wake_reasons` are exactly `["unacked"]`) is
+   **excluded** from `record_pings`, so its `last_ping_at` interval cadence is
+   untouched and the two cadences stay independent.
+5. The re-fire map is keyed by member, not by message: after an unacked wake, a
+   *new* stale episode beginning less than one interval later has its first
+   wake delayed until the gate reopens — bounded by one `interval_seconds`, and
+   accepted for the simplicity of one map entry per member.
+
 #### `run_monitor_loop(fleet_id, tick_seconds)`
 
 Foreground driver. The fleet's monitor-runtime row is the **only** coordination
 artifact (no PID file); identity throughout is the OS process id.
 
 1. Reset the shared stop flag to false; clear the process-local
-   `_last_member_status` and `_last_stall_check_at` dicts (so each run starts with no
-   remembered native status and no stall-check baseline); capture `pid = this-pid`.
+   `_last_member_status`, `_last_stall_check_at`, and `_last_unacked_wake_at`
+   dicts (so each run starts with no remembered native status, no stall-check
+   baseline, and no unacked re-fire gate); capture `pid = this-pid`.
 2. **Claim the slot** via the broker's atomic claim `(fleet_id, pid,
    tick_seconds, now-as-ISO)`. On refusal (returns false) → application error
    (exit 1) `monitor already running for fleet {fleet_id}`. There is no silent
@@ -2494,15 +2566,20 @@ array**; every other list endpoint wraps in an object (member rows under
   Response `{"members": [ <member dict> + "monitor": <MonitorConfig>|null, … ]}`.
   Projected `MonitorConfig`: `{interval_seconds, last_ping_at, enabled}`
   (`member_id` dropped).
-- **`GET /api/monitor`** — fleet-scoped. Returns `{running, pid, tick_seconds,
-  last_tick_at, last_tick_age_seconds, started_at}`. Read the runtime row and
+- **`GET /api/monitor`** — fleet-scoped. Returns the flat runtime keys
+  `{running, pid, tick_seconds, last_tick_at, last_tick_age_seconds,
+  started_at}` plus a top-level `members` key. Read the runtime row and
   the live-check (current UTC). If absent **or** not live: `running=false`,
   `pid=null`, `tick_seconds` = the row's value when a row exists else `null`,
   `last_tick_at`/`last_tick_age_seconds`/`started_at` all `null` — **a stale row
   never leaks a lingering pid or start time**. When live: `running=true` with the
   live `pid`, `tick_seconds`, `last_tick_at`, `started_at`, and a computed
   `last_tick_age_seconds` (null when `last_tick_at` is null; else whole-seconds
-  now − parsed `last_tick_at`, **integer-truncated**).
+  now − parsed `last_tick_at`, **integer-truncated**). `members` carries the
+  shared `monitor_members_payload` rows (§6.2, including `pending_count`,
+  `oldest_pending_ts`, `oldest_pending_age_seconds`), computed with the same
+  `now` as the runtime fields; the flat runtime keys are unchanged by this
+  addition.
 - **`GET /api/members/{member_id}/monitor`** — fleet-scoped. Absent config → `404`,
   detail `Member not enrolled`; else the projected `MonitorConfig` (single
   object).
@@ -2601,7 +2678,8 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
   driven by the monitor loop, independent of the `monitor_config.interval_seconds`
   ping intervals. A watched member is stall-check due every `monitor_stall_interval`
   seconds; `0` disables stall detection entirely (no `stall-check` wake-reason tag
-  is ever emitted). Tracked process-locally in the running loop; no DB column.
+  is ever emitted) and does **not** affect the `unacked` trigger (§6.6). Tracked
+  process-locally in the running loop; no DB column.
 - **Default DB URL** expands `~` to `$HOME` **only for the factory default**; a
   user-supplied `CAFLEET_DATABASE_URL` is passed through verbatim (no `~`
   expansion, so a user value must already be absolute). Net default on home
