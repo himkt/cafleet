@@ -21,11 +21,6 @@ def _monitor_config_response(cfg: dict) -> dict:
     }
 
 
-def _monitor_runtime_payload(fleet_id: int) -> dict:
-    """Build the ``GET /api/monitor`` liveness dict from the DB heartbeat."""
-    return broker.monitor_runtime_payload(fleet_id, datetime.now(UTC))
-
-
 def get_webui_fleet(request: Request) -> int:
     """Return the integer ``X-Fleet-Id``; 400 if missing/non-integer, 404 if gone."""
     raw = request.headers.get("x-fleet-id")
@@ -101,7 +96,11 @@ def list_members(fleet_id: int = Depends(get_webui_fleet)):
 
 @webui_router.get("/monitor")
 def get_monitor(fleet_id: int = Depends(get_webui_fleet)):
-    return _monitor_runtime_payload(fleet_id)
+    # One `now` for the runtime dict and the members rows (CLI/WebUI parity).
+    now = datetime.now(UTC)
+    payload = broker.monitor_runtime_payload(fleet_id, now)
+    payload["members"] = broker.monitor_members_payload(fleet_id, now)
+    return payload
 
 
 @webui_router.get("/members/{member_id}/monitor")

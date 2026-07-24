@@ -415,6 +415,37 @@ def monitor_runtime_payload(fleet_id: int, now: datetime) -> dict:
     }
 
 
+def monitor_members_payload(fleet_id: int, now: datetime) -> list[dict]:
+    """Build the per-member rows shared by ``monitor status`` and GET /api/monitor.
+
+    One dict per ``list_monitor_targets`` row, so the CLI and API payloads
+    cannot drift. ``last_ping_age_seconds`` and ``oldest_pending_age_seconds``
+    are whole seconds (integer-truncated) against the single supplied ``now``,
+    ``None`` when the source timestamp is ``None``.
+    """
+
+    def _age(ts: str | None) -> int | None:
+        if ts is None:
+            return None
+        return int((now - datetime.fromisoformat(ts)).total_seconds())
+
+    return [
+        {
+            "member_id": t["member_id"],
+            "name": t["name"],
+            "role": "director" if t["is_director"] else "member",
+            "interval_seconds": t["interval_seconds"],
+            "last_ping_at": t["last_ping_at"],
+            "last_ping_age_seconds": _age(t["last_ping_at"]),
+            "enabled": t["enabled"],
+            "pending_count": t["pending_count"],
+            "oldest_pending_ts": t["oldest_pending_ts"],
+            "oldest_pending_age_seconds": _age(t["oldest_pending_ts"]),
+        }
+        for t in list_monitor_targets(fleet_id)
+    ]
+
+
 def delete_fleet_monitor_rows(session, fleet_id: int) -> None:
     """Delete the fleet's ``monitor_config`` rows and its ``monitor_runtime`` row.
 

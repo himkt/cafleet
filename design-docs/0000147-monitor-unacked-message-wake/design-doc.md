@@ -1,7 +1,7 @@
 # Monitor Unacked-Message Wake Reason
 
 **Status**: Approved
-**Progress**: 11/14 tasks complete
+**Progress**: 13/14 tasks complete
 **Last Updated**: 2026-07-24
 
 ## Overview
@@ -149,8 +149,8 @@ WebUI `GET /api/monitor` gains an additive top-level `"members"` key carrying th
 
 ### Step 5: `monitor status` and WebUI
 
-- [ ] Add the shared `monitor_members_payload(fleet_id, now)` builder in `broker/monitor.py` (rows including `oldest_pending_ts` / `oldest_pending_age_seconds`), switch `cli/monitor.py` to it, add the `unacked` column (+ `pending` padding) in `output/formatters.py`, and add the additive `members` key in `webui/api.py`'s `GET /api/monitor` via the same builder <!-- completed: -->
-- [ ] Tests: `monitor status --json` payload fields, exact text-table layout with and without a pending age, `GET /api/monitor` response carries `members` with unchanged runtime keys <!-- completed: -->
+- [x] Add the shared `monitor_members_payload(fleet_id, now)` builder in `broker/monitor.py` (rows including `oldest_pending_ts` / `oldest_pending_age_seconds`), switch `cli/monitor.py` to it, add the `unacked` column (+ `pending` padding) in `output/formatters.py`, and add the additive `members` key in `webui/api.py`'s `GET /api/monitor` via the same builder <!-- completed: 2026-07-24T12:36 -->
+- [x] Tests: `monitor status --json` payload fields, exact text-table layout with and without a pending age, `GET /api/monitor` response carries `members` with unchanged runtime keys <!-- completed: 2026-07-24T12:36 -->
 
 ### Step 6: Verification
 

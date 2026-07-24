@@ -76,29 +76,10 @@ def monitor_status(ctx: click.Context, json_output: bool) -> None:
 
     now = datetime.now(UTC)
     # matches GET /api/monitor for WebUI/CLI parity (one `now` for runtime + members).
-    runtime = broker.monitor_runtime_payload(fleet_id, now)
-
-    members = []
-    for t in broker.list_monitor_targets(fleet_id):
-        last_ping_at = t["last_ping_at"]
-        age = (
-            int((now - datetime.fromisoformat(last_ping_at)).total_seconds())
-            if last_ping_at is not None
-            else None
-        )
-        members.append(
-            {
-                "member_id": t["member_id"],
-                "name": t["name"],
-                "role": "director" if t["is_director"] else "member",
-                "interval_seconds": t["interval_seconds"],
-                "last_ping_at": last_ping_at,
-                "last_ping_age_seconds": age,
-                "enabled": t["enabled"],
-                "pending_count": t["pending_count"],
-            }
-        )
-    payload = {"runtime": runtime, "members": members}
+    payload = {
+        "runtime": broker.monitor_runtime_payload(fleet_id, now),
+        "members": broker.monitor_members_payload(fleet_id, now),
+    }
 
     if json_output:
         click.echo(output.format_json(payload))

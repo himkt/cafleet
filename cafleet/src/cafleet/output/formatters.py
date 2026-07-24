@@ -175,7 +175,8 @@ def format_monitor_status(payload: dict) -> str:
     ``payload`` is ``{"runtime": {...}, "members": [...]}`` (the same shape the
     ``--json`` path emits). The runtime line reads ``running``/``stopped`` from
     the DB heartbeat; the table lists the watched set (the root Director + every
-    ordinary member) with role / interval / last-ping age / enabled / pending.
+    ordinary member) with role / interval / last-ping age / enabled / pending /
+    oldest-pending (``unacked``) age.
     The monitoring member is the unenrolled watcher and never appears here.
     """
     rt = payload["runtime"]
@@ -191,19 +192,22 @@ def format_monitor_status(payload: dict) -> str:
     members = payload["members"]
     if members:
         lines.append(
-            "  member_id  name         role      interval  last_ping  enabled  pending"
+            "  member_id  name         role      interval  last_ping  enabled  "
+            "pending  unacked"
         )
         lines.append(
-            "  ---------  -----------  --------  --------  ---------  -------  -------"
+            "  ---------  -----------  --------  --------  ---------  -------  "
+            "-------  -------"
         )
         for m in members:
             interval_s = f"{m['interval_seconds']}s"
             last_ping = _format_ping_age(m["last_ping_age_seconds"])
             enabled_s = "yes" if m["enabled"] else "no"
+            unacked = _format_ping_age(m["oldest_pending_age_seconds"])
             lines.append(
                 f"  {str(m['member_id']):<9}  {m['name']:<11}  {m['role']:<8}  "
                 f"{interval_s:<8}  {last_ping:<9}  {enabled_s:<7}  "
-                f"{m['pending_count']}"
+                f"{str(m['pending_count']):<7}  {unacked}"
             )
     return "\n".join(lines)
 
