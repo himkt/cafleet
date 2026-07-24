@@ -522,28 +522,99 @@ def test_kill_pane__argv_and_ignore_missing_semantics(
 
 
 @pytest.mark.parametrize(
-    ("scenario", "command", "expect_raise_match", "expected_literal"),
+    ("scenario", "text", "shell", "expect_raise_match", "expected_literal"),
     [
-        ("canonical_argv", "git log -1 --oneline", None, "! git log -1 --oneline"),
-        ("strips_surrounding_whitespace", "  git status  ", None, "! git status"),
-        ("rejects_newline_in_body", "line1\nline2", "(?i)newline", None),
-        ("rejects_trailing_newline", "trailing\n", "(?i)newline", None),
-        ("rejects_leading_newline", "\nleading", "(?i)newline", None),
-        ("rejects_carriage_return", "carriage\rreturn", "(?i)newline", None),
-        ("rejects_crlf", "mixed\r\nCRLF", "(?i)newline", None),
-        ("rejects_empty", "", "send_bash_command: command may not be empty", None),
         (
-            "rejects_blank_space",
-            "   ",
-            "send_bash_command: command may not be empty",
+            "shell_canonical_argv",
+            "git log -1 --oneline",
+            True,
+            None,
+            "! git log -1 --oneline",
+        ),
+        (
+            "shell_strips_surrounding_whitespace",
+            "  git status  ",
+            True,
+            None,
+            "! git status",
+        ),
+        (
+            "plain_canonical_argv",
+            "please run /compact",
+            False,
+            None,
+            "please run /compact",
+        ),
+        ("plain_strips_surrounding_whitespace", "  hello  ", False, None, "hello"),
+        (
+            "plain_bang_text_delivered_verbatim",
+            "! git status",
+            False,
+            None,
+            "! git status",
+        ),
+        (
+            "shell_rejects_newline_in_body",
+            "line1\nline2",
+            True,
+            "send_prompt: text may not contain newlines",
             None,
         ),
-        ("rejects_tab", "\t", "send_bash_command: command may not be empty", None),
+        (
+            "plain_rejects_newline_in_body",
+            "line1\nline2",
+            False,
+            "send_prompt: text may not contain newlines",
+            None,
+        ),
+        (
+            "shell_rejects_carriage_return",
+            "carriage\rreturn",
+            True,
+            "send_prompt: text may not contain newlines",
+            None,
+        ),
+        (
+            "plain_rejects_crlf",
+            "mixed\r\nCRLF",
+            False,
+            "send_prompt: text may not contain newlines",
+            None,
+        ),
+        ("shell_rejects_empty", "", True, "send_prompt: text may not be empty", None),
+        ("plain_rejects_empty", "", False, "send_prompt: text may not be empty", None),
+        (
+            "shell_rejects_blank_space",
+            "   ",
+            True,
+            "send_prompt: text may not be empty",
+            None,
+        ),
+        ("plain_rejects_tab", "\t", False, "send_prompt: text may not be empty", None),
+        # The mux layer checks empty-first (matching the former send_bash_command):
+        # a "\n"-only text strips to empty and raises the EMPTY error here, while
+        # the CLI layer's newline-first precedence raises the newline error.
+        (
+            "shell_newline_only_hits_empty_check_first",
+            "\n",
+            True,
+            "send_prompt: text may not be empty",
+            None,
+        ),
+        (
+            "plain_newline_only_hits_empty_check_first",
+            "\n",
+            False,
+            "send_prompt: text may not be empty",
+            None,
+        ),
     ],
 )
-def test_send_bash_command__argv_and_validation(
-    monkeypatch, scenario, command, expect_raise_match, expected_literal
+def test_send_prompt__argv_and_validation(
+    monkeypatch, scenario, text, shell, expect_raise_match, expected_literal
 ):
+    """Shell form: `! <stripped>` literal + Enter with NO leading Escape. Plain
+    form: Escape (permission-prompt safeguard) → `<stripped>` literal + Enter."""
     captured: list[list[str]] = []
 
     def mock_run(args, **_kwargs):
@@ -551,22 +622,55 @@ def test_send_bash_command__argv_and_validation(
         return ""
 
     monkeypatch.setattr(multiplexer_tmux, "_run", mock_run)
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
     if expect_raise_match is not None:
         with pytest.raises(TmuxError, match=expect_raise_match):
-            _tmux.send_bash_command(target_pane_id="%5", command=command)
+            _tmux.send_prompt(target_pane_id="%5", text=text, shell=shell)
         assert captured == []
-    else:
-        _tmux.send_bash_command(target_pane_id="%5", command=command)
-        assert len(captured) == 2
-        assert captured[0] == [
-            "tmux",
-            "send-keys",
-            "-t",
-            "%5",
-            "-l",
-            expected_literal,
+    elif shell:
+        _tmux.send_prompt(target_pane_id="%5", text=text, shell=shell)
+        assert captured == [
+            ["tmux", "send-keys", "-t", "%5", "-l", expected_literal],
+            ["tmux", "send-keys", "-t", "%5", "Enter"],
         ]
-        assert captured[1] == ["tmux", "send-keys", "-t", "%5", "Enter"]
+    else:
+        _tmux.send_prompt(target_pane_id="%5", text=text, shell=shell)
+        assert captured == [
+            ["tmux", "send-keys", "-t", "%5", "Escape"],
+            ["tmux", "send-keys", "-t", "%5", "-l", expected_literal],
+            ["tmux", "send-keys", "-t", "%5", "Enter"],
+        ]
+
+
+def test_send_prompt__shell_defaults_to_false_plain_form(monkeypatch):
+    """Calling without the `shell` kwarg takes the plain form: leading Escape,
+    payload delivered without the `! ` prefix."""
+    captured: list[list[str]] = []
+    monkeypatch.setattr(
+        multiplexer_tmux,
+        "_run",
+        lambda args, **_kw: captured.append(list(args)) or "",
+    )
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+    _tmux.send_prompt(target_pane_id="%5", text="hello world")
+    assert captured == [
+        ["tmux", "send-keys", "-t", "%5", "Escape"],
+        ["tmux", "send-keys", "-t", "%5", "-l", "hello world"],
+        ["tmux", "send-keys", "-t", "%5", "Enter"],
+    ]
+
+
+def test_send_prompt__plain_form_esc_settles_before_literal(monkeypatch):
+    """The plain form inherits the full esc_first sequence: Escape →
+    _ESC_SETTLE_DELAY → literal → _SUBMIT_DELAY → Enter."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(multiplexer_tmux, "_run", lambda args, **_kw: "")
+    monkeypatch.setattr("time.sleep", lambda secs: sleeps.append(secs))
+    _tmux.send_prompt(target_pane_id="%5", text="hello")
+    assert sleeps == [
+        multiplexer_tmux._ESC_SETTLE_DELAY,
+        multiplexer_tmux._SUBMIT_DELAY,
+    ]
 
 
 # --- Esc keystroke safeguard ------
@@ -899,18 +1003,19 @@ def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
     [
         ("send_exit", lambda t: t.send_exit(target_pane_id="%7")),
         (
-            "send_bash_command",
-            lambda t: t.send_bash_command(target_pane_id="%7", command="git status"),
+            "send_prompt_shell_form",
+            lambda t: t.send_prompt(target_pane_id="%7", text="git status", shell=True),
         ),
     ],
 )
 def test_esc_first_false_helpers__never_send_escape(monkeypatch, helper_name, invoke):
-    """The two opt-out helpers — `send_exit` and `send_bash_command` — must NOT
-    send an `Esc` first. An `Escape` before `/exit` or `! <cmd>` would strip a
-    literal the agent must keep.
+    """The two opt-out helpers — `send_exit` and `send_prompt`'s shell form —
+    must NOT send an `Esc` first. An `Escape` before `/exit` or `! <cmd>` would
+    strip a literal the agent must keep.
 
     `send_inline_preview` is deliberately ABSENT here — it leads with `Esc`
-    (asserted in test_tmux_send_inline_preview.py)."""
+    (asserted in test_tmux_send_inline_preview.py). `send_prompt`'s plain form
+    is the opt-IN case (asserted in test_send_prompt__argv_and_validation)."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
     monkeypatch.setattr("time.sleep", lambda _secs: None)
     captured: list[list[str]] = []
