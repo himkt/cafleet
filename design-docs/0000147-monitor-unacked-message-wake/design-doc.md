@@ -1,7 +1,7 @@
 # Monitor Unacked-Message Wake Reason
 
 **Status**: Approved
-**Progress**: 9/14 tasks complete
+**Progress**: 11/14 tasks complete
 **Last Updated**: 2026-07-24
 
 ## Overview
@@ -144,8 +144,8 @@ WebUI `GET /api/monitor` gains an additive top-level `"members"` key carrying th
 
 ### Step 4: Wake-nudge payload
 
-- [ ] Insert the unacked sentence into the payload and revise its closing re-engagement sentence in `multiplexer/tmux.py` and `multiplexer/herdr.py` (byte-identical) <!-- completed: -->
-- [ ] Update the payload tests pinning the exact text and tmux/herdr byte-equality <!-- completed: -->
+- [x] Insert the unacked sentence into the payload and revise its closing re-engagement sentence in `multiplexer/tmux.py` and `multiplexer/herdr.py` (byte-identical) <!-- completed: 2026-07-24T11:57 -->
+- [x] Update the payload tests pinning the exact text and tmux/herdr byte-equality <!-- completed: 2026-07-24T11:57 -->
 
 ### Step 5: `monitor status` and WebUI
 
