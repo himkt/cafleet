@@ -27,7 +27,7 @@ Shared contract:
   opencode members run cafleet and the other commands on the preset's
   deny-by-default allowlist, and route everything else to the Director.
 - All three honor the leading-`!` shell shortcut that
-  [`cafleet member exec`](cli-options.md#member-exec) uses.
+  [`cafleet member prompt --shell`](cli-options.md#member-prompt) uses.
 - `--model <m>` from `cafleet member create` is inserted immediately before
   the prompt. The value passes through verbatim — the binary rejects unknown
   models, so newly released models need no cafleet release. Omitted, no model
@@ -91,14 +91,14 @@ commands. It ships as a static file in the assets release archive
 prefix_rule(pattern = ["cafleet"], decision = "allow")
 
 prefix_rule(
-    pattern = ["cafleet", "member", "exec"],
+    pattern = ["cafleet", "member", "prompt"],
     decision = "prompt",
-    justification = "cafleet member exec runs arbitrary commands on a member",
+    justification = "cafleet member prompt keystrokes arbitrary text or shell commands into a member pane",
 )
 ```
 
 Codex applies the strictest decision when more than one rule matches
-(`forbidden` > `prompt` > `allow`): `cafleet member exec` matches both rules,
+(`forbidden` > `prompt` > `allow`): `cafleet member prompt` matches both rules,
 so its `prompt` wins and each invocation keeps requiring approval, while every
 other subcommand matches only the broad `["cafleet"]` allow — for every fleet,
 since `--fleet-id` is a trailing flag past the matched prefix.

@@ -1,7 +1,7 @@
 # `cafleet member prompt` and Removal of `member exec` / `message cancel`
 
 **Status**: Approved
-**Progress**: 0/28 tasks complete
+**Progress**: 6/28 tasks complete
 **Last Updated**: 2026-07-24
 
 ## Overview
@@ -14,7 +14,7 @@ Introduce a Director-only CLI subcommand `cafleet member prompt` that keystrokes
 - [ ] `cafleet member exec` and `cafleet message cancel` no longer parse (Click's default `No such command` error, exit 2).
 - [ ] The `canceled` status value is absent from source, tests, docs, skills, presets, and the admin WebUI; the message lifecycle is exactly `input_required` → `completed` via `message ack`.
 - [ ] Alembic migration `0004` folds legacy `status_state = 'canceled'` rows into `completed`; the chain-guard tests assert the four-revision chain with head `0004`.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass; a repo-wide `git grep` (tracked files only — gitignored trees like `site/` and `researches/` are excluded by construction) for `member exec`, `member_exec`, `send_bash_command`, `message cancel`, `cancel_message`, and `canceled` returns no hits outside `design-docs/`.
+- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass; a repo-wide `git grep` (tracked files only — gitignored trees like `site/` and `researches/` are excluded by construction) for `member exec`, `member_exec`, `send_bash_command`, `message cancel`, `cancel_message`, and `canceled` returns no hits outside `design-docs/` — for the `canceled` term only, additionally excluding the `0004` migration file (`cafleet/src/cafleet/db/alembic/versions/0004_*.py`) and `SPEC.md`'s migration-chain description, whose contract text necessarily carries the literal legacy value being folded.
 
 ---
 
@@ -141,12 +141,12 @@ The migration chain currently stands at three revisions (`0001` → `0002` → `
 
 ### Step 1: Documentation (docs/ + SPEC.md first, per documentation-maintenance.md)
 
-- [ ] Update `docs/spec/cli-options.md`: replace the `member exec` row/section/error rows with `member prompt` (flags, both forms, error strings, permissions.allow-coverage exclusion), and remove the `message cancel` row/section and `--member-id` cancel mention <!-- completed: -->
-- [ ] Update `docs/spec/multiplexer-backends.md`: `send_prompt` contract, Esc-safeguard section listing the plain form as Esc-carrying and the shell form as the deliberate omission <!-- completed: -->
-- [ ] Update `docs/spec/webui-api.md` and `docs/spec/data-model.md`: status domain `input_required` | `completed` <!-- completed: -->
-- [ ] Update `docs/api/broker.md`, `docs/concepts/` pages (`coding-agents.md`, `member-lifecycle.md`, `overview.md`, `monitoring.md`), `docs/quickstart.md`, `docs/spec/coding-agent-backends.md` <!-- completed: -->
-- [ ] Update `SPEC.md`: `member prompt` section, `send_prompt` multiplexer entries and Esc table, MessageStatus domain and transitions, preset excerpts, reimplementation checklist <!-- completed: -->
-- [ ] Verify `README.md` thin surface is unaffected <!-- completed: -->
+- [x] Update `docs/spec/cli-options.md`: replace the `member exec` row/section/error rows with `member prompt` (flags, both forms, error strings, permissions.allow-coverage exclusion), and remove the `message cancel` row/section and `--member-id` cancel mention <!-- completed: 2026-07-24T09:50 -->
+- [x] Update `docs/spec/multiplexer-backends.md`: `send_prompt` contract, Esc-safeguard section listing the plain form as Esc-carrying and the shell form as the deliberate omission <!-- completed: 2026-07-24T09:52 -->
+- [x] Update `docs/spec/webui-api.md` and `docs/spec/data-model.md`: status domain `input_required` | `completed` <!-- completed: 2026-07-24T09:53 -->
+- [x] Update `docs/api/broker.md`, `docs/concepts/` pages (`coding-agents.md`, `member-lifecycle.md`, `overview.md`, `monitoring.md`), `docs/quickstart.md`, `docs/spec/coding-agent-backends.md` <!-- completed: 2026-07-24T09:57 -->
+- [x] Update `SPEC.md`: `member prompt` section, `send_prompt` multiplexer entries and Esc table, MessageStatus domain and transitions, preset excerpts, reimplementation checklist <!-- completed: 2026-07-24T10:08 -->
+- [x] Verify `README.md` thin surface is unaffected <!-- completed: 2026-07-24T10:08 -->
 
 ### Step 2: Skills, rules, presets
 
@@ -186,7 +186,7 @@ The migration chain currently stands at three revisions (`0001` → `0002` → `
 - [ ] Remove cancel tests from `tests/broker/test_messaging.py` and `tests/cli/test_message.py`; add the `message cancel` absence guard <!-- completed: -->
 - [ ] Update `tests/broker/test_typed_columns.py`, `tests/broker/test_inline_preview.py`, `tests/broker/test_asset_installs.py` (codex rules content), `tests/cli/test_help_budget.py` (subcommand lists) <!-- completed: -->
 - [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` <!-- completed: -->
-- [ ] Repo-wide `git grep` sweep (tracked files only) for `member exec`, `member_exec`, `send_bash_command`, `message cancel`, `cancel_message`, `canceled` — no hits outside `design-docs/` <!-- completed: -->
+- [ ] Repo-wide `git grep` sweep (tracked files only) for `member exec`, `member_exec`, `send_bash_command`, `message cancel`, `cancel_message`, `canceled` — no hits outside `design-docs/`; for the `canceled` term only, additionally exclude `cafleet/src/cafleet/db/alembic/versions/0004_*.py` and `SPEC.md`'s migration-chain description (their contract text necessarily carries the literal legacy value being folded) <!-- completed: -->
 
 ---
 
@@ -197,3 +197,4 @@ The migration chain currently stands at three revisions (`0001` → `0002` → `
 | 2026-07-23 | Initial draft |
 | 2026-07-24 | Review round 1: CLI validation precedence pinned newline-first; migration renumbered `0002` → `0004` (four-revision chain guards, head-version test); `_transition_message_state` inlined into `ack_message`; module-docstring `/cancel` drop made explicit; sweep switched to `git grep`; clean-docs rubric example and stale `database-migrations.md` chain-guard description added to scope |
 | 2026-07-24 | User approved — Status: Approved |
+| 2026-07-24 | Director arbitration (Programmer escalation): the `canceled` sweep term in Step 7 and Success Criterion 5 now excludes the `0004` migration file and `SPEC.md`'s migration-chain description — their contract text necessarily carries the literal legacy value being folded |

@@ -208,7 +208,7 @@ The `body` field is the message's `text` column.
 
 **Row cap**: none — the endpoint returns every matching row. The member detail view truncates client-side to the 200 most recent rows per tab.
 
-**Status values**: `input_required` (Pending), `completed` (Acknowledged), `canceled` (Canceled).
+**Status values**: `input_required` (Pending), `completed` (Acknowledged).
 
 ### GET /api/members/{member_id}/sent — Sent Messages
 

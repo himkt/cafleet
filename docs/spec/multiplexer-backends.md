@@ -111,6 +111,27 @@ Closing a member pane leaves the two backends asymmetric on layout reflow:
   swallowed: a layout failure never fails `member delete` — the pane is closed
   and the member deregistered regardless.
 
+## Prompt dispatch (`send_prompt`) {#prompt-dispatch}
+
+`cafleet member prompt` delivers its keystrokes through the Protocol method
+
+```python
+def send_prompt(self, *, target_pane_id: str, text: str, shell: bool = False) -> None
+```
+
+Both backends validate fail-fast: text empty after strip →
+`send_prompt: text may not be empty`; the **original** text containing `\n` or
+`\r` → `send_prompt: text may not contain newlines` (raised as the backend's
+native error type, `TmuxError` / `HerdrError`). The `shell` flag controls both
+the payload prefix and the Esc safeguard:
+
+- **tmux**: payload is `! <stripped>` when `shell` else `<stripped>`, delivered
+  literally followed by `Enter`, with the leading `Esc` only in the plain form
+  (`esc_first=not shell`).
+- **herdr**: the shell form runs `herdr pane run <pane> "! <stripped>"` with no
+  Esc; the plain form sends `Esc` first, then `herdr pane run <pane> <stripped>`
+  (mirroring `send_poll_trigger`'s esc-then-run shape).
+
 ## Push notifications {#push-notifications}
 
 CAFleet's delivery model is pull-based: recipients discover messages via
@@ -165,6 +186,11 @@ permission-approval prompt has that prompt dismissed before the trailing
 - `cafleet member ping` injects `Esc` → a literal `cafleet message poll`
   command → `Enter` (the `send_poll_trigger` helper, also `esc_first=True`) —
   the manual re-poke for a pane that missed an inline preview.
+- `cafleet member prompt`'s plain form leads with `Esc` before typing the text
+  and `Enter` — the same safeguard, protecting the submitted user turn. Its
+  `--shell` form is the **deliberate omission**: `! <cmd>` must land in the
+  bare composer, and an `Esc` before it would mis-fire (see
+  [Prompt dispatch](#prompt-dispatch)).
 - The monitor loop's wake nudge targets only the monitoring member's own pane,
   which is never parked on a permission prompt, so it does **not** lead with
   `Esc` (see [Monitoring](../concepts/monitoring.md)).

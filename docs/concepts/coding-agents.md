@@ -40,8 +40,8 @@ every command. The only environment variable forwarded into the pane is
 `CAFLEET_DATABASE_URL`. claude panes load the Claude Code skills directly,
 while codex and opencode panes read the cafleet skill files by absolute path.
 All three honor a leading-`!` shell shortcut on the coding agent's input line,
-so `cafleet member exec` works against any pane shape. For the full broker CLI
-reference, see [CLI options](../spec/cli-options.md).
+so `cafleet member prompt --shell` works against any pane shape. For the full
+broker CLI reference, see [CLI options](../spec/cli-options.md).
 
 ## Model selection
 

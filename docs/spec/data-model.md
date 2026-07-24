@@ -46,7 +46,7 @@ erDiagram
         INTEGER to_member_id "NULL for broadcast_summary"
         TEXT type "unicast | broadcast_summary"
         TEXT created_at
-        TEXT status_state "input_required | completed | canceled"
+        TEXT status_state "input_required | completed"
         TEXT status_timestamp
         INTEGER origin_message_id "broadcast grouping self-link"
         TEXT text "message body"
@@ -160,7 +160,6 @@ transitions:
 | `message poll` | Returns the `input_required` deliveries whose `owner_member_id` equals `--member-id`; any in-fleet caller can poll any in-fleet inbox by id. |
 | `message show` | Returns the message iff at least one endpoint belongs to `--fleet-id`; cross-fleet lookups return "not found". |
 | `message ack` | Recipient-only — the caller must equal the message's `owner_member_id`. |
-| `message cancel` | Sender-only — the caller must equal the message's `from_member_id`. |
 
 ## Broadcast Grouping
 

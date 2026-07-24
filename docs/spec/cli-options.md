@@ -31,14 +31,13 @@ subcommand rejects it with `No such option`.
 | `message broadcast` | Broadcast a message to all fleet members | yes | `--from-member-id` (sender) | [message broadcast](#message-broadcast) |
 | `message poll` | Fetch un-acked incoming messages | yes | `--member-id` | [message poll](#message-poll) |
 | `message ack` | Acknowledge a received message | yes | `--member-id` | [message ack](#message-ack) |
-| `message cancel` | Retract an un-acked sent message | yes | `--member-id` | [message cancel](#message-cancel) |
 | `message show` | Show one message | yes | `--member-id` | [message show](#message-show) |
 | `member create` | Register a member and spawn its coding-agent pane | yes | none (Director auto-resolved) | [member create](#member-create) |
 | `member delete` | Tear down a member's pane (when one exists) and deregister it | yes | `--member-id` | [member delete](#member-delete) |
 | `member show` | Show one member's detail | yes | `--member-id` | [member show](#member-show) |
 | `member list` | List every active registry entry of the fleet | yes | none | [member list](#member-list) |
 | `member capture` | Capture the tail of a member's pane | yes | `--member-id` | [member capture](#member-capture) |
-| `member exec` | Dispatch a shell command into a member's pane | yes | `--member-id` | [member exec](#member-exec) |
+| `member prompt` | Keystroke a prompt (or, with `--shell`, a shell command) into a member's pane | yes | `--member-id` | [member prompt](#member-prompt) |
 | `member ping` | Inject an inbox-poll keystroke into a member's pane | yes | `--member-id` | [member ping](#member-ping) |
 | `monitor start` | Run the per-fleet scheduler loop in-process (launch as a background task) | yes | none | [monitor start](#monitor-start) |
 | `monitor status` | Show monitor liveness and the per-member schedule | yes | none | [monitor status](#monitor-status) |
@@ -73,7 +72,7 @@ it:
 
 | Subcommand | Default behavior | `--full` behavior |
 |---|---|---|
-| `message {send,poll,ack,cancel,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…`; compact rendered envelope. | Untruncated `text`; the full typed-column message dict in `--json`, the verbose labeled block in text mode (see [Message envelope](./message-envelope.md#text-mode)). |
+| `message {send,poll,ack,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…`; compact rendered envelope. | Untruncated `text`; the full typed-column message dict in `--json`, the verbose labeled block in text mode (see [Message envelope](./message-envelope.md#text-mode)). |
 | `message broadcast` | One-line summary (`broadcast id=<id> recipients=<N> delivered=<k>`). | The single `broadcast_summary` message rendered as the full verbose envelope. Never per-recipient envelopes or a `recipient_ids` list. |
 | `member show` | Compact one-line row `<member_id> <name> <status>`. | Labeled block with `kind`, `skills`, and the placement sub-block. Text mode only — JSON is the unprojected broker dict regardless. |
 | `member create` | One compact line: `<member_id> <name> backend=<coding_agent> pane=<pane_id>`. | The 6-line `Member registered and spawned.` block. |
@@ -100,8 +99,8 @@ Subcommands accepting `--json`:
 
 | Group | Subcommands |
 |---|---|
-| `message` | `send`, `broadcast`, `poll`, `ack`, `cancel`, `show` |
-| `member` | `create`, `delete`, `show`, `list`, `capture`, `exec`, `ping` |
+| `message` | `send`, `broadcast`, `poll`, `ack`, `show` |
+| `member` | `create`, `delete`, `show`, `list`, `capture`, `prompt`, `ping` |
 | `monitor` | `status`, `config` |
 | `fleet` | `create`, `list`, `show` |
 | (root) | `doctor` |
@@ -128,8 +127,8 @@ strings, and matching also depends on the canonical flag order (see
 non-integer with Click's standard invalid-integer error, exit 2). Ids are
 DB-assigned integers, typically 1–4 digits, pasted in full — there is no
 prefix resolution. `--member-id` always names **the member in question**: the
-requester on `message poll` / `ack` / `cancel` / `show`, the target on
-`member delete` / `show` / `capture` / `exec` / `ping`, and the enrolled
+requester on `message poll` / `ack` / `show`, the target on
+`member delete` / `show` / `capture` / `prompt` / `ping`, and the enrolled
 member on `monitor config`.
 
 ## Sender and recipient (`--from-member-id`, `--to-member-id`) {#from-to-member-id}
@@ -149,8 +148,9 @@ allow-listed subcommand:
   flag order — `Bash(cafleet <grp> <cmd> --fleet-id *)`. A different flag
   order does not match and prompts. Trailing flags such as
   [`--json`](#json-output) are covered by the same pattern.
-- **`member exec` is excluded** so it stays under `permissions.ask` — its
-  positional command body is operator-controlled.
+- **`member prompt` is excluded** so it stays under `permissions.ask` — its
+  positional text body is operator-controlled, in both the plain and the
+  `--shell` form.
 
 ```
 Bash(cafleet message poll --fleet-id *)
@@ -162,8 +162,8 @@ repo does not ship a committed permissions block.
 
 ## Message Body Truncation
 
-The five subcommands that emit a user-supplied delivery body —
-`cafleet message {send,poll,ack,cancel,show}` — truncate the `text` body to
+The four subcommands that emit a user-supplied delivery body —
+`cafleet message {send,poll,ack,show}` — truncate the `text` body to
 the first `CAFLEET_MAX_TEXT_LEN` Unicode codepoints plus a single `…`
 (U+2026) suffix by default, uniformly in text and `--json` output. Length is
 measured in Python `str` codepoints, never bytes. Pass `--full` (a documented
@@ -429,21 +429,20 @@ bundled WebUI dist directory does not exist, the app warns on stderr
 
 ## `cafleet message` — Message Broker
 
-All six subcommands require `--fleet-id`, name the acting member
+All five subcommands require `--fleet-id`, name the acting member
 (`--from-member-id` on `send` / `broadcast`, `--member-id` on `poll` / `ack` /
-`cancel` / `show`), and run behind the
+`show`), and run behind the
 [stale-assets guard](#stale-assets-guard).
 The envelope schema is canonical in
 [Message envelope](./message-envelope.md); truncation and `--full` are
 canonical [above](#message-body-truncation). Text output is the subcommand's
-acknowledgement line (`Message sent.` / `Message acknowledged.` /
-`Message canceled.`) followed by the compact rendered envelope; `message show`
-prints the envelope alone. Behavior detail:
+acknowledgement line (`Message sent.` / `Message acknowledged.`) followed by
+the compact rendered envelope; `message show` prints the envelope alone.
+Behavior detail:
 [`send_message`](../api/broker.md#cafleet.broker.send_message),
 [`broadcast_message`](../api/broker.md#cafleet.broker.broadcast_message),
 [`poll_messages`](../api/broker.md#cafleet.broker.poll_messages),
 [`ack_message`](../api/broker.md#cafleet.broker.ack_message),
-[`cancel_message`](../api/broker.md#cafleet.broker.cancel_message),
 [`get_message`](../api/broker.md#cafleet.broker.get_message).
 
 ### `message send`
@@ -486,14 +485,6 @@ an empty inbox prints `No messages found.`.
 | `--message-id` | yes | Message to acknowledge. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
 
-### `message cancel`
-
-| Flag | Required | Notes |
-|---|---|---|
-| `--member-id` | yes | Sender retracting the message (sender-only). |
-| `--message-id` | yes | Message to cancel. |
-| `--full` | no | See [Message Body Truncation](#message-body-truncation). |
-
 ### `message show`
 
 | Flag | Required | Notes |
@@ -506,7 +497,7 @@ an empty inbox prints `No messages found.`.
 
 The `cafleet member` subgroup owns the member lifecycle: `create` registers a
 member **and** spawns its coding-agent pane; `delete` tears it down; `capture`
-/ `exec` / `ping` inspect or keystroke an existing member's pane;
+/ `prompt` / `ping` inspect or keystroke an existing member's pane;
 `show` and `list` are registry reads (no multiplexer requirement). All run
 behind the [stale-assets guard](#stale-assets-guard). Behavior detail:
 [`register_member`](../api/broker.md#cafleet.broker.register_member),
@@ -524,7 +515,7 @@ Resolution rules shared by the `--member-id` verbs:
    check beyond fleet membership.
 2. No placement row → exit 1 (see [Error Messages](#error-messages)) — except
    `member show` and `member delete`, which tolerate a missing placement.
-3. A pending placement (`pane_id` is `None`) → `capture` / `exec` / `ping`
+3. A pending placement (`pane_id` is `None`) → `capture` / `prompt` / `ping`
    exit 1; `delete` tolerates it.
 
 Key sequences are delivered **literally** (`send-keys` with `shell=False`) —
@@ -638,21 +629,37 @@ activity fields `last_sent` / `last_recv` / `last_ack` (ISO timestamps or
 JSON: `{member_id, pane_id, lines, content}`; text emits the content
 with no trailing newline.
 
-### `member exec` {#member-exec}
+### `member prompt` {#member-prompt}
 
-Director-only shell-dispatch primitive. Keystrokes `! <command>` + `Enter`
-into a member's pane so the coding agent's `!` shortcut runs the command
-natively — honored by all three backends. This is the dispatch half of the
-bash-via-Director fallback protocol, canonical in the cafleet skill's
-`reference/exec-routing.md`.
+Director-only keystroke primitive with two forms. The plain form keystrokes
+`TEXT` into a member's pane as a submitted user turn — for text that only
+takes effect when it arrives as a direct user turn (slash commands, skill
+invocations, and other magic commands a broker message body cannot trigger).
+The `--shell` form keystrokes `! TEXT` so the coding agent's `!` shortcut runs
+the command natively — honored by all three backends; it is the dispatch half
+of the bash-via-Director fallback protocol, canonical in the cafleet skill's
+`reference/prompt-routing.md`. Broker messaging remains the canonical
+coordination channel; the plain form is not a substitute for `message send`.
 
 | Flag / argument | Required | Notes |
 |---|---|---|
 | `--member-id` | yes | Target member's ID |
-| *(positional `COMMAND`)* | yes | Single shell command; leading/trailing whitespace stripped before dispatch. Pipes, `&&`, `;`, `$(...)`, and backticks are forwarded opaquely. Empty (after strip) or newline-containing commands exit 2. |
+| `--shell` | no | Boolean flag, default off. Dispatch `! TEXT` (shell form) instead of `TEXT` (plain form). |
+| *(positional `TEXT`)* | yes | Single line of text; leading/trailing whitespace stripped before dispatch. Pipes, `&&`, `;`, `$(...)`, and backticks are forwarded opaquely. Newline-containing (checked first, against the original text) or empty-after-strip text exits 2. |
 
-Text output: `Sent bash command '<command>' to member <name> (<pane_id>).`;
-JSON: `{member_id, pane_id, command}`.
+The `--shell` flag controls both the payload prefix and the Esc safeguard:
+
+| Form | Keystroke sequence | Follow-up |
+|---|---|---|
+| Plain (no `--shell`) | `Esc` → settle → literal `TEXT` → `Enter`. The trailing `Enter` submits a real user turn; the leading `Esc` (as in `member ping` / inline previews) keeps it from blindly confirming a pending permission prompt. | None — the submitted turn opens the member's turn directly. |
+| `--shell` | literal `! TEXT` → `Enter` (no `Esc` — an `Esc` before `! <cmd>` would mis-fire; see [Esc safeguard](multiplexer-backends.md#esc-safeguard)). | `cafleet member ping` required — the bang output only stages in the pane; the ping advances the member's turn to consume it. |
+
+The flag performs no content inspection: plain-form `TEXT` beginning with `!`
+is delivered verbatim without the shell mechanics.
+
+Text output: `Sent prompt '<text>' to member <name> (<pane_id>).`; with
+`--shell`: `Sent shell prompt '<text>' to member <name> (<pane_id>).`;
+JSON: `{member_id, pane_id, text, shell}`.
 
 ### `member ping` {#member-ping}
 
@@ -663,7 +670,7 @@ Re-pokes a member's inbox: keystrokes `Esc` → `cafleet message poll
 re-poke for a pane that missed the broker's automatic on-delivery
 notification; the action is wholly fixed by the command — no
 operator-controlled body — which is why `member ping` sits in
-`permissions.allow` while `member exec` stays in `permissions.ask`.
+`permissions.allow` while `member prompt` stays in `permissions.ask`.
 
 | Flag | Required | Notes |
 |---|---|---|
@@ -754,14 +761,14 @@ never pinged). Exits 1 for a not-in-fleet or not-enrolled member.
 | `member create` when the fleet row has no `director_member_id` recorded (mid-bootstrap corruption) | `Error: fleet <fleet-id> has no root Director recorded; re-create the fleet with 'cafleet fleet create'.` (exit 1) |
 | `member create` (with a placement) when the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` (exit 1; the `register_member` invariant guard) |
 | `member delete` against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 1) |
-| `message send` / `message broadcast` / `message poll` / `message ack` / `message cancel` / `message show` with an acting member id (`--member-id` / `--from-member-id`) that is not in `--fleet-id` | `Error: member <member-id> is not in fleet <fleet-id>.` (exit 1) — the fleet-membership gate runs before any read/write operation, and also fires for an unknown id. |
-| `member exec` with missing positional `COMMAND` | `Error: Missing argument 'COMMAND'.` (exit 2) |
-| `member exec ""` (empty / whitespace-only) | `Error: command may not be empty.` (exit 2) |
-| `member exec` with `\n` or `\r` | `Error: command may not contain newlines.` (exit 2) |
-| `member capture` / `member exec` / `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to <capture|exec|ping>.` (exit 1) |
+| `message send` / `message broadcast` / `message poll` / `message ack` / `message show` with an acting member id (`--member-id` / `--from-member-id`) that is not in `--fleet-id` | `Error: member <member-id> is not in fleet <fleet-id>.` (exit 1) — the fleet-membership gate runs before any read/write operation, and also fires for an unknown id. |
+| `member prompt` with missing positional `TEXT` | `Error: Missing argument 'TEXT'.` (exit 2) |
+| `member prompt` with `\n` or `\r` | `Error: text may not contain newlines.` (exit 2; checked first, against the original text — a `"\n"`-only input raises this error, not the empty-text one) |
+| `member prompt ""` (empty / whitespace-only) | `Error: text may not be empty.` (exit 2) |
+| `member capture` / `member prompt` / `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to <capture|prompt|ping>.` (exit 1) |
 | `member ping` when the keystroke fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
-| `member show` / `member capture` / `member exec` / `member ping` with a cross-fleet / unknown / inactive target member id | `Error: Member <member-id> not found` (exit 1) |
-| `member capture` / `member exec` / `member ping` on an in-fleet target with no placement row | ``Error: member <member-id> has no placement row; it was not spawned via `cafleet member create`.`` (exit 1) |
+| `member show` / `member capture` / `member prompt` / `member ping` with a cross-fleet / unknown / inactive target member id | `Error: Member <member-id> not found` (exit 1) |
+| `member capture` / `member prompt` / `member ping` on an in-fleet target with no placement row | ``Error: member <member-id> has no placement row; it was not spawned via `cafleet member create`.`` (exit 1) |
 | Any `--text` / `--text-file` command (`message send`, `message broadcast`, `member create`) with neither flag | `Error: Provide exactly one of --text or --text-file.` (exit 2) |
 | Any `--text` / `--text-file` command with both flags | `Error: --text and --text-file are mutually exclusive.` (exit 2) |
 | `--text` empty or whitespace-only | `Error: text may not be empty.` (exit 2) |

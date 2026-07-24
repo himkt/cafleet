@@ -339,12 +339,9 @@ All values are persisted/compared as exact lowercase strings.
 - **MessageType:** `"unicast"` | `"broadcast_summary"`. Broadcast fan-out emits ONE
   `broadcast_summary` (owned by the sender) + N `unicast` deliveries. There is no
   distinct "broadcast delivery" type — deliveries reuse `unicast`.
-- **MessageStatus:** `"input_required"` | `"completed"` | `"canceled"` (NOTE:
-  `"canceled"` — one `l`).
+- **MessageStatus:** `"input_required"` | `"completed"`.
   - `unicast` is born `input_required`; `broadcast_summary` is born `completed`.
-  - ack: `input_required` → `completed` (recipient only).
-  - cancel: `input_required` → `canceled` (sender only).
-  - transitions are legal ONLY from `input_required`.
+  - ack: `input_required` → `completed` (recipient only) — the only transition.
 - **CodingAgentName:** `"claude"` | `"codex"` | `"opencode"`.
 
 ### 5.4 Member kind discriminator (resolved cross-module)
@@ -672,16 +669,13 @@ documented non-match, not an error mask.
 - **`poll_messages(member_id)`** — un-acked deliveries: `owner_member_id = member_id` AND
   `status_state = "input_required"`, `broadcast_summary` excluded, ordered
   `status_timestamp DESC`.
-- **`ack_message` / `cancel_message(member_id, message_id)`** — both transition a message in
-  one write_session. Load; absent → value error `Message {message_id} not found`. If
-  the caller is not the authorized party → permission error. If `status_state`
-  is not `input_required` → value error `Cannot {verb} message in state
-  {status_state}` (verb `ACK` / `cancel`). Set the new state and
-  `status_timestamp = now`. **ack**: authorized = recipient (`owner_member_id`); new
-  state `completed`; permission error `Only the recipient can ACK a message`.
-  **cancel**: authorized = sender (`from_member_id`); new state `canceled`;
-  permission error `Only the sender can cancel a message`. `input_required` is the
-  only state a message may transition from.
+- **`ack_message(member_id, message_id)`** — transitions a message in one
+  write_session. Load; absent → value error `Message {message_id} not found`.
+  If the caller is not the recipient (`owner_member_id`) → permission error
+  `Only the recipient can ACK a message`. If `status_state` is not
+  `input_required` → value error `Cannot ACK message in state {status_state}`.
+  Set `status_state = "completed"` and `status_timestamp = now`.
+  `input_required` is the only state a message may transition from.
 
 #### Queries
 
@@ -800,15 +794,14 @@ HTTP status); permission errors gate authorization. The exit-code policy is
 | `send_message` | value | `Destination member not found: {to_id}` |
 | `send_message` | value | `Destination member not in fleet: {to_id}` |
 | `broadcast_message` | value | `Sender member not found or not active in fleet: {member_id}` |
-| `ack_message` / `cancel_message` | value | `Message {message_id} not found` |
-| `ack_message` / `cancel_message` | value | `Cannot {verb} message in state {status_state}` |
+| `ack_message` | value | `Message {message_id} not found` |
+| `ack_message` | value | `Cannot ACK message in state {status_state}` |
 | `ack_message` | permission | `Only the recipient can ACK a message` |
-| `cancel_message` | permission | `Only the sender can cancel a message` |
 | `get_message` | value | `Message {message_id} not found` (missing and out-of-fleet) |
 
 ### 6.3 CLI
 
-**Scope:** the entire `cafleet` command tree (23 commands across 4 groups + 3
+**Scope:** the entire `cafleet` command tree (22 commands across 4 groups + 3
 top-level commands — §1, §10), the shared option guards, and the `member create`
 spawn orchestration + rollback ladder. Orchestration glue only — it wires
 broker/multiplexer/output/coding-agent. The command/option checklist is §10; this
@@ -854,14 +847,14 @@ unknown-option error (exit 2).
   JSON format.`; a shared per-subcommand flag (declaration `json_flag` in
   `cli/_helpers.py`), canonically written **trailing**, after all other flags.
   On every `message` subcommand; `member create` / `delete` / `show` / `list` /
-  `capture` / `exec` / `ping`; `monitor status` / `config`;
+  `capture` / `prompt` / `ping`; `monitor status` / `config`;
   `fleet create` / `list` / `show`; and `doctor`. Emits compact single-line
   JSON instead of text; composes with `--full` (truncation is applied to the
   result before the json-vs-text fork); `--quiet` is a text-only shortcut,
   ignored in the JSON branch.
 - `--member-id` — required integer naming **the member in question**, one
-  meaning everywhere: the requester on `message poll` / `ack` / `cancel` /
-  `show`, the target on `member delete` / `show` / `capture` / `exec` / `ping`,
+  meaning everywhere: the requester on `message poll` / `ack` /
+  `show`, the target on `member delete` / `show` / `capture` / `prompt` / `ping`,
   and the enrolled member on `monitor config`. Help text: `Member ID (the
   member in question)`. Shared declaration `member_id_option` in
   `cli/_helpers.py`.
@@ -1019,10 +1012,10 @@ fleet-scoped command (§6.3 `--fleet-id`).
 
 #### `message` group
 
-All six follow the shared handler sequence above. Common: the acting member id —
+All five follow the shared handler sequence above. Common: the acting member id —
 `--from-member-id` (integer, required — the sender) on `send` / `broadcast`,
-`--member-id` (integer, required) on `poll` / `ack` / `cancel` / `show`;
-`--message-id` (integer, required) on `ack`/`cancel`/`show`; `--full` (documented)
+`--member-id` (integer, required) on `poll` / `ack` / `show`;
+`--message-id` (integer, required) on `ack`/`show`; `--full` (documented)
 on all; `--quiet` (documented boolean, default `false` — success output is the
 bare `message_id`) on `send` and `ack`.
 
@@ -1042,7 +1035,6 @@ bare `message_id`) on `send` and `ack`.
   `delivered`.
 - **poll** — fleet-gated; indexed message list; empty `No messages found.`.
 - **ack** — fleet-gated; prefix `Message acknowledged.\n` + the formatted message.
-- **cancel** — fleet-gated; prefix `Message canceled.\n` + the formatted message.
 - **show** — fetches the message within the fleet; text is the formatted message.
 
 #### `member` group — shared resolution helpers
@@ -1051,7 +1043,7 @@ These helpers back the `member` subcommands. The target member is named by
 `--member-id` (§1).
 
 - **Require-pane** — given a placement and an action label
-  (`capture`/`exec`/`ping`), no pane id → application error `member
+  (`capture`/`prompt`/`ping`), no pane id → application error `member
   <member_id> has no pane yet (pending placement) — nothing to <action>.`.
 - **Load-authorized-member** — fetch the member within the fleet: not found →
   `Member <member_id> not found`; other fetch failure → `failed to fetch member:
@@ -1206,16 +1198,22 @@ not set, strip ANSI. JSON: `{member_id, pane_id, lines, content}`; text
 emits the content with no trailing newline, **preserving ANSI even on a non-TTY
 sink** when `--ansi` is set.
 
-#### `member exec`
+#### `member prompt`
 
-Options: `--member-id` (integer, required), **positional** `command` (string,
-required). A newline/CR → usage error `command may not contain newlines.`; empty
-after trim → usage error `command may not be empty.`; then trim. Ensure tmux,
-load the member, require a pane (`exec`). Dispatch via the coding agent's `!`
-shell shortcut (a tmux error → application error `send failed: <error>`). JSON:
-`{member_id, pane_id, command}`; text: `Sent bash command <quoted-command>
-to member <name> (<pane_id>).` (the command rendered with human-readable
-quoting/escaping — reproducing the quoted intent is sufficient).
+Options: `--member-id` (integer, required), `--shell` (boolean flag, default
+`false`), **positional** `text` (string, required). A newline/CR → usage error
+`text may not contain newlines.`; empty after trim → usage error `text may not
+be empty.`; then trim. Ensure tmux, load the member, require a pane (`prompt`).
+Dispatch via the multiplexer's `send_prompt` (§6.5): the plain form delivers
+the text Esc-safeguarded as a submitted user turn; the `--shell` form delivers
+`! <text>` un-escaped via the coding agent's `!` shell shortcut (a tmux error →
+application error `send failed: <error>`). The flag performs no content
+inspection — plain-form text beginning with `!` is delivered verbatim. JSON:
+`{member_id, pane_id, text, shell}`; text: `Sent prompt <quoted-text> to
+member <name> (<pane_id>).`, or with `--shell` `Sent shell prompt
+<quoted-text> to member <name> (<pane_id>).` (the text rendered with
+human-readable quoting/escaping — reproducing the quoted intent is
+sufficient).
 
 #### `member ping`
 
@@ -1750,11 +1748,13 @@ Director's `MultiplexerContext` and passes it directly.
   literal-then-Enter, `timeout=5`s, **Esc-first=YES**, any error → `false`. Under
   `send-keys -l` the `\n` is a soft line break inside one keystroke; the single
   trailing Enter submits the whole 2-line payload as one recipient turn.
-- **`send_bash_command(*, target_pane_id, command)`** — fail-fast. Strip
-  surrounding whitespace; empty after strip → `send_bash_command: command may not
-  be empty`; the **original** command with a newline or CR → `send_bash_command:
-  command may not contain newlines`. literal-then-Enter with `payload = "! " +
-  normalized_command`, **no Esc-first** (honors the coding-agent `!` shortcut).
+- **`send_prompt(*, target_pane_id, text, shell=False)`** — fail-fast. Strip
+  surrounding whitespace; empty after strip → `send_prompt: text may not
+  be empty`; the **original** text with a newline or CR → `send_prompt:
+  text may not contain newlines`. literal-then-Enter with `payload = "! " +
+  stripped_text` when `shell` else `stripped_text`, and `esc_first=not shell` —
+  the plain form Esc-safeguards the submitted user turn; the shell form omits
+  the Esc (honors the coding-agent `!` shortcut).
 - **`capture_pane(*, target_pane_id, lines=20) -> str`** — fail-fast. `lines <=
   0` → `capture_pane: lines must be positive, got <lines>`. Run `tmux
   capture-pane -p -t <target_pane_id> -S -<lines>`, split the raw output on
@@ -1770,7 +1770,7 @@ Director's `MultiplexerContext` and passes it directly.
 #### Fail-fast vs. best-effort split
 
 - **Fail-fast** (surface failures): `ensure_available`, `context_discovery`,
-  `split_window`, `select_layout`, `send_exit`, `send_bash_command`,
+  `split_window`, `select_layout`, `send_exit`, `send_prompt`,
   `capture_pane`, `list_pane_ids`, `kill_pane` (modulo `ignore_missing`
   pane-gone tolerance on `kill_pane` / `send_exit`).
 - **Best-effort boolean** (NEVER raise; `false` on any failure):
@@ -1789,7 +1789,7 @@ Immutable, three non-nullable string fields, no defaults, constructed only by
 
 The shared literal-then-Enter primitive (used by `send_exit`,
 `send_poll_trigger`, `send_wake_trigger`, `send_inline_preview`, and
-`send_bash_command`) takes `target_pane_id`, `payload`, optional
+`send_prompt`) takes `target_pane_id`, `payload`, optional
 `timeout`, `ignore_missing` (default false), `esc_first` (default false):
 
 1. **If `esc_first`:** run `tmux send-keys -t <target_pane_id> Escape`, then
@@ -1805,7 +1805,8 @@ The shared literal-then-Enter primitive (used by `send_exit`,
 An embedded `\n` in `payload` is a **soft** newline within the single keystroke
 sequence — it does NOT fragment into a second submit. Esc-first matrix:
 `send_poll_trigger` **YES**, `send_inline_preview` **YES**, `send_wake_trigger`
-**NO**, `send_exit` **NO**, `send_bash_command` **NO**.
+**NO**, `send_exit` **NO**, `send_prompt` plain form **YES** / shell form
+**NO** (`esc_first=not shell`).
 
 #### Subprocess core, timeout, and pane-gone tolerance
 
@@ -1925,21 +1926,24 @@ Each method's herdr realization:
   the embedded newline is literal), then a sleep of `_SUBMIT_DELAY` (`1.0`s),
   then a single `herdr pane send-keys <id> enter`, keeping the tmux contract of
   "one submit for the whole 2-line payload".
-- **`send_bash_command(*, target_pane_id, command)`** — `herdr pane run <id> "!
-  <command>"`.
+- **`send_prompt(*, target_pane_id, text, shell=False)`** — shell form:
+  `herdr pane run <id> "! <text>"` (no Esc); plain form: `herdr pane send-keys
+  <id> esc`, then `herdr pane run <id> "<text>"` (mirroring
+  `send_poll_trigger`'s esc-then-run shape).
 - **`capture_pane(*, target_pane_id, lines=20) -> str`** — `herdr pane read <id>
   --source recent-unwrapped --lines <lines>`.
 
 **`_SUBMIT_DELAY` (`1.0`s).** herdr `pane run` submits text **and** Enter
 atomically, so the run-based paths (`send_poll_trigger`, `send_wake_trigger`,
-`send_bash_command`, `send_exit`) carry no submit delay. `send_inline_preview`
+`send_prompt`, `send_exit`) carry no submit delay. `send_inline_preview`
 is the one herdr path built from a separate `pane send-text` + `pane send-keys
 enter` pair, and it sleeps `_SUBMIT_DELAY` between them: codex classifies the
 fast-injected payload as a paste and absorbs an Enter arriving within its
 post-paste suppression window, which would otherwise leave the preview stuck in
 the recipient's composer. The `esc_first` safeguard maps to a discrete `herdr
 pane send-keys <id> esc` before the payload on exactly the paths that use it
-today (`send_poll_trigger`, `send_inline_preview`).
+today (`send_poll_trigger`, `send_inline_preview`, and `send_prompt`'s plain
+form).
 
 #### `AgentStateAware` capability (herdr only)
 
@@ -2299,9 +2303,9 @@ contents (verbatim):
 prefix_rule(pattern = ["cafleet"], decision = "allow")
 
 prefix_rule(
-    pattern = ["cafleet", "member", "exec"],
+    pattern = ["cafleet", "member", "prompt"],
     decision = "prompt",
-    justification = "cafleet member exec runs arbitrary commands on a member",
+    justification = "cafleet member prompt keystrokes arbitrary text or shell commands into a member pane",
 )
 ```
 
@@ -2386,7 +2390,7 @@ around command names and `.env`):
 
 # CAFleet member agent
 
-You are a CAFleet member spawned by the Director. The bash ruleset in your frontmatter is deny-by-default: only the explicitly allowlisted commands — `cafleet` (except `cafleet member exec`), read-only `gh` queries plus the PR comment/review endpoints, non-destructive `git` subcommands, file-inspection utilities, and Python project tooling — run; every other command is denied with no prompt (every check resolves to allow or deny). When a denied command is genuinely needed, route it to the Director per the exec-routing protocol. Read and edit are workspace-scoped with `.env` files denied. Refer to your Director's spawn-prompt instructions for the task.
+You are a CAFleet member spawned by the Director. The bash ruleset in your frontmatter is deny-by-default: only the explicitly allowlisted commands — `cafleet` (except `cafleet member prompt`), read-only `gh` queries plus the PR comment/review endpoints, non-destructive `git` subcommands, file-inspection utilities, and Python project tooling — run; every other command is denied with no prompt (every check resolves to allow or deny). When a denied command is genuinely needed, route it to the Director per the prompt-routing protocol. Read and edit are workspace-scoped with `.env` files denied. Refer to your Director's spawn-prompt instructions for the task.
 ````
 
 The body is a single physical paragraph (no internal hard line breaks after the
@@ -2625,7 +2629,7 @@ printer that writes `Error: <message>` to stderr.
 |---|---|---|---|
 | usage error | **2** | argument/parse/usage mistakes: missing required option; unknown option; invalid integer; integer-range violations; mutually-exclusive-option violations; the spawn-prompt placeholder errors; explicit usage errors | a usage-class error; prints `Error: <msg>` (+ usage line). Parser-native parse errors already exit 2. |
 | application error | **1** | application/runtime errors: runtime conflicts (one-monitor rule, not-enrolled, not-found-on-delete), the root-Director-deregistration guard, the spawn rollback ladder, and the missing-`--fleet-id` callback error | an app-class error; prints `Error: <msg>`. |
-| value-error / permission-error (broker/messaging/queries) | translated by caller | callable from CLI **and** WebUI; CLI wraps to exit 1, WebUI maps to HTTP status | distinct error variants; permission-error gates authorization (recipient-acks / sender-cancels). |
+| value-error / permission-error (broker/messaging/queries) | translated by caller | callable from CLI **and** WebUI; CLI wraps to exit 1, WebUI maps to HTTP status | distinct error variants; permission-error gates authorization (recipient-acks). |
 | HTTP error | — | serialized `{"detail": <string>}` | HTTP error responses with the same status + body. |
 
 The root-Director-deregistration guard raises a single **application error
@@ -2708,13 +2712,17 @@ AUTOINCREMENT, and the create-order quirk are in §6.1.
 - `idx_messages_owner_member_status_ts` on `messages(owner_member_id, status_timestamp)`
 - `idx_messages_from_member_status_ts` on `messages(from_member_id, status_timestamp)`
 
-**The migration chain.** Three linear revisions: the initial revision `0001`
+**The migration chain.** Four linear revisions: the initial revision `0001`
 (no predecessor), `0002` (`down_revision` `0001`), which drops the
-`member_placements.coding_agent` DDL default via a batch `alter_column`, and
-`0003` (`down_revision` `0002`; head), which renames the `skill_installs`
+`member_placements.coding_agent` DDL default via a batch `alter_column`,
+`0003` (`down_revision` `0002`), which renames the `skill_installs`
 table to `asset_installs` (create `asset_installs`, copy every row across,
 drop `skill_installs`; the `downgrade()` reverses the same three steps) —
-data-preserving in both directions; the columns are unchanged.
+data-preserving in both directions; the columns are unchanged — and `0004`
+(`down_revision` `0003`; head), a data-only migration folding legacy
+`messages.status_state = 'canceled'` rows into `completed`
+(`status_timestamp` untouched; `downgrade()` is a no-op — the fold is not
+invertible).
 `0001` creates the full §5.2 schema in one step, in this order:
 
 1. `members` (+ `idx_members_fleet_status`) — created **first** because every
@@ -2798,7 +2806,7 @@ line (§6.3). The driver's engine is disposed when the command finishes
 
 ## 10. CLI command checklist
 
-The full command surface — **24 commands across 5 groups + 3 top-level commands**.
+The full command surface — **23 commands across 5 groups + 3 top-level commands**.
 Each must be reproduced with identical option names, types, defaults,
 required-ness, documented-vs-hidden status, output shapes, and exit codes. Every
 interaction flag is now **documented** (there are no hidden flags). Per-command
@@ -2827,7 +2835,7 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 - [ ] `cafleet member show` (`--member-id` target, `--full`, `--json`)
 - [ ] `cafleet member list` (`--json`)
 - [ ] `cafleet member capture` (`--member-id`, `--lines`=**20**, `--ansi`/`--no-ansi`, `--json`)
-- [ ] `cafleet member exec` (`--member-id`, positional `command`, `--json`)
+- [ ] `cafleet member prompt` (`--member-id`, `--shell`, positional `text`, `--json`)
 - [ ] `cafleet member ping` (`--member-id`, `--quiet`, `--json`)
 
 **`message`:**
@@ -2836,7 +2844,6 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 - [ ] `cafleet message broadcast` (`--from-member-id`, `--text` / `--text-file` xor-required, `--full`, `--json`)
 - [ ] `cafleet message poll` (`--member-id`, `--full`, `--json`)
 - [ ] `cafleet message ack` (`--member-id`, `--message-id`, `--full`, `--json`)
-- [ ] `cafleet message cancel` (`--member-id`, `--message-id`, `--full`, `--json`)
 - [ ] `cafleet message show` (`--member-id`, `--message-id`, `--full`, `--json`)
 
 **`monitor`:**
@@ -2866,18 +2873,18 @@ preserved.
 
 Fidelity is structural and semantic, not byte-for-byte (§1). The host-language
 artifacts that need only preserve *intent* (not exact bytes): the `repr()`-style
-quoting in `member exec` echo, the OS-error message suffix in a preset-install
+quoting in `member prompt` echo, the OS-error message suffix in a preset-install
 failure, and an exception's exact internal-repr fragment.
 
 ### Surface-redesign decisions
 
 The decisions that shape this surface (full rationale in the design doc):
 
-- **`member` is the single member-lifecycle surface.** `member` owns member registration, teardown, introspection (`show`, `list`), and keystroke interaction (`create`/`delete`/`show`/`list`/`capture`/`exec`/`ping`). There is no separate `agent` group.
+- **`member` is the single member-lifecycle surface.** `member` owns member registration, teardown, introspection (`show`, `list`), and keystroke interaction (`create`/`delete`/`show`/`list`/`capture`/`prompt`/`ping`). There is no separate `agent` group.
 - **`--fleet-id` is a required option with no environment default** (§6.3); a
   missing value is the shared callback's exit-1 error.
 - **One error/exit model** (§7.2): usage → exit 2, application/runtime → exit 1.
-- **Alembic-migrated schema** (§8): a linear chain (`0001 → 0002 → 0003`)
+- **Alembic-migrated schema** (§8): a linear chain (`0001 → 0002 → 0003 → 0004`)
   with the current revision recorded in `alembic_version`; no
   cross-implementation DB interoperability. Re-running `cafleet setup` (the db
   half runs first) on a database created by this chain applies any pending
