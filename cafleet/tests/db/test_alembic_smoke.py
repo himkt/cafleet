@@ -48,20 +48,20 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         engine.dispose()
 
 
-def test_alembic_version_table_records_head_0003(alembic_upgraded_db):
+def test_alembic_version_table_records_head_0004(alembic_upgraded_db):
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version_num FROM alembic_version"))
             rows = result.fetchall()
-        assert rows == [("0003",)]
+        assert rows == [("0004",)]
     finally:
         engine.dispose()
 
 
-def test_three_revision_migration_chain_exists():
-    """The migration history is a linear 3-revision chain: the initial revision
-    (0001, no predecessor) followed by 0002 and 0003, which is the head."""
+def test_four_revision_migration_chain_exists():
+    """The migration history is a linear 4-revision chain: the initial revision
+    (0001, no predecessor) followed by 0002, 0003, and 0004, which is the head."""
     with importlib.resources.as_file(
         importlib.resources.files("cafleet.db") / "alembic" / "alembic.ini"
     ) as ini_path:
@@ -69,14 +69,16 @@ def test_three_revision_migration_chain_exists():
         script = ScriptDirectory.from_config(cfg)
         revisions = list(script.walk_revisions())
 
-    assert len(revisions) == 3
-    assert revisions[0].revision == "0003"
-    assert revisions[0].down_revision == "0002"
-    assert revisions[1].revision == "0002"
-    assert revisions[1].down_revision == "0001"
-    assert revisions[2].revision == "0001"
-    assert revisions[2].down_revision is None
-    assert script.get_current_head() == "0003"
+    assert len(revisions) == 4
+    assert revisions[0].revision == "0004"
+    assert revisions[0].down_revision == "0003"
+    assert revisions[1].revision == "0003"
+    assert revisions[1].down_revision == "0002"
+    assert revisions[2].revision == "0002"
+    assert revisions[2].down_revision == "0001"
+    assert revisions[3].revision == "0001"
+    assert revisions[3].down_revision is None
+    assert script.get_current_head() == "0004"
 
 
 def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
