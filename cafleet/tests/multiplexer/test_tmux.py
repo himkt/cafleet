@@ -835,8 +835,8 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
         lambda args, **_kw: captured.append(list(args)) or "",
     )
 
-    # The Director (332, interval-due) and a member (336, both interval- and
-    # stall-check-due) are both due. The member's user-controlled name carries a
+    # The Director (332, interval-due) and a member (336, interval-, stall-check-
+    # and unacked-due) are both due. The member's user-controlled name carries a
     # CR/LF, a tab, a backtick, a ``$(…)`` sequence, and a pipe — every
     # metacharacter the sanitizer must neutralize so the no-raw-control /
     # no-backtick / no-``$(`` / no-``|`` assertions below hold for any name.
@@ -853,7 +853,7 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
                 "member_id": 336,
                 "name": "evil\r\nname\there`$(id)|whoami",
                 "is_director": False,
-                "wake_reasons": ["interval", "stall-check"],
+                "wake_reasons": ["interval", "stall-check", "unacked"],
             },
         ],
         director_member_id=332,
@@ -882,12 +882,17 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     # tag; the member with role ``member`` and its two comma-joined reasons.
     assert "director 332 (Director) [interval]" in payload
     assert "member 336 (evil" in payload
-    assert "[interval,stall-check]" in payload
+    assert "[interval,stall-check,unacked]" in payload
     # The crafted control chars collapsed to U+23CE rather than vanishing.
     assert "⏎" in payload
 
     # The five-state precedence rubric is spelled out verbatim in the instruction.
     assert "awaiting_user, unknown, finished, stalled, working" in payload
+
+    # The unacked report rule sits in the instruction, and the closing
+    # re-engagement sentence lists the unacked report alongside stalled/finished.
+    assert "For a member tagged unacked" in payload
+    assert "when an unacked-tagged member is reportable per its rule above" in payload
 
     # The Director id is named as the standing inspect-and-re-engage target via
     # the "the Director pane ({director_id})" clause — distinct from the due-list
@@ -941,6 +946,55 @@ def test_send_wake_trigger__singular_noun_and_director_named_when_not_due(monkey
     assert "director 332" not in payload
 
 
+def test_send_wake_trigger__payload_exact_text(monkeypatch):
+    """Pins the wake instruction verbatim (§ Wake-nudge payload): the unacked
+    sentence sits between the stall-check sentence and the awaiting_user guard,
+    and the closing re-engagement sentence lists the unacked report alongside
+    stalled / finished."""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
+    monkeypatch.setattr("time.sleep", lambda _secs: None)
+    captured: list[list[str]] = []
+    monkeypatch.setattr(
+        multiplexer_tmux,
+        "_run",
+        lambda args, **_kw: captured.append(list(args)) or "",
+    )
+
+    result = _tmux.send_wake_trigger(
+        target_pane_id="%7",
+        due_members=[
+            {
+                "member_id": 336,
+                "name": "alice",
+                "is_director": False,
+                "wake_reasons": ["unacked"],
+            }
+        ],
+        director_member_id=332,
+    )
+    assert result is True
+
+    payload = captured[0][5]
+    assert payload == (
+        "[monitor] wake: 1 member due — member 336 (alice) [unacked]. "
+        "Capture each named pane read-only, with the Director pane "
+        "(332) always inspected. From capture content only, "
+        "classify each pane in this precedence order: awaiting_user, unknown, "
+        "finished, stalled, working. For a member tagged stall-check, compare "
+        "its capture against your previous stall-check capture of that pane, "
+        "then keep the new capture as that pane's baseline; with no previous "
+        "stall-check capture, classify unknown. For a member tagged unacked, "
+        "its oldest un-acked delivery has waited at least one full interval: "
+        "report it to the Director unless its pane classifies awaiting_user or "
+        "unknown — including working panes. Never re-engage a pane "
+        "classified awaiting_user: when the Director is awaiting_user, send "
+        "nothing this wake, whatever the other panes show. Otherwise re-engage "
+        "the Director via cafleet message send when a due member is stalled or "
+        "finished, when an unacked-tagged member is reportable per its rule "
+        "above, or the Director is finished with un-acked work."
+    )
+
+
 def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
     """The wake payload is byte-identical on the tmux and herdr backends (spec:
     the two ``send_wake_trigger`` contracts are kept byte-identical). Driving both
@@ -963,7 +1017,7 @@ def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
             "member_id": 336,
             "name": "alice",
             "is_director": False,
-            "wake_reasons": ["interval", "stall-check"],
+            "wake_reasons": ["interval", "stall-check", "unacked"],
         },
     ]
 
