@@ -1,7 +1,7 @@
 # `cafleet member prompt` and Removal of `member exec` / `message cancel`
 
 **Status**: Approved
-**Progress**: 17/28 tasks complete
+**Progress**: 19/28 tasks complete
 **Last Updated**: 2026-07-24
 
 ## Overview
@@ -170,8 +170,8 @@ The migration chain currently stands at three revisions (`0001` → `0002` → `
 
 ### Step 5: Admin WebUI
 
-- [ ] Update `admin/src/types.ts` status union, `TimelineMessage.tsx`, `MemberDetail.tsx`; run `mise //admin:lint` <!-- completed: -->
-- [ ] Run `mise //admin:build` to regenerate `cafleet/src/cafleet/webui/dist` <!-- completed: -->
+- [x] Update `admin/src/types.ts` status union, `TimelineMessage.tsx`, `MemberDetail.tsx`; run `mise //admin:lint` <!-- completed: 2026-07-24T10:24 -->
+- [x] Run `mise //admin:build` to regenerate `cafleet/src/cafleet/webui/dist` <!-- completed: 2026-07-24T10:24 -->
 
 ### Step 6: Data migration
 

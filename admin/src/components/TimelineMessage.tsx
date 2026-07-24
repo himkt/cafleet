@@ -25,11 +25,6 @@ function body(entry: TimelineEntry): string {
   return firstRow(entry).body;
 }
 
-function isCanceled(entry: TimelineEntry): boolean {
-  if (entry.kind === "unicast") return entry.message.status === "canceled";
-  return entry.rows.every((r) => r.status === "canceled");
-}
-
 function recipientNames(entry: TimelineEntry): string[] {
   if (entry.kind === "unicast") {
     return [entry.message.to_member_name];
@@ -41,7 +36,6 @@ export default function TimelineMessageComponent({
   entry,
   members,
 }: TimelineMessageProps) {
-  const canceled = isCanceled(entry);
   const row = firstRow(entry);
   const sender = members.find((m) => m.member_id === row.from_member_id) ?? {
     member_id: row.from_member_id,
@@ -65,18 +59,10 @@ export default function TimelineMessageComponent({
             {formatTime(entrySortKey(entry))}
           </span>
         </div>
-        {canceled ? (
-          <p className="mt-0.5 whitespace-pre-wrap break-words text-sm opacity-60">
-            <s>{body(entry)}</s>
-          </p>
-        ) : (
-          <>
-            <p className="mt-0.5 whitespace-pre-wrap break-words text-sm">
-              {body(entry)}
-            </p>
-            <ReactionBar entry={entry} members={members} />
-          </>
-        )}
+        <p className="mt-0.5 whitespace-pre-wrap break-words text-sm">
+          {body(entry)}
+        </p>
+        <ReactionBar entry={entry} members={members} />
       </div>
     </div>
   );
