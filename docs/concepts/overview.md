@@ -24,7 +24,7 @@ each other; members in different fleets are invisible to one another.
 | inline preview | the 2-line message preview the broker keystrokes into the recipient's pane | [Multiplexer backends](../spec/multiplexer-backends.md#push-notifications) |
 | poll / ack | how a recipient fetches and then confirms consumption of a message | [CLI options](../spec/cli-options.md) |
 | coding-agent backend | the binary in a member pane: `claude`, `codex`, or `opencode` | [Coding agents](coding-agents.md) |
-| monitor | a fleet-scoped loop the monitoring member runs as a background task, waking the monitoring member by keystroke whenever a watched member (Director or ordinary member) is due on its own interval | [Monitoring](monitoring.md) |
+| monitor | a fleet-scoped loop that wakes the monitoring member whenever a watched member is due | [Monitoring](monitoring.md) |
 
 ## Architecture diagram
 
@@ -48,11 +48,14 @@ flowchart LR
 
 ## CLI
 
-The `cafleet` CLI is organized as three top-level commands (`setup`, `doctor`,
-`server`) plus four command groups:
+The `cafleet` CLI has seven entry points — three top-level commands and four
+command groups:
 
-| Group | Scope | Subcommands |
+| Entry point | Scope | Subcommands |
 |---|---|---|
+| `setup` | one-time onboarding: brings the database to the current schema and installs the coding-agent assets | — |
+| `doctor` | environment check: reports the resolved multiplexer, the calling pane, and what is installed | — |
+| `server` | serves the admin WebUI | — |
 | `fleet` | fleet lifecycle | `create`, `list`, `show`, `delete` |
 | `member` | member lifecycle + keystroke interaction | `create`, `delete`, `show`, `list`, `capture`, `prompt`, `ping` |
 | `message` | the message broker | `send`, `broadcast`, `poll`, `ack`, `show` |

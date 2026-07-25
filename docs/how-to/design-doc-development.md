@@ -8,29 +8,15 @@ CAFleet ships three skills that run spec-driven development as
 CAFleet-orchestrated teams. Give your coding agent one prompt per stage, in
 order.
 
-## Prompts
+## Prompts {#prompts}
 
-```text
-Create a design doc for <one-line feature description>.
-```
+Each prompt triggers one `cafleet-design-doc` workflow:
 
-Triggers the `cafleet-design-doc` skill's create workflow — a Director /
-Drafter / Reviewer team drafts the design document.
-
-```text
-Interview me about design-docs/NNNNNNN-<slug>.
-```
-
-Triggers the `cafleet-design-doc` skill's interview workflow — a Director +
-Analyzer pair annotates the document with your answers.
-
-```text
-Implement design-docs/NNNNNNN-<slug>.
-```
-
-Triggers the `cafleet-design-doc` skill's execute workflow — a Director /
-Programmer / Tester team implements the document and a fresh Reviewer member
-reviews it before your approval.
+| Stage | Prompt | Workflow | Team |
+|---|---|---|---|
+| 1. Draft | `Create a design doc for <one-line feature description>.` | create | Director + Drafter + Reviewer |
+| 2. Refine | `Interview me about design-docs/NNNNNNN-<slug>.` | interview | Director + Analyzer, annotating the document with your answers |
+| 3. Implement | `Implement design-docs/NNNNNNN-<slug>.` | execute | Director + Programmer + Tester + optional Verifier, with a fresh Reviewer before your approval |
 
 The contributor-facing description of this loop, including what to pass to
 each skill, lives in [Contributing](../contributing.md).

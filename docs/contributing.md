@@ -22,16 +22,18 @@ path.
 
 ## Tech stack
 
-- **Language:** Python 3.12+, managed with [uv](https://docs.astral.sh/uv/)
-- **Server:** [FastAPI](https://fastapi.tiangolo.com/) (admin WebUI)
-- **Database:** [SQLAlchemy](https://www.sqlalchemy.org/) 2.x (sync `pysqlite` driver) + SQLite
-- **CLI:** [click](https://click.palletsprojects.com/)
-- **Admin frontend:** Vite + Bun (SPA served at `/`)
-- **Task runner:** [mise](https://mise.jdx.dev/)
+| Concern | Technology | Notes |
+|---|---|---|
+| Language | Python 3.12+, managed with [uv](https://docs.astral.sh/uv/) | — |
+| Server | [FastAPI](https://fastapi.tiangolo.com/) | Admin WebUI only |
+| Database | [SQLAlchemy](https://www.sqlalchemy.org/) 2.x + SQLite | Sync `pysqlite` driver |
+| CLI | [click](https://click.palletsprojects.com/) | — |
+| Admin frontend | Vite + Bun | SPA served at `/` |
+| Task runner | [mise](https://mise.jdx.dev/) | — |
 
 ## Development
 
-Clone the repo and use mise for all common tasks:
+Clone the repo and run the first-time setup once:
 
 ```bash
 git clone https://github.com/himkt/cafleet.git
@@ -40,16 +42,20 @@ cd cafleet
 mise //:uv-sync
 mise //cafleet:install    # editable uv tool install of the cafleet CLI
 cafleet setup --skip claude --skip codex --skip opencode   # migrate the database schema only (idempotent)
-
-mise //cafleet:lint       # ruff check + ruff format --check
-mise //cafleet:format     # ruff check --fix + ruff format
-mise //cafleet:typecheck  # ty
-mise //cafleet:test       # pytest
-
-mise //admin:build        # build the WebUI (required before / is served)
-mise //admin:dev          # WebUI dev server (Vite)
-mise //admin:install      # reinstall WebUI deps from the committed lockfile
 ```
+
+After that, pick the task you need by name:
+
+| Task | Runs | When you need it |
+|---|---|---|
+| `mise //cafleet:lint` | `ruff check` + `ruff format --check` | Checking Python style before a commit |
+| `mise //cafleet:format` | `ruff check --fix` + `ruff format` | Applying Python formatting fixes |
+| `mise //cafleet:typecheck` | `ty` | Type-checking the Python package |
+| `mise //cafleet:test` | `pytest` | Running the test suite |
+| `mise //admin:lint` | `bun lint` | Checking the WebUI sources |
+| `mise //admin:build` | Vite build | Required before `/` is served |
+| `mise //admin:dev` | Vite dev server | Working on the WebUI with hot reload |
+| `mise //admin:install` | `bun install --frozen-lockfile` | Reinstalling WebUI deps from the committed lockfile |
 
 To change the WebUI's dependencies, edit `admin/package.json` and run plain
 `bun install` inside `admin/` to regenerate `admin/bun.lock` —
@@ -85,19 +91,13 @@ same command the GitHub Actions workflow runs.
 ## Contributing changes
 
 CAFleet uses its own design-doc-driven development skills to evolve the
-codebase. Some tips for new contributors:
+codebase. Each workflow's prompt, team, and output is in
+[Spec Driven Dev § Prompts](how-to/design-doc-development.md#prompts); run them
+in that order — create, then interview, then execute.
 
-1. Invoke the `cafleet-design-doc` skill (create workflow) with a one-line description —
-   orchestrates a Director / Drafter / Reviewer team to produce a design doc
-   under `design-docs/NNNNNNN-<slug>/`.
-2. Invoke the `cafleet-design-doc` skill (interview workflow) with the path
-   `design-docs/NNNNNNN-<slug>` — fine-grained Q&A pass that annotates the
-   doc with `COMMENT(user-relay)` markers for the create workflow's resume mode
-   to absorb.
-3. Invoke the `cafleet-design-doc` skill (execute workflow) with the path
-   `design-docs/NNNNNNN-<slug>` — TDD-cycle implementation pass (Director /
-   Programmer / Tester / optional Verifier, plus a fresh Reviewer at review
-   time).
+One detail matters to contributors specifically: the interview pass annotates
+the doc with `COMMENT(user-relay)` markers that the create workflow's resume
+mode absorbs.
 
 See your coding-agent's skill documentation for the literal invocation syntax.
 Existing design documents under [`design-docs/`](https://github.com/himkt/cafleet/tree/main/design-docs)
@@ -121,3 +121,11 @@ When editing `docs/` or `README.md`, follow these conventions:
   ids.
 - **SSOT**: one fact, one home. When another page needs the fact, link;
   when a fact serves no install/configure/use/understand purpose, delete.
+- **Tables**: state an enumeration of three or more parallel items carrying
+  two or more shared attributes as a table; keep single items, ordered
+  procedures, and rationale as prose. Give every table at least two data
+  rows — a one-row table costs a header row and buys nothing over a
+  sentence — and keep every cell to at most two sentences. When an
+  enumeration belongs on more than one page, give it one owning page
+  carrying the table and make every other mention a link plus a one-clause
+  summary.

@@ -19,6 +19,25 @@ The pane is also cafleet's only push channel: message delivery stays pull-based
 broker keystrokes a best-effort inline preview into the recipient's pane after
 persisting a message — see [Push notifications](#push-notifications).
 
+## Backend matrix {#backend-matrix}
+
+Where the two backends differ, behavior by behavior:
+
+| Behavior | tmux | herdr |
+|---|---|---|
+| Pane id shape | `%7` | `w1:p1` |
+| Error class | `TmuxError` | `HerdrError` |
+| Native agent-state capability | absent | `AgentStateAware`, tracking `working` / `blocked` / `done` / `idle` / `unknown` |
+| Access mechanism | Shells out to `tmux` | Uses the herdr CLI as a subprocess |
+| Pane-spawn cwd | Builtin inheritance from the splitting pane | Explicit `--cwd <dir>` on every `herdr pane split` |
+| Delete-time layout reflow | Native auto-fit after a bare `kill-pane` | No native reflow — `kill_pane` rebalances best-effort, scoped to the killed pane's tab |
+| `send_prompt` shell form | Payload `! <stripped>` + `Enter`, no leading `Esc` | `herdr pane run <pane> "! <stripped>"`, no `Esc` |
+| `send_prompt` plain form | Payload `<stripped>` + `Enter` with a leading `Esc` (`esc_first=not shell`) | `Esc` first, then `herdr pane run <pane> <stripped>` |
+| Inline-preview keystroke | `send-keys` | `pane send-text` + `pane send-keys` |
+
+`TmuxError` and `HerdrError` are both subclasses of `MultiplexerError`. Each
+behavior's full contract stays under its own heading below.
+
 ## Backend selection {#backend-selection}
 
 Every call site resolves its backend through `resolve_multiplexer()`
@@ -34,14 +53,28 @@ precedence:
    inside a tmux or herdr session, or set `CAFLEET_MULTIPLEXER`). Exactly one
    present → that backend.
 
+The outcomes of that order:
+
+| `CAFLEET_MULTIPLEXER` | `HERDR_ENV` | `TMUX` | Result |
+|---|---|---|---|
+| `tmux` or `herdr` | any | any | That backend |
+| An unknown value | any | any | Fails loudly |
+| unset | truthy | set | Error — set `CAFLEET_MULTIPLEXER` to disambiguate |
+| unset | truthy | unset | herdr |
+| unset | not truthy | set | tmux |
+| unset | not truthy | unset | Error — run cafleet inside a tmux or herdr session, or set `CAFLEET_MULTIPLEXER` |
+
+The four override-set combinations collapse into the first two rows because an
+explicit override wins outright, whatever the environment holds.
+
 Auto-detect (an unset `CAFLEET_MULTIPLEXER`) is the default: absence is a valid,
 well-defined state. `cafleet doctor` reports the resolved backend and its
 identifiers (see [CLI options](cli-options.md#cafleet-doctor)).
 
 ## Error taxonomy
 
-Backend failures share a base `MultiplexerError`, with `TmuxError` and
-`HerdrError` as backend-specific subclasses. CLI boundaries catch
+Backend failures share a base `MultiplexerError`, with the per-backend
+subclasses in the [backend matrix](#backend-matrix). CLI boundaries catch
 `MultiplexerError`, so both backends' failures are handled uniformly while each
 backend keeps its own message text.
 
@@ -54,21 +87,25 @@ implements — the base `Multiplexer` Protocol stays clean and tmux implements
 nothing new.
 
 On the herdr backend the monitor loop point-reads each watched member's native
-agent status per tick and flags it due when the status transitions into `done`
-— the sole wake-on-status state (`_WAKE_ON_STATUS = ("done",)`) — in addition
-to the interval, stall-check, and unacked triggers. A transition into `blocked`
-is recorded but never flags a wake: a blocked member is awaiting a user answer
-and must not be woken about. On the tmux backend the capability is absent, so
-members come due by interval, stall-check, and unacked only. No DB column backs the
-native status; the
-last-seen state lives only in the running loop's memory. See
-[Monitoring](../concepts/monitoring.md).
+agent status per tick, which adds a fourth wake trigger:
+
+| Wake trigger | tmux | herdr |
+|---|---|---|
+| interval | yes | yes |
+| stall-check | yes | yes |
+| unacked | yes | yes |
+| Native agent status transitions into `done` | no — the capability is absent | yes — the sole wake-on-status state (`_WAKE_ON_STATUS = ("done",)`) |
+
+A transition into `blocked` is recorded but never flags a wake: a blocked
+member is awaiting a user answer and must not be woken about. No DB column
+backs the native status; the last-seen state lives only in the running loop's
+memory. See [Monitoring](../concepts/monitoring.md).
 
 ## Access mechanism
 
-The herdr backend uses the **herdr CLI** exclusively (subprocess), mirroring how
-the tmux backend shells out to `tmux` — no new Python dependency; the binary is
-expected on `PATH`. herdr also exposes a JSON unix-socket API whose only unique
+Each backend's access mechanism is in the [backend matrix](#backend-matrix) —
+no new Python dependency either way; the binary is expected on `PATH`. herdr
+also exposes a JSON unix-socket API whose only unique
 capability is a push event stream; that would require a persistent connection
 and a concurrent reader that cafleet's synchronous `scan → wake → sleep`
 monitor loop does not have, so the socket stream is a deliberately-deferred
@@ -77,42 +114,35 @@ optimization.
 ## Pane spawn working directory {#pane-spawn-cwd}
 
 A member pane spawned by `cafleet member create` starts in the invoking
-process's working directory (the Director's pane cwd). Each backend realizes
-this differently:
+process's working directory (the Director's pane cwd); each backend realizes
+this differently, per the [backend matrix](#backend-matrix).
 
-- **tmux** relies on the multiplexer's builtin cwd inheritance — a new pane
-  starts in the splitting pane's working directory.
-- **herdr** receives the member-create process's cwd explicitly: every
-  `herdr pane split` carries `--cwd <dir>`, where `<dir>` is `os.getcwd()` of
-  the invoking process. herdr's own inheritance is not relied upon because
-  herdr spawns `/bin/sh` instead of the passwd login shell when `SHELL` is
-  unset ([herdr discussion #1517](https://github.com/ogulcancelik/herdr/discussions/1517)).
-  An unresolvable cwd fails the spawn loudly with `HerdrError`; there is no
-  fallback directory.
+On herdr, `<dir>` is `os.getcwd()` of the invoking process. herdr's own
+inheritance is not relied upon because herdr spawns `/bin/sh` instead of the
+passwd login shell when `SHELL` is unset
+([herdr discussion #1517](https://github.com/ogulcancelik/herdr/discussions/1517)).
+An unresolvable cwd fails the spawn loudly with `HerdrError`; there is no
+fallback directory.
 
 ## Delete-time pane layout {#delete-time-pane-layout}
 
-Closing a member pane leaves the two backends asymmetric on layout reflow:
+Closing a member pane leaves the two backends asymmetric on layout reflow, per
+the [backend matrix](#backend-matrix).
 
-- **tmux** issues a bare `kill-pane` and relies on the multiplexer's native
-  auto-fit — the remaining panes reclaim the freed space with no explicit
-  layout step.
-- **herdr** has no native reflow, so `kill_pane` restores the layout itself:
-  it reads the target pane's tab (`herdr pane get`) before the close, runs
-  `herdr pane close`, then rebalances best-effort, scoped to that tab. The
-  scoping comes from the layout read itself: the killed pane is gone, so the
-  rebalance picks a pane still open in that tab (`herdr pane list`) and anchors
-  the geometry read on it (`herdr pane layout --pane <surviving>`), which
-  returns that tab's layout regardless of which tab or pane holds focus. When
-  no pane remains in the tab, there is nothing to rebalance and the step is
-  skipped. With ≥ 2 members remaining, the member column is re-equalized to
-  equal heights (the same invariant the create path enforces); after the last
-  member is deleted, the Director pane is explicitly restored to full tab width
-  when the layout read shows a residual right split; a single remaining member
-  needs no resize. The rebalance silently skips on unexpected layout shapes.
-  Any `HerdrError` during the rebalance is swallowed: a layout failure never
-  fails `member delete` — the pane is closed and the member deregistered
-  regardless.
+herdr's `kill_pane` reads the target pane's tab (`herdr pane get`) before the
+close, runs `herdr pane close`, then rebalances. The scoping comes from the
+layout read itself: the killed pane is gone, so the rebalance picks a pane
+still open in that tab (`herdr pane list`) and anchors the geometry read on it
+(`herdr pane layout --pane <surviving>`), which returns that tab's layout
+regardless of which tab or pane holds focus. When no pane remains in the tab,
+there is nothing to rebalance and the step is skipped. With ≥ 2 members
+remaining, the member column is re-equalized to equal heights (the same
+invariant the create path enforces); after the last member is deleted, the
+Director pane is explicitly restored to full tab width when the layout read
+shows a residual right split; a single remaining member needs no resize. The
+rebalance silently skips on unexpected layout shapes. Any `HerdrError` during
+the rebalance is swallowed: a layout failure never fails `member delete` — the
+pane is closed and the member deregistered regardless.
 
 ## Prompt dispatch (`send_prompt`) {#prompt-dispatch}
 
@@ -126,14 +156,9 @@ Both backends validate fail-fast: text empty after strip →
 `send_prompt: text may not be empty`; the **original** text containing `\n` or
 `\r` → `send_prompt: text may not contain newlines` (raised as the backend's
 native error type, `TmuxError` / `HerdrError`). The `shell` flag controls both
-the payload prefix and the Esc safeguard:
-
-- **tmux**: payload is `! <stripped>` when `shell` else `<stripped>`, delivered
-  literally followed by `Enter`, with the leading `Esc` only in the plain form
-  (`esc_first=not shell`).
-- **herdr**: the shell form runs `herdr pane run <pane> "! <stripped>"` with no
-  Esc; the plain form sends `Esc` first, then `herdr pane run <pane> <stripped>`
-  (mirroring `send_poll_trigger`'s esc-then-run shape).
+the payload prefix and the Esc safeguard; the per-backend payloads are in the
+[backend matrix](#backend-matrix). herdr's plain form mirrors
+`send_poll_trigger`'s esc-then-run shape.
 
 ## Push notifications {#push-notifications}
 
@@ -148,9 +173,9 @@ the recipient's coding agent consumes it as a fresh user-turn input:
 ```
 
 The keystroke is dispatched through the resolved backend's
-`send_inline_preview` helper — tmux realizes it with `send-keys`, herdr with
-`pane send-text` + `pane send-keys`; the contract (one Esc-safeguarded submit
-of the whole 2-line payload) is identical on both.
+`send_inline_preview` helper; the contract — one Esc-safeguarded submit of the
+whole 2-line payload — is identical on both, and the per-backend realization is
+in the [backend matrix](#backend-matrix).
 
 ```mermaid
 %%{init: {'theme': 'default', 'sequence': {'actorFontSize': 18, 'messageFontSize': 16, 'noteFontSize': 16, 'wrap': true, 'width': 180}}}%%
@@ -179,24 +204,16 @@ documented in [CLI options](cli-options.md#message-body-truncation).
 
 ### The `Esc` safeguard {#esc-safeguard}
 
-The preview keystroke **leads with `Esc`** (`send_inline_preview` is called
-with `esc_first=True`): it presses `Escape`, lets the pane settle ~0.1 s, then
-types the payload and `Enter`, so a recipient parked on a pending
-permission-approval prompt has that prompt dismissed before the trailing
-`Enter` lands. The same `Esc`-safeguarded path serves `message send` and
-`message broadcast`. Two related keystroke paths differ:
+Where a path leads with `Esc`, the mechanism is the same: it presses `Escape`,
+lets the pane settle ~0.1 s, then types the payload and `Enter`.
 
-- `cafleet member ping` injects `Esc` → a literal `cafleet message poll`
-  command → `Enter` (the `send_poll_trigger` helper, also `esc_first=True`) —
-  the manual re-poke for a pane that missed an inline preview.
-- `cafleet member prompt`'s plain form leads with `Esc` before typing the text
-  and `Enter` — the same safeguard, protecting the submitted user turn. Its
-  `--shell` form is the **deliberate omission**: `! <cmd>` must land in the
-  bare composer, and an `Esc` before it would mis-fire (see
-  [Prompt dispatch](#prompt-dispatch)).
-- The monitor loop's wake nudge targets only the monitoring member's own pane,
-  which is never parked on a permission prompt, so it does **not** lead with
-  `Esc` (see [Monitoring](../concepts/monitoring.md)).
+| Keystroke path | Leads with `Esc`? | Payload | Why |
+|---|---|---|---|
+| Inline preview (`message send` / `message broadcast`) | yes (`esc_first=True`) | The 2-line preview + `Enter` | A recipient parked on a pending permission-approval prompt has it dismissed before the trailing `Enter` lands |
+| `cafleet member ping` | yes (`send_poll_trigger`, `esc_first=True`) | A literal `cafleet message poll` command + `Enter` | The manual re-poke for a pane that missed an inline preview |
+| `cafleet member prompt` (plain form) | yes | The text + `Enter` | The same safeguard, protecting the submitted user turn |
+| `cafleet member prompt --shell` | **no** — a deliberate omission | `! <cmd>` + `Enter` | `! <cmd>` must land in the bare composer, and an `Esc` before it would mis-fire (see [Prompt dispatch](#prompt-dispatch)) |
+| Monitor-loop wake nudge | no | — | It targets only the monitoring member's own pane, which is never parked on a permission prompt (see [Monitoring](../concepts/monitoring.md)) |
 
 ### Design principles
 

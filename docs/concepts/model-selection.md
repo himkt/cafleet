@@ -15,13 +15,16 @@ the cafleet package, and `member create` performs no hidden selection.
 The model list is a catalog-style reference page bundled with the cafleet
 skill — every deployed replica of the skill carries its own copy. It has one
 table per backend (`claude`, `codex`, and `opencode`), ordered most → least
-capable, with each model's spawn token, its alias (claude models), reviewed
-capability class, and standard input/output USD-per-MTok prices, plus links
-to the approved official source pages (Anthropic and OpenAI pricing, Codex
-availability, and OpenCode Zen).
-Capability classes and the ordering are maintainer judgment, never a provider
-benchmark claim; prices are standard provider rates — planning estimates,
-not an invoice guarantee.
+capable. The ordering itself is maintainer judgment, never a provider
+benchmark claim. Each table carries these columns:
+
+| Column | What it holds | How to read it |
+|---|---|---|
+| Spawn token | The value passed to the backend's own `--model` flag | Used verbatim |
+| Alias | The model's short alias | claude models only |
+| Capability class | The model's reviewed capability tier | Maintainer judgment, never a provider benchmark claim |
+| Input / output price | Standard input/output USD-per-MTok rates | Planning estimates, not an invoice guarantee |
+| Source link | The approved official source page | Anthropic and OpenAI pricing, Codex availability, and OpenCode Zen |
 
 The page is maintained exclusively by the repository's
 `cafleet-model-list-refresh` skill and refreshed at least every 30 days; a
@@ -44,19 +47,25 @@ reliably. Without the trigger, existing workflow model behavior is unchanged.
 Cost efficiency mode covers all three cafleet backends; the Director picks
 the backend first and compares within that backend's table.
 
-Two roles are policy exceptions on **every** team spawn, trigger or not:
+The monitor and the reviewer are policy exceptions on **every** team spawn,
+trigger or not:
 
-- **Monitor** — the cheapest listed model that can run the monitoring
-  protocol reliably.
-- **Reviewer** — the most capable listed model of the chosen backend.
+| Role | Model chosen | Needs the `cost efficiency mode` trigger? |
+|---|---|---|
+| Ordinary member | The cheapest model that can finish the task reliably | yes |
+| Monitor | The cheapest listed model that can run the monitoring protocol reliably | no |
+| Reviewer | The most capable listed model of the chosen backend | no |
 
-Explicit flags stay overrides: a user-supplied `--coding-agent`, `--model`, or
-`--effort` is recorded rather than silently replaced (a mismatched
-backend/model pair is relayed to the user instead of spawned), and a
-user-pinned model is never deleted and replaced automatically. A stale model
-list disables cost efficiency mode, and a task no listed model fits gets an
-operator relay — the Director **fails closed** instead of spawning a guessed
-model.
+Explicit flags stay overrides, and the Director **fails closed** instead of
+spawning a guessed model:
+
+| Situation | What the Director does |
+|---|---|
+| The user supplies `--coding-agent`, `--model`, or `--effort` | Records the value rather than silently replacing it |
+| The backend and model do not match | Relays the pair to the user instead of spawning it |
+| A user-pinned model would otherwise be replaced | Never deletes and replaces it automatically |
+| The model list is stale | Disables cost efficiency mode |
+| No listed model fits the task | Relays to the operator |
 
 ## Replacement
 

@@ -56,26 +56,70 @@ Each parameter has exactly one input source:
 | Sender / recipient member IDs | `--from-member-id <int>` / `--to-member-id <int>` on two-party subcommands |
 | JSON output | `--json` per-subcommand option (trailing canonical position — placed after all other flags) |
 
+## Environment variables
+
+Every `CAFLEET_`-prefixed variable cafleet reads:
+
+| Environment variable | Settings field | Default | Controls | Overridden by |
+|---|---|---|---|---|
+| `CAFLEET_DATABASE_URL` | `database_url` | see [config](../api/config.md) | The registry database location; an absolute path is required | — |
+| `CAFLEET_MULTIPLEXER` | `multiplexer` | unset ⇒ auto-detect | The multiplexer backend, per [Backend selection](multiplexer-backends.md#backend-selection) | — |
+| `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Body truncation on `message {send,poll,ack,show}`, and the broker's inline-preview truncation | `--full` |
+| `CAFLEET_BROKER_HOST` | `broker_host` | `127.0.0.1` | The `cafleet server` bind address | `--host` |
+| `CAFLEET_BROKER_PORT` | `broker_port` | `8000` | The `cafleet server` bind port | `--port` |
+
+A flag wins over its environment variable, and the environment variable wins
+over the hardcoded default. `member.description` truncation uses a separate
+hard-coded 60-codepoint limit.
+
 ## Global Options
 
-Placed **before** the subcommand:
+`--version`, placed **before** the subcommand, prints `cafleet <version>` and
+exits 0, bypassing the `--fleet-id` requirement.
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--version` | no | Print `cafleet <version>` and exit 0. Bypasses the `--fleet-id` requirement. |
+## Output shapes {#output-shapes}
 
-### `--full` semantics (cross-subcommand escape hatch) {#full-semantics}
+One row per subcommand. `--full` is the global "give me every field cafleet
+has, untruncated, unfiltered" escape hatch; an em-dash marks a subcommand that
+does not accept it.
 
-`--full` is the global "give me every field cafleet has, untruncated,
-unfiltered" escape hatch — a documented flag on every subcommand that accepts
-it:
+| Subcommand | Default text output | `--full` text output | JSON payload |
+|---|---|---|---|
+| `fleet create` | The compact line `<fleet_id> director=<director_member_id>` | The labeled block | The fleet dict with a nested `director` (including its `placement`) |
+| `fleet list` | `FLEET_ID`, `DIRECTOR`, `NAME`, `MEMBERS`, `CREATED_AT` columns, one row per fleet | — | Output as JSON |
+| `fleet show` | The fleet row, adding a `deleted_at:` line | — | Always includes `deleted_at`, null when active |
+| `fleet delete` | `Deleted fleet <fleet_id>. Deregistered N members.` | — | — |
+| `message send` | `Message sent.` plus the compact rendered envelope | Untruncated `text`; the verbose labeled block | The rendered envelope, or the full typed-column message dict with `--full` |
+| `message broadcast` | `broadcast id=<message_id> recipients=<N> delivered=<k>` | The single `broadcast_summary` message as the full verbose envelope, never per-recipient envelopes or a `recipient_ids` list | Carries both `recipients` and `delivered` |
+| `message poll` | The compact rendered envelopes; `No messages found.` on an empty inbox | Untruncated `text`; the verbose labeled block | The rendered envelopes |
+| `message ack` | `Message acknowledged.` plus the compact rendered envelope | Untruncated `text`; the verbose labeled block | The rendered envelope |
+| `message show` | The compact rendered envelope alone | Untruncated `text`; the verbose labeled block | The rendered envelope |
+| `member create` | The compact line `<member_id> <name> backend=<coding_agent> pane=<pane_id>` | The 6-line `Member registered and spawned.` block | The member dict with its `placement` |
+| `member delete` | A `Member deleted.` header plus `member_id:` / `pane_id:` lines, pane status `<pane_id> (killed)` | — | `{member_id, pane_status}` |
+| `member show` | The compact one-line row `<member_id> <name> <status>` | The labeled block with `kind`, `skills`, and the placement sub-block | The broker `get_member` dict, unchanged regardless of `--full` |
+| `member list` | One row per member; `0 members.` on an empty roster | — | One dict per row |
+| `member capture` | The captured content, with no trailing newline | — | `{member_id, pane_id, lines, content}` |
+| `member prompt` | `Sent prompt '<text>' to member <name> (<pane_id>).`, or `Sent shell prompt '<text>' …` with `--shell` | — | `{member_id, pane_id, text, shell}` |
+| `member ping` | `Pinged member <name> (<pane_id>) — poll keystroke dispatched.` | — | `{member_id, pane_id}` |
+| `monitor status` | `monitor: running (…)` or `monitor: stopped`, plus the schedule table | — | Keeps `last_ping_at` (ISO or `null`) and adds derived `*_age_seconds` fields |
+| `monitor config` | `member 5: interval 720s, enabled, last_ping <ts>` | — | Output as JSON |
+| `doctor` | The `multiplexer:` and `assets:` blocks | — | Output as JSON |
 
-| Subcommand | Default behavior | `--full` behavior |
-|---|---|---|
-| `message {send,poll,ack,show}` | `text` truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…`; compact rendered envelope. | Untruncated `text`; the full typed-column message dict in `--json`, the verbose labeled block in text mode (see [Message envelope](./message-envelope.md#text-mode)). |
-| `message broadcast` | One-line summary (`broadcast id=<id> recipients=<N> delivered=<k>`). | The single `broadcast_summary` message rendered as the full verbose envelope. Never per-recipient envelopes or a `recipient_ids` list. |
-| `member show` | Compact one-line row `<member_id> <name> <status>`. | Labeled block with `kind`, `skills`, and the placement sub-block. Text mode only — JSON is the unprojected broker dict regardless. |
-| `member create` | One compact line: `<member_id> <name> backend=<coding_agent> pane=<pane_id>`. | The 6-line `Member registered and spawned.` block. |
+`setup`, `server`, and `monitor start` are absent by design — they stream
+progress or run a loop rather than emitting a one-shot payload — so the
+[Subcommand summary](#subcommand-summary) legitimately carries three more rows
+than this table.
+
+### `--quiet` semantics {#quiet-semantics}
+
+`--quiet` suppresses the normal output and prints one bare value, for shell
+capture. It is a text-only shortcut, ignored in the JSON branch.
+
+| Subcommand | Quiet output |
+|---|---|
+| `message send` | The bare `message_id` |
+| `message ack` | The bare `message_id` |
+| `member ping` | The bare target member id |
 
 ## JSON output (`--json`) {#json-output}
 
@@ -95,15 +139,28 @@ branch. The trailing position keeps JSON invocations inside the existing
 per-subcommand allow patterns (see
 [`permissions.allow` coverage](#permissionsallow-coverage)).
 
-Subcommands accepting `--json`:
+Subcommands accepting `--json`, one row per subcommand:
 
-| Group | Subcommands |
+| Subcommand | Group |
 |---|---|
-| `message` | `send`, `broadcast`, `poll`, `ack`, `show` |
-| `member` | `create`, `delete`, `show`, `list`, `capture`, `prompt`, `ping` |
-| `monitor` | `status`, `config` |
-| `fleet` | `create`, `list`, `show` |
-| (root) | `doctor` |
+| `doctor` | (root) |
+| `fleet create` | `fleet` |
+| `fleet list` | `fleet` |
+| `fleet show` | `fleet` |
+| `message send` | `message` |
+| `message broadcast` | `message` |
+| `message poll` | `message` |
+| `message ack` | `message` |
+| `message show` | `message` |
+| `member create` | `member` |
+| `member delete` | `member` |
+| `member show` | `member` |
+| `member list` | `member` |
+| `member capture` | `member` |
+| `member prompt` | `member` |
+| `member ping` | `member` |
+| `monitor status` | `monitor` |
+| `monitor config` | `monitor` |
 
 All other subcommands reject `--json` with Click's standard
 `No such option` error (exit 2) — including the root group itself, so a
@@ -170,15 +227,11 @@ measured in Python `str` codepoints, never bytes. Pass `--full` (a documented
 per-subcommand option) to disable truncation; it composes orthogonally with
 `--json`.
 
-| Variable | Settings field | Default | Notes |
-|---|---|---|---|
-| `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Also bounds the broker's inline-preview truncation. `member.description` truncation uses a separate hard-coded 60-codepoint limit. |
+The limit is `CAFLEET_MAX_TEXT_LEN` — see
+[Environment variables](#environment-variables).
 
 This applies to CLI emit sites only — FastAPI `/api/*` responses
 ([webui-api.md](./webui-api.md)) and `member capture` content are untouched.
-A `--quiet` flag on `cafleet message send`, `cafleet message ack`, and
-`cafleet member ping` suppresses the normal output and prints only the bare
-`message_id` (the target member id for `ping`), for shell capture.
 
 ## `cafleet setup` — Onboarding and Schema Management {#cafleet-setup}
 
@@ -190,28 +243,25 @@ positional arguments — `cafleet setup <word>` fails with Click's standard
 `Got unexpected extra argument (<word>)` error — and does not accept
 `--fleet-id`.
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--skip AGENT` | no | Repeatable. `click.Choice(["claude", "codex", "opencode"])`; an unknown value fails with Click's standard invalid-choice error (exit 2). Duplicates are deduplicated. Help: `Skip the named agent's assets install (repeatable).` |
+The one flag is `--skip AGENT`: optional and repeatable, typed
+`click.Choice(["claude", "codex", "opencode"])`, with duplicates deduplicated
+and an unknown value failing with Click's standard invalid-choice error
+(exit 2). Its help text is
+`Skip the named agent's assets install (repeatable).`
 
 The command runs two halves, in order:
 
 1. **db half** — initializes or migrates the registry database to the bundled
-   Alembic head revision (idempotent). Output, by prior DB state:
+   Alembic head revision (idempotent). Each refusal message below becomes the
+   db-half failure `<msg>`:
 
-    ```
-    Created <db_file> and applied migrations to head (<head>).   # fresh DB
-    Upgraded from <old_rev> to <head>.                           # behind head
-    Already at head (<head>); nothing to do.                     # at head
-    ```
-
-    It refuses two states (each refusal message becomes the db-half failure
-    `<msg>`):
-
-    ```
-    DB has existing tables but no alembic_version. Run `alembic stamp head` manually if you are sure the schema matches.
-    DB schema is at revision <rev> which is unknown to this version of cafleet. Refusing to downgrade automatically.
-    ```
+    | Prior DB state | Outcome | Output / refusal message |
+    |---|---|---|
+    | No DB file | Created and migrated to head | `Created <db_file> and applied migrations to head (<head>).` |
+    | Behind head | Upgraded | `Upgraded from <old_rev> to <head>.` |
+    | At head | No-op | `Already at head (<head>); nothing to do.` |
+    | Tables present but no `alembic_version` | Refused | ``DB has existing tables but no alembic_version. Run `alembic stamp head` manually if you are sure the schema matches.`` |
+    | Revision unknown to this CLI version | Refused | `DB schema is at revision <rev> which is unknown to this version of cafleet. Refusing to downgrade automatically.` |
 
 2. **assets half** — targets are the fixed list `claude`, `codex`, `opencode`
    (in that order) minus the skipped agents. Downloads the
@@ -226,16 +276,21 @@ The command runs two halves, in order:
 
 The halves fail independently (`db half failed: <msg>` / `assets half failed:
 <msg>`); if any half that ran failed, the command exits 1 with the failed
-halves joined by `' and '`. A skipped assets half is not-run and cannot
-contribute a failure. A missing release (`no release found for version
-<version>`) or missing asset (`asset cafleet-assets-v<version>.zip not found
-in release <version>`) is a loud assets-half failure.
+halves joined by `' and '`.
 
-Assets-half pre-flight: the `asset_installs` table must exist, else the half
-fails with `the database schema is missing or outdated; run 'cafleet setup'
-first`. (The db half always runs first within the same command, so this fires
-only after a db-half failure or an externally broken schema; it is kept as
-defense.)
+| Half | Trigger | Message | Effect |
+|---|---|---|---|
+| db | Either refusal state in the table above | The refusal message, as `db half failed: <msg>` | Exit 1 |
+| assets | The `asset_installs` table is missing as the half starts | `the database schema is missing or outdated; run 'cafleet setup' first` | Exit 1 |
+| assets | No GitHub Release for the installed CLI version | `no release found for version <version>` | Exit 1 |
+| assets | The release exists but the asset is absent | `asset cafleet-assets-v<version>.zip not found in release <version>` | Exit 1 |
+| assets | A skills install fails for a target | `failed to install skills into <skills_dir>: <error>` | Aborts the loop; rows recorded before the failure remain |
+| assets | A preset install fails for a target | `failed to install preset into <target>: <error>` | Aborts the loop; rows recorded before the failure remain |
+| assets | All three agents skipped | `assets half skipped (all agents skipped)` | Not-run; cannot contribute a failure |
+
+The assets-half pre-flight fires only after a db-half failure or an externally
+broken schema, since the db half always runs first within the same command; it
+is kept as defense.
 
 ### Schema-only invocation {#schema-only}
 
@@ -289,17 +344,21 @@ Every fleet-scoped command group — `fleet`, `member`, `message`, and
 `monitor` — validates the recorded assets installs before any subcommand body
 runs:
 
-1. Missing DB file, missing `asset_installs` table, or zero rows → exit 1 with
-   `Error: no assets install is recorded; run 'cafleet setup' first`.
-2. Any recorded `cafleet_version` differing from the runtime CLI version
-   (string inequality — a downgrade also triggers) → exit 1 with
-   `Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>);
-   run 'cafleet setup' to reinstall`, stale agents in ascending order.
-3. Otherwise the command proceeds silently.
+| Recorded install state | Result | Exit |
+|---|---|---|
+| No DB file, no `asset_installs` table, or zero rows | `Error: no assets install is recorded; run 'cafleet setup' first` | 1 |
+| A recorded `cafleet_version` differs from the runtime CLI version (string inequality — a downgrade also triggers) | `Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall`, stale agents in ascending order | 1 |
+| All recorded versions match | The command proceeds silently | 0 |
 
-Agents with no recorded row are not checked. Exempt surfaces: `setup` (must
-remain runnable to repair), `doctor` (reports instead of blocking), and
-`server`. Group-level help (`cafleet fleet --help`) prints before the callback
+Agents with no recorded row are not checked. Three surfaces are exempt:
+
+| Exempt surface | Why exempt | Behavior under a stale/missing install |
+|---|---|---|
+| `setup` | It must remain runnable to repair the install | Runs normally — it is the repair path |
+| `doctor` | It reports instead of blocking | Prints each recorded row marked `ok` or `STALE` |
+| `server` | It serves the WebUI rather than running a fleet-scoped command, and the guard wraps only the four fleet-scoped groups | Starts normally |
+
+Group-level help (`cafleet fleet --help`) prints before the callback
 runs and always works; subcommand help runs the group callback first, so under
 a missing/stale install the guard errors instead of printing help.
 
@@ -334,26 +393,15 @@ Error: Missing option '--coding-agent'. Choose from:
 `Error: cafleet fleet create must be run inside a tmux or herdr session` and
 writes nothing. It creates the fleet and its root Director (hardcoded
 `name="Director"`; there is no `--description` flag)
-atomically — see [data-model.md](./data-model.md). Default
-output is one compact line carrying the two ids:
-
-```
-<fleet_id> director=<director_member_id>
-```
-
-`--json` returns the fleet dict with a nested `director` (including its
-`placement`).
+atomically — see [data-model.md](./data-model.md). Output shapes are in
+[Output shapes](#output-shapes).
 
 ### `fleet list`
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--json` | no | Output as JSON |
+The only flag is the optional shared [`--json`](#json-output).
 
-Lists all non-soft-deleted fleets. Text output renders `FLEET_ID`, `DIRECTOR`,
-`NAME`, `MEMBERS`, `CREATED_AT` columns; each row exposes `director_member_id`
-so the Director's id can be recovered after `fleet create` output scrolls
-away.
+Lists all non-soft-deleted fleets. Each row exposes `director_member_id` so
+the Director's id can be recovered after `fleet create` output scrolls away.
 
 ### `fleet show`
 
@@ -363,20 +411,16 @@ away.
 | `--json` | no | Output as JSON |
 
 Exits 1 with `Error: fleet 'X' not found.` if the row does not exist.
-Intentionally returns soft-deleted rows (audit info stays reachable), adding a
-`deleted_at:` line in text mode; `--json` always includes `deleted_at` (null
-when active).
+Intentionally returns soft-deleted rows, so audit info stays reachable.
 
 ### `fleet delete`
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--fleet-id` | yes | The fleet to delete |
+The only flag is `--fleet-id` (required), naming the fleet to delete.
 
 Soft-deletes the fleet in one transaction: stamps `deleted_at`, deregisters
 every active member (root Director included), and removes their placement rows;
-messages are untouched. Prints `Deleted fleet <fleet_id>. Deregistered N members.`
-and is idempotent (`Deregistered 0 members.` on re-run). Unknown `fleet_id`
+messages are untouched. It is idempotent (`Deregistered 0 members.` on
+re-run). Unknown `fleet_id`
 exits 1 with `Error: fleet 'X' not found.`. Member panes are **not** closed —
 run `cafleet member delete` per member first for a clean teardown.
 
@@ -390,9 +434,8 @@ the assets-install report (the runtime CLI version and every recorded
 the [stale-assets guard](#stale-assets-guard) — a stale or missing install is
 reported, not fatal.
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--json` | no | Output as JSON — trailing per-subcommand flag (see [JSON output](#json-output)). |
+The only flag is the optional [`--json`](#json-output), a trailing
+per-subcommand flag.
 
 ```
 multiplexer:
@@ -435,10 +478,8 @@ All five subcommands require `--fleet-id`, name the acting member
 [stale-assets guard](#stale-assets-guard).
 The envelope schema is canonical in
 [Message envelope](./message-envelope.md); truncation and `--full` are
-canonical [above](#message-body-truncation). Text output is the subcommand's
-acknowledgement line (`Message sent.` / `Message acknowledged.`) followed by
-the compact rendered envelope; `message show` prints the envelope alone.
-Behavior detail:
+canonical [above](#message-body-truncation); per-subcommand output shapes are
+in [Output shapes](#output-shapes). Behavior detail:
 [`send_message`](../api/broker.md#cafleet.broker.send_message),
 [`broadcast_message`](../api/broker.md#cafleet.broker.broadcast_message),
 [`poll_messages`](../api/broker.md#cafleet.broker.poll_messages),
@@ -454,6 +495,7 @@ Behavior detail:
 | `--text` | no | Inline message body. Exactly one of `--text` / `--text-file`. |
 | `--text-file` | no | Path to a UTF-8 file whose contents are the body (`-` = stdin); use it for bodies that would exceed the shell's `ARG_MAX`. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
+| `--quiet` | no | Print only the bare `message_id`, for shell capture — see [`--quiet` semantics](#quiet-semantics). |
 
 ### `message broadcast`
 
@@ -461,11 +503,9 @@ Behavior detail:
 |---|---|---|
 | `--from-member-id` | yes | Broadcaster (sender). |
 | `--text` / `--text-file` | one of | Message body, as on `message send`. |
-| `--full` | no | See [`--full` semantics](#full-semantics). |
+| `--full` | no | See [Output shapes](#output-shapes). |
 
-Default text output is `broadcast id=<message_id> recipients=<N> delivered=<k>`,
-where `k` counts the best-effort inline previews that landed. `--json` carries
-both `recipients` and `delivered`.
+`delivered=<k>` counts the best-effort inline previews that landed.
 
 ### `message poll`
 
@@ -474,8 +514,7 @@ both `recipients` and `delivered`.
 | `--member-id` | yes | Recipient whose inbox is fetched. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
 
-Returns only un-acked (`input_required`) deliveries addressed to the member;
-an empty inbox prints `No messages found.`.
+Returns only un-acked (`input_required`) deliveries addressed to the member.
 
 ### `message ack`
 
@@ -484,6 +523,7 @@ an empty inbox prints `No messages found.`.
 | `--member-id` | yes | Recipient acknowledging the message (recipient-only). |
 | `--message-id` | yes | Message to acknowledge. |
 | `--full` | no | See [Message Body Truncation](#message-body-truncation). |
+| `--quiet` | no | Print only the bare `message_id`, for shell capture — see [`--quiet` semantics](#quiet-semantics). |
 
 ### `message show`
 
@@ -507,22 +547,29 @@ behind the [stale-assets guard](#stale-assets-guard). Behavior detail:
 
 ### Member targeting and key delivery
 
-Resolution rules shared by the `--member-id` verbs:
+Resolution shared by the `--member-id` verbs, by target state:
 
-1. A cross-fleet, unknown, or inactive `--member-id` resolves to "not found"
-   (exit 1, `Error: Member <member-id> not found`). Any active in-fleet member
-   (the root Director included) is a valid target; there is no caller-auth
-   check beyond fleet membership.
-2. No placement row → exit 1 (see [Error Messages](#error-messages)) — except
-   `member show` and `member delete`, which tolerate a missing placement.
-3. A pending placement (`pane_id` is `None`) → `capture` / `prompt` / `ping`
-   exit 1; `delete` tolerates it.
+| Target state | `capture` / `prompt` / `ping` | `show` | `delete` |
+|---|---|---|---|
+| Active, placed with a `pane_id` | Dispatches | Shows the member | Kills the pane, then soft-deletes |
+| Active, placement pending (`pane_id` is `None`) | Exit 1 | Shows the member | Tolerated — a plain registry soft-delete |
+| Active, no placement row | Exit 1 | Tolerated | Tolerated — a plain registry soft-delete |
+| Cross-fleet, unknown, or inactive | Exit 1, `Error: Member <member-id> not found` | The same error | The same error |
 
-Key sequences are delivered **literally** (`send-keys` with `shell=False`) —
-shell meta, key names, and multi-byte characters all arrive as plain
-characters. Common exit codes: `0` dispatch success; `1` multiplexer
-unavailable, member not found, missing placement, pending placement, or a
-`send-keys` failure; `2` per-subcommand argument/validation errors.
+Any active in-fleet member (the root Director included) is a valid target;
+there is no caller-auth check beyond fleet membership. Key sequences are
+delivered **literally** (`send-keys` with `shell=False`) — shell meta, key
+names, and multi-byte characters all arrive as plain characters.
+
+| Exit | Meaning |
+|---|---|
+| `0` | Dispatch success |
+| `1` | Multiplexer unavailable |
+| `1` | Member not found |
+| `1` | Missing placement |
+| `1` | Pending placement |
+| `1` | A `send-keys` failure |
+| `2` | Per-subcommand argument or validation errors |
 
 ### `member create` {#member-create}
 
@@ -537,12 +584,15 @@ one root Director by construction, so no override flag exists.
 | `--name` | yes | Display name — see [Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals) for pane-title behavior. |
 | `--description` | yes | One-sentence purpose. |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; when omitted, the member — every role — inherits the spawning Director's placement backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. |
-| `--model` | no | Model forwarded to the backend binary's own `--model` flag — see [Model selection](../concepts/coding-agents.md#model-selection). |
-| `--effort` | no | Reasoning-effort level forwarded to the backend binary (claude: `low`, `medium`, `high`, `xhigh`, `max`; codex: `minimal`, `low`, `medium`, `high`, `xhigh`; opencode: unsupported). Validated per backend before any side effect — see [Reasoning effort](../concepts/coding-agents.md#reasoning-effort). |
-| `--role` | no | `member` (default) or `monitor`. `monitor` spawns the fleet's single dedicated monitoring member; a second spawn is rejected. See [Monitoring](../concepts/monitoring.md#the-monitoring-member). |
+| `--model` | no | Model forwarded to the backend binary's own `--model` flag. The opencode backend additionally requires `<provider-id>/<model-id>`; per-backend formats and create-time validation are in [Model selection](coding-agent-backends.md#model-selection). |
+| `--effort` | no | Reasoning-effort level forwarded to the backend binary, validated per backend before any side effect. Accepted levels, forwarding forms, and rejection strings are in [Reasoning effort](coding-agent-backends.md#reasoning-effort). |
+| `--role` | no | `member` (default) or `monitor`. `monitor` spawns the fleet's single dedicated monitoring member; a second spawn is rejected. |
 | `--full` | no | Switches the non-JSON output to the 6-line labeled block. |
 | `--text` | no | Inline spawn prompt (backend-neutral template). Exactly one of `--text` / `--text-file`. |
 | `--text-file` | no | Path to a UTF-8 file whose contents are the spawn prompt (`-` = stdin). Inline prompts beyond a few KB exceed the multiplexer argv ceiling — use `--text-file` for long prompts. |
+
+The monitoring member's role and lifecycle are covered in
+[Monitoring](../concepts/monitoring.md#the-monitoring-member).
 
 #### Spawn command per backend
 
@@ -552,8 +602,15 @@ The per-backend spawn argv and auto-approval flags live in
 #### Spawn-prompt substitution
 
 `cafleet member create` runs `str.format` over the resolved prompt body,
-substituting exactly four placeholders: `{fleet_id}`, `{member_id}` (the
-member's own newly-allocated id), `{director_member_id}`, and `{coding_agent}`.
+substituting exactly four placeholders:
+
+| Placeholder | Substituted value | How the spawned member sees it |
+|---|---|---|
+| `{fleet_id}` | The member's fleet id | `FLEET ID: <fleet_id>` |
+| `{member_id}` | The member's own newly-allocated id | `YOUR MEMBER ID: <member_id>` |
+| `{director_member_id}` | The fleet's root Director id | `DIRECTOR MEMBER ID: <director_member_id>` |
+| `{coding_agent}` | The resolved backend name (`claude`, `codex`, or `opencode`) | `CODING AGENT: <coding_agent>` |
+
 Identity reaches the spawned member as literals rendered into its prompt; the
 only environment variable forwarded into the pane is `CAFLEET_DATABASE_URL`.
 A literal brace must be doubled (`{{` / `}}`); an unknown placeholder or
@@ -561,39 +618,33 @@ malformed brace expression exits 2 and rolls back the just-registered member
 (see [Error Messages](#error-messages)).
 
 The spawn always creates the pane without stealing focus (tmux
-`split-window -d`): the Director's pane and active window stay active. Default
-output is the compact line `<member_id> <name> backend=<coding_agent>
-pane=<pane_id>` (`pane` renders `(pending)` until the pane id is patched onto
-the placement); `--json` returns the member dict with its `placement`.
+`split-window -d`): the Director's pane and active window stay active. In the
+default output, `pane` renders `(pending)` until the pane id is patched onto
+the placement.
 
 ### `member delete` {#member-delete}
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--member-id` | yes | The member to delete (target). |
+The only flag is `--member-id` (required), naming the member to delete.
 
 Tears down the target's pane (when one exists) and soft-deletes the member.
 Targeting the root Director is blocked (see
 [Error Messages](#error-messages)). A placementless or pending-placement
 delete is a pure registry soft-delete and succeeds outside a multiplexer.
 The pane path kills the pane immediately (tolerating an already-gone pane),
-then soft-deletes; exit 0. Success output is a `Member deleted.`
-header plus `member_id:` / `pane_id:` lines with pane status `<pane_id> (killed)`;
-JSON is `{member_id, pane_status}`.
+then soft-deletes; exit 0. Pane status renders `(no placement)` for a
+placementless target and `(pending — no pane)` for a pending placement.
 
 ### `member show` {#member-show}
 
 | Flag | Required | Notes |
 |---|---|---|
 | `--member-id` | yes | Any active in-fleet registry entry — placed or placementless (root Director included). |
-| `--full` | no | Text mode only — see [`--full` semantics](#full-semantics). |
+| `--full` | no | Text mode only — see [Output shapes](#output-shapes). |
 
-Registry read — no multiplexer requirement. Default text is the compact
-one-line row `<member_id> <name> <status>`; `--full` renders the labeled block
-with `kind`, `skills`, and the placement sub-block (`placement:   none` when
-placementless; `None` fields render `-`). `--json` returns the broker
-`get_member` dict unchanged regardless of `--full`. `kind` is one of
-`director`, `monitor`, or `member`.
+Registry read — no multiplexer requirement. In the `--full` block, the
+placement sub-block renders `placement:   none` when the member is
+placementless, and `None` fields render `-`. `kind` is one of `director`,
+`monitor`, or `member`.
 
 ### `member list` {#member-list}
 
@@ -602,21 +653,25 @@ flag; no identity flag. Lists every **active** registry entry of the fleet —
 the root Director, the monitoring member, ordinary members, and placementless
 rows. An empty roster prints `0 members.`.
 
-Text output renders one row per member with `member_id`, `name`, `kind`
-(`director` / `monitor` / `member`), `backend`, `pane_id`, and `idle` columns.
-A placementless row renders `-` in its placement cells (`backend`, `pane_id`);
-a placed row whose pane id is not yet patched renders `(pending)` in
-`pane_id`. `idle` is the wall-time since the member's most recent message
-activity — the latest of `last_sent` (most recent outgoing message) and
-`last_recv` (most recent delivery), broadcast summaries excluded — humanized
-as `Ns` / `Nm` / `Nh`, `-` when the member has no message activity.
+| Field | Text column | Text rendering when absent | JSON key | JSON type |
+|---|---|---|---|---|
+| `member_id` | yes | — | `member_id` | integer |
+| `name` | yes | — | `name` | string |
+| `kind` | yes (`director` / `monitor` / `member`) | — | `kind` | string |
+| `backend` | yes | `-` for a placementless row | — (inside `placement`) | — |
+| `pane_id` | yes | `-` placementless; `(pending)` before the pane id is patched | — (inside `placement`) | — |
+| `idle` | yes | `-` when the member has no message activity | `idle` | integer seconds or `null` |
+| `placement` | — | — | `placement` | the placement sub-dict, `null` for a placementless row |
+| `last_sent` | — | — | `last_sent` | ISO timestamp or `null` |
+| `last_recv` | — | — | `last_recv` | ISO timestamp or `null` |
+| `last_ack` | — | — | `last_ack` | ISO timestamp or `null` |
 
-`--json` returns one dict per row with `member_id`, `name`, `kind`,
-`placement` (the placement sub-dict, `null` for a placementless row), and the
-activity fields `last_sent` / `last_recv` / `last_ack` (ISO timestamps or
-`null`; `last_ack` is the most recent acknowledged delivery) plus `idle`
-(integer seconds or `null`). Per-member detail such as `description` and
-`registered_at` lives on [`member show`](#member-show).
+`idle` is the wall-time since the member's most recent message activity — the
+latest of `last_sent` (most recent outgoing message) and `last_recv` (most
+recent delivery), broadcast summaries excluded — humanized as `Ns` / `Nm` /
+`Nh` in text mode. `last_ack` is the most recent acknowledged delivery.
+Per-member detail such as `description` and `registered_at` lives on
+[`member show`](#member-show).
 
 ### `member capture` {#member-capture}
 
@@ -626,8 +681,7 @@ activity fields `last_sent` / `last_recv` / `last_ack` (ISO timestamps or
 | `--lines` | no | Number of trailing lines to capture (default: **20**). |
 | `--ansi` / `--no-ansi` | no | Default `--no-ansi` strips ANSI escapes and cleans carriage-return redraws; `--ansi` emits the raw capture. |
 
-JSON: `{member_id, pane_id, lines, content}`; text emits the content
-with no trailing newline.
+Output shapes are in [Output shapes](#output-shapes).
 
 ### `member prompt` {#member-prompt}
 
@@ -645,21 +699,30 @@ coordination channel; the plain form is not a substitute for `message send`.
 |---|---|---|
 | `--member-id` | yes | Target member's ID |
 | `--shell` | no | Boolean flag, default off. Dispatch `! TEXT` (shell form) instead of `TEXT` (plain form). |
-| *(positional `TEXT`)* | yes | Single line of text; leading/trailing whitespace stripped before dispatch. Pipes, `&&`, `;`, `$(...)`, and backticks are forwarded opaquely. Newline-containing (checked first, against the original text) or empty-after-strip text exits 2. |
+| *(positional `TEXT`)* | yes | Single line of text; leading/trailing whitespace stripped before dispatch. Newline-containing or empty-after-strip text exits 2. |
+
+Shell metacharacters — pipes, `&&`, `;`, `$(...)`, and backticks — are
+forwarded opaquely. The newline check runs first, against the original text.
 
 The `--shell` flag controls both the payload prefix and the Esc safeguard:
 
 | Form | Keystroke sequence | Follow-up |
 |---|---|---|
-| Plain (no `--shell`) | `Esc` → settle → literal `TEXT` → `Enter`. The trailing `Enter` submits a real user turn; the leading `Esc` (as in `member ping` / inline previews) keeps it from blindly confirming a pending permission prompt. | None — the submitted turn opens the member's turn directly. |
-| `--shell` | literal `! TEXT` → `Enter` (no `Esc` — an `Esc` before `! <cmd>` would mis-fire; see [Esc safeguard](multiplexer-backends.md#esc-safeguard)). | `cafleet member ping` required — the bang output only stages in the pane; the ping advances the member's turn to consume it. |
+| Plain (no `--shell`) | `Esc` → settle → literal `TEXT` → `Enter` | None |
+| `--shell` | literal `! TEXT` → `Enter` | `cafleet member ping` required |
+
+In the plain form the trailing `Enter` submits a real user turn, and the
+leading `Esc` (as in `member ping` and inline previews) keeps it from blindly
+confirming a pending permission prompt; the submitted turn opens the member's
+turn directly. The `--shell` form leads with no `Esc` because an `Esc` before
+`! <cmd>` would mis-fire (see
+[Esc safeguard](multiplexer-backends.md#esc-safeguard)), and its bang output
+only stages in the pane — the ping advances the member's turn to consume it.
 
 The flag performs no content inspection: plain-form `TEXT` beginning with `!`
 is delivered verbatim without the shell mechanics.
 
-Text output: `Sent prompt '<text>' to member <name> (<pane_id>).`; with
-`--shell`: `Sent shell prompt '<text>' to member <name> (<pane_id>).`;
-JSON: `{member_id, pane_id, text, shell}`.
+Output shapes are in [Output shapes](#output-shapes).
 
 ### `member ping` {#member-ping}
 
@@ -677,8 +740,7 @@ operator-controlled body — which is why `member ping` sits in
 | `--member-id` | yes | The target member. |
 | `--quiet` | no | Print only the bare member id, for shell capture. |
 
-Text: `Pinged member <name> (<pane_id>) — poll keystroke dispatched.`; JSON:
-`{member_id, pane_id}`. A keystroke non-delivery exits 1.
+A keystroke non-delivery exits 1.
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 
@@ -697,9 +759,10 @@ after `fleet delete`. Behavior detail:
 
 ### `monitor start`
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--tick` | no | Scan-tick cadence in seconds (`click.IntRange(min=1)`, default **5**). The tick is the floor on interval precision — see [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision). |
+The one flag is `--tick` (optional): the scan-tick cadence in seconds
+(`click.IntRange(min=1)`, default **5**). The tick is the floor on interval
+precision — see
+[Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
 
 Runs the loop **in-process** (the monitoring member launches it as a
 background task in its own pane; the loop blocks the task and writes to its
@@ -707,9 +770,15 @@ stdout — one `<iso-ts> due member <id> (<name>) [<reasons>] -> wake monitor`
 line per due member). On startup it runs the multiplexer precondition guard,
 atomically claims the single-instance `monitor_runtime` row, and installs
 `SIGTERM`/`SIGINT` handlers (a clean stop clears the row). If the fleet has no
-monitoring member, it warns on stderr and runs anyway. Exit `0` on clean exit;
-`1` already running / unknown fleet / multiplexer unreachable; `2` usage
-errors.
+monitoring member, it warns on stderr and runs anyway.
+
+| Exit | Meaning |
+|---|---|
+| `0` | Clean exit |
+| `1` | A monitor is already running for the fleet |
+| `1` | Unknown fleet |
+| `1` | Multiplexer unreachable |
+| `2` | Usage errors |
 
 ### `monitor status`
 
@@ -726,9 +795,7 @@ monitor: running (pid 4821, last tick 2s ago, tick 5s, started 2026-06-13T04:50:
   5          alice         member    720s      -          yes      0
 ```
 
-The monitoring member is not enrolled and never shows in the table. When no
-monitor is running the first line reads `monitor: stopped`. JSON keeps
-`last_ping_at` (ISO or null) and adds derived `*_age_seconds` fields.
+The monitoring member is not enrolled and never shows in the table.
 
 ### `monitor config`
 
@@ -739,54 +806,53 @@ monitor is running the first line reads `monitor: stopped`. JSON keeps
 | `--enable` / `--disable` | no | Enable or disable monitoring for the member. Mutually exclusive. |
 
 With no edit flag, prints the current config; with an edit flag, applies and
-prints the new config. Text:
-`member 5: interval 720s, enabled, last_ping 2026-06-13T04:51:00` (`-` when
-never pinged). Exits 1 for a not-in-fleet or not-enrolled member.
+prints the new config. `last_ping` renders `-` when the member has never been
+pinged. Exits 1 for a not-in-fleet or not-enrolled member.
 
 ## Error Messages
 
-| Situation | Error Message |
-|---|---|
-| Any `fleet` / `member` / `message` / `monitor` command with no assets install recorded (missing DB file, missing `asset_installs` table, or zero rows) | `Error: no assets install is recorded; run 'cafleet setup' first` (exit 1; see [Stale-assets guard](#stale-assets-guard)) |
-| Any `fleet` / `member` / `message` / `monitor` command with a recorded `asset_installs` version differing from the runtime CLI version | `Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall` (exit 1; see [Stale-assets guard](#stale-assets-guard)) |
-| `cafleet setup` when the `asset_installs` table is missing as the assets half starts (a db-half failure or an externally broken schema) | assets-half failure `the database schema is missing or outdated; run 'cafleet setup' first` (exit 1) |
-| Missing `--fleet-id` on a fleet-scoped subcommand | `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` (exit 1) |
-| Missing `--member-id` | `Error: Missing option '--member-id'.` (exit 2) |
-| `fleet create` with no `--name` | `Error: Missing option '--name'.` (exit 2) |
-| `fleet create` with `--coding-agent` omitted | `Error: Missing option '--coding-agent'. Choose from:` followed by `claude,` / `codex,` / `opencode`, one per tab-indented line — recorded verbatim under [`fleet create`](#fleet-create) (exit 2) |
-| `fleet create` run outside a supported multiplexer | `Error: cafleet fleet create must be run inside a tmux or herdr session` (exit 1; no DB writes) |
-| `fleet delete` on unknown fleet_id | `Error: fleet 'X' not found.` (exit 1) |
-| `member create` against an unknown `--fleet-id` | `Error: Fleet '<fleet-id>' not found.` (exit 2; Director auto-discovery runs first thing) |
-| `member create` into a soft-deleted fleet | `Error: fleet X is deleted` (exit 1) |
-| `member create` when the fleet row has no `director_member_id` recorded (mid-bootstrap corruption) | `Error: fleet <fleet-id> has no root Director recorded; re-create the fleet with 'cafleet fleet create'.` (exit 1) |
-| `member create` (with a placement) when the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` (exit 1; the `register_member` invariant guard) |
-| `member delete` against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` (exit 1) |
-| `message send` / `message broadcast` / `message poll` / `message ack` / `message show` with an acting member id (`--member-id` / `--from-member-id`) that is not in `--fleet-id` | `Error: member <member-id> is not in fleet <fleet-id>.` (exit 1) — the fleet-membership gate runs before any read/write operation, and also fires for an unknown id. |
-| `member prompt` with missing positional `TEXT` | `Error: Missing argument 'TEXT'.` (exit 2) |
-| `member prompt` with `\n` or `\r` | `Error: text may not contain newlines.` (exit 2; checked first, against the original text — a `"\n"`-only input raises this error, not the empty-text one) |
-| `member prompt ""` (empty / whitespace-only) | `Error: text may not be empty.` (exit 2) |
-| `member capture` / `member prompt` / `member ping` on a member with pending placement | `Error: member <id> has no pane yet (pending placement) — nothing to <capture|prompt|ping>.` (exit 1) |
-| `member ping` when the keystroke fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` (exit 1) |
-| `member show` / `member capture` / `member prompt` / `member ping` with a cross-fleet / unknown / inactive target member id | `Error: Member <member-id> not found` (exit 1) |
-| `member capture` / `member prompt` / `member ping` on an in-fleet target with no placement row | ``Error: member <member-id> has no placement row; it was not spawned via `cafleet member create`.`` (exit 1) |
-| Any `--text` / `--text-file` command (`message send`, `message broadcast`, `member create`) with neither flag | `Error: Provide exactly one of --text or --text-file.` (exit 2) |
-| Any `--text` / `--text-file` command with both flags | `Error: --text and --text-file are mutually exclusive.` (exit 2) |
-| `--text` empty or whitespace-only | `Error: text may not be empty.` (exit 2) |
-| `--text-file <path>` to an empty (zero-byte or whitespace-only) file | `Error: --text-file <path>: file is empty.` (exit 1) |
-| `--text-file -` with empty (or whitespace-only) stdin | `Error: --text-file -: stdin is empty.` (exit 1) |
-| `--text-file <path>` to a non-existent path or non-regular file | `Error: --text-file <path>: file does not exist or is not a regular file.` (exit 1) |
-| `--text-file <path>` to an unreadable file | `Error: --text-file <path>: file is not readable.` (exit 1) |
-| `--text-file <path>` to a file containing invalid UTF-8 | `Error: --text-file <path>: file is not valid UTF-8.` (exit 1) |
-| `member create --coding-agent opencode --model` with a value violating the `<provider-id>/<model-id>` format | `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` (exit 2; fires before any side effect) |
-| `member create --effort` with a level unknown to the claude backend | `Error: --effort for the claude backend must be one of low, medium, high, xhigh, max (got '<value>').` (exit 2; fires before any side effect) |
-| `member create --coding-agent codex --effort` with an unknown level | `Error: --effort for the codex backend must be one of minimal, low, medium, high, xhigh (got '<value>').` (exit 2; fires before any side effect) |
-| `member create --coding-agent opencode --effort` with any value | `Error: opencode does not support reasoning effort.` (exit 2; fires before any side effect) |
-| `member create` with an unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` (exit 2; the just-registered member is rolled back) |
-| `member create` with a malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` (exit 2; the just-registered member is rolled back) |
-| `member create --role monitor` when the fleet already has an active monitoring member | `Error: fleet <id> already has an active monitoring member (member <existing-id>); only one is allowed.` (exit 1) |
-| `member create` with `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the member's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
-| `member create` with `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the member's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` (exit 1; nothing spawned) |
-| `monitor start` for a fleet that already has a live monitor | `Error: monitor already running for fleet <id>` (exit 1) |
-| `monitor start` / `monitor status` against an unknown or soft-deleted fleet | `Error: fleet <id> not found` (exit 1) |
-| `monitor config` with both `--enable` and `--disable` | `Error: --enable and --disable are mutually exclusive.` (exit 2) |
-| `monitor config` against a member not in the fleet or not enrolled | `Error: member <id> is not enrolled in monitoring for fleet <fleet-id>.` (exit 1) |
+| Command | Situation | Error message | Exit | Notes |
+|---|---|---|---|---|
+| (any fleet-scoped command) | No assets install recorded (missing DB file, missing `asset_installs` table, or zero rows) | `Error: no assets install is recorded; run 'cafleet setup' first` | 1 | See [Stale-assets guard](#stale-assets-guard) |
+| (any fleet-scoped command) | A recorded `asset_installs` version differs from the runtime CLI version | `Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall` | 1 | See [Stale-assets guard](#stale-assets-guard) |
+| `setup` | The `asset_installs` table is missing as the assets half starts | `the database schema is missing or outdated; run 'cafleet setup' first` | 1 | An assets-half failure, after a db-half failure or an externally broken schema |
+| (any fleet-scoped command) | Missing `--fleet-id` | `Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.` | 1 | — |
+| (any `--member-id` command) | Missing `--member-id` | `Error: Missing option '--member-id'.` | 2 | — |
+| `fleet create` | No `--name` | `Error: Missing option '--name'.` | 2 | — |
+| `fleet create` | `--coding-agent` omitted | `Error: Missing option '--coding-agent'. Choose from:` followed by `claude,` / `codex,` / `opencode`, one per tab-indented line | 2 | Recorded verbatim under [`fleet create`](#fleet-create) |
+| `fleet create` | Run outside a supported multiplexer | `Error: cafleet fleet create must be run inside a tmux or herdr session` | 1 | No DB writes |
+| `fleet delete` | Unknown fleet_id | `Error: fleet 'X' not found.` | 1 | — |
+| `member create` | Unknown `--fleet-id` | `Error: Fleet '<fleet-id>' not found.` | 2 | Director auto-discovery runs first thing |
+| `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 | — |
+| `member create` | The fleet row has no `director_member_id` recorded | `Error: fleet <fleet-id> has no root Director recorded; re-create the fleet with 'cafleet fleet create'.` | 1 | Mid-bootstrap corruption |
+| `member create` | With a placement, when the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 | The `register_member` invariant guard |
+| `member delete` | Against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` | 1 | — |
+| `message *` | An acting member id (`--member-id` / `--from-member-id`) not in `--fleet-id` | `Error: member <member-id> is not in fleet <fleet-id>.` | 1 | The fleet-membership gate runs before any read/write operation, and also fires for an unknown id |
+| `member prompt` | Missing positional `TEXT` | `Error: Missing argument 'TEXT'.` | 2 | — |
+| `member prompt` | `\n` or `\r` in the text | `Error: text may not contain newlines.` | 2 | Checked first, against the original text — a `"\n"`-only input raises this, not the empty-text error |
+| `member prompt` | Empty / whitespace-only text | `Error: text may not be empty.` | 2 | — |
+| `member capture` / `prompt` / `ping` | The member has a pending placement | <code>Error: member &lt;id&gt; has no pane yet (pending placement) — nothing to &lt;capture&#124;prompt&#124;ping&gt;.</code> | 1 | — |
+| `member ping` | The keystroke fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` | 1 | — |
+| `member show` / `capture` / `prompt` / `ping` | A cross-fleet, unknown, or inactive target member id | `Error: Member <member-id> not found` | 1 | — |
+| `member capture` / `prompt` / `ping` | An in-fleet target with no placement row | ``Error: member <member-id> has no placement row; it was not spawned via `cafleet member create`.`` | 1 | — |
+| `message send` / `message broadcast` / `member create` | Neither `--text` nor `--text-file` | `Error: Provide exactly one of --text or --text-file.` | 2 | — |
+| `message send` / `message broadcast` / `member create` | Both flags | `Error: --text and --text-file are mutually exclusive.` | 2 | — |
+| `message send` / `message broadcast` / `member create` | `--text` empty or whitespace-only | `Error: text may not be empty.` | 2 | — |
+| `message send` / `message broadcast` / `member create` | `--text-file <path>` to an empty (zero-byte or whitespace-only) file | `Error: --text-file <path>: file is empty.` | 1 | — |
+| `message send` / `message broadcast` / `member create` | `--text-file -` with empty or whitespace-only stdin | `Error: --text-file -: stdin is empty.` | 1 | — |
+| `message send` / `message broadcast` / `member create` | `--text-file <path>` to a non-existent path or non-regular file | `Error: --text-file <path>: file does not exist or is not a regular file.` | 1 | — |
+| `message send` / `message broadcast` / `member create` | `--text-file <path>` to an unreadable file | `Error: --text-file <path>: file is not readable.` | 1 | — |
+| `message send` / `message broadcast` / `member create` | `--text-file <path>` to a file containing invalid UTF-8 | `Error: --text-file <path>: file is not valid UTF-8.` | 1 | — |
+| `member create` | `--coding-agent opencode --model` violating the `<provider-id>/<model-id>` format | `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` | 2 | Fires before any side effect |
+| `member create` | `--effort` with a level unknown to the claude backend | `Error: --effort for the claude backend must be one of low, medium, high, xhigh, max (got '<value>').` | 2 | Fires before any side effect |
+| `member create` | `--coding-agent codex --effort` with an unknown level | `Error: --effort for the codex backend must be one of minimal, low, medium, high, xhigh (got '<value>').` | 2 | Fires before any side effect |
+| `member create` | `--coding-agent opencode --effort` with any value | `Error: opencode does not support reasoning effort.` | 2 | Fires before any side effect |
+| `member create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` | 2 | The just-registered member is rolled back |
+| `member create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 | The just-registered member is rolled back |
+| `member create` | `--role monitor` when the fleet already has an active monitoring member | `Error: fleet <id> already has an active monitoring member (member <existing-id>); only one is allowed.` | 1 | — |
+| `member create` | `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the member's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
+| `member create` | `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the member's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
+| `monitor start` | The fleet already has a live monitor | `Error: monitor already running for fleet <id>` | 1 | — |
+| `monitor start` / `monitor status` | An unknown or soft-deleted fleet | `Error: fleet <id> not found` | 1 | — |
+| `monitor config` | Both `--enable` and `--disable` | `Error: --enable and --disable are mutually exclusive.` | 2 | — |
+| `monitor config` | A member not in the fleet or not enrolled | `Error: member <id> is not enrolled in monitoring for fleet <fleet-id>.` | 1 | — |

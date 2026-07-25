@@ -45,15 +45,34 @@ Director follows whenever it re-engages a member.
 
 ## The watched set
 
-Enrollment covers the **root Director** (default interval **180 s**) and
-**every ordinary member** (default **720 s**). The monitoring member itself is
-not enrolled — it is the watcher — and neither are placementless registry
-rows. A watched member is flagged only
-when it is enabled, its pane is alive, and its interval has elapsed since its
-last wake-dispatch (`last_ping_at`); the stamp written for each interval-due
-member prevents a wake-storm while the watcher is still working (a
-stall-check-only due member keeps its `last_ping_at` untouched — only its stall
-baseline advances).
+Enrollment is by member class:
+
+| Member class | Enrolled | `monitor` field on `GET /api/members` |
+|---|---|---|
+| The fleet's root Director | yes | A schedule object |
+| An ordinary member with a placement | yes | A schedule object |
+| The dedicated monitoring member | no — it is the watcher | `null` |
+| A deregistered member | no — the row is hard-deleted on deregistration | `null` |
+| A registry row without a placement | no | `null` |
+
+The root Director is checked far more often than an ordinary member; both
+defaults live in the knob table under
+[Cadence and tick precision](#cadence-and-tick-precision).
+
+A watched member is flagged only when it is enabled, its pane is alive, and its
+interval has elapsed since its last wake-dispatch (`last_ping_at`); the stamp
+written for each interval-due member prevents a wake-storm while the watcher is
+still working (a stall-check-only due member keeps its `last_ping_at` untouched
+— only its stall baseline advances).
+
+Four reasons can flag a member:
+
+| Reason | Fires when | Advances `last_ping_at`? | Availability | Silenced by |
+|---|---|---|---|---|
+| `interval` | The member is enabled, its pane is alive, and its own interval has elapsed since `last_ping_at` | yes | Both backends | `cafleet monitor config --disable` |
+| `unacked` | Its oldest un-acked delivery has waited at least the member's own `interval_seconds` | no | Both backends | `cafleet monitor config --disable` — there is no dedicated switch |
+| `stall-check` | The stall-check interval has elapsed since that pane's last stall-check wake | no | Both backends | `CAFLEET_MONITOR_STALL_INTERVAL=0`, or `cafleet monitor config --disable` |
+| `status:done` | The member's native agent status transitions into `done` | yes | herdr only | `cafleet monitor config --disable` |
 
 A watched member is additionally flagged with reason `unacked` when its oldest
 un-acked delivery — an `input_required` message other than a
@@ -87,13 +106,13 @@ On each wake it runs a routine bounded to two read/act commands — read-only
 2. **Capture each named pane** (always also the Director's) and classify it
    from the capture content only, first match wins:
 
-   | State | Evidence | Monitor action |
-   |---|---|---|
-   | `awaiting_user` | An unanswered question or permission prompt | **None** — never re-engage |
-   | `unknown` | Dead/unreadable pane, or a stall-check wake with no remembered baseline | **None** — fail-safe |
-   | `finished` | A completed turn at an empty input prompt | Report to the Director |
-   | `stalled` | A stall-check capture identical to the previous stall-check capture | Report to the Director |
-   | `working` | In-flight work matched by no earlier rule | None |
+   | State | Evidence | Monitor action | Action when the member is tagged `unacked` |
+   |---|---|---|---|
+   | `awaiting_user` | An unanswered question or permission prompt | **None** — never re-engage | **None** — report suppressed |
+   | `unknown` | Dead/unreadable pane, or a stall-check wake with no remembered baseline | **None** — fail-safe | **None** — report suppressed |
+   | `finished` | A completed turn at an empty input prompt | Report to the Director | Report to the Director |
+   | `stalled` | A stall-check capture identical to the previous stall-check capture | Report to the Director | Report to the Director |
+   | `working` | In-flight work matched by no earlier rule | None | Report to the Director |
 
    When a capture cannot distinguish `awaiting_user` from `finished`, classify
    `awaiting_user`: a missed `finished` delays a nudge by one cycle, but a
@@ -102,11 +121,11 @@ On each wake it runs a routine bounded to two read/act commands — read-only
    stall-check wake, replaced unconditionally on every stall-check wake.
 4. **Apply the unacked report rule** — for a member tagged `unacked`, its
    oldest un-acked delivery has waited at least one full member interval (a
-   missed poll trigger): report it to the Director whenever its pane
-   classifies `finished`, `stalled`, or `working` — a busy pane is still
-   reported and the Director decides. `awaiting_user` suppresses the report
-   (the member is waiting on the user, not on a nudge), and `unknown`
-   suppresses it too: an unreadable capture cannot rule out a pending prompt.
+   missed poll trigger), and the rubric's fourth column gives the report
+   behavior per state. A busy pane is still reported and the Director decides;
+   `awaiting_user` suppresses the report because the member is waiting on the
+   user rather than on a nudge, and `unknown` suppresses it because an
+   unreadable capture cannot rule out a pending prompt.
 5. **Re-engage the Director** via `cafleet message send` when a due member is
    `stalled` or `finished`, or an `unacked`-tagged member is reportable per
    the rule above — **unless the Director's own pane is
@@ -125,7 +144,7 @@ itself capture-gated (see *Heartbeat vs facilitation* above).
 |---|---|---|
 | Root Director ping interval | `180s` | `monitor_config.interval_seconds` (the Director's row) |
 | Ordinary member ping interval | `720s` | `monitor_config.interval_seconds` (each member's row) |
-| Stall-check interval | `240s` | `monitor_stall_interval` / `CAFLEET_MONITOR_STALL_INTERVAL` (`0` disables) |
+| Stall-check interval | `240s` | `monitor_stall_interval` / `CAFLEET_MONITOR_STALL_INTERVAL` |
 | Unacked-delivery staleness / re-fire | the member's own ping interval | `monitor_config.interval_seconds` (no dedicated knob) |
 | Scan tick | `5s` | `monitor start --tick N` (per run) |
 
@@ -139,10 +158,11 @@ classify it `stalled` without waiting for the (much longer) member interval.
 The unacked trigger reuses the member's own `interval_seconds` as both its
 staleness threshold and its re-fire period, coupling staleness tolerance to
 check cadence by design — tightening a member's ping interval also tightens
-how long its deliveries may sit un-acked. It has no dedicated switch:
-`cafleet monitor config --disable` (`enabled = 0`) silences the member from
-**all** triggers, while `CAFLEET_MONITOR_STALL_INTERVAL=0` disables only
-stall-check and does not affect `unacked`.
+how long its deliveries may sit un-acked. It has no dedicated switch — each
+reason's disable path is the *Silenced by* column of the wake-reason table in
+[The watched set](#the-watched-set), where `cafleet monitor config --disable`
+(`enabled = 0`) silences a member from **all** triggers while
+`CAFLEET_MONITOR_STALL_INTERVAL=0` reaches only stall-check.
 
 ## Single-instance and liveness
 
