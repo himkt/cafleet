@@ -1,7 +1,7 @@
 # Tabular content across the documentation site
 
 **Status**: Approved
-**Progress**: 0/70 tasks complete
+**Progress**: 2/70 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -156,8 +156,8 @@ Every task names the finding id(s) it implements, so all 70 tasks trace back to 
 
 ### Step 1: Record the convention
 
-- [ ] Add a tables bullet to `docs/contributing.md` § Documentation style stating the tabulate rule, the one-row and paragraph-cell anti-rules, and the single-owner-plus-link rule *(no finding — convention)* <!-- completed: -->
-- [ ] Record the same tabulate convention as a project rule under `.claude/rules`, covering the tabulate rule, both anti-rules, the single-owner-plus-link rule, and the table-rendering conventions — agents author most of these pages and read the rules, not the contributor guide *(no finding — convention)* <!-- completed: -->
+- [x] Add a tables bullet to `docs/contributing.md` § Documentation style stating the tabulate rule, the one-row and paragraph-cell anti-rules, and the single-owner-plus-link rule *(no finding — convention)* <!-- completed: 2026-07-25T13:25 -->
+- [x] Record the same tabulate convention as a project rule under `.claude/rules`, covering the tabulate rule, both anti-rules, the single-owner-plus-link rule, and the table-rendering conventions — agents author most of these pages and read the rules, not the contributor guide *(no finding — convention)* <!-- completed: 2026-07-25T13:30 -->
 
 ### Step 2: `docs/spec/coding-agent-backends.md`
 

@@ -121,3 +121,11 @@ When editing `docs/` or `README.md`, follow these conventions:
   ids.
 - **SSOT**: one fact, one home. When another page needs the fact, link;
   when a fact serves no install/configure/use/understand purpose, delete.
+- **Tables**: state an enumeration of three or more parallel items carrying
+  two or more shared attributes as a table; keep single items, ordered
+  procedures, and rationale as prose. Give every table at least two data
+  rows — a one-row table costs a header row and buys nothing over a
+  sentence — and keep every cell to at most two sentences. When an
+  enumeration belongs on more than one page, give it one owning page
+  carrying the table and make every other mention a link plus a one-clause
+  summary.
