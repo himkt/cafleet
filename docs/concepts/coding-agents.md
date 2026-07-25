@@ -49,9 +49,9 @@ broker CLI reference, see [CLI options](../spec/cli-options.md).
 
 `cafleet member create --model <string>` forwards the value to the spawned
 backend's own `--model` flag — e.g. `--model opus` for a `claude` member;
-omit it and the binary uses its own default. Validation and the accepted
-model-name format are per-backend and documented on the backend reference
-pages linked above.
+omit it and the binary uses its own default. Per-backend accepted formats and
+create-time validation are in
+[Coding-agent backends § Model selection](../spec/coding-agent-backends.md#model-selection).
 
 ## Reasoning effort
 

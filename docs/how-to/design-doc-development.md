@@ -16,7 +16,7 @@ Each prompt triggers one `cafleet-design-doc` workflow:
 |---|---|---|---|
 | 1. Draft | `Create a design doc for <one-line feature description>.` | create | Director + Drafter + Reviewer |
 | 2. Refine | `Interview me about design-docs/NNNNNNN-<slug>.` | interview | Director + Analyzer, annotating the document with your answers |
-| 3. Implement | `Implement design-docs/NNNNNNN-<slug>.` | execute | Director + Programmer + Tester, with a fresh Reviewer before your approval |
+| 3. Implement | `Implement design-docs/NNNNNNN-<slug>.` | execute | Director + Programmer + Tester + optional Verifier, with a fresh Reviewer before your approval |
 
 The contributor-facing description of this loop, including what to pass to
 each skill, lives in [Contributing](../contributing.md).

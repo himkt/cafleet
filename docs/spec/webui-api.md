@@ -13,11 +13,12 @@ The WebUI does not require authentication. Fleet-scoped endpoints require an
 over HTTP and coerced by the backend with `int(...)`. A missing or non-integer
 value returns 400. The backend verifies the fleet exists in the `fleets` table.
 
-Two fleet-scoping errors apply to **every** fleet-scoped endpoint:
+These fleet-scoping errors apply to **every** fleet-scoped endpoint:
 
 | Status | `detail` | Trigger |
 |---|---|---|
-| 400 | — | A missing or non-integer `X-Fleet-Id` header |
+| 400 | `X-Fleet-Id header required` | The `X-Fleet-Id` header is missing or empty |
+| 400 | `X-Fleet-Id must be an integer` | The header value is not an integer |
 | 404 | `Fleet not found` | The header names a fleet id that does not exist |
 
 No server-side session cookies. The SPA stores the active fleet_id client-side via hash-based routing and sends it in the X-Fleet-Id header on each request.
@@ -171,7 +172,7 @@ Returns one member's monitoring schedule.
 **Errors**: 404 (`detail: "Member not enrolled"`) when the member is not in the
 fleet, or is not one of the
 [enrolled member classes](../concepts/monitoring.md#the-watched-set) — in
-addition to the two fleet-scoping errors in
+addition to the shared fleet-scoping errors in
 [Request Headers](#request-headers).
 
 The SPA reads the folded `monitor` field on `GET /api/members` instead of
@@ -195,7 +196,7 @@ the same lower bound the CLI `--interval` (`click.IntRange(min=1)`) enforces.
 
 **Response** (200 OK): the updated config, same shape as the `GET` above.
 
-**Errors** — in addition to the two fleet-scoping errors in
+**Errors** — in addition to the shared fleet-scoping errors in
 [Request Headers](#request-headers):
 
 | Status | `detail` | Trigger |
@@ -211,9 +212,9 @@ The three message endpoints compare as follows:
 
 | Endpoint | Rows returned | Excluded | Ordering | Row cap |
 |---|---|---|---|---|
-| `GET /api/members/{member_id}/inbox` | Messages where `owner_member_id = member_id` | `type == "broadcast_summary"` | Newest first | none — the member detail view truncates client-side to the 200 most recent rows per tab |
-| `GET /api/members/{member_id}/sent` | Messages where `from_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC` | Same as inbox |
-| `GET /api/timeline` | All fleet messages, scoped through the sender join | `type == "broadcast_summary"` | `status_timestamp DESC` | Hard-capped at 200 rows; no pagination |
+| `GET /api/members/{member_id}/inbox` | Messages where `owner_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC` (newest first) | none — the member detail view truncates client-side to the 200 most recent rows per tab |
+| `GET /api/members/{member_id}/sent` | Messages where `from_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC` (newest first) | none — the member detail view truncates client-side to the 200 most recent rows per tab |
+| `GET /api/timeline` | All fleet messages, scoped through the sender join | `type == "broadcast_summary"` | `status_timestamp DESC` (newest first) | Hard-capped at 200 rows; no pagination |
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -333,13 +334,13 @@ X-Fleet-Id: <fleet_id>
 }
 ```
 
-**Errors** — in addition to the two fleet-scoping errors in
+**Errors** — in addition to the shared fleet-scoping errors in
 [Request Headers](#request-headers):
 
 | Status | `detail` | Trigger |
 |---|---|---|
 | 422 | A validation array, not a string — see [Error Format](#error-format) | Missing or invalid `from_member_id`, `to_member_id`, or `text` |
-| 400 | — | `from_member_id` is not an active member in the caller's fleet (`from_member not in fleet`) |
+| 400 | `from_member not in fleet` | `from_member_id` is not an active member in the caller's fleet |
 | 404 | `Member not found` | `to_member_id` does not resolve to an active member in the fleet (unknown, cross-fleet, or deregistered) |
 
 ## Error Format

@@ -95,10 +95,9 @@ codebase. Each workflow's prompt, team, and output is in
 [Spec Driven Dev § Prompts](how-to/design-doc-development.md#prompts); run them
 in that order — create, then interview, then execute.
 
-Two details matter to contributors specifically: the interview pass annotates
+One detail matters to contributors specifically: the interview pass annotates
 the doc with `COMMENT(user-relay)` markers that the create workflow's resume
-mode absorbs, and the execute pass may add an optional Verifier alongside its
-Director / Programmer / Tester team.
+mode absorbs.
 
 See your coding-agent's skill documentation for the literal invocation syntax.
 Existing design documents under [`design-docs/`](https://github.com/himkt/cafleet/tree/main/design-docs)
