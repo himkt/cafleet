@@ -172,8 +172,9 @@ class HerdrMultiplexer:
         # right column is every pane in the Director's tab except the Director's
         # own; the first member splits the Director pane rightward, later members
         # split a deterministic column pane downward. After appending a member,
-        # the column is rebalanced to equal heights (see
-        # _equalize_focused_tab_column) so the result matches tmux main-vertical.
+        # the column is rebalanced to equal heights (see _equalize_tab_column,
+        # anchored on the Director's own pane) so the result matches tmux
+        # main-vertical.
         # NOTE(himkt): once herdr respects the login shell when split, this won't be necessary
         # https://github.com/ogulcancelik/herdr/discussions/1517
         try:
@@ -197,34 +198,26 @@ class HerdrMultiplexer:
             new_pane_id = self._split_pane(reference.pane_id, "right", cwd, env_args)
         else:
             new_pane_id = self._split_pane(max(column), "down", cwd, env_args)
-            self._equalize_focused_tab_column()
+            self._equalize_tab_column(reference.pane_id)
         # pane run feeds one shell line, so the argv is quoted to preserve boundaries.
         _run(["herdr", "pane", "run", new_pane_id, shlex.join(command)])
         return new_pane_id
 
-    def _equalize_focused_tab_column(self) -> None:
-        """Rebalance the members' right column on the focused tab to equal
-        heights — the tmux ``select-layout main-vertical`` reflow that herdr has
-        no single command for.
+    def _equalize_tab_column(self, anchor_pane_id: str) -> None:
+        """Rebalance the members' right column on the tab containing
+        ``anchor_pane_id`` to equal heights — the tmux ``select-layout
+        main-vertical`` reflow that herdr has no single command for.
 
         Best-effort: any :class:`HerdrError` is swallowed so a resize failure
         never fails a spawn over cosmetics.
         """
         try:
-            self._resize_focused_tab_column()
+            self._resize_tab_column(anchor_pane_id)
         except HerdrError:
             return
 
-    def _resize_focused_tab_column(self) -> None:
-        current = _run_json(["herdr", "pane", "current"])
-        try:
-            tab_id = current["pane"]["tab_id"]
-        except KeyError as exc:
-            raise HerdrError(f"herdr pane current missing {exc} field") from exc
-        read = self._read_tab_layout(tab_id)
-        if read is None:
-            return  # focus moved between the two reads — leave the layout alone
-        panes, splits = read
+    def _resize_tab_column(self, anchor_pane_id: str) -> None:
+        panes, splits = self._read_tab_layout(anchor_pane_id)
         # The right column is every pane outside the leftmost (Director) column.
         min_x = min(p["rect"]["x"] for p in panes)
         column = sorted(
@@ -235,15 +228,17 @@ class HerdrMultiplexer:
             return
         self._equalize_column(column, splits)
 
-    def _read_tab_layout(
-        self, expected_tab_id: str
-    ) -> tuple[list[dict], list[dict]] | None:
-        """Return (panes, splits) when the focused-tab layout reported by
-        `herdr pane layout` is the expected tab, else None."""
+    def _read_tab_layout(self, anchor_pane_id: str) -> tuple[list[dict], list[dict]]:
+        """Return (panes, splits) for the tab containing ``anchor_pane_id``.
+
+        Addressing the read by a pane id makes it invoker- and focus-independent:
+        a bare `herdr pane layout` follows global focus, so it reports an
+        unrelated tab whenever the operator is viewing one.
+        """
         try:
-            layout = _run_json(["herdr", "pane", "layout"])["layout"]
-            if layout["tab_id"] != expected_tab_id:
-                return None
+            layout = _run_json(["herdr", "pane", "layout", "--pane", anchor_pane_id])[
+                "layout"
+            ]
             return layout["panes"], layout["splits"]
         except KeyError as exc:
             raise HerdrError(f"herdr pane layout missing {exc} field") from exc
@@ -457,11 +452,24 @@ class HerdrMultiplexer:
         except HerdrError:
             return
 
+    def _surviving_pane_in_tab(self, tab_id: str) -> str | None:
+        """A pane still open in ``tab_id`` to anchor the layout read on, or None
+        when the tab has no panes left. The killed pane is already gone, so it
+        cannot anchor its own tab's read."""
+        result = _run_json(["herdr", "pane", "list"])
+        try:
+            return next(
+                (p["pane_id"] for p in result["panes"] if p.get("tab_id") == tab_id),
+                None,
+            )
+        except KeyError as exc:
+            raise HerdrError(f"herdr pane list missing {exc} field") from exc
+
     def _resize_after_close(self, target_tab_id: str) -> None:
-        read = self._read_tab_layout(target_tab_id)
-        if read is None:
-            return  # focus is on another tab — never resize an unrelated layout
-        panes, splits = read
+        anchor_pane_id = self._surviving_pane_in_tab(target_tab_id)
+        if anchor_pane_id is None:
+            return  # the tab has no panes left — nothing to rebalance
+        panes, splits = self._read_tab_layout(anchor_pane_id)
         if not panes:
             return
         min_x = min(p["rect"]["x"] for p in panes)

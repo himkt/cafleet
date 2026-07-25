@@ -1877,22 +1877,25 @@ Each method's herdr realization:
   Director's own `pane_id`. If empty → `herdr pane split <reference.pane_id>
   --direction right --no-focus --cwd <cwd> [--env K=V …]` (first member); else
   `herdr pane split <max(column)> --direction down --no-focus --cwd <cwd>
-  [--env K=V …]` followed by the column-equalization step below. `<cwd>` is the
-  fetched working directory, passed verbatim (absolute path, argv list, no
-  quoting). Then `herdr pane run <new_id> "<shlex.join(command)>"`.
+  [--env K=V …]` followed by the column-equalization step below,
+  `_equalize_tab_column(reference.pane_id)` — anchored on the Director's own
+  pane, so the rebalance is independent of which tab or pane holds focus.
+  `<cwd>` is the fetched working directory, passed verbatim (absolute path,
+  argv list, no quoting). Then `herdr pane run <new_id> "<shlex.join(command)>"`.
   The argv `command` is rendered to a single properly-quoted string with
   `shlex.join` before the `pane run` because `pane run` submits one text line into
   the pane's shell (a genuine semantic difference from the tmux exec-argv path —
   otherwise an argument containing spaces would be re-split).
-- **`_equalize_focused_tab_column()`** — herdr has no single reflow command, so
-  after appending a member `split_window` rebalances the right column to equal
-  heights arithmetically. It reads the focused tab id (`herdr pane current` →
-  `result.pane.tab_id`) and the tab geometry (`herdr pane layout` →
-  `result.layout` with `tab_id`, `panes[].rect{x,y,width,height}`, and
-  `splits[].{direction,rect,ratio}`); if the layout's `tab_id` no longer matches
-  (focus moved), it returns. The right column is every pane whose `rect.x` is not
-  the minimum x (the Director column); its `down` splits form a right-leaning
-  chain where split *k* (top→bottom) separates member *k* from the members below.
+- **`_equalize_tab_column(anchor_pane_id)`** — herdr has no single reflow command,
+  so after appending a member `split_window` rebalances the right column to equal
+  heights arithmetically. It reads the tab geometry of the tab containing
+  `anchor_pane_id` (`herdr pane layout --pane <anchor_pane_id>` → `result.layout`
+  with `panes[].rect{x,y,width,height}` and `splits[].{direction,rect,ratio}`);
+  the read is anchored on a pane the backend already holds, so there is no
+  `herdr pane current` call and no tab-id comparison. The right column is every
+  pane whose `rect.x` is not the minimum x (the Director column); its `down`
+  splits form a right-leaning chain where split *k* (top→bottom) separates
+  member *k* from the members below.
   Equal heights ⇔ split *k* has ratio `1/(N-k)` (top → `1/N`, …, bottom pair →
   `1/2`). Because `herdr pane resize --amount` is a signed delta on a split's
   ratio, each split is driven to target by one resize: `delta = 1/(N-k) - ratio`
@@ -1910,13 +1913,16 @@ Each method's herdr realization:
   `ignore_missing` propagates unchanged and no rebalance runs.
   (3) `_rebalance_after_close(target_tab_id)` — best-effort: any `HerdrError`
   is swallowed so a layout failure never fails a delete (the pane is already
-  closed). Skips when `target_tab_id` is `None`. Otherwise it reads the
-  focused-tab layout via `_read_tab_layout(target_tab_id)` (`herdr pane
-  layout`; a `tab_id` mismatch returns `None` and skips — the rebalance never
-  resizes an unrelated tab's layout; a missing envelope field raises
-  `HerdrError`), returns on an empty pane list, and computes the member column
-  as the panes whose `rect.x` is not the minimum x, sorted by `y`. Column case
-  table: size ≥ 2 → `_equalize_column` (the `_equalize_focused_tab_column`
+  closed). Skips when `target_tab_id` is `None`. Otherwise it resolves an anchor
+  for the layout read — the killed pane is gone, so `_surviving_pane_in_tab`
+  runs `herdr pane list` and takes the first pane whose `tab_id` equals
+  `target_tab_id` (a missing envelope field raises `HerdrError`); `None` — no
+  pane left in that tab — skips the rebalance. It then reads that tab's layout
+  via `_read_tab_layout(anchor_pane_id)` (`herdr pane layout --pane <anchor>`,
+  which by construction returns the anchor pane's tab; a missing envelope field
+  raises `HerdrError`), returns on an empty pane list, and computes the member
+  column as the panes whose `rect.x` is not the minimum x, sorted by `y`. Column
+  case table: size ≥ 2 → `_equalize_column` (the `_equalize_tab_column`
   arithmetic above — `1/(N-k)` split targets, one signed resize per off-target
   split, the `len(down_splits) != n - 1` malformed-chain skip); size 1 → no
   resize (heights are trivially equal and the right split's ratio is unaffected
@@ -1926,7 +1932,7 @@ Each method's herdr realization:
   (skipped when the delta `< 1e-3`); an empty `splits` list is already
   structurally full-width (nothing emitted), and any other residue (multiple
   splits, a non-`right` split, ≥ 2 panes) is skipped. The create path shares
-  `_read_tab_layout` / `_equalize_column` with `_equalize_focused_tab_column`;
+  `_read_tab_layout` / `_equalize_column` with `_equalize_tab_column`;
   tmux `kill_pane` stays a bare `kill-pane` (native auto-fit).
 - **`list_pane_ids() -> set`** — `herdr pane list` → the set of pane ids.
 - **`send_exit(*, target_pane_id, ignore_missing=False)`** — `herdr pane run

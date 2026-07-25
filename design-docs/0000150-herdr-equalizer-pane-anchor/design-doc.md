@@ -1,7 +1,7 @@
 # herdr equalizer: anchor every layout read on a pane
 
-**Status**: Approved
-**Progress**: 0/22 tasks complete
+**Status**: Complete
+**Progress**: 22/22 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -14,16 +14,16 @@ operating on" two incompatible ways. This design replaces every bare
 
 ## Success Criteria
 
-- [ ] Spawning a member equalizes the member column regardless of which tab or pane
+- [x] Spawning a member equalizes the member column regardless of which tab or pane
       is focused at spawn time.
-- [ ] Deleting a member rebalances the killed pane's tab regardless of which tab or
+- [x] Deleting a member rebalances the killed pane's tab regardless of which tab or
       pane is focused at delete time.
-- [ ] The herdr backend issues no `herdr pane current` call on the spawn or delete
+- [x] The herdr backend issues no `herdr pane current` call on the spawn or delete
       layout paths; `context_discovery()` keeps its own `pane current` call.
-- [ ] Every `herdr pane layout` invocation in the backend carries `--pane <id>`.
-- [ ] `SPEC.md` and `docs/spec/multiplexer-backends.md` describe the anchored reads,
+- [x] Every `herdr pane layout` invocation in the backend carries `--pane <id>`.
+- [x] `SPEC.md` and `docs/spec/multiplexer-backends.md` describe the anchored reads,
       with no residual mention of the removed tab-mismatch skip.
-- [ ] The test suite pins the new argv on both paths and contains no test asserting
+- [x] The test suite pins the new argv on both paths and contains no test asserting
       the removed guard.
 
 ---
@@ -236,25 +236,25 @@ Documentation lands first, per `.claude/rules/documentation-maintenance.md`. No
 `skills/*/SKILL.md` file references the equalizer or `herdr pane layout`, so the skill
 surface needs no edit.
 
-- [ ] `SPEC.md` — replace the `_equalize_focused_tab_column()` bullet with
+- [x] `SPEC.md` — replace the `_equalize_focused_tab_column()` bullet with
       `_equalize_tab_column(anchor_pane_id)`: the geometry read is `herdr pane layout
       --pane <anchor_pane_id>`, there is no `pane current` call and no tab-id
-      comparison, and the `1/(N-k)` arithmetic and best-effort swallow are unchanged <!-- completed: -->
-- [ ] `SPEC.md` — update the `split_window` bullet so the equalization step is named
-      `_equalize_tab_column` and its anchor is stated as `reference.pane_id` <!-- completed: -->
-- [ ] `SPEC.md` — rewrite the `kill_pane` phase-3 spec: `_rebalance_after_close`
+      comparison, and the `1/(N-k)` arithmetic and best-effort swallow are unchanged <!-- completed: 2026-07-25T02:42 -->
+- [x] `SPEC.md` — update the `split_window` bullet so the equalization step is named
+      `_equalize_tab_column` and its anchor is stated as `reference.pane_id` <!-- completed: 2026-07-25T02:42 -->
+- [x] `SPEC.md` — rewrite the `kill_pane` phase-3 spec: `_rebalance_after_close`
       skips on a `None` tab, else `_surviving_pane_in_tab` runs `herdr pane list` and
       takes the first pane whose `tab_id` matches (`None` → skip), then
       `_read_tab_layout` reads `herdr pane layout --pane <anchor>`; delete the
       "a `tab_id` mismatch returns `None` and skips" clause; and rename both
       old-name references inside the bullet — the "`_equalize_focused_tab_column`
       arithmetic above" phrase and the shared-helper sentence — so all three
-      `SPEC.md` occurrences (with the bullet heading above) are renamed <!-- completed: -->
-- [ ] `docs/spec/multiplexer-backends.md` — rewrite the herdr bullet in
+      `SPEC.md` occurrences (with the bullet heading above) are renamed <!-- completed: 2026-07-25T02:42 -->
+- [x] `docs/spec/multiplexer-backends.md` — rewrite the herdr bullet in
       §*Delete-time pane layout* so tab scoping is attributed to the anchored read
       (a surviving pane in the killed pane's tab) instead of to a focused-tab
       comparison; remove the "whenever the focused-tab layout reports a different tab
-      than the killed pane's" clause and state the no-surviving-pane skip <!-- completed: -->
+      than the killed pane's" clause and state the no-surviving-pane skip <!-- completed: 2026-07-25T02:42 -->
 
 ### Step 2: Tests
 
@@ -269,22 +269,22 @@ because they return before the layout read (`__ignore_missing_swallows_pane_not_
 rebalance, and the fourth has no tab anchor, so none of them issue the new
 `pane list`).
 
-- [ ] Add a `_survivor_list(tab_id: str = "wT:t3")` helper returning
+- [x] Add a `_survivor_list(tab_id: str = "wT:t3")` helper returning
       `_envelope({"panes": [{"pane_id": "wT:p3", "tab_id": tab_id}]})` — the
       post-close `pane list` envelope supplying the rebalance anchor (`wT:p3` is the
-      Director pane already used by `_column_layout` / `_DIRECTOR_PANE`) <!-- completed: -->
-- [ ] Delete `test_equalize__focus_moved_between_reads_skips` and
+      Director pane already used by `_column_layout` / `_DIRECTOR_PANE`) <!-- completed: 2026-07-25T02:45 -->
+- [x] Delete `test_equalize__focus_moved_between_reads_skips` and
       `test_kill_pane__layout_on_different_tab_skips_resize` — both assert the removed
-      guard <!-- completed: -->
-- [ ] Re-point the three surviving `_equalize_*` tests
+      guard <!-- completed: 2026-07-25T02:45 -->
+- [x] Re-point the three surviving `_equalize_*` tests
       (`__three_member_column_drives_top_split_to_one_third`,
       `__already_balanced_column_emits_no_resize`, `__best_effort_swallows_herdr_error`)
       at `_equalize_tab_column("wT:p3")`: drop the `pane current` envelope and its argv
-      entry, and expect `["herdr", "pane", "layout", "--pane", "wT:p3"]` <!-- completed: -->
-- [ ] Re-point `test_split_window__subsequent_member_splits_max_then_equalizes`: drop
+      entry, and expect `["herdr", "pane", "layout", "--pane", "wT:p3"]` <!-- completed: 2026-07-25T02:45 -->
+- [x] Re-point `test_split_window__subsequent_member_splits_max_then_equalizes`: drop
       the `pane current` envelope and argv entry, expect
-      `["herdr", "pane", "layout", "--pane", "wG:p1"]`, and update the docstring <!-- completed: -->
-- [ ] Re-point the nine layout-reaching `kill_pane` tests (`__argv_and_success`,
+      `["herdr", "pane", "layout", "--pane", "wG:p1"]`, and update the docstring <!-- completed: 2026-07-25T02:45 -->
+- [x] Re-point the nine layout-reaching `kill_pane` tests (`__argv_and_success`,
       `__rebalances_remaining_column_after_close`, `__already_balanced_column_emits_no_resize`,
       `__single_remaining_member_emits_no_resize`,
       `__last_member_residual_right_split_restores_director_width`,
@@ -292,51 +292,85 @@ rebalance, and the fourth has no tab anchor, so none of them issue the new
       `__resize_error_swallowed`, `__malformed_split_chain_skips_resize`): insert
       `_survivor_list()` into `set_returns` immediately after the close entry, and
       `["herdr", "pane", "list"]` before the
-      `["herdr", "pane", "layout", "--pane", "wT:p3"]` entry in the expected argv <!-- completed: -->
-- [ ] Rename the old helper names where they appear outside a re-pointed assertion —
+      `["herdr", "pane", "layout", "--pane", "wT:p3"]` entry in the expected argv <!-- completed: 2026-07-25T02:45 -->
+- [x] Rename the old helper names where they appear outside a re-pointed assertion —
       the `split_window` region comment (line 122), the `_balanced_layout` docstring
       (line 202), the `_run_json`-wrapper inline comment (line 252), and the
       `_equalize_*` section-header comment (line 307) — so Step 4's residue grep
-      confirms rather than rediscovers <!-- completed: -->
-- [ ] Add the three regression tests: (i) the spawn path emits no
+      confirms rather than rediscovers <!-- completed: 2026-07-25T02:45 -->
+- [x] Add the three regression tests: (i) the spawn path emits no
       `["herdr", "pane", "current"]` and does emit `pane layout --pane wG:p1`;
       (ii) the delete path, given a `pane list` spanning two tabs, anchors on the
       surviving pane in the target tab and not on one from another tab; (iii) the
       delete path, given a `pane list` with no pane in the target tab, stops after
-      `pane list` with no layout read and no resize <!-- completed: -->
-- [ ] Run `mise //cafleet:test tests/multiplexer/test_herdr.py` and confirm the new and
-      re-pointed assertions fail against the unmodified code <!-- completed: -->
+      `pane list` with no layout read and no resize <!-- completed: 2026-07-25T02:45 -->
+- [x] Run `mise //cafleet:test tests/multiplexer/test_herdr.py` and confirm the new and
+      re-pointed assertions fail against the unmodified code <!-- completed: 2026-07-25T02:45 -->
 
 ### Step 3: Code
 
 `cafleet/src/cafleet/multiplexer/herdr.py` throughout.
 
-- [ ] Rewrite `_read_tab_layout` to take `anchor_pane_id`, issue
+- [x] Rewrite `_read_tab_layout` to take `anchor_pane_id`, issue
       `herdr pane layout --pane <anchor_pane_id>`, drop the tab-id comparison, and
-      return `tuple[list[dict], list[dict]]` <!-- completed: -->
-- [ ] Rename `_equalize_focused_tab_column` → `_equalize_tab_column` and
+      return `tuple[list[dict], list[dict]]` <!-- completed: 2026-07-25T02:49 -->
+- [x] Rename `_equalize_focused_tab_column` → `_equalize_tab_column` and
       `_resize_focused_tab_column` → `_resize_tab_column`, give each an
       `anchor_pane_id` parameter, delete the `pane current` call and the
-      `if read is None` branch, and update both docstrings <!-- completed: -->
-- [ ] Update `split_window` to call `self._equalize_tab_column(reference.pane_id)` and
-      rename the helper reference in its leading comment block <!-- completed: -->
-- [ ] Add `_surviving_pane_in_tab(tab_id) -> str | None` per the Specification <!-- completed: -->
-- [ ] Update `_resize_after_close` to resolve the anchor first, skip on `None`, and
+      `if read is None` branch, and update both docstrings <!-- completed: 2026-07-25T02:49 -->
+- [x] Update `split_window` to call `self._equalize_tab_column(reference.pane_id)` and
+      rename the helper reference in its leading comment block <!-- completed: 2026-07-25T02:49 -->
+- [x] Add `_surviving_pane_in_tab(tab_id) -> str | None` per the Specification <!-- completed: 2026-07-25T02:49 -->
+- [x] Update `_resize_after_close` to resolve the anchor first, skip on `None`, and
       drop its `if read is None` branch; leave the column case table, the
       `if not panes: return` guard, `kill_pane`, `_pane_tab_id`, and
-      `_rebalance_after_close` unchanged <!-- completed: -->
-- [ ] Run `mise //cafleet:format`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` <!-- completed: -->
+      `_rebalance_after_close` unchanged <!-- completed: 2026-07-25T02:49 -->
+- [x] Run `mise //cafleet:format`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` <!-- completed: 2026-07-25T02:49 -->
 
 ### Step 4: Verification
 
-- [ ] `mise //cafleet:test` — the full suite passes <!-- completed: -->
-- [ ] Live check: from a herdr session, switch the view to a tab **other** than the
+- [x] `mise //cafleet:test` — the full suite passes <!-- completed: 2026-07-25T02:54 -->
+- [x] Live check: from a herdr session, switch the view to a tab **other** than the
       Director's, spawn a member with `cafleet member create`, then read the layout
       read-only with `herdr pane layout --pane <director-pane-id>` and confirm the
       member column's split ratios match the `1/(N-k)` targets and the pane heights are
-      uniform — the scenario that reproduces the reported bug <!-- completed: -->
-- [ ] Live check: with the view still on another tab, delete a member and confirm the
-      remaining column re-equalizes <!-- completed: -->
-- [ ] Grep the repository for `_equalize_focused_tab_column`, `_resize_focused_tab_column`,
+      uniform — the scenario that reproduces the reported bug <!-- completed: 2026-07-25T03:05 -->
+- [x] Live check: with the view still on another tab, delete a member and confirm the
+      remaining column re-equalizes <!-- completed: 2026-07-25T03:06 -->
+- [x] Grep the repository for `_equalize_focused_tab_column`, `_resize_focused_tab_column`,
       and the removed guard's wording ("focus moved", "focused-tab layout") and confirm
-      no residue remains in code, tests, `SPEC.md`, or `docs/` <!-- completed: -->
+      no residue remains in code, tests, `SPEC.md`, or `docs/` <!-- completed: 2026-07-25T02:54 -->
+
+**Live-check status.** The geometry half of both live checks was executed against a real
+herdr 0.7.4 session on fleet 28 and passed exactly. The focus precondition was not met;
+the operator accepted the checks as adequately covered by the unit tests plus the
+geometry run below, and both boxes are checked on that basis.
+
+Measured, spawning a scratch member to take the member column from N=4 to N=5 and then
+deleting it:
+
+| Stage | Split ratios | `1/(N-k)` targets | Column heights |
+|---|---|---|---|
+| N=4 baseline | 0.25 / 0.3333 / 0.5 | 0.25 / 0.3333 / 0.5 | 18 / 17 / 18 / 17 |
+| N=5 after spawn | 0.2 / 0.25 / 0.3333 / 0.5 | 0.2 / 0.25 / 0.3333 / 0.5 | 14 / 14 / 14 / 14 / 14 |
+| N=4 after delete | 0.25 / 0.3333 / 0.5 | 0.25 / 0.3333 / 0.5 | 18 / 17 / 18 / 17 |
+
+Every ratio landed on target and every column was uniform within integer rounding of the
+70-row area — against the Background's reported failure at the same N=5 size (heights
+16/16/10/14/14, ratios 0.2286/0.2963/0.2632/0.5).
+
+What this does not establish: global focus was on the Director's tab `w23:t7` throughout
+(confirmed by a bare `herdr pane layout` returning `tab_id: w23:t7` and `herdr pane
+current` reporting the Director pane `focused: true`). That is the condition under which
+the equalizer worked even before this change, so the run demonstrates no regression but
+does not exercise the reported bug — which requires the view on a non-Director tab. The
+focus-independence of the anchored read is covered by the unit tests
+(`test_split_window__layout_read_anchored_on_director_not_focus` and the two delete-path
+anchor regressions), which pin argv rather than live geometry.
+
+## Changelog
+
+| Date | Changes |
+|------|---------|
+| 2026-07-25 | Initial draft |
+| 2026-07-25 | Execution complete: all 22 tasks and 6 success criteria done; post-implementation Reviewer approved in 2 rounds, its one finding (an unpinned `_surviving_pane_in_tab` KeyError→HerdrError branch) fixed by a parametrized regression guard; live-check geometry verified at N=5 and after delete, with the non-Director-focus precondition unmet and accepted by the operator; PR #225 opened |
