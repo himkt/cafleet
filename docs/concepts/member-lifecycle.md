@@ -55,11 +55,14 @@ substituting `{fleet_id}`, `{member_id}` (the member's own newly-allocated id),
 ## Delete ordering
 
 `cafleet member delete` tears down the pane (when one exists) and
-soft-deletes the member. Pane path: kill the pane immediately (tolerating an
-already-gone pane), then deregister — exit 0. A member with a
-pending placement (no pane yet) is a plain registry soft-delete, and so is a
-placementless registry row (no placement row) — `cafleet member delete`
-soft-deletes both without touching the multiplexer.
+soft-deletes the member, exiting 0. An already-gone pane is tolerated, not an
+error.
+
+| Member state | What `member delete` does | Multiplexer effect |
+|---|---|---|
+| A live pane | Kills the pane immediately, then deregisters | The pane is killed |
+| A pending placement (no pane id yet) | A plain registry soft-delete | none |
+| A placementless registry row (no placement row) | A plain registry soft-delete | none |
 
 ## Spawn-prompt input modes
 
@@ -70,17 +73,21 @@ whole prompt from stdin); literal braces in prompt text must be doubled (`{{`,
 
 ## Commands
 
-The lifecycle ops live in the `member` group: `member create`, `member delete`,
-`member show` (single-member
-detail — kind, skills, placement block), and `member list` (every active
-registry entry of the fleet, with `kind` and `idle` columns). Keystroke
-interaction lives
-in the same group: `member capture`, `member prompt`, and `member ping`.
+The lifecycle ops and keystroke interaction all live in the `member` group:
+
+| Lifecycle stage | Commands |
+|---|---|
+| Spawn | `member create` |
+| Teardown | `member delete` |
+| Introspection | `member show`, `member list` |
+| Keystroke interaction | `member capture`, `member prompt`, `member ping` |
+
 `member create` takes no identity flag — the CLI resolves the
 Director from `fleets.director_member_id`; every other lifecycle verb targets
-its member by `--member-id`, scoped to the per-subcommand `--fleet-id`. See
-[CLI options](../spec/cli-options.md) for every flag and the shared
-resolution rules.
+its member by `--member-id`, scoped to the per-subcommand `--fleet-id`. Each
+subcommand's purpose and identity flag are in
+[CLI options § Subcommand summary](../spec/cli-options.md#subcommand-summary),
+which also carries every flag and the shared resolution rules.
 
 `cafleet member prompt` keystrokes text into a member's pane: the plain form
 submits a direct user turn (for slash commands and other magic commands a

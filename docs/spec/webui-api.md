@@ -98,12 +98,10 @@ Returns the selected fleet's roster via `list_roster(include_message_holders=Tru
 
 **`monitor` field**: each member carries its folded monitoring schedule —
 `{"interval_seconds": int, "last_ping_at": str|null, "enabled": bool}` — or
-`null` when the member is not enrolled (the unenrolled watcher, deregistered
-members, and members without a placement all carry
-`monitor: null`). Folding the schedule into the list lets the SPA render every
-member's schedule without an extra request per member. Which members are
-enrolled — the watched set — is defined in
-[Monitoring](../concepts/monitoring.md).
+`null` when the member is not enrolled. Folding the schedule into the list lets
+the SPA render every member's schedule without an extra request per member.
+Which members are enrolled — the watched set — is defined in
+[Monitoring](../concepts/monitoring.md#the-watched-set).
 
 **`kind` values** — the unified 3-value vocabulary:
 
@@ -171,8 +169,9 @@ Returns one member's monitoring schedule.
 ```
 
 **Errors**: 404 (`detail: "Member not enrolled"`) when the member is not in the
-fleet or not enrolled (the monitoring member, deregistered, placementless) —
-in addition to the two fleet-scoping errors in
+fleet, or is not one of the
+[enrolled member classes](../concepts/monitoring.md#the-watched-set) — in
+addition to the two fleet-scoping errors in
 [Request Headers](#request-headers).
 
 The SPA reads the folded `monitor` field on `GET /api/members` instead of
@@ -202,7 +201,7 @@ the same lower bound the CLI `--interval` (`click.IntRange(min=1)`) enforces.
 | Status | `detail` | Trigger |
 |---|---|---|
 | 422 | A validation array, not a string — see [Error Format](#error-format) | An invalid body: `interval_seconds < 1`, or a wrong type |
-| 404 | `Member not enrolled` | The member is not in the fleet or not enrolled |
+| 404 | `Member not enrolled` | The member is not in the fleet, or is not one of the [enrolled member classes](../concepts/monitoring.md#the-watched-set) |
 
 ### GET /api/members/{member_id}/inbox — Inbox Messages
 

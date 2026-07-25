@@ -4,12 +4,17 @@ icon: lucide/cpu
 
 # Coding agents
 
-cafleet supports three coding-agent binaries inside member panes: `claude`
-(Claude Code), `codex` (OpenAI Codex CLI), and `opencode`
-(opencode.ai). The backend is selected per member with
-`--coding-agent {claude,codex,opencode}`, and mixed-backend teams are allowed:
-a single Director may spawn all three in the same fleet with no broker-level
-differences. The value is recorded in the placement's `coding_agent` column.
+cafleet supports three coding-agent binaries inside member panes. The backend
+is selected per member with `--coding-agent {claude,codex,opencode}`, and
+mixed-backend teams are allowed: a single Director may spawn all three in the
+same fleet with no broker-level differences. The value is recorded in the
+placement's `coding_agent` column.
+
+| Backend | Product | How the pane loads the cafleet skill |
+|---|---|---|
+| `claude` | Claude Code | Loads the Claude Code skills directly |
+| `codex` | OpenAI Codex CLI | Reads the cafleet skill files by absolute path |
+| `opencode` | opencode.ai | Reads the cafleet skill files by absolute path |
 
 The flag means slightly different things per command:
 
@@ -23,11 +28,9 @@ The flag means slightly different things per command:
   value still wins).
 
 Each backend is spawned with flags that enable its Bash tool with no runtime
-permission prompts. claude and codex members run cafleet (and any shell
-command) directly; opencode members run only the commands on their preset's
-deny-by-default bash allowlist and route everything else to the Director.
-The per-backend spawn argv, auto-approval posture, and sandbox trade-offs are
-specified in [Coding-agent backends](../spec/coding-agent-backends.md).
+permission prompts. The per-backend spawn argv, shell-command posture, and
+sandbox trade-offs are specified in
+[Coding-agent backends § Spawn argv](../spec/coding-agent-backends.md#spawn-argv).
 
 ## cafleet usage from a member pane
 
@@ -37,8 +40,7 @@ identity placeholders — `{fleet_id}`, `{member_id}`, `{director_member_id}`,
 and `{coding_agent}` — to literals, so the member reads its ids as plain text
 lines (e.g. `FLEET ID: 1`, `YOUR MEMBER ID: 4`) and passes them explicitly on
 every command. The only environment variable forwarded into the pane is
-`CAFLEET_DATABASE_URL`. claude panes load the Claude Code skills directly,
-while codex and opencode panes read the cafleet skill files by absolute path.
+`CAFLEET_DATABASE_URL`.
 All three honor a leading-`!` shell shortcut on the coding agent's input line,
 so `cafleet member prompt --shell` works against any pane shape. For the full
 broker CLI reference, see [CLI options](../spec/cli-options.md).
@@ -54,26 +56,24 @@ pages linked above.
 ## Reasoning effort
 
 `cafleet member create --effort <level>` forwards a reasoning-effort level to
-the spawned backend binary: claude via `--effort <level>` (levels `low`,
-`medium`, `high`, `xhigh`, `max`) and codex via
-`--config=model_reasoning_effort=<level>` (levels `minimal`, `low`, `medium`,
-`high`, `xhigh`). Unlike `--model`, the accepted level set is validated per
-backend at create time, before any registration or multiplexer side effect;
-omit the flag and the binary uses its own default. The opencode backend does
-not support reasoning effort (see the asymmetry below). The exact argv forms
-and error strings are specified in
-[Coding-agent backends](../spec/coding-agent-backends.md).
+the spawned backend binary. Unlike `--model`, the accepted level set is
+validated per backend at create time, before any registration or multiplexer
+side effect; omit the flag and the binary uses its own default. Per-backend
+accepted levels, forwarding forms, and rejection strings are in
+[Coding-agent backends § Reasoning effort](../spec/coding-agent-backends.md#reasoning-effort).
 
 ## Known asymmetries (intentional non-goals) {#known-asymmetries-intentional-non-goals}
 
-- **Reasoning effort.** Only `claude` and `codex` expose a reasoning-effort
-  control. `--effort` with the `opencode` backend exits 2 with
-  `opencode does not support reasoning effort.` before any side effect.
+These are intentional non-goals, not gaps.
 
-- **Pane title.** Only the `claude` spawn argv carries `--name`, so `codex`
-  and `opencode` panes do not display the member name in their pane title.
-  The `pane_id` column of `cafleet member list` is ground truth for all three.
-- **Sandbox isolation.** Only `codex` provides OS-level (kernel-enforced)
-  isolation. `claude` relies on a deny-list safety floor and `opencode` on a
-  deny-by-default bash allowlist — neither is kernel-enforced; operators who
-  need kernel-enforced isolation should use the `codex` backend.
+| Dimension | `claude` | `codex` | `opencode` |
+|---|---|---|---|
+| Reasoning effort | supported | supported | not supported |
+| Pane title | supported, via `--name` | not supported | not supported |
+| Sandbox isolation | not supported — a deny-list safety floor | supported — OS-level, kernel-enforced | not supported — a deny-by-default bash allowlist |
+
+`--effort` with the `opencode` backend exits 2 with
+`opencode does not support reasoning effort.` before any side effect. Because
+`codex` and `opencode` panes do not display the member name, the `pane_id`
+column of `cafleet member list` is ground truth for all three. Operators who
+need kernel-enforced isolation should use the `codex` backend.

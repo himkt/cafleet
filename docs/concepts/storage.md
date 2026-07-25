@@ -31,13 +31,19 @@ schema.
 The schema is managed by a **chain of Alembic migrations**; the current
 revision is recorded in the `alembic_version` table. Operators run
 `cafleet setup` (schema-only: `cafleet setup --skip claude --skip codex
---skip opencode`) once before starting the server; it migrates the database
-in place to the bundled head
-revision, preserving existing data (message history included), so it is
-idempotent and safe to re-run after every upgrade. It refuses to
-auto-downgrade a database that is ahead of the bundled head, and refuses an
-unversioned database with tables it does not recognize. Without the schema,
-the first request fails with `OperationalError: no such table: members`.
+--skip opencode`) once before starting the server. Existing data (message
+history included) is preserved, so the command is idempotent and safe to
+re-run after every upgrade.
+
+| Database state | What `cafleet setup` does |
+|---|---|
+| Behind the bundled head | Migrates in place to the bundled head revision |
+| Already at the bundled head | Nothing to apply |
+| Ahead of the bundled head | Refuses to auto-downgrade |
+| Unversioned, with tables it does not recognize | Refuses |
+
+Without the schema, the first request fails with
+`OperationalError: no such table: members`.
 
 ## Assets-install recording
 

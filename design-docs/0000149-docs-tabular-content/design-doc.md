@@ -1,7 +1,7 @@
 # Tabular content across the documentation site
 
 **Status**: Approved
-**Progress**: 14/70 tasks complete
+**Progress**: 31/70 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -179,7 +179,7 @@ Every task names the finding id(s) it implements, so all 70 tasks trace back to 
 - [x] Add an endpoint index table under `## Endpoints` with columns `Method | Path | Returns | X-Fleet-Id required`, one row per endpoint the live page documents — the page governs the count, and this document is corrected if it differs *(SPEC-F2)* <!-- completed: 2026-07-25T13:37 -->
 - [x] Convert the `GET /api/monitor` null-behavior paragraph to a `Field | No runtime row has ever existed | Stale or cleared heartbeat row` table with six rows; add no column for the running case *(SPEC-F3)* <!-- completed: 2026-07-25T13:37 -->
 - [x] Add a message-endpoint comparison table (`Endpoint | Rows returned | Excluded | Ordering | Row cap`) covering inbox, sent, and timeline. This table becomes the **single home** for the ordering and row-cap facts; the per-endpoint restatements of those two facts are trimmed. Keep the shared-formatter sentence, broadcast grouping, and ACK timestamp blocks *(SPEC-F4)* <!-- completed: 2026-07-25T13:37 -->
-- [ ] Replace the enrolled-member prose at the three `webui-api.md` sites with a link plus one-clause summary pointing at the owning table in `docs/concepts/monitoring.md` *(SPEC-F5)* <!-- completed: -->
+- [x] Replace the enrolled-member prose at the three `webui-api.md` sites with a link plus one-clause summary pointing at the owning table in `docs/concepts/monitoring.md` *(SPEC-F5)* <!-- completed: 2026-07-25T13:46 -->
 - [x] Confirm `## Error Format` still explains why 422 rows carry no quoted `detail` string, and that every 422 row points at it *(SPEC-F1)* <!-- completed: 2026-07-25T13:37 -->
 
 ### Step 4: `docs/spec/cli-options.md`
@@ -219,24 +219,24 @@ Every task names the finding id(s) it implements, so all 70 tasks trace back to 
 
 ### Step 7: `docs/concepts/`
 
-- [ ] `monitoring.md`: add a wake-reason table (`Reason | Fires when | Advances last_ping_at? | Availability | Silenced by`) over `interval`, `unacked`, `stall-check`, `status:done` *(CON-F9)* <!-- completed: -->
-- [ ] `monitoring.md`: add a fourth column to the five-state rubric table giving each state its behavior when the member is tagged `unacked`. Verify the `working` row's behavior against the monitor role definition and the implementation rather than copying either the existing table cell or the existing prose — the two currently disagree, so neither is a safe source *(CON-F10)* <!-- completed: -->
-- [ ] `monitoring.md`: cross-reference the wake-reason table's "silenced by" column from the knob table instead of adding a second disable column; move the stall row's `(0 disables)` out of its "Set by" cell *(CON-F11)* <!-- completed: -->
-- [ ] `monitoring.md`: remove the duplicated `180s` / `720s` defaults from the § The watched set prose, leaving the knob table as their single home; the prose may keep a qualitative magnitude description per the echo rule *(CON cross-page — monitor default intervals)* <!-- completed: -->
-- [ ] `monitoring.md`: add the enrolled-member table (`Member class | Enrolled | monitor field on GET /api/members`) with five rows — this page is the site-wide owner. Re-derive the five member classes from actual enrollment behavior and reconcile any drift against this page's existing prose; a wrong row key here propagates to every linking page *(SPEC-F5)* <!-- completed: -->
-- [ ] `coding-agents.md`: replace § Reasoning effort's running sentence with a link plus one-clause summary pointing at the owning table in `docs/spec/coding-agent-backends.md`, keeping the validation and default prose *(CON-F2)* <!-- completed: -->
-- [ ] `coding-agents.md`: convert § Known asymmetries to a `Dimension | claude | codex | opencode` matrix over reasoning effort, pane title, and sandbox isolation, carrying supported / not-supported rather than restating the level sets; absorb the second opencode-unsupported mention *(CON-F3)* <!-- completed: -->
-- [ ] `coding-agents.md`: add a `Backend | Product | How the pane loads the cafleet skill` table collecting the per-backend facts currently spread across the intro and § cafleet usage from a member pane. Carry no auto-approval-posture column — that enumeration is owned by the Step 2 capability matrix; link to it instead *(CON-F4)* <!-- completed: -->
+- [x] `monitoring.md`: add a wake-reason table (`Reason | Fires when | Advances last_ping_at? | Availability | Silenced by`) over `interval`, `unacked`, `stall-check`, `status:done` *(CON-F9)* <!-- completed: 2026-07-25T13:46 -->
+- [x] `monitoring.md`: add a fourth column to the five-state rubric table giving each state its behavior when the member is tagged `unacked`. Verify the `working` row's behavior against the monitor role definition and the implementation rather than copying either the existing table cell or the existing prose — the two currently disagree, so neither is a safe source *(CON-F10)* <!-- completed: 2026-07-25T13:46 -->
+- [x] `monitoring.md`: cross-reference the wake-reason table's "silenced by" column from the knob table instead of adding a second disable column; move the stall row's `(0 disables)` out of its "Set by" cell *(CON-F11)* <!-- completed: 2026-07-25T13:46 -->
+- [x] `monitoring.md`: remove the duplicated `180s` / `720s` defaults from the § The watched set prose, leaving the knob table as their single home; the prose may keep a qualitative magnitude description per the echo rule *(CON cross-page — monitor default intervals)* <!-- completed: 2026-07-25T13:46 -->
+- [x] `monitoring.md`: add the enrolled-member table (`Member class | Enrolled | monitor field on GET /api/members`) with five rows — this page is the site-wide owner. Re-derive the five member classes from actual enrollment behavior and reconcile any drift against this page's existing prose; a wrong row key here propagates to every linking page *(SPEC-F5)* <!-- completed: 2026-07-25T13:46 -->
+- [x] `coding-agents.md`: replace § Reasoning effort's running sentence with a link plus one-clause summary pointing at the owning table in `docs/spec/coding-agent-backends.md`, keeping the validation and default prose *(CON-F2)* <!-- completed: 2026-07-25T13:46 -->
+- [x] `coding-agents.md`: convert § Known asymmetries to a `Dimension | claude | codex | opencode` matrix over reasoning effort, pane title, and sandbox isolation, carrying supported / not-supported rather than restating the level sets; absorb the second opencode-unsupported mention *(CON-F3)* <!-- completed: 2026-07-25T13:46 -->
+- [x] `coding-agents.md`: add a `Backend | Product | How the pane loads the cafleet skill` table collecting the per-backend facts currently spread across the intro and § cafleet usage from a member pane. Carry no auto-approval-posture column — that enumeration is owned by the Step 2 capability matrix; link to it instead *(CON-F4)* <!-- completed: 2026-07-25T13:46 -->
 - [ ] `coding-agents.md`: replace the inline placeholder enumeration with a link plus one-clause summary pointing at the owning table in `docs/spec/cli-options.md` *(CON-F14)* <!-- completed: -->
-- [ ] `model-selection.md`: convert § The model list's column description to a `Column | What it holds | How to read it` table over five rows, moving the judgment and estimate caveats into the rows they qualify *(CON-F5)* <!-- completed: -->
-- [ ] `model-selection.md`: convert § Cost efficiency mode's role policies to a `Role | Model chosen | Needs the cost efficiency mode trigger?` table over ordinary member, monitor, and reviewer *(CON-F6)* <!-- completed: -->
-- [ ] `model-selection.md`: convert the closing override paragraph to a `Situation | What the Director does` table over the five conditions, keeping the fail-closed framing sentence *(CON-F7)* <!-- completed: -->
-- [ ] `member-lifecycle.md`: convert § Delete ordering to a `Member state | What member delete does | Multiplexer effect` table over the three states *(CON-F12)* <!-- completed: -->
-- [ ] `member-lifecycle.md`: replace § Commands' prose enumeration with a slim table keyed by **lifecycle stage** — not restating purpose or flags — plus a link to the owning subcommand summary in `docs/spec/cli-options.md`; keep the identity-flag rule and the `member prompt` paragraph *(CON-F13)* <!-- completed: -->
+- [x] `model-selection.md`: convert § The model list's column description to a `Column | What it holds | How to read it` table over five rows, moving the judgment and estimate caveats into the rows they qualify *(CON-F5)* <!-- completed: 2026-07-25T13:46 -->
+- [x] `model-selection.md`: convert § Cost efficiency mode's role policies to a `Role | Model chosen | Needs the cost efficiency mode trigger?` table over ordinary member, monitor, and reviewer *(CON-F6)* <!-- completed: 2026-07-25T13:46 -->
+- [x] `model-selection.md`: convert the closing override paragraph to a `Situation | What the Director does` table over the five conditions, keeping the fail-closed framing sentence *(CON-F7)* <!-- completed: 2026-07-25T13:46 -->
+- [x] `member-lifecycle.md`: convert § Delete ordering to a `Member state | What member delete does | Multiplexer effect` table over the three states *(CON-F12)* <!-- completed: 2026-07-25T13:46 -->
+- [x] `member-lifecycle.md`: replace § Commands' prose enumeration with a slim table keyed by **lifecycle stage** — not restating purpose or flags — plus a link to the owning subcommand summary in `docs/spec/cli-options.md`; keep the identity-flag rule and the `member prompt` paragraph *(CON-F13)* <!-- completed: 2026-07-25T13:46 -->
 - [ ] `member-lifecycle.md`: replace the inline placeholder enumeration with a link plus one-clause summary pointing at the owning table *(CON-F14)* <!-- completed: -->
-- [ ] `storage.md`: convert § Schema management to a `Database state | What cafleet setup does` table over four states, keeping the no-schema failure outside the table *(CON-F15)* <!-- completed: -->
-- [ ] `overview.md`: extend the CLI group table to all seven entry points. **Paraphrase** the scope text for `setup`, `doctor`, and `server` to the concepts altitude rather than copying the spec wording, so the two pages differ in wording and only the spec page reads as the contract *(CON-F1)* <!-- completed: -->
-- [ ] `overview.md`: trim the `monitor` glossary cell to a one-clause definition matching its neighbours, leaving the mechanism to the linked Monitoring page *(CON-M1)* <!-- completed: -->
+- [x] `storage.md`: convert § Schema management to a `Database state | What cafleet setup does` table over four states, keeping the no-schema failure outside the table *(CON-F15)* <!-- completed: 2026-07-25T13:46 -->
+- [x] `overview.md`: extend the CLI group table to all seven entry points. **Paraphrase** the scope text for `setup`, `doctor`, and `server` to the concepts altitude rather than copying the spec wording, so the two pages differ in wording and only the spec page reads as the contract *(CON-F1)* <!-- completed: 2026-07-25T13:46 -->
+- [x] `overview.md`: trim the `monitor` glossary cell to a one-clause definition matching its neighbours, leaving the mechanism to the linked Monitoring page *(CON-M1)* <!-- completed: 2026-07-25T13:46 -->
 
 ### Step 8: Entry points and how-to
 
