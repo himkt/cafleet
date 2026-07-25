@@ -329,7 +329,7 @@ rebalance, and the fourth has no tab anchor, so none of them issue the new
 
 ### Step 4: Verification
 
-- [ ] `mise //cafleet:test` — the full suite passes <!-- completed: -->
+- [x] `mise //cafleet:test` — the full suite passes <!-- completed: 2026-07-25T02:54 -->
 - [ ] Live check: from a herdr session, switch the view to a tab **other** than the
       Director's, spawn a member with `cafleet member create`, then read the layout
       read-only with `herdr pane layout --pane <director-pane-id>` and confirm the
@@ -337,6 +337,32 @@ rebalance, and the fourth has no tab anchor, so none of them issue the new
       uniform — the scenario that reproduces the reported bug <!-- completed: -->
 - [ ] Live check: with the view still on another tab, delete a member and confirm the
       remaining column re-equalizes <!-- completed: -->
-- [ ] Grep the repository for `_equalize_focused_tab_column`, `_resize_focused_tab_column`,
+- [x] Grep the repository for `_equalize_focused_tab_column`, `_resize_focused_tab_column`,
       and the removed guard's wording ("focus moved", "focused-tab layout") and confirm
-      no residue remains in code, tests, `SPEC.md`, or `docs/` <!-- completed: -->
+      no residue remains in code, tests, `SPEC.md`, or `docs/` <!-- completed: 2026-07-25T02:54 -->
+
+**Live-check status.** The geometry half of both live checks was executed against a real
+herdr 0.7.4 session on fleet 28 and passed exactly; the focus precondition was not met,
+so the two boxes stay unchecked.
+
+Measured, spawning a scratch member to take the member column from N=4 to N=5 and then
+deleting it:
+
+| Stage | Split ratios | `1/(N-k)` targets | Column heights |
+|---|---|---|---|
+| N=4 baseline | 0.25 / 0.3333 / 0.5 | 0.25 / 0.3333 / 0.5 | 18 / 17 / 18 / 17 |
+| N=5 after spawn | 0.2 / 0.25 / 0.3333 / 0.5 | 0.2 / 0.25 / 0.3333 / 0.5 | 14 / 14 / 14 / 14 / 14 |
+| N=4 after delete | 0.25 / 0.3333 / 0.5 | 0.25 / 0.3333 / 0.5 | 18 / 17 / 18 / 17 |
+
+Every ratio landed on target and every column was uniform within integer rounding of the
+70-row area — against the Background's reported failure at the same N=5 size (heights
+16/16/10/14/14, ratios 0.2286/0.2963/0.2632/0.5).
+
+What this does not establish: global focus was on the Director's tab `w23:t7` throughout
+(confirmed by a bare `herdr pane layout` returning `tab_id: w23:t7` and `herdr pane
+current` reporting the Director pane `focused: true`). That is the condition under which
+the equalizer worked even before this change, so the run demonstrates no regression but
+does not exercise the reported bug — which requires the view on a non-Director tab. The
+focus-independence of the anchored read is covered by the unit tests
+(`test_split_window__layout_read_anchored_on_director_not_focus` and the two delete-path
+anchor regressions), which pin argv rather than live geometry.
