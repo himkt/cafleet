@@ -1,7 +1,7 @@
 # Tabular content across the documentation site
 
 **Status**: Approved
-**Progress**: 54/70 tasks complete
+**Progress**: 59/70 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -216,11 +216,11 @@ Every task names the finding id(s) it implements, so all 70 tasks trace back to 
 
 ### Step 6: `docs/spec/multiplexer-backends.md`
 
-- [ ] Add a `## Backend matrix` section after the intro with columns `Behavior | tmux | herdr` and the eight behavioral deltas as rows *(SPEC-F14)* <!-- completed: -->
-- [ ] Reduce the five per-section tmux/herdr bullet pairs to their rationale and exception prose, leaving the matrix as the comparison surface *(SPEC-F14)* <!-- completed: -->
-- [ ] Convert `### The Esc safeguard` to a `Keystroke path | Leads with Esc? | Payload | Why` table over the five paths; keep the shared press-settle-type mechanism as prose above it *(SPEC-F15)* <!-- completed: -->
-- [ ] Add a `CAFLEET_MULTIPLEXER | HERDR_ENV | TMUX | Result` truth table to `## Backend selection` covering six of the eight combinations, with a one-line note stating why the other two are absent; keep the three numbered precedence items *(SPEC-F16)* <!-- completed: -->
-- [ ] Convert the second paragraph of `## Native agent-state (herdr only)` to a `Wake trigger | tmux | herdr` table with four rows; add no rows for undocumented states, and keep the `blocked` rule as prose *(SPEC-F17)* <!-- completed: -->
+- [x] Add a `## Backend matrix` section after the intro with columns `Behavior | tmux | herdr`, one row per behavioral delta in SPEC-F14's row-key list — nine, keeping the two `send_prompt` forms separate since their payloads differ on both backends *(SPEC-F14)* <!-- completed: 2026-07-25T14:34 -->
+- [x] Reduce every per-section tmux/herdr delta — three bullet pairs and three prose sites — to its rationale and exception prose, leaving the matrix as the comparison surface *(SPEC-F14)* <!-- completed: 2026-07-25T14:34 -->
+- [x] Convert `### The Esc safeguard` to a `Keystroke path | Leads with Esc? | Payload | Why` table over the five paths; keep the shared press-settle-type mechanism as prose above it *(SPEC-F15)* <!-- completed: 2026-07-25T14:34 -->
+- [x] Add a `CAFLEET_MULTIPLEXER | HERDR_ENV | TMUX | Result` truth table to `## Backend selection` covering six of the eight combinations, with a one-line note stating why the other two are absent; keep the three numbered precedence items *(SPEC-F16)* <!-- completed: 2026-07-25T14:34 -->
+- [x] Convert the second paragraph of `## Native agent-state (herdr only)` to a `Wake trigger | tmux | herdr` table with four rows; add no rows for undocumented states, and keep the `blocked` rule as prose *(SPEC-F17)* <!-- completed: 2026-07-25T14:34 -->
 
 ### Step 7: `docs/concepts/`
 
