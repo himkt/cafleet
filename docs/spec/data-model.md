@@ -80,25 +80,30 @@ erDiagram
     }
 ```
 
-The three minted-id tables (`fleets`, `members`, `messages`) use `INTEGER PRIMARY
-KEY AUTOINCREMENT`, so **ids are never reused** and real ids are always `>= 1`.
-The three 1:1 tables reuse a parent id as their PK; `asset_installs` keys on
-the coding-agent name and is not FK-linked.
+Minted ids are **never reused** and real ids are always `>= 1`.
 
 ## Tables
 
+| Table | Primary key | Parent | FK ON DELETE | Row removal |
+|---|---|---|---|---|
+| `fleets` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `members.member_id`, via the nullable `director_member_id` back-reference | `RESTRICT` | Soft-delete keyed on `deleted_at` |
+| `members` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `fleets.fleet_id` | `RESTRICT` | Soft-delete (`status='deregistered'` + `deregistered_at`) |
+| `messages` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `members.member_id`, via `owner_member_id` | `RESTRICT` | Not deleted |
+| `member_placements` | Reuses `members.member_id` | `members` | `CASCADE` | Hard-deleted on deregistration |
+| `monitor_config` | Reuses `members.member_id` | `members` | `CASCADE` | Hard-deleted alongside the placement on deregistration, and inside the `fleet delete` transaction |
+| `monitor_runtime` | Reuses `fleets.fleet_id` | `fleets` | `RESTRICT` | Removed inside the `fleet delete` transaction; "no monitor" is modeled as "no row" |
+| `asset_installs` | `coding_agent` (the agent name) | — | — | Upserted, one row per coding agent |
+
 ### `fleets`
 
-Fleet deletion is a **soft-delete** keyed on `deleted_at`. `cafleet fleet
-create` writes the fleet row, the root Director (and its placement), and the
-`director_member_id` back-reference in one
-all-or-nothing transaction — which is why `director_member_id` is DB-nullable
-despite the post-bootstrap NOT NULL invariant.
+`cafleet fleet create` writes the fleet row, the root Director (and its
+placement), and the `director_member_id` back-reference in one all-or-nothing
+transaction — which is why `director_member_id` is DB-nullable despite the
+post-bootstrap NOT NULL invariant.
 
 ### `members`
 
-Deregistration is a soft-delete (`status='deregistered'` + `deregistered_at`);
-active query paths filter `status='active'`. Special members are marked by a
+Active query paths filter `status='active'`. Special members are marked by a
 broker-owned `cafleet.kind` flag inside `member_card_json` rather than a
 column: `"monitoring-member"` marks the fleet's single monitoring member
 (which skips `monitor_config` enrollment and is located by this marker — see
@@ -108,10 +113,10 @@ through any public path.
 ### `messages`
 
 One row per delivery: a unicast row, a broadcast delivery row, or a broadcast
-summary row (see [Broadcast grouping](#broadcast-grouping)). `from_member_id`
-is deliberately not a foreign key — historical messages may outlive their sender.
-`status_timestamp` is updated on every state change and drives `ORDER BY DESC`
-listing. The rendered envelope is specified in
+summary row (see [Broadcast grouping](#broadcast-grouping)). `from_member_id`,
+`to_member_id`, and `origin_message_id` are deliberately not foreign keys —
+historical messages may outlive their sender. `status_timestamp` is updated on
+every state change and drives `ORDER BY DESC` listing. The rendered envelope is specified in
 [Message envelope](message-envelope.md).
 
 ### `member_placements`
@@ -119,19 +124,17 @@ listing. The rendered envelope is specified in
 Links a member to its multiplexer pane; pane ids are stored verbatim as opaque
 strings. The root Director keeps its own placement row (it is pane-bound); an
 ordinary member is a placed row other than the fleet's root Director
-(`member_id != fleets.director_member_id`). Placement rows are hard-deleted
-when the member is deregistered — they have no historical value.
+(`member_id != fleets.director_member_id`). Placement rows have no historical
+value.
 
 ### `monitor_config` and `monitor_runtime`
 
-The two monitor tables: `monitor_config` holds one row per **enrolled** member
-(the root Director and every ordinary member — never the monitoring member
-or placementless registry rows), hard-deleted alongside the
-placement on deregistration; `monitor_runtime` holds one row per fleet with
-the running loop's pid and `last_tick_at` heartbeat — "no monitor" is modeled
-as "no row". Both are removed explicitly inside the `fleet delete`
-transaction. Enrollment, cadence, and liveness semantics are on
-[Monitoring](../concepts/monitoring.md).
+The two monitor tables: `monitor_config` holds one row per **enrolled** member,
+and `monitor_runtime` holds one row per fleet with the running loop's pid and
+`last_tick_at` heartbeat. Which members are enrolled — the watched set — is
+defined in
+[Monitoring](../concepts/monitoring.md#the-watched-set), along with the
+cadence and liveness semantics.
 
 ### `asset_installs`
 

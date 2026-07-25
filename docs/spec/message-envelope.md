@@ -18,18 +18,18 @@ The broker's read paths return the persisted columns as a flat dict (the typed-c
 
 Field decisions:
 
-| Field | Default | `--full` |
-|---|---|---|
-| `message_id` | rendered as `id` (full integer) | rendered as `message_id` |
-| `from_member_id` | rendered as `from` (full integer) | rendered as `from_member_id` |
-| `to_member_id` | omitted (the recipient's own poll already establishes `to == self`) | included |
-| `owner_member_id` | omitted (always equals `to_member_id` for delivery rows; equals broadcaster for summary rows) | included |
-| `status_timestamp` | rendered as `ts` | rendered as `status_timestamp` |
-| `text` | included, truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` suffix | included, untruncated |
-| `type` | omitted when `"unicast"` (the default); rendered as `kind` when `"broadcast_summary"` | rendered as `type` |
-| `created_at` | omitted | included |
-| `status_state` | omitted (unconditional) | included |
-| `origin_message_id` | rendered as `origin` (full integer) when non-NULL; omitted on unicast deliveries | included |
+| Field | Compact text mode | Compact JSON key | `--full` text label | `--full` JSON key |
+|---|---|---|---|---|
+| `message_id` | the bracketed `[<id>` segment on line 1 | `id` | `id` | `message_id` |
+| `from_member_id` | the <code>&#124; from:&lt;n&gt;</code> segment on line 1 | `from` | `from` | `from_member_id` |
+| `to_member_id` | omitted (the recipient's own poll already establishes `to == self`) | omitted | `to`, omitted for broadcast-summary rows (`to_member_id IS NULL`) | `to_member_id` |
+| `owner_member_id` | omitted (always equals `to_member_id` for delivery rows; equals broadcaster for summary rows) | omitted | — | `owner_member_id` |
+| `status_timestamp` | the bare `<ts>` segment on line 1 | `ts` | — | `status_timestamp` |
+| `text` | the body line, truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…`, omitted when the body is empty | `text`, truncated | `text`, omitted when the body is empty | `text`, untruncated |
+| `type` | the <code>&#124; kind:&lt;kind&gt;</code> segment when `!= "unicast"` | `kind` when `"broadcast_summary"` | `type` | `type` |
+| `created_at` | omitted | omitted | — | `created_at` |
+| `status_state` | omitted (unconditional) | omitted | `state` | `status_state` |
+| `origin_message_id` | the <code>&#124; origin:&lt;id&gt;</code> segment when non-NULL | `origin` when non-NULL | — | `origin_message_id` |
 
 ### JSON output
 
@@ -82,16 +82,15 @@ Text mode renders each message as two lines (line 1 is the bracketed envelope, l
 build OK
 ```
 
-Optional segments `| kind:<kind>` and `| origin:<id>` are appended to line 1 when the message is a broadcast summary (`type != "unicast"`) or has a non-NULL `origin_message_id`, respectively. The body line is omitted entirely when the resulting body is the empty string.
-
-`--full` switches to a variable-length labeled block — one field per line (`id`, `state`, `from`, `to`, `type`, `text`), with the `to:` line omitted for broadcast-summary rows (`to_member_id IS NULL`) and the `text:` line omitted when the body is the empty string (deliveries explicitly sent with an empty body). So a fresh unicast delivery prints six lines, while a broadcast-summary row with no recipient prints fewer. Broadcast summary rows are never empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. Body truncation (the `…` suffix at `CAFLEET_MAX_TEXT_LEN` codepoints) is documented in [cli-options.md](cli-options.md#message-body-truncation).
+`--full` switches to a variable-length labeled block — one field per line, per the table above. So a fresh unicast delivery prints six lines, while a broadcast-summary row with no recipient prints fewer. Broadcast summary rows are never empty — the broker writes the human-readable summary `"Broadcast sent to N recipients"` at insert time, so summary rows always render their `text:` line. Body truncation (the `…` suffix at `CAFLEET_MAX_TEXT_LEN` codepoints) is documented in [cli-options.md](cli-options.md#message-body-truncation).
 
 ## Flag cross-reference
 
 The flags that govern envelope rendering are documented in [cli-options.md](cli-options.md):
 
-- [`--json`](cli-options.md#json-output) — emit JSON output (compact).
-- [`--full`](cli-options.md#output-shapes) — return the full typed-column envelope and untruncated body.
-
-`CAFLEET_MAX_TEXT_LEN` (default `200`) controls body truncation in the rendered envelope; it is documented under [Message Body Truncation](cli-options.md#message-body-truncation).
+| Control | Default | Effect on the envelope |
+|---|---|---|
+| [`--json`](cli-options.md#json-output) | off — text mode | Emits compact single-line JSON |
+| [`--full`](cli-options.md#output-shapes) | off — the compact envelope | Returns the full typed-column envelope and an untruncated body |
+| [`CAFLEET_MAX_TEXT_LEN`](cli-options.md#message-body-truncation) | `200` | Truncates the body at that many codepoints, appending `…` |
 

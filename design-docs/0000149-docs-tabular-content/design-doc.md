@@ -1,7 +1,7 @@
 # Tabular content across the documentation site
 
 **Status**: Approved
-**Progress**: 50/70 tasks complete
+**Progress**: 54/70 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -25,6 +25,8 @@ The docs site states parallel, multi-attribute content as prose, bullets, and re
 ## Background
 
 Four auditors read all 20 pages in full and produced 59 findings: 54 tabulate-me candidates and 5 table-misuse candidates. The audit records are `findings-cli-options.md`, `findings-spec-rest.md`, `findings-concepts.md`, and `findings-entry-howto-api.md` in this directory; each finding carries its exact location, proposed columns, row keys, and the prose that must survive the change. These four files are committed alongside this document and are **normative during implementation**: where a task names a finding id, the finding's proposed columns, row keys, and prose-that-must-remain govern, and this document states only the delta.
+
+Their normativity has one bound: an audit finding records what a page *said* at audit time, not what the system *does*. Where a proposed cell conflicts with a contract source — the `SPEC.md` DDL, an error string in the CLI, a role definition — the contract source wins and the finding is treated as incomplete. A conflict **between two contract sources** is different: that is reported, never resolved in favour of one.
 
 Finding ids are namespaced per audit file: `CLI-*` (`findings-cli-options.md`), `SPEC-*` (`findings-spec-rest.md`), `CON-*` (`findings-concepts.md`), `EHA-*` (`findings-entry-howto-api.md`).
 
@@ -207,10 +209,10 @@ Every task names the finding id(s) it implements, so all 70 tasks trace back to 
 
 ### Step 5: `docs/spec/data-model.md` and `docs/spec/message-envelope.md`
 
-- [ ] Add a summary matrix under `## Tables` with columns `Table | Primary key | Parent | FK ON DELETE | Row removal` over the seven tables; shrink the key-style paragraph above it to the two facts the table cannot carry. Cross-check every primary-key and foreign-key cell against the `SPEC.md` DDL; report any mismatch rather than silently resolving it in favour of one source *(SPEC-F11)* <!-- completed: -->
-- [ ] Replace the enrolled-member prose in `### monitor_config and monitor_runtime` with a link plus one-clause summary pointing at the owning table in `docs/concepts/monitoring.md` *(SPEC-F5)* <!-- completed: -->
-- [ ] Widen the `### Compact rendered envelope (default)` field table to `Field | Compact text mode | Compact JSON key | --full text label | --full JSON key` over the existing ten rows in order. Treat the `--full` label list as **closed**: use only the labels § Text mode already documents (`id`, `state`, `from`, `to`, `type`, `text`), and em-dash any field that has none *(SPEC-F12)* <!-- completed: -->
-- [ ] Convert `## Flag cross-reference` to a `Control | Default | Effect on the envelope` table over `--json`, `--full`, and `CAFLEET_MAX_TEXT_LEN`, keeping each control's link *(SPEC-F13)* <!-- completed: -->
+- [x] Add a summary matrix under `## Tables` with columns `Table | Primary key | Parent | FK ON DELETE | Row removal` over the seven tables; shrink the key-style paragraph above it to the two facts the table cannot carry. Cross-check every primary-key and foreign-key cell against the `SPEC.md` DDL; report any mismatch rather than silently resolving it in favour of one source *(SPEC-F11)* <!-- completed: 2026-07-25T14:03 -->
+- [x] Replace the enrolled-member prose in `### monitor_config and monitor_runtime` with a link plus one-clause summary pointing at the owning table in `docs/concepts/monitoring.md` *(SPEC-F5)* <!-- completed: 2026-07-25T14:03 -->
+- [x] Widen the `### Compact rendered envelope (default)` field table to `Field | Compact text mode | Compact JSON key | --full text label | --full JSON key` over the existing ten rows in order. Treat the `--full` label list as **closed**: use only the labels § Text mode already documents (`id`, `state`, `from`, `to`, `type`, `text`), and em-dash any field that has none *(SPEC-F12)* <!-- completed: 2026-07-25T14:03 -->
+- [x] Convert `## Flag cross-reference` to a `Control | Default | Effect on the envelope` table over `--json`, `--full`, and `CAFLEET_MAX_TEXT_LEN`, keeping each control's link *(SPEC-F13)* <!-- completed: 2026-07-25T14:03 -->
 
 ### Step 6: `docs/spec/multiplexer-backends.md`
 
