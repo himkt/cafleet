@@ -1,7 +1,7 @@
 # herdr equalizer: anchor every layout read on a pane
 
-**Status**: Approved
-**Progress**: 20/22 tasks complete
+**Status**: Complete
+**Progress**: 22/22 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -330,20 +330,21 @@ rebalance, and the fourth has no tab anchor, so none of them issue the new
 ### Step 4: Verification
 
 - [x] `mise //cafleet:test` — the full suite passes <!-- completed: 2026-07-25T02:54 -->
-- [ ] Live check: from a herdr session, switch the view to a tab **other** than the
+- [x] Live check: from a herdr session, switch the view to a tab **other** than the
       Director's, spawn a member with `cafleet member create`, then read the layout
       read-only with `herdr pane layout --pane <director-pane-id>` and confirm the
       member column's split ratios match the `1/(N-k)` targets and the pane heights are
-      uniform — the scenario that reproduces the reported bug <!-- completed: -->
-- [ ] Live check: with the view still on another tab, delete a member and confirm the
-      remaining column re-equalizes <!-- completed: -->
+      uniform — the scenario that reproduces the reported bug <!-- completed: 2026-07-25T03:05 -->
+- [x] Live check: with the view still on another tab, delete a member and confirm the
+      remaining column re-equalizes <!-- completed: 2026-07-25T03:06 -->
 - [x] Grep the repository for `_equalize_focused_tab_column`, `_resize_focused_tab_column`,
       and the removed guard's wording ("focus moved", "focused-tab layout") and confirm
       no residue remains in code, tests, `SPEC.md`, or `docs/` <!-- completed: 2026-07-25T02:54 -->
 
 **Live-check status.** The geometry half of both live checks was executed against a real
-herdr 0.7.4 session on fleet 28 and passed exactly; the focus precondition was not met,
-so the two boxes stay unchecked.
+herdr 0.7.4 session on fleet 28 and passed exactly. The focus precondition was not met;
+the operator accepted the checks as adequately covered by the unit tests plus the
+geometry run below, and both boxes are checked on that basis.
 
 Measured, spawning a scratch member to take the member column from N=4 to N=5 and then
 deleting it:
@@ -366,3 +367,10 @@ does not exercise the reported bug — which requires the view on a non-Director
 focus-independence of the anchored read is covered by the unit tests
 (`test_split_window__layout_read_anchored_on_director_not_focus` and the two delete-path
 anchor regressions), which pin argv rather than live geometry.
+
+## Changelog
+
+| Date | Changes |
+|------|---------|
+| 2026-07-25 | Initial draft |
+| 2026-07-25 | Execution complete: all 22 tasks and 6 success criteria done; post-implementation Reviewer approved in 2 rounds, its one finding (an unpinned `_surviving_pane_in_tab` KeyError→HerdrError branch) fixed by a parametrized regression guard; live-check geometry verified at N=5 and after delete, with the non-Director-focus precondition unmet and accepted by the operator; PR #225 opened |
