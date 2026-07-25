@@ -1,7 +1,7 @@
 # Tabular content across the documentation site
 
 **Status**: Approved
-**Progress**: 8/70 tasks complete
+**Progress**: 14/70 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -148,7 +148,9 @@ Four proposed tables have cells the current pages do not supply. These are fille
 
 **Execution shape.** The whole document implements on a **single branch with a single PR** — not one PR per step, and not split into several design docs.
 
-**Commit granularity.** One commit per Implementation step, **nine in total**.
+**Commit granularity.** One commit per Implementation step, **nine in total**. A link-replacement task the ordering rule below defers rides in the commit of the step that supplies its owning table, not in its own step's commit — so a step may commit with that one task still unchecked, and the step carrying the owning table commits one task more than it lists.
+
+**Step execution order.** Steps run `1, 2, 3, 7, 4, 5, 6, 8, 9`. Step 7 is pulled ahead of Steps 4–6 because it creates the `monitoring.md` owning table that Step 3's and Step 5's link-replacement tasks both point at; commit messages still name the step, so the nine commits stay one-per-step in a non-numeric order.
 
 **Ordering.** Step 1 is the first commit and gates Steps 2–8, consistent with this project's documentation-first implementation ordering. Beyond that, a task that **creates an owning table lands before any task that replaces another mention with a link to it**, even when the linking task carries a lower step number. Concretely: Step 7's `monitoring.md` enrolled-member table and its knob table land before Step 3's and Step 5's link-replacement tasks; Step 2's model and effort tables land before Step 7's `coding-agents.md` link task; Step 4's placeholder table lands before Step 7's two placeholder link tasks.
 
@@ -172,13 +174,13 @@ Every task names the finding id(s) it implements, so all 70 tasks trace back to 
 
 ### Step 3: `docs/spec/webui-api.md`
 
-- [ ] Replace the one-row `## Request Headers` table with prose carrying its three contracts, and add a shared fleet-scoping error table (`Status | detail | Trigger`; rows 400, 404) introduced as applying to every fleet-scoped endpoint *(SPEC-M1, SPEC-F1)* <!-- completed: -->
-- [ ] Convert the three per-endpoint `**Errors**` blocks to `Status | detail | Trigger` tables carrying only endpoint-specific rows; keep the POST section's cross-reference to Request Headers *(SPEC-F1)* <!-- completed: -->
-- [ ] Add an endpoint index table under `## Endpoints` with columns `Method | Path | Returns | X-Fleet-Id required`, one row per endpoint the live page documents — the page governs the count, and this document is corrected if it differs *(SPEC-F2)* <!-- completed: -->
-- [ ] Convert the `GET /api/monitor` null-behavior paragraph to a `Field | No runtime row has ever existed | Stale or cleared heartbeat row` table with six rows; add no column for the running case *(SPEC-F3)* <!-- completed: -->
-- [ ] Add a message-endpoint comparison table (`Endpoint | Rows returned | Excluded | Ordering | Row cap`) covering inbox, sent, and timeline. This table becomes the **single home** for the ordering and row-cap facts; the per-endpoint restatements of those two facts are trimmed. Keep the shared-formatter sentence, broadcast grouping, and ACK timestamp blocks *(SPEC-F4)* <!-- completed: -->
+- [x] Replace the one-row `## Request Headers` table with prose carrying its three contracts, and add a shared fleet-scoping error table (`Status | detail | Trigger`; rows 400, 404) introduced as applying to every fleet-scoped endpoint *(SPEC-M1, SPEC-F1)* <!-- completed: 2026-07-25T13:37 -->
+- [x] Convert each per-endpoint `**Errors**` block to a `Status | detail | Trigger` table carrying only endpoint-specific rows; keep the POST section's cross-reference to Request Headers. A block left with a single endpoint-specific row after the shared rows hoist out stays prose — the one-row anti-rule outranks the conversion *(SPEC-F1)* <!-- completed: 2026-07-25T13:37 -->
+- [x] Add an endpoint index table under `## Endpoints` with columns `Method | Path | Returns | X-Fleet-Id required`, one row per endpoint the live page documents — the page governs the count, and this document is corrected if it differs *(SPEC-F2)* <!-- completed: 2026-07-25T13:37 -->
+- [x] Convert the `GET /api/monitor` null-behavior paragraph to a `Field | No runtime row has ever existed | Stale or cleared heartbeat row` table with six rows; add no column for the running case *(SPEC-F3)* <!-- completed: 2026-07-25T13:37 -->
+- [x] Add a message-endpoint comparison table (`Endpoint | Rows returned | Excluded | Ordering | Row cap`) covering inbox, sent, and timeline. This table becomes the **single home** for the ordering and row-cap facts; the per-endpoint restatements of those two facts are trimmed. Keep the shared-formatter sentence, broadcast grouping, and ACK timestamp blocks *(SPEC-F4)* <!-- completed: 2026-07-25T13:37 -->
 - [ ] Replace the enrolled-member prose at the three `webui-api.md` sites with a link plus one-clause summary pointing at the owning table in `docs/concepts/monitoring.md` *(SPEC-F5)* <!-- completed: -->
-- [ ] Confirm `## Error Format` still explains why 422 rows carry no quoted `detail` string, and that every 422 row points at it *(SPEC-F1)* <!-- completed: -->
+- [x] Confirm `## Error Format` still explains why 422 rows carry no quoted `detail` string, and that every 422 row points at it *(SPEC-F1)* <!-- completed: 2026-07-25T13:37 -->
 
 ### Step 4: `docs/spec/cli-options.md`
 
