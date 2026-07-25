@@ -846,6 +846,36 @@ def test_kill_pane__no_surviving_pane_in_tab_skips_layout_read(herdr_run):
     ]
 
 
+@pytest.mark.parametrize(
+    "list_result",
+    [
+        pytest.param({"not_panes": []}, id="envelope-missing-panes"),
+        pytest.param(
+            {"panes": [{"tab_id": "wT:t3"}]}, id="matching-entry-missing-pane-id"
+        ),
+    ],
+)
+def test_kill_pane__malformed_post_close_pane_list_swallowed(herdr_run, list_result):
+    """A malformed post-close ``pane list`` — no ``panes`` key, or an entry in the
+    target tab without ``pane_id`` — becomes a HerdrError inside
+    ``_surviving_pane_in_tab``, which the best-effort ``_rebalance_after_close``
+    swallows: the delete returns None with no layout read and no resize. The
+    conversion is what keeps it swallowable; a raw KeyError escapes the
+    ``except HerdrError`` and fails a delete whose pane is already closed."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _pane_get("wT:t3"),
+        "",  # pane close
+        _envelope(list_result),
+    )
+    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
+    assert captured == [
+        ["herdr", "pane", "get", "wT:m9"],
+        ["herdr", "pane", "close", "wT:m9"],
+        ["herdr", "pane", "list"],
+    ]
+
+
 # --- send_exit -------------------------------------------------------------
 
 
