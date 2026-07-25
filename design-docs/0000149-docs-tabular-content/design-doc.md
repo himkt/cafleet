@@ -10,15 +10,15 @@ The docs site states parallel, multi-attribute content as prose, bullets, and re
 
 ## Success Criteria
 
-- [ ] Every enumeration of three or more parallel items carrying two or more shared attributes renders as a table, on every page with qualifying content. The exempt surfaces are `docs/concepts/fleet-isolation.md`, the four `docs/api/*` mkdocstrings stubs, and `docs/index.md`.
-- [ ] `docs/spec/coding-agent-backends.md` answers "which models and effort levels does backend X accept, and what does a wrong value produce" from one row per backend. A model or effort value may still appear in a backend section's rationale prose; what no per-backend section keeps is the enumerating statement of the accepted set.
-- [ ] `docs/spec/webui-api.md` answers "what does status N mean on endpoint E" from one row, with the two fleet-scoping errors stated once rather than three times.
-- [ ] The five-state rubric table in `docs/concepts/monitoring.md` gives the same answer as the prose beneath it for all five states, including `working`.
-- [ ] Each of the eight duplicated enumerations in the Ownership table below appears as a table on exactly one page; every other mention is a link plus a one-clause summary.
-- [ ] No table on the site has exactly one data row, and no table cell holds more than two sentences. Both rules bind sitewide, including tables this work never otherwise touches. A verbatim quoted contract string — an error message, an output line — counts as one unit toward the cell cap regardless of its internal sentence count.
-- [ ] No repository file path is introduced into any page outside the surfaces exempted by the user-facing-docs rule.
-- [ ] Every fact carried by a paragraph that Step 2, 4, or 6 deletes survives in the replacing table or in kept prose.
-- [ ] The project's strict docs build passes, and every intra-site anchor added or retargeted by this work resolves.
+- [x] Every enumeration of three or more parallel items carrying two or more shared attributes renders as a table, on every page with qualifying content. The exempt surfaces are `docs/concepts/fleet-isolation.md`, the four `docs/api/*` mkdocstrings stubs, and `docs/index.md`.
+- [x] `docs/spec/coding-agent-backends.md` answers "which models and effort levels does backend X accept, and what does a wrong value produce" from one row per backend. A model or effort value may still appear in a backend section's rationale prose; what no per-backend section keeps is the enumerating statement of the accepted set.
+- [x] `docs/spec/webui-api.md` answers "what does status N mean on endpoint E" from one row, with the two fleet-scoping errors stated once rather than three times.
+- [x] The five-state rubric table in `docs/concepts/monitoring.md` gives the same answer as the prose beneath it for all five states, including `working`.
+- [x] Each of the eight duplicated enumerations in the Ownership table below appears as a table on exactly one page; every other mention is a link plus a one-clause summary.
+- [x] No table on the site has exactly one data row, and no table cell holds more than two sentences. Both rules bind sitewide, including tables this work never otherwise touches. A verbatim quoted contract string — an error message, an output line — counts as one unit toward the cell cap regardless of its internal sentence count.
+- [x] No repository file path is introduced into any page outside the surfaces exempted by the user-facing-docs rule.
+- [x] Every fact carried by a paragraph that Step 2, 4, or 6 deletes survives in the replacing table or in kept prose.
+- [x] The project's strict docs build passes, and every intra-site anchor added or retargeted by this work resolves.
 
 ---
 
