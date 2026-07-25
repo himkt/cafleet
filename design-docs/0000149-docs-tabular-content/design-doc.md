@@ -4,9 +4,23 @@
 **Progress**: 0/57 tasks complete
 **Last Updated**: 2026-07-25
 
+COMMENT(user-relay): The Progress counter reads 0/57 but the Implementation checklist holds 68 checkboxes (76 in the file minus the 8 Success Criteria). Verified by count during the interview — correct it to 0/68 tasks complete.
+
+COMMENT(user-relay): Reword "across all 20 pages" to "every page with qualifying content". The current claim contradicts Background, which exempts fleet-isolation.md, the four docs/api stubs, and index.md; the exempt list moves into Success Criteria.
+
 ## Overview
 
 The docs site states parallel, multi-attribute content as prose, bullets, and repeated per-item sections, forcing readers to reconstruct comparison matrices in their heads. This document converts that content to tables across all 20 pages, fixes five places where a table is misused, and assigns a single owning page to every enumeration that is currently duplicated.
+
+COMMENT(user-relay): Add the exempt-page list here (fleet-isolation.md, the four docs/api stubs, index.md), so criterion 1's scope is stated where the criterion lives rather than only in Background.
+
+COMMENT(user-relay): The one-row-table rule is sitewide, binding pre-existing tables this work never touches. State that scope in the criterion, and add a Step 9 task to fix any one-row table found.
+
+COMMENT(user-relay): Add a clause to the two-sentence cell cap: a verbatim quoted contract string (an error message, an output line) counts as one unit regardless of its internal sentence count. Without it the cap conflicts with the verbatim-preservation constraint.
+
+COMMENT(user-relay): Name the concrete check for the build criterion — the project's strict docs build passing. "Every anchor resolves" is otherwise unverifiable as written.
+
+COMMENT(user-relay): Add a fact-parity criterion. Steps 2, 4, and 6 delete prose, and no current criterion guards against losing a fact the replacing table does not carry. Pair it with the per-deletion parity check added to Step 9.
 
 ## Success Criteria
 
@@ -20,6 +34,14 @@ The docs site states parallel, multi-attribute content as prose, bullets, and re
 - [ ] The docs site builds and every intra-site anchor added or retargeted by this work resolves.
 
 ---
+
+COMMENT(user-relay): Add a five-row list naming the five table-misuse fixes and mapping each to its Implementation task. The Overview counts them but the set is never enumerated anywhere in this document.
+
+COMMENT(user-relay): State that the four findings-*.md audit files are committed alongside this document and are normative during implementation — tasks defer to them for proposed columns, row keys, and which prose survives.
+
+COMMENT(user-relay): "Two pages need no tabulation work" then names fleet-isolation.md plus four docs/api stubs — five files, not two. Reword to name the exempt surfaces without a numeral.
+
+COMMENT(user-relay): Record that the three dropped findings were reviewed and ratified by the user during the interview, so the drops read as a confirmed decision rather than unreviewed author judgment.
 
 ## Background
 
@@ -47,7 +69,13 @@ Three audited findings are deliberately **not** implemented, because tabulating 
 
 ---
 
+COMMENT(user-relay): Add a short table-rendering conventions paragraph covering code spans for literals, the em-dash for empty cells, and column alignment. Roughly forty new tables land across twenty pages, and without a stated convention they will not come out consistent.
+
 ## Specification
+
+COMMENT(user-relay): Clarify that the counted "three or more parallel items" may sit on either axis — as rows or as columns. A two-subject comparison such as tmux vs herdr only clears the bar if the behaviors are the counted items, which the current wording leaves ambiguous.
+
+COMMENT(user-relay): State what separates a convertible rule list from one that stays a list: lookup and decision rules become tables, genuinely ordered precedence stays a numbered list. Step 4 tabulates the member-targeting resolution rules while Step 6 keeps backend-selection's precedence items, and nothing currently explains the difference.
 
 ### The tabulate rule
 
@@ -62,6 +90,14 @@ Content becomes a table when **three or more parallel items each carry two or mo
 | Rationale, caveats, and "why" for a decision | Prose, adjacent to the table it qualifies |
 
 Two anti-rules follow from the same principle, and both are enforced by this document's success criteria: a table with exactly one data row costs a header row and buys nothing over a sentence; a cell holding more than two sentences defeats the vertical scan the table shape promises. When a finding moves an enumeration into a table, the surrounding rationale prose stays — a table replaces the enumeration, never the contract prose around it.
+
+COMMENT(user-relay): Specify the form "every other mention becomes a link" takes: a link plus a one-clause summary, never restating the owned attributes. "Becomes a link" alone leaves each of the non-owning sites to invent its own shape.
+
+COMMENT(user-relay): Resolve the observed "unenrolled watcher" vs "monitoring member" drift by deferring to the term in the concepts overview Core terms table, per the user-facing-docs rule. Name that tie-break here so the owning table and every link agree.
+
+COMMENT(user-relay): State the echo rule for non-owning prose: qualitative magnitude words are allowed, exact values are not. This is what lets the watched-set prose keep describing cadence without re-homing the 180s/720s defaults.
+
+COMMENT(user-relay): Add an eighth row to the ownership table. The coding-agents.md "Auto-approval posture" column planned in Step 7 overlaps the coding-agent-backends.md capability matrix's "Shell-command posture" from Step 2 — pick one owner and link from the other.
 
 ### Ownership of duplicated enumerations
 
@@ -79,6 +115,10 @@ Seven enumerations currently appear on more than one page. Each gets exactly one
 
 Two overlaps resolve inside a single page. In `docs/concepts/monitoring.md`, the wake-reason table owns the "silenced by" fact and the knob table cross-references it rather than carrying a second disable column. In `docs/spec/coding-agent-backends.md`, the model table and the effort table stay separate — they share only the backend key, and merging them would produce a seven-column table of unrelated contracts.
 
+COMMENT(user-relay): State that the two deliberately empty cells render as an em-dash, matching the convention the output-shape table already uses. "Leave the cell empty" does not say what the reader sees.
+
+COMMENT(user-relay): Record the two facts no page states — the writable_roots rationale and an MCP bypass example — as follow-up documentation gaps, so they are tracked rather than left implicit in two em-dashes.
+
 ### Sourcing constraint
 
 Four proposed tables have cells the current pages do not supply. These are filled from the named page, never inferred:
@@ -90,6 +130,10 @@ Four proposed tables have cells the current pages do not supply. These are fille
 | Codex prerequisites checklist | The "why" for `writable_roots` | Leave the cell empty — no page states it |
 | Safety-floor bypass classes | An example for the MCP class | Leave the cell empty — no page gives one |
 
+COMMENT(user-relay): State how inbound links to a retargeted section are found — a search sweep for references at the time each anchor changes, with the Step 9 strict build as the backstop. "Updates every link to it" does not say how they are located.
+
+COMMENT(user-relay): Add a constraint to check the docs site configuration for section-level nav entries during implementation and update it if any exist. The work adds many new sections and currently assumes nav lists only pages.
+
 ### Constraints on every edit
 
 - `docs/` is user-facing: tables state behavior, flags, values, and error strings — not source paths. `docs/contributing.md`, `docs/api/*`, path-as-contract mentions in `docs/spec/*`, and `~/…` user-machine paths remain exempt.
@@ -98,14 +142,30 @@ Four proposed tables have cells the current pages do not supply. These are fille
 
 ---
 
+COMMENT(user-relay): Record the execution decision — the whole document implements on a single branch with a single PR, not one PR per step and not split into several design docs.
+
+COMMENT(user-relay): Add an ordering note at the top of Implementation: tasks that create an owning table land before the tasks that replace other mentions with links to it. Several link-replacement tasks currently precede their owners.
+
+COMMENT(user-relay): State the commit granularity — one commit per Implementation step, nine in total.
+
+COMMENT(user-relay): Annotate every task with the finding ID(s) it implements, so all 68 tasks trace back to the 59-finding audit.
+
 ## Implementation
 
 > Task format: `- [x] Done task <!-- completed: 2026-02-13T14:30 -->`
 > When completing a task, check the box and record the timestamp in the same edit.
 
+COMMENT(user-relay): Add a second task recording the tabulate convention as a project rule under .claude/rules, alongside the contributing.md bullet. Agents author most of these pages and read the rules, not the contributor guide.
+
+COMMENT(user-relay): State that Step 1 is the first commit and gates Steps 2-8, consistent with this project's documentation-first implementation ordering.
+
 ### Step 1: Record the convention
 
 - [ ] Add a tables bullet to `docs/contributing.md` § Documentation style stating the tabulate rule, the one-row and paragraph-cell anti-rules, and the single-owner-plus-link rule <!-- completed: -->
+
+COMMENT(user-relay): Reconcile the last task with success criterion 2. A model or effort value may appear in rationale prose, but never as the enumerating statement of the contract — the criterion currently reads as a total ban on per-backend prose mentioning them.
+
+COMMENT(user-relay): State that the rejection strings and validation messages moved into the two new tables are re-verified against the current CLI before landing, and that any drift is reported as a separate finding rather than corrected silently in the same edit.
 
 ### Step 2: `docs/spec/coding-agent-backends.md`
 
@@ -116,6 +176,10 @@ Four proposed tables have cells the current pages do not supply. These are fille
 - [ ] Convert `### Safety-floor caveats` bullet 2 to a `Bypass class | Example | Why the allowlist misses it` table with three rows; keep the MCP directive, the verification caveat, and the codex-for-isolation escalation as prose <!-- completed: -->
 - [ ] Delete the per-backend model and effort prose sentences now carried by the two new tables, leaving each `##` backend section its posture, rationale, and subsections <!-- completed: -->
 
+COMMENT(user-relay): Drop the hard-coded "nine endpoints" from the endpoint-index task. The live page governs — one row per endpoint whatever the count is at implementation time, correcting this document if it differs.
+
+COMMENT(user-relay): State in the message-endpoint comparison task that the new table becomes the single home for the ordering and row-cap facts, and that the per-endpoint restatements are trimmed. As written the table could be read as a summary layered on top of prose that stays.
+
 ### Step 3: `docs/spec/webui-api.md`
 
 - [ ] Replace the one-row `## Request Headers` table with prose carrying its three contracts, and add a shared fleet-scoping error table (`Status | detail | Trigger`; rows 400, 404) introduced as applying to every fleet-scoped endpoint <!-- completed: -->
@@ -125,6 +189,16 @@ Four proposed tables have cells the current pages do not supply. These are fille
 - [ ] Add a message-endpoint comparison table (`Endpoint | Rows returned | Excluded | Ordering | Row cap`) covering inbox, sent, and timeline; keep the shared-formatter sentence, broadcast grouping, and ACK timestamp blocks <!-- completed: -->
 - [ ] Replace the enrolled-member prose at the three `webui-api.md` sites with a link to the owning table in `docs/concepts/monitoring.md` <!-- completed: -->
 - [ ] Confirm `## Error Format` still explains why 422 rows carry no quoted `detail` string, and that every 422 row points at it <!-- completed: -->
+
+COMMENT(user-relay): The --effort task builds a second table for an enumeration the Ownership section assigns to coding-agent-backends.md § Reasoning effort. Resolve it by merging this task's extra CLI-contract columns into that owning table and pointing at it from here, keeping only the --model format constraint local.
+
+COMMENT(user-relay): Merge the two Error Messages tasks into one redesign adding Command, Exit, and Notes together. As written the same table is restructured twice in sequence.
+
+COMMENT(user-relay): The output-shape task says "all 19 subcommands" while the summary table has 22 rows. Verify both counts against the live page and record why they legitimately differ, or reconcile them.
+
+COMMENT(user-relay): Qualify the paragraph-deletion task: delete only the sentences the new output-shape table carries, and keep any sentence it does not. Whole-paragraph deletion would drop uncarried facts.
+
+COMMENT(user-relay): Verify that --quiet actually exists on message send and message ack before documenting those rows, and halt if it does not. The task assumes a docs gap; if the flag is absent, adding the rows would document behavior that does not exist.
 
 ### Step 4: `docs/spec/cli-options.md`
 
@@ -147,12 +221,18 @@ Four proposed tables have cells the current pages do not supply. These are fille
 - [ ] Replace the one-row `## Global Options` table with a sentence covering `--version` <!-- completed: -->
 - [ ] Trim the `### member prompt` form-comparison table cells to their keystroke sequences and move both rationale sentences to prose beneath it <!-- completed: -->
 
+COMMENT(user-relay): State that the summary matrix's primary-key and foreign-key facts are cross-checked against the SPEC.md DDL, with any mismatch reported rather than silently resolved in favour of one source.
+
+COMMENT(user-relay): Define "treat the --full label list as closed" — use only labels the page already documents, and em-dash any field that has none.
+
 ### Step 5: `docs/spec/data-model.md` and `docs/spec/message-envelope.md`
 
 - [ ] Add a summary matrix under `## Tables` with columns `Table | Primary key | Parent | FK ON DELETE | Row removal` over the seven tables; shrink the key-style paragraph above it to the two facts the table cannot carry <!-- completed: -->
 - [ ] Replace the enrolled-member prose in `### monitor_config and monitor_runtime` with a link to the owning table in `docs/concepts/monitoring.md` <!-- completed: -->
 - [ ] Widen the `### Compact rendered envelope (default)` field table to `Field | Compact text mode | Compact JSON key | --full text label | --full JSON key` over the existing ten rows in order; treat the `--full` label list as closed <!-- completed: -->
 - [ ] Convert `## Flag cross-reference` to a `Control | Default | Effect on the envelope` table over `--json`, `--full`, and `CAFLEET_MAX_TEXT_LEN`, keeping each control's link <!-- completed: -->
+
+COMMENT(user-relay): The selection truth table covers six of the eight combinations of three variables. Require a one-line note explaining why the other two are absent, so the gap reads as deliberate rather than as an oversight.
 
 ### Step 6: `docs/spec/multiplexer-backends.md`
 
@@ -161,6 +241,12 @@ Four proposed tables have cells the current pages do not supply. These are fille
 - [ ] Convert `### The Esc safeguard` to a `Keystroke path | Leads with Esc? | Payload | Why` table over the five paths; keep the shared press-settle-type mechanism as prose above it <!-- completed: -->
 - [ ] Add a `CAFLEET_MULTIPLEXER | HERDR_ENV | TMUX | Result` truth table to `## Backend selection` covering six combinations; keep the three numbered precedence items <!-- completed: -->
 - [ ] Convert the second paragraph of `## Native agent-state (herdr only)` to a `Wake trigger | tmux | herdr` table with four rows; add no rows for undocumented states, and keep the `blocked` rule as prose <!-- completed: -->
+
+COMMENT(user-relay): The rubric's working row currently disagrees between table and prose, so neither is a safe source for the new fourth column. Verify the behavior against the monitor role definition and implementation before writing, rather than copying either existing text.
+
+COMMENT(user-relay): State that the five member classes in the enrolled-member table are re-derived from actual enrollment behavior and any drift against the page's existing prose is reconciled — this page becomes the site-wide owner, so a wrong row key propagates to every linking page.
+
+COMMENT(user-relay): Resolve the member-lifecycle § Commands either/or: a slim table keyed by lifecycle stage, not restating purpose or flags, plus the link to the owning summary in cli-options.
 
 ### Step 7: `docs/concepts/`
 
@@ -183,6 +269,12 @@ Four proposed tables have cells the current pages do not supply. These are fille
 - [ ] `overview.md`: extend the CLI group table to all seven entry points, sourcing the scope text for `setup`, `doctor`, and `server` from the CLI options spec <!-- completed: -->
 - [ ] `overview.md`: trim the `monitor` glossary cell to a one-clause definition matching its neighbours, leaving the mechanism to the linked Monitoring page <!-- completed: -->
 
+COMMENT(user-relay): The overview.md CLI entry-point task sources scope text from cli-options, creating a second home for it. Paraphrase to the concepts altitude instead of copying, so the two pages differ in wording and only the spec page reads as the contract.
+
+COMMENT(user-relay): Drop the hard-coded "seven pick-one tasks" from the contributing.md Development task. Verify against the live mise task set and write one row per task, whatever the count is then.
+
+COMMENT(user-relay): In the quickstart Configure conversion, place the two kept code snippets below the new table, each introduced by the backend it belongs to.
+
 ### Step 8: Entry points and how-to
 
 - [ ] `quickstart.md`: convert § Configure's three per-backend sub-headings to a `Backend | Config file | Manual configuration | Installed by cafleet setup | Reference` table; keep both code snippets and both rationale paragraphs <!-- completed: -->
@@ -192,6 +284,14 @@ Four proposed tables have cells the current pages do not supply. These are fille
 - [ ] `contributing.md`: split § Development's code block into a first-time setup sequence that stays a code block and a `Task | Runs | When you need it` table over the seven pick-one tasks <!-- completed: -->
 - [ ] `design-doc-development.md`: convert § Prompts to a `Stage | Prompt | Workflow | Team` table over the three stages, keeping each prompt in a code span and the stage numbering <!-- completed: -->
 
+COMMENT(user-relay): Add a task fixing any one-row table found anywhere on the site, not only in tables this work touched — the one-row rule is sitewide.
+
+COMMENT(user-relay): Add a per-deletion fact-parity check: for every paragraph Steps 2, 4, and 6 delete, confirm each fact it carried survives in the replacing table or in kept prose.
+
+COMMENT(user-relay): State that Step 9 is executed twice — the implementer runs the checks and records results, then the reviewer independently confirms them.
+
+COMMENT(user-relay): Record a follow-up design doc for automated enforcement of the one-row-table and two-sentence-cell rules. This change verifies them manually; tooling is deliberately out of scope here.
+
 ### Step 9: Verify
 
 - [ ] Confirm each of the seven owned enumerations appears as a table on exactly one page and every other mention is a link <!-- completed: -->
@@ -199,6 +299,8 @@ Four proposed tables have cells the current pages do not supply. These are fille
 - [ ] Build the docs site and confirm every anchor added or retargeted by this work resolves <!-- completed: -->
 
 ---
+
+COMMENT(user-relay): Remove this Changelog section entirely, including its heading, table, and the preceding horizontal rule. The user does not want a changelog on this document; the standard design-doc template marks the section optional, so its absence is compliant.
 
 ## Changelog
 
