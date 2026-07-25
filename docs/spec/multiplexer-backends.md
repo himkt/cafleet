@@ -99,16 +99,20 @@ Closing a member pane leaves the two backends asymmetric on layout reflow:
   layout step.
 - **herdr** has no native reflow, so `kill_pane` restores the layout itself:
   it reads the target pane's tab (`herdr pane get`) before the close, runs
-  `herdr pane close`, then rebalances best-effort, scoped to that tab. With
-  ≥ 2 members remaining, the member column is re-equalized to equal heights
-  (the same invariant the create path enforces); after the last member is
-  deleted, the Director pane is explicitly restored to full tab width when the
-  layout read shows a residual right split; a single remaining member needs no
-  resize. The rebalance silently skips on unexpected layout shapes and whenever
-  the focused-tab layout reports a different tab than the killed pane's — it
-  never resizes an unrelated tab. Any `HerdrError` during the rebalance is
-  swallowed: a layout failure never fails `member delete` — the pane is closed
-  and the member deregistered regardless.
+  `herdr pane close`, then rebalances best-effort, scoped to that tab. The
+  scoping comes from the layout read itself: the killed pane is gone, so the
+  rebalance picks a pane still open in that tab (`herdr pane list`) and anchors
+  the geometry read on it (`herdr pane layout --pane <surviving>`), which
+  returns that tab's layout regardless of which tab or pane holds focus. When
+  no pane remains in the tab, there is nothing to rebalance and the step is
+  skipped. With ≥ 2 members remaining, the member column is re-equalized to
+  equal heights (the same invariant the create path enforces); after the last
+  member is deleted, the Director pane is explicitly restored to full tab width
+  when the layout read shows a residual right split; a single remaining member
+  needs no resize. The rebalance silently skips on unexpected layout shapes.
+  Any `HerdrError` during the rebalance is swallowed: a layout failure never
+  fails `member delete` — the pane is closed and the member deregistered
+  regardless.
 
 ## Prompt dispatch (`send_prompt`) {#prompt-dispatch}
 

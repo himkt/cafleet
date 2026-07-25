@@ -1,7 +1,7 @@
 # herdr equalizer: anchor every layout read on a pane
 
 **Status**: Approved
-**Progress**: 0/22 tasks complete
+**Progress**: 4/22 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -236,25 +236,25 @@ Documentation lands first, per `.claude/rules/documentation-maintenance.md`. No
 `skills/*/SKILL.md` file references the equalizer or `herdr pane layout`, so the skill
 surface needs no edit.
 
-- [ ] `SPEC.md` — replace the `_equalize_focused_tab_column()` bullet with
+- [x] `SPEC.md` — replace the `_equalize_focused_tab_column()` bullet with
       `_equalize_tab_column(anchor_pane_id)`: the geometry read is `herdr pane layout
       --pane <anchor_pane_id>`, there is no `pane current` call and no tab-id
-      comparison, and the `1/(N-k)` arithmetic and best-effort swallow are unchanged <!-- completed: -->
-- [ ] `SPEC.md` — update the `split_window` bullet so the equalization step is named
-      `_equalize_tab_column` and its anchor is stated as `reference.pane_id` <!-- completed: -->
-- [ ] `SPEC.md` — rewrite the `kill_pane` phase-3 spec: `_rebalance_after_close`
+      comparison, and the `1/(N-k)` arithmetic and best-effort swallow are unchanged <!-- completed: 2026-07-25T02:42 -->
+- [x] `SPEC.md` — update the `split_window` bullet so the equalization step is named
+      `_equalize_tab_column` and its anchor is stated as `reference.pane_id` <!-- completed: 2026-07-25T02:42 -->
+- [x] `SPEC.md` — rewrite the `kill_pane` phase-3 spec: `_rebalance_after_close`
       skips on a `None` tab, else `_surviving_pane_in_tab` runs `herdr pane list` and
       takes the first pane whose `tab_id` matches (`None` → skip), then
       `_read_tab_layout` reads `herdr pane layout --pane <anchor>`; delete the
       "a `tab_id` mismatch returns `None` and skips" clause; and rename both
       old-name references inside the bullet — the "`_equalize_focused_tab_column`
       arithmetic above" phrase and the shared-helper sentence — so all three
-      `SPEC.md` occurrences (with the bullet heading above) are renamed <!-- completed: -->
-- [ ] `docs/spec/multiplexer-backends.md` — rewrite the herdr bullet in
+      `SPEC.md` occurrences (with the bullet heading above) are renamed <!-- completed: 2026-07-25T02:42 -->
+- [x] `docs/spec/multiplexer-backends.md` — rewrite the herdr bullet in
       §*Delete-time pane layout* so tab scoping is attributed to the anchored read
       (a surviving pane in the killed pane's tab) instead of to a focused-tab
       comparison; remove the "whenever the focused-tab layout reports a different tab
-      than the killed pane's" clause and state the no-surviving-pane skip <!-- completed: -->
+      than the killed pane's" clause and state the no-surviving-pane skip <!-- completed: 2026-07-25T02:42 -->
 
 ### Step 2: Tests
 
