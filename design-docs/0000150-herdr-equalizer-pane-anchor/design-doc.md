@@ -1,7 +1,7 @@
 # herdr equalizer: anchor every layout read on a pane
 
 **Status**: Approved
-**Progress**: 18/22 tasks complete
+**Progress**: 20/22 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -14,16 +14,16 @@ operating on" two incompatible ways. This design replaces every bare
 
 ## Success Criteria
 
-- [ ] Spawning a member equalizes the member column regardless of which tab or pane
+- [x] Spawning a member equalizes the member column regardless of which tab or pane
       is focused at spawn time.
-- [ ] Deleting a member rebalances the killed pane's tab regardless of which tab or
+- [x] Deleting a member rebalances the killed pane's tab regardless of which tab or
       pane is focused at delete time.
-- [ ] The herdr backend issues no `herdr pane current` call on the spawn or delete
+- [x] The herdr backend issues no `herdr pane current` call on the spawn or delete
       layout paths; `context_discovery()` keeps its own `pane current` call.
-- [ ] Every `herdr pane layout` invocation in the backend carries `--pane <id>`.
-- [ ] `SPEC.md` and `docs/spec/multiplexer-backends.md` describe the anchored reads,
+- [x] Every `herdr pane layout` invocation in the backend carries `--pane <id>`.
+- [x] `SPEC.md` and `docs/spec/multiplexer-backends.md` describe the anchored reads,
       with no residual mention of the removed tab-mismatch skip.
-- [ ] The test suite pins the new argv on both paths and contains no test asserting
+- [x] The test suite pins the new argv on both paths and contains no test asserting
       the removed guard.
 
 ---
