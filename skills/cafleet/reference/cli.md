@@ -23,7 +23,7 @@ cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id> --json
 
 ### `--full` (cross-subcommand escape hatch)
 
-`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch over a single flag covering four overloaded surfaces: `message {send,poll,ack,cancel,show}` → untruncated `text` + the full typed-column envelope; `message broadcast` → the single `broadcast_summary` message rendered verbose (never per-recipient rows or a `recipient_ids` list); `member show` → the labeled block (`kind`, `skills`, placement sub-block) in **text mode only** (JSON is the unprojected broker dict regardless of `--full`); `member create` → the 6-line `Member registered and spawned.` block. Per-surface detail: [`cli-options.md`](../../../docs/spec/cli-options.md#full-semantics).
+`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch over a single flag covering four overloaded surfaces: `message {send,poll,ack,cancel,show}` → untruncated `text` + the full typed-column envelope; `message broadcast` → the single `broadcast_summary` message rendered verbose (never per-recipient rows or a `recipient_ids` list); `member show` → the labeled block (`kind`, `skills`, placement sub-block) in **text mode only** (JSON is the unprojected broker dict regardless of `--full`); `member create` → the 6-line `Member registered and spawned.` block. Per-surface detail: [`cli-options.md`](../../../docs/spec/cli-options.md#output-shapes).
 
 ### `--json` (per-subcommand, machine-parseable)
 

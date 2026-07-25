@@ -101,7 +101,7 @@ does not accept it.
 | `member capture` | The captured content, with no trailing newline | — | `{member_id, pane_id, lines, content}` |
 | `member prompt` | `Sent prompt '<text>' to member <name> (<pane_id>).`, or `Sent shell prompt '<text>' …` with `--shell` | — | `{member_id, pane_id, text, shell}` |
 | `member ping` | `Pinged member <name> (<pane_id>) — poll keystroke dispatched.` | — | `{member_id, pane_id}` |
-| `monitor status` | `monitor: running (…)` or `monitor: stopped`, plus the schedule table | — | Keeps `last_ping_at` and adds derived `*_age_seconds` fields |
+| `monitor status` | `monitor: running (…)` or `monitor: stopped`, plus the schedule table | — | Keeps `last_ping_at` (ISO or `null`) and adds derived `*_age_seconds` fields |
 | `monitor config` | `member 5: interval 720s, enabled, last_ping <ts>` | — | Output as JSON |
 | `doctor` | The `multiplexer:` and `assets:` blocks | — | Output as JSON |
 
@@ -586,10 +586,13 @@ one root Director by construction, so no override flag exists.
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; when omitted, the member — every role — inherits the spawning Director's placement backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. |
 | `--model` | no | Model forwarded to the backend binary's own `--model` flag. The opencode backend additionally requires `<provider-id>/<model-id>`; per-backend formats and create-time validation are in [Model selection](coding-agent-backends.md#model-selection). |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary, validated per backend before any side effect. Accepted levels, forwarding forms, and rejection strings are in [Reasoning effort](coding-agent-backends.md#reasoning-effort). |
-| `--role` | no | `member` (default) or `monitor`. `monitor` spawns the fleet's single dedicated monitoring member; a second spawn is rejected. See [Monitoring](../concepts/monitoring.md#the-monitoring-member). |
+| `--role` | no | `member` (default) or `monitor`. `monitor` spawns the fleet's single dedicated monitoring member; a second spawn is rejected. |
 | `--full` | no | Switches the non-JSON output to the 6-line labeled block. |
 | `--text` | no | Inline spawn prompt (backend-neutral template). Exactly one of `--text` / `--text-file`. |
 | `--text-file` | no | Path to a UTF-8 file whose contents are the spawn prompt (`-` = stdin). Inline prompts beyond a few KB exceed the multiplexer argv ceiling — use `--text-file` for long prompts. |
+
+The monitoring member's role and lifecycle are covered in
+[Monitoring](../concepts/monitoring.md#the-monitoring-member).
 
 #### Spawn command per backend
 
