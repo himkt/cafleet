@@ -1,7 +1,7 @@
 # Tabular content across the documentation site
 
 **Status**: Approved
-**Progress**: 59/70 tasks complete
+**Progress**: 65/70 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -245,12 +245,14 @@ Every task names the finding id(s) it implements, so all 70 tasks trace back to 
 
 ### Step 8: Entry points and how-to
 
-- [ ] `quickstart.md`: convert § Configure's three per-backend sub-headings to a `Backend | Config file | Manual configuration | Installed by cafleet setup | Reference` table. Place the two kept code snippets **below** the table, each introduced by the backend it belongs to; keep both rationale paragraphs *(EHA-F1)* <!-- completed: -->
-- [ ] `quickstart.md`: convert the prerequisites bullets to a `Requirement | Accepted | Notes` table over three rows *(EHA-F2)* <!-- completed: -->
-- [ ] `contributing.md`: convert § Tech stack's bold-key bullets to a `Concern | Technology | Notes` table over six rows, keeping every external link *(EHA-F3)* <!-- completed: -->
-- [ ] `contributing.md`: replace § Contributing changes' three-item list with a link plus one-clause summary pointing at the owning workflows table in `docs/how-to/design-doc-development.md`, keeping the ordering sentence and the contributor-specific delta *(EHA-F4)* <!-- completed: -->
-- [ ] `contributing.md`: split § Development's code block into a first-time setup sequence that stays a code block and a `Task | Runs | When you need it` table. Verify the pick-one task set against the live mise task set and write one row per task, whatever the count is then *(EHA-F5)* <!-- completed: -->
-- [ ] `design-doc-development.md`: convert § Prompts to a `Stage | Prompt | Workflow | Team` table over the three stages, keeping each prompt in a code span and the stage numbering *(EHA-F6)* <!-- completed: -->
+- [x] `quickstart.md`: convert § Configure's three per-backend sub-headings to a `Backend | Config file | Manual configuration | Installed by cafleet setup | Reference` table. Place the two kept code snippets **below** the table, each introduced by the backend it belongs to; keep both rationale paragraphs *(EHA-F1)* <!-- completed: 2026-07-25T14:49 -->
+- [x] `quickstart.md`: convert the prerequisites bullets to a `Requirement | Accepted | Notes` table over three rows *(EHA-F2)* <!-- completed: 2026-07-25T14:49 -->
+- [x] `contributing.md`: convert § Tech stack's bold-key bullets to a `Concern | Technology | Notes` table over six rows, keeping every external link *(EHA-F3)* <!-- completed: 2026-07-25T14:49 -->
+- [x] `contributing.md`: replace § Contributing changes' three-item list with a link plus one-clause summary pointing at the owning workflows table in `docs/how-to/design-doc-development.md`, keeping the ordering sentence and the contributor-specific delta *(EHA-F4)* <!-- completed: 2026-07-25T14:49 -->
+- [x] `contributing.md`: split § Development's code block into a first-time setup sequence that stays a code block and a `Task | Runs | When you need it` table. Verify the pick-one task set against the live mise task set and write one row per task, whatever the count is then *(EHA-F5)* <!-- completed: 2026-07-25T14:49 -->
+- [x] `design-doc-development.md`: convert § Prompts to a `Stage | Prompt | Workflow | Team` table over the three stages, keeping each prompt in a code span and the stage numbering *(EHA-F6)* <!-- completed: 2026-07-25T14:49 -->
+
+COMMENT(programmer): EHA-F5's live-task verification changed the row count. The finding proposes seven catalog rows; the live mise task set also defines `admin:lint` (`bun lint`), which the old code block omitted and which is a routine quality gate exactly like the four `cafleet` rows beside it. Per the task's "write one row per task, whatever the count is then", the table has **eight** rows. I deliberately did not pull in `cafleet:build`, `cafleet:makemigration`, `cafleet:publish`, or `cafleet:dev`: those are release, migration, and server-run tasks rather than the pick-one contributor loop this section documents, and adding them would widen the section's scope beyond the finding. Remove this marker once ratified.
 
 ### Step 9: Verify
 

@@ -13,11 +13,11 @@ walkthrough.
 
 Prerequisites:
 
-- Python 3.12+
-- A terminal multiplexer — tmux or herdr (see
-  [Multiplexer backends](spec/multiplexer-backends.md))
-- At least one of: `claude` (Claude Code), `codex` (OpenAI Codex CLI), or
-  `opencode`
+| Requirement | Accepted | Notes |
+|---|---|---|
+| Python | 3.12 or newer | — |
+| Terminal multiplexer | tmux or herdr | Auto-detected — see [Multiplexer backends](spec/multiplexer-backends.md) |
+| Coding agent | `claude` (Claude Code), `codex` (OpenAI Codex CLI), or `opencode` | At least one; a mixed fleet may use all three — see [Coding agents](concepts/coding-agents.md) |
 
 ```bash
 uv tool install cafleet     # or: pip install cafleet
@@ -27,14 +27,19 @@ cafleet setup               # migrate the database schema + install the assets (
 ## Configure
 
 CAFleet is designed to run inside a coding agent without per-command
-permission prompts — each backend has a different config file and permission
-system, and the snippets below are the recommended starting points.
+permission prompts. Each backend has a different config file and permission
+system:
+
+| Backend | Config file | Manual configuration | Installed by `cafleet setup` | Reference |
+|---|---|---|---|---|
+| `claude` (Claude Code) | `~/.claude/settings.json` | The `permissions.allow` / `permissions.ask` entries below | The skills | The sub-section below |
+| `codex` (OpenAI Codex CLI) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` | [The `cafleet` rules file](spec/coding-agent-backends.md#cafleet-rules-file) |
+| `opencode` | none | none required | The skills, plus the `cafleet` agent preset at `~/.opencode/agents/cafleet.md` | [Opencode](spec/coding-agent-backends.md#opencode) |
+
+The snippets below are the recommended starting points for the two backends
+that need one.
 
 ### Claude Code
-
-!!! tip "Where this lives"
-
-    Typically the config entries below go in `~/.claude/settings.json`.
 
 ```json
 {
@@ -60,10 +65,6 @@ commands into a member's pane; the operator should confirm each invocation.
 
 ### Codex
 
-!!! tip "Where this lives"
-
-    Typically the config entries below go in `~/.codex/config.toml`.
-
 ```toml
 [sandbox_workspace_write]
 network_access = true
@@ -77,19 +78,9 @@ classifies as network access — without it cafleet commands fail with
 default SQLite DB directory. Use the absolute path matching
 `CAFLEET_DATABASE_URL` or the default XDG location.
 
-The Codex rules for `cafleet` commands — allow every subcommand, keep
-`cafleet member prompt` prompting — are installed to
-`~/.codex/rules/cafleet.rules` by `cafleet setup`. See
-[Coding-agent backends § The `cafleet` rules file](spec/coding-agent-backends.md#cafleet-rules-file)
-for the rules, their precedence, and where operator customizations belong.
-
-### Opencode
-
-No manual configuration is required. `cafleet setup` installs opencode's
-`cafleet` agent preset to `~/.opencode/agents/cafleet.md`. See
-[Coding-agent backends § Opencode](spec/coding-agent-backends.md#opencode)
-for the preset's ruleset, the refresh recipe after upgrades, and the
-MCP-server rule.
+The Codex rules for `cafleet` commands allow every subcommand while keeping
+`cafleet member prompt` prompting; the reference above covers their precedence
+and where operator customizations belong.
 
 ### Trust the working directory
 

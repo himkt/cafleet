@@ -243,9 +243,11 @@ positional arguments — `cafleet setup <word>` fails with Click's standard
 `Got unexpected extra argument (<word>)` error — and does not accept
 `--fleet-id`.
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--skip AGENT` | no | Repeatable. `click.Choice(["claude", "codex", "opencode"])`; an unknown value fails with Click's standard invalid-choice error (exit 2). Duplicates are deduplicated. Help: `Skip the named agent's assets install (repeatable).` |
+The one flag is `--skip AGENT`: optional and repeatable, typed
+`click.Choice(["claude", "codex", "opencode"])`, with duplicates deduplicated
+and an unknown value failing with Click's standard invalid-choice error
+(exit 2). Its help text is
+`Skip the named agent's assets install (repeatable).`
 
 The command runs two halves, in order:
 
@@ -396,9 +398,7 @@ atomically — see [data-model.md](./data-model.md). Output shapes are in
 
 ### `fleet list`
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--json` | no | Output as JSON |
+The only flag is the optional shared [`--json`](#json-output).
 
 Lists all non-soft-deleted fleets. Each row exposes `director_member_id` so
 the Director's id can be recovered after `fleet create` output scrolls away.
@@ -415,9 +415,7 @@ Intentionally returns soft-deleted rows, so audit info stays reachable.
 
 ### `fleet delete`
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--fleet-id` | yes | The fleet to delete |
+The only flag is `--fleet-id` (required), naming the fleet to delete.
 
 Soft-deletes the fleet in one transaction: stamps `deleted_at`, deregisters
 every active member (root Director included), and removes their placement rows;
@@ -436,9 +434,8 @@ the assets-install report (the runtime CLI version and every recorded
 the [stale-assets guard](#stale-assets-guard) — a stale or missing install is
 reported, not fatal.
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--json` | no | Output as JSON — trailing per-subcommand flag (see [JSON output](#json-output)). |
+The only flag is the optional [`--json`](#json-output), a trailing
+per-subcommand flag.
 
 ```
 multiplexer:
@@ -624,9 +621,7 @@ the placement.
 
 ### `member delete` {#member-delete}
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--member-id` | yes | The member to delete (target). |
+The only flag is `--member-id` (required), naming the member to delete.
 
 Tears down the target's pane (when one exists) and soft-deletes the member.
 Targeting the root Director is blocked (see
@@ -758,9 +753,10 @@ after `fleet delete`. Behavior detail:
 
 ### `monitor start`
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--tick` | no | Scan-tick cadence in seconds (`click.IntRange(min=1)`, default **5**). The tick is the floor on interval precision — see [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision). |
+The one flag is `--tick` (optional): the scan-tick cadence in seconds
+(`click.IntRange(min=1)`, default **5**). The tick is the floor on interval
+precision — see
+[Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
 
 Runs the loop **in-process** (the monitoring member launches it as a
 background task in its own pane; the loop blocks the task and writes to its
