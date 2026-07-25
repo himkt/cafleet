@@ -1,7 +1,7 @@
 # Tabular content across the documentation site
 
 **Status**: Approved
-**Progress**: 2/70 tasks complete
+**Progress**: 8/70 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -161,12 +161,12 @@ Every task names the finding id(s) it implements, so all 70 tasks trace back to 
 
 ### Step 2: `docs/spec/coding-agent-backends.md`
 
-- [ ] Add a `## Model selection` section after `## Spawn argv` with columns `Backend | Accepted value format | Example values | Create-time validation`; rows `claude`, `codex`, `opencode`. Reduce the `--model` shared-contract bullet's trailing parenthetical to a pointer *(SPEC-F6)* <!-- completed: -->
-- [ ] Add a `## Reasoning effort` section after it with columns `Backend | Accepted levels | Forwarded as | Rejected with (exit 2)`; rows `claude`, `codex`, `opencode`. Keep the "before any registration or multiplexer side effect" guarantee in the shared-contract bullet *(SPEC-F7)* <!-- completed: -->
-- [ ] Add a per-backend capability matrix under `## Spawn argv` after the existing argv table, with columns `Backend | OS-level sandbox | Sets the pane title | Shell-command posture | Preset / config prerequisite`. Absorb the pane-title bullet; keep the first sentence of the Bash-posture bullet as the shared claim. This matrix is the site-wide owner of the shell-command / auto-approval posture *(SPEC-F8)* <!-- completed: -->
-- [ ] Convert the Codex `~/.codex` prerequisites to a `Setting | Required value | Why` table with rows `network_access`, `writable_roots`, `trust_level`; em-dash the `writable_roots` why-cell; keep both Quickstart links and the TOML block *(SPEC-F9)* <!-- completed: -->
-- [ ] Convert `### Safety-floor caveats` bullet 2 to a `Bypass class | Example | Why the allowlist misses it` table with three rows; em-dash the MCP example cell; keep the MCP directive, the verification caveat, and the codex-for-isolation escalation as prose *(SPEC-F10)* <!-- completed: -->
-- [ ] Delete the per-backend model and effort prose sentences now carried by the two new tables, leaving each `##` backend section its posture, rationale, and subsections. A model or effort value may remain where it is rationale rather than the enumerating statement of the contract *(SPEC-F6, SPEC-F7)* <!-- completed: -->
+- [x] Add a `## Model selection` section after `## Spawn argv` with columns `Backend | Accepted value format | Example values | Create-time validation`; rows `claude`, `codex`, `opencode`. Reduce the `--model` shared-contract bullet's trailing parenthetical to a pointer *(SPEC-F6)* <!-- completed: 2026-07-25T13:33 -->
+- [x] Add a `## Reasoning effort` section after it with columns `Backend | Accepted levels | Forwarded as | Rejected with (exit 2)`; rows `claude`, `codex`, `opencode`. Keep the "before any registration or multiplexer side effect" guarantee in the shared-contract bullet *(SPEC-F7)* <!-- completed: 2026-07-25T13:33 -->
+- [x] Add a per-backend capability matrix under `## Spawn argv` after the existing argv table, with columns `Backend | OS-level sandbox | Sets the pane title | Shell-command posture | Preset / config prerequisite`. Absorb the pane-title bullet; keep the first sentence of the Bash-posture bullet as the shared claim. This matrix is the site-wide owner of the shell-command / auto-approval posture *(SPEC-F8)* <!-- completed: 2026-07-25T13:33 -->
+- [x] Convert the Codex `~/.codex` prerequisites to a `Setting | Required value | Why` table with rows `network_access`, `writable_roots`, `trust_level`; em-dash the `writable_roots` why-cell; keep both Quickstart links and the TOML block *(SPEC-F9)* <!-- completed: 2026-07-25T13:33 -->
+- [x] Convert `### Safety-floor caveats` bullet 2 to a `Bypass class | Example | Why the allowlist misses it` table with three rows; em-dash the MCP example cell; keep the MCP directive, the verification caveat, and the codex-for-isolation escalation as prose *(SPEC-F10)* <!-- completed: 2026-07-25T13:33 -->
+- [x] Delete the per-backend model and effort prose sentences now carried by the two new tables, leaving each `##` backend section its posture, rationale, and subsections. A model or effort value may remain where it is rationale rather than the enumerating statement of the contract *(SPEC-F6, SPEC-F7)* <!-- completed: 2026-07-25T13:33 -->
 
 **Verification constraint for this step.** The rejection strings and validation messages moved into the two new tables are re-verified against the current CLI before landing. Any drift between the page and the CLI is reported as a **separate finding**, not corrected silently in the same edit.
 

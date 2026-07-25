@@ -23,36 +23,52 @@ version/config requirements.
 Shared contract:
 
 - All three postures enable the Bash tool with no runtime permission prompts.
-  claude and codex members run cafleet (and any shell command) directly;
-  opencode members run cafleet and the other commands on the preset's
-  deny-by-default allowlist, and route everything else to the Director.
 - All three honor the leading-`!` shell shortcut that
   [`cafleet member prompt --shell`](cli-options.md#member-prompt) uses.
 - `--model <m>` from `cafleet member create` is inserted immediately before
   the prompt. The value passes through verbatim — the binary rejects unknown
   models, so newly released models need no cafleet release. Omitted, no model
-  tokens are emitted and the binary uses its configured default. (The opencode
-  backend additionally validates the value's format — see below.)
+  tokens are emitted and the binary uses its configured default. Per-backend
+  formats and create-time validation are in
+  [Model selection](#model-selection).
 - `--effort <level>` from `cafleet member create` forwards a reasoning-effort
   level, emitted immediately after the model tokens (before the prompt).
   Unlike `--model`, the accepted level set is validated per backend at create
   time — an unknown level exits 2 before any registration or multiplexer side
   effect. Omitted, no effort tokens are emitted and the argv is byte-identical
-  to the no-effort form. opencode does not support the flag — see below.
+  to the no-effort form. Per-backend levels and rejection strings are in
+  [Reasoning effort](#reasoning-effort).
 - A missing binary fails the spawn: exit 1 with
   `Error: binary <name> not found on PATH`.
-- Only `claude` sets the pane title (via `--name`); locate `codex` and
-  `opencode` panes through `cafleet member list` (`pane_id` is ground truth).
+
+Per-backend capabilities:
+
+| Backend | OS-level sandbox | Sets the pane title | Shell-command posture | Preset / config prerequisite |
+|---|---|---|---|---|
+| `claude` | none | yes, via `--name <member-name>` | Runs cafleet and any shell command directly | none |
+| `codex` | kernel-enforced — `--sandbox workspace-write` confines writes to the workspace, and codex is the only backend with one | no — locate the pane through `cafleet member list` (`pane_id` is ground truth) | Runs cafleet and any shell command directly | `~/.codex/rules/cafleet.rules`, plus the `~/.codex/config.toml` settings and a trusted working directory. The rules file is a permission posture, not a spawn dependency — `member create --coding-agent codex` needs only the `codex` binary on PATH |
+| `opencode` | none | no — locate the pane through `cafleet member list` | Deny-by-default allowlist; everything outside it routes to the Director | `~/.opencode/agents/cafleet.md`, a spawn precondition — when it is missing the spawn fails with `opencode agent preset not found at <preset>; run 'cafleet setup' first` |
+
+## Model selection {#model-selection}
+
+| Backend | Accepted value format | Example values | Create-time validation |
+|---|---|---|---|
+| `claude` | Passes through verbatim | `haiku`, `sonnet`, `opus`, `fable` | none — the binary rejects unknown models |
+| `codex` | Passes through verbatim | `gpt-5.6-sol` (default), `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5` | none — the binary rejects unknown models |
+| `opencode` | `<provider-id>/<model-id>`, split on the **first** `/` into two non-empty segments (model ids may contain further slashes) | `anthropic/claude-sonnet-4-6`, `openai/gpt-5.5` | exit 2 with `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` |
+
+## Reasoning effort {#reasoning-effort}
+
+| Backend | Accepted levels | Forwarded as | Rejected with (exit 2) |
+|---|---|---|---|
+| `claude` | `low`, `medium`, `high`, `xhigh`, `max` | `--effort <level>`, immediately after the model tokens | `Error: --effort for the claude backend must be one of low, medium, high, xhigh, max (got '<value>').` |
+| `codex` | `minimal`, `low`, `medium`, `high`, `xhigh` | the single token `--config=model_reasoning_effort=<level>`, immediately after the model tokens | `Error: --effort for the codex backend must be one of minimal, low, medium, high, xhigh (got '<value>').` |
+| `opencode` | none — the backend exposes no reasoning-effort control | — | `Error: opencode does not support reasoning effort.` |
 
 ## Claude {#claude}
 
 `--permission-mode dontAsk` is the reference auto-approval posture the other
-backends match. Example `--model` values: `haiku`, `sonnet`, `opus`, `fable`.
-
-Reasoning-effort levels: `low`, `medium`, `high`, `xhigh`, `max`, forwarded
-as `--effort <level>` immediately after the model tokens. An unknown level
-fails at create time with exit 2 and
-`Error: --effort for the claude backend must be one of low, medium, high, xhigh, max (got '<value>').`
+backends match.
 
 ## Codex {#codex}
 
@@ -60,21 +76,19 @@ fails at create time with exit 2 and
 kernel-enforced sandbox — codex is the only backend with one.
 `--ask-for-approval never` disables interactive approval prompts (upstream
 write-up: <https://developers.openai.com/codex/agent-approvals-security>).
-Example `--model` values: `gpt-5.6-sol` (default), `gpt-5.6-terra`,
-`gpt-5.6-luna`, `gpt-5.5`.
 
-Reasoning-effort levels: `minimal`, `low`, `medium`, `high`, `xhigh`,
-forwarded as the single token `--config=model_reasoning_effort=<level>`
-immediately after the model tokens. An unknown level fails at create time
-with exit 2 and
-`Error: --effort for the codex backend must be one of minimal, low, medium, high, xhigh (got '<value>').`
+Three `~/.codex/config.toml` prerequisites must be in place before the first
+codex spawn, covered in
+[Quickstart § Configure](../quickstart.md#codex) and
+[Quickstart § Trust the working directory](../quickstart.md#trust-the-working-directory):
 
-Two `~/.codex/config.toml` requirements, covered in
-[Quickstart § Configure](../quickstart.md#codex): `network_access = true`
-(the multiplexer socket counts as network access) and `writable_roots`
-including the cafleet DB directory. The working directory must also be
-trusted before spawning
-([Quickstart § Trust the working directory](../quickstart.md#trust-the-working-directory)):
+| Setting | Required value | Why |
+|---|---|---|
+| `network_access` | `true` | The multiplexer socket counts as network access |
+| `writable_roots` | Includes the cafleet DB directory | — |
+| `trust_level` | `"trusted"` | The working directory must be trusted before spawning |
+
+`trust_level` is keyed by absolute workspace path:
 
 ```toml
 [projects."/abs/path/to/workspace"]
@@ -116,16 +130,6 @@ The pane runs the bare `opencode` TUI (not `opencode run`), so it stays a
 long-lived, observable pane like the other backends. The prompt is passed via
 `--prompt` — bare `opencode`'s positional is a project path, not a message.
 
-`--model` values must be `<provider-id>/<model-id>`, split on the **first**
-`/` into two non-empty segments (model ids may contain further slashes).
-Violations fail at create time with exit 2 and
-`Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').`
-Example values: `anthropic/claude-sonnet-4-6`, `openai/gpt-5.5`.
-
-opencode exposes no reasoning-effort control: `--effort` with this backend
-fails at create time with exit 2 and
-`Error: opencode does not support reasoning effort.`, before any side effect.
-
 ### The `cafleet` agent preset {#cafleet-agent-preset}
 
 `--agent cafleet` binds the member to `~/.opencode/agents/cafleet.md`. The
@@ -149,18 +153,21 @@ popup ad hoc.
 
 ### Safety-floor caveats {#safety-floor-caveats}
 
-The posture is a deny-by-default allowlist, with no OS-level sandbox:
+The posture is a deny-by-default allowlist, with no OS-level sandbox.
+Standalone un-enumerated commands fall to the `"*": "deny"` base, but three
+classes of bypass under allowed globs persist:
 
-- **MCP-contributed tools bypass the permission evaluator.** cafleet ships no
-  MCP stanzas; operators MUST NOT add MCP servers to any opencode config
-  their machine loads.
-- Standalone un-enumerated commands fall to the `"*": "deny"` base, but
-  bypasses under allowed globs persist: argument-space abuse and shell
-  chaining inside a `cmd *` match (a compound line whose leading tokens match
-  an allowed glob, e.g. `git log --stat; curl … | sh` matching `git log *`),
-  and interpreter/hook execution via allowed tooling (`uv run pytest *`
-  executes workspace-writable test code; `git commit *` runs `.git/hooks`) —
-  unless opencode's per-sub-command evaluation of compound lines is verified
-  and recorded here. For kernel-enforced isolation, use the `codex` backend.
+| Bypass class | Example | Why the allowlist misses it |
+|---|---|---|
+| MCP-contributed tools | — | They bypass the permission evaluator entirely |
+| Shell chaining or argument-space abuse inside an allowed `cmd *` match | <code>git log --stat; curl … &#124; sh</code> matching `git log *` | The compound line's leading tokens match the allowed glob |
+| Interpreter or hook execution via allowed tooling | `uv run pytest *` executes workspace-writable test code; `git commit *` runs `.git/hooks` | The allowed command is itself the execution vector |
+
+cafleet ships no MCP stanzas, and operators MUST NOT add MCP servers to any
+opencode config their machine loads.
+
+The second and third classes stand unless opencode's per-sub-command
+evaluation of compound lines is verified and recorded here. For
+kernel-enforced isolation, use the `codex` backend.
 
 Validated against `opencode 1.15.5` (the minimum supported version).
