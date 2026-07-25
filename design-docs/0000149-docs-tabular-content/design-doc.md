@@ -1,7 +1,7 @@
 # Tabular content across the documentation site
 
 **Status**: Approved
-**Progress**: 31/70 tasks complete
+**Progress**: 50/70 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -97,6 +97,9 @@ Roughly forty new tables land across twenty pages. These conventions keep them c
 | Column alignment | Default left alignment; no alignment colons unless an existing adjacent table already uses them |
 | Header wording | Noun phrase, sentence case, no trailing punctuation |
 | Boolean-ish columns | `yes` / `no`, not `✓` / `✗` |
+| A literal `\|` inside a cell | A raw `<code>` element using `&#124;` (plus `&lt;` / `&gt;` where the string also carries angle brackets). A `\|` escape is **not** a fix — Python-Markdown leaves the backslash visible inside a code span |
+
+The pipe rule is verified by inspecting rendered HTML, not by the docs build: the build renders a broken cell without error either way, so a green build is not evidence.
 
 ### Ownership of duplicated enumerations
 
@@ -126,7 +129,7 @@ Four proposed tables have cells the current pages do not supply. These are fille
 | Table | Missing cells | Source |
 |---|---|---|
 | `concepts/overview.md` CLI entry points | Scope text for `setup`, `doctor`, `server` | `docs/spec/cli-options.md` § Subcommand summary, paraphrased to the concepts altitude |
-| Identity placeholder table | "Resolves to" for `{fleet_id}`, `{director_member_id}`, `{coding_agent}`; label lines for the latter two | `docs/spec/cli-options.md` § member create |
+| Identity placeholder table | "Resolves to" for `{fleet_id}`, `{director_member_id}`, `{coding_agent}`; label lines for the latter two | The canonical spawn-prompt skeleton, which renders all four literally. `docs/spec/cli-options.md` § member create names the four placeholders but carries no label lines, so it cannot source this table |
 | Codex prerequisites checklist | The "why" for `writable_roots` | Em-dash — no page states it |
 | Safety-floor bypass classes | An example for the MCP class | Em-dash — no page gives one |
 
@@ -184,23 +187,23 @@ Every task names the finding id(s) it implements, so all 70 tasks trace back to 
 
 ### Step 4: `docs/spec/cli-options.md`
 
-- [ ] Replace the `--effort` cell's semicolon list in the `member create` flag table with a pointer to the owning table in `docs/spec/coding-agent-backends.md` § Reasoning effort, merging this page's extra CLI-contract columns into that owning table; keep only the `--model` format constraint local *(CLI-F1)* <!-- completed: -->
-- [ ] Redesign `## Error Messages` in one pass: add `Command`, `Exit`, and `Notes` columns together, moving the exit code out of every message cell and the trailing explanatory clauses out of the message column, leaving `Error message` holding only the verbatim string *(CLI-F2, CLI-M3)* <!-- completed: -->
-- [ ] Convert the two inline exit-code sentences (member targeting, `monitor start`) to `Exit | Meaning` tables, one row per trigger rather than one row per code *(CLI-F3)* <!-- completed: -->
-- [ ] Replace the three numbered resolution rules in `### Member targeting and key delivery` with a `Target state | capture / prompt / ping | show | delete` matrix over four target states *(CLI-F4)* <!-- completed: -->
-- [ ] Add a cross-subcommand output-shape table (`Subcommand | Default text output | --full text output | JSON payload`), with an em-dash where `--full` does not apply. Verify the subcommand count against the live page and against the `## Subcommand summary` row count; if the two legitimately differ, record why in a one-line note, otherwise reconcile them *(CLI-F5)* <!-- completed: -->
-- [ ] Fold the `### --full semantics` table into the output-shape table, including the missing `fleet create` row, and remove the standalone table *(CLI-F8)* <!-- completed: -->
-- [ ] Delete from each per-subcommand trailing output paragraph only the sentences the new output-shape table carries; keep every sentence it does not *(CLI-F5)* <!-- completed: -->
-- [ ] Convert the two `member list` output paragraphs to a `Field | Text column | Text rendering when absent | JSON key | JSON type` table over ten fields *(CLI-F6)* <!-- completed: -->
-- [ ] Add a consolidated environment-variable table (`Environment variable | Settings field | Default | Controls | Overridden by`) with five rows, and remove the one-row `CAFLEET_MAX_TEXT_LEN` table it absorbs *(CLI-F7, CLI-M1)* <!-- completed: -->
-- [ ] Verify `--quiet` exists on `message send` and `message ack` against the current CLI. If it does, add a `--quiet` semantics table (`Subcommand | Quiet output`) and the missing `--quiet` rows to both flag tables. If it does not, **halt this task and report** rather than documenting behavior that does not exist *(CLI-F9)* <!-- completed: -->
-- [ ] Convert the `cafleet setup` db half to a `Prior DB state | Outcome | Output / refusal message` table with five rows, keeping every string verbatim *(CLI-F10)* <!-- completed: -->
-- [ ] Convert the `cafleet setup` failure paragraphs to a `Half | Trigger | Message | Effect` table *(CLI-F11)* <!-- completed: -->
-- [ ] Convert `#### Spawn-prompt substitution` to a `Placeholder | Substituted value | How the spawned member sees it` table over the four placeholders — this table is the site-wide owner *(CLI-F12, CON-F14)* <!-- completed: -->
-- [ ] Replace the `## Stale-assets guard` numbered list with a `Recorded install state | Result | Exit` table plus an `Exempt surface | Why exempt | Behavior under a stale/missing install` table, supplying the missing reason for `server` *(CLI-F13)* <!-- completed: -->
-- [ ] Re-key the `## JSON output (--json)` table one row per subcommand so it can be scanned by name; leave the 22-row subcommand summary at its current width *(CLI-F14)* <!-- completed: -->
-- [ ] Replace the one-row `## Global Options` table with a sentence covering `--version` *(CLI-M1)* <!-- completed: -->
-- [ ] Trim the `### member prompt` form-comparison table cells to their keystroke sequences and move both rationale sentences to prose beneath it *(CLI-M2)* <!-- completed: -->
+- [x] Replace the `--effort` cell's semicolon list in the `member create` flag table with a pointer to the owning table in `docs/spec/coding-agent-backends.md` § Reasoning effort, merging this page's extra CLI-contract columns into that owning table; keep only the `--model` format constraint local *(CLI-F1)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Redesign `## Error Messages` in one pass: add `Command`, `Exit`, and `Notes` columns together, moving the exit code out of every message cell and the trailing explanatory clauses out of the message column, leaving `Error message` holding only the verbatim string *(CLI-F2, CLI-M3)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Convert the two inline exit-code sentences (member targeting, `monitor start`) to `Exit | Meaning` tables, one row per trigger rather than one row per code *(CLI-F3)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Replace the three numbered resolution rules in `### Member targeting and key delivery` with a `Target state | capture / prompt / ping | show | delete` matrix over four target states *(CLI-F4)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Add a cross-subcommand output-shape table (`Subcommand | Default text output | --full text output | JSON payload`), with an em-dash where `--full` does not apply. Verify the subcommand count against the live page and against the `## Subcommand summary` row count; if the two legitimately differ, record why in a one-line note, otherwise reconcile them *(CLI-F5)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Fold the `### --full semantics` table into the output-shape table, including the missing `fleet create` row, and remove the standalone table *(CLI-F8)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Delete from each per-subcommand trailing output paragraph only the sentences the new output-shape table carries; keep every sentence it does not *(CLI-F5)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Convert the two `member list` output paragraphs to a `Field | Text column | Text rendering when absent | JSON key | JSON type` table over ten fields *(CLI-F6)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Add a consolidated environment-variable table (`Environment variable | Settings field | Default | Controls | Overridden by`) with five rows, and remove the one-row `CAFLEET_MAX_TEXT_LEN` table it absorbs *(CLI-F7, CLI-M1)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Verify `--quiet` exists on `message send` and `message ack` against the current CLI. If it does, add a `--quiet` semantics table (`Subcommand | Quiet output`) and the missing `--quiet` rows to both flag tables. If it does not, **halt this task and report** rather than documenting behavior that does not exist *(CLI-F9)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Convert the `cafleet setup` db half to a `Prior DB state | Outcome | Output / refusal message` table with five rows, keeping every string verbatim *(CLI-F10)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Convert the `cafleet setup` failure paragraphs to a `Half | Trigger | Message | Effect` table *(CLI-F11)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Convert `#### Spawn-prompt substitution` to a `Placeholder | Substituted value | How the spawned member sees it` table over the four placeholders — this table is the site-wide owner *(CLI-F12, CON-F14)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Replace the `## Stale-assets guard` numbered list with a `Recorded install state | Result | Exit` table plus an `Exempt surface | Why exempt | Behavior under a stale/missing install` table, supplying the missing reason for `server` *(CLI-F13)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Re-key the `## JSON output (--json)` table one row per subcommand so it can be scanned by name; leave the 22-row subcommand summary at its current width *(CLI-F14)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Replace the one-row `## Global Options` table with a sentence covering `--version` *(CLI-M1)* <!-- completed: 2026-07-25T13:58 -->
+- [x] Trim the `### member prompt` form-comparison table cells to their keystroke sequences and move both rationale sentences to prose beneath it *(CLI-M2)* <!-- completed: 2026-07-25T13:58 -->
 
 ### Step 5: `docs/spec/data-model.md` and `docs/spec/message-envelope.md`
 
@@ -227,13 +230,13 @@ Every task names the finding id(s) it implements, so all 70 tasks trace back to 
 - [x] `coding-agents.md`: replace § Reasoning effort's running sentence with a link plus one-clause summary pointing at the owning table in `docs/spec/coding-agent-backends.md`, keeping the validation and default prose *(CON-F2)* <!-- completed: 2026-07-25T13:46 -->
 - [x] `coding-agents.md`: convert § Known asymmetries to a `Dimension | claude | codex | opencode` matrix over reasoning effort, pane title, and sandbox isolation, carrying supported / not-supported rather than restating the level sets; absorb the second opencode-unsupported mention *(CON-F3)* <!-- completed: 2026-07-25T13:46 -->
 - [x] `coding-agents.md`: add a `Backend | Product | How the pane loads the cafleet skill` table collecting the per-backend facts currently spread across the intro and § cafleet usage from a member pane. Carry no auto-approval-posture column — that enumeration is owned by the Step 2 capability matrix; link to it instead *(CON-F4)* <!-- completed: 2026-07-25T13:46 -->
-- [ ] `coding-agents.md`: replace the inline placeholder enumeration with a link plus one-clause summary pointing at the owning table in `docs/spec/cli-options.md` *(CON-F14)* <!-- completed: -->
+- [x] `coding-agents.md`: replace the inline placeholder enumeration with a link plus one-clause summary pointing at the owning table in `docs/spec/cli-options.md` *(CON-F14)* <!-- completed: 2026-07-25T13:58 -->
 - [x] `model-selection.md`: convert § The model list's column description to a `Column | What it holds | How to read it` table over five rows, moving the judgment and estimate caveats into the rows they qualify *(CON-F5)* <!-- completed: 2026-07-25T13:46 -->
 - [x] `model-selection.md`: convert § Cost efficiency mode's role policies to a `Role | Model chosen | Needs the cost efficiency mode trigger?` table over ordinary member, monitor, and reviewer *(CON-F6)* <!-- completed: 2026-07-25T13:46 -->
 - [x] `model-selection.md`: convert the closing override paragraph to a `Situation | What the Director does` table over the five conditions, keeping the fail-closed framing sentence *(CON-F7)* <!-- completed: 2026-07-25T13:46 -->
 - [x] `member-lifecycle.md`: convert § Delete ordering to a `Member state | What member delete does | Multiplexer effect` table over the three states *(CON-F12)* <!-- completed: 2026-07-25T13:46 -->
 - [x] `member-lifecycle.md`: replace § Commands' prose enumeration with a slim table keyed by **lifecycle stage** — not restating purpose or flags — plus a link to the owning subcommand summary in `docs/spec/cli-options.md`; keep the identity-flag rule and the `member prompt` paragraph *(CON-F13)* <!-- completed: 2026-07-25T13:46 -->
-- [ ] `member-lifecycle.md`: replace the inline placeholder enumeration with a link plus one-clause summary pointing at the owning table *(CON-F14)* <!-- completed: -->
+- [x] `member-lifecycle.md`: replace the inline placeholder enumeration with a link plus one-clause summary pointing at the owning table *(CON-F14)* <!-- completed: 2026-07-25T13:58 -->
 - [x] `storage.md`: convert § Schema management to a `Database state | What cafleet setup does` table over four states, keeping the no-schema failure outside the table *(CON-F15)* <!-- completed: 2026-07-25T13:46 -->
 - [x] `overview.md`: extend the CLI group table to all seven entry points. **Paraphrase** the scope text for `setup`, `doctor`, and `server` to the concepts altitude rather than copying the spec wording, so the two pages differ in wording and only the spec page reads as the contract *(CON-F1)* <!-- completed: 2026-07-25T13:46 -->
 - [x] `overview.md`: trim the `monitor` glossary cell to a one-clause definition matching its neighbours, leaving the mechanism to the linked Monitoring page *(CON-M1)* <!-- completed: 2026-07-25T13:46 -->

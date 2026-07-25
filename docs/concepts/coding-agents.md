@@ -35,11 +35,11 @@ sandbox trade-offs are specified in
 ## cafleet usage from a member pane
 
 The cafleet CLI works unchanged from any backend pane. Identity reaches a
-member through its spawn prompt: `cafleet member create` renders the four
-identity placeholders — `{fleet_id}`, `{member_id}`, `{director_member_id}`,
-and `{coding_agent}` — to literals, so the member reads its ids as plain text
-lines (e.g. `FLEET ID: 1`, `YOUR MEMBER ID: 4`) and passes them explicitly on
-every command. The only environment variable forwarded into the pane is
+member through its spawn prompt: `cafleet member create` renders four identity
+placeholders to literals, so the member reads its ids as plain text lines
+(e.g. `FLEET ID: 1`, `YOUR MEMBER ID: 4`) and passes them explicitly on every
+command. Each placeholder and its label line is in
+[CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution). The only environment variable forwarded into the pane is
 `CAFLEET_DATABASE_URL`.
 All three honor a leading-`!` shell shortcut on the coding agent's input line,
 so `cafleet member prompt --shell` works against any pane shape. For the full

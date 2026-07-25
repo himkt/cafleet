@@ -74,6 +74,12 @@ Two rules keep the non-owning mentions honest:
 | Column alignment | Default left alignment; no alignment colons unless an adjacent existing table already uses them |
 | Header wording | Noun phrase, sentence case, no trailing punctuation |
 | Boolean-ish columns | `yes` / `no`, not `✓` / `✗` |
+| A literal `\|` inside a cell | A raw `<code>` element using `&#124;` (plus `&lt;` / `&gt;` when the string also carries angle brackets) |
+
+A `\|` escape does not work inside a code span — Python-Markdown leaves the
+backslash visible in the rendered page. Verify any piped cell by inspecting the
+rendered HTML: the docs build renders a broken cell without error, so a passing
+build is not evidence the cell is intact.
 
 ## Scope
 

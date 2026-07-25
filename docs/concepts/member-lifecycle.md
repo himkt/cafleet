@@ -48,9 +48,9 @@ spawn or the patch fails, the registration is rolled back. The new pane is
 created without stealing focus, so the Director's active window is unchanged.
 Identity reaches the spawned pane as literals rendered into the prompt:
 `cafleet member create` runs `str.format` over the resolved prompt,
-substituting `{fleet_id}`, `{member_id}` (the member's own newly-allocated id),
-`{director_member_id}`, and `{coding_agent}` — see
-[Coding agents](coding-agents.md).
+substituting the four identity placeholders — each one and its label line is
+in
+[CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution).
 
 ## Delete ordering
 

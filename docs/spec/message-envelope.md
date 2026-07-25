@@ -71,7 +71,7 @@ A poll result with one unicast delivery (id `42`, from `7`, body `"build OK"`).
 
 > Indented here for readability; the actual `--json` output is a single compact line with no whitespace. `--full` only changes which fields are emitted, never the encoding.
 
-A broadcast summary row carries `kind: "broadcast_summary"` (or `type` in `--full`) and `origin: <id>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"`. The `message broadcast` response always contains exactly this single summary message plus the wrapper-level `recipients` (the real recipient count `N`) and `delivered` (the count of best-effort inline previews that landed) fields — there is no per-recipient envelope list. `--full` renders that single summary message in full (verbose envelope / typed-column dict) instead of the one-line summary, but never adds per-recipient envelopes (see [`--full` semantics](cli-options.md#full-semantics) for the cross-subcommand summary).
+A broadcast summary row carries `kind: "broadcast_summary"` (or `type` in `--full`) and `origin: <id>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"`. The `message broadcast` response always contains exactly this single summary message plus the wrapper-level `recipients` (the real recipient count `N`) and `delivered` (the count of best-effort inline previews that landed) fields — there is no per-recipient envelope list. `--full` renders that single summary message in full (verbose envelope / typed-column dict) instead of the one-line summary, but never adds per-recipient envelopes (see [Output shapes](cli-options.md#output-shapes) for the cross-subcommand summary).
 
 ### Text mode
 
@@ -91,7 +91,7 @@ Optional segments `| kind:<kind>` and `| origin:<id>` are appended to line 1 whe
 The flags that govern envelope rendering are documented in [cli-options.md](cli-options.md):
 
 - [`--json`](cli-options.md#json-output) — emit JSON output (compact).
-- [`--full`](cli-options.md#full-semantics) — return the full typed-column envelope and untruncated body.
+- [`--full`](cli-options.md#output-shapes) — return the full typed-column envelope and untruncated body.
 
 `CAFLEET_MAX_TEXT_LEN` (default `200`) controls body truncation in the rendered envelope; it is documented under [Message Body Truncation](cli-options.md#message-body-truncation).
 
