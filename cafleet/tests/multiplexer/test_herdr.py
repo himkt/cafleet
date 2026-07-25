@@ -119,7 +119,7 @@ def test_context_discovery__missing_field_raises(herdr_run):
 # the Director's tab except the Director's own, and either starts the column
 # (first member → split the Director --direction right) or appends to it
 # (subsequent → split max(column) --direction down, then equalizes the column via
-# _equalize_focused_tab_column). The max()-based stack order is validation-pending
+# _equalize_tab_column). The max()-based stack order is validation-pending
 # against a real herdr binary; the argv shapes below pin the current implementation.
 
 _REFERENCE = MultiplexerContext(session="wG", window_id="wG:t1", pane_id="wG:p1")
@@ -199,7 +199,7 @@ def test_split_window__first_member_no_env_omits_env_flags(monkeypatch, herdr_ru
 
 def _balanced_layout(tab_id: str, col_x: int) -> dict:
     """A two-member right column already at equal heights (down split ratio 0.5),
-    so ``_equalize_focused_tab_column`` computes a zero delta and emits no resize.
+    so ``_equalize_tab_column`` computes a zero delta and emits no resize.
     The Director pane sits at ``x=0`` (the leftmost column, excluded)."""
     return {
         "layout": {
@@ -230,10 +230,11 @@ def test_split_window__subsequent_member_splits_max_then_equalizes(
     monkeypatch, herdr_run
 ):
     """A non-empty column → the member splits ``max(column)`` downward, then
-    ``_equalize_focused_tab_column`` reads the focused tab (``pane current`` +
-    ``pane layout``) before the command runs. The column is listed [p3, p2] to
-    pin that the split targets ``max`` (p3), not the last-listed pane (p2); the
-    layout is already balanced (0.5), so no resize is emitted."""
+    ``_equalize_tab_column`` reads the layout anchored on the Director's own pane
+    (``pane layout --pane wG:p1``, no ``pane current`` round-trip) before the
+    command runs. The column is listed [p3, p2] to pin that the split targets
+    ``max`` (p3), not the last-listed pane (p2); the layout is already balanced
+    (0.5), so no resize is emitted."""
     captured, set_returns = herdr_run
     monkeypatch.setattr("os.getcwd", lambda: _CWD)
     set_returns(
@@ -248,12 +249,11 @@ def test_split_window__subsequent_member_splits_max_then_equalizes(
             }
         ),
         _envelope({"pane": {"pane_id": "wG:p4"}}),  # split(max=p3, down) → new pane
-        _envelope({"pane": {"tab_id": "wG:t1"}}),  # pane current → focused tab
-        # _run_json returns the `result` object; _resize_focused_tab_column then
+        # _run_json returns the `result` object; _resize_tab_column then
         # indexes ["layout"], so the result must carry the `layout` wrapper (do
         # NOT pre-index it here, or the equalizer KeyErrors and swallows,
         # bypassing the real balanced path).
-        _envelope(_balanced_layout("wG:t1", col_x=100)),  # pane layout
+        _envelope(_balanced_layout("wG:t1", col_x=100)),  # pane layout --pane wG:p1
     )
     new_pane = _herdr.split_window(
         reference=_REFERENCE, env={}, command=["claude", "second"]
@@ -273,10 +273,36 @@ def test_split_window__subsequent_member_splits_max_then_equalizes(
             "--cwd",
             _CWD,
         ],
-        ["herdr", "pane", "current"],
-        ["herdr", "pane", "layout"],
+        # The layout read is anchored on the Director's pane, not on focus.
+        ["herdr", "pane", "layout", "--pane", "wG:p1"],
         ["herdr", "pane", "run", "wG:p4", "claude second"],
     ]
+
+
+def test_split_window__layout_read_anchored_on_director_not_focus(
+    monkeypatch, herdr_run
+):
+    """Regression: the spawn-path layout read is addressed by the Director's own
+    pane id, making it invoker- and focus-independent. It issues no
+    ``pane current`` — a focus-derived tab makes the equalizer silently skip
+    whenever the operator views a tab other than the Director's."""
+    captured, set_returns = herdr_run
+    monkeypatch.setattr("os.getcwd", lambda: _CWD)
+    set_returns(
+        _envelope(
+            {
+                "panes": [
+                    {"pane_id": "wG:p1", "tab_id": "wG:t1"},  # the Director
+                    {"pane_id": "wG:p3", "tab_id": "wG:t1"},  # the existing column
+                ]
+            }
+        ),
+        _envelope({"pane": {"pane_id": "wG:p4"}}),  # split(max=p3, down) → new pane
+        _envelope(_balanced_layout("wG:t1", col_x=100)),
+    )
+    _herdr.split_window(reference=_REFERENCE, env={}, command=["claude"])
+    assert ["herdr", "pane", "current"] not in captured
+    assert ["herdr", "pane", "layout", "--pane", "wG:p1"] in captured
 
 
 def test_split_window__pane_list_missing_field_raises(herdr_run):
@@ -304,7 +330,7 @@ def test_split_window__unresolvable_cwd_raises(monkeypatch, herdr_run):
     assert captured == []
 
 
-# --- _equalize_focused_tab_column (deterministic ratio math) ---------------
+# --- _equalize_tab_column (deterministic ratio math) -----------------------
 #
 # The right column is a right-leaning chain of `down` splits; equal heights ⇔
 # split_k has ratio 1/(N-k). `pane resize --amount` is a signed delta on the
@@ -344,13 +370,11 @@ def test_equalize__three_member_column_drives_top_split_to_one_third(herdr_run):
     the top split moves: resize member1 up by 1/3-1/2 = 0.1667 (deterministic)."""
     captured, set_returns = herdr_run
     set_returns(
-        _envelope({"pane": {"tab_id": "wT:t3"}}),  # pane current → focused tab
         _column_layout([0.5, 0.5]),  # pane layout: two down splits at 0.5
     )
-    _herdr._equalize_focused_tab_column()
+    _herdr._equalize_tab_column("wT:p3")
     assert captured == [
-        ["herdr", "pane", "current"],
-        ["herdr", "pane", "layout"],
+        ["herdr", "pane", "layout", "--pane", "wT:p3"],
         # top split 0.5 → 1/3: negative delta grows the pane below (m1) upward.
         [
             "herdr",
@@ -371,23 +395,10 @@ def test_equalize__already_balanced_column_emits_no_resize(herdr_run):
     below the 1e-3 threshold, so no resize is emitted."""
     captured, set_returns = herdr_run
     set_returns(
-        _envelope({"pane": {"tab_id": "wT:t3"}}),
         _column_layout([0.3333, 0.5]),
     )
-    _herdr._equalize_focused_tab_column()
-    assert captured == [["herdr", "pane", "current"], ["herdr", "pane", "layout"]]
-
-
-def test_equalize__focus_moved_between_reads_skips(herdr_run):
-    """The layout's tab_id differs from the focused tab (focus moved between the
-    two reads) → no resize, to avoid rebalancing the wrong tab."""
-    captured, set_returns = herdr_run
-    set_returns(
-        _envelope({"pane": {"tab_id": "wT:t3"}}),
-        _envelope({"layout": {"tab_id": "wT:t9", "panes": [], "splits": []}}),
-    )
-    _herdr._equalize_focused_tab_column()
-    assert captured == [["herdr", "pane", "current"], ["herdr", "pane", "layout"]]
+    _herdr._equalize_tab_column("wT:p3")
+    assert captured == [["herdr", "pane", "layout", "--pane", "wT:p3"]]
 
 
 def test_equalize__best_effort_swallows_herdr_error(herdr_run):
@@ -395,7 +406,7 @@ def test_equalize__best_effort_swallows_herdr_error(herdr_run):
     cosmetic and must not fail a spawn."""
     _captured, set_returns = herdr_run
     set_returns(HerdrError("herdr command failed: server unreachable"))
-    assert _herdr._equalize_focused_tab_column() is None
+    assert _herdr._equalize_tab_column("wT:p3") is None
 
 
 # --- list_pane_ids ---------------------------------------------------------
@@ -435,12 +446,13 @@ def test_pane_exists__other_error_propagates(herdr_run):
 #
 # kill_pane anchors the rebalance to the killed pane's tab: a pre-close
 # `pane get <target>` records the target's tab_id, `pane close` runs with its
-# existing not_found-tolerant semantics, then the rebalance reads `pane layout`
-# and — only when the focused-tab layout is the killed pane's tab — either
-# re-equalizes the remaining member column (≥ 2 members, the create-path
-# 1/(N-k) arithmetic), does nothing (1 member), or restores the Director's
-# full tab width (0 members). Every layout step is best-effort: a HerdrError
-# from the pre-close read or the rebalance never fails the delete.
+# existing not_found-tolerant semantics, then a post-close `pane list` supplies a
+# surviving pane in that tab to anchor the `pane layout --pane <anchor>` read.
+# The rebalance then either re-equalizes the remaining member column (≥ 2
+# members, the create-path 1/(N-k) arithmetic), does nothing (1 member), or
+# restores the Director's full tab width (0 members). Every layout step is
+# best-effort: a HerdrError from the pre-close read or the rebalance never fails
+# the delete.
 
 # The Director pane in the `_column_layout` shape (leftmost column, x=26).
 _DIRECTOR_PANE = {
@@ -454,26 +466,36 @@ def _pane_get(tab_id: str = "wT:t3") -> str:
     return _envelope({"pane": {"pane_id": "wT:m9", "tab_id": tab_id}})
 
 
+def _survivor_list(tab_id: str = "wT:t3") -> str:
+    """The post-close ``pane list`` envelope supplying the rebalance anchor —
+    ``wT:p3`` is the Director pane already used by ``_column_layout`` /
+    ``_DIRECTOR_PANE``, so it is the pane the layout read is addressed by."""
+    return _envelope({"panes": [{"pane_id": "wT:p3", "tab_id": tab_id}]})
+
+
 def _post_close_layout(panes: list[dict], splits: list[dict]) -> str:
     """A ``pane layout`` envelope on the killed pane's tab (``wT:t3``)."""
     return _envelope({"layout": {"tab_id": "wT:t3", "panes": panes, "splits": splits}})
 
 
 def test_kill_pane__argv_and_success(herdr_run):
-    """The full delete sequence: pre-close ``pane get``, ``pane close``, then
-    the ``pane layout`` read. The sole remaining Director with an empty
-    ``splits`` list is structurally full-width — no corrective resize."""
+    """The full delete sequence: pre-close ``pane get``, ``pane close``, the
+    post-close ``pane list`` anchor lookup, then the anchored ``pane layout``
+    read. The sole remaining Director with an empty ``splits`` list is
+    structurally full-width — no corrective resize."""
     captured, set_returns = herdr_run
     set_returns(
         _pane_get(),
         "",  # pane close
+        _survivor_list(),
         _post_close_layout([_DIRECTOR_PANE], []),
     )
     assert _herdr.kill_pane(target_pane_id="wT:m9") is None
     assert captured == [
         ["herdr", "pane", "get", "wT:m9"],
         ["herdr", "pane", "close", "wT:m9"],
-        ["herdr", "pane", "layout"],
+        ["herdr", "pane", "list"],
+        ["herdr", "pane", "layout", "--pane", "wT:p3"],
     ]
 
 
@@ -526,19 +548,21 @@ def test_kill_pane__default_raises_on_pane_not_found(herdr_run):
 def test_kill_pane__rebalances_remaining_column_after_close(herdr_run):
     """A 3-member column remains after the close with down splits at 0.5/0.7.
     Equal thirds ⇒ top split → 1/3 (resize m1 up 0.1667) and bottom split → 1/2
-    (resize m2 up 0.2) — the create-path 1/(N-k) arithmetic, driven from the
-    pre-close tab anchor instead of ``pane current``."""
+    (resize m2 up 0.2) — the create-path 1/(N-k) arithmetic, driven from a
+    surviving pane in the pre-close tab."""
     captured, set_returns = herdr_run
     set_returns(
         _pane_get(),
         "",  # pane close
+        _survivor_list(),
         _column_layout([0.5, 0.7]),
     )
     assert _herdr.kill_pane(target_pane_id="wT:m9") is None
     assert captured == [
         ["herdr", "pane", "get", "wT:m9"],
         ["herdr", "pane", "close", "wT:m9"],
-        ["herdr", "pane", "layout"],
+        ["herdr", "pane", "list"],
+        ["herdr", "pane", "layout", "--pane", "wT:p3"],
         [
             "herdr",
             "pane",
@@ -571,13 +595,15 @@ def test_kill_pane__already_balanced_column_emits_no_resize(herdr_run):
     set_returns(
         _pane_get(),
         "",  # pane close
+        _survivor_list(),
         _column_layout([0.3333, 0.5]),
     )
     assert _herdr.kill_pane(target_pane_id="wT:m9") is None
     assert captured == [
         ["herdr", "pane", "get", "wT:m9"],
         ["herdr", "pane", "close", "wT:m9"],
-        ["herdr", "pane", "layout"],
+        ["herdr", "pane", "list"],
+        ["herdr", "pane", "layout", "--pane", "wT:p3"],
     ]
 
 
@@ -588,13 +614,15 @@ def test_kill_pane__single_remaining_member_emits_no_resize(herdr_run):
     set_returns(
         _pane_get(),
         "",  # pane close
+        _survivor_list(),
         _column_layout([]),  # Director + a single member, right split only
     )
     assert _herdr.kill_pane(target_pane_id="wT:m9") is None
     assert captured == [
         ["herdr", "pane", "get", "wT:m9"],
         ["herdr", "pane", "close", "wT:m9"],
-        ["herdr", "pane", "layout"],
+        ["herdr", "pane", "list"],
+        ["herdr", "pane", "layout", "--pane", "wT:p3"],
     ]
 
 
@@ -608,6 +636,7 @@ def test_kill_pane__last_member_residual_right_split_restores_director_width(
     set_returns(
         _pane_get(),
         "",  # pane close
+        _survivor_list(),
         _post_close_layout(
             [_DIRECTOR_PANE],
             [{"direction": "right", "rect": {"x": 26, "y": 1}, "ratio": 0.62}],
@@ -617,7 +646,8 @@ def test_kill_pane__last_member_residual_right_split_restores_director_width(
     assert captured == [
         ["herdr", "pane", "get", "wT:m9"],
         ["herdr", "pane", "close", "wT:m9"],
-        ["herdr", "pane", "layout"],
+        ["herdr", "pane", "list"],
+        ["herdr", "pane", "layout", "--pane", "wT:p3"],
         [
             "herdr",
             "pane",
@@ -674,33 +704,15 @@ def test_kill_pane__last_member_residue_guards_emit_no_resize(herdr_run, panes, 
     set_returns(
         _pane_get(),
         "",  # pane close
+        _survivor_list(),
         _post_close_layout(panes, splits),
     )
     assert _herdr.kill_pane(target_pane_id="wT:m9") is None
     assert captured == [
         ["herdr", "pane", "get", "wT:m9"],
         ["herdr", "pane", "close", "wT:m9"],
-        ["herdr", "pane", "layout"],
-    ]
-
-
-def test_kill_pane__layout_on_different_tab_skips_resize(herdr_run):
-    """The focused-tab layout reports a different tab than the pre-close target
-    tab (focus on an unrelated tab): no resize, even though the reported layout
-    carries an unbalanced column that would otherwise be equalized."""
-    captured, set_returns = herdr_run
-    unrelated = json.loads(_column_layout([0.5, 0.7]))
-    unrelated["result"]["layout"]["tab_id"] = "wT:t9"
-    set_returns(
-        _pane_get("wT:t3"),
-        "",  # pane close
-        json.dumps(unrelated),
-    )
-    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
-    assert captured == [
-        ["herdr", "pane", "get", "wT:m9"],
-        ["herdr", "pane", "close", "wT:m9"],
-        ["herdr", "pane", "layout"],
+        ["herdr", "pane", "list"],
+        ["herdr", "pane", "layout", "--pane", "wT:p3"],
     ]
 
 
@@ -727,13 +739,15 @@ def test_kill_pane__layout_read_error_swallowed(herdr_run):
     set_returns(
         _pane_get(),
         "",  # pane close
+        _survivor_list(),
         HerdrError("herdr command failed: server unreachable"),  # pane layout
     )
     assert _herdr.kill_pane(target_pane_id="wT:m9") is None
     assert captured == [
         ["herdr", "pane", "get", "wT:m9"],
         ["herdr", "pane", "close", "wT:m9"],
-        ["herdr", "pane", "layout"],
+        ["herdr", "pane", "list"],
+        ["herdr", "pane", "layout", "--pane", "wT:p3"],
     ]
 
 
@@ -744,6 +758,7 @@ def test_kill_pane__resize_error_swallowed(herdr_run):
     set_returns(
         _pane_get(),
         "",  # pane close
+        _survivor_list(),
         _post_close_layout(
             [_DIRECTOR_PANE],
             [{"direction": "right", "rect": {"x": 26, "y": 1}, "ratio": 0.62}],
@@ -773,13 +788,61 @@ def test_kill_pane__malformed_split_chain_skips_resize(herdr_run):
     set_returns(
         _pane_get(),
         "",  # pane close
+        _survivor_list(),
         _post_close_layout([_DIRECTOR_PANE, *members], splits),
     )
     assert _herdr.kill_pane(target_pane_id="wT:m9") is None
     assert captured == [
         ["herdr", "pane", "get", "wT:m9"],
         ["herdr", "pane", "close", "wT:m9"],
-        ["herdr", "pane", "layout"],
+        ["herdr", "pane", "list"],
+        ["herdr", "pane", "layout", "--pane", "wT:p3"],
+    ]
+
+
+def test_kill_pane__anchors_on_surviving_pane_in_the_killed_panes_tab(herdr_run):
+    """Regression: the post-close ``pane list`` spans two tabs and the target
+    tab's survivor is not listed first — the layout read is anchored on
+    ``wT:p3`` (the survivor in the killed pane's tab), never on the ``wX:t9``
+    pane, so the rebalance can never address an unrelated tab."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _pane_get("wT:t3"),
+        "",  # pane close
+        _envelope(
+            {
+                "panes": [
+                    {"pane_id": "wX:p1", "tab_id": "wX:t9"},  # another tab
+                    {"pane_id": "wT:p3", "tab_id": "wT:t3"},  # the killed pane's tab
+                ]
+            }
+        ),
+        _column_layout([0.3333, 0.5]),  # balanced — the anchored argv is the assertion
+    )
+    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
+    assert captured == [
+        ["herdr", "pane", "get", "wT:m9"],
+        ["herdr", "pane", "close", "wT:m9"],
+        ["herdr", "pane", "list"],
+        ["herdr", "pane", "layout", "--pane", "wT:p3"],
+    ]
+
+
+def test_kill_pane__no_surviving_pane_in_tab_skips_layout_read(herdr_run):
+    """Regression: the killed pane was the last one in its tab, so the
+    post-close ``pane list`` carries no pane to anchor on — the rebalance stops
+    after the list with no layout read and no resize."""
+    captured, set_returns = herdr_run
+    set_returns(
+        _pane_get("wT:t3"),
+        "",  # pane close
+        _envelope({"panes": [{"pane_id": "wX:p1", "tab_id": "wX:t9"}]}),
+    )
+    assert _herdr.kill_pane(target_pane_id="wT:m9") is None
+    assert captured == [
+        ["herdr", "pane", "get", "wT:m9"],
+        ["herdr", "pane", "close", "wT:m9"],
+        ["herdr", "pane", "list"],
     ]
 
 

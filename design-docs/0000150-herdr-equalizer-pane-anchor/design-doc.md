@@ -1,7 +1,7 @@
 # herdr equalizer: anchor every layout read on a pane
 
 **Status**: Approved
-**Progress**: 4/22 tasks complete
+**Progress**: 12/22 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -269,22 +269,22 @@ because they return before the layout read (`__ignore_missing_swallows_pane_not_
 rebalance, and the fourth has no tab anchor, so none of them issue the new
 `pane list`).
 
-- [ ] Add a `_survivor_list(tab_id: str = "wT:t3")` helper returning
+- [x] Add a `_survivor_list(tab_id: str = "wT:t3")` helper returning
       `_envelope({"panes": [{"pane_id": "wT:p3", "tab_id": tab_id}]})` — the
       post-close `pane list` envelope supplying the rebalance anchor (`wT:p3` is the
-      Director pane already used by `_column_layout` / `_DIRECTOR_PANE`) <!-- completed: -->
-- [ ] Delete `test_equalize__focus_moved_between_reads_skips` and
+      Director pane already used by `_column_layout` / `_DIRECTOR_PANE`) <!-- completed: 2026-07-25T02:45 -->
+- [x] Delete `test_equalize__focus_moved_between_reads_skips` and
       `test_kill_pane__layout_on_different_tab_skips_resize` — both assert the removed
-      guard <!-- completed: -->
-- [ ] Re-point the three surviving `_equalize_*` tests
+      guard <!-- completed: 2026-07-25T02:45 -->
+- [x] Re-point the three surviving `_equalize_*` tests
       (`__three_member_column_drives_top_split_to_one_third`,
       `__already_balanced_column_emits_no_resize`, `__best_effort_swallows_herdr_error`)
       at `_equalize_tab_column("wT:p3")`: drop the `pane current` envelope and its argv
-      entry, and expect `["herdr", "pane", "layout", "--pane", "wT:p3"]` <!-- completed: -->
-- [ ] Re-point `test_split_window__subsequent_member_splits_max_then_equalizes`: drop
+      entry, and expect `["herdr", "pane", "layout", "--pane", "wT:p3"]` <!-- completed: 2026-07-25T02:45 -->
+- [x] Re-point `test_split_window__subsequent_member_splits_max_then_equalizes`: drop
       the `pane current` envelope and argv entry, expect
-      `["herdr", "pane", "layout", "--pane", "wG:p1"]`, and update the docstring <!-- completed: -->
-- [ ] Re-point the nine layout-reaching `kill_pane` tests (`__argv_and_success`,
+      `["herdr", "pane", "layout", "--pane", "wG:p1"]`, and update the docstring <!-- completed: 2026-07-25T02:45 -->
+- [x] Re-point the nine layout-reaching `kill_pane` tests (`__argv_and_success`,
       `__rebalances_remaining_column_after_close`, `__already_balanced_column_emits_no_resize`,
       `__single_remaining_member_emits_no_resize`,
       `__last_member_residual_right_split_restores_director_width`,
@@ -292,20 +292,20 @@ rebalance, and the fourth has no tab anchor, so none of them issue the new
       `__resize_error_swallowed`, `__malformed_split_chain_skips_resize`): insert
       `_survivor_list()` into `set_returns` immediately after the close entry, and
       `["herdr", "pane", "list"]` before the
-      `["herdr", "pane", "layout", "--pane", "wT:p3"]` entry in the expected argv <!-- completed: -->
-- [ ] Rename the old helper names where they appear outside a re-pointed assertion —
+      `["herdr", "pane", "layout", "--pane", "wT:p3"]` entry in the expected argv <!-- completed: 2026-07-25T02:45 -->
+- [x] Rename the old helper names where they appear outside a re-pointed assertion —
       the `split_window` region comment (line 122), the `_balanced_layout` docstring
       (line 202), the `_run_json`-wrapper inline comment (line 252), and the
       `_equalize_*` section-header comment (line 307) — so Step 4's residue grep
-      confirms rather than rediscovers <!-- completed: -->
-- [ ] Add the three regression tests: (i) the spawn path emits no
+      confirms rather than rediscovers <!-- completed: 2026-07-25T02:45 -->
+- [x] Add the three regression tests: (i) the spawn path emits no
       `["herdr", "pane", "current"]` and does emit `pane layout --pane wG:p1`;
       (ii) the delete path, given a `pane list` spanning two tabs, anchors on the
       surviving pane in the target tab and not on one from another tab; (iii) the
       delete path, given a `pane list` with no pane in the target tab, stops after
-      `pane list` with no layout read and no resize <!-- completed: -->
-- [ ] Run `mise //cafleet:test tests/multiplexer/test_herdr.py` and confirm the new and
-      re-pointed assertions fail against the unmodified code <!-- completed: -->
+      `pane list` with no layout read and no resize <!-- completed: 2026-07-25T02:45 -->
+- [x] Run `mise //cafleet:test tests/multiplexer/test_herdr.py` and confirm the new and
+      re-pointed assertions fail against the unmodified code <!-- completed: 2026-07-25T02:45 -->
 
 ### Step 3: Code
 
