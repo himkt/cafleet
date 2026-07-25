@@ -2,11 +2,11 @@
 name: cafleet-model-list-refresh
 description: >-
   Refresh the CAFleet model list at skills/cafleet/reference/model-list.md
-  from the approved official pricing sources. Use when a maintainer asks to
-  refresh, update, or re-verify the model list, its token prices, or its
-  freshness, or when a Director reports the list was last refreshed more than
-  30 days ago. Maintainer-invoked only — never run automatically during a
-  member spawn.
+  from the approved official pricing and capability sources. Use when a
+  maintainer asks to refresh, update, or re-verify the model list, its token
+  prices, its context windows, or its freshness, or when a Director reports
+  the list was last refreshed more than 30 days ago. Maintainer-invoked only —
+  never run automatically during a member spawn.
 ---
 
 # CAFleet Model List Refresh
@@ -19,19 +19,23 @@ reaches Directors exclusively through the release/deployment transaction below.
 
 ## Approved sources (exhaustive allowlist)
 
-Fetch **only** these four official pages. Search results, third-party price
-sites, and social posts are never model-list authority.
+Fetch **only** these five official pages. Search results, third-party price
+sites, and social posts are never model-list authority. The first four are
+pricing and availability authority; the fifth is capability authority for the
+`claude` backend's context windows and Claude Code model-string syntax, and
+is never used to price a model.
 
-| Source | Backend it feeds | URL |
+| Source | What it feeds | URL |
 |---|---|---|
-| Anthropic pricing | `claude` | `https://platform.claude.com/docs/en/about-claude/pricing.md` |
-| OpenAI pricing | `codex` (prices) | `https://developers.openai.com/api/docs/pricing` |
-| Codex model availability | `codex` (availability) | `https://learn.chatgpt.com/docs/models.md` |
-| OpenCode Zen models and pricing | `opencode` | `https://opencode.ai/docs/zen.md` |
+| Anthropic pricing | `claude` prices | `https://platform.claude.com/docs/en/about-claude/pricing.md` |
+| OpenAI pricing | `codex` prices | `https://developers.openai.com/api/docs/pricing` |
+| Codex model availability | `codex` availability | `https://learn.chatgpt.com/docs/models.md` |
+| OpenCode Zen models and pricing | `opencode` prices and availability | `https://opencode.ai/docs/zen.md` |
+| Claude Code model configuration | `claude` context windows and `[1m]` applicability | `https://code.claude.com/docs/en/model-config.md` |
 
 ## Refresh procedure
 
-1. **Fetch** all three approved sources. If any source cannot be fetched or
+1. **Fetch** all five approved sources. If any source cannot be fetched or
    parsed, **stop**: leave the model list unchanged, report the error, and
    let it become stale rather than fabricating values.
 2. **Extract pricing facts only**: the currently effective standard input and
@@ -59,7 +63,28 @@ sites, and social posts are never model-list authority.
    reviewer defaults* table from the refreshed backend tables, and mirror its
    values into each backend overlay's `{monitor_model}` / `{reviewer_model}`
    rows (`skills/cafleet/reference/coding-agent/<name>-overlay.md`).
-5. **Propose, then apply atomically.** Generate a concise proposed diff and
+5. **Re-verify every `claude` row's context window on every refresh**, even
+   when the prices are unchanged. Take each window from the Claude Code model
+   configuration page's *Extended context* section and record it in the
+   `claude` table's `Context` column. That page is also the authority for
+   whether a row's `--model` value carries the `[1m]` suffix, which is a
+   Claude Code model-string suffix stripped before the request reaches the
+   provider — it is meaningless for the `codex` and `opencode` tables, whose
+   values never carry it. Apply the suffix only where it changes the window a
+   member actually gets:
+   - A model the page lists as always running at 1M on the Anthropic API
+     carries **no** suffix — the window is already 1M and the suffix is inert.
+   - A model the page gives no 1M variant carries **no** suffix.
+   - A model without 1M support carries **no** suffix; appending it there is a
+     malformed value.
+   - Where the page shows the window is opt-in for the reader's plan, the
+     suffix belongs in the page's note rather than the row, so the Director
+     applies it per spawn against the operator's plan instead of every
+     spawn inheriting a credit-billed window.
+
+   A suffixed value must be single-quoted everywhere it appears in a command,
+   because `[1m]` is a glob pattern that fails an unquoted zsh invocation.
+6. **Propose, then apply atomically.** Generate a concise proposed diff and
    require explicit maintainer approval before rewriting the tables in
    `skills/cafleet/reference/model-list.md`. Preserve the prescribed preamble
    verbatim; update the preamble's *last refreshed* date only after approval.
