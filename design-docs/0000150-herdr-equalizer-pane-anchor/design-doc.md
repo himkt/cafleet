@@ -1,7 +1,7 @@
 # herdr equalizer: anchor every layout read on a pane
 
 **Status**: Approved
-**Progress**: 12/22 tasks complete
+**Progress**: 18/22 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -311,21 +311,21 @@ rebalance, and the fourth has no tab anchor, so none of them issue the new
 
 `cafleet/src/cafleet/multiplexer/herdr.py` throughout.
 
-- [ ] Rewrite `_read_tab_layout` to take `anchor_pane_id`, issue
+- [x] Rewrite `_read_tab_layout` to take `anchor_pane_id`, issue
       `herdr pane layout --pane <anchor_pane_id>`, drop the tab-id comparison, and
-      return `tuple[list[dict], list[dict]]` <!-- completed: -->
-- [ ] Rename `_equalize_focused_tab_column` → `_equalize_tab_column` and
+      return `tuple[list[dict], list[dict]]` <!-- completed: 2026-07-25T02:49 -->
+- [x] Rename `_equalize_focused_tab_column` → `_equalize_tab_column` and
       `_resize_focused_tab_column` → `_resize_tab_column`, give each an
       `anchor_pane_id` parameter, delete the `pane current` call and the
-      `if read is None` branch, and update both docstrings <!-- completed: -->
-- [ ] Update `split_window` to call `self._equalize_tab_column(reference.pane_id)` and
-      rename the helper reference in its leading comment block <!-- completed: -->
-- [ ] Add `_surviving_pane_in_tab(tab_id) -> str | None` per the Specification <!-- completed: -->
-- [ ] Update `_resize_after_close` to resolve the anchor first, skip on `None`, and
+      `if read is None` branch, and update both docstrings <!-- completed: 2026-07-25T02:49 -->
+- [x] Update `split_window` to call `self._equalize_tab_column(reference.pane_id)` and
+      rename the helper reference in its leading comment block <!-- completed: 2026-07-25T02:49 -->
+- [x] Add `_surviving_pane_in_tab(tab_id) -> str | None` per the Specification <!-- completed: 2026-07-25T02:49 -->
+- [x] Update `_resize_after_close` to resolve the anchor first, skip on `None`, and
       drop its `if read is None` branch; leave the column case table, the
       `if not panes: return` guard, `kill_pane`, `_pane_tab_id`, and
-      `_rebalance_after_close` unchanged <!-- completed: -->
-- [ ] Run `mise //cafleet:format`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` <!-- completed: -->
+      `_rebalance_after_close` unchanged <!-- completed: 2026-07-25T02:49 -->
+- [x] Run `mise //cafleet:format`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` <!-- completed: 2026-07-25T02:49 -->
 
 ### Step 4: Verification
 
