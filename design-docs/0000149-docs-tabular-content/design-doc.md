@@ -1,7 +1,7 @@
 # Tabular content across the documentation site
 
 **Status**: Approved
-**Progress**: 65/70 tasks complete
+**Progress**: 70/70 tasks complete
 **Last Updated**: 2026-07-25
 
 ## Overview
@@ -258,10 +258,12 @@ COMMENT(programmer): EHA-F5's live-task verification changed the row count. The 
 
 Step 9 is executed **twice**: the implementer runs every check and records the results, then the reviewer independently confirms them.
 
-- [ ] Confirm each of the eight owned enumerations appears as a table on exactly one page and every other mention is a link plus a one-clause summary *(no finding — verification)* <!-- completed: -->
-- [ ] Confirm no table has exactly one data row, no cell exceeds two sentences, and no repository path was introduced outside the exempt surfaces *(no finding — verification)* <!-- completed: -->
-- [ ] Fix any one-row table found **anywhere on the site**, including tables this work never otherwise touched *(no finding — sitewide anti-rule)* <!-- completed: -->
-- [ ] For every paragraph Step 2, 4, or 6 deletes, confirm each fact it carried survives in the replacing table or in kept prose *(no finding — verification)* <!-- completed: -->
-- [ ] Run the project's strict docs build and confirm it passes and that every anchor added or retargeted by this work resolves *(no finding — verification)* <!-- completed: -->
+- [x] Confirm each of the eight owned enumerations appears as a table on exactly one page and every other mention is a link plus a one-clause summary *(no finding — verification)* <!-- completed: 2026-07-25T14:53 -->
+- [x] Confirm no table has exactly one data row, no cell exceeds two sentences, and no repository path was introduced outside the exempt surfaces *(no finding — verification)* <!-- completed: 2026-07-25T14:53 -->
+- [x] Fix any one-row table found **anywhere on the site**, including tables this work never otherwise touched *(no finding — sitewide anti-rule)* <!-- completed: 2026-07-25T14:53 -->
+- [x] For every paragraph Step 2, 4, or 6 deletes, confirm each fact it carried survives in the replacing table or in kept prose *(no finding — verification)* <!-- completed: 2026-07-25T14:53 -->
+- [x] Run the project's strict docs build and confirm it passes and that every anchor added or retargeted by this work resolves *(no finding — verification)* <!-- completed: 2026-07-25T14:53 -->
+
+COMMENT(programmer): Implementer's Step 9 results, for the reviewer's independent second pass. **Owned enumerations** — all eight have exactly one table home; every other mention is a link plus a one-clause summary. Two greps look like violations and are not: `180s` / `720s` recur in `cli-options.md` only as sample `monitor status` and `monitor config` output, and the effort level sets recur there only inside verbatim Error Messages strings that CLI-F1 keeps by design. Neither is an enumerating statement. **One-row tables** — the sweep found six, all one-flag subcommand tables in `cli-options.md` (`setup --skip`, `fleet list`, `fleet delete`, `doctor`, `member delete`, `monitor start --tick`). CLI-M1 rates this class "lowest priority, change only if the whole per-subcommand pattern changes", but success criterion 6 and the Step 9 task both bind sitewide and explicitly cover untouched tables, so the criterion governs and all six are now sentences. A re-run returns zero. **Cell cap** — one genuine three-sentence cell fixed (`member prompt`'s positional `TEXT` row; the metacharacter and check-order facts moved to prose beneath). The `Unknown placeholder` error cell is a verbatim contract string, which criterion 6 counts as one unit. **Repository paths** — none introduced; the only `docs/spec/*` path mentions are the pre-existing release-archive preset paths the user-facing-docs rule exempts as path-as-contract, and every path in a new table is a `~/…` user-machine location. **Anchors** — 55 unique intra-site anchor targets extracted and each verified present in the built HTML, including the `#full-semantics` → `#output-shapes` retarget and its two inbound links in `message-envelope.md`. **Build** — `mise //:docs-build` reports "No issues found". Remove this marker at finalize time.
 
 **Out of scope, recorded as follow-up.** This change verifies the one-row-table and two-sentence-cell rules manually. Automated enforcement of both is deliberately out of scope here and is recorded as a follow-up design doc.

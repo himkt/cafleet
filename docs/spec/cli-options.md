@@ -696,7 +696,10 @@ coordination channel; the plain form is not a substitute for `message send`.
 |---|---|---|
 | `--member-id` | yes | Target member's ID |
 | `--shell` | no | Boolean flag, default off. Dispatch `! TEXT` (shell form) instead of `TEXT` (plain form). |
-| *(positional `TEXT`)* | yes | Single line of text; leading/trailing whitespace stripped before dispatch. Pipes, `&&`, `;`, `$(...)`, and backticks are forwarded opaquely. Newline-containing (checked first, against the original text) or empty-after-strip text exits 2. |
+| *(positional `TEXT`)* | yes | Single line of text; leading/trailing whitespace stripped before dispatch. Newline-containing or empty-after-strip text exits 2. |
+
+Shell metacharacters — pipes, `&&`, `;`, `$(...)`, and backticks — are
+forwarded opaquely. The newline check runs first, against the original text.
 
 The `--shell` flag controls both the payload prefix and the Esc safeguard:
 
