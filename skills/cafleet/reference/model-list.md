@@ -5,13 +5,14 @@ with standard API prices and the official sources. The selection policy —
 cost efficiency mode, the monitor/reviewer rules — lives in
 [`roles/director.md`](../roles/director.md) § *Model selection*, not on this
 page. The tables are maintained exclusively by the
-`cafleet-model-list-refresh` skill from the official pricing pages linked
-below — refreshed at least every 30 days (last refreshed: 2026-07-20).
+`cafleet-model-list-refresh` skill from the official sources linked below —
+refreshed at least every 30 days (last refreshed: 2026-07-25).
 Prices are standard provider USD rates per MTok and are planning estimates,
-not an invoice guarantee. The list covers the `claude`, `codex`, and
-`opencode` backends; opencode models route through OpenCode Zen and keep the
-`opencode/` prefix in their `--model` value. Each backend's table is ordered
-most → least capable.
+not an invoice guarantee. Context windows are listed for the `claude` backend,
+whose model strings are the ones a context-window suffix can apply to. The
+list covers the `claude`, `codex`, and `opencode` backends; opencode models
+route through OpenCode Zen and keep the `opencode/` prefix in their `--model`
+value. Each backend's table is ordered most → least capable.
 
 ## Sources
 
@@ -19,6 +20,8 @@ most → least capable.
 - [OpenAI pricing](https://developers.openai.com/api/docs/pricing)
 - [Codex model availability](https://learn.chatgpt.com/docs/models.md)
 - [OpenCode Zen models and pricing](https://opencode.ai/docs/zen.md)
+- [Claude Code model configuration](https://code.claude.com/docs/en/model-config.md)
+  — context windows and `[1m]` applicability for the `claude` backend
 
 ## Monitor and reviewer defaults
 
@@ -36,12 +39,21 @@ tables below:
 
 Either the model name or its alias is a valid `--model` token.
 
-| Model | Alias | Class | Input $/MTok | Output $/MTok |
-|---|---|---|---|---|
-| claude-fable-5 | fable | Mythos-class frontier; highest capability on every dimension | 10.00 | 50.00 |
-| claude-opus-4-8 | opus | Everyday frontier; strong coding, planning, and review | 5.00 | 25.00 |
-| claude-sonnet-5 | sonnet | Efficient mid tier for routine work | 2.00 | 10.00 |
-| claude-haiku-4-5 | haiku | Fast low-cost tier; monitoring and quick bounded tasks | 1.00 | 5.00 |
+| Model | Alias | Class | Context | Input $/MTok | Output $/MTok |
+|---|---|---|---|---|---|
+| claude-fable-5 | fable | Mythos-class frontier; highest capability on every dimension | 1M | 10.00 | 50.00 |
+| claude-opus-5 | opus | Everyday frontier; strong coding, planning, and review | 1M | 5.00 | 25.00 |
+| claude-opus-4-8 | — | Prior frontier generation at the same price tier | 1M | 5.00 | 25.00 |
+| claude-sonnet-5 | sonnet | Efficient mid tier for routine work | 1M | 2.00 | 10.00 |
+| claude-haiku-4-5 | haiku | Fast low-cost tier; monitoring and quick bounded tasks | 200K | 1.00 | 5.00 |
+
+Every 1M row above runs at that window by default on the Anthropic API, so
+its `--model` value needs no `[1m]` suffix; `claude-haiku-4-5` has no 1M
+variant and never takes one. The one case that calls for the suffix is an
+Opus spawn on a Pro plan, where the 1M window is opt-in and billed to usage
+credits — there the Director passes `--model 'claude-opus-5[1m]'`, quoted,
+because the brackets otherwise glob in zsh. Confirm the operator's plan
+before spending their credits that way.
 
 ## codex
 
