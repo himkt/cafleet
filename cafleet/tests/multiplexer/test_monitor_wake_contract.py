@@ -315,4 +315,4 @@ def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
     tmux_payload = tmux_calls[0][5]
     herdr_payload = herdr_calls[0][4]
     assert tmux_payload == herdr_payload
-    assert tmux_payload.count("coding_agent=") == 4
+    assert tmux_payload.count("coding_agent=") == 5

@@ -1,7 +1,7 @@
 # Direct Fixed-Action Nudge from the Monitoring Member
 
 **Status**: Approved
-**Progress**: 26/31 tasks complete
+**Progress**: 28/31 tasks complete
 **Last Updated**: 2026-07-29
 
 ## Overview
@@ -479,8 +479,8 @@ The example in `skills/cafleet/roles/monitor.md` and the exact payload tests are
 
 ### Step 5: Wake contract
 
-- [ ] Update the multiplexer protocol and both `send_wake_trigger` payloads byte-identically with sanitized per-due/Director coding-agent fields, pending-list-first order, initial/final Director captures, finished-or-confidently-stalled token gate, target-overlay cues, candidate-vs-working rules, broker-enforced observation spacing, durable observe/ping/result/backpressured-batch-retry flow, lifecycle ownership, full-body Director consumption, and completion ownership <!-- completed: -->
-- [ ] Update exact-payload/cross-backend tests to pin coding-agent/name sanitization and parity, mixed-backend cue selection, active-working non-action, one ordinary candidate ping, Director-awaiting ordinary ping, Director becoming working/awaiting during processing, full-spacing Director stalled gate with no ping claim, fresh-token pass-through with no intervening command, disabled/dead-Director deferral, at-most-one aggregate preview invocation, restart/cadence rules, and the arbitrary-instruction prohibition <!-- completed: -->
+- [x] Update the multiplexer protocol and both `send_wake_trigger` payloads byte-identically with sanitized per-due/Director coding-agent fields, pending-list-first order, initial/final Director captures, finished-or-confidently-stalled token gate, target-overlay cues, candidate-vs-working rules, broker-enforced observation spacing, durable observe/ping/result/backpressured-batch-retry flow, lifecycle ownership, full-body Director consumption, and completion ownership <!-- completed: 2026-07-29T08:41 -->
+- [x] Update exact-payload/cross-backend tests to pin coding-agent/name sanitization and parity, mixed-backend cue selection, active-working non-action, one ordinary candidate ping, Director-awaiting ordinary ping, Director becoming working/awaiting during processing, full-spacing Director stalled gate with no ping claim, fresh-token pass-through with no intervening command, disabled/dead-Director deferral, at-most-one aggregate preview invocation, restart/cadence rules, and the arbitrary-instruction prohibition <!-- completed: 2026-07-29T08:41 -->
 
 ### Step 6: End-to-end verification
 

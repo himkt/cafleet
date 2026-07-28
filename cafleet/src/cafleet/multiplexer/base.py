@@ -11,6 +11,8 @@ test or in future host environments.
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from cafleet.coding_agent import CODING_AGENTS
+
 
 class MultiplexerError(Exception):
     """Base for terminal-multiplexer backend failures.
@@ -34,6 +36,93 @@ class MultiplexerContext:
     session: str
     window_id: str
     pane_id: str
+
+
+def _sanitize_wake_name(name: str) -> str:
+    """Keep a user-controlled member name inside the one-line wake envelope."""
+    return (
+        name.replace("\r\n", "⏎")
+        .replace("\n", "⏎")
+        .replace("\r", "⏎")
+        .replace("\t", "⏎")
+        .replace("`", "ˋ")
+        .replace("$(", "$﹙")
+        .replace("|", "│")
+    )
+
+
+def _monitor_wake_payload(due_members: list[dict], director: dict) -> str:
+    """Build the byte-identical tmux/herdr monitoring-member wake contract."""
+    for target in due_members:
+        coding_agent = target.get("coding_agent")
+        if coding_agent not in CODING_AGENTS:
+            raise ValueError(
+                f"member {target.get('member_id')} has invalid "
+                f"coding_agent {coding_agent!r}"
+            )
+    director_agent = director.get("coding_agent")
+    if director_agent not in CODING_AGENTS:
+        raise ValueError(
+            f"Director {director.get('member_id')} has invalid "
+            f"coding_agent {director_agent!r}"
+        )
+
+    noun = "member" if len(due_members) == 1 else "members"
+    due_list = ", ".join(
+        f"{'director' if target['is_director'] else 'member'} "
+        f"{target['member_id']} "
+        f"({_sanitize_wake_name(target['name'])}; "
+        f"coding_agent={target['coding_agent']}) "
+        f"[{','.join(target['wake_reasons'])}]"
+        for target in due_members
+    )
+    director_id = director["member_id"]
+    return (
+        f"[monitor] wake: {len(due_members)} {noun} due — {due_list}. "
+        f"Capture every named pane and the initial Director {director_id} "
+        f"(coding_agent={director_agent}) at --lines 120 --no-ansi --json; "
+        "apply each target's coding_agent overlay. Treat unacked only as "
+        "context on an already-due member; it never authorizes an action. "
+        "Classify capture content only in this precedence: awaiting_user, "
+        "unknown, finished, working, stall_candidate. Backend-overlay active "
+        "tool, stream, generation, working, ambiguous, or truncated cues force "
+        "working; only quiet non-finished content with no prompt or active-work "
+        "cue is a stall_candidate. Never classify stalled yourself or remember "
+        "hashes in process. Query monitor stall pending before ordinary "
+        "observations, including durable disabled or dead reports absent from "
+        "this batch. Submit every named ordinary observation through monitor "
+        "stall observe with the captured_at and content_sha256 from that same "
+        "capture; add --stall-check only for that reason, and use loss-tolerant "
+        "unknown without capture fields when unreadable. working is always "
+        "non-actionable, including when tagged unacked or byte-identical. Run "
+        "cafleet member ping only when observe atomically returns action=ping, "
+        "then immediately record ping-result --success or --failure; never retry "
+        "a claimed, nudged, or pending episode. A failed ping queues ping_failed "
+        "immediately; an unchanged next synchronized capture after a successful "
+        "nudge queues unchanged_after_nudge exactly once. Restart from durable "
+        "broker state; lifecycle cleanup preserves sticky escalation_pending "
+        "and resets non-pending disabled, dead, or placement-pending episodes. "
+        "The Director being awaiting_user, working, unknown, disabled, dead, or "
+        "unreadable suppresses only the final aggregate, never an eligible "
+        "ordinary-member ping. After all ordinary actions, recapture Director "
+        f"{director_id} (coding_agent={director_agent}) and submit "
+        "--director-gate; only finished or broker-resolved stalled after two "
+        "byte-identical captures separated by a full stall interval returns a "
+        "token, and Director observation never authorizes ping. With that fresh "
+        "token, immediately call monitor report-batch exactly once with "
+        "collected finished IDs and no intervening command, even when no new "
+        "entry is known; without a token make no Director-targeting call. "
+        "report-batch is the sole Director-delivery path; it collects every "
+        "durable pending or newly queued escalation plus this wake's finished "
+        "IDs, applies one-open backpressure, and retries the same message ID at "
+        "most once this wake; a surviving open aggregate leaves new escalations "
+        "pending and finished IDs ephemeral. The Director must retrieve an "
+        "aggregate with message show --full before acting and ACK it once. Never "
+        "call message send, message broadcast, or member prompt this wake; "
+        "attach no task text or arbitrary instruction, and take no ordinary "
+        "action except the fixed member ping. finished is report-only; the "
+        "Director alone judges whether assigned work remains."
+    )
 
 
 @runtime_checkable
@@ -142,8 +231,7 @@ class Multiplexer(Protocol):
         *,
         target_pane_id: str,
         due_members: list[dict],
-        director: dict | None = None,
-        director_member_id: int | None = None,
+        director: dict,
     ) -> bool:
         """Keystroke a single-line *wake nudge* into the monitoring member's pane.
 
@@ -166,9 +254,6 @@ class Multiplexer(Protocol):
                 dict carrying ``member_id``, ``name``, and ``is_director``.
             director: The Director descriptor carrying ``member_id`` and
                 ``coding_agent``.
-            director_member_id: Legacy member-id form retained until all wake
-                payload callers move to the descriptor.
-
         Returns:
             ``True`` if the keystroke landed; ``False`` if the pane is dead or
             the multiplexer is unreachable.
