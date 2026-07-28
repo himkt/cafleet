@@ -803,11 +803,12 @@ def test_send_wake_trigger__return_branches_and_argv(
             {
                 "member_id": 332,
                 "name": "Director",
+                "coding_agent": "codex",
                 "is_director": True,
                 "wake_reasons": ["interval"],
             }
         ],
-        director_member_id=332,
+        director={"member_id": 332, "coding_agent": "codex"},
     )
     assert result is expected_result
     if scenario == "success_returns_true":
@@ -846,17 +847,19 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
             {
                 "member_id": 332,
                 "name": "Director",
+                "coding_agent": "codex",
                 "is_director": True,
                 "wake_reasons": ["interval"],
             },
             {
                 "member_id": 336,
                 "name": "evil\r\nname\there`$(id)|whoami",
+                "coding_agent": "claude",
                 "is_director": False,
                 "wake_reasons": ["interval", "stall-check", "unacked"],
             },
         ],
-        director_member_id=332,
+        director={"member_id": 332, "coding_agent": "codex"},
     )
     assert result is True
 
@@ -880,24 +883,25 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     # Each freshly-due member is named ``<role> <id> (<name>) [<reasons>]``: the
     # Director (is_director=True) renders with role ``director`` and its interval
     # tag; the member with role ``member`` and its two comma-joined reasons.
-    assert "director 332 (Director) [interval]" in payload
+    assert "director 332 (Director; coding_agent=codex) [interval]" in payload
     assert "member 336 (evil" in payload
+    assert "coding_agent=claude" in payload
     assert "[interval,stall-check,unacked]" in payload
     # The crafted control chars collapsed to U+23CE rather than vanishing.
     assert "⏎" in payload
 
     # The five-state precedence rubric is spelled out verbatim in the instruction.
-    assert "awaiting_user, unknown, finished, stalled, working" in payload
+    assert "awaiting_user, unknown, finished, working, stall_candidate" in payload
 
     # The unacked report rule sits in the instruction, and the closing
     # re-engagement sentence lists the unacked report alongside stalled/finished.
-    assert "For a member tagged unacked" in payload
-    assert "when an unacked-tagged member is reportable per its rule above" in payload
+    assert "Treat unacked only as context" in payload
+    assert "never authorizes an action" in payload
 
     # The Director id is named as the standing inspect-and-re-engage target via
     # the "the Director pane ({director_id})" clause — distinct from the due-list
     # rendering (where the id is not parenthesized).
-    assert "(332)" in payload
+    assert "Director 332 (coding_agent=codex)" in payload
 
     # Shell-safety guarantee: no backtick, no ``$(`` command sub,
     # and no pipe survive into the payload.
@@ -926,11 +930,12 @@ def test_send_wake_trigger__singular_noun_and_director_named_when_not_due(monkey
             {
                 "member_id": 336,
                 "name": "alice",
+                "coding_agent": "claude",
                 "is_director": False,
                 "wake_reasons": ["stall-check"],
             }
         ],
-        director_member_id=332,
+        director={"member_id": 332, "coding_agent": "opencode"},
     )
     assert result is True
 
@@ -938,10 +943,10 @@ def test_send_wake_trigger__singular_noun_and_director_named_when_not_due(monkey
     # Singular noun for a single due member ("{N} {member|members} due").
     assert payload.startswith("[monitor] wake: 1 member due")
     # The lone due member is named ``member <id> (<name>) [<reasons>]``.
-    assert "member 336 (alice) [stall-check]" in payload
+    assert "member 336 (alice; coding_agent=claude) [stall-check]" in payload
     # The Director (332) is not in the due set, yet it is named via the standing
     # clause; it is never rendered as a due member (no ``member 332`` / ``director 332``).
-    assert "(332)" in payload
+    assert "Director 332 (coding_agent=opencode)" in payload
     assert "member 332" not in payload
     assert "director 332" not in payload
 
@@ -966,33 +971,24 @@ def test_send_wake_trigger__payload_exact_text(monkeypatch):
             {
                 "member_id": 336,
                 "name": "alice",
+                "coding_agent": "claude",
                 "is_director": False,
-                "wake_reasons": ["unacked"],
+                "wake_reasons": ["interval", "stall-check", "unacked"],
             }
         ],
-        director_member_id=332,
+        director={"member_id": 332, "coding_agent": "opencode"},
     )
     assert result is True
 
     payload = captured[0][5]
-    assert payload == (
-        "[monitor] wake: 1 member due — member 336 (alice) [unacked]. "
-        "Capture each named pane read-only, with the Director pane "
-        "(332) always inspected. From capture content only, "
-        "classify each pane in this precedence order: awaiting_user, unknown, "
-        "finished, stalled, working. For a member tagged stall-check, compare "
-        "its capture against your previous stall-check capture of that pane, "
-        "then keep the new capture as that pane's baseline; with no previous "
-        "stall-check capture, classify unknown. For a member tagged unacked, "
-        "its oldest un-acked delivery has waited at least one full interval: "
-        "report it to the Director unless its pane classifies awaiting_user or "
-        "unknown — including working panes. Never re-engage a pane "
-        "classified awaiting_user: when the Director is awaiting_user, send "
-        "nothing this wake, whatever the other panes show. Otherwise re-engage "
-        "the Director via cafleet message send when a due member is stalled or "
-        "finished, when an unacked-tagged member is reportable per its rule "
-        "above, or the Director is finished with un-acked work."
+    assert payload.startswith(
+        "[monitor] wake: 1 member due — member 336 "
+        "(alice; coding_agent=claude) [interval,stall-check,unacked]. "
     )
+    assert "Query monitor stall pending before ordinary observations" in payload
+    assert "monitor report-batch exactly once" in payload
+    assert "message show --full" in payload
+    assert "cafleet message send" not in payload
 
 
 def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
@@ -1010,12 +1006,14 @@ def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
         {
             "member_id": 332,
             "name": "Director",
+            "coding_agent": "opencode",
             "is_director": True,
             "wake_reasons": ["interval"],
         },
         {
             "member_id": 336,
             "name": "alice",
+            "coding_agent": "claude",
             "is_director": False,
             "wake_reasons": ["interval", "stall-check", "unacked"],
         },
@@ -1027,8 +1025,9 @@ def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
         "_run",
         lambda args, **_kw: tmux_calls.append(list(args)) or "",
     )
+    director = {"member_id": 332, "coding_agent": "opencode"}
     _tmux.send_wake_trigger(
-        target_pane_id="%7", due_members=due_members, director_member_id=332
+        target_pane_id="%7", due_members=due_members, director=director
     )
     # tmux literal-then-Enter: the payload is arg index 5 of the first send-keys call.
     tmux_payload = tmux_calls[0][5]
@@ -1040,7 +1039,7 @@ def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
         lambda args, **_kw: herdr_calls.append(list(args)) or "",
     )
     HerdrMultiplexer().send_wake_trigger(
-        target_pane_id="wG:p1", due_members=due_members, director_member_id=332
+        target_pane_id="wG:p1", due_members=due_members, director=director
     )
     # herdr ``pane run``: the payload is arg index 4 (herdr pane run <pane> <payload>).
     herdr_payload = herdr_calls[0][4]
