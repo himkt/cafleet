@@ -1,7 +1,7 @@
 # Direct Fixed-Action Nudge from the Monitoring Member
 
 **Status**: Approved
-**Progress**: 21/31 tasks complete
+**Progress**: 26/31 tasks complete
 **Last Updated**: 2026-07-29
 
 ## Overview
@@ -471,11 +471,11 @@ The example in `skills/cafleet/roles/monitor.md` and the exact payload tests are
 
 ### Step 4: CLI state surface
 
-- [ ] Add `captured_at`/`content_sha256` to capture JSON in documented key order, stamp/hash at the capture boundary under both `--ansi` and `--no-ansi`, and leave text output byte-identical <!-- completed: -->
-- [ ] Add `monitor stall observe` with typed classification (`awaiting_user|unknown|finished|working|stall_candidate`), mutually exclusive ordinary stall-check/Director-gate modes, paired timestamp/hash validation, exact resolved/token output, live readable targeting, and loss-tolerant no-capture `unknown` targeting <!-- completed: -->
-- [ ] Add `cafleet monitor stall ping-result --success|--failure` and token-required `cafleet monitor report-batch [--finished-member-id]...`; neither accepts arbitrary text, report-batch consumes the fresh safe gate, enforces backpressure/ACK-only completion, and records at most one same-ID aggregate preview outcome <!-- completed: -->
-- [ ] Add `cafleet monitor stall pending` with stable text/JSON ordering so queued reports remain discoverable when their members are absent from the due batch <!-- completed: -->
-- [ ] Add CLI tests for classifications, hash modes, mode/argument exclusivity, ordinary/Director target guards and no-ping Director results, safe/unsafe gate-token output, missing/malformed/expired/replayed token rejection, pending visibility, batch sorting/deduplication/empty behavior, aggregate-name sanitization, one-open backpressure, pending vs awaiting-ACK retry timing, success-without-ACK/ACK recovery, state conflicts, retry idempotency, and no-arbitrary-body rejection <!-- completed: -->
+- [x] Add `captured_at`/`content_sha256` to capture JSON in documented key order, stamp/hash at the capture boundary under both `--ansi` and `--no-ansi`, and leave text output byte-identical <!-- completed: 2026-07-29T08:26 -->
+- [x] Add `monitor stall observe` with typed classification (`awaiting_user|unknown|finished|working|stall_candidate`), mutually exclusive ordinary stall-check/Director-gate modes, paired timestamp/hash validation, exact resolved/token output, live readable targeting, and loss-tolerant no-capture `unknown` targeting <!-- completed: 2026-07-29T08:26 -->
+- [x] Add `cafleet monitor stall ping-result --success|--failure` and token-required `cafleet monitor report-batch [--finished-member-id]...`; neither accepts arbitrary text, report-batch consumes the fresh safe gate, enforces backpressure/ACK-only completion, and records at most one same-ID aggregate preview outcome <!-- completed: 2026-07-29T08:26 -->
+- [x] Add `cafleet monitor stall pending` with stable text/JSON ordering so queued reports remain discoverable when their members are absent from the due batch <!-- completed: 2026-07-29T08:26 -->
+- [x] Add CLI tests for classifications, hash modes, mode/argument exclusivity, ordinary/Director target guards and no-ping Director results, safe/unsafe gate-token output, missing/malformed/expired/replayed token rejection, pending visibility, batch sorting/deduplication/empty behavior, aggregate-name sanitization, one-open backpressure, pending vs awaiting-ACK retry timing, success-without-ACK/ACK recovery, state conflicts, retry idempotency, and no-arbitrary-body rejection <!-- completed: 2026-07-29T08:26 -->
 
 ### Step 5: Wake contract
 
