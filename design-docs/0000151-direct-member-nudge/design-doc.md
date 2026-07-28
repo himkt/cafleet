@@ -1,7 +1,7 @@
 # Direct Fixed-Action Nudge from the Monitoring Member
 
 **Status**: Approved
-**Progress**: 28/31 tasks complete
+**Progress**: 31/31 tasks complete
 **Last Updated**: 2026-07-29
 
 ## Overview
@@ -484,9 +484,9 @@ The example in `skills/cafleet/roles/monitor.md` and the exact payload tests are
 
 ### Step 6: End-to-end verification
 
-- [ ] Add model/migration/broker tests for backfill/explicit cleanup, delivery state/one-open constraints, gate issuance/invalidation/expiry/atomic consumption and concurrent replay, capture-timestamp validation, ordinary/Director full-interval observations, explicit-working non-action, no Director ping claim, scan-live→capture-fails, claim→death→ping-failure ordering, sticky pending, backpressured aggregate creation, same-ID preview retry/ACK reconciliation, and non-pending reset <!-- completed: -->
-- [ ] Add integration scenarios for immediate loop restart before interval, disable/dead→recover reseed, scan-live→capture-fails, ordinary ping while Director awaits, two full-spacing unchanged Director captures→fresh-token one aggregate preview, active/ambiguous Director→no token/preview, stale/direct/restarted/concurrent report-batch rejection, repeated known preview failures with the same finished member→one open row/no duplicate entry, queued ping failure behind open message→later aggregate after ACK, successful preview→no ACK→later finished/unacked Director→interval-stale same-ID recovery, over-cap full-body consumption before ACK, and preview-failure same-ID recovery <!-- completed: -->
-- [ ] Run unchanged `member ping` safety tests plus full test/lint/typecheck; verify no independent `unacked`, process-local cadence/episode state, working-hash promotion, erasable pending escalation, or blanket “members never ping” residue <!-- completed: -->
+- [x] Add model/migration/broker tests for backfill/explicit cleanup, delivery state/one-open constraints, gate issuance/invalidation/expiry/atomic consumption and concurrent replay, capture-timestamp validation, ordinary/Director full-interval observations, explicit-working non-action, no Director ping claim, scan-live→capture-fails, claim→death→ping-failure ordering, sticky pending, backpressured aggregate creation, same-ID preview retry/ACK reconciliation, and non-pending reset <!-- completed: 2026-07-29T08:52 -->
+- [x] Add integration scenarios for immediate loop restart before interval, disable/dead→recover reseed, scan-live→capture-fails, ordinary ping while Director awaits, two full-spacing unchanged Director captures→fresh-token one aggregate preview, active/ambiguous Director→no token/preview, stale/direct/restarted/concurrent report-batch rejection, repeated known preview failures with the same finished member→one open row/no duplicate entry, queued ping failure behind open message→later aggregate after ACK, successful preview→no ACK→later finished/unacked Director→interval-stale same-ID recovery, over-cap full-body consumption before ACK, and preview-failure same-ID recovery <!-- completed: 2026-07-29T08:52 -->
+- [x] Run unchanged `member ping` safety tests plus full test/lint/typecheck; verify no independent `unacked`, process-local cadence/episode state, working-hash promotion, erasable pending escalation, or blanket “members never ping” residue <!-- completed: 2026-07-29T08:52 -->
 
 ---
 

@@ -13,7 +13,6 @@ representation never leaks past the broker.
 """
 
 import hashlib
-import hmac
 import os
 import re
 import secrets
@@ -821,6 +820,31 @@ def _validate_director_gate_token(
         raise click.ClickException(
             "director gate token must be 64 lowercase hexadecimal characters"
         )
+    expected = hashlib.sha256(bytes.fromhex(token)).hexdigest()
+    current_director_id = (
+        select(Fleet.director_member_id)
+        .where(
+            Fleet.fleet_id == fleet_id,
+            Fleet.deleted_at.is_(None),
+        )
+        .scalar_subquery()
+    )
+    consumed = session.execute(
+        delete(MonitorDirectorGate)
+        .where(
+            MonitorDirectorGate.fleet_id == fleet_id,
+            MonitorDirectorGate.director_member_id == current_director_id,
+            MonitorDirectorGate.token_sha256 == expected,
+            MonitorDirectorGate.expires_at > now.isoformat(),
+        )
+        .returning(MonitorDirectorGate.director_member_id)
+        .execution_options(synchronize_session=False)
+    ).first()
+    if consumed is None:
+        raise click.ClickException(
+            "monitor Director gate token is absent, mismatched, or expired"
+        )
+
     fleet = session.execute(
         select(Fleet).where(
             Fleet.fleet_id == fleet_id,
@@ -842,17 +866,6 @@ def _validate_director_gate_token(
     ).first()
     if director is None:
         raise click.ClickException("monitor report Director is unavailable")
-    gate = session.get(MonitorDirectorGate, fleet_id)
-    if (
-        gate is None
-        or gate.director_member_id != fleet.director_member_id
-        or datetime.fromisoformat(gate.expires_at) <= now
-    ):
-        raise click.ClickException("monitor Director gate is absent or expired")
-    expected = hashlib.sha256(bytes.fromhex(token)).hexdigest()
-    if not hmac.compare_digest(gate.token_sha256, expected):
-        raise click.ClickException("monitor Director gate token does not match")
-    session.delete(gate)
     return fleet, director
 
 
