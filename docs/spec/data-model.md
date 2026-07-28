@@ -21,6 +21,9 @@ erDiagram
     members ||--o| member_placements : "1:1 (reused PK)"
     members ||--o| monitor_config : "1:1 (reused PK)"
     members ||--o{ messages : "owner_member_id"
+    messages ||--o| monitor_report_delivery : "aggregate delivery"
+    fleets ||--o{ monitor_report_delivery : "fleet_id"
+    fleets ||--o| monitor_director_gate : "fresh report proof"
 
     fleets {
         INTEGER fleet_id PK "AUTOINCREMENT"
@@ -65,6 +68,11 @@ erDiagram
         INTEGER interval_seconds
         TEXT last_ping_at "NULL = due immediately"
         INTEGER enabled "bool as 0/1"
+        TEXT last_stall_check_at "durable dispatch cadence"
+        TEXT last_stall_candidate_at "validated capture time"
+        TEXT last_stall_capture_sha256 "64 lowercase hex"
+        TEXT stall_episode_state "clear | claimed | nudged | pending | escalated"
+        TEXT stall_escalation_reason "NULL | fixed reason enum"
     }
     monitor_runtime {
         INTEGER fleet_id PK "reuses fleets.fleet_id"
@@ -77,6 +85,22 @@ erDiagram
         TEXT coding_agent PK "claude | codex | opencode"
         TEXT cafleet_version
         TEXT installed_at
+    }
+    monitor_report_delivery {
+        INTEGER message_id PK "FK messages.message_id"
+        INTEGER fleet_id FK
+        TEXT preview_state "pending | awaiting_ack | delivered"
+        INTEGER attempt_count
+        TEXT last_attempt_at
+        TEXT delivered_at
+    }
+    monitor_director_gate {
+        INTEGER fleet_id PK
+        INTEGER director_member_id FK
+        TEXT token_sha256 "raw token never stored"
+        TEXT classification "finished | stalled"
+        TEXT issued_at
+        TEXT expires_at "30-second lifetime"
     }
 ```
 
@@ -92,6 +116,8 @@ Minted ids are **never reused** and real ids are always `>= 1`.
 | `member_placements` | Reuses `members.member_id` | `members` | `CASCADE` | Hard-deleted on deregistration |
 | `monitor_config` | Reuses `members.member_id` | `members` | `CASCADE` | Hard-deleted alongside the placement on deregistration, and inside the `fleet delete` transaction |
 | `monitor_runtime` | Reuses `fleets.fleet_id` | `fleets` | `RESTRICT` | Removed inside the `fleet delete` transaction; "no monitor" is modeled as "no row" |
+| `monitor_report_delivery` | Reuses `messages.message_id` | `messages`, `fleets` | Message delete cascades; fleet cleanup explicit | Terminal history is retained until fleet teardown |
+| `monitor_director_gate` | Reuses `fleets.fleet_id` | `fleets`, `members` | Explicit lifecycle cleanup | Replaced/consumed by Director-gate observations |
 | `asset_installs` | `coding_agent` (the agent name) | — | — | Upserted, one row per coding agent |
 
 ### `fleets`
@@ -127,14 +153,45 @@ ordinary member is a placed row other than the fleet's root Director
 (`member_id != fleets.director_member_id`). Placement rows have no historical
 value.
 
-### `monitor_config` and `monitor_runtime`
+### Monitor state tables
 
-The two monitor tables: `monitor_config` holds one row per **enrolled** member,
-and `monitor_runtime` holds one row per fleet with the running loop's pid and
-`last_tick_at` heartbeat. Which members are enrolled — the watched set — is
-defined in
-[Monitoring](../concepts/monitoring.md#the-watched-set), along with the
-cadence and liveness semantics.
+`monitor_config` holds one row per **enrolled** member. Alongside the public
+schedule fields, five internal columns make stall handling restart-safe:
+
+| Column | Contract |
+|---|---|
+| `last_stall_check_at` | Nullable UTC ISO timestamp of the last successfully dispatched stall-check wake. |
+| `last_stall_candidate_at` | Nullable validated capture timestamp for the accepted candidate baseline. |
+| `last_stall_capture_sha256` | Nullable lowercase 64-hex hash paired with the candidate timestamp. |
+| `stall_episode_state` | Non-null `clear`, `nudge_claimed`, `nudged`, `escalation_pending`, or `escalated`; server default `clear`. |
+| `stall_escalation_reason` | Null outside pending/escalated; otherwise `ping_failed`, `ping_interrupted`, or `unchanged_after_nudge`. |
+
+Candidate timestamp/hash are both null or both non-null. Every non-`clear`
+episode has both. Disabling or losing a pane clears ordinary non-pending state,
+converts `nudge_claimed` to sticky interrupted escalation, and preserves
+pending escalation. Soft deregistration explicitly deletes the config row.
+
+`monitor_report_delivery` makes aggregate preview delivery durable. Checks
+enforce non-negative attempts, attempt/timestamp pairing, delivered timestamp
+only for terminal `delivered`, and at least one attempt for `awaiting_ack`. A
+partial unique index permits **one open** (`pending` or `awaiting_ack`) row per
+fleet. Preview retries reuse its message ID; only ACK reconciliation marks it
+delivered.
+
+`monitor_director_gate` stores the SHA-256 digest—not the raw 32-byte token—of
+one consumable proof for the active Director. Its classification is `finished`
+or broker-resolved `stalled`, and `expires_at` is exactly 30 seconds after
+`issued_at`. A new Director observation invalidates the prior row; successful
+`report-batch` validation consumes it transactionally. Director
+disable/deregistration/replacement and fleet teardown delete it.
+
+`monitor_runtime` remains the one-row-per-fleet loop pid/heartbeat table. Which
+members are enrolled and the cadence semantics are defined in
+[Monitoring](../concepts/monitoring.md#the-watched-set).
+
+Alembic revision `0005_add_monitor_stall_episode_state.py` adds the five
+episode columns and both durable tables, backfilling existing config rows to
+null candidate/cadence fields and `stall_episode_state = "clear"`.
 
 ### `asset_installs`
 

@@ -1,8 +1,8 @@
 # Direct Fixed-Action Nudge from the Monitoring Member
 
 **Status**: Approved
-**Progress**: 0/31 tasks complete
-**Last Updated**: 2026-07-28
+**Progress**: 11/31 tasks complete
+**Last Updated**: 2026-07-29
 
 ## Overview
 
@@ -441,17 +441,17 @@ The example in `skills/cafleet/roles/monitor.md` and the exact payload tests are
 
 ### Step 1: Documentation and role contracts
 
-- [ ] Update `docs/concepts/monitoring.md`: preserve synchronized batches; redefine `unacked` as annotation-only; document durable cadence/episodes, candidate-vs-working safety, fixed direct ping, sticky pending reports, lifecycle reset, consumable Director gate, and completion ownership <!-- completed: -->
-- [ ] Update `SPEC.md` data model and migration contract with five `monitor_config` columns, the one-open-per-fleet `monitor_report_delivery` invariants, consumable `monitor_director_gate` proof, explicit teardown/soft-deregistration cleanup, and revision `0005_add_monitor_stall_episode_state.py` <!-- completed: -->
-- [ ] Update `SPEC.md` broker/CLI contracts for mode-exact capture timestamps/fingerprints, ordinary/director-gate/loss-tolerant paths, `monitor stall observe`/`ping-result`/`pending`, and token-gated atomic fixed `monitor report-batch`, including backpressure, ACK-only completion, retry thresholds, exact payloads/outputs, validations, idempotency, and errors <!-- completed: -->
-- [ ] Update `SPEC.md` monitor-loop/multiplexer contracts: durable stall cadence, lifecycle cleanup, annotation-only unacked ordering, internal coding-agent metadata, removal of both process maps, unchanged batch commit gate, and exact wake payload <!-- completed: -->
-- [ ] Update `docs/spec/data-model.md` and `docs/spec/cli-options.md` for the five episode fields, delivery queue, consumable Director-gate row/token, timestamped ANSI/no-ANSI capture identity, complete `monitor stall` group, token-required report-batch recovery/output, and aggregate full-body consumption <!-- completed: -->
-- [ ] Update `docs/spec/multiplexer-backends.md`: distinguish trigger reasons from the `unacked` hint; document sanitized target coding-agent entries, reuse of the unchanged Esc-first poll primitive, one aggregate Director preview per wake, and retry of the same message ID <!-- completed: -->
-- [ ] Update `skills/cafleet/roles/monitor.md`: per-target overlay selection, JSON capture/fingerprint and loss-tolerant unknown flow, `stall_candidate`/`working` split, pending-list-first collection, direct ping/result ordering, final Director `finished|stalled` gate observation, immediate one-use-token aggregate/retry command, restart recovery, lifecycle/sticky-report rules, and finished behavior <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/coding-agent/_template.md` and the claude/codex/opencode overlays with target-backend affirmative `working`, quiet `stall_candidate`, and ambiguity cues; bind the note to monitor classification and add per-backend role-contract fixtures <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/supervision.md`: make monitor-direct fixed poll the first confident-candidate stall action; route durable pending escalation to the Director; define the Director gate as target-specific; retain the Director's gate for every later Director action <!-- completed: -->
-- [ ] Update `skills/cafleet/roles/director.md`, `skills/cafleet/roles/member.md`, `skills/cafleet/SKILL.md`, and `.claude/rules/bash-tool.md` for the monitoring member's sole fixed-ping exception, Director `message show --full`/message-ID dedup/ACK protocol for aggregate previews, and preserved arbitrary-instruction prohibition/completion ownership <!-- completed: -->
-- [ ] Verify `README.md`, broker/API reference pages unrelated to the new broker functions, and WebUI response contracts require no change because the thin surface, HTTP shapes, and monitor-status member shape are unchanged <!-- completed: -->
+- [x] Update `docs/concepts/monitoring.md`: preserve synchronized batches; redefine `unacked` as annotation-only; document durable cadence/episodes, candidate-vs-working safety, fixed direct ping, sticky pending reports, lifecycle reset, consumable Director gate, and completion ownership <!-- completed: 2026-07-29T01:47 -->
+- [x] Update `SPEC.md` data model and migration contract with five `monitor_config` columns, the one-open-per-fleet `monitor_report_delivery` invariants, consumable `monitor_director_gate` proof, explicit teardown/soft-deregistration cleanup, and revision `0005_add_monitor_stall_episode_state.py` <!-- completed: 2026-07-29T01:47 -->
+- [x] Update `SPEC.md` broker/CLI contracts for mode-exact capture timestamps/fingerprints, ordinary/director-gate/loss-tolerant paths, `monitor stall observe`/`ping-result`/`pending`, and token-gated atomic fixed `monitor report-batch`, including backpressure, ACK-only completion, retry thresholds, exact payloads/outputs, validations, idempotency, and errors <!-- completed: 2026-07-29T01:47 -->
+- [x] Update `SPEC.md` monitor-loop/multiplexer contracts: durable stall cadence, lifecycle cleanup, annotation-only unacked ordering, internal coding-agent metadata, removal of both process maps, unchanged batch commit gate, and exact wake payload <!-- completed: 2026-07-29T01:47 -->
+- [x] Update `docs/spec/data-model.md` and `docs/spec/cli-options.md` for the five episode fields, delivery queue, consumable Director-gate row/token, timestamped ANSI/no-ANSI capture identity, complete `monitor stall` group, token-required report-batch recovery/output, and aggregate full-body consumption <!-- completed: 2026-07-29T01:47 -->
+- [x] Update `docs/spec/multiplexer-backends.md`: distinguish trigger reasons from the `unacked` hint; document sanitized target coding-agent entries, reuse of the unchanged Esc-first poll primitive, one aggregate Director preview per wake, and retry of the same message ID <!-- completed: 2026-07-29T01:47 -->
+- [x] Update `skills/cafleet/roles/monitor.md`: per-target overlay selection, JSON capture/fingerprint and loss-tolerant unknown flow, `stall_candidate`/`working` split, pending-list-first collection, direct ping/result ordering, final Director `finished|stalled` gate observation, immediate one-use-token aggregate/retry command, restart recovery, lifecycle/sticky-report rules, and finished behavior <!-- completed: 2026-07-29T01:47 -->
+- [x] Update `skills/cafleet/reference/coding-agent/_template.md` and the claude/codex/opencode overlays with target-backend affirmative `working`, quiet `stall_candidate`, and ambiguity cues; bind the note to monitor classification and add per-backend role-contract fixtures <!-- completed: 2026-07-29T01:47 -->
+- [x] Update `skills/cafleet/reference/supervision.md`: make monitor-direct fixed poll the first confident-candidate stall action; route durable pending escalation to the Director; define the Director gate as target-specific; retain the Director's gate for every later Director action <!-- completed: 2026-07-29T01:47 -->
+- [x] Update `skills/cafleet/roles/director.md`, `skills/cafleet/roles/member.md`, `skills/cafleet/SKILL.md`, and `.claude/rules/bash-tool.md` for the monitoring member's sole fixed-ping exception, Director `message show --full`/message-ID dedup/ACK protocol for aggregate previews, and preserved arbitrary-instruction prohibition/completion ownership <!-- completed: 2026-07-29T01:47 -->
+- [x] Verify `README.md`, broker/API reference pages unrelated to the new broker functions, and WebUI response contracts require no change because the thin surface, HTTP shapes, and monitor-status member shape are unchanged <!-- completed: 2026-07-29T01:47 -->
 
 ### Step 2: Durable schema and broker state machine
 

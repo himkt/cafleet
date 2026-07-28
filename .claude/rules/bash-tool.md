@@ -63,12 +63,23 @@ The CLI renders these into your spawn prompt as literal `FLEET ID:` / `YOUR MEMB
 
 If you are the **Director** (not a member), this rule applies in reverse only when a member auto-routes a denied command to you.
 
-For the **inbox-poll-only nudge case** (the monitoring loop wants the member to re-check its inbox after a missed broker auto-fire, or after a long idle window), the Director's primitive is `cafleet member ping`. It carries no message — its action is fixed (it injects `Esc` + `cafleet message poll --fleet-id <s> --member-id <m>` + Enter into the member's pane via the existing `tmux.send_poll_trigger` helper; the leading `Esc` is the permission-prompt safeguard, inherited because `send_poll_trigger` passes `esc_first=True`) — so it is pre-approved in `permissions.allow` and fires without a per-call confirmation prompt:
+For the **inbox-poll-only nudge case**, the primitive is `cafleet member ping`.
+It carries no message — its action is fixed (it injects `Esc` +
+`cafleet message poll --fleet-id <s> --member-id <m>` + Enter through
+`send_poll_trigger`; the leading `Esc` is the prompt safeguard) — so it is
+pre-approved in `permissions.allow` and fires without a per-call confirmation:
 
 ```bash
 cafleet member ping --fleet-id <fleet-id> \
   --member-id <member-id>
 ```
+
+The Director normally owns this primitive. The sole member-side exception is
+the dedicated monitoring member: it may issue this fixed `member ping` once
+only after the broker has claimed a confidently stalled ordinary-member episode
+and returned `action = ping`. It must record the result immediately. This does
+not authorize arbitrary text, `member prompt`, a Director target, self-target,
+or any other pane action; ordinary members remain prohibited.
 
 For the **shell-dispatch fallback** (a member auto-routed a denied command and needs the Director to dispatch arbitrary shell on its behalf), the Director's primitive is `cafleet member prompt --shell`. This subcommand carries the operator-controlled text as a positional argument, so it remains under `permissions.ask` for per-call confirmation:
 

@@ -26,26 +26,65 @@ The Director's plain output is **not visible to members** — the only Director�
 
 CAFleet members do not act autonomously. The Director drives the team — and the Director needs a way to wake itself up periodically to check inboxes, dispatch queued work, and detect stalls. That heartbeat is supplied by **`cafleet monitor`**, a per-fleet `scan → wake → sleep` loop that the fleet's dedicated **monitoring member** runs as a **background task** in its own pane. Because it is just a backgrounded command, the heartbeat is **backend-agnostic** — a root Director on `claude`, `codex`, or `opencode` gets the identical tick.
 
-Each tick the loop scans the **watched set** — the root Director (default **180 s**) and every ordinary member (default **720 s**), each on its own per-member interval — and, when **≥ 1 watched member is due**, wakes the monitoring member **once**. The loop's only keystroke is into the monitoring member's own pane; it **never** keystrokes a watched pane (the Director or an ordinary member). The wake nudge does **not** lead with `Esc`: the monitoring member's pane runs a read-only routine under `dontAsk` and is never parked on a permission-approval prompt, so a leading `Esc` would merely self-interrupt an in-progress routine. (The `Esc` safeguard instead lives where a target may be on a prompt — the broker's message-delivery inline preview and `cafleet member ping`.) The dedicated monitoring member is the **watcher**, not a watched member — it carries no interval and is located by its `member_card_json.cafleet.kind == "monitoring-member"` marker, not by a `monitor_config` row. The keystroke is a single-line *wake nudge* that **names** each due member as `<role> <id> (<name>) [<reasons>]` (role `director` or `member`; reasons drawn from `interval`, `status:done`, `stall-check`, `unacked`) plus the Director id as the standing inspect-and-re-engage target, instructing the monitoring member to classify each named pane plus the Director on the five-state taxonomy and re-engage the Director when a due member is `stalled`/`finished` or an `unacked`-tagged member is reportable per its report rule (see [`roles/monitor.md`](../roles/monitor.md)).
+Each tick scans the **watched set** — the root Director (default **180 s**) and
+every ordinary member (default **720 s**) — and emits at most one synchronized
+wake to the monitoring member. The loop itself never keystrokes a watched pane.
+Its fixed cadence unions `interval`, durable `stall-check`, and herdr
+`status:done` triggers; only after that union does it append `unacked` as
+annotation-only context to already-due rows. A stale delivery can never create a
+due row or an independent wake.
+
+The byte-identical tmux/herdr wake identifies every due target and the Director
+as `<role> <id> (<sanitized-name>; coding_agent=<backend>) [<reasons>]`.
+`coding_agent` selects the **target-specific** overlay for capture
+classification. Durable `last_stall_check_at` preserves dispatch cadence across
+loop restart; capture timestamps and fingerprints in SQLite separately enforce
+two actual candidate observations a full stall interval apart.
 
 See [`SKILL.md`](../SKILL.md) and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring/) for the full command surface and policy. **The monitoring member — not the Director — runs `cafleet monitor start`** (see § Monitor Lifecycle).
 
-**The Director is never woken by the loop.** It is re-engaged only on demand: by the monitoring member's report (`cafleet message send`, which persists an ACKable broker message **and** fires the `Esc`-safeguarded inline preview, when the routine reports a `stalled`/`finished` member or classifies the Director's own pane `finished` with un-acked work — but **never** when the Director's pane is `awaiting_user`), and by the broker's inline-preview keystroke on every other inbound `cafleet message send`. The preview's leading `Esc` exists to stop the trailing `Enter` from blindly *confirming* a prompt; a pending `{decision_surface}` prompt is protected because the monitoring member never re-engages an `awaiting_user` pane at all — by policy, not by the keystroke. The monitor decides only *when* to wake the monitoring member; this file defines *what* the Director does once re-engaged.
+**The loop never wakes the Director directly.** At the end of a synchronized
+wake, the monitoring member re-captures the Director. Only explicit `finished`
+or a broker-resolved two-candidate `stalled` result issues a fresh one-use gate
+token. An immediate token-gated `monitor report-batch` is the sole
+Director-delivery path for monitor observations; `awaiting_user`, `working`,
+unresolved candidate/`unknown`, and unreadable capture issue no token. The
+aggregate uses one durable message ID, is ACK-complete only, and is retried with
+that same message ID under one-open-per-fleet backpressure. Other inbound
+`message send` previews remain unchanged.
 
 ### How ordinary members are woken
 
-Ordinary members are **watched** (each enrolled with its own 720 s interval), but the loop **never keystrokes a member pane**. When a member comes due, the loop wakes the *monitoring member*, which captures the member read-only and surfaces a stall to the Director. Member re-engagement is always Director-mediated, via two paths:
+Ordinary members are **watched** (each enrolled with its own 720 s interval),
+but the loop never keystrokes them. When a member comes due, it wakes the
+monitoring member, which classifies the capture and submits it to the durable
+broker state machine. There are three recovery paths:
 
 1. **Primary** — the broker's inline-preview keystroke fired on every `cafleet message send` (`tmux.send_inline_preview`), landing the instant the Director or a teammate sends work.
-2. **Manual recovery** — the Director's `Esc`-safeguarded `cafleet member ping` (it reuses the `send_poll_trigger` helper, so it inherits the same `Esc` safeguard), for a member that missed its inline preview (surfaced by the monitoring member's `unacked` report) or looks stalled. This path is **gated**: fire it only after a fresh capture classifies the target `finished` or `stalled` per § Idle Semantics → *The pre-nudge capture gate*.
+2. **First confident stall** — the monitoring member's narrow exception:
+   `observe` atomically claims `nudge_claimed`, returns `action = ping`, and the
+   monitor invokes the fixed, `Esc`-safeguarded `cafleet member ping` once,
+   then records success/failure. This carries no text and can target only an
+   ordinary member. A failed nudge queues sticky `escalation_pending`.
+3. **Later Director recovery** — the Director may use `member ping` or send a
+   new instruction, but every such later Director action still requires the
+   target-specific fresh-capture gate below.
 
-A member that has gone quiet is surfaced to the Director by the monitoring member's assessment; the Director then re-pings via `cafleet member ping` or re-sends the instruction — each through the pre-nudge capture gate. The monitoring member never keystrokes task instructions into a member's pane.
+An unchanged capture at the next synchronized observation after the direct
+nudge queues `escalation_pending/unchanged_after_nudge` exactly once. Pending
+state is sticky across progress, disablement, pane death, and restart until a
+safe aggregate commits it. The monitoring member never keystrokes task
+instructions into a member's pane; its sole direct action is the fixed poll.
 
 ## The monitoring member
 
 The monitoring member is a single, dedicated coding-agent member — spawned **first** in the fleet with `cafleet member create --role monitor --model {monitor_model}` — that owns the heartbeat and applies LLM judgment to the watched members' state (the Director **and** each freshly-due member). `--role monitor` sets `member_card_json.cafleet.kind == "monitoring-member"`; the monitoring member is **not** enrolled in `monitor_config` — it is the watcher, located by that kind marker (`find_monitoring_member`), and carries no interval of its own. Only one is allowed per fleet (a second `--role monitor` spawn is rejected). It is the **one** process that runs `cafleet monitor start` (the Director never runs it — see § Spawn Protocol).
 
-The monitoring member's own first-person routine — its Startup (the `ready: monitor live` gate), the on-wake capture-classify-reengage steps, the wake-nudge it consumes, Teardown, and its canonical spawn prompt (the [`reference/director.md`](director.md) skeleton plus a per-role delta) — lives in [`roles/monitor.md`](../roles/monitor.md).
+The monitoring member's first-person routine — including per-target overlay
+selection, JSON capture identity, pending-list-first collection, durable
+observe → claim → ping → ping-result ordering, restart recovery, final
+Director gate, and immediate aggregate report — lives in
+[`roles/monitor.md`](../roles/monitor.md).
 
 ## Idle Semantics
 
@@ -53,8 +92,16 @@ The monitoring member's own first-person routine — its Startup (the `ready: mo
 
 - **`finished` with outstanding assigned work → drive it forward (issue #174 bullet 3).** A member that completed its turn while the task you assigned is unfinished is NOT left alone: dispatch the next step or re-engage it — through the pre-nudge capture gate below — via `cafleet message send` / `cafleet member ping`. You alone judge whether assigned work remains — the monitoring member reports `finished`, you decide.
 - **`finished` with nothing outstanding → leave it.** Expected rest; idle notifications about it are informational, not a call to act. Idle members receive messages normally — the broker's inline preview wakes them when you have new work (each such send still routes through the gate).
-- **`stalled` mid-execution → re-engage (issue #174 bullet 2).** The monitoring member surfaces a member whose capture is unchanged across two consecutive stall-check observations; re-engage — through the gate — via `cafleet member ping` / `cafleet message send`.
-- **Reported `unacked` (a stale un-acked delivery) → `cafleet member ping` through the gate.** The monitoring member reports a watched member whose oldest un-acked delivery has waited at least one full member interval — a missed inbox poll. The canonical response is `cafleet member ping` (pre-approved in `permissions.allow`): it re-injects the missed `cafleet message poll`. The pre-nudge capture gate below applies unchanged — take a fresh capture and fire only on `finished` or `stalled`; on `working` or `awaiting_user` defer the round, relying on the unacked re-fire cadence to resurface the report.
+- **First confident `stalled` mid-execution → monitor fixed ping.** Two
+  byte-identical quiet `stall_candidate` captures accepted a full interval
+  apart let the monitoring member invoke one fixed `cafleet member ping`. If
+  the next synchronized capture is unchanged, or that ping failed/interrupted,
+  the broker queues `escalation_pending`; the Director receives it through an
+  aggregate and owns every further decision.
+- **`unacked` is context, not proof.** It annotates an already-due capture and
+  never schedules a wake or authorizes a ping. `working + unacked` remains
+  `working` and is non-actionable. If later Director judgment calls for a
+  recovery action, the fresh target-specific gate still applies.
 - **`awaiting_user` or `working` → skip the round (issue #174 bullet 1).** The gate below defers the entire send; a pending user prompt is never destroyed and an in-flight turn is never interrupted.
 - An immediate reply to a **reply-soliciting** message (a question or blocker) received from that member in the current facilitation turn is exempt from the gate: the member ended its turn to await this reply, so its pane is at rest with no live prompt — reply via `cafleet message send`; the reply's `Esc`-first keystroke cancels nothing. A reply to a progress-only status message ("still working", "ack") is NOT exempt — the member may still be mid-turn — and routes through the gate.
 
@@ -62,7 +109,14 @@ Idleness alone is never a stop signal, never a stall, and never grounds for a pa
 
 ### The pre-nudge capture gate
 
-Every re-engagement keystroke at a member — `cafleet member ping`, a non-exempt `cafleet message send`, and `cafleet message broadcast` (all recipients) — is **capture-gated**: immediately before firing, take a fresh read-only capture of the target and classify it from capture content only, on the five-state rubric, using the *Pane-state capture cues* of the **target member's** backend overlay ([`coding-agent/<name>-overlay.md`](coding-agent/)). Fleets can mix backends, so read the target's backend from the `backend` column of `cafleet member list` and apply that overlay's cue table — not necessarily your own. The gate capture depth is normative:
+Every **Director-initiated** re-engagement keystroke at a member — `cafleet
+member ping`, a non-exempt `cafleet message send`, and `cafleet message
+broadcast` — is capture-gated immediately before firing. The monitoring
+member's first confident-candidate fixed-ping exception uses its just-taken,
+broker-accepted capture and does not waive this gate for any later Director
+action. Classify from content only using the **target member's** backend
+overlay; mixed fleets make this target-specific. The gate capture depth is
+normative:
 
 ```bash
 cafleet member capture --fleet-id <fleet-id> --member-id <target-member-id> --lines 120
@@ -156,7 +210,13 @@ On every supervision tick — whether fired by the monitoring member's on-demand
 
 ## Stall Response
 
-When you receive any signal that a member may be stalled (the monitoring member's nudge, idle notification, user nudge), evaluate using this 2-stage protocol. **Every nudge is gate-preconditioned**: fire it only after a fresh capture classifies the target `finished` or `stalled` per § Idle Semantics → *The pre-nudge capture gate* — a monitor report is stale knowledge, never a substitute for the fresh capture.
+When a `monitor report batch:` preview arrives, first retrieve that message ID
+with `cafleet message show --full`, process its untruncated entries, deduplicate
+by message ID, and ACK once. A monitor aggregate is evidence for the
+facilitation loop, not permission to bypass the fresh-capture gate. The only
+first-action exception already occurred inside the monitoring routine when the
+broker claimed the confident stall; every later Director nudge remains
+gate-preconditioned.
 
 > **Bash request blocking case**: When `cafleet message poll` returns a member message asking for a shell command, dispatch via `cafleet member prompt --shell "<cmd>"` per [`reference/prompt-routing.md`](prompt-routing.md). Member blocks until the keystroke lands; process requests one at a time, don't skip ahead to other inbox items.
 
