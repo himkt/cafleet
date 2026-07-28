@@ -17,19 +17,17 @@ from datetime import UTC, datetime, timedelta
 import click
 import pytest
 
+import cafleet.monitor.loop as monitor_loop_module
 from cafleet import broker
 from cafleet.config import settings
-from cafleet.db.models import Fleet, Message
+from cafleet.db.models import Fleet, MemberPlacement, Message, MonitorConfig
 from cafleet.monitor.loop import (
     _WAKE_ON_STATUS,
     CONTINUE,
     STOP,
     _flag_native_status_due,
     _flag_stall_check_due,
-    _flag_unacked_due,
     _last_member_status,
-    _last_stall_check_at,
-    _last_unacked_wake_at,
     monitor_tick,
     run_monitor_loop,
 )
@@ -41,6 +39,11 @@ from tests.broker._helpers import (
 )
 
 _NOW = datetime(2026, 6, 13, 12, 0, 0, tzinfo=UTC)
+
+
+def _annotate_unacked_due(due: list[dict], now: datetime) -> None:
+    """Resolve the new helper lazily so pre-implementation tests still collect."""
+    monitor_loop_module._annotate_unacked_due(due, now)
 
 
 @pytest.fixture(autouse=True)
@@ -55,24 +58,6 @@ def _clear_native_status():
     _last_member_status.clear()
     yield
     _last_member_status.clear()
-
-
-@pytest.fixture(autouse=True)
-def _clear_stall_check():
-    """Reset the per-process stall-check baseline map around each test (mirrors
-    ``run_monitor_loop``'s per-run clear), so stall-check due-ness starts fresh."""
-    _last_stall_check_at.clear()
-    yield
-    _last_stall_check_at.clear()
-
-
-@pytest.fixture(autouse=True)
-def _clear_unacked_wake():
-    """Reset the per-process unacked-wake map around each test (mirrors
-    ``run_monitor_loop``'s per-run clear), so the re-fire gate starts absent."""
-    _last_unacked_wake_at.clear()
-    yield
-    _last_unacked_wake_at.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -98,6 +83,8 @@ class _FakeStateMux:
         self._statuses = statuses
         self._wake_ok = wake_ok
         self.wakes: list[tuple] = []
+        self.directors: list[dict] = []
+        self.wake_payloads: list[list[dict]] = []
 
     def list_pane_ids(self):
         return set(self._live)
@@ -105,15 +92,46 @@ class _FakeStateMux:
     def agent_status(self, *, target_pane_id):
         return self._statuses.get(target_pane_id)
 
-    def send_wake_trigger(self, *, target_pane_id, due_members, director_member_id):
+    def send_wake_trigger(self, *, target_pane_id, due_members, director):
+        assert set(director) == {"member_id", "coding_agent"}
+        assert director["coding_agent"] in {"claude", "codex", "opencode"}
+        assert all(
+            target["coding_agent"] in {"claude", "codex", "opencode"}
+            for target in due_members
+        )
+        self.directors.append(dict(director))
+        self.wake_payloads.append(
+            [
+                {
+                    "member_id": target["member_id"],
+                    "coding_agent": target["coding_agent"],
+                    "wake_reasons": list(target["wake_reasons"]),
+                }
+                for target in due_members
+            ]
+        )
         self.wakes.append(
-            (target_pane_id, [t["member_id"] for t in due_members], director_member_id)
+            (
+                target_pane_id,
+                [t["member_id"] for t in due_members],
+                director["member_id"],
+            )
         )
         return self._wake_ok
 
 
 def _native_target(
-    member_id, pane_id="%9", *, pane_alive=True, name="alice", enabled=True
+    member_id,
+    pane_id="%9",
+    *,
+    pane_alive=True,
+    name="alice",
+    enabled=True,
+    coding_agent="claude",
+    last_stall_check_at=None,
+    oldest_pending_ts=None,
+    interval_seconds=720,
+    is_director=False,
 ):
     return {
         "member_id": member_id,
@@ -121,15 +139,26 @@ def _native_target(
         "pane_alive": pane_alive,
         "name": name,
         "enabled": enabled,
+        "coding_agent": coding_agent,
+        "last_stall_check_at": last_stall_check_at,
+        "oldest_pending_ts": oldest_pending_ts,
+        "interval_seconds": interval_seconds,
+        "is_director": is_director,
     }
 
 
-def _register_watched_member(fleet: dict, name: str, pane_id: str) -> int:
+def _register_watched_member(
+    fleet: dict,
+    name: str,
+    pane_id: str,
+    *,
+    coding_agent: str = "claude",
+) -> int:
     """Register an ordinary member — a watched member enrolled @720."""
     return _register_member(
         fleet["fleet_id"],
         name=name,
-        placement=_member_placement(pane_id),
+        placement=_member_placement(pane_id, coding_agent),
     )["member_id"]
 
 
@@ -138,12 +167,14 @@ def _iso_ago(seconds: int) -> str:
 
 
 def _unacked_target(member_id, *, oldest_pending_ts, interval_seconds=720, **kwargs):
-    """A scan-row dict for ``_flag_unacked_due``: a watched member carrying its
+    """A due-row dict for ``_annotate_unacked_due`` carrying its
     own ``interval_seconds`` and the ``oldest_pending_ts`` scan field."""
-    target = _native_target(member_id, **kwargs)
-    target["interval_seconds"] = interval_seconds
-    target["oldest_pending_ts"] = oldest_pending_ts
-    return target
+    return _native_target(
+        member_id,
+        oldest_pending_ts=oldest_pending_ts,
+        interval_seconds=interval_seconds,
+        **kwargs,
+    )
 
 
 def _insert_stale_pending(
@@ -164,6 +195,21 @@ def _insert_stale_pending(
             text="pending",
         )
     )
+
+
+def _set_episode(
+    session,
+    member_id: int,
+    state: str,
+    *,
+    reason: str | None = None,
+) -> None:
+    config = session.get(MonitorConfig, member_id)
+    config.last_stall_check_at = (_NOW - timedelta(seconds=60)).isoformat()
+    config.last_stall_candidate_at = (_NOW - timedelta(seconds=60)).isoformat()
+    config.last_stall_capture_sha256 = "a" * 64
+    config.stall_episode_state = state
+    config.stall_escalation_reason = reason
 
 
 def _stub_tmux(monkeypatch, live_panes, *, wake_ok=True):
@@ -187,9 +233,19 @@ def _stub_tmux(monkeypatch, live_panes, *, wake_ok=True):
         polls.append((target_pane_id, fleet_id, member_id))
         return True
 
-    def fake_wake(self, *, target_pane_id, due_members, director_member_id):
+    def fake_wake(self, *, target_pane_id, due_members, director):
+        assert set(director) == {"member_id", "coding_agent"}
+        assert director["coding_agent"] in {"claude", "codex", "opencode"}
+        assert all(
+            target["coding_agent"] in {"claude", "codex", "opencode"}
+            for target in due_members
+        )
         wakes.append(
-            (target_pane_id, [t["member_id"] for t in due_members], director_member_id)
+            (
+                target_pane_id,
+                [t["member_id"] for t in due_members],
+                director["member_id"],
+            )
         )
         return wake_ok
 
@@ -219,7 +275,13 @@ def _stub_tmux_wakes(monkeypatch, live_panes, *, wake_ok=True):
     )
     wakes = []
 
-    def fake_wake(self, *, target_pane_id, due_members, director_member_id):
+    def fake_wake(self, *, target_pane_id, due_members, director):
+        assert set(director) == {"member_id", "coding_agent"}
+        assert director["coding_agent"] in {"claude", "codex", "opencode"}
+        assert all(
+            target["coding_agent"] in {"claude", "codex", "opencode"}
+            for target in due_members
+        )
         wakes.append(
             (
                 target_pane_id,
@@ -227,7 +289,7 @@ def _stub_tmux_wakes(monkeypatch, live_panes, *, wake_ok=True):
                     (t["member_id"], list(t.get("wake_reasons", [])))
                     for t in due_members
                 ],
-                director_member_id,
+                director["member_id"],
             )
         )
         return wake_ok
@@ -617,17 +679,16 @@ def test_flag_native_status_due__recovery_read_committed_immediately_rearms_epis
     assert pending3 == {5: "done"}
 
 
-def test_flag_native_status_due__already_interval_due_keeps_only_interval_reason():
-    """A member already in the interval-due set is not appended twice, and the
-    native ``done`` trigger does not re-tag it — it keeps only its ``interval``
-    reason (the interval trigger owns it)."""
+def test_flag_native_status_due__already_due_appends_status_reason():
+    """A native done transition is unioned onto an already-due row."""
     mux = _FakeStateMux({"%9"}, {"%9": "done"})
     target = _native_target(5)
     target["wake_reasons"] = ["interval"]
     due = [target]
-    _flag_native_status_due(mux, [target], due)
+    pending = _flag_native_status_due(mux, [target], due)
     assert [t["member_id"] for t in due] == [5]
-    assert target["wake_reasons"] == ["interval"]
+    assert target["wake_reasons"] == ["interval", "status:done"]
+    assert pending == {5: "done"}
 
 
 def test_flag_native_status_due__dead_or_pending_pane_skipped():
@@ -815,15 +876,19 @@ def test_flag_stall_check_due__first_tick_flags_when_absent(monkeypatch):
     _flag_stall_check_due(targets, due, _NOW)
     assert [t["member_id"] for t in due] == [5]
     assert due[0]["wake_reasons"] == ["stall-check"]
-    # the commit is gated on a successful wake in monitor_tick, not done here.
-    assert 5 not in _last_stall_check_at
+    # The helper is read-only; persistence is gated on a successful wake.
+    assert targets[0]["last_stall_check_at"] is None
 
 
 def test_flag_stall_check_due__not_due_before_interval(monkeypatch):
     """Within one interval of the last stall-check the member is not re-flagged."""
     monkeypatch.setattr(settings, "monitor_stall_interval", 240)
-    _last_stall_check_at[5] = _NOW - timedelta(seconds=100)
-    targets = [_native_target(5)]
+    targets = [
+        _native_target(
+            5,
+            last_stall_check_at=(_NOW - timedelta(seconds=100)).isoformat(),
+        )
+    ]
     due: list[dict] = []
     _flag_stall_check_due(targets, due, _NOW)
     assert due == []
@@ -832,8 +897,12 @@ def test_flag_stall_check_due__not_due_before_interval(monkeypatch):
 def test_flag_stall_check_due__due_once_interval_elapsed(monkeypatch):
     """At exactly one interval since the last stall-check the member is due again."""
     monkeypatch.setattr(settings, "monitor_stall_interval", 240)
-    _last_stall_check_at[5] = _NOW - timedelta(seconds=240)
-    targets = [_native_target(5)]
+    targets = [
+        _native_target(
+            5,
+            last_stall_check_at=(_NOW - timedelta(seconds=240)).isoformat(),
+        )
+    ]
     due: list[dict] = []
     _flag_stall_check_due(targets, due, _NOW)
     assert [t["member_id"] for t in due] == [5]
@@ -921,9 +990,15 @@ def test_monitor_tick__stall_check_only_member_excluded_from_record_pings(monkey
         broker.get_monitor_config(sid, director_id)["last_ping_at"] == _NOW.isoformat()
     )
     assert broker.get_monitor_config(sid, member)["last_ping_at"] == recent
-    # both had a stall-check reason → both baselines committed on the successful wake.
-    assert _last_stall_check_at[director_id] == _NOW
-    assert _last_stall_check_at[member] == _NOW
+    # Both stall dispatch timestamps commit durably on the successful wake.
+    assert (
+        broker.get_monitor_config(sid, director_id)["last_stall_check_at"]
+        == _NOW.isoformat()
+    )
+    assert (
+        broker.get_monitor_config(sid, member)["last_stall_check_at"]
+        == _NOW.isoformat()
+    )
 
 
 def test_monitor_tick__stall_disabled_emits_no_wake_and_no_stall_tag(monkeypatch):
@@ -948,13 +1023,12 @@ def test_monitor_tick__stall_disabled_emits_no_wake_and_no_stall_tag(monkeypatch
 
     assert result is CONTINUE
     assert wakes == []
-    assert _last_stall_check_at == {}
+    assert broker.get_monitor_config(sid, director_id)["last_stall_check_at"] is None
+    assert broker.get_monitor_config(sid, member)["last_stall_check_at"] is None
 
 
-def test_monitor_tick__stall_baseline_committed_only_on_successful_wake(monkeypatch):
-    """``_last_stall_check_at`` is committed ONLY on a successful wake. A failed
-    keystroke leaves the baseline unset, so the member stays stall-check due and the
-    next (successful) tick commits it — no silent skip."""
+def test_monitor_tick__stall_dispatch_committed_only_on_successful_wake(monkeypatch):
+    """The durable stall dispatch timestamp is gated on a successful wake."""
     monkeypatch.setattr(settings, "monitor_stall_interval", 240)
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
@@ -969,17 +1043,20 @@ def test_monitor_tick__stall_baseline_committed_only_on_successful_wake(monkeypa
     # Tick 1: the wake keystroke FAILS (wake_ok=False) → nothing committed.
     _stub_tmux_wakes(monkeypatch, {"%0", "%7"}, wake_ok=False)
     assert monitor_tick(sid, _NOW) is CONTINUE
-    assert _last_stall_check_at == {}
+    assert broker.get_monitor_config(sid, director_id)["last_stall_check_at"] is None
     assert broker.get_monitor_config(sid, director_id)["last_ping_at"] is None
 
-    # Tick 2: the wake SUCCEEDS → the still-due member's baseline is committed now.
+    # Tick 2: the wake succeeds, committing the same dispatch time durably.
     _stub_tmux_wakes(monkeypatch, {"%0", "%7"}, wake_ok=True)
     assert monitor_tick(sid, _NOW) is CONTINUE
-    assert _last_stall_check_at[director_id] == _NOW
+    assert (
+        broker.get_monitor_config(sid, director_id)["last_stall_check_at"]
+        == _NOW.isoformat()
+    )
 
 
-def test_monitor_tick__first_tick_every_watched_member_stall_check_due(monkeypatch):
-    """First-tick semantics: with ``_last_stall_check_at`` empty, EVERY enabled
+def test_monitor_tick__null_dispatch_every_watched_member_stall_check_due(monkeypatch):
+    """With durable ``last_stall_check_at`` null, every enabled
     watched live member is stall-check due even when all are interval-not-due — the
     dict is not pre-seeded. The wake conveys a ``stall-check`` reason for each, and
     each baseline is committed on the successful wake."""
@@ -1005,145 +1082,137 @@ def test_monitor_tick__first_tick_every_watched_member_stall_check_due(monkeypat
     assert set(conveyed) == {director_id, member}
     assert conveyed[director_id] == ["stall-check"]
     assert conveyed[member] == ["stall-check"]
-    # both baselines seeded on the successful wake …
-    assert _last_stall_check_at[director_id] == _NOW
-    assert _last_stall_check_at[member] == _NOW
+    # Both durable dispatch timestamps commit on the successful wake …
+    assert (
+        broker.get_monitor_config(sid, director_id)["last_stall_check_at"]
+        == _NOW.isoformat()
+    )
+    assert (
+        broker.get_monitor_config(sid, member)["last_stall_check_at"]
+        == _NOW.isoformat()
+    )
     # … and neither ping cadence advanced (stall-check-only → excluded).
     assert broker.get_monitor_config(sid, director_id)["last_ping_at"] == recent
     assert broker.get_monitor_config(sid, member)["last_ping_at"] == recent
 
 
-def test_run_monitor_loop__clears_stall_check_dict_not_preseeded(monkeypatch):
-    """``run_monitor_loop`` clears ``_last_stall_check_at`` at the start of every
-    run (the same per-run reset as ``_last_member_status``) and never pre-seeds any
-    member — an absent member is exactly what makes tick 1 stall-check due. The clear
-    happens before the slot claim, so a claim failure still leaves the dict empty."""
+def test_run_monitor_loop__does_not_reset_durable_stall_dispatch(
+    broker_session, monkeypatch
+):
+    """A process restart leaves the persisted stall cadence untouched."""
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    # pre-seed a stale entry; run_monitor_loop must wipe it.
-    _last_stall_check_at[999] = _NOW
+    director_id = fleet["director"]["member_id"]
+    persisted = (_NOW - timedelta(seconds=30)).isoformat()
+    with broker_session() as session:
+        session.get(MonitorConfig, director_id).last_stall_check_at = persisted
+        session.commit()
     monkeypatch.setattr(broker, "claim_monitor_runtime", lambda *a, **k: False)
 
     with pytest.raises(click.ClickException):
         run_monitor_loop(sid, 5)
 
-    assert _last_stall_check_at == {}
+    assert (
+        broker.get_monitor_config(sid, director_id)["last_stall_check_at"] == persisted
+    )
 
 
-# --- unacked-delivery due trigger (§ Loop: _flag_unacked_due) ---------------
+# --- unacked-delivery annotation -------------------------------------------
 #
-# A watched member whose oldest un-acked delivery (``oldest_pending_ts``) has
-# waited at least one full ``interval_seconds`` — the member's OWN interval,
-# read from the same scan row — is flagged ``unacked``. The re-fire gate
-# (``_last_unacked_wake_at``) re-flags every interval while the delivery stays
-# un-acked; the gate entry is committed only on a successful wake, and an
-# unacked-only member is EXCLUDED from ``record_pings`` so the ping cadence
-# stays independent.
+# Only rows already due for interval, durable stall-check, or native done can
+# receive the ``unacked`` hint. It is appended last and has no cadence of its own.
 
 
-def test_flag_unacked_due__due_at_exactly_one_interval():
-    """A pending delivery aged exactly one ``interval_seconds`` flags the member
-    with the ``unacked`` reason; the re-fire gate entry is NOT self-committed
-    here — that commit is gated on a successful wake in ``monitor_tick``."""
-    targets = [_unacked_target(5, oldest_pending_ts=_iso_ago(720))]
-    due: list[dict] = []
-    _flag_unacked_due(targets, due, _NOW)
-    assert [t["member_id"] for t in due] == [5]
-    assert due[0]["wake_reasons"] == ["unacked"]
-    assert 5 not in _last_unacked_wake_at
+def test_annotate_unacked_due__appends_at_exactly_one_interval():
+    target = _unacked_target(5, oldest_pending_ts=_iso_ago(720))
+    target["wake_reasons"] = ["interval"]
+    due = [target]
+
+    _annotate_unacked_due(due, _NOW)
+
+    assert target["wake_reasons"] == ["interval", "unacked"]
 
 
-def test_flag_unacked_due__not_yet_stale_skipped():
+def test_annotate_unacked_due__not_yet_stale_skipped():
     """A pending delivery younger than one interval never flags — the normal
     deliver-then-ack cycle produces no wakes."""
-    targets = [_unacked_target(5, oldest_pending_ts=_iso_ago(719))]
-    due: list[dict] = []
-    _flag_unacked_due(targets, due, _NOW)
-    assert due == []
+    target = _unacked_target(5, oldest_pending_ts=_iso_ago(719))
+    target["wake_reasons"] = ["stall-check"]
+    _annotate_unacked_due([target], _NOW)
+    assert target["wake_reasons"] == ["stall-check"]
 
 
-def test_flag_unacked_due__no_pending_skipped():
+def test_annotate_unacked_due__no_pending_skipped():
     """``oldest_pending_ts is None`` (no pending delivery) never flags."""
-    targets = [_unacked_target(5, oldest_pending_ts=None)]
+    target = _unacked_target(5, oldest_pending_ts=None)
+    target["wake_reasons"] = ["status:done"]
+    _annotate_unacked_due([target], _NOW)
+    assert target["wake_reasons"] == ["status:done"]
+
+
+def test_annotate_unacked_due__empty_due_set_stays_empty():
+    """A stale delivery cannot add a row because the helper receives due rows only."""
     due: list[dict] = []
-    _flag_unacked_due(targets, due, _NOW)
+    _annotate_unacked_due(due, _NOW)
     assert due == []
 
 
-def test_flag_unacked_due__refire_gate_entry_younger_than_interval_skipped():
-    """With a gate entry younger than one interval, a still-stale delivery does
-    not re-flag — the member is woken about at most once per interval."""
-    _last_unacked_wake_at[5] = _NOW - timedelta(seconds=300)
-    targets = [_unacked_target(5, oldest_pending_ts=_iso_ago(1500))]
-    due: list[dict] = []
-    _flag_unacked_due(targets, due, _NOW)
-    assert due == []
+def test_annotate_unacked_due__existing_hint_is_not_duplicated():
+    target = _unacked_target(5, oldest_pending_ts=_iso_ago(1500))
+    target["wake_reasons"] = ["interval", "unacked"]
+    _annotate_unacked_due([target], _NOW)
+    assert target["wake_reasons"] == ["interval", "unacked"]
 
 
-def test_flag_unacked_due__refire_gate_reopens_at_interval():
-    """At exactly one interval since the last unacked wake the gate reopens and
-    the still-stale delivery re-flags the member."""
-    _last_unacked_wake_at[5] = _NOW - timedelta(seconds=720)
-    targets = [_unacked_target(5, oldest_pending_ts=_iso_ago(1500))]
-    due: list[dict] = []
-    _flag_unacked_due(targets, due, _NOW)
-    assert [t["member_id"] for t in due] == [5]
-    assert due[0]["wake_reasons"] == ["unacked"]
-
-
-def test_flag_unacked_due__uses_members_own_interval():
+def test_annotate_unacked_due__uses_members_own_interval():
     """The staleness threshold is each member's OWN ``interval_seconds`` from the
     same scan row: the same 300 s-old delivery is stale for a 180 s member and
     not for a 720 s member."""
-    targets = [
+    due = [
         _unacked_target(5, oldest_pending_ts=_iso_ago(300), interval_seconds=180),
         _unacked_target(
             6, oldest_pending_ts=_iso_ago(300), interval_seconds=720, pane_id="%10"
         ),
     ]
-    due: list[dict] = []
-    _flag_unacked_due(targets, due, _NOW)
-    assert [t["member_id"] for t in due] == [5]
-    assert due[0]["wake_reasons"] == ["unacked"]
+    for target in due:
+        target["wake_reasons"] = ["stall-check"]
+    _annotate_unacked_due(due, _NOW)
+    assert due[0]["wake_reasons"] == ["stall-check", "unacked"]
+    assert due[1]["wake_reasons"] == ["stall-check"]
 
 
-def test_flag_unacked_due__appends_reason_to_already_due_member():
+def test_annotate_unacked_due__appends_reason_last_to_already_due_member():
     """An unacked-due member already in the due set (e.g. interval-due) is not
     appended twice; ``unacked`` is UNIONED onto its existing reasons."""
     target = _unacked_target(5, oldest_pending_ts=_iso_ago(800))
     target["wake_reasons"] = ["interval"]
     due = [target]
-    _flag_unacked_due([target], due, _NOW)
+    _annotate_unacked_due(due, _NOW)
     assert [t["member_id"] for t in due] == [5]
     assert target["wake_reasons"] == ["interval", "unacked"]
 
 
-def test_flag_unacked_due__disabled_target_skipped():
-    """A monitor-disabled target is never unacked-flagged (mirrors ``should_ping``)."""
-    targets = [_unacked_target(5, oldest_pending_ts=_iso_ago(800), enabled=False)]
-    due: list[dict] = []
-    _flag_unacked_due(targets, due, _NOW)
-    assert due == []
+def test_annotate_unacked_due__preserves_due_row_order():
+    first = _unacked_target(5, oldest_pending_ts=_iso_ago(800))
+    second = _unacked_target(6, oldest_pending_ts=None, pane_id="%10")
+    first["wake_reasons"] = ["interval"]
+    second["wake_reasons"] = ["status:done"]
+    due = [first, second]
+    _annotate_unacked_due(due, _NOW)
+    assert [target["member_id"] for target in due] == [5, 6]
 
 
-def test_flag_unacked_due__dead_or_pending_pane_skipped():
-    """Members with no pane (pending) or a dead pane are never unacked-flagged."""
-    targets = [
-        _unacked_target(5, oldest_pending_ts=_iso_ago(800), pane_id=None),
-        _unacked_target(6, oldest_pending_ts=_iso_ago(800), pane_alive=False),
-    ]
-    due: list[dict] = []
-    _flag_unacked_due(targets, due, _NOW)
-    assert due == []
+def test_annotate_unacked_due__does_not_change_non_unacked_reasons():
+    target = _unacked_target(5, oldest_pending_ts=None)
+    target["wake_reasons"] = ["interval", "stall-check", "status:done"]
+    _annotate_unacked_due([target], _NOW)
+    assert target["wake_reasons"] == ["interval", "stall-check", "status:done"]
 
 
-def test_monitor_tick__unacked_only_member_excluded_from_record_pings(
+def test_monitor_tick__stale_unacked_without_normal_trigger_does_not_wake(
     broker_session, monkeypatch
 ):
-    """An unacked-only member (interval-not-due, flagged only by its stale
-    delivery) wakes the watcher with the sole ``unacked`` reason, is EXCLUDED
-    from ``record_pings`` (its ping stamp is untouched), and has its re-fire
-    gate entry committed on the successful wake."""
+    """A stale delivery alone cannot create a due member or watcher wake."""
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["member_id"]
@@ -1164,28 +1233,24 @@ def test_monitor_tick__unacked_only_member_excluded_from_record_pings(
     result = monitor_tick(sid, _NOW)
 
     assert result is CONTINUE
-    assert len(wakes) == 1
-    conveyed = dict(wakes[0][1])
-    assert conveyed == {member: ["unacked"]}
-    # unacked-only → excluded from record_pings: both ping stamps unchanged
+    assert wakes == []
     assert broker.get_monitor_config(sid, member)["last_ping_at"] == recent
     assert broker.get_monitor_config(sid, director_id)["last_ping_at"] == recent
-    # the successful wake committed the re-fire gate entry
-    assert _last_unacked_wake_at[member] == _NOW
 
 
-def test_monitor_tick__unacked_commit_gated_on_woke(broker_session, monkeypatch):
-    """The ``_last_unacked_wake_at`` commit is gated on ``woke == True``. A failed
-    keystroke commits nothing — the member re-flags on the next tick — and the
-    following successful wake commits the gate entry."""
+def test_monitor_tick__stale_hint_reappears_on_each_normal_due_wake(
+    broker_session, monkeypatch
+):
+    """No re-fire map exists: normal wakes carry the stale hint until ACK."""
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["member_id"]
     _register_monitoring_member(fleet, "watcher", "%7")
     member = _register_watched_member(fleet, "alice", "%9")
 
-    recent = _NOW.isoformat()
-    broker.record_pings([director_id, member], recent)
+    recent = (_NOW - timedelta(seconds=720)).isoformat()
+    broker.record_pings([director_id], _NOW.isoformat())
+    broker.record_pings([member], recent)
     with broker_session() as s:
         _insert_stale_pending(s, member, director_id, _iso_ago(800))
         s.commit()
@@ -1193,30 +1258,24 @@ def test_monitor_tick__unacked_commit_gated_on_woke(broker_session, monkeypatch)
         sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
     )
 
-    # Tick 1: the wake keystroke FAILS (wake_ok=False) → nothing committed.
-    wakes1 = _stub_tmux_wakes(monkeypatch, {"%0", "%7", "%9"}, wake_ok=False)
+    wakes1 = _stub_tmux_wakes(monkeypatch, {"%0", "%7", "%9"})
     assert monitor_tick(sid, _NOW) is CONTINUE
     assert len(wakes1) == 1
-    assert dict(wakes1[0][1]) == {member: ["unacked"]}
-    assert _last_unacked_wake_at == {}
+    assert dict(wakes1[0][1]) == {member: ["interval", "unacked"]}
 
-    # Tick 2: the wake SUCCEEDS → the still-due member's gate entry commits now.
+    broker.record_pings([member], recent)
     wakes2 = _stub_tmux_wakes(monkeypatch, {"%0", "%7", "%9"}, wake_ok=True)
     assert monitor_tick(sid, _NOW) is CONTINUE
     assert len(wakes2) == 1
-    assert dict(wakes2[0][1]) == {member: ["unacked"]}
-    assert _last_unacked_wake_at[member] == _NOW
-    # an unacked-only wake never advances the ping cadence
-    assert broker.get_monitor_config(sid, member)["last_ping_at"] == recent
+    assert dict(wakes2[0][1]) == {member: ["interval", "unacked"]}
 
 
 def test_monitor_tick__reason_order_interval_stall_check_unacked(
     broker_session, monkeypatch
 ):
     """A member due on all three triggers carries ``wake_reasons`` in the call
-    order ``interval``, ``stall-check``, ``unacked`` (``_flag_unacked_due`` runs
-    after the stall-check flag and before the native trigger), and all three
-    cadence commits land on the one successful wake."""
+    order ``interval``, ``stall-check``, ``unacked`` because annotation runs
+    after every trigger, and both real cadences commit on one successful wake."""
     monkeypatch.setattr(settings, "monitor_stall_interval", 240)
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
@@ -1241,22 +1300,312 @@ def test_monitor_tick__reason_order_interval_stall_check_unacked(
     conveyed = dict(wakes[0][1])
     assert conveyed[member] == ["interval", "stall-check", "unacked"]
     assert conveyed[director_id] == ["interval", "stall-check"]
-    # all three cadences committed on the one successful wake
+    # The interval and durable stall cadences commit on the one successful wake.
     assert broker.get_monitor_config(sid, member)["last_ping_at"] == _NOW.isoformat()
-    assert _last_stall_check_at[member] == _NOW
-    assert _last_unacked_wake_at[member] == _NOW
+    assert (
+        broker.get_monitor_config(sid, member)["last_stall_check_at"]
+        == _NOW.isoformat()
+    )
 
 
-def test_run_monitor_loop__clears_unacked_map(monkeypatch):
-    """``run_monitor_loop`` clears ``_last_unacked_wake_at`` at the start of every
-    run, alongside the other per-run maps; the clear precedes the slot claim, so
-    a claim failure still leaves the map empty."""
+def test_monitor_tick__reason_order_all_triggers_unacked_last(
+    broker_session, monkeypatch
+):
+    """Interval, durable stall, native done, and stale-delivery context are
+    unioned onto one member in construction order and still produce one wake."""
+    monkeypatch.setattr(settings, "monitor_stall_interval", 240)
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    _last_unacked_wake_at[999] = _NOW
-    monkeypatch.setattr(broker, "claim_monitor_runtime", lambda *a, **k: False)
+    director_id = fleet["director"]["member_id"]
+    _register_monitoring_member(fleet, "watcher", "%7")
+    member = _register_watched_member(fleet, "alice", "%9")
 
-    with pytest.raises(click.ClickException):
-        run_monitor_loop(sid, 5)
+    broker.record_pings([director_id], _NOW.isoformat())
+    with broker_session() as session:
+        director_config = session.get(MonitorConfig, director_id)
+        director_config.last_stall_check_at = _NOW.isoformat()
+        _insert_stale_pending(session, member, director_id, _iso_ago(800))
+        session.commit()
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+    mux = _FakeStateMux(
+        {"%0", "%7", "%9"},
+        {"%0": "idle", "%9": "done"},
+    )
+    monkeypatch.setattr("cafleet.monitor.loop.resolve_multiplexer", lambda: mux)
 
-    assert _last_unacked_wake_at == {}
+    assert monitor_tick(sid, _NOW) is CONTINUE
+
+    assert len(mux.wake_payloads) == 1
+    assert mux.wake_payloads[0] == [
+        {
+            "member_id": member,
+            "coding_agent": "claude",
+            "wake_reasons": [
+                "interval",
+                "stall-check",
+                "status:done",
+                "unacked",
+            ],
+        }
+    ]
+
+
+def test_monitor_tick__mixed_backend_metadata_reaches_one_wake(monkeypatch):
+    """Every due row uses its own backend while the Director has an independent
+    descriptor; mixed backends remain one synchronized watcher wake."""
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    _register_monitoring_member(fleet, "watcher", "%7")
+    codex_member = _register_watched_member(
+        fleet, "codex-member", "%9", coding_agent="codex"
+    )
+    opencode_member = _register_watched_member(
+        fleet, "opencode-member", "%10", coding_agent="opencode"
+    )
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+    mux = _FakeStateMux(
+        {"%0", "%7", "%9", "%10"},
+        {"%0": "idle", "%9": "idle", "%10": "idle"},
+    )
+    monkeypatch.setattr("cafleet.monitor.loop.resolve_multiplexer", lambda: mux)
+
+    assert monitor_tick(sid, _NOW) is CONTINUE
+
+    assert mux.directors == [{"member_id": director_id, "coding_agent": "claude"}]
+    assert len(mux.wake_payloads) == 1
+    assert {row["member_id"]: row["coding_agent"] for row in mux.wake_payloads[0]} == {
+        director_id: "claude",
+        codex_member: "codex",
+        opencode_member: "opencode",
+    }
+
+
+def test_monitor_tick__invalid_coding_agent_fails_closed_without_cadence_commit(
+    broker_session, monkeypatch
+):
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    _register_monitoring_member(fleet, "watcher", "%7")
+    member = _register_watched_member(fleet, "alice", "%9", coding_agent="codex")
+    broker.record_pings([director_id], _NOW.isoformat())
+    with broker_session() as session:
+        session.get(MemberPlacement, member).coding_agent = "not-registered"
+        session.commit()
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+    attempted_wakes: list[bool] = []
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.list_pane_ids",
+        lambda self: {"%0", "%7", "%9"},
+        raising=False,
+    )
+
+    def fake_wake(self, **kwargs):
+        attempted_wakes.append(True)
+        return True
+
+    monkeypatch.setattr(
+        "cafleet.multiplexer.tmux.TmuxMultiplexer.send_wake_trigger",
+        fake_wake,
+        raising=False,
+    )
+
+    with pytest.raises(click.ClickException, match="coding.agent|coding_agent"):
+        monitor_tick(sid, _NOW)
+
+    assert attempted_wakes == []
+    config = broker.get_monitor_config(sid, member)
+    assert config["last_ping_at"] is None
+    assert config["last_stall_check_at"] is None
+
+
+def test_monitor_tick__reconciles_nonlive_episodes_before_due_filtering(
+    broker_session, monkeypatch
+):
+    """Dead, placement-pending, and disabled targets are cleaned in one scan;
+    claimed/pending escalations stay discoverable but cannot trigger a wake."""
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    _register_monitoring_member(fleet, "watcher", "%7")
+    dead = _register_watched_member(fleet, "dead", "%9")
+    paneless = _register_member(
+        sid,
+        name="paneless",
+        placement=_member_placement(None),
+    )["member_id"]
+    disabled = _register_watched_member(fleet, "disabled", "%11")
+    broker.record_pings([director_id, dead, paneless, disabled], _NOW.isoformat())
+    with broker_session() as session:
+        _set_episode(session, dead, "nudge_claimed")
+        _set_episode(session, paneless, "nudged")
+        _set_episode(
+            session,
+            disabled,
+            "escalation_pending",
+            reason="ping_failed",
+        )
+        session.get(MonitorConfig, disabled).enabled = 0
+        session.commit()
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+    _, wakes = _stub_tmux(monkeypatch, {"%0", "%7"})
+
+    assert monitor_tick(sid, _NOW) is CONTINUE
+    assert wakes == []
+
+    dead_config = broker.get_monitor_config(sid, dead)
+    assert dead_config["last_stall_check_at"] is None
+    assert dead_config["stall_episode_state"] == "escalation_pending"
+    assert dead_config["stall_escalation_reason"] == "ping_interrupted"
+    assert dead_config["last_stall_candidate_at"] is not None
+
+    paneless_config = broker.get_monitor_config(sid, paneless)
+    assert paneless_config["last_stall_check_at"] is None
+    assert paneless_config["stall_episode_state"] == "clear"
+    assert paneless_config["last_stall_candidate_at"] is None
+    assert paneless_config["last_stall_capture_sha256"] is None
+
+    disabled_config = broker.get_monitor_config(sid, disabled)
+    assert disabled_config["last_stall_check_at"] is None
+    assert disabled_config["stall_episode_state"] == "escalation_pending"
+    assert disabled_config["stall_escalation_reason"] == "ping_failed"
+    assert disabled_config["last_stall_candidate_at"] is not None
+
+
+@pytest.mark.parametrize("director_unavailable", ["disabled", "dead"])
+def test_monitor_tick__pending_only_waits_for_director_recovery_and_normal_due(
+    broker_session, monkeypatch, director_unavailable
+):
+    """Sticky pending escalation neither schedules a wake nor bypasses an
+    unavailable Director; a later ordinary interval event resumes one batch."""
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    _register_monitoring_member(fleet, "watcher", "%7")
+    member = _register_watched_member(fleet, "alice", "%9")
+    broker.record_pings([director_id, member], _NOW.isoformat())
+    with broker_session() as session:
+        _set_episode(
+            session,
+            member,
+            "escalation_pending",
+            reason="ping_failed",
+        )
+        if director_unavailable == "disabled":
+            session.get(MonitorConfig, director_id).enabled = 0
+        session.commit()
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+
+    first_live = {"%7", "%9"}
+    if director_unavailable == "disabled":
+        first_live.add("%0")
+    _, first_wakes = _stub_tmux(monkeypatch, first_live)
+    assert monitor_tick(sid, _NOW) is CONTINUE
+    assert first_wakes == []
+    assert (
+        broker.get_monitor_config(sid, member)["stall_episode_state"]
+        == "escalation_pending"
+    )
+
+    if director_unavailable == "disabled":
+        with broker_session() as session:
+            session.get(MonitorConfig, director_id).enabled = 1
+            session.commit()
+    due_at = _NOW + timedelta(seconds=720)
+    _, recovery_wakes = _stub_tmux(monkeypatch, {"%0", "%7", "%9"})
+
+    assert monitor_tick(sid, due_at) is CONTINUE
+    assert len(recovery_wakes) == 1
+    assert set(recovery_wakes[0][1]) == {director_id, member}
+    assert recovery_wakes[0][2] == director_id
+    assert (
+        broker.get_monitor_config(sid, member)["stall_episode_state"]
+        == "escalation_pending"
+    )
+
+
+def test_monitor_tick__live_rebind_reseeds_stall_dispatch_after_cleanup(
+    broker_session, monkeypatch
+):
+    """A pending placement clears a non-pending episode and dispatch timestamp;
+    once rebound live, the next scan seeds a fresh durable stall-check cadence."""
+    monkeypatch.setattr(settings, "monitor_stall_interval", 240)
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    _register_monitoring_member(fleet, "watcher", "%7")
+    member = _register_member(
+        sid,
+        name="recovering",
+        placement=_member_placement(None, "codex"),
+    )["member_id"]
+    broker.record_pings([director_id, member], _NOW.isoformat())
+    with broker_session() as session:
+        _set_episode(session, member, "nudged")
+        session.get(MonitorConfig, director_id).last_stall_check_at = _NOW.isoformat()
+        session.commit()
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+
+    _, first_wakes = _stub_tmux(monkeypatch, {"%0", "%7"})
+    assert monitor_tick(sid, _NOW) is CONTINUE
+    assert first_wakes == []
+    cleaned = broker.get_monitor_config(sid, member)
+    assert cleaned["stall_episode_state"] == "clear"
+    assert cleaned["last_stall_candidate_at"] is None
+    assert cleaned["last_stall_check_at"] is None
+
+    broker.update_placement_pane_id(member, "%9")
+    recovery_wakes = _stub_tmux_wakes(monkeypatch, {"%0", "%7", "%9"})
+    later = _NOW + timedelta(seconds=1)
+    assert monitor_tick(sid, later) is CONTINUE
+    assert dict(recovery_wakes[0][1]) == {member: ["stall-check"]}
+    assert (
+        broker.get_monitor_config(sid, member)["last_stall_check_at"]
+        == later.isoformat()
+    )
+
+
+def test_monitor_tick__immediate_restart_honors_durable_stall_dispatch(monkeypatch):
+    monkeypatch.setattr(settings, "monitor_stall_interval", 240)
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    director_id = fleet["director"]["member_id"]
+    _register_monitoring_member(fleet, "watcher", "%7")
+    broker.record_pings([director_id], _NOW.isoformat())
+    broker.claim_monitor_runtime(
+        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
+    )
+
+    first_wakes = _stub_tmux_wakes(monkeypatch, {"%0", "%7"})
+    assert monitor_tick(sid, _NOW) is CONTINUE
+    assert dict(first_wakes[0][1]) == {director_id: ["stall-check"]}
+    assert (
+        broker.get_monitor_config(sid, director_id)["last_stall_check_at"]
+        == _NOW.isoformat()
+    )
+
+    # The only process-local transition cache may reset on a new monitor process.
+    _last_member_status.clear()
+    second_wakes = _stub_tmux_wakes(monkeypatch, {"%0", "%7"})
+    assert monitor_tick(sid, _NOW + timedelta(seconds=1)) is CONTINUE
+    assert second_wakes == []
+
+
+def test_loop_module_has_no_process_local_stall_or_unacked_maps():
+    import cafleet.monitor.loop as loop
+
+    assert not hasattr(loop, "_last_stall_check_at")
+    assert not hasattr(loop, "_last_unacked_wake_at")
