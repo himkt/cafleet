@@ -1,7 +1,7 @@
 # Direct Fixed-Action Nudge from the Monitoring Member
 
 **Status**: Approved
-**Progress**: 11/31 tasks complete
+**Progress**: 17/31 tasks complete
 **Last Updated**: 2026-07-29
 
 ## Overview
@@ -455,12 +455,12 @@ The example in `skills/cafleet/roles/monitor.md` and the exact payload tests are
 
 ### Step 2: Durable schema and broker state machine
 
-- [ ] Add dispatch time, candidate-observation time, fingerprint, episode state, and reason with check constraints to `MonitorConfig`, including `"clear"` defaults and paired-null candidate fields <!-- completed: -->
-- [ ] Add Alembic revision `0005_add_monitor_stall_episode_state.py` with episode backfill/constraints plus `monitor_report_delivery` and `monitor_director_gate`, their checks/indexes/FKs, teardown and Director-lifecycle cleanup, and reversible downgrade; update canonical DDL assertions <!-- completed: -->
-- [ ] Add capture-boundary UTC `captured_at` plus `content_sha256 = sha256(emitted_content.encode("utf-8"))` for both ANSI modes without storing capture content <!-- completed: -->
-- [ ] Implement atomic `observe_stall_episode`: live guard for readable states, loss-tolerant capture-failed `unknown`, ordinary vs Director-gate modes, validated capture-time full-interval enforcement, Director `stalled` with permanent `action=none`, issue/invalidate 30-second one-use gate tokens, unconditional non-actionable `working`, ordinary baseline/claim/restart behavior, and exact results <!-- completed: -->
-- [ ] Implement loss-tolerant/idempotent ping-result, pending-list, token-validating/consuming transactional `report_monitor_batch`, one-open backpressure, ACK reconciliation, pending/awaiting-ACK retry eligibility, and preview-outcome recording; retries always reuse the open message ID <!-- completed: -->
-- [ ] Implement shared lifecycle cleanup: disable/dead/pending-pane reset, `nudge_claimed`→sticky interrupted escalation, pending preservation, explicit soft-deregistration deletion, and recovery reseed <!-- completed: -->
+- [x] Add dispatch time, candidate-observation time, fingerprint, episode state, and reason with check constraints to `MonitorConfig`, including `"clear"` defaults and paired-null candidate fields <!-- completed: 2026-07-29T07:51 -->
+- [x] Add Alembic revision `0005_add_monitor_stall_episode_state.py` with episode backfill/constraints plus `monitor_report_delivery` and `monitor_director_gate`, their checks/indexes/FKs, teardown and Director-lifecycle cleanup, and reversible downgrade; update canonical DDL assertions <!-- completed: 2026-07-29T07:51 -->
+- [x] Add capture-boundary UTC `captured_at` plus `content_sha256 = sha256(emitted_content.encode("utf-8"))` for both ANSI modes without storing capture content <!-- completed: 2026-07-29T07:51 -->
+- [x] Implement atomic `observe_stall_episode`: live guard for readable states, loss-tolerant capture-failed `unknown`, ordinary vs Director-gate modes, validated capture-time full-interval enforcement, Director `stalled` with permanent `action=none`, issue/invalidate 30-second one-use gate tokens, unconditional non-actionable `working`, ordinary baseline/claim/restart behavior, and exact results <!-- completed: 2026-07-29T07:51 -->
+- [x] Implement loss-tolerant/idempotent ping-result, pending-list, token-validating/consuming transactional `report_monitor_batch`, one-open backpressure, ACK reconciliation, pending/awaiting-ACK retry eligibility, and preview-outcome recording; retries always reuse the open message ID <!-- completed: 2026-07-29T07:51 -->
+- [x] Implement shared lifecycle cleanup: disable/dead/pending-pane reset, `nudge_claimed`→sticky interrupted escalation, pending preservation, explicit soft-deregistration deletion, and recovery reseed <!-- completed: 2026-07-29T07:51 -->
 
 ### Step 3: Monitor-loop trigger policy
 
