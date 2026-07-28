@@ -138,7 +138,12 @@ class Multiplexer(Protocol):
         ...
 
     def send_wake_trigger(
-        self, *, target_pane_id: str, due_members: list[dict], director_member_id: int
+        self,
+        *,
+        target_pane_id: str,
+        due_members: list[dict],
+        director: dict | None = None,
+        director_member_id: int | None = None,
     ) -> bool:
         """Keystroke a single-line *wake nudge* into the monitoring member's pane.
 
@@ -159,8 +164,10 @@ class Multiplexer(Protocol):
             target_pane_id: Pane id of the monitoring member to nudge.
             due_members: The freshly-due watched members to name, each a target
                 dict carrying ``member_id``, ``name``, and ``is_director``.
-            director_member_id: The Director's member id, named in every payload
-                as the standing inspect-and-re-engage target.
+            director: The Director descriptor carrying ``member_id`` and
+                ``coding_agent``.
+            director_member_id: Legacy member-id form retained until all wake
+                payload callers move to the descriptor.
 
         Returns:
             ``True`` if the keystroke landed; ``False`` if the pane is dead or

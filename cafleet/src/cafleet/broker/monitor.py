@@ -238,6 +238,60 @@ def record_pings(member_ids: list[int], when: str) -> None:
         )
 
 
+def record_monitor_dispatch(
+    ping_member_ids: list[int],
+    stall_check_member_ids: list[int],
+    when: str,
+) -> None:
+    """Atomically commit the interval and durable stall dispatch cadences."""
+    if not ping_member_ids and not stall_check_member_ids:
+        return
+    with _shared.write_session() as session:
+        if ping_member_ids:
+            session.execute(
+                update(MonitorConfig)
+                .where(MonitorConfig.member_id.in_(ping_member_ids))
+                .values(last_ping_at=when)
+            )
+        if stall_check_member_ids:
+            session.execute(
+                update(MonitorConfig)
+                .where(MonitorConfig.member_id.in_(stall_check_member_ids))
+                .values(last_stall_check_at=when)
+            )
+
+
+def reconcile_monitor_lifecycle(
+    fleet_id: int, unavailable_member_ids: list[int]
+) -> None:
+    """Batch-clean disabled, placement-pending, and dead watched members."""
+    if not unavailable_member_ids:
+        return
+    member_ids = sorted(set(unavailable_member_ids))
+    with _shared.write_session() as session:
+        rows = session.execute(
+            select(MonitorConfig, Fleet.director_member_id)
+            .join(Member, Member.member_id == MonitorConfig.member_id)
+            .join(Fleet, Fleet.fleet_id == Member.fleet_id)
+            .where(
+                Member.fleet_id == fleet_id,
+                Member.member_id.in_(member_ids),
+                Member.status == "active",
+            )
+        ).all()
+        director_unavailable = False
+        for config, director_member_id in rows:
+            _apply_nonlive_episode_cleanup(config)
+            if config.member_id == director_member_id:
+                director_unavailable = True
+        if director_unavailable:
+            session.execute(
+                delete(MonitorDirectorGate).where(
+                    MonitorDirectorGate.fleet_id == fleet_id
+                )
+            )
+
+
 def list_monitor_targets(fleet_id: int) -> list[dict]:
     """Per-tick scan: one row per active, enrolled member — the watched set.
 

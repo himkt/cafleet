@@ -1,7 +1,7 @@
 # Direct Fixed-Action Nudge from the Monitoring Member
 
 **Status**: Approved
-**Progress**: 17/31 tasks complete
+**Progress**: 21/31 tasks complete
 **Last Updated**: 2026-07-29
 
 ## Overview
@@ -464,10 +464,10 @@ The example in `skills/cafleet/roles/monitor.md` and the exact payload tests are
 
 ### Step 3: Monitor-loop trigger policy
 
-- [ ] In `monitor/loop.py`, remove `_last_unacked_wake_at` and `_last_stall_check_at` plus their per-run clear/re-fire/commit paths <!-- completed: -->
-- [ ] Replace `_flag_unacked_due` with an annotation-only helper over existing due rows, retain the one-member-interval staleness threshold, run native detection first, and append `unacked` last without changing batched cadence commits <!-- completed: -->
-- [ ] Read durable `last_stall_check_at`, select/validate `MemberPlacement.coding_agent` for every target and the Director descriptor, batch-clear non-live lifecycle state before due filtering, keep pending escalation non-triggering, and persist dispatch cadences only after the single watcher wake succeeds <!-- completed: -->
-- [ ] Rewrite loop tests for annotation-only unacked, durable interval across immediate restart, coding-agent propagation/invalid-value fail-closed, success/failure cadence commits, no pending-only wake while the Director is disabled/dead, later-recovery delivery, non-live cleanup/pending preservation, recovery reseed, and one synchronized wake <!-- completed: -->
+- [x] In `monitor/loop.py`, remove `_last_unacked_wake_at` and `_last_stall_check_at` plus their per-run clear/re-fire/commit paths <!-- completed: 2026-07-29T08:10 -->
+- [x] Replace `_flag_unacked_due` with an annotation-only helper over existing due rows, retain the one-member-interval staleness threshold, run native detection first, and append `unacked` last without changing batched cadence commits <!-- completed: 2026-07-29T08:10 -->
+- [x] Read durable `last_stall_check_at`, select/validate `MemberPlacement.coding_agent` for every target and the Director descriptor, batch-clear non-live lifecycle state before due filtering, keep pending escalation non-triggering, and persist dispatch cadences only after the single watcher wake succeeds <!-- completed: 2026-07-29T08:10 -->
+- [x] Rewrite loop tests for annotation-only unacked, durable interval across immediate restart, coding-agent propagation/invalid-value fail-closed, success/failure cadence commits, no pending-only wake while the Director is disabled/dead, later-recovery delivery, non-live cleanup/pending preservation, recovery reseed, and one synchronized wake <!-- completed: 2026-07-29T08:10 -->
 
 ### Step 4: CLI state surface
 

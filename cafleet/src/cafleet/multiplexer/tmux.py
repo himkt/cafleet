@@ -247,7 +247,12 @@ class TmuxMultiplexer:
         )
 
     def send_wake_trigger(
-        self, *, target_pane_id: str, due_members: list[dict], director_member_id: int
+        self,
+        *,
+        target_pane_id: str,
+        due_members: list[dict],
+        director: dict | None = None,
+        director_member_id: int | None = None,
     ) -> bool:
         """Best-effort wake nudge for the monitoring member's pane.
 
@@ -266,6 +271,10 @@ class TmuxMultiplexer:
         pipe, so it is safe in the monitoring member's coding-agent input box. The
         payload is byte-identical to the herdr backend's.
         """
+        if director is not None:
+            director_member_id = director["member_id"]
+        if director_member_id is None:
+            raise ValueError("Director descriptor is required")
         noun = "member" if len(due_members) == 1 else "members"
         due_list = ", ".join(
             f"{'director' if t['is_director'] else 'member'} {t['member_id']} "
