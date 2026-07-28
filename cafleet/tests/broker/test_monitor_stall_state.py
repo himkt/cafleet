@@ -747,7 +747,7 @@ def test_report_batch_creates_sorted_sanitized_aggregate_and_escalates_rows():
     message = broker.get_message(
         fleet["fleet_id"],
         result["created_message_id"],
-    )
+    )["message"]
     assert (
         message["from_member_id"]
         == broker.find_monitoring_member(fleet["fleet_id"])["member_id"]
