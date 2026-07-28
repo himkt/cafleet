@@ -187,10 +187,16 @@ def _report_args(
 
 
 def _expire_gate(db_file, fleet_id: int) -> None:
+    now = datetime.now(UTC)
     with sqlite3.connect(str(db_file)) as connection:
         connection.execute(
-            "UPDATE monitor_director_gate SET expires_at = ? WHERE fleet_id = ?",
-            ((datetime.now(UTC) - timedelta(seconds=1)).isoformat(), fleet_id),
+            "UPDATE monitor_director_gate SET issued_at = ?, expires_at = ? "
+            "WHERE fleet_id = ?",
+            (
+                (now - timedelta(seconds=31)).isoformat(),
+                (now - timedelta(seconds=1)).isoformat(),
+                fleet_id,
+            ),
         )
         connection.commit()
 
