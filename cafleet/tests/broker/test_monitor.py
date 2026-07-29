@@ -139,7 +139,7 @@ def test_register_second_monitoring_member__rejected():
 
 def test_register_paneless_monitoring_member__rejected():
     # a monitoring member must own a pane (placement) to run the monitor loop
-    # and receive wake nudges; registering one with placement=None is rejected.
+    # and receive wake triggers; registering one with placement=None is rejected.
     fleet = _create_fleet()
     with pytest.raises(click.ClickException, match="pane-bound"):
         broker.register_member(
@@ -312,6 +312,119 @@ def test_record_pings__sets_last_ping_at():
     when = _iso_now()
     broker.record_pings([aid], when)
     assert broker.get_monitor_config(sid, aid)["last_ping_at"] == when
+
+
+# --- record_monitor_dispatch (kept cadence stamping) ------------------------
+
+
+def test_record_monitor_dispatch__stamps_both_cadences():
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    pinged = _register_ordinary_member(fleet, name="pinged", pane_id="%20")[
+        "member_id"
+    ]
+    checked = _register_ordinary_member(fleet, name="checked", pane_id="%21")[
+        "member_id"
+    ]
+    when = _iso_now()
+
+    broker.record_monitor_dispatch([pinged], [checked], when)
+
+    pinged_cfg = broker.get_monitor_config(sid, pinged)
+    assert pinged_cfg["last_ping_at"] == when
+    assert pinged_cfg["last_stall_check_at"] is None
+    checked_cfg = broker.get_monitor_config(sid, checked)
+    assert checked_cfg["last_stall_check_at"] == when
+    assert checked_cfg["last_ping_at"] is None
+
+
+def test_record_monitor_dispatch__empty_lists_noop():
+    fleet = _create_fleet()
+    member_id = _register_ordinary_member(fleet, name="idle")["member_id"]
+
+    broker.record_monitor_dispatch([], [], _iso_now())
+
+    cfg = broker.get_monitor_config(fleet["fleet_id"], member_id)
+    assert cfg["last_ping_at"] is None
+    assert cfg["last_stall_check_at"] is None
+
+
+# --- lifecycle reconciliation (clears last_stall_check_at only) -------------
+
+
+def test_reconcile_monitor_lifecycle__clears_only_last_stall_check_at():
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    member_id = _register_ordinary_member(fleet, name="gone", pane_id="%22")[
+        "member_id"
+    ]
+    when = _iso_now()
+    broker.record_monitor_dispatch([member_id], [member_id], when)
+    assert broker.get_monitor_config(sid, member_id)["last_stall_check_at"] == when
+
+    broker.reconcile_monitor_lifecycle(sid, [member_id])
+
+    cfg = broker.get_monitor_config(sid, member_id)
+    assert cfg["last_stall_check_at"] is None
+    # only the stall-check cadence is cleared — schedule fields are untouched
+    assert cfg["last_ping_at"] == when
+    assert cfg["interval_seconds"] == 720
+    assert cfg["enabled"] is True
+
+
+def test_update_monitor_config__disable_clears_last_stall_check_at():
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    member_id = _register_ordinary_member(fleet, name="off", pane_id="%23")[
+        "member_id"
+    ]
+    when = _iso_now()
+    broker.record_monitor_dispatch([], [member_id], when)
+    assert broker.get_monitor_config(sid, member_id)["last_stall_check_at"] == when
+
+    disabled = broker.update_monitor_config(sid, member_id, enabled=False)
+    assert disabled["enabled"] is False
+    assert disabled["last_stall_check_at"] is None
+
+
+# --- config dict shape (the five kept fields) ------------------------------
+
+_CONFIG_KEYS = {
+    "member_id",
+    "interval_seconds",
+    "last_ping_at",
+    "enabled",
+    "last_stall_check_at",
+}
+
+
+def test_get_monitor_config__exact_five_key_shape():
+    fleet = _create_fleet()
+    member = _register_ordinary_member(fleet, name="shape")
+
+    cfg = broker.get_monitor_config(fleet["fleet_id"], member["member_id"])
+    assert set(cfg) == _CONFIG_KEYS
+    assert cfg["last_stall_check_at"] is None
+
+
+def test_list_monitor_configs__exact_five_key_shape():
+    fleet = _create_fleet()
+    _register_ordinary_member(fleet, name="rows")
+
+    configs = broker.list_monitor_configs(fleet["fleet_id"])
+    assert configs
+    for cfg in configs:
+        assert set(cfg) == _CONFIG_KEYS
+
+
+def test_update_monitor_config__exact_five_key_shape():
+    fleet = _create_fleet()
+    member = _register_ordinary_member(fleet, name="edit")
+
+    updated = broker.update_monitor_config(
+        fleet["fleet_id"], member["member_id"], interval_seconds=45
+    )
+    assert set(updated) == _CONFIG_KEYS
 
 
 # --- list_monitor_configs --------------------------------------------------
