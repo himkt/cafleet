@@ -1,8 +1,8 @@
 # Monitor Ping Simplification
 
 **Status**: Approved
-**Progress**: 28/38 tasks complete
-**Last Updated**: 2026-07-29
+**Progress**: 38/38 tasks complete
+**Last Updated**: 2026-07-30
 
 ## Overview
 
@@ -10,15 +10,15 @@ Reduce monitoring to its minimal shape — `monitor start` + capture + ping, plu
 
 ## Success Criteria
 
-- [ ] `cafleet member ping` against a pending-placement member exits 0 in all three output modes (text, `--json`, `--quiet`) with the skip contract below (stable `skipped` JSON key on both success paths); `member prompt` keeps its pending-placement hard error; `message send` is unchanged.
-- [ ] `cafleet monitor --help` lists exactly two subcommands: `start` and `capture`; `cafleet member --help` no longer lists `capture`.
-- [ ] The tmux/herdr wake payload is the pure-trigger form specified below, byte-identical across both backends, containing no protocol clauses; `skills/cafleet/roles/monitor.md` is the sole normative protocol carrier.
-- [ ] An ordinary member whose capture classifies `finished` (e.g. a claude member at the empty at-rest composer) receives the same two-wake treatment as a `stall_candidate`: byte-identical captures across two consecutive stall-check wakes yield at most one fixed `cafleet member ping`; a member still unchanged at the next stall-check wake, or a failed ping, is reported to the Director by a plain `cafleet message send`.
-- [ ] The broker exposes no stall-episode API (`observe_stall_episode`, `record_stall_ping_result`, `list_pending_stall_escalations`, the report-batch/gate path are gone) and no durable episode state exists anywhere; no durable ping/episode log is added.
-- [ ] Migration `0006` drops the four episode columns from `monitor_config` and the `monitor_director_gate` / `monitor_report_delivery` tables, preserving the five kept columns, with a working `downgrade()`; the chain-guard tests in `tests/db/test_alembic_smoke.py` assert the six-revision chain and head `0006`.
-- [ ] A repo-wide sweep for the removed vocabulary (`monitor stall`, `monitor status`, `monitor config`, `report-batch`, `ping_failed`, `ping_interrupted`, `unchanged_after_nudge`, `nudge_claimed`, `escalation_pending`, `stall_episode_state`, `director_gate`, `member capture`, the deleted broker function names, `format_monitor_status`, `format_monitor_config`, and — for the fixed-ping/wake-trigger senses — `nudge`) returns zero hits outside `design-docs/` and git history. Carve-outs for the `nudge` term: the Director's message-level stall-nudge concept (the cafleet-design-doc skill's coordination protocol and workflow role files) is a different concept and stays, as do the kept test module names `test_direct_member_nudge.py` / `test_direct_member_nudge_docs.py`.
-- [ ] The five-state classification taxonomy, the scheduler loop's triggers/cadence/annotation-only `unacked`, `monitor_runtime`, and the fixed `member ping` action are unchanged; the WebUI `monitor` object simply loses the four episode fields.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass.
+- [x] `cafleet member ping` against a pending-placement member exits 0 in all three output modes (text, `--json`, `--quiet`) with the skip contract below (stable `skipped` JSON key on both success paths); `member prompt` keeps its pending-placement hard error; `message send` is unchanged.
+- [x] `cafleet monitor --help` lists exactly two subcommands: `start` and `capture`; `cafleet member --help` no longer lists `capture`.
+- [x] The tmux/herdr wake payload is the pure-trigger form specified below, byte-identical across both backends, containing no protocol clauses; `skills/cafleet/roles/monitor.md` is the sole normative protocol carrier.
+- [x] An ordinary member whose capture classifies `finished` (e.g. a claude member at the empty at-rest composer) receives the same two-wake treatment as a `stall_candidate`: byte-identical captures across two consecutive stall-check wakes yield at most one fixed `cafleet member ping`; a member still unchanged at the next stall-check wake, or a failed ping, is reported to the Director by a plain `cafleet message send`.
+- [x] The broker exposes no stall-episode API (`observe_stall_episode`, `record_stall_ping_result`, `list_pending_stall_escalations`, the report-batch/gate path are gone) and no durable episode state exists anywhere; no durable ping/episode log is added.
+- [x] Migration `0006` drops the four episode columns from `monitor_config` and the `monitor_director_gate` / `monitor_report_delivery` tables, preserving the five kept columns, with a working `downgrade()`; the chain-guard tests in `tests/db/test_alembic_smoke.py` assert the six-revision chain and head `0006`.
+- [x] A repo-wide sweep for the removed vocabulary (`monitor stall`, `monitor status`, `monitor config`, `report-batch`, `ping_failed`, `ping_interrupted`, `unchanged_after_nudge`, `nudge_claimed`, `escalation_pending`, `stall_episode_state`, `director_gate`, `member capture`, the deleted broker function names, `format_monitor_status`, `format_monitor_config`, and — for the fixed-ping/wake-trigger senses — `nudge`) returns zero hits outside `design-docs/` and git history. Carve-outs for the `nudge` term: the Director's message-level stall-nudge concept (the cafleet-design-doc skill's coordination protocol and workflow role files) is a different concept and stays, as do the kept test module names `test_direct_member_nudge.py` / `test_direct_member_nudge_docs.py`.
+- [x] The five-state classification taxonomy, the scheduler loop's triggers/cadence/annotation-only `unacked`, `monitor_runtime`, and the fixed `member ping` action are unchanged; the WebUI `monitor` object simply loses the four episode fields.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass.
 
 ---
 
@@ -239,16 +239,16 @@ Generated via `mise //cafleet:makemigration "drop monitor stall episode state"` 
 
 ### Step 7: Tests and verification
 
-- [ ] Delete `tests/broker/test_monitor_stall_state.py`, `tests/cli/test_monitor_stall.py`, and — with the output formatters — `tests/output/test_monitor_status_table.py` and `tests/output/test_ping_age_ascii.py` <!-- completed: -->
-- [ ] Rewrite `tests/multiplexer/test_monitor_wake_contract.py` against the §3 pure-trigger payload: exact-string pin, tmux/herdr byte parity, sanitizer coverage, invalid-`coding_agent` fail-closed <!-- completed: -->
-- [ ] Update `tests/cli/test_monitor.py`: delete the `monitor status` / `monitor config` sections; add the startup-line assertion to the `monitor start` tests <!-- completed: -->
-- [ ] Update `tests/monitor/test_loop.py` (startup line; unchanged scan/wake behavior) and `tests/integration/test_direct_member_nudge.py` + `tests/docs/test_direct_member_nudge_docs.py` for the ping skip, respelled capture, and removed broker machinery <!-- completed: -->
-- [ ] Update `tests/cli/test_member_ping.py` (existing ping tests take the `skipped` JSON key), rename `tests/cli/test_member_capture_defaults.py` → `tests/cli/test_monitor_capture_defaults.py` with its invocations respelled to `monitor capture`, and update `tests/cli/test_help_budget.py` (the `("member", "capture")` budget entry moves to the monitor group) <!-- completed: -->
-- [ ] Update `tests/webui/test_monitor_api.py` (trimmed `monitor` shape) and `tests/broker/test_monitor.py` (config-dict assertions lose the episode columns) <!-- completed: -->
-- [ ] Add CLI tests: ping skip in text/`--json`/`--quiet` (exit 0, `skipped` key both paths), placementless ping still errors, and the `monitor capture` contract (including the pending-placement hard error) <!-- completed: -->
-- [ ] Repo-wide vocabulary sweep per Success Criteria (rg over source, docs, skills, rules, tests) <!-- completed: -->
+- [x] Delete `tests/broker/test_monitor_stall_state.py`, `tests/cli/test_monitor_stall.py`, and — with the output formatters — `tests/output/test_monitor_status_table.py` and `tests/output/test_ping_age_ascii.py` <!-- completed: 2026-07-30T08:58 -->
+- [x] Rewrite `tests/multiplexer/test_monitor_wake_contract.py` against the §3 pure-trigger payload: exact-string pin, tmux/herdr byte parity, sanitizer coverage, invalid-`coding_agent` fail-closed <!-- completed: 2026-07-30T08:58 -->
+- [x] Update `tests/cli/test_monitor.py`: delete the `monitor status` / `monitor config` sections; add the startup-line assertion to the `monitor start` tests <!-- completed: 2026-07-30T08:58 -->
+- [x] Update `tests/monitor/test_loop.py` (startup line; unchanged scan/wake behavior) and `tests/integration/test_direct_member_nudge.py` + `tests/docs/test_direct_member_nudge_docs.py` for the ping skip, respelled capture, and removed broker machinery <!-- completed: 2026-07-30T08:58 -->
+- [x] Update `tests/cli/test_member_ping.py` (existing ping tests take the `skipped` JSON key), rename `tests/cli/test_member_capture_defaults.py` → `tests/cli/test_monitor_capture_defaults.py` with its invocations respelled to `monitor capture`, and update `tests/cli/test_help_budget.py` (the `("member", "capture")` budget entry moves to the monitor group) <!-- completed: 2026-07-30T08:58 -->
+- [x] Update `tests/webui/test_monitor_api.py` (trimmed `monitor` shape) and `tests/broker/test_monitor.py` (config-dict assertions lose the episode columns) <!-- completed: 2026-07-30T08:58 -->
+- [x] Add CLI tests: ping skip in text/`--json`/`--quiet` (exit 0, `skipped` key both paths), placementless ping still errors, and the `monitor capture` contract (including the pending-placement hard error) <!-- completed: 2026-07-30T08:58 -->
+- [x] Repo-wide vocabulary sweep per Success Criteria (rg over source, docs, skills, rules, tests) <!-- completed: 2026-07-30T08:58 -->
 
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` <!-- completed: -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` <!-- completed: 2026-07-30T08:58 -->
 
 ---
 
