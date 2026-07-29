@@ -10,23 +10,23 @@ Allow the dedicated monitoring member to invoke the existing fixed-action `cafle
 
 ## Success Criteria
 
-- [ ] The monitor loop continues to run one fixed-cadence `scan → one batched watcher wake → sleep` cycle with no jitter, per-member timer, or direct scheduler keystroke into a watched pane.
-- [ ] A stale un-acked delivery can annotate an already-due member with `unacked`, but can never independently add a member to the due set or wake the monitoring member.
-- [ ] On both tmux and herdr, the monitoring member directly invokes the existing `cafleet member ping` only for an ordinary member classified `stalled` from two consecutive byte-identical `stall_candidate` captures separated by a full stall interval.
-- [ ] The direct nudge remains fixed action: it injects only `Esc` plus the target's `cafleet message poll` command and cannot carry a task body or arbitrary instruction.
-- [ ] Each stall episode permits at most one successful direct nudge; an unchanged next synchronized capture escalates to the Director exactly once, while changed or non-stalled capture state resets the episode.
-- [ ] A failed direct nudge is durably queued as `escalation_pending/ping_failed` in the same monitoring turn and is not retried during that stall episode.
-- [ ] Capture fingerprint, episode state, and deferred-escalation reason are durable in SQLite, so restarting the monitoring member cannot repeat a claimed/successful nudge or lose a pending/already-reported escalation.
-- [ ] Separate durable dispatch and candidate-observation timestamps make the monitor loop honor the remaining stall cadence after restart and make the broker reject hash promotion until two actual candidate captures are a full `CAFLEET_MONITOR_STALL_INTERVAL` apart.
-- [ ] The monitoring member never directly nudges the Director, itself, an `awaiting_user`/`unknown`/`working`/`finished` ordinary member, or a member based only on `unacked`.
-- [ ] If no normal wake can safely reach the Director, escalation stays sticky without creating a new wake; Director re-enable/live rebind or another normal due-member event is the explicit delivery precondition, and the next safe synchronized check reports it once.
-- [ ] One synchronized wake emits at most one Director-targeting inline preview; when ACK reconciliation leaves no older open aggregate, all then-pending stall escalations and that wake's finished observations are committed as one fixed aggregate after ordinary-member actions complete.
-- [ ] Aggregate preview delivery is durable and bounded: each fleet has at most one open aggregate, retries reuse its message ID, new escalations remain pending and repeated finished observations are not inserted while it is open, and only Director ACK completes delivery.
-- [ ] After an older open aggregate is ACKed, every durable stall escalation that accumulated behind it remains queued and is included in the next aggregate formed on a Director-safe normal synchronized wake; ephemeral finished observations are included only when observed again on such a wake.
-- [ ] The Director treats every aggregate preview as a notification, retrieves that message ID with `message show --full` before acting, processes the untruncated body, and ACKs the aggregate once.
-- [ ] The final Director gate permits one aggregate preview only when the Director is `finished` or resolved `stalled` from two full-spacing unchanged Director observations; a fresh one-use broker token makes that gate enforceable by `report-batch`, and Director observation can never claim or run an ordinary-member ping.
-- [ ] `finished` remains a report-only classification: the Director alone decides whether assigned work remains and whether to dispatch another task.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
+- [x] The monitor loop continues to run one fixed-cadence `scan → one batched watcher wake → sleep` cycle with no jitter, per-member timer, or direct scheduler keystroke into a watched pane.
+- [x] A stale un-acked delivery can annotate an already-due member with `unacked`, but can never independently add a member to the due set or wake the monitoring member.
+- [x] On both tmux and herdr, the monitoring member directly invokes the existing `cafleet member ping` only for an ordinary member classified `stalled` from two consecutive byte-identical `stall_candidate` captures separated by a full stall interval.
+- [x] The direct nudge remains fixed action: it injects only `Esc` plus the target's `cafleet message poll` command and cannot carry a task body or arbitrary instruction.
+- [x] Each stall episode permits at most one successful direct nudge; an unchanged next synchronized capture escalates to the Director exactly once, while changed or non-stalled capture state resets the episode.
+- [x] A failed direct nudge is durably queued as `escalation_pending/ping_failed` in the same monitoring turn and is not retried during that stall episode.
+- [x] Capture fingerprint, episode state, and deferred-escalation reason are durable in SQLite, so restarting the monitoring member cannot repeat a claimed/successful nudge or lose a pending/already-reported escalation.
+- [x] Separate durable dispatch and candidate-observation timestamps make the monitor loop honor the remaining stall cadence after restart and make the broker reject hash promotion until two actual candidate captures are a full `CAFLEET_MONITOR_STALL_INTERVAL` apart.
+- [x] The monitoring member never directly nudges the Director, itself, an `awaiting_user`/`unknown`/`working`/`finished` ordinary member, or a member based only on `unacked`.
+- [x] If no normal wake can safely reach the Director, escalation stays sticky without creating a new wake; Director re-enable/live rebind or another normal due-member event is the explicit delivery precondition, and the next safe synchronized check reports it once.
+- [x] One synchronized wake emits at most one Director-targeting inline preview; when ACK reconciliation leaves no older open aggregate, all then-pending stall escalations and that wake's finished observations are committed as one fixed aggregate after ordinary-member actions complete.
+- [x] Aggregate preview delivery is durable and bounded: each fleet has at most one open aggregate, retries reuse its message ID, new escalations remain pending and repeated finished observations are not inserted while it is open, and only Director ACK completes delivery.
+- [x] After an older open aggregate is ACKed, every durable stall escalation that accumulated behind it remains queued and is included in the next aggregate formed on a Director-safe normal synchronized wake; ephemeral finished observations are included only when observed again on such a wake.
+- [x] The Director treats every aggregate preview as a notification, retrieves that message ID with `message show --full` before acting, processes the untruncated body, and ACKs the aggregate once.
+- [x] The final Director gate permits one aggregate preview only when the Director is `finished` or resolved `stalled` from two full-spacing unchanged Director observations; a fresh one-use broker token makes that gate enforceable by `report-batch`, and Director observation can never claim or run an ordinary-member ping.
+- [x] `finished` remains a report-only classification: the Director alone decides whether assigned work remains and whether to dispatch another task.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
 
