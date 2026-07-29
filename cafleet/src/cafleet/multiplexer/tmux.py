@@ -228,12 +228,12 @@ class TmuxMultiplexer:
         due_members: list[dict],
         director: dict,
     ) -> bool:
-        """Best-effort wake nudge for the monitoring member's pane.
+        """Best-effort wake trigger for the monitoring member's pane.
 
-        Carries a single-line instruction that **names** each due member
-        (``<role> <id> (<name>) [<reasons>]``) and the Director id, directing the
-        monitoring member to classify each pane on the five-state taxonomy and
-        re-engage the Director — distinct from the poll command
+        Carries a single-line pure trigger that **names** each due member
+        (``<role> <id> (<name>) [<reasons>]``) and the Director descriptor and
+        points the monitoring member at its role protocol — distinct from the
+        poll command
         ``send_poll_trigger`` carries (now used only by ``cafleet member ping``).
         This is the sole keystroke the loop fires — it wakes only the monitoring
         member. No leading ``Escape``: the target is the monitoring member's own
