@@ -964,7 +964,7 @@ def test_send_wake_trigger__no_esc_single_pane_run(monkeypatch, herdr_run):
     assert payload.startswith("[monitor] wake: 1 member due")
     # The due member is named ``<role> <id> (<name>) [<reasons>]``.
     assert "director 332 (Director; coding_agent=codex) [interval]" in payload
-    assert "Director 332 (coding_agent=codex)" in payload
+    assert "Director: 332 (coding_agent=codex)." in payload
 
 
 def test_send_wake_trigger__sanitizes_name_metacharacters(monkeypatch, herdr_run):

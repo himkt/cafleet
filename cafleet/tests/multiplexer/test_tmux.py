@@ -820,10 +820,10 @@ def test_send_wake_trigger__return_branches_and_argv(
         assert captured == []
 
 
-def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
-    """The wake nudge is a single-line monitoring instruction that NAMES the
-    freshly-due members (each with its ``[<wake_reasons>]`` tag) and the Director id
-    — distinct from the ``cafleet ... message poll`` command the Director receives.
+def test_send_wake_trigger__payload_is_single_line_pure_trigger(monkeypatch):
+    """The wake trigger is a single-line payload that NAMES the freshly-due
+    members (each with its ``[<wake_reasons>]`` tag) and the Director id —
+    distinct from the ``cafleet ... message poll`` command the Director receives.
     A crafted user-controlled name carrying CR/LF/tab, a backtick, a ``$(…)``
     command-substitution sequence, and a pipe is sanitized so the single-line
     guarantee holds and the payload carries no backtick, no ``$(``, and no ``|``."""
@@ -890,18 +890,10 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
     # The crafted control chars collapsed to U+23CE rather than vanishing.
     assert "⏎" in payload
 
-    # The five-state precedence rubric is spelled out verbatim in the instruction.
-    assert "awaiting_user, unknown, finished, working, stall_candidate" in payload
-
-    # The unacked report rule sits in the instruction, and the closing
-    # re-engagement sentence lists the unacked report alongside stalled/finished.
-    assert "Treat unacked only as context" in payload
-    assert "never authorizes an action" in payload
-
-    # The Director id is named as the standing inspect-and-re-engage target via
-    # the "the Director pane ({director_id})" clause — distinct from the due-list
-    # rendering (where the id is not parenthesized).
-    assert "Director 332 (coding_agent=codex)" in payload
+    # The Director descriptor identifies the recipient of the monitoring
+    # member's per-event messages — distinct from the due-list rendering.
+    assert "Director: 332 (coding_agent=codex)." in payload
+    assert payload.endswith("Follow your monitor role protocol.")
 
     # Shell-safety guarantee: no backtick, no ``$(`` command sub,
     # and no pipe survive into the payload.
@@ -911,10 +903,9 @@ def test_send_wake_trigger__payload_is_single_line_monitor_nudge(monkeypatch):
 
 
 def test_send_wake_trigger__singular_noun_and_director_named_when_not_due(monkeypatch):
-    """Worked example B (§2): a single due member yields the singular noun
-    ("1 member due"), and the Director id is still named as the standing
-    inspect-and-re-engage target even though the Director is not itself due —
-    the property this design restores (the Director is always inspected)."""
+    """A single due member yields the singular noun ("1 member due"), and the
+    Director descriptor still names the report recipient even though the
+    Director is not itself due."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
     monkeypatch.setattr("time.sleep", lambda _secs: None)
     captured: list[list[str]] = []
@@ -944,18 +935,16 @@ def test_send_wake_trigger__singular_noun_and_director_named_when_not_due(monkey
     assert payload.startswith("[monitor] wake: 1 member due")
     # The lone due member is named ``member <id> (<name>) [<reasons>]``.
     assert "member 336 (alice; coding_agent=claude) [stall-check]" in payload
-    # The Director (332) is not in the due set, yet it is named via the standing
-    # clause; it is never rendered as a due member (no ``member 332`` / ``director 332``).
-    assert "Director 332 (coding_agent=opencode)" in payload
+    # The Director (332) is not in the due set, yet it is named via the
+    # descriptor; it is never rendered as a due member.
+    assert "Director: 332 (coding_agent=opencode)." in payload
     assert "member 332" not in payload
     assert "director 332" not in payload
 
 
 def test_send_wake_trigger__payload_exact_text(monkeypatch):
-    """Pins the wake instruction verbatim (§ Wake-nudge payload): the unacked
-    sentence sits between the stall-check sentence and the awaiting_user guard,
-    and the closing re-engagement sentence lists the unacked report alongside
-    stalled / finished."""
+    """Pins the pure-trigger wake payload verbatim (§3): due list, Director
+    descriptor, one pointer sentence — nothing else."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
     monkeypatch.setattr("time.sleep", lambda _secs: None)
     captured: list[list[str]] = []
@@ -981,14 +970,12 @@ def test_send_wake_trigger__payload_exact_text(monkeypatch):
     assert result is True
 
     payload = captured[0][5]
-    assert payload.startswith(
+    assert payload == (
         "[monitor] wake: 1 member due — member 336 "
         "(alice; coding_agent=claude) [interval,stall-check,unacked]. "
+        "Director: 332 (coding_agent=opencode). "
+        "Follow your monitor role protocol."
     )
-    assert "Query monitor stall pending before ordinary observations" in payload
-    assert "monitor report-batch exactly once" in payload
-    assert "message show --full" in payload
-    assert "cafleet message send" not in payload
 
 
 def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
@@ -1085,6 +1072,6 @@ def test_esc_first_false_helpers__never_send_escape(monkeypatch, helper_name, in
 
 
 def test_send_resume_trigger__removed():
-    """`send_resume_trigger` (the blind ordinary-member resume nudge) is removed
-    entirely — no caller remains (spec §2, Success Criteria)."""
+    """`send_resume_trigger` (the blind ordinary-member resume trigger) is
+    removed entirely — no caller remains (spec §2, Success Criteria)."""
     assert not hasattr(TmuxMultiplexer, "send_resume_trigger")

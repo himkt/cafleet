@@ -570,7 +570,17 @@ def test_migration_0006_preserves_kept_columns_and_downgrades(tmp_path):
                         " WHERE member_id = 1"
                     )
                 ).one()
-            assert tuple(row) == (1, 180, kept[0], 1, kept[1], None, None, "clear", None)
+            assert tuple(row) == (
+                1,
+                180,
+                kept[0],
+                1,
+                kept[1],
+                None,
+                None,
+                "clear",
+                None,
+            )
         finally:
             engine.dispose()
 

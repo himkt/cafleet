@@ -4,8 +4,8 @@
 tz-aware ``now``, so these tests need neither tmux nor the DB. The scan rows are
 the watched members — the root Director (180 s) and every ordinary member
 (720 s); the monitoring member is the unenrolled watcher and never appears here.
-``is_director`` is retained for ``monitor status`` labeling but ``should_ping``
-is role-agnostic: enabled + live pane + interval elapsed ⇒ due.
+``is_director`` is retained for the wake-entry and WebUI role labels but
+``should_ping`` is role-agnostic: enabled + live pane + interval elapsed ⇒ due.
 """
 
 from datetime import UTC, datetime, timedelta

@@ -320,9 +320,7 @@ def test_record_pings__sets_last_ping_at():
 def test_record_monitor_dispatch__stamps_both_cadences():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    pinged = _register_ordinary_member(fleet, name="pinged", pane_id="%20")[
-        "member_id"
-    ]
+    pinged = _register_ordinary_member(fleet, name="pinged", pane_id="%20")["member_id"]
     checked = _register_ordinary_member(fleet, name="checked", pane_id="%21")[
         "member_id"
     ]
@@ -375,9 +373,7 @@ def test_reconcile_monitor_lifecycle__clears_only_last_stall_check_at():
 def test_update_monitor_config__disable_clears_last_stall_check_at():
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
-    member_id = _register_ordinary_member(fleet, name="off", pane_id="%23")[
-        "member_id"
-    ]
+    member_id = _register_ordinary_member(fleet, name="off", pane_id="%23")["member_id"]
     when = _iso_now()
     broker.record_monitor_dispatch([], [member_id], when)
     assert broker.get_monitor_config(sid, member_id)["last_stall_check_at"] == when

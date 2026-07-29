@@ -166,7 +166,7 @@ def test_send_message__real_inline_preview_keystroke_is_esc_first(monkeypatch):
 
     Guards that the §1 hardening reaches every ``message send`` recipient over
     the broker path — not just at the unit-level helper. This is exactly the
-    Background incident's failure path (a nudge confirming the Director's
+    Background incident's failure path (a ping confirming the Director's
     ``git push`` prompt), now closed."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tmux")
     monkeypatch.setattr("time.sleep", lambda _secs: None)
