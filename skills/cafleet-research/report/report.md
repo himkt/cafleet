@@ -84,9 +84,9 @@ Capture `fleet_id` and `director.member_id` from the response. Treat `fleet_id` 
 
 ### Step 1: Supervision Model (Director — spawn the monitoring member first)
 
-Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms the loop's startup line in the task output, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the conditional idle-nudge routine) and lifecycle. The monitoring member is deleted first in the Step 8 teardown (first-out).
+See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the on-wake routine) and lifecycle. The monitoring member is deleted first in the Step 8 teardown (first-out).
 
 On each active turn, check `${OUTPUT_DIR}` for these expected deliverables:
 
@@ -98,7 +98,7 @@ Readiness/stall rules (apply per the `cafleet` skill's `reference/supervision.md
 
 - After Scouts/Researchers have been spawned and tasks have been assigned, expect at least one `00-scout-*.md` or `NN-research-*.md` file to appear after the first round of replies.
 - Do not consider the workflow ready for Step 5 until `report.md` exists.
-- If a member has an assignment still in progress but their deliverable file is missing past the expected milestone, run the 2-stage health-check from the `cafleet` skill's `reference/supervision.md`: `cafleet message poll` → `cafleet member capture --lines 200` → directed `cafleet message send` nudge → user escalation.
+- If a member has an assignment still in progress but their deliverable file is missing past the expected milestone, run the 2-stage health-check from the `cafleet` skill's `reference/supervision.md`: `cafleet message poll` → `cafleet monitor capture --lines 200` → directed `cafleet message send` → user escalation.
 
 ### Step 2: Spawn Manager (Director)
 

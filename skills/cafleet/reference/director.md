@@ -1,6 +1,6 @@
-# tmux-backed member commands (`cafleet member *`)
+# tmux-backed member commands (`cafleet member *` + `monitor capture`)
 
-Reference page for the Director-only lifecycle and pane-interaction commands — `member create`, `member delete`, `member list`, `member capture`, `member prompt`, `member ping`. All run inside a tmux or herdr session, scoped to the per-subcommand `--fleet-id` (`member list` and `member show` are registry reads with no multiplexer requirement). `member create` takes **no identity flag** — the CLI auto-resolves the spawning Director from `fleets.director_member_id`; every other lifecycle verb identifies its **target** by `--member-id`.
+Reference page for the Director-only lifecycle and pane-interaction commands — `member create`, `member delete`, `member list`, `monitor capture`, `member prompt`, `member ping`. All run inside a tmux or herdr session, scoped to the per-subcommand `--fleet-id` (`member list` and `member show` are registry reads with no multiplexer requirement). `member create` takes **no identity flag** — the CLI auto-resolves the spawning Director from `fleets.director_member_id`; every other lifecycle verb identifies its **target** by `--member-id`.
 
 Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/prompt-routing.md`.
 
@@ -132,7 +132,7 @@ The Director owns member replacement; the Reviewer supplies evidence (an `[INCOR
 
 For each replacement, in order:
 
-1. **Freeze and hand off** — freeze new work for the task and request one concise state report (completed work, modified paths, commands/tests run, blockers, next step); if the member cannot respond promptly, `cafleet member capture` is the handoff evidence.
+1. **Freeze and hand off** — freeze new work for the task and request one concise state report (completed work, modified paths, commands/tests run, blockers, next step); if the member cannot respond promptly, `cafleet monitor capture` is the handoff evidence.
 2. **Re-select stronger** — pick a strictly more capable model from the failed model's backend table (a row above the failed model) that fits the task's now-demonstrated difficulty; choose the cheapest model within that stronger set.
 3. **Record** — note the trigger, evidence pointers, old/new model, and attempt number in your coordination notes (no secrets or prompt contents).
 4. **Delete before create** — `cafleet member delete` the old member through the standard lifecycle before spawning the replacement; the monitoring member stays live and all normal spawn/audit/prompt-substitution rules apply.
@@ -158,13 +158,13 @@ cafleet member list --fleet-id <fleet-id>
 
 One output shape: every **active** registry entry of the fleet (the root Director, the monitoring member, ordinary members, placementless rows), one row each with `member_id`, `name`, `kind` (`director` / `monitor` / `member`), `backend`, `pane_id` (a pending placement renders `(pending)`; placementless rows render `-` placement cells), and `idle` — the humanized wall-time since the member's most recent message activity (`Ns`/`Nm`/`Nh`, `-` when none). `--json` adds the underlying `last_sent` / `last_recv` / `last_ack` timestamps (output shape in [`cli-options.md`](../../../docs/spec/cli-options.md#member-list)). Use the `idle` column for routine supervision ticks instead of capturing every member every tick — capture is reserved for the cases the idle column flags.
 
-## Member Capture
+## Monitor Capture
 
-Capture the last N lines of a member's pane buffer (read-only). `--lines` defaults `20`; `--ansi` / `--no-ansi` (default) strips ANSI escapes and de-fragments carriage returns. Output is the raw buffer in text mode, `{member_id, pane_id, lines, content}` in JSON.
+Capture the last N lines of a member's pane buffer (read-only). `--lines` defaults `20`; `--ansi` / `--no-ansi` (default) strips ANSI escapes and de-fragments carriage returns. Output is the raw buffer in text mode, `{member_id, pane_id, lines, content, captured_at, content_sha256}` in JSON. This is the read primitive behind the pre-ping capture gate ([`reference/supervision.md`](supervision.md) § *The pre-ping capture gate*).
 
 ```bash
-cafleet member capture --fleet-id <fleet-id> --member-id <member-id>
-cafleet member capture --fleet-id <fleet-id> --member-id <member-id> --lines 200
+cafleet monitor capture --fleet-id <fleet-id> --member-id <member-id>
+cafleet monitor capture --fleet-id <fleet-id> --member-id <member-id> --lines 200
 ```
 
 ## Answering a member's relayed question
@@ -189,7 +189,7 @@ After every successful `cafleet member prompt --shell` (exit 0), the Director MU
 
 Skip the ping only on non-zero `member prompt` exit (the dispatch did not complete; the supervision tick is the safety net). For a series of shell dispatches on the same member, the ping follows each one, not only the last. The plain form needs no ping — the submitted turn opens the member's turn directly.
 
-## Member Ping (manual inbox-poll nudge)
+## Member Ping (manual inbox-poll)
 
 Keystrokes **`Esc` → `cafleet … message poll` → `Enter`** into a member's pane (the leading `Esc` dismisses any pending permission-approval prompt, so the trailing `Enter` cannot blindly confirm it) for re-poking a member that missed the broker's auto-fired inline preview. The action is fully fixed by the command — no operator-controlled body — so it sits in `permissions.allow` while `member prompt` stays in `permissions.ask`. Keystroke mechanics: [`multiplexer-backends.md`](../../../docs/spec/multiplexer-backends.md#esc-safeguard).
 

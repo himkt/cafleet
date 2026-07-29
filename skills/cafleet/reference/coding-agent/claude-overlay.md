@@ -23,7 +23,7 @@ Every note names the base token/instruction it qualifies.
 |------|-----------|
 | `AskUserQuestion` takes ≤ 4 options/question; the built-in "Other" is the free-text path (don't add an explicit "Other"). Question shapes → form: choice among ≤ 4 labeled options; approve-or-revise (two options); continue-or-abort (two options); open-ended draft-comparison (2–4 full candidate bodies). | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions; `cafleet-design-doc/create/create.md` Step 2 question batch |
 | `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet`: register a sub-topic with `TaskCreate`, claim with `TaskUpdate` (owner + `in_progress`), complete with `TaskUpdate` (`completed`), check progress with `TaskList`. | `{task_coord}` — `cafleet-research/report/report.md` task coordination |
-| *Pane-state capture cues* (below) — the concrete claude-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitoring member's target-specific classification rubric — `cafleet/roles/monitor.md` § On each wake; the pane-state taxonomy in `docs/concepts/monitoring.md`; the Director's pre-nudge capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response (both consumers apply the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — the concrete claude-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitoring member's target-specific classification rubric — `cafleet/roles/monitor.md` § On each wake; the pane-state taxonomy in `docs/concepts/monitoring.md`; the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response (both consumers apply the cues of the **target member's** backend overlay). |
 
 ## Pane-state capture cues
 
@@ -36,7 +36,7 @@ The monitoring member classifies each target from its **content only** (never na
 | `working` | Affirmative active-work evidence: a running spinner, `esc to interrupt`, streaming response, tool execution, or generation indicator. A truncated or ambiguous capture that might hide one of these cues is also `working`. |
 | `stall_candidate` | Quiet, non-finished transcript content with no question/approval box, no empty at-rest composer, and no spinner, tool, streaming, generation, or other active-work cue. |
 
-When a capture cannot separate `awaiting_user` from `finished`, classify `awaiting_user`. When it cannot separate active work from a quiet candidate, classify `working`; only the broker may promote full-spacing, byte-identical `stall_candidate` observations to `stalled`.
+When a capture cannot separate `awaiting_user` from `finished`, classify `awaiting_user`. When it cannot separate active work from a quiet candidate, classify `working`. `stall_candidate` and `finished` are the two quiet families: the monitoring member itself confirms a member quiet when its captures on two consecutive stall-check wakes are byte-identical.
 
 ## Worked resolution
 

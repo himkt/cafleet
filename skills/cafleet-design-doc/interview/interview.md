@@ -111,9 +111,9 @@ Capture `fleet_id` and `director.member_id` from the JSON response. Substitute t
 
 #### 2b. Spawn the monitoring member (first-in)
 
-BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Then spawn the dedicated monitoring member as the **first** `cafleet member create` in the fleet, with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Then spawn the dedicated monitoring member as the **first** `cafleet member create` in the fleet, with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms the loop's startup line in the task output, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the conditional idle-nudge routine) and lifecycle. The monitoring member is deleted first in the 2f teardown (first-out).
+See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the on-wake routine) and lifecycle. The monitoring member is deleted first in the 2f teardown (first-out).
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 

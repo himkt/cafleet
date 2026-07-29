@@ -14,7 +14,7 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 |---|------|------------------------------|
 | 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{decision_surface}` / `{monitor_model}` / `{permission_flags}`, **or** guess a wrong/default value (spawn the monitor on the wrong model), **or** ignore a backend note (codex has no harness task list) |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + `cafleet monitor` heartbeat (monitor-first spawn, the `ready: monitor live` gate, the 5-step facilitation loop, the Authorization-Scope Guard) — you spawn an unsupervised team |
-| 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `member delete` / `member list` / `member capture` / `member prompt` / `member ping`), the pre-spawn model-selection step (§ *Model selection before member create* — classify the role, choose the backend/model from the model list, pass the pair to `member create`), and the canonical spawn-prompt skeleton — you can't spawn or drive members, or you spawn them on guessed models |
+| 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `member delete` / `member list` / `monitor capture` / `member prompt` / `member ping`), the pre-spawn model-selection step (§ *Model selection before member create* — classify the role, choose the backend/model from the model list, pass the pair to `member create`), and the canonical spawn-prompt skeleton — you can't spawn or drive members, or you spawn them on guessed models |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**
 
@@ -49,12 +49,12 @@ Angle-bracket tokens are placeholders, **not** shell variables — substitute th
 ## Director-only primitives
 
 You own these; ordinary members do NOT call them: `member create`, `member
-delete`, `member list`, `member capture`, `member prompt`, `member ping` (plus
+delete`, `member list`, `monitor capture`, `member prompt`, `member ping` (plus
 the backend-specific decision-relay primitive your overlay names). The sole
-exception is the dedicated monitoring member: after the broker atomically
-returns `action = ping` for a confidently stalled ordinary member, it may call
-the fixed, bodyless `member ping` once for that stall episode and record the
-result. The exception never permits `member prompt`, task text, a Director
+exception is the dedicated monitoring member: when its own notes confirm an
+ordinary member quiet across two stall-check wakes, it may call the fixed,
+bodyless `member ping` at most once for that quiet period. The exception never
+permits `member prompt`, task text, a Director
 target, or another arbitrary member action. `member prompt` carries an
 operator-controlled text body (both forms) and stays under `permissions.ask`;
 the fixed primitives are pre-approved (`permissions.allow`). Full flags and

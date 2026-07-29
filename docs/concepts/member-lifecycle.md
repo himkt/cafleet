@@ -44,7 +44,10 @@ stateDiagram-v2
 `cafleet member create` is atomic: it registers the member with a
 pending placement (no pane id yet), spawns the member pane in the Director's
 own tmux window, then patches the placement row with the real pane id. If the
-spawn or the patch fails, the registration is rolled back. The new pane is
+spawn or the patch fails, the registration is rolled back. The pending window
+is ping-tolerant: `cafleet member ping` against a member whose placement has
+no pane yet skips the keystroke and succeeds — the member polls its inbox on
+spawn, so there is nothing a ping would add. The new pane is
 created without stealing focus, so the Director's active window is unchanged.
 Identity reaches the spawned pane as literals rendered into the prompt:
 `cafleet member create` runs `str.format` over the resolved prompt,
@@ -80,7 +83,7 @@ The lifecycle ops and keystroke interaction all live in the `member` group:
 | Spawn | `member create` |
 | Teardown | `member delete` |
 | Introspection | `member show`, `member list` |
-| Keystroke interaction | `member capture`, `member prompt`, `member ping` |
+| Keystroke interaction | `member prompt`, `member ping` |
 
 `member create` takes no identity flag — the CLI resolves the
 Director from `fleets.director_member_id`; every other lifecycle verb targets

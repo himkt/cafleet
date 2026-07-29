@@ -7,7 +7,7 @@ The bash-via-Director protocol is the **fallback** for a harness-denied command.
 | Primitive | Purpose | Permission gate |
 |---|---|---|
 | [`cafleet member prompt`](director.md#member-prompt) | Keystroke dispatch with an operator-controlled `TEXT` body. `--shell` keystrokes `! <cmd>` + `Enter`; the plain form keystrokes `TEXT` + `Enter` as a submitted user turn. | `permissions.ask` |
-| [`cafleet member ping`](director.md#member-ping-manual-inbox-poll-nudge) | Fixed-action inbox-poll nudge; no operator-controlled body. | `permissions.allow` |
+| [`cafleet member ping`](director.md#member-ping-manual-inbox-poll) | Fixed-action inbox-poll; no operator-controlled body. | `permissions.allow` |
 
 ## The two forms: shell vs plain
 

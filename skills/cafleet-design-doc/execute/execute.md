@@ -165,7 +165,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 3b. Spawn the monitoring member (first-in)
 
-This team **keeps an active heartbeat**, so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`; it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `member create`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; the monitoring member is deleted first in Step 8's cleanup (first-out), which terminates the loop with its pane. See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
+This team **keeps an active heartbeat**, so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`; it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms the loop's startup line in the task output, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `member create`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; the monitoring member is deleted first in Step 8's cleanup (first-out), which terminates the loop with its pane. See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -334,7 +334,7 @@ If the Verifier was spawned, assign verification:
 
 ### Step 5: Reviewer Review Loop (Director)
 
-After all TDD steps (and Phase D, if run) complete, the Director runs a fresh-context review loop before anything is presented to the user. **Run to completion / stop means stop**: the loop is uncapped and ends only on Reviewer approval or an explicit user halt/abort. When the user signals halt (explicit "stop", "wait", "pause", profanity / frustration, or repeated rejection of tool calls), the Director halts dispatch immediately, treats the monitoring member's idle-nudges as notification-only, and waits for explicit re-authorization; an explicit abort triggers the Abort Flow (Step 6).
+After all TDD steps (and Phase D, if run) complete, the Director runs a fresh-context review loop before anything is presented to the user. **Run to completion / stop means stop**: the loop is uncapped and ends only on Reviewer approval or an explicit user halt/abort. When the user signals halt (explicit "stop", "wait", "pause", profanity / frustration, or repeated rejection of tool calls), the Director halts dispatch immediately, treats the monitoring member's escalation messages as notification-only, and waits for explicit re-authorization; an explicit abort triggers the Abort Flow (Step 6).
 
 #### Success Criteria Verification (gate)
 

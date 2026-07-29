@@ -32,9 +32,9 @@ Angle-bracket tokens (`<fleet-id>`, `<director-member-id>`, `<drafter-member-id>
 
 ## Idle Semantics & Stall Response
 
-Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet member capture` fallback → the decision-relay three-beat for a paused decision-prompt frame, per your overlay) follow the `cafleet` skill's `reference/supervision.md` § Idle Semantics and § Stall Response. Two skill-specific rungs are NOT in those skills and stay here:
+Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet monitor capture` fallback → the decision-relay three-beat for a paused decision-prompt frame, per your overlay) follow the `cafleet` skill's `reference/supervision.md` § Idle Semantics and § Stall Response. Two skill-specific rungs are NOT in those skills and stay here:
 
-- **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet member capture --member-id <member-id> --lines 200`, then escalate — in that order.
+- **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet monitor capture --member-id <member-id> --lines 200`, then escalate — in that order.
 - **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via {decision_surface} with concrete options (re-spawn / redistribute / drop scope). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
 
 ## Communication Protocol
@@ -48,7 +48,7 @@ All Director-to-member messages use the CAFleet message broker. The Director sto
 cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
   --to-member-id <member-id> --text "<instruction>"
 ```
-A push notification keystrokes the message into the member's pane (see the `cafleet` skill § Send). Poll your inbox with `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id> --json`, ACK each message with `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --message-id <message-id>`, and inspect a stalled member with `cafleet member capture --member-id <member-id> --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
+A push notification keystrokes the message into the member's pane (see the `cafleet` skill § Send). Poll your inbox with `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id> --json`, ACK each message with `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --message-id <message-id>`, and inspect a stalled member with `cafleet monitor capture --member-id <member-id> --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
 
 ## User Interaction Rules
 
@@ -74,7 +74,7 @@ When the user provides free-form text instead of a listed option, use LLM reason
 
 ## Progress Monitoring
 
-Track team progress on each active turn — woken by members' replies (broker inline previews) and your own periodic polling — using the 2-stage health check (poll → member capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next (`cafleet member ping` for manual re-poke). Supervision obligations (Authorization-Scope Guard, idle semantics) come from the `cafleet` skill's `reference/supervision.md`.
+Track team progress on each active turn — woken by members' replies (broker inline previews) and your own periodic polling — using the 2-stage health check (poll → monitor capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next (`cafleet member ping` for manual re-poke). Supervision obligations (Authorization-Scope Guard, idle semantics) come from the `cafleet` skill's `reference/supervision.md`.
 
 ### User delegation for a member's relayed question
 

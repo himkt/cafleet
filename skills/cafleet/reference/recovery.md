@@ -4,7 +4,7 @@ Director reference for crash / disconnect / idle / wedged-pane recovery. Member-
 
 ## 2-stage health check
 
-Before assuming a member is stalled, run the cheap checks first: poll your own inbox (`cafleet message poll` — the member may have replied via a keystroke you missed) without touching its pane, then capture the member's pane (`cafleet member capture`, default `--lines 20`; bump `--lines` to show a member's full decision-prompt frame — the line count needed is a backend delta, see your overlay). The same poll→capture detection drives the supervision tick — see [`supervision.md`](supervision.md) § Stall Response.
+Before assuming a member is stalled, run the cheap checks first: poll your own inbox (`cafleet message poll` — the member may have replied via a keystroke you missed) without touching its pane, then capture the member's pane (`cafleet monitor capture`, default `--lines 20`; bump `--lines` to show a member's full decision-prompt frame — the line count needed is a backend delta, see your overlay). The same poll→capture detection drives the supervision tick — see [`supervision.md`](supervision.md) § Stall Response.
 
 ## Routine monitoring via `member list`
 
@@ -21,14 +21,14 @@ Once you have a capture, classify the shape:
 | **Missed inline-preview keystroke** (the recipient's TUI was in a non-input state when the broker keystroked the message preview, so the preview landed elsewhere on the pane and was lost) | `cafleet member ping --member-id <member>` re-keystrokes the `cafleet message poll` command into the member's pane. The member runs `cafleet message poll` and drains whatever has accumulated. |
 | **REPL idle / mid tool-call** (capture shows a coding-agent prompt or active tool call, not a decision-prompt frame) | Wait. The member is doing work. Re-check `member list` next tick; only escalate if `idle` keeps growing AND there is unread inbox. |
 | **Pane crashed** (capture shows a shell prompt without the coding agent, or the pane is missing entirely) | `cafleet member delete` to tear down the registration cleanly, then `cafleet member create` to re-spawn. The previous member's `member_id` is gone — do not re-use it. |
-| **Truly wedged** (capture shows no progress over multiple ticks, no decision-prompt frame, no pending work explanation) | Soft escalation first — `cafleet member ping --member-id <member>` to nudge. If unchanged after 2–3 ticks, hard escalation: `cafleet member delete` then re-spawn. |
+| **Truly wedged** (capture shows no progress over multiple ticks, no decision-prompt frame, no pending work explanation) | Soft escalation first — `cafleet member ping --member-id <member>`. If unchanged after 2–3 ticks, hard escalation: `cafleet member delete` then re-spawn. |
 
 ## Recovering from a tmux disconnect
 
-If `cafleet member capture` exits with a multiplexer subprocess error (the multiplexer server is unreachable):
+If `cafleet monitor capture` exits with a multiplexer subprocess error (the multiplexer server is unreachable):
 
 1. Run `cafleet doctor` to confirm your own pane's multiplexer state. If it fails to resolve a backend, you are no longer attached to a supported multiplexer session and recovery is impossible from this shell — re-attach (on tmux, `tmux attach -t <session>`) and re-run.
-2. If `cafleet doctor` succeeds but `cafleet member capture` still fails, the target pane is gone (the multiplexer server killed it, or the user closed it manually). Treat as "Pane crashed" above — `cafleet member delete` then re-spawn.
+2. If `cafleet doctor` succeeds but `cafleet monitor capture` still fails, the target pane is gone (the multiplexer server killed it, or the user closed it manually). Treat as "Pane crashed" above — `cafleet member delete` then re-spawn.
 3. Never invoke raw tmux directly — cafleet's primitives encapsulate the fleet-isolation boundary that raw tmux bypasses.
 
 ## Shutdown Protocol

@@ -1,6 +1,6 @@
 # CAFleet CLI — Fuller Command Catalog
 
-Read this file for the broker CLI surface beyond the core identity / poll / send / ack lifecycle in [`SKILL.md`](../SKILL.md): environment variables, global options, output flags, coding-agent backends, cancel / show / broadcast / roster introspection / doctor / fleet delete, the typical workflow, the message lifecycle, and error handling. Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-options.md`](../../../docs/spec/cli-options.md).
+Read this file for the broker CLI surface beyond the core identity / poll / send / ack lifecycle in [`SKILL.md`](../SKILL.md): environment variables, global options, output flags, coding-agent backends, cancel / show / broadcast / roster introspection / doctor / the monitor group / fleet delete, the typical workflow, the message lifecycle, and error handling. Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-options.md`](../../../docs/spec/cli-options.md).
 
 ## Environment variables
 
@@ -98,6 +98,20 @@ Print the resolved multiplexer backend and the calling pane's session/window/pan
 cafleet doctor
 cafleet doctor --json
 ```
+
+## Monitor group
+
+`cafleet monitor` is exactly the monitoring toolkit — the loop and its read
+primitive:
+
+```bash
+cafleet monitor start --fleet-id <fleet-id>          # the scheduler loop (launched by the monitoring member as a background task)
+cafleet monitor capture --fleet-id <fleet-id> --member-id <target-member-id> --lines 120 --no-ansi --json
+```
+
+`monitor start` prints `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` immediately after claiming the runtime row — the line behind the monitoring member's `ready: monitor live` handshake. `monitor capture` is the read-only pane capture (default `--lines 20`; `--json` adds `captured_at` and `content_sha256`) used by the Director's pre-ping capture gate and the monitoring member's wake routine; a pending-placement target is a hard error.
+
+`cafleet member ping` stays under `member` (a Director write primitive). Against a pending-placement member it skips the keystroke and exits 0 — the member polls its inbox on spawn — with the stable `skipped` JSON key on both success paths.
 
 ## Deregister
 

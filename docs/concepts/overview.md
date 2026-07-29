@@ -43,7 +43,7 @@ flowchart LR
     end
     Broker -. inline-preview keystroke .-> PaneA
     Broker -. inline-preview keystroke .-> PaneB
-    Monitor -. wake nudge .-> PaneB
+    Monitor -. wake trigger .-> PaneB
 ```
 
 ## CLI
@@ -82,8 +82,9 @@ per-member routes live at [WebUI API](../spec/webui-api.md).
 A Director supervises its team on a periodic tick supplied by `cafleet monitor`
 — a per-fleet loop the fleet's dedicated monitoring member runs as a background
 task. The monitor owns only the scheduling;
-the monitoring member classifies each due member and re-engages the Director when it
-finds a `stalled`/`finished` pane, and the Director owns the supervision actions.
+the monitoring member classifies each due member, pings a confirmed-quiet
+member once, and messages the Director when an event needs its attention; the
+Director owns the supervision actions.
 See [Monitoring](monitoring.md).
 
 ## Design-document orchestration
