@@ -46,10 +46,10 @@ _PER_SUBCOMMAND_BUDGETS: dict[tuple[str, ...], int] = {
     ("member", "create"): 21,
     ("member", "list"): 10,
     ("member", "show"): 10,
-    ("member", "capture"): 11,
     ("member", "ping"): 10,
     ("member", "prompt"): 10,
     ("member", "delete"): 10,
+    ("monitor", "capture"): 11,
 }
 
 

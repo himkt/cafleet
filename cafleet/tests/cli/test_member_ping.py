@@ -132,7 +132,7 @@ def test_ping_dispatch__text_output(runner, fleet_id, happy_path_member, poll_re
     assert "poll keystroke dispatched" in out
 
 
-def test_ping_dispatch__json_output_two_keys(
+def test_ping_dispatch__json_output_three_keys_with_skipped_false(
     runner, fleet_id, happy_path_member, poll_recorder
 ):
     result = runner.invoke(
@@ -149,9 +149,30 @@ def test_ping_dispatch__json_output_two_keys(
     )
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
-    assert set(data.keys()) == {"member_id", "pane_id"}
+    # stable schema: the skipped key is present on BOTH success paths
+    assert list(data) == ["member_id", "pane_id", "skipped"]
     assert data["member_id"] == MEMBER_ID
     assert data["pane_id"] == PANE_ID
+    assert data["skipped"] is False
+
+
+def test_ping_dispatch__quiet_output_bare_member_id(
+    runner, fleet_id, happy_path_member, poll_recorder
+):
+    result = runner.invoke(
+        cli,
+        [
+            "member",
+            "ping",
+            "--fleet-id",
+            str(fleet_id),
+            "--member-id",
+            str(MEMBER_ID),
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == str(MEMBER_ID)
 
 
 def test_send_failure__send_poll_trigger_returns_false_exits_one(
@@ -206,20 +227,71 @@ def test_authorization_boundary__placement_none_exits_one_with_exact_message(
     assert "cafleet member create" in out
 
 
-def test_authorization_boundary__pending_pane_exits_one_with_exact_message(
-    runner, fleet_id, monkeypatch
-):
+@pytest.fixture
+def pending_placement_member(monkeypatch):
+    """``broker.get_member`` returns a member whose pane is still pending."""
     monkeypatch.setattr(
         broker,
         "get_member",
         lambda *_a, **_kw: _member(placement=_placement(mux_pane_id=None)),
     )
+
+
+def test_pending_placement_skip__text_exit_zero_exact_message(
+    runner, fleet_id, pending_placement_member, poll_recorder
+):
     result = _invoke(runner, fleet_id)
-    assert result.exit_code == 1, result.output
-    out = result.output or ""
-    assert f"member {MEMBER_ID}" in out
-    assert "has no pane yet" in out
-    assert "pending placement" in out
+    assert result.exit_code == 0, result.output
+    assert (
+        f"Member {MEMBER_NAME} has no pane yet (pending placement) — "
+        f"ping skipped; it will poll its inbox on spawn." in result.output
+    )
+    # the skip path dispatches no keystroke
+    assert poll_recorder == []
+
+
+def test_pending_placement_skip__json_pane_null_skipped_true(
+    runner, fleet_id, pending_placement_member, poll_recorder
+):
+    result = runner.invoke(
+        cli,
+        [
+            "member",
+            "ping",
+            "--fleet-id",
+            str(fleet_id),
+            "--member-id",
+            str(MEMBER_ID),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert list(data) == ["member_id", "pane_id", "skipped"]
+    assert data["member_id"] == MEMBER_ID
+    assert data["pane_id"] is None
+    assert data["skipped"] is True
+    assert poll_recorder == []
+
+
+def test_pending_placement_skip__quiet_bare_member_id(
+    runner, fleet_id, pending_placement_member, poll_recorder
+):
+    result = runner.invoke(
+        cli,
+        [
+            "member",
+            "ping",
+            "--fleet-id",
+            str(fleet_id),
+            "--member-id",
+            str(MEMBER_ID),
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == str(MEMBER_ID)
+    assert poll_recorder == []
 
 
 def test_tmux_unavailable__tmux_not_available_exits_one(

@@ -1,22 +1,17 @@
-"""CLI tests for the ``cafleet monitor`` group (§7).
+"""CLI tests for the ``cafleet monitor`` group.
 
 ``monitor start`` runs the foreground loop in-process, so the tests mock
 ``loop.run_monitor_loop`` at the module boundary the CLI calls through
 (module-attribute access, matching the established ``broker.get_member``
 convention) — the loop never actually runs.
 
-The watched set is the root Director (180 s) + every ordinary member (720 s);
-the monitoring member is the unenrolled watcher, located by kind. ``monitor
-status`` lists the watched set with role ``director`` / ``member`` (never a
-``monitor`` row) and renders ``last_ping`` as a human age; ``monitor start``
-warns when no monitoring member is present; ``monitor config`` edits any
-enrolled member and reports not-enrolled for the watcher.
+The monitor group is exactly the monitoring toolkit: the loop (``start``) and
+its read primitive (``capture``). ``monitor start`` warns when no monitoring
+member is present but still runs the loop.
 """
 
 import json
-import os
 import sqlite3
-from datetime import UTC, datetime, timedelta
 
 import click
 import pytest
@@ -52,60 +47,6 @@ def fleet(fresh_db, _mock_tmux_for_fleet_create):
     return db_file, runner, json.loads(result.output)
 
 
-def _seed_runtime(
-    db_file, fleet_id: int, pid: int, *, tick: int = 5, last_tick_at: str | None = None
-) -> None:
-    now = datetime.now(UTC).isoformat()
-    last_tick = last_tick_at if last_tick_at is not None else now
-    conn = sqlite3.connect(str(db_file))
-    try:
-        conn.execute(
-            "INSERT INTO monitor_runtime "
-            "(fleet_id, pid, started_at, last_tick_at, tick_seconds) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (fleet_id, pid, now, last_tick, tick),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _monitor_config_row(db_file, member_id: int):
-    conn = sqlite3.connect(str(db_file))
-    try:
-        return conn.execute(
-            "SELECT interval_seconds, enabled FROM monitor_config WHERE member_id = ?",
-            (member_id,),
-        ).fetchone()
-    finally:
-        conn.close()
-
-
-def _insert_pending_message(
-    db_file, owner_member_id: int, from_member_id: int, status_timestamp: str
-) -> None:
-    """Insert an ``input_required`` unicast delivery with a controlled
-    ``status_timestamp`` so the oldest-pending age is deterministic."""
-    conn = sqlite3.connect(str(db_file))
-    try:
-        conn.execute(
-            "INSERT INTO messages (owner_member_id, from_member_id, to_member_id, "
-            "type, created_at, status_state, status_timestamp, origin_message_id, "
-            "text) VALUES (?, ?, ?, 'unicast', ?, 'input_required', ?, NULL, "
-            "'pending')",
-            (
-                owner_member_id,
-                from_member_id,
-                owner_member_id,
-                status_timestamp,
-                status_timestamp,
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
 def _soft_delete_fleet(db_file, fleet_id: int) -> None:
     conn = sqlite3.connect(str(db_file))
     try:
@@ -136,24 +77,6 @@ def _register_monitoring_member(
             "coding_agent": "claude",
         },
         kind="monitoring-member",
-    )
-
-
-def _register_ordinary_member(
-    sid: int, *, name: str = "alice", pane_id: str = "%9"
-) -> dict:
-    """Register a pane-bound ordinary member — a watched member enrolled @720."""
-    return broker.register_member(
-        fleet_id=sid,
-        name=name,
-        description="ordinary member",
-        placement={
-            "backend": "tmux",
-            "mux_session": "main",
-            "mux_window_id": "@3",
-            "mux_pane_id": pane_id,
-            "coding_agent": "claude",
-        },
     )
 
 
@@ -269,326 +192,13 @@ def test_monitor_start__no_warning_when_monitoring_member_present(fleet, monkeyp
     assert calls == [(sid, DEFAULT_TICK_SECONDS)]
 
 
-# --- monitor status --------------------------------------------------------
+# --- group shape -------------------------------------------------------------
 
 
-def test_monitor_status__running_text_shows_runtime_and_member_table(fleet):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    director_id = data["director"]["member_id"]
-    _register_monitoring_member(sid)  # the watcher — NOT a table row
-    member_id = _register_ordinary_member(sid)["member_id"]
-    _seed_runtime(db_file, sid, os.getpid())
-
-    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid)])
-
-    assert result.exit_code == 0, result.output
-    out = result.output
-    assert "running" in out.lower()
-    assert str(os.getpid()) in out
-    # the watched set (Director + member) appears with director / member roles
-    assert str(director_id) in out
-    assert str(member_id) in out
-    assert "alice" in out
-    assert "director" in out
-    assert "member" in out
-    # the monitoring member is the unenrolled watcher and is not a watched row
-    assert "watcher" not in out
+def test_monitor_group_has_exactly_start_and_capture():
+    """The monitor group is the loop and its read primitive — nothing else."""
+    assert set(cli.commands["monitor"].commands) == {"start", "capture"}
 
 
-def test_monitor_status__json_shape(fleet):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    director_id = data["director"]["member_id"]
-    watcher_id = _register_monitoring_member(sid)["member_id"]
-    member_id = _register_ordinary_member(sid)["member_id"]
-    _seed_runtime(db_file, sid, os.getpid())
-
-    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid), "--json"])
-
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    runtime = payload["runtime"]
-    assert runtime["running"] is True
-    assert runtime["pid"] == os.getpid()
-    for key in ("tick_seconds", "last_tick_at", "last_tick_age_seconds", "started_at"):
-        assert key in runtime
-
-    # the watched set is the Director + member; the watcher is not enrolled
-    members = {m["member_id"]: m for m in payload["members"]}
-    assert set(members) == {director_id, member_id}
-    assert watcher_id not in members
-
-    assert members[director_id]["role"] == "director"
-    assert members[director_id]["interval_seconds"] == 180
-    assert members[member_id]["role"] == "member"
-    assert members[member_id]["interval_seconds"] == 720
-    for m in members.values():
-        assert m["enabled"] is True
-        assert m["pending_count"] == 0
-        # never pinged → ISO is null and the derived age is null (parity field)
-        assert m["last_ping_at"] is None
-        assert m["last_ping_age_seconds"] is None
-        # no pending delivery → the oldest-pending pair is null too
-        assert m["oldest_pending_ts"] is None
-        assert m["oldest_pending_age_seconds"] is None
-        for key in ("name", "interval_seconds", "last_ping_at"):
-            assert key in m
-
-
-def test_monitor_status__not_running_when_no_runtime(fleet):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid), "--json"])
-
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.output)["runtime"]["running"] is False
-
-
-def test_monitor_status__labels_director_and_member_roles(fleet):
-    # the table labels the watched Director as ``director`` and ordinary members
-    # as ``member``; the monitoring member is the unenrolled watcher and never
-    # appears as a row (no ``monitor`` role).
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    director_id = data["director"]["member_id"]
-    watcher = _register_monitoring_member(sid)
-    member_id = _register_ordinary_member(sid)["member_id"]
-    _seed_runtime(db_file, sid, os.getpid())
-
-    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid), "--json"])
-    assert result.exit_code == 0, result.output
-    roles = {m["member_id"]: m["role"] for m in json.loads(result.output)["members"]}
-    assert roles[director_id] == "director"
-    assert roles[member_id] == "member"
-    assert watcher["member_id"] not in roles
-    assert "monitor" not in roles.values()
-
-
-def test_monitor_status__last_ping_age_rendered(fleet):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    member_id = _register_ordinary_member(sid)["member_id"]
-    _seed_runtime(db_file, sid, os.getpid())
-    # stamp the member's last_ping_at ~120 s in the past
-    pinged = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
-    broker.record_pings([member_id], pinged)
-
-    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid), "--json"])
-    assert result.exit_code == 0, result.output
-    members = {m["member_id"]: m for m in json.loads(result.output)["members"]}
-    assert members[member_id]["last_ping_at"] == pinged
-    age = members[member_id]["last_ping_age_seconds"]
-    assert isinstance(age, int)
-    assert 115 <= age <= 200  # ~120 s, generous bounds for test timing
-
-
-def test_monitor_status__json_oldest_pending_fields(fleet):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    director_id = data["director"]["member_id"]
-    member_id = _register_ordinary_member(sid)["member_id"]
-    _seed_runtime(db_file, sid, os.getpid())
-    # the member's oldest pending delivery is ~800 s old
-    pending = (datetime.now(UTC) - timedelta(seconds=800)).isoformat()
-    _insert_pending_message(db_file, member_id, director_id, pending)
-
-    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid), "--json"])
-    assert result.exit_code == 0, result.output
-    members = {m["member_id"]: m for m in json.loads(result.output)["members"]}
-
-    m = members[member_id]
-    assert m["pending_count"] == 1
-    assert m["oldest_pending_ts"] == pending
-    age = m["oldest_pending_age_seconds"]
-    assert isinstance(age, int)
-    assert 795 <= age <= 900  # ~800 s, generous bounds for test timing
-    # the Director has no pending delivery → both fields stay null
-    assert members[director_id]["oldest_pending_ts"] is None
-    assert members[director_id]["oldest_pending_age_seconds"] is None
-
-
-def test_monitor_status__text_renders_pending_age_not_iso(fleet):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    director_id = data["director"]["member_id"]
-    member_id = _register_ordinary_member(sid)["member_id"]
-    _seed_runtime(db_file, sid, os.getpid())
-    pending = (datetime.now(UTC) - timedelta(seconds=800)).isoformat()
-    _insert_pending_message(db_file, member_id, director_id, pending)
-
-    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid)])
-    assert result.exit_code == 0, result.output
-    # the unacked column shows a human age, not the raw ISO timestamp
-    assert "unacked" in result.output
-    assert pending not in result.output
-    assert "s ago" in result.output
-
-
-def test_monitor_status__text_renders_last_ping_as_age_not_iso(fleet):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    member_id = _register_ordinary_member(sid)["member_id"]
-    _seed_runtime(db_file, sid, os.getpid())
-    pinged = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
-    broker.record_pings([member_id], pinged)
-
-    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid)])
-    assert result.exit_code == 0, result.output
-    # the last-ping column shows a human age, not the raw ISO timestamp
-    assert pinged not in result.output
-
-
-def test_monitor_status__stale_row_reports_not_running_with_nulls(fleet):
-    # a stale heartbeat (beyond STALE_AFTER) reads as not-live: the process
-    # fields null out even though the row (with a real pid/started_at) exists
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    stale = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-    _seed_runtime(db_file, sid, os.getpid(), last_tick_at=stale)
-
-    result = runner.invoke(cli, ["monitor", "status", "--fleet-id", str(sid), "--json"])
-
-    assert result.exit_code == 0, result.output
-    runtime = json.loads(result.output)["runtime"]
-    assert runtime["running"] is False
-    assert runtime["pid"] is None
-    assert runtime["started_at"] is None
-    assert runtime["last_tick_at"] is None
-    assert runtime["tick_seconds"] == 5  # the row exists (stale, not absent)
-
-
-# --- monitor config --------------------------------------------------------
-
-
-def test_monitor_config__show(fleet):
-    # the watched Director is enrolled @180
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    director_id = data["director"]["member_id"]
-    result = runner.invoke(
-        cli,
-        ["monitor", "config", "--fleet-id", str(sid), "--member-id", str(director_id)],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "180" in result.output  # the Director's default interval
-
-
-def test_monitor_config__edits_director_interval(fleet):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    director_id = data["director"]["member_id"]
-    result = runner.invoke(
-        cli,
-        [
-            "monitor",
-            "config",
-            "--fleet-id",
-            str(sid),
-            "--member-id",
-            str(director_id),
-            "--interval",
-            "90",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert _monitor_config_row(db_file, director_id)[0] == 90
-
-
-def test_monitor_config__edits_member_interval(fleet):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    member_id = _register_ordinary_member(sid)["member_id"]
-    result = runner.invoke(
-        cli,
-        [
-            "monitor",
-            "config",
-            "--fleet-id",
-            str(sid),
-            "--member-id",
-            str(member_id),
-            "--interval",
-            "300",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert _monitor_config_row(db_file, member_id)[0] == 300
-
-
-def test_monitor_config__disable_then_enable(fleet):
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    member_id = _register_ordinary_member(sid)["member_id"]
-
-    disabled = runner.invoke(
-        cli,
-        [
-            "monitor",
-            "config",
-            "--fleet-id",
-            str(sid),
-            "--member-id",
-            str(member_id),
-            "--disable",
-        ],
-    )
-    assert disabled.exit_code == 0, disabled.output
-    assert _monitor_config_row(db_file, member_id)[1] == 0
-
-    enabled = runner.invoke(
-        cli,
-        [
-            "monitor",
-            "config",
-            "--fleet-id",
-            str(sid),
-            "--member-id",
-            str(member_id),
-            "--enable",
-        ],
-    )
-    assert enabled.exit_code == 0, enabled.output
-    assert _monitor_config_row(db_file, member_id)[1] == 1
-
-
-def test_monitor_config__mutual_exclusion_exits_two(fleet):
-    # the mutual-exclusion guard fires before any enrollment lookup, so the
-    # target member need not be enrolled
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    director_id = data["director"]["member_id"]
-    result = runner.invoke(
-        cli,
-        [
-            "monitor",
-            "config",
-            "--fleet-id",
-            str(sid),
-            "--member-id",
-            str(director_id),
-            "--enable",
-            "--disable",
-        ],
-    )
-
-    assert result.exit_code == 2, result.output
-    # a real usage error, not the group's "no such command" during the red phase
-    assert "no such command" not in result.output.lower()
-
-
-def test_monitor_config__monitoring_member_reports_not_enrolled(fleet):
-    # the monitoring member is the unenrolled watcher → config reports not-enrolled
-    db_file, runner, data = fleet
-    sid = data["fleet_id"]
-    watcher_id = _register_monitoring_member(sid)["member_id"]
-    result = runner.invoke(
-        cli,
-        ["monitor", "config", "--fleet-id", str(sid), "--member-id", str(watcher_id)],
-    )
-
-    assert result.exit_code == 1, result.output
-    assert "not enrolled" in result.output.lower()
+def test_member_group_no_longer_has_capture():
+    assert "capture" not in cli.commands["member"].commands
