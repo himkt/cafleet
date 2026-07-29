@@ -131,7 +131,7 @@ User → /clean-docs (one workflow)
 | Role | Responsibility |
 |---|---|
 | **Director** | Resolve task-scoped `${BASE}`; `cafleet fleet create`; spawn the monitor first and gate on `ready: monitor live`; partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply any edit a scanner's harness denies (verify the staged diff first); run verification; escalate observations to the user; tear down monitor-first. |
-| **monitor** | The mandatory dedicated monitoring member (canonical conditional idle-nudge). Reuses the `cafleet` skill's `roles/monitor.md`; the Director never runs `cafleet monitor start`. |
+| **monitor** | The mandatory dedicated monitoring member (canonical per-event escalation). Reuses the `cafleet` skill's `roles/monitor.md`; the Director never runs `cafleet monitor start`. |
 | **scanner** (×N) | For its slice: run the workflow's scan mechanics, propose actions per the workflow's rubric, record observations separately, write its partial artifact under `${BASE}`. After approval is relayed: apply its own slice's approved rows exactly as written, re-verify its diff, route harness-denied writes to the Director. |
 | **reviewer** | Validate the merged artifact **before** any edit, per the workflow's guarantees and guardrails. After apply: run the workflow verification (parameter table below). |
 

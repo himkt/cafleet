@@ -1,7 +1,7 @@
 # Monitor Ping Simplification
 
 **Status**: Approved
-**Progress**: 26/38 tasks complete
+**Progress**: 28/38 tasks complete
 **Last Updated**: 2026-07-29
 
 ## Overview
@@ -232,14 +232,10 @@ Generated via `mise //cafleet:makemigration "drop monitor stall episode state"` 
 - [x] `monitor/loop.py`: emit the startup line `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` after a successful runtime claim, before the first tick <!-- completed: 2026-07-30T10:15 -->
 - [x] `multiplexer/base.py`: rewrite `_monitor_wake_payload` to the exact §3 pure-trigger form (unchanged signature, entry rendering, sanitization, and validation) and update the `send_wake_trigger` docstrings; respell fixed-ping/wake-trigger "nudge" wording in source docstrings repo-wide (`multiplexer/tmux.py`, `broker/members.py`, `monitor/loop.py`) <!-- completed: 2026-07-30T10:15 -->
 
-  COMMENT(programmer): 4 stale tests pin the pre-0000154 wake payload and fail against the §3 pure trigger: `tests/multiplexer/test_tmux.py::test_send_wake_trigger__payload_is_single_line_monitor_nudge`, `::test_send_wake_trigger__singular_noun_and_director_named_when_not_due`, `::test_send_wake_trigger__payload_exact_text`, and `tests/multiplexer/test_herdr.py::test_send_wake_trigger__no_esc_single_pane_run`. They assert the old standing clause (`Director 332 (coding_agent=…)` without the colon) and verbatim protocol-body sentences (`Query monitor stall pending …`). My implementation matches §3 exactly — the committed `tests/multiplexer/test_monitor_wake_contract.py` exact-string pin is green. These two per-backend test files are not in the Step 7 enumeration; please route the Tester to update or delete their wake-payload tests (the no-esc and sanitizer mechanics they also cover are already re-pinned in the wake-contract module).
-
-  COMMENT(director): arbitration — test defect confirmed; the implementation matches §3 and the wake-contract pin is green. Tester: update the 4 stale test_tmux.py/test_herdr.py wake-payload tests to the pure-trigger form (or delete any that only duplicate the wake-contract module's coverage, keeping backend-mechanics coverage such as no-esc keystroke ordering).
-
 ### Step 6: WebUI
 
-- [ ] `webui/api.py`: confirm `GET /api/monitor` and `GET`/`PATCH /api/members/{id}/monitor` still function on the trimmed config dict; update the `monitor` response shape and any typed models <!-- completed: -->
-- [ ] Sweep `admin/src` for episode-field usage (none expected) and rebuild via `mise //admin:build` if the API types are generated <!-- completed: -->
+- [x] `webui/api.py`: confirm `GET /api/monitor` and `GET`/`PATCH /api/members/{id}/monitor` still function on the trimmed config dict; update the `monitor` response shape and any typed models — the projection already exposes exactly `{interval_seconds, last_ping_at, enabled}`; docstring updated, all 30 webui tests pass <!-- completed: 2026-07-30T10:25 -->
+- [x] Sweep `admin/src` for episode-field usage (none expected) and rebuild via `mise //admin:build` if the API types are generated — zero episode-field hits; `types.ts` is hand-written and already matches the trimmed shape, so no rebuild; `mise //admin:lint` green <!-- completed: 2026-07-30T10:25 -->
 
 ### Step 7: Tests and verification
 
@@ -251,6 +247,7 @@ Generated via `mise //cafleet:makemigration "drop monitor stall episode state"` 
 - [ ] Update `tests/webui/test_monitor_api.py` (trimmed `monitor` shape) and `tests/broker/test_monitor.py` (config-dict assertions lose the episode columns) <!-- completed: -->
 - [ ] Add CLI tests: ping skip in text/`--json`/`--quiet` (exit 0, `skipped` key both paths), placementless ping still errors, and the `monitor capture` contract (including the pending-placement hard error) <!-- completed: -->
 - [ ] Repo-wide vocabulary sweep per Success Criteria (rg over source, docs, skills, rules, tests) <!-- completed: -->
+
 - [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` <!-- completed: -->
 
 ---
