@@ -1,7 +1,7 @@
 # Monitor Ping Simplification
 
 **Status**: Approved
-**Progress**: 21/38 tasks complete
+**Progress**: 24/38 tasks complete
 **Last Updated**: 2026-07-29
 
 ## Overview
@@ -223,9 +223,9 @@ Generated via `mise //cafleet:makemigration "drop monitor stall episode state"` 
 
 ### Step 4: CLI
 
-- [ ] `cli/member.py`: implement the §1 ping skip (drop `_require_member_pane` from `member ping`; add the `skipped` key to both JSON paths; skip text line); narrow `_require_member_pane` docs/action set to capture/prompt; delete the `member capture` command <!-- completed: -->
-- [ ] `cli/monitor.py`: delete `status`, `config`, the `stall` group, and `report-batch`; add `monitor capture` (the moved implementation, contract unchanged) <!-- completed: -->
-- [ ] Update any internal callers/help text referencing the removed or moved commands (e.g. `doctor`, `member create` spawn scaffolding, `fleet delete` messages) found by the Step 7 sweep <!-- completed: -->
+- [x] `cli/member.py`: implement the §1 ping skip (drop `_require_member_pane` from `member ping`; add the `skipped` key to both JSON paths; skip text line); narrow `_require_member_pane` docs/action set to capture/prompt; delete the `member capture` command <!-- completed: 2026-07-30T09:55 -->
+- [x] `cli/monitor.py`: delete `status`, `config`, the `stall` group, and `report-batch`; add `monitor capture` (the moved implementation, contract unchanged) <!-- completed: 2026-07-30T09:55 -->
+- [x] Update any internal callers/help text referencing the removed or moved commands (e.g. `doctor`, `member create` spawn scaffolding, `fleet delete` messages) found by the Step 7 sweep — swept `src/`: the dead `format_monitor_status` / `format_monitor_config` / `_format_ping_age` formatters and their `output/__init__.py` exports removed; `monitor/loop.py` `should_ping` docstring respelled; the remaining `multiplexer/base.py` payload body is Step 5 scope <!-- completed: 2026-07-30T09:55 -->
 
 ### Step 5: Monitor loop and wake payload
 

@@ -1,9 +1,7 @@
 """``cafleet member`` — multiplexer-backed member commands (Director only)."""
 
 import contextlib
-import hashlib
 import os
-from datetime import UTC, datetime
 from typing import Literal, NoReturn, overload
 
 import click
@@ -32,6 +30,11 @@ def member():
 
 
 def _require_member_pane(placement: dict, member_id: int, action: str) -> str:
+    """Require a bound pane for the hard-error verbs (``capture``/``prompt``).
+
+    ``member ping`` does not use it — a pending placement takes ping's skip
+    path instead.
+    """
     pane_id = placement["mux_pane_id"]
     if pane_id is None:
         raise click.ClickException(
@@ -73,8 +76,9 @@ def _load_authorized_member(
     placement-missing error, unless the caller opts in via
     ``allow_missing_placement`` (``member show`` and ``member delete`` do —
     both resolve a placementless target successfully and receive
-    ``placement=None``). Pane-id presence is NOT checked here — delete
-    tolerates a pending placement while the pane verbs reject it.
+    ``placement=None``). Pane-id presence is NOT checked here — delete and
+    ping tolerate a pending placement (ping takes its skip path) while
+    capture/prompt reject it.
 
     Callers MUST use ``target["member_id"]``, since reassigning the
     ``member_id`` local param does not propagate to the caller.
@@ -469,68 +473,6 @@ def member_list(ctx, json_output):
         click.echo(output.format_member_list(rows))
 
 
-@member.command("capture")
-@fleet_id_option
-@member_id_option
-@click.option(
-    "--lines",
-    "lines",
-    type=int,
-    default=20,
-    show_default=True,
-    help="Lines to capture.",
-)
-@click.option(
-    "--ansi/--no-ansi",
-    default=False,
-    help="Emit raw ANSI instead of stripping it.",
-)
-@json_flag
-@click.pass_context
-def member_capture(ctx, member_id, lines, ansi, json_output):
-    """Capture the last N lines of a member pane's terminal buffer."""
-    fleet_id = ctx.obj["fleet_id"]
-
-    mux = ensure_multiplexer_or_die()
-
-    target, placement = _load_authorized_member(
-        fleet_id,
-        member_id,
-    )
-    member_id = target["member_id"]
-    pane_id = _require_member_pane(placement, member_id, "capture")
-
-    try:
-        content = mux.capture_pane(target_pane_id=pane_id, lines=lines)
-    except MultiplexerError as exc:
-        raise click.ClickException(f"capture failed: {exc}") from exc
-    captured_at = datetime.now(UTC).isoformat()
-
-    if not ansi:
-        content = output.strip_ansi(content)
-
-    if json_output:
-        click.echo(
-            output.format_json(
-                {
-                    "member_id": member_id,
-                    "pane_id": pane_id,
-                    "lines": lines,
-                    "content": content,
-                    "captured_at": captured_at,
-                    "content_sha256": hashlib.sha256(
-                        content.encode("utf-8")
-                    ).hexdigest(),
-                },
-            )
-        )
-    else:
-        # color=True preserves ANSI escape sequences on non-TTY sinks (e.g.
-        # CliRunner-captured stdout). Without it, click.echo would re-strip
-        # the escapes the operator just opted into via --ansi.
-        click.echo(content, nl=False, color=True if ansi else None)
-
-
 @member.command("prompt")
 @fleet_id_option
 @member_id_option
@@ -601,7 +543,29 @@ def member_ping(ctx, member_id, quiet, json_output):
         member_id,
     )
     member_id = target["member_id"]
-    pane_id = _require_member_pane(placement, member_id, "ping")
+    pane_id = placement["mux_pane_id"]
+
+    if pane_id is None:
+        # Pending placement takes the skip path: the member's inbox is intact
+        # and it polls it on spawn, so there is nothing a ping would add.
+        if json_output:
+            click.echo(
+                output.format_json(
+                    {
+                        "member_id": member_id,
+                        "pane_id": None,
+                        "skipped": True,
+                    },
+                )
+            )
+        elif quiet:
+            click.echo(str(member_id))
+        else:
+            click.echo(
+                f"Member {target['name']} has no pane yet (pending placement) "
+                f"— ping skipped; it will poll its inbox on spawn."
+            )
+        return
 
     try:
         ok = mux.send_poll_trigger(
@@ -623,6 +587,7 @@ def member_ping(ctx, member_id, quiet, json_output):
                 {
                     "member_id": member_id,
                     "pane_id": pane_id,
+                    "skipped": False,
                 },
             )
         )

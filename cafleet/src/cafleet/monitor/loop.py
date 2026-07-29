@@ -57,9 +57,9 @@ def should_ping(target: dict, now: datetime) -> bool:
     Director (180 s) or an ordinary member (720 s). The dedicated monitoring
     member is the unenrolled watcher and never appears here. A watched member is
     due once its interval has elapsed, regardless of ``pending_count`` (R2). The
-    policy is role-agnostic (``is_director`` is retained for ``monitor status``
-    labeling, not consulted here). Disabled members and dead/missing panes are
-    always skipped, and a not-yet-due member waits.
+    policy is role-agnostic (``is_director`` is retained for the wake-entry
+    role label, not consulted here). Disabled members and dead/missing panes
+    are always skipped, and a not-yet-due member waits.
     """
     if not target["enabled"]:
         return False
