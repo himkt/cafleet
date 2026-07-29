@@ -138,3 +138,20 @@ Moves a message from `input_required` to `completed`. `--message-id` required.
 ```bash
 cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --message-id <message-id>
 ```
+
+## Fixed monitoring-member ping exception
+
+Ordinary members never call `cafleet member ping`, `member prompt`, or any
+other pane-driving primitive. The dedicated monitoring member has one narrow
+exception: after two full-spacing, byte-identical quiet `stall_candidate`
+captures make the broker atomically return `action = ping`, it may invoke the
+existing fixed `member ping` once for that ordinary member's stall episode and
+must immediately record success or failure. The command accepts no arbitrary
+body and injects only `Esc` plus the target's `cafleet message poll`.
+
+The monitoring member never pings the Director or itself, never promotes
+affirmative/ambiguous `working`, and never acts from `unacked` alone. It reports
+durable escalations and `finished` observations only through the token-gated
+aggregate command; the Director retrieves the aggregate's full body, decides
+whether finished members still owe work, and ACKs it. This exception does not
+broaden ordinary-member authority.

@@ -42,6 +42,10 @@ subcommand rejects it with `No such option`.
 | `monitor start` | Run the per-fleet scheduler loop in-process (launch as a background task) | yes | none | [monitor start](#monitor-start) |
 | `monitor status` | Show monitor liveness and the per-member schedule | yes | none | [monitor status](#monitor-status) |
 | `monitor config` | Show or edit a member's monitor schedule | yes | `--member-id` | [monitor config](#monitor-config) |
+| `monitor stall observe` | Submit a typed capture observation to the durable stall state machine | yes | `--member-id` | [monitor stall observe](#monitor-stall-observe) |
+| `monitor stall ping-result` | Record the claimed fixed ping result | yes | `--member-id` | [monitor stall ping-result](#monitor-stall-ping-result) |
+| `monitor stall pending` | List durable pending stall escalations | yes | none | [monitor stall pending](#monitor-stall-pending) |
+| `monitor report-batch` | Consume a fresh Director gate and reconcile/create/preview one aggregate | yes | repeated `--finished-member-id` | [monitor report-batch](#monitor-report-batch) |
 
 ## Option Source Matrix
 
@@ -98,11 +102,15 @@ does not accept it.
 | `member delete` | A `Member deleted.` header plus `member_id:` / `pane_id:` lines, pane status `<pane_id> (killed)` | — | `{member_id, pane_status}` |
 | `member show` | The compact one-line row `<member_id> <name> <status>` | The labeled block with `kind`, `skills`, and the placement sub-block | The broker `get_member` dict, unchanged regardless of `--full` |
 | `member list` | One row per member; `0 members.` on an empty roster | — | One dict per row |
-| `member capture` | The captured content, with no trailing newline | — | `{member_id, pane_id, lines, content}` |
+| `member capture` | The captured content, byte-identical to the prior text surface | — | `{member_id, pane_id, lines, content, captured_at, content_sha256}` in that key order |
 | `member prompt` | `Sent prompt '<text>' to member <name> (<pane_id>).`, or `Sent shell prompt '<text>' …` with `--shell` | — | `{member_id, pane_id, text, shell}` |
 | `member ping` | `Pinged member <name> (<pane_id>) — poll keystroke dispatched.` | — | `{member_id, pane_id}` |
 | `monitor status` | `monitor: running (…)` or `monitor: stopped`, plus the schedule table | — | Keeps `last_ping_at` (ISO or `null`) and adds derived `*_age_seconds` fields |
 | `monitor config` | `member 5: interval 720s, enabled, last_ping <ts>` | — | Output as JSON |
+| `monitor stall observe` | `member <id>: <classification>, action <action>, episode <state>, reason <reason-or->, director gate <token-or->` | — | `{member_id, classification, action, episode_state, escalation_reason, director_gate_token}` |
+| `monitor stall ping-result` | `member <id>: episode <state>, reason <reason-or->` | — | `{member_id, episode_state, escalation_reason}` |
+| `monitor stall pending` | One line per member, or `(no pending stall escalations)` | — | `{members: [{member_id, name, escalation_reason}, ...]}` |
+| `monitor report-batch` | `monitor report batch: created <id-or->, open <id-or->, preview <id-or-> <outcome>, <n> escalated, <n> finished` | — | Ordered result ending in `created` and `preview_outcome` |
 | `doctor` | The `multiplexer:` and `assets:` blocks | — | Output as JSON |
 
 `setup`, `server`, and `monitor start` are absent by design — they stream
@@ -683,6 +691,13 @@ Per-member detail such as `description` and `registered_at` lives on
 
 Output shapes are in [Output shapes](#output-shapes).
 
+Text output remains byte-identical. JSON stamps `captured_at` from the local UTC
+clock at the capture read boundary and computes
+`content_sha256 = sha256(content.encode("utf-8"))` from the exact emitted
+`content`. `--no-ansi` hashes the ANSI-stripped, carriage-return-defragmented
+string; `--ansi` hashes the ANSI-preserving string. No normalization occurs
+after the selected mode, and capture content is never stored in SQLite.
+
 ### `member prompt` {#member-prompt}
 
 Director-only keystroke primitive with two forms. The plain form keystrokes
@@ -744,8 +759,8 @@ A keystroke non-delivery exits 1.
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 
-The per-fleet scheduler that wakes the monitoring member whenever a watched
-member is due. All three subcommands require `--fleet-id` and run behind the
+The per-fleet scheduler and its typed durable-state surface. Every monitor
+subcommand requires `--fleet-id` and runs behind the
 [stale-assets guard](#stale-assets-guard). The conceptual model is canonical
 on the [Monitoring](../concepts/monitoring.md) concepts page; there is no
 `monitor stop` — the loop terminates with the monitoring member's pane
@@ -808,6 +823,101 @@ The monitoring member is not enrolled and never shows in the table.
 With no edit flag, prints the current config; with an edit flag, applies and
 prints the new config. `last_ping` renders `-` when the member has never been
 pinged. Exits 1 for a not-in-fleet or not-enrolled member.
+
+Disabling clears durable stall dispatch cadence. A claimed-but-unrecorded ping
+becomes sticky `escalation_pending/ping_interrupted`; an existing pending
+escalation is preserved; other candidate/episode fields reset.
+
+### `monitor stall observe` {#monitor-stall-observe}
+
+Submits one typed capture observation. It never keystrokes a pane or inserts a
+message.
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--member-id` | yes | Observed member. |
+| `--classification` | yes | `awaiting_user`, `unknown`, `finished`, `working`, or `stall_candidate`; callers never submit `stalled`. |
+| `--captured-at` | paired | Timezone-aware UTC ISO timestamp returned by the same capture. |
+| `--capture-sha256` | paired | Exactly 64 lowercase hexadecimal characters from the same capture. |
+| `--stall-check` | no | Marks an ordinary observation as scheduler-authorized to seed/promote a candidate. |
+| `--director-gate` | no | Director-only no-ping mode; mutually exclusive with `--stall-check`. |
+
+A readable classification requires both capture fields. Loss-tolerant
+`unknown` omits both and reconciles a retained ordinary/Director row even when
+the pane disappeared after scan. Capture time cannot be in the future and must
+be strictly newer than the accepted candidate time to advance it.
+
+For an ordinary member, a first stall-check `stall_candidate` seeds a baseline
+and resolves `unknown`; a too-early/duplicate candidate is a no-op; a
+full-interval changed hash resolves `working`; a full-interval identical hash
+resolves `stalled` and atomically claims `nudge_claimed` with `action = ping`.
+Affirmative `working` is unconditionally non-actionable. Once nudged, the next
+strictly newer unchanged candidate queues
+`escalation_pending/unchanged_after_nudge`; changed/non-stalled state resets a
+non-pending episode. The dedicated monitoring member and the root Director are
+never ordinary ping targets.
+
+`--director-gate` accepts only the active enrolled root Director, invalidates
+any older gate at transaction start, and always returns `action = none`.
+Explicit `finished`, or two full-spacing identical Director candidates resolving
+`stalled`, returns a fresh random 64-hex token. Other classifications return no
+token. The raw token is never stored; its digest expires after 30 seconds.
+
+### `monitor stall ping-result` {#monitor-stall-ping-result}
+
+Exactly one of `--success` / `--failure` is required with `--member-id`.
+Success changes `nudge_claimed → nudged`; failure changes it to
+`escalation_pending/ping_failed`. The operation deliberately does not recheck
+pane liveness, so a result remains recordable after target death. Exact replay
+is idempotent, late success after lifecycle cleanup cannot erase
+`ping_interrupted`, contradictory outcomes fail, and the Director/monitoring
+member are rejected.
+
+### `monitor stall pending` {#monitor-stall-pending}
+
+Takes only `--fleet-id` and the shared `--json`. It lists every durable
+`escalation_pending` ordinary-member row in ascending member ID, including
+disabled or dead members absent from the due batch. Pending rows create no
+wake and remain sticky until committed into an aggregate.
+
+### `monitor report-batch` {#monitor-report-batch}
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--director-gate-token` | yes | Fresh 64-lowercase-hex token returned by the immediately preceding Director-gate observation. |
+| `--finished-member-id` | no | Repeatable ordinary-member ID; validated, deduplicated, and sorted. |
+
+The command accepts no text. It atomically validates and consumes the
+single-use gate, reconciles an older open message by ACK state, applies one-open
+backpressure, and—only when no open delivery survives—creates one aggregate
+from all pending escalations followed by this wake's finished IDs. A replayed,
+expired, mismatched, stale-after-restart, or concurrently consumed token exits
+1 without preview or mutation; malformed/missing tokens and malformed flag
+combinations exit 2.
+
+The fixed body begins `monitor report batch:`. Escalations precede finished
+entries and each group is sorted by member ID; names are single-line sanitized.
+Creating the message and moving included escalation rows to `escalated` occur
+in one transaction. A surviving open aggregate ignores new finished IDs and
+leaves newer escalations pending for a later safe wake.
+
+After commit, at most one inline preview is attempted. `pending` retries on the
+next safe normal wake; `awaiting_ack` retries only after one Director monitor
+interval; both reuse the **same message ID**. Preview success changes
+`pending → awaiting_ack`, not delivered. Only later ACK reconciliation sets
+`delivered`; `preview_outcome` is `awaiting_ack`, `failed`, or `none`.
+
+The preview may be truncated. The Director must use its envelope ID to retrieve
+the untruncated aggregate before action:
+
+```bash
+cafleet message show --fleet-id <fleet-id> \
+  --member-id <director-member-id> --message-id <message-id> --full
+```
+
+The Director deduplicates by message ID, processes every full-body entry, then
+ACKs the aggregate once. With a valid gate but no open/new entry, the result is
+`created = false` with null message IDs and `preview_outcome = none`.
 
 ## Error Messages
 

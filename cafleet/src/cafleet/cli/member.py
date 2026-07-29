@@ -1,7 +1,9 @@
 """``cafleet member`` — multiplexer-backed member commands (Director only)."""
 
 import contextlib
+import hashlib
 import os
+from datetime import UTC, datetime
 from typing import Literal, NoReturn, overload
 
 import click
@@ -502,6 +504,7 @@ def member_capture(ctx, member_id, lines, ansi, json_output):
         content = mux.capture_pane(target_pane_id=pane_id, lines=lines)
     except MultiplexerError as exc:
         raise click.ClickException(f"capture failed: {exc}") from exc
+    captured_at = datetime.now(UTC).isoformat()
 
     if not ansi:
         content = output.strip_ansi(content)
@@ -514,6 +517,10 @@ def member_capture(ctx, member_id, lines, ansi, json_output):
                     "pane_id": pane_id,
                     "lines": lines,
                     "content": content,
+                    "captured_at": captured_at,
+                    "content_sha256": hashlib.sha256(
+                        content.encode("utf-8")
+                    ).hexdigest(),
                 },
             )
         )

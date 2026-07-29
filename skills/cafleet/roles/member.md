@@ -57,4 +57,13 @@ What your harness denies is per-backend: on claude and codex, a deny-list reject
 
 ## Where the IDs come from
 
-Identity reaches you as literal labeled lines in your spawn prompt — `FLEET ID:` (your fleet), `YOUR MEMBER ID:` (your own id), and `DIRECTOR MEMBER ID:` — rendered by `cafleet member create`'s `str.format` substitution at spawn time. **Take those literal integers from the prompt and pass them explicitly on every call**: `cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id>`, `cafleet message send --fleet-id <fleet-id> --from-member-id <my-member-id> --to-member-id <director-member-id> --text "..."`. No environment variable supplies them. Do not ask the operator for them; if genuinely missing, let the cafleet call fail with its own CLI error. You do **not** invoke `cafleet member ping` / `cafleet member prompt` — those are Director-only. You poll your own inbox via `cafleet message poll`; if you missed an inline preview, your Director re-pokes you via `cafleet member ping` and the resulting poll keystroke lands in your pane.
+Identity reaches you as literal labeled lines in your spawn prompt — `FLEET ID:` (your fleet), `YOUR MEMBER ID:` (your own id), and `DIRECTOR MEMBER ID:` — rendered by `cafleet member create`'s `str.format` substitution at spawn time. **Take those literal integers from the prompt and pass them explicitly on every call**: `cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id>`, `cafleet message send --fleet-id <fleet-id> --from-member-id <my-member-id> --to-member-id <director-member-id> --text "..."`. No environment variable supplies them. Do not ask the operator for them; if genuinely missing, let the cafleet call fail with its own CLI error.
+
+An **ordinary** member must not invoke `cafleet member ping` or `cafleet member prompt`;
+those remain Director-only. The sole exception belongs to the
+dedicated monitoring member under its separate role contract: it may use the
+fixed, bodyless `member ping` only after the durable stall state machine returns
+`action = ping`. That exception does not grant ordinary members any additional
+authority. You poll your own inbox via `cafleet message poll`; if you missed an
+inline preview, the Director or that narrowly authorized monitoring routine
+re-pokes you via `cafleet member ping`.

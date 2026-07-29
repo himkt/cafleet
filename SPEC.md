@@ -310,6 +310,15 @@ The unified shapes:
 | `interval_seconds` | integer | DDL default 60; enrollment writes 180 (Director) / 720 (member) |
 | `last_ping_at` | optional string | |
 | `enabled` | boolean | stored INTEGER 0/1; exposed as boolean at the broker boundary |
+| `last_stall_check_at` | optional string | last successfully dispatched stall-check wake |
+| `last_stall_candidate_at` | optional string | validated UTC capture time paired with the hash |
+| `last_stall_capture_sha256` | optional string | lowercase 64-hex capture fingerprint |
+| `stall_episode_state` | string | `clear`, `nudge_claimed`, `nudged`, `escalation_pending`, or `escalated`; DDL default `clear` |
+| `stall_escalation_reason` | optional string | `ping_failed`, `ping_interrupted`, or `unchanged_after_nudge` only for pending/escalated |
+
+Candidate time and fingerprint are paired-null. Every non-`clear` episode has
+both. Clear/claimed/nudged require a null reason; pending/escalated require a
+non-null reason.
 
 **MonitorRuntime** (1:1 with Fleet; `fleet_id` is PK = FK, not autoincrement)
 
@@ -320,6 +329,31 @@ The unified shapes:
 | `started_at` | optional string | |
 | `last_tick_at` | optional string | |
 | `tick_seconds` | integer | DDL default 5 |
+
+**MonitorReportDelivery** (1:1 with an aggregate Message)
+
+| Field | Type | Notes |
+|---|---|---|
+| `message_id` | integer | PK, FK→messages, ON DELETE CASCADE |
+| `fleet_id` | integer | FK→fleets, ON DELETE RESTRICT |
+| `preview_state` | string | `pending`, `awaiting_ack`, or `delivered`; DDL default `pending` |
+| `attempt_count` | integer | non-negative; DDL default 0 |
+| `last_attempt_at` | optional string | null iff attempt_count is zero |
+| `delivered_at` | optional string | non-null exactly for `delivered` |
+
+A partial unique index on `fleet_id` for `pending`/`awaiting_ack` enforces one
+open aggregate per fleet. `awaiting_ack` requires at least one recorded attempt.
+
+**MonitorDirectorGate** (1:1 with Fleet)
+
+| Field | Type | Notes |
+|---|---|---|
+| `fleet_id` | integer | PK, FK→fleets, ON DELETE RESTRICT |
+| `director_member_id` | integer | FK→members, ON DELETE RESTRICT |
+| `token_sha256` | string | lowercase 64-hex digest; raw token never stored |
+| `classification` | string | `finished` or broker-resolved `stalled` |
+| `issued_at` | string | broker-clock UTC |
+| `expires_at` | string | exactly 30 seconds after issue |
 
 **AssetInstalls** (`coding_agent` TEXT PK, not autoincrement, not FK-linked)
 
@@ -391,7 +425,7 @@ contract error string.
 
 ### 6.1 Persistence & Schema
 
-**Scope:** the seven data models (§5.2), the connection factory, and the
+**Scope:** the nine data models (§5.2), the connection factory, and the
 Alembic-migrated SQLite schema. This module owns **no** CRUD/query logic and no
 HTTP surface; all reads/writes/joins live in the broker (§6.2). Schema
 management is detailed in §8; this section covers the connection factory, the
@@ -441,10 +475,8 @@ not a no-op. Both must run on every connection the reimplementation opens.
 #### Structural invariants
 
 - **AUTOINCREMENT on exactly three tables** — `fleets`, `members`, `messages` —
-  guaranteeing monotonically increasing ids that are never reused. The three 1:1
-  child tables (`member_placements`, `monitor_config`, `monitor_runtime`)
-  deliberately **do not** use it: each reuses its parent's id (`member_id` /
-  `fleet_id`) as both PK and FK.
+  guaranteeing monotonically increasing ids that are never reused. The 1:1
+  state tables deliberately do not use it; each reuses its parent's id as PK/FK.
 - **Create-order / forward-reference quirk.** `fleets.fleet_id` and
   `members.fleet_id` form a mutual reference. The initial migration creates
   the member table **first**, relying on SQLite tolerating a foreign key to a
@@ -458,6 +490,9 @@ not a no-op. Both must run on every connection the reimplementation opens.
   omitted from an INSERT (distinct from values the application writes
   explicitly): `monitor_config.interval_seconds` → `60`,
   `monitor_config.enabled` → `1` (stored as INTEGER 0/1, a boolean-as-int),
+  `monitor_config.stall_episode_state` → `"clear"`,
+  `monitor_report_delivery.preview_state` → `"pending"`,
+  `monitor_report_delivery.attempt_count` → `0`,
   `monitor_runtime.tick_seconds` → `5`. `member_placements.coding_agent`
   carries no DDL default — every writer passes an explicit value.
 - **No-FK message columns.** `messages.from_member_id`, `messages.to_member_id`, and
@@ -472,6 +507,10 @@ not a no-op. Both must run on every connection the reimplementation opens.
   persistence.
 - All timestamp columns are stored as ISO-8601 text (§5.1);
   `monitor_config.enabled` is stored as an integer 0/1 used as a boolean.
+- Monitor checks enforce the §5.2 episode/reason and paired-candidate
+  invariants, lowercase 64-hex fingerprints/tokens, valid delivery
+  attempt/timestamp state, one open aggregate per fleet, and
+  `monitor_director_gate.expires_at > issued_at`.
 
 ### 6.2 Broker
 
@@ -703,27 +742,103 @@ documented non-match, not an error mask.
   card kind** (not a monitor_config row — it is the unenrolled watcher); must be
   active in the fleet **and pane-bound** (a null pane is treated as absent).
   Returns `{member_id, name, pane_id}` or None.
-- **`get_monitor_config(fleet_id, member_id)`** — `{member_id, interval_seconds,
-  last_ping_at, enabled}` with `enabled` as a boolean; None if not enrolled / not
-  in fleet.
+- **`get_monitor_config(fleet_id, member_id)`** — public schedule fields plus
+  the five durable stall fields from §5.2, with `enabled` as a boolean; None if
+  not enrolled / not in fleet.
 - **`list_monitor_configs(fleet_id)`** — every enrolled member's config in the
   fleet, `enabled` as boolean.
 - **`update_monitor_config(fleet_id, member_id, interval_seconds=None,
   enabled=None)`** — if not enrolled → application error `member {member_id} is
   not enrolled in monitoring for fleet {fleet_id}.`. **Partial update** — only
-  the supplied (non-null) fields change (`enabled` stored as 0/1). Returns the
-  updated config.
+  supplied fields change (`enabled` stored as 0/1). Disabling always clears
+  `last_stall_check_at`; `nudge_claimed` becomes sticky
+  `escalation_pending/ping_interrupted`, pending state is preserved, and other
+  episode/candidate state clears. Disabling the Director deletes its gate.
 - **`record_pings(member_ids, when)`** — empty list → no-op (no transaction);
   else set `last_ping_at = when` for all listed configs.
 - **`list_monitor_targets(fleet_id)`** — one row per **active, enrolled** member
   (the watched set; the monitoring member is excluded by the monitor_config
-  join). Each row: `{member_id, name, is_director, pane_id, interval_seconds,
-  last_ping_at, enabled, pending_count, oldest_pending_ts}`, where
+  join). Each row: `{member_id, name, is_director, pane_id, coding_agent,
+  interval_seconds, last_ping_at, enabled, last_stall_check_at, pending_count,
+  oldest_pending_ts}`, where
   `pending_count` counts messages with `owner_member_id = member_id`,
   `status_state = "input_required"`, `type != "broadcast_summary"`, and
   `oldest_pending_ts` is `MIN(status_timestamp)` over the same predicate set
   (a second correlated scalar subquery; `None` when the member has no pending
   delivery).
+
+#### Monitor — durable stall episode and aggregate delivery
+
+`observe_stall_episode(...)` owns every episode transition. Readable ordinary
+observations require an active, enabled, enrolled ordinary member with a live
+placement plus paired validated `captured_at`/`content_sha256`. A no-capture
+`unknown` is loss-tolerant for a retained row: it converts `nudge_claimed` to
+sticky `escalation_pending/ping_interrupted`, preserves an existing pending
+reason, and otherwise clears the candidate/episode. The monitoring member is
+always rejected.
+
+Only typed `stall_candidate` on a scheduler-authorized `stall-check` can
+promote:
+
+1. no baseline → seed candidate time/hash and resolve `unknown`;
+2. duplicate/out-of-order or less than `monitor_stall_interval` elapsed →
+   resolve `unknown` without mutation;
+3. full-spacing changed hash → resolve `working` and replace the baseline;
+4. full-spacing identical hash → resolve `stalled`, atomically write
+   `nudge_claimed`, and return `action = ping`.
+
+Explicit or ambiguous `working` is always non-actionable and resets a
+non-pending episode regardless of hash equality. Once claimed/nudged, the next
+strictly newer unchanged candidate queues `escalation_pending` with
+`ping_interrupted`/`unchanged_after_nudge`; changed or higher-precedence state
+resets. Pending state is sticky until aggregate insertion. `escalated` never
+re-pings during unchanged content.
+
+Director-gate mode accepts only the active enrolled root Director, deletes any
+prior gate at transaction start, applies the same validated full-spacing
+candidate resolution, but permanently returns `action = none`. Resolved
+`finished` or `stalled` issues a random 32-byte raw token once, stores only its
+SHA-256 digest with the Director identity and broker-clock 30-second expiry, and
+returns the 64-hex raw encoding. Unsafe/unknown results issue none. No Director
+observation can claim an ordinary-member ping.
+
+`record_stall_ping_result(...)` accepts exactly one success/failure for a
+claimed ordinary episode without rechecking pane liveness. Success records
+`nudged`; failure records `escalation_pending/ping_failed`. Exact replay and
+late-success-after-interruption are idempotent; contradictory results fail.
+`list_pending_stall_escalations(...)` returns all pending ordinary rows in
+ascending member ID, including disabled/dead targets.
+
+`report_monitor_batch(...)` validates and consumes a fresh Director token in
+the same SQLite transaction that reconciles an older open delivery by ACK,
+selects pending rows, validates/deduplicates finished IDs, creates at most one
+aggregate message/delivery row, and transitions only included escalations to
+`escalated`. Token consumption rolls back on later validation/insertion error
+and is single-use under concurrency. Missing/malformed token is usage-class;
+expired, mismatched, replayed, wrong-Director, or already-consumed token is
+application-class with no preview/state mutation.
+
+One-open backpressure is strict: a surviving `pending`/`awaiting_ack` aggregate
+causes no new message, leaves escalations pending, and ignores ephemeral
+finished IDs. Without an open delivery, escalation entries precede finished
+entries, groups sort by member ID, and sanitized names cannot inject a line.
+The fixed message begins `monitor report batch:`.
+
+After commit, at most one `send_inline_preview` occurs. Known success moves
+`pending → awaiting_ack`; known failure increments/stamps the attempt while
+retaining the open state. Only later message ACK reconciliation records
+`delivered`. Pending failure retries on the next safe normal wake;
+`awaiting_ack` retries after a full Director interval; every retry uses the
+same message ID. The result keys in order are `created_message_id`,
+`open_message_id`, `preview_message_id`, `escalated_member_ids`,
+`finished_member_ids`, `created`, `preview_outcome`.
+
+Lifecycle cleanup batches placement-pending/dead rows before due filtering:
+clear dispatch/candidate/non-pending episode state, convert `nudge_claimed` to
+sticky interruption escalation, preserve pending reason, and delete a Director
+gate. Re-enable/live rebind reseeds from a first candidate. Soft deregistration
+explicitly deletes the member's monitor row; fleet teardown explicitly deletes
+delivery and gate rows.
 
 #### Monitor — runtime claim / heartbeat / clear + liveness
 
@@ -770,15 +885,18 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
 - **`delete_fleet_monitor_rows(session, fleet_id)`** /
   **`delete_member_monitor_row(session, member_id)`** (in caller's transaction) —
   in-transaction cascade deletes: the fleet variant deletes the fleet's
-  monitor_config rows (by fleet membership) and its monitor_runtime row; the
-  member variant deletes the single member's monitor_config row.
+  monitor_config rows (by fleet membership), monitor runtime, report-delivery,
+  and Director-gate rows; the member variant explicitly deletes the single
+  member's monitor_config row. Director deregistration/replacement separately
+  deletes its gate.
 
 #### Soft-delete + cascade summary
 
 - Members and fleets are **never row-deleted** — they flip to
   `status="deregistered"` / `deleted_at` set.
-- Placements and monitor rows (monitor_config, monitor_runtime) **are
-  hard-deleted** on cascade.
+- Placements and monitor rows (`monitor_config`, `monitor_runtime`,
+  `monitor_report_delivery`, `monitor_director_gate`) are hard-deleted by their
+  explicit lifecycle owners (with delivery additionally message-FK-cascaded).
 - **Messages are never deleted** — audit history is permanent.
 - Deregistered members remain visible via `verify_member_fleet`,
   `get_member_names` (both status-agnostic), and
@@ -1207,9 +1325,15 @@ shown in help), `--ansi` /
 `--no-ansi` (boolean pair, default `false`).
 Ensure tmux, load the member, require a pane (`capture`). Capture the last N lines
 (a tmux error → application error `capture failed: <error>`). When `--ansi` is
-not set, strip ANSI. JSON: `{member_id, pane_id, lines, content}`; text
+not set, strip ANSI. JSON begins `{member_id, pane_id, lines, content, ...}`; text
 emits the content with no trailing newline, **preserving ANSI even on a non-TTY
 sink** when `--ansi` is set.
+
+JSON adds `captured_at`, stamped from local UTC at the capture read boundary,
+and `content_sha256 = sha256(content.encode("utf-8"))`, in key order after
+`content`. The hash is mode-exact: no-ANSI hashes the stripped,
+carriage-return-defragmented emitted string; ANSI hashes the preserving emitted
+string. Text output stays byte-identical. Capture content is not stored.
 
 #### `member prompt`
 
@@ -1268,6 +1392,38 @@ A shared `_require_live_fleet` guard fetches the fleet; missing or soft-deleted
   exclusive.`. When both `--interval` and the enabled value are unset (read-only
   mode), fetch the config; not enrolled → application error `member <member_id>
   is not enrolled in monitoring for fleet <fleet_id>.`. Else update.
+- **stall observe** — `--member-id`, typed `--classification`
+  (`awaiting_user|unknown|finished|working|stall_candidate`), paired
+  `--captured-at`/`--capture-sha256`, and mutually exclusive optional
+  `--stall-check`/`--director-gate`. Readable observations require the pair;
+  loss-tolerant unknown omits it. JSON key order: `member_id`,
+  `classification`, `action`, `episode_state`, `escalation_reason`,
+  `director_gate_token`. Text:
+  `member <id>: <classification>, action <action>, episode <state>, reason
+  <reason-or->, director gate <token-or->`.
+- **stall ping-result** — `--member-id` plus exactly one
+  `--success|--failure`. JSON: `member_id`, `episode_state`,
+  `escalation_reason`; text:
+  `member <id>: episode <state>, reason <reason-or->`.
+- **stall pending** — stable ascending pending-member listing. JSON top-level
+  `members`, with each row `member_id`, `name`, `escalation_reason`; empty text
+  `(no pending stall escalations)`.
+- **report-batch** — required `--director-gate-token` and repeatable
+  `--finished-member-id`; accepts no arbitrary body. It consumes the fresh
+  single-use token, enforces one-open backpressure/ACK-only completion, and
+  records at most one same-message-ID preview outcome. JSON keys:
+  `created_message_id`, `open_message_id`, `preview_message_id`,
+  `escalated_member_ids`, `finished_member_ids`, `created`,
+  `preview_outcome`; text:
+  `monitor report batch: created <id-or->, open <id-or->, preview <id-or->
+  <awaiting_ack|failed|none>, <n> escalated, <n> finished`.
+
+The monitoring member calls `monitor stall pending` before ordinary
+observations, records every claimed ping result, performs an authoritative final
+Director `--director-gate` observation, then immediately calls
+`monitor report-batch` with no intervening command. Aggregate previews are
+notifications: the Director retrieves the message ID via `message show --full`,
+processes the untruncated body, deduplicates by ID, then ACKs once.
 
 #### `server`
 
@@ -1740,20 +1896,32 @@ Director's `MultiplexerContext` and passes it directly.
   best-effort. tmux missing → `false`; payload `cafleet message poll --fleet-id
   <fleet_id> --member-id <member_id>`; literal-then-Enter, `timeout=5`s,
   **Esc-first=YES**, any error → `false`. Used only by `member ping`.
-- **`send_wake_trigger(*, target_pane_id, due_members, director_member_id) ->
-  bool`** — best-effort; the **sole** keystroke the monitor loop fires. Each due
-  entry has `member_id`, `name`, `is_director`, `wake_reasons` (an ordered, deduped
-  `list[str]` drawn from `{"interval", "status:done", "stall-check", "unacked"}`). tmux missing
-  → `false`; `noun = "member"` if one due else `"members"`; build `due_list` by joining
-  with `", "`, each `<"director" if is_director else "member"> <member_id> (<sanitized
-  name>) [<wake_reasons joined by ",">]`; single-line payload (note the em-dash,
-  `{N}` = count):
-  ```
-  [monitor] wake: {N} {noun} due — {due_list}. Capture each named pane read-only, with the Director pane ({director_member_id}) always inspected. From capture content only, classify each pane in this precedence order: awaiting_user, unknown, finished, stalled, working. For a member tagged stall-check, compare its capture against your previous stall-check capture of that pane, then keep the new capture as that pane's baseline; with no previous stall-check capture, classify unknown. For a member tagged unacked, its oldest un-acked delivery has waited at least one full interval: report it to the Director unless its pane classifies awaiting_user or unknown — including working panes. Never re-engage a pane classified awaiting_user: when the Director is awaiting_user, send nothing this wake, whatever the other panes show. Otherwise re-engage the Director via cafleet message send when a due member is stalled or finished, when an unacked-tagged member is reportable per its rule above, or the Director is finished with un-acked work.
-  ```
-  literal-then-Enter, `timeout=5`s, **Esc-first=NO** (an Esc would self-interrupt
-  the monitoring member); any error → `false`. The payload carries no backtick, no
-  command-substitution sequence, and no pipe.
+- **`send_wake_trigger(*, target_pane_id, due_members, director) -> bool`** —
+  best-effort; the **sole** keystroke the monitor loop fires. Each due entry has
+  `member_id`, `name`, `is_director`, validated `coding_agent`, and ordered
+  deduped `wake_reasons`; the Director descriptor has `member_id` and
+  `coding_agent`. Names and agent values pass the single-line sanitizer.
+  Render each entry as `<role> <id> (<name>; coding_agent=<agent>)
+  [<reasons>]`.
+
+  The tmux/herdr payload is byte-identical and pins the full routine: capture
+  every named pane plus the Director at `--lines 120 --no-ansi --json`; select
+  target overlays from `coding_agent=`; treat `unacked` only as annotation;
+  distinguish affirmative/ambiguous `working` from quiet `stall_candidate`;
+  query `monitor stall pending` before ordinary observations; submit capture
+  time/hash to durable `monitor stall observe`; invoke `cafleet member ping`
+  only for atomically claimed `action = ping`, then record `ping-result`; retain
+  sticky pending/lifecycle/restart behavior; collect finished IDs; re-capture
+  the Director last and submit `--director-gate`; only `finished` or
+  full-spacing resolved `stalled` returns a token; immediately call
+  `monitor report-batch` once with no intervening command; allow no second
+  preview, task text, or other ordinary action; require same-message-ID
+  aggregate recovery and Director `message show --full` consumption; keep
+  finished-work judgment with only the Director.
+
+  The nudge is literal-then-Enter with `timeout=5`s and **Esc-first=NO**; any
+  error returns false. It contains no backtick, command-substitution sequence,
+  or pipe.
 - **`send_inline_preview(*, target_pane_id, message_id, sender_id, ts, text) ->
   bool`** — best-effort; the broker's inline-preview path (the broker truncates
   `text` first). tmux missing → `false`; cosmetic CR/LF strip on `text`
@@ -1841,10 +2009,11 @@ tmux error only when **both** `ignore_missing` is true **and** the message text
 failure re-raises even under `ignore_missing`. Whatever error shape a port uses
 MUST keep the message/stderr text inspectable for this substring match.
 
-#### `_sanitize_wake_name` — payload contract
+#### Wake-field sanitizer — payload contract
 
-Applied to each user-controlled member name before interpolation into the
-`send_wake_trigger` payload. Replacement chain, **order matters**: `\r\n` → `⏎`
+Applied to each member name and `coding_agent` value before interpolation into
+the `send_wake_trigger` payload. An absent/unregistered coding agent aborts the
+wake without cadence commit. Replacement chain, **order matters**: `\r\n` → `⏎`
 (U+23CE); `\n` → `⏎`; `\r` → `⏎`; `\t` → `⏎`; `` ` `` → `ˋ` (U+02CB); `$(` →
 `$﹙` (`$` followed by U+FE59). CR/LF/tab → U+23CE preserves the single-line
 guarantee; backtick → U+02CB and `$(` → `$`+U+FE59 preserve the no-backtick /
@@ -1989,7 +2158,8 @@ false on the tmux backend). The monitor loop consumes this capability (§6.6).
 **Scope:** the in-process supervision scheduler. A coding agent launches
 `run_monitor_loop` as a background task; it keeps a fleet's dedicated
 *monitoring member* periodically woken so the watcher re-inspects the Director
-and ordinary members. The module owns the OS-facing half — the pure due-check,
+and ordinary members. Every fixed tick performs one scan and at most one synchronized wake;
+`unacked` is annotation-only. The module owns the OS-facing half — the pure due-check,
 one scan pass, the foreground driver with signal handling and runtime-row
 cleanup, the scan-cadence constant, and the re-export of the four policy
 tunables. It performs no DB internals (the broker's) and no multiplexer
@@ -2060,24 +2230,14 @@ One scan pass, steps in order:
    `interval` wake-reason. Each due target carries `wake_reasons: list[str]`,
    ordered and deduped, drawn from `{"interval", "status:done", "stall-check",
    "unacked"}`:
-   - **Stall-check trigger.** When `monitor_stall_interval > 0`, additionally flag
-     each **enabled** watched live member that is stall-check due — its
-     `_last_stall_check_at` entry absent (first tick) or `now -
-     _last_stall_check_at[id] ≥ monitor_stall_interval` — unioning it into the due
-     set with a `stall-check` reason (see § *Stall-detection cadence* below). When
-     `monitor_stall_interval == 0` this branch is skipped and no `stall-check`
-     reason is ever emitted.
-   - **Unacked-delivery trigger.** Additionally flag each **enabled** watched live
-     member whose oldest un-acked delivery is stale — its scan row's
-     `oldest_pending_ts` is non-null and `now − oldest_pending_ts ≥
-     interval_seconds` (the member's own interval, read from the same row) — and
-     whose re-fire gate passes — its `_last_unacked_wake_at` entry is absent, or
-     `now − _last_unacked_wake_at[id] ≥ interval_seconds` — unioning it into the
-     due set with an `unacked` reason (see § *Unacked-delivery due trigger*
-     below). This trigger runs after the stall-check trigger and before the
-     native trigger, so a multi-reason member's `wake_reasons` order is
-     `interval`, `stall-check`, `unacked` (the native trigger below only appends
-     fresh targets).
+   - **Lifecycle reconciliation first.** Batch-clear disabled,
+     placement-pending, and dead rows before due filtering. Convert a durable
+     claim to sticky interruption escalation, preserve pending state, and
+     clear other episode/candidate state. Pending escalation never creates a
+     due row.
+   - **Stall-check trigger.** When `monitor_stall_interval > 0`, union each
+     enabled live row whose persisted `last_stall_check_at` is null or a full
+     interval old. Zero disables this branch and direct monitor nudges.
    - **Native `done` trigger (`AgentStateAware` backend, herdr only).** Additionally
      point-read each **enabled** watched live member's `agent_status`, and union into
      the due set any member whose status **transitioned into** `done` since the loop's
@@ -2085,6 +2245,10 @@ One scan pass, steps in order:
      `status:done` reason. A transition into `blocked` is recorded but **never** flags
      a wake. On a non-`AgentStateAware` backend (tmux) this branch is skipped
      entirely, so members come due by interval and stall-check only.
+   - **Unacked annotation last.** Iterate only rows already in the due set.
+     Append `unacked` when `oldest_pending_ts` is at least that member's
+     interval old. It never adds a row; representative order is
+     `[interval,stall-check,status:done,unacked]`.
 6. **Wake the watcher iff due and watcher live.** If the due list is non-empty
    **and** the watcher is present **and** its `pane_id` is in the live set: call
    the multiplexer's wake trigger against the watcher's own pane (the loop's
@@ -2093,14 +2257,11 @@ One scan pass, steps in order:
    - If `woke` is true:
      - call the broker's `record_pings` with `now-as-ISO` and **only** the due
        members whose `wake_reasons` include `interval` or `status:done` (a
-       stall-check-only or unacked-only member is **excluded**, keeping the ping
-       cadence and the stall/unacked cadences independent), advancing their
+       stall-check-only member is excluded), advancing their
        `last_ping_at` **only** on a
        successful wake, so a just-flagged member is not due again next tick;
-     - commit `_last_stall_check_at[id] = now` for **every** due member whose reasons
-       include `stall-check`;
-     - commit `_last_unacked_wake_at[id] = now` for **every** due member whose
-       reasons include `unacked`;
+     - persist `last_stall_check_at = now` for every due member tagged
+       `stall-check`;
      - emit one stdout heartbeat line per due member, appending that member's joined
        `wake_reasons` as a ` [<reasons joined by ",">]` suffix before ` -> wake
        monitor`, with this **exact** format:
@@ -2110,16 +2271,16 @@ One scan pass, steps in order:
        `name` is emitted **raw** (sanitization applies only to the keystroke
        payload). The only native-status reason that can appear is `status:done`,
        since a `blocked` transition never flags a wake.
-   - If `woke` is false: do **not** record pings, do **not** commit
-     `_last_stall_check_at` or `_last_unacked_wake_at`, and do **not** echo — the
-     due members stay flagged, so
+   - If `woke` is false: do not record pings, do not persist stall-check
+     dispatch timestamps, and do not echo — the due members stay flagged, so
      the next tick retries (no wake-storm, no silent skip).
    - No live watcher to wake: nothing is recorded.
 7. Return `CONTINUE`.
 
-**Critical ordering invariant:** `record_pings`, the `_last_stall_check_at` and
-`_last_unacked_wake_at` commits, and the heartbeat echo are all gated behind
-`woke == true`. Preserve this gating exactly.
+**Critical ordering invariant:** `record_pings`, durable stall-dispatch commits,
+and the heartbeat echo are all gated behind `woke == true`. Preserve this
+gating exactly. Every target and Director descriptor carries validated
+`coding_agent`; an absent/unknown value fails closed without cadence commit.
 
 #### Native agent-state due trigger (herdr only)
 
@@ -2160,74 +2321,36 @@ only, with no knowledge of native status.
 #### Stall-detection cadence
 
 Independent of the interval trigger and driven by `settings.monitor_stall_interval`
-(`CAFLEET_MONITOR_STALL_INTERVAL`, default `240`; `0` disables). The loop owns a
-process-local `_last_stall_check_at: dict[member_id, datetime]`, **cleared per run**
-in `run_monitor_loop` (the same lifecycle as `_last_member_status`); it backs no DB
-column and is never persisted. On **both** backends:
+(`CAFLEET_MONITOR_STALL_INTERVAL`, default `240`; `0` disables). Dispatch
+cadence is durable in each row's `last_stall_check_at`. A null timestamp is due
+immediately; otherwise the full interval must elapse. Successful synchronized
+wake persists `now`; failure persists nothing. Immediate loop restart therefore
+honors the remaining interval.
 
-1. When `monitor_stall_interval == 0`, stall detection is disabled: no member is
-   ever stall-check flagged and no `stall-check` wake-reason is emitted, so an
-   in-flight pane never classifies `stalled`.
-2. Otherwise each tick, every **enabled** watched live member is **stall-check due**
-   when its `_last_stall_check_at` entry is **absent** — first-tick semantics,
-   mirroring `should_ping`'s `last_ping_at is None → due`; the dict is **not**
-   pre-seeded — or when `now - _last_stall_check_at[id] ≥ monitor_stall_interval`.
-   A stall-check-due member is unioned into the due set with a `stall-check` reason.
-3. `_last_stall_check_at[id]` is committed to `now` **only on a successful wake**
-   (`woke == True`), for every due member whose reasons include `stall-check` —
-   mirroring the `record_pings` gating, so a failed keystroke re-flags the member
-   next tick.
-4. A **stall-check-only** member (its `wake_reasons` are exactly `["stall-check"]`)
-   is **excluded** from `record_pings`, so its `last_ping_at` interval cadence is
-   untouched and the two cadences stay independent. On the first tick every watched
-   member is stall-check due; the watcher captures and classifies each pane `unknown`
-   (no prior stall-check capture exists) and takes no action, seeding each pane's
-   baseline one interval early — the wake itself is not extra, since the root
-   Director is interval-due on tick 1 regardless.
+Candidate confidence is a separate durable clock:
+`last_stall_candidate_at` is the validated capture boundary, not dispatch time.
+`observe` refuses duplicate/out-of-order/future timestamps and refuses hash
+promotion until a full interval elapsed between actual accepted captures.
+Delayed wake handling and direct duplicate calls cannot manufacture a confident
+stall. A stall-check-only member never advances `last_ping_at`.
 
-#### Unacked-delivery due trigger
+#### Unacked-delivery annotation
 
-Independent of the interval trigger, reusing each member's own
-`interval_seconds` as both the staleness threshold and the re-fire period — no
-new setting and no new `CAFLEET_*` env var (`CAFLEET_MONITOR_STALL_INTERVAL=0`
-disables only stall-check and does **not** affect `unacked`; `enabled = 0`
-silences the member from **all** triggers). The loop owns a process-local
-`_last_unacked_wake_at: dict[member_id, datetime]`, **cleared per run** in
-`run_monitor_loop` (the same lifecycle as `_last_member_status` and
-`_last_stall_check_at`); it backs no DB column and is never persisted. On
-**both** backends:
-
-1. Each tick, an **enabled** watched live member is **unacked-due** when its
-   scan row's `oldest_pending_ts` is non-null and `now − oldest_pending_ts ≥
-   interval_seconds` (the member's own interval, read from the same row) — a
-   delivery younger than one interval is never flagged, so the normal
-   deliver-then-ack cycle produces no wakes —
-2. **and** the re-fire gate passes: the member's `_last_unacked_wake_at` entry
-   is absent, or `now − _last_unacked_wake_at[id] ≥ interval_seconds`. An
-   unacked-due member is unioned into the due set with an `unacked` reason; the
-   member re-flags every `interval_seconds` while a stale un-acked delivery
-   remains and stops once every such delivery is acked.
-3. `_last_unacked_wake_at[id]` is committed to `now` **only on a successful
-   wake** (`woke == True`), for every due member whose reasons include
-   `unacked` — mirroring the `record_pings` gating, so a failed keystroke
-   re-flags the member next tick.
-4. An **unacked-only** member (its `wake_reasons` are exactly `["unacked"]`) is
-   **excluded** from `record_pings`, so its `last_ping_at` interval cadence is
-   untouched and the two cadences stay independent.
-5. The re-fire map is keyed by member, not by message: after an unacked wake, a
-   *new* stale episode beginning less than one interval later has its first
-   wake delayed until the gate reopens — bounded by one `interval_seconds`, and
-   accepted for the simplicity of one map entry per member.
+No independent unacked trigger, re-fire cadence, or process map exists. After
+interval, stall-check, and native done have built the synchronized due set, the
+loop visits only those rows and appends `unacked` last when
+`oldest_pending_ts` is non-null and at least `interval_seconds` old. A younger
+delivery is omitted; ACK removes the hint on later normal wakes. A stale
+delivery without another trigger yields no row and no wake.
 
 #### `run_monitor_loop(fleet_id, tick_seconds)`
 
 Foreground driver. The fleet's monitor-runtime row is the **only** coordination
 artifact (no PID file); identity throughout is the OS process id.
 
-1. Reset the shared stop flag to false; clear the process-local
-   `_last_member_status`, `_last_stall_check_at`, and `_last_unacked_wake_at`
-   dicts (so each run starts with no remembered native status, no stall-check
-   baseline, and no unacked re-fire gate); capture `pid = this-pid`.
+1. Reset the shared stop flag to false and clear only the native-status
+   transition cache; durable dispatch/episode state remains in SQLite. Capture
+   `pid = this-pid`.
 2. **Claim the slot** via the broker's atomic claim `(fleet_id, pid,
    tick_seconds, now-as-ISO)`. On refusal (returns false) → application error
    (exit 1) `monitor already running for fleet {fleet_id}`. There is no silent
@@ -2684,8 +2807,10 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
   driven by the monitor loop, independent of the `monitor_config.interval_seconds`
   ping intervals. A watched member is stall-check due every `monitor_stall_interval`
   seconds; `0` disables stall detection entirely (no `stall-check` wake-reason tag
-  is ever emitted) and does **not** affect the `unacked` trigger (§6.6). Tracked
-  process-locally in the running loop; no DB column.
+  is ever emitted and no monitor-direct ping can be claimed). Dispatch cadence
+  is persisted in `monitor_config.last_stall_check_at`; candidate confidence uses
+  the separate persisted capture timestamp. `unacked` remains only an annotation
+  on another normal trigger (§6.6).
 - **Default DB URL** expands `~` to `$HOME` **only for the factory default**; a
   user-supplied `CAFLEET_DATABASE_URL` is passed through verbatim (no `~`
   expansion, so a user value must already be absolute). Net default on home
@@ -2783,7 +2908,7 @@ for age math.
 
 ## 8. Database schema
 
-**Schema** = the seven application tables of §5.2 plus Alembic's
+**Schema** = the nine application tables of §5.2 plus Alembic's
 `alembic_version` bookkeeping table (a single-column `version_num` table holding
 one row: the current revision). The schema is created and evolved by a
 **chain of Alembic migrations** bundled inside the wheel; applying the chain in
@@ -2795,18 +2920,35 @@ AUTOINCREMENT, and the create-order quirk are in §6.1.
 - `idx_members_fleet_status` on `members(fleet_id, status)`
 - `idx_messages_owner_member_status_ts` on `messages(owner_member_id, status_timestamp)`
 - `idx_messages_from_member_status_ts` on `messages(from_member_id, status_timestamp)`
+- `idx_monitor_report_delivery_fleet_state_message` on
+  `monitor_report_delivery(fleet_id, preview_state, message_id)`
 
-**The migration chain.** Four linear revisions: the initial revision `0001`
+The partial unique index
+`uq_monitor_report_delivery_one_open_per_fleet` covers
+`monitor_report_delivery(fleet_id) WHERE preview_state IN
+('pending','awaiting_ack')`.
+
+**The migration chain.** Five linear revisions: the initial revision `0001`
 (no predecessor), `0002` (`down_revision` `0001`), which drops the
 `member_placements.coding_agent` DDL default via a batch `alter_column`,
 `0003` (`down_revision` `0002`), which renames the `skill_installs`
 table to `asset_installs` (create `asset_installs`, copy every row across,
 drop `skill_installs`; the `downgrade()` reverses the same three steps) —
-data-preserving in both directions; the columns are unchanged — and `0004`
-(`down_revision` `0003`; head), a data-only migration folding legacy
+data-preserving in both directions; the columns are unchanged — `0004`
+(`down_revision` `0003`), a data-only migration folding legacy
 `messages.status_state = 'canceled'` rows into `completed`
 (`status_timestamp` untouched; `downgrade()` is a no-op — the fold is not
-invertible).
+invertible), and head revision `0005_add_monitor_stall_episode_state.py`
+(`down_revision` `0004`).
+
+Revision `0005` batch-adds the five §5.2 `monitor_config` columns with server
+defaults that backfill existing rows to `(NULL, NULL, NULL, "clear", NULL)`,
+retains the `"clear"` default, installs all episode/candidate/reason checks,
+and creates `monitor_report_delivery` plus `monitor_director_gate` with their
+FKs/checks/indexes. Downgrade drops both new tables before removing the five
+columns. Fleet teardown explicitly deletes both tables; message deletion also
+cascades a delivery row, Director lifecycle removes its gate, and soft member
+deregistration retains the explicit monitor-config deletion.
 `0001` creates the full §5.2 schema in one step, in this order:
 
 1. `members` (+ `idx_members_fleet_status`) — created **first** because every
@@ -2890,7 +3032,7 @@ line (§6.3). The driver's engine is disposed when the command finishes
 
 ## 10. CLI command checklist
 
-The full command surface — **23 commands across 5 groups + 3 top-level commands**.
+The full command surface — **27 commands across 5 groups + 3 top-level commands**.
 Each must be reproduced with identical option names, types, defaults,
 required-ness, documented-vs-hidden status, output shapes, and exit codes. Every
 interaction flag is now **documented** (there are no hidden flags). Per-command
@@ -2935,6 +3077,10 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 - [ ] `cafleet monitor start` (`--tick`≥1=5)
 - [ ] `cafleet monitor status` (`--json`)
 - [ ] `cafleet monitor config` (`--member-id`, `--interval`≥1, `--enable`/`--disable`, `--json`)
+- [ ] `cafleet monitor stall observe` (`--member-id`, `--classification`, paired capture fields, `--stall-check`/`--director-gate`, `--json`)
+- [ ] `cafleet monitor stall ping-result` (`--member-id`, `--success`/`--failure`, `--json`)
+- [ ] `cafleet monitor stall pending` (`--json`)
+- [ ] `cafleet monitor report-batch` (`--director-gate-token`, repeatable `--finished-member-id`, `--json`)
 
 Every `member *`, `message *`, and `monitor *` command, plus `fleet
 show` and `fleet delete`, takes the **required `--fleet-id` option** (integer);

@@ -947,11 +947,12 @@ def test_send_wake_trigger__no_esc_single_pane_run(monkeypatch, herdr_run):
             {
                 "member_id": 332,
                 "name": "Director",
+                "coding_agent": "codex",
                 "is_director": True,
                 "wake_reasons": ["interval"],
             }
         ],
-        director_member_id=332,
+        director={"member_id": 332, "coding_agent": "codex"},
     )
     assert result is True
     # No leading esc — the monitoring member's own pane is never on a prompt.
@@ -962,8 +963,8 @@ def test_send_wake_trigger__no_esc_single_pane_run(monkeypatch, herdr_run):
     payload = argv[4]
     assert payload.startswith("[monitor] wake: 1 member due")
     # The due member is named ``<role> <id> (<name>) [<reasons>]``.
-    assert "director 332 (Director) [interval]" in payload
-    assert "(332)" in payload
+    assert "director 332 (Director; coding_agent=codex) [interval]" in payload
+    assert "Director 332 (coding_agent=codex)" in payload
 
 
 def test_send_wake_trigger__sanitizes_name_metacharacters(monkeypatch, herdr_run):
@@ -975,17 +976,19 @@ def test_send_wake_trigger__sanitizes_name_metacharacters(monkeypatch, herdr_run
             {
                 "member_id": 332,
                 "name": "Director",
+                "coding_agent": "opencode",
                 "is_director": True,
                 "wake_reasons": ["interval"],
             },
             {
                 "member_id": 336,
                 "name": "evil\r\nname\there`$(id)|whoami",
+                "coding_agent": "claude",
                 "is_director": False,
                 "wake_reasons": ["stall-check"],
             },
         ],
-        director_member_id=332,
+        director={"member_id": 332, "coding_agent": "opencode"},
     )
     payload = captured[0][4]
     assert payload.startswith("[monitor] wake: 2 members due")

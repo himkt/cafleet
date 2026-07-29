@@ -93,13 +93,42 @@ agent status per tick, which adds a fourth wake trigger:
 |---|---|---|
 | interval | yes | yes |
 | stall-check | yes | yes |
-| unacked | yes | yes |
+| unacked | annotation only on an already-due row | annotation only on an already-due row |
 | Native agent status transitions into `done` | no — the capability is absent | yes — the sole wake-on-status state (`_WAKE_ON_STATUS = ("done",)`) |
 
 A transition into `blocked` is recorded but never flags a wake: a blocked
 member is awaiting a user answer and must not be woken about. No DB column
 backs the native status; the last-seen state lives only in the running loop's
 memory. See [Monitoring](../concepts/monitoring.md).
+
+## Synchronized monitor wake and fixed direct nudge
+
+The monitor loop remains one fixed-cadence
+`scan → one synchronized watcher wake → sleep` path on both backends. It never
+calls `send_poll_trigger` and never keystrokes a watched pane. `unacked` is
+appended only as an annotation after interval, durable stall-check, and native
+done trigger construction; a stale delivery cannot create a due row.
+
+`send_wake_trigger` receives every due target plus the Director descriptor.
+Each rendered entry includes a sanitized name and sanitized
+`coding_agent=<claude|codex|opencode>` so the monitoring member applies the
+target's overlay cues. tmux and herdr emit a byte-identical policy payload that
+requires JSON capture at `--lines 120 --no-ansi`, durable
+`stall_candidate` observation, and broker claim before action.
+
+The monitoring member may reuse the existing `cafleet member ping` only when
+the broker returns `action = ping` for a confidently stalled ordinary member.
+The primitive is unchanged on both backends: `Esc`, a literal target
+`cafleet message poll`, then `Enter`. It cannot carry arbitrary text, cannot
+target the Director/monitoring member, and runs at most once per durable stall
+episode.
+
+At the end of the wake, a fresh safe Director-gate token authorizes one
+`monitor report-batch`. The command may invoke `send_inline_preview` at most
+once for the fleet's open aggregate. Failure/success recovery always retries
+the **same message ID**; one-open backpressure prevents a second aggregate
+preview in that wake. The Director retrieves the aggregate with
+`message show --full` before processing and ACK.
 
 ## Access mechanism
 
@@ -201,6 +230,11 @@ so Member → Director notifications work automatically. The recipient acks via
 `cafleet message ack --message-id <message_id>` once it has consumed the message.
 Body truncation in the preview (`…` at `CAFLEET_MAX_TEXT_LEN` codepoints) is
 documented in [CLI options](cli-options.md#message-body-truncation).
+
+Monitor aggregates use the same preview mechanism, but delivery state is
+durable: a successful preview remains `awaiting_ack`, an interval-stale retry
+reuses the same message ID, and only Director ACK completes it. The preview is
+notification only; its full body is retrieved by ID before action.
 
 ### The `Esc` safeguard {#esc-safeguard}
 

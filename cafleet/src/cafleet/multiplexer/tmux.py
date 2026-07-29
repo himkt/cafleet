@@ -7,6 +7,7 @@ import time
 from cafleet.multiplexer.base import (
     MultiplexerContext,
     MultiplexerError,
+    _monitor_wake_payload,
 )
 
 
@@ -123,32 +124,6 @@ def _best_effort_send(
     return True
 
 
-def _sanitize_wake_name(name: str) -> str:
-    """Neutralize the sequences in a user-controlled member name that would break
-    the wake nudge's guarantees, before the name is interpolated into the payload:
-
-    * CR/LF/tab → U+23CE (⏎), preserving the single-line guarantee.
-    * a backtick → U+02CB (ˋ), a ``$(`` command-substitution opener →
-      ``$`` + U+FE59 (﹙), and a pipe ``|`` → U+2502 (│), so the no-backtick /
-      no-``$(`` / no-``|`` payload guarantee holds for *any* name, not just the
-      static template — defense-in-depth for the agent-crash / mis-launch edge
-      where the monitoring pane could momentarily sit at a shell prompt.
-
-    Distinct from the CR/LF-only cosmetic strip ``send_inline_preview`` applies;
-    the ``$(`` replacement is non-empty so it cannot reintroduce ``$(`` by joining
-    leftover characters.
-    """
-    return (
-        name.replace("\r\n", "⏎")
-        .replace("\n", "⏎")
-        .replace("\r", "⏎")
-        .replace("\t", "⏎")
-        .replace("`", "ˋ")
-        .replace("$(", "$﹙")
-        .replace("|", "│")
-    )
-
-
 class TmuxMultiplexer:
     name = "tmux"
 
@@ -247,7 +222,11 @@ class TmuxMultiplexer:
         )
 
     def send_wake_trigger(
-        self, *, target_pane_id: str, due_members: list[dict], director_member_id: int
+        self,
+        *,
+        target_pane_id: str,
+        due_members: list[dict],
+        director: dict,
     ) -> bool:
         """Best-effort wake nudge for the monitoring member's pane.
 
@@ -266,30 +245,7 @@ class TmuxMultiplexer:
         pipe, so it is safe in the monitoring member's coding-agent input box. The
         payload is byte-identical to the herdr backend's.
         """
-        noun = "member" if len(due_members) == 1 else "members"
-        due_list = ", ".join(
-            f"{'director' if t['is_director'] else 'member'} {t['member_id']} "
-            f"({_sanitize_wake_name(t['name'])}) [{','.join(t['wake_reasons'])}]"
-            for t in due_members
-        )
-        payload = (
-            f"[monitor] wake: {len(due_members)} {noun} due — {due_list}. "
-            f"Capture each named pane read-only, with the Director pane "
-            f"({director_member_id}) always inspected. From capture content only, "
-            "classify each pane in this precedence order: awaiting_user, unknown, "
-            "finished, stalled, working. For a member tagged stall-check, compare "
-            "its capture against your previous stall-check capture of that pane, "
-            "then keep the new capture as that pane's baseline; with no previous "
-            "stall-check capture, classify unknown. For a member tagged unacked, "
-            "its oldest un-acked delivery has waited at least one full interval: "
-            "report it to the Director unless its pane classifies awaiting_user or "
-            "unknown — including working panes. Never re-engage a pane "
-            "classified awaiting_user: when the Director is awaiting_user, send "
-            "nothing this wake, whatever the other panes show. Otherwise re-engage "
-            "the Director via cafleet message send when a due member is stalled or "
-            "finished, when an unacked-tagged member is reportable per its rule "
-            "above, or the Director is finished with un-acked work."
-        )
+        payload = _monitor_wake_payload(due_members, director)
         return _best_effort_send(target_pane_id=target_pane_id, payload=payload)
 
     def send_inline_preview(

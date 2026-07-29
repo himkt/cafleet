@@ -48,7 +48,35 @@ Angle-bracket tokens are placeholders, **not** shell variables — substitute th
 
 ## Director-only primitives
 
-You own these; members do NOT call them: `member create`, `member delete`, `member list`, `member capture`, `member prompt`, `member ping` (plus the backend-specific decision-relay primitive your overlay names). `member prompt` carries an operator-controlled text body (both forms) and stays under `permissions.ask`; the rest have no operator-controlled body and are pre-approved (`permissions.allow`), so the Director can fire them during supervision without prompts. Full flags and behavior live in [`reference/director.md`](../reference/director.md); the bash-via-Director fallback that uses `member prompt --shell` + `member ping` is in [`reference/prompt-routing.md`](../reference/prompt-routing.md).
+You own these; ordinary members do NOT call them: `member create`, `member
+delete`, `member list`, `member capture`, `member prompt`, `member ping` (plus
+the backend-specific decision-relay primitive your overlay names). The sole
+exception is the dedicated monitoring member: after the broker atomically
+returns `action = ping` for a confidently stalled ordinary member, it may call
+the fixed, bodyless `member ping` once for that stall episode and record the
+result. The exception never permits `member prompt`, task text, a Director
+target, or another arbitrary member action. `member prompt` carries an
+operator-controlled text body (both forms) and stays under `permissions.ask`;
+the fixed primitives are pre-approved (`permissions.allow`). Full flags and
+behavior live in [`reference/director.md`](../reference/director.md); the
+bash-via-Director fallback that uses `member prompt --shell` + `member ping` is
+in [`reference/prompt-routing.md`](../reference/prompt-routing.md).
+
+## Monitoring aggregate previews
+
+A preview whose body starts `monitor report batch:` is a notification from the
+monitoring member, not the action source. It may be truncated and may be a
+same-message-ID retry. Before acting, retrieve that exact message ID:
+
+```bash
+cafleet message show --fleet-id <fleet-id> \
+  --member-id <director-member-id> --message-id <message-id> --full
+```
+
+Process every entry in the untruncated body, deduplicate work by message ID, and
+only then ACK that aggregate once. A `monitor finished:` entry remains
+informational: you alone decide from the assignment ledger whether the member
+has outstanding work. Never act or ACK from the inline preview alone.
 
 ## When you, as Director, want to run your own command
 

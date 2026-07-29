@@ -35,6 +35,7 @@ from collections.abc import Callable
 from cafleet.multiplexer.base import (
     MultiplexerContext,
     MultiplexerError,
+    _monitor_wake_payload,
 )
 
 _PANE_NOT_FOUND = "pane_not_found"
@@ -121,20 +122,6 @@ def _best_effort(steps: Callable[[], None]) -> bool:
     except HerdrError:
         return False
     return True
-
-
-def _sanitize_wake_name(name: str) -> str:
-    """Neutralize CR/LF/tab/backtick/``$(``/pipe in a name so the wake payload stays
-    single-line with no shell metacharacters (mirrors the tmux payload contract)."""
-    return (
-        name.replace("\r\n", "⏎")
-        .replace("\n", "⏎")
-        .replace("\r", "⏎")
-        .replace("\t", "⏎")
-        .replace("`", "ˋ")
-        .replace("$(", "$﹙")
-        .replace("|", "│")
-    )
 
 
 class HerdrMultiplexer:
@@ -320,32 +307,13 @@ class HerdrMultiplexer:
         return _best_effort(steps)
 
     def send_wake_trigger(
-        self, *, target_pane_id: str, due_members: list[dict], director_member_id: int
+        self,
+        *,
+        target_pane_id: str,
+        due_members: list[dict],
+        director: dict,
     ) -> bool:
-        noun = "member" if len(due_members) == 1 else "members"
-        due_list = ", ".join(
-            f"{'director' if t['is_director'] else 'member'} {t['member_id']} "
-            f"({_sanitize_wake_name(t['name'])}) [{','.join(t['wake_reasons'])}]"
-            for t in due_members
-        )
-        payload = (
-            f"[monitor] wake: {len(due_members)} {noun} due — {due_list}. "
-            f"Capture each named pane read-only, with the Director pane "
-            f"({director_member_id}) always inspected. From capture content only, "
-            "classify each pane in this precedence order: awaiting_user, unknown, "
-            "finished, stalled, working. For a member tagged stall-check, compare "
-            "its capture against your previous stall-check capture of that pane, "
-            "then keep the new capture as that pane's baseline; with no previous "
-            "stall-check capture, classify unknown. For a member tagged unacked, "
-            "its oldest un-acked delivery has waited at least one full interval: "
-            "report it to the Director unless its pane classifies awaiting_user or "
-            "unknown — including working panes. Never re-engage a pane "
-            "classified awaiting_user: when the Director is awaiting_user, send "
-            "nothing this wake, whatever the other panes show. Otherwise re-engage "
-            "the Director via cafleet message send when a due member is stalled or "
-            "finished, when an unacked-tagged member is reportable per its rule "
-            "above, or the Director is finished with un-acked work."
-        )
+        payload = _monitor_wake_payload(due_members, director)
 
         # No esc: the monitoring member's own pane is never on a permission prompt.
         def steps() -> None:

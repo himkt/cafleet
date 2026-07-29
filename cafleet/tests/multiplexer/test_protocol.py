@@ -7,6 +7,8 @@ when cmux lands, it adds its own parallel smoke test rather than
 parametrizing over both impls.
 """
 
+import inspect
+
 import pytest
 
 from cafleet.multiplexer import (
@@ -49,6 +51,21 @@ def test_protocol_declares_list_pane_ids():
 def test_protocol_declares_send_wake_trigger():
     """The monitoring-member wake keystroke is part of the Multiplexer contract."""
     assert hasattr(Multiplexer, "send_wake_trigger")
+
+
+@pytest.mark.parametrize(
+    "owner",
+    [Multiplexer, TmuxMultiplexer, HerdrMultiplexer],
+)
+def test_send_wake_trigger__requires_exact_director_descriptor_signature(owner):
+    parameters = inspect.signature(owner.send_wake_trigger).parameters
+    assert list(parameters) == [
+        "self",
+        "target_pane_id",
+        "due_members",
+        "director",
+    ]
+    assert parameters["director"].default is inspect.Parameter.empty
 
 
 def test_herdr_satisfies_multiplexer_and_agent_state_aware():

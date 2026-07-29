@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 import click
 
 from cafleet import broker
+from cafleet.coding_agent import CODING_AGENTS
 from cafleet.config import settings
 from cafleet.multiplexer import AgentStateAware, resolve_multiplexer
 
@@ -33,20 +34,6 @@ _WAKE_ON_STATUS = ("done",)
 # INTO ``done`` flags a member due, so one ``done`` episode wakes the watcher
 # once. Reset per run in ``run_monitor_loop``.
 _last_member_status: dict[int, str | None] = {}
-
-# Per-process last stall-check time per member (tz-aware ``datetime``, not an ISO
-# string — it is compared against ``now`` directly, never persisted). A member
-# absent from this map is stall-check due on its first observation. Reset per run
-# in ``run_monitor_loop``.
-_last_stall_check_at: dict[int, datetime] = {}
-
-# Per-process last successful unacked wake per member (tz-aware ``datetime``,
-# never persisted) — the re-fire gate: a member with a still-stale un-acked
-# delivery is re-flagged only once its own ``interval_seconds`` has elapsed since
-# the entry. Keyed by member, not by message, so a new stale episode beginning
-# less than one interval after a wake has its first wake delayed until the gate
-# reopens (bounded by one interval). Reset per run in ``run_monitor_loop``.
-_last_unacked_wake_at: dict[int, datetime] = {}
 
 
 class _Sentinel:
@@ -109,9 +96,19 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
     live_panes = mux.list_pane_ids()
 
     targets = broker.list_monitor_targets(fleet_id)
-    due: list[dict] = []
+    unavailable_ids: list[int] = []
     for target in targets:
         target["pane_alive"] = target["pane_id"] in live_panes
+        if (
+            not target["enabled"]
+            or target["pane_id"] is None
+            or not target["pane_alive"]
+        ):
+            unavailable_ids.append(target["member_id"])
+    broker.reconcile_monitor_lifecycle(fleet_id, unavailable_ids)
+
+    due: list[dict] = []
+    for target in targets:
         if should_ping(target, now):
             target["wake_reasons"] = ["interval"]
             due.append(target)
@@ -120,16 +117,39 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
     # trigger; it unions ``stall-check`` onto each stall-check-due watched member.
     _flag_stall_check_due(targets, due, now)
 
-    # Unacked-delivery cadence also runs on BOTH backends, after the stall-check
-    # flag and before the native trigger, so a multi-reason member's
-    # ``wake_reasons`` order is ``interval``, ``stall-check``, ``unacked``.
-    _flag_unacked_due(targets, due, now)
-
     pending_status: dict[int, str | None] = {}
     if isinstance(mux, AgentStateAware):
         pending_status = _flag_native_status_due(mux, targets, due)
 
+    # A stale unacked delivery is context only. Annotation runs after every
+    # native trigger so ``unacked`` is always the final reason and can never add
+    # a member to the due set.
+    _annotate_unacked_due(due, now)
+
     if due and watcher is not None and watcher["pane_id"] in live_panes:
+        director_target = next(
+            (
+                target
+                for target in targets
+                if target["member_id"] == fleet["director_member_id"]
+            ),
+            None,
+        )
+        if director_target is None:
+            raise click.ClickException(
+                f"fleet {fleet_id} has no enrolled Director monitor target"
+            )
+        for target in [*due, director_target]:
+            coding_agent = target.get("coding_agent")
+            if coding_agent not in CODING_AGENTS:
+                raise click.ClickException(
+                    f"member {target['member_id']} has unregistered "
+                    f"coding_agent {coding_agent!r}"
+                )
+        director = {
+            "member_id": director_target["member_id"],
+            "coding_agent": director_target["coding_agent"],
+        }
         # The loop's only keystroke: a single best-effort wake nudge into the
         # watcher's own pane. The nudge NAMES the due members (each with its
         # ``wake_reasons``) and the Director id, driving the watcher's
@@ -138,35 +158,36 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
         woke = mux.send_wake_trigger(
             target_pane_id=watcher["pane_id"],
             due_members=due,
-            director_member_id=fleet["director_member_id"],
+            director=director,
         )
         if woke:
             # All ledger writes are gated on a successful wake, so a failed
             # best-effort keystroke leaves the due members flagged and the next
             # tick retries instead of silently skipping a check.
             #
-            # ``record_pings`` receives only members whose reasons include
-            # ``interval`` or ``status:done`` — a stall-check-only or
-            # unacked-only member is EXCLUDED, keeping the ping cadence and the
-            # stall/unacked cadences independent. ``_last_stall_check_at`` is
-            # committed for every member whose reasons include ``stall-check``,
-            # and ``_last_unacked_wake_at`` for every member whose reasons
-            # include ``unacked``. ``pending_status`` holds the natively-flagged
-            # members' reads, committed on this same gate (the non-flagged reads
-            # were already committed in ``_flag_native_status_due``).
+            # The interval cadence receives only members whose reasons include
+            # ``interval`` or ``status:done`` — a stall-check-only member is
+            # excluded, keeping the interval and stall cadences
+            # independent. Both timestamps commit in one broker transaction.
+            # ``pending_status`` holds the natively-flagged members' reads,
+            # committed on this same gate (the non-flagged reads were already
+            # committed in ``_flag_native_status_due``).
             ping_ids = [
                 t["member_id"]
                 for t in due
                 if "interval" in t["wake_reasons"] or "status:done" in t["wake_reasons"]
             ]
-            if ping_ids:
-                broker.record_pings(ping_ids, now.isoformat())
+            stall_check_ids = [
+                target["member_id"]
+                for target in due
+                if "stall-check" in target["wake_reasons"]
+            ]
+            broker.record_monitor_dispatch(
+                ping_ids,
+                stall_check_ids,
+                now.isoformat(),
+            )
             _last_member_status.update(pending_status)
-            for target in due:
-                if "stall-check" in target["wake_reasons"]:
-                    _last_stall_check_at[target["member_id"]] = now
-                if "unacked" in target["wake_reasons"]:
-                    _last_unacked_wake_at[target["member_id"]] = now
             # Visible heartbeat: one line per due member on the launching task's
             # stdout, each carrying its joined ``[<reasons>]`` suffix.
             for target in due:
@@ -208,10 +229,14 @@ def _flag_native_status_due(
         member_id = target["member_id"]
         status = mux.agent_status(target_pane_id=target["pane_id"])
         prev = _last_member_status.get(member_id)
-        if status in _WAKE_ON_STATUS and status != prev and member_id not in due_ids:
-            target["wake_reasons"] = [f"status:{status}"]
-            due.append(target)
-            due_ids.add(member_id)
+        if status in _WAKE_ON_STATUS and status != prev:
+            reason = f"status:{status}"
+            if member_id in due_ids:
+                target["wake_reasons"].append(reason)
+            else:
+                target["wake_reasons"] = [reason]
+                due.append(target)
+                due_ids.add(member_id)
             pending[member_id] = status
         else:
             _last_member_status[member_id] = status
@@ -223,16 +248,15 @@ def _flag_stall_check_due(targets: list[dict], due: list[dict], now: datetime) -
 
     Driven by ``settings.monitor_stall_interval`` (default 240; ``0`` disables the
     trigger entirely). An **enabled** watched live member is stall-check due when
-    it is ABSENT from ``_last_stall_check_at`` (first-tick semantics, mirroring
-    ``should_ping``'s ``last_ping_at is None → due``; the map is never pre-seeded)
-    or when at least one full interval has elapsed since its last stall-check. A
+    its durable ``last_stall_check_at`` is null (first-tick semantics, mirroring
+    ``should_ping``'s ``last_ping_at is None → due``) or when at least one full
+    interval has elapsed since its last stall-check. A
     stall-check-due member already in the due set (e.g. interval-due) has
     ``stall-check`` UNIONED onto its existing ``wake_reasons``; a member not yet
     due is appended with ``["stall-check"]``.
 
-    This never commits ``_last_stall_check_at`` — that commit is gated on a
-    successful wake in ``monitor_tick``, so a failed keystroke re-flags the member
-    next tick (mirrors the ``record_pings`` gating).
+    This helper is read-only; the durable timestamp commit is gated on a
+    successful wake in ``monitor_tick``.
     """
     interval = settings.monitor_stall_interval
     if interval <= 0:
@@ -244,8 +268,11 @@ def _flag_stall_check_due(targets: list[dict], due: list[dict], now: datetime) -
         if target["pane_id"] is None or not target["pane_alive"]:
             continue
         member_id = target["member_id"]
-        last = _last_stall_check_at.get(member_id)
-        if last is not None and (now - last).total_seconds() < interval:
+        last = target["last_stall_check_at"]
+        if (
+            last is not None
+            and (now - datetime.fromisoformat(last)).total_seconds() < interval
+        ):
             continue
         if member_id in due_ids:
             target["wake_reasons"].append("stall-check")
@@ -255,29 +282,9 @@ def _flag_stall_check_due(targets: list[dict], due: list[dict], now: datetime) -
             due_ids.add(member_id)
 
 
-def _flag_unacked_due(targets: list[dict], due: list[dict], now: datetime) -> None:
-    """Union each unacked-due watched member into the due set (both backends).
-
-    An **enabled** watched live member is unacked-due when its oldest un-acked
-    delivery (``oldest_pending_ts``, from the same scan row) has waited at least
-    the member's OWN ``interval_seconds`` — the staleness threshold — AND its
-    re-fire gate passes: its ``_last_unacked_wake_at`` entry is absent, or at
-    least one full interval has elapsed since it. A delivery younger than one
-    interval never flags, so the normal deliver-then-ack cycle produces no
-    wakes. An unacked-due member already in the due set has ``unacked`` UNIONED
-    onto its existing ``wake_reasons``; a member not yet due is appended with
-    ``["unacked"]``.
-
-    This never commits ``_last_unacked_wake_at`` — that commit is gated on a
-    successful wake in ``monitor_tick``, so a failed keystroke re-flags the
-    member next tick (mirrors the ``record_pings`` gating).
-    """
-    due_ids = {t["member_id"] for t in due}
-    for target in targets:
-        if not target["enabled"]:
-            continue
-        if target["pane_id"] is None or not target["pane_alive"]:
-            continue
+def _annotate_unacked_due(due: list[dict], now: datetime) -> None:
+    """Append stale-delivery context to already-due rows without scheduling."""
+    for target in due:
         oldest = target["oldest_pending_ts"]
         if oldest is None:
             continue
@@ -285,16 +292,8 @@ def _flag_unacked_due(targets: list[dict], due: list[dict], now: datetime) -> No
         age = (now - datetime.fromisoformat(oldest)).total_seconds()
         if age < interval:
             continue
-        member_id = target["member_id"]
-        last = _last_unacked_wake_at.get(member_id)
-        if last is not None and (now - last).total_seconds() < interval:
-            continue
-        if member_id in due_ids:
+        if "unacked" not in target["wake_reasons"]:
             target["wake_reasons"].append("unacked")
-        else:
-            target["wake_reasons"] = ["unacked"]
-            due.append(target)
-            due_ids.add(member_id)
 
 
 _stop_requested = False
@@ -329,8 +328,6 @@ def run_monitor_loop(fleet_id: int, tick_seconds: int) -> None:
     global _stop_requested
     _stop_requested = False
     _last_member_status.clear()
-    _last_stall_check_at.clear()
-    _last_unacked_wake_at.clear()
     pid = os.getpid()
     if not broker.claim_monitor_runtime(
         fleet_id, pid, tick_seconds, datetime.now(UTC).isoformat()

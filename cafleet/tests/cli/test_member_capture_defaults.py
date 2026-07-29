@@ -1,6 +1,8 @@
 """Tests for ``cafleet member capture`` defaults."""
 
+import hashlib
 import json
+from datetime import UTC, datetime
 
 import pytest
 from click.testing import CliRunner
@@ -219,3 +221,66 @@ def test_member_capture__json_envelope_post_processed_and_lines_default(
     assert "\x1b" not in payload["content"]
     assert "hello" not in payload["content"]
     assert "world" in payload["content"]
+
+
+@pytest.mark.parametrize(
+    ("ansi_flag", "raw", "expected_content"),
+    [
+        pytest.param(
+            False,
+            "\x1b[31mloading\rready\x1b[0m\n",
+            "ready\n",
+            id="no-ansi-hashes-emitted-defragmented-content",
+        ),
+        pytest.param(
+            True,
+            "\x1b[31mloading\rready\x1b[0m\n",
+            "\x1b[31mloading\rready\x1b[0m\n",
+            id="ansi-hashes-emitted-raw-content",
+        ),
+    ],
+)
+def test_member_capture__json_stamps_and_hashes_exact_emitted_content(
+    bootstrapped_member,
+    monkeypatch,
+    ansi_flag,
+    raw,
+    expected_content,
+):
+    sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
+    _record_run(monkeypatch, returns=raw)
+    args = [
+        "member",
+        "capture",
+        "--fleet-id",
+        sid,
+        "--member-id",
+        member_id,
+        "--json",
+    ]
+    if ansi_flag:
+        args.append("--ansi")
+    before = datetime.now(UTC)
+
+    result = runner.invoke(cli, args)
+
+    after = datetime.now(UTC)
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert list(payload) == [
+        "member_id",
+        "pane_id",
+        "lines",
+        "content",
+        "captured_at",
+        "content_sha256",
+    ]
+    assert payload["content"] == expected_content
+    captured_at = datetime.fromisoformat(payload["captured_at"])
+    assert captured_at.tzinfo is not None
+    assert captured_at.utcoffset() == UTC.utcoffset(None)
+    assert before <= captured_at <= after
+    assert (
+        payload["content_sha256"]
+        == hashlib.sha256(expected_content.encode("utf-8")).hexdigest()
+    )

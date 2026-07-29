@@ -22,18 +22,20 @@ Required section. Convert every note (a constraint/caveat the inline value shoul
 | Note | Applies at |
 |------|-----------|
 | <the caveat, one row each> | `{token}` — `<skill>/<file>` § <base heading> |
-| *Pane-state capture cues* (below) — this backend's `awaiting_user` vs `finished` discriminators. | classification rubric rule 1 (`awaiting_user`) — `cafleet/roles/monitor.md` § On each wake; the pane-state taxonomy in `docs/concepts/monitoring.md`; the Director's pre-nudge capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response (the Director applies the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — this backend's `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate` discriminators. | the monitoring member's target-specific classification rubric — `cafleet/roles/monitor.md` § On each wake; the pane-state taxonomy in `docs/concepts/monitoring.md`; the Director's pre-nudge capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response (both consumers apply the cues of the **target member's** backend overlay). |
 
 ## Pane-state capture cues
 
-Required section. Give this backend's concrete capture-content discriminators for the two pane states a single capture most easily confuses — `awaiting_user` (classification rubric rule 1, the destructive-if-missed class) vs `finished` (rule 3) — so both consumers can tell them apart from pane text alone, never from native `agent_status`: the monitoring member's classification rubric and the Director's pre-nudge capture gate (`cafleet/reference/supervision.md` § Idle Semantics). Register a row for this table in the *Note → applies at* table above, bound to both consumers — the rubric's rule 1 and the Director's pre-nudge gate.
+Required section. Give concrete capture-content discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`, from pane text alone and never native `agent_status`. `working` includes visible streaming, generation, tool execution, or any ambiguous/truncated state that might still be active. `stall_candidate` is quiet, non-finished content with no prompt and no active-work cue; it is only a typed observation, and only the broker may promote two byte-identical, full-spacing observations to resolved `stalled`. Register the table in *Note → applies at* and bind it to both the monitoring member's target-specific rubric and the Director's pre-nudge gate.
 
 | State | <backend> capture cue |
 |---|---|
 | `awaiting_user` | <the concrete frame this backend shows when a pane is waiting on a user answer or approval — the box/prompt shape, awaiting a keypress> |
 | `finished` | <the concrete frame this backend shows at a completed turn — the empty composer/prompt at rest, no pending box, no active-turn indicator> |
+| `working` | <affirmative streaming/generation/tool/active-turn indicators; include ambiguous or truncated content that may still be active> |
+| `stall_candidate` | <quiet non-finished content with no prompt, no empty finished composer, and no affirmative active-work cue> |
 
-State the ambiguity tie-break: when a capture cannot cleanly separate the two, classify `awaiting_user`.
+State both ambiguity tie-breaks: `awaiting_user` wins over `finished`, and `working` wins over `stall_candidate`.
 
 ## Worked resolution
 

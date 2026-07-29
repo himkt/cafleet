@@ -17,21 +17,23 @@ monitoring member kills its pane and the loop terminates with it.
 
 ## Heartbeat vs facilitation
 
-The monitor decides only the *when*. Everything requiring agent judgment stays
-the Director's job, defined by the cafleet skill's supervision protocol:
+The loop decides only the *when*. The monitoring member classifies captures and
+may perform one broker-authorized fixed action; task judgment stays with the
+Director:
 
 | Layer | Owns | Lives in |
 |---|---|---|
-| Heartbeat (the *when*) | which watched members are due; the wake keystroke into the monitoring member | the `cafleet monitor` loop |
-| Facilitation (the *what*) | poll → ACK → dispatch → health-check → escalate | the Director, per the cafleet skill's supervision protocol |
+| Heartbeat (the *when*) | which watched members are due; one synchronized wake into the monitoring member | the `cafleet monitor` loop |
+| Fixed stall recovery | capture classification, durable stall observation, at-most-once fixed inbox-poll ping, aggregate report | the monitoring member plus broker state machine |
+| Facilitation (the *what next*) | assignment judgment, task dispatch, health-check, recovery, escalation | the Director, per the cafleet skill's supervision protocol |
 
 The loop's only keystroke is a **wake nudge** into the monitoring member's own
-pane, naming each due member as `<role> <id> (<name>) [<reasons>]` (reasons:
-`interval`, `status:done`, `stall-check`, `unacked`) plus the Director as the standing
-inspect target. It never keystrokes a watched pane, and because the monitoring
-member's pane is never parked on a permission prompt, the wake nudge does not
-lead with `Esc` — unlike the message-delivery preview and `cafleet member ping`
-(see [Push notifications](../spec/multiplexer-backends.md#esc-safeguard)).
+pane. It names each due member as
+`<role> <id> (<sanitized-name>; coding_agent=<backend>) [<reasons>]` and carries
+the Director descriptor. The tmux and herdr payloads are byte-identical. The
+loop never keystrokes a watched pane; after capture-based broker resolution,
+the monitoring member may separately invoke the unchanged fixed
+`cafleet member ping` once for a confidently stalled ordinary member.
 
 The facilitation layer's re-engagement is itself **capture-gated**: before the
 Director fires a re-engagement keystroke at a member (`cafleet member ping`, a
@@ -59,29 +61,23 @@ The root Director is checked far more often than an ordinary member; both
 defaults live in the knob table under
 [Cadence and tick precision](#cadence-and-tick-precision).
 
-A watched member is flagged only when it is enabled, its pane is alive, and its
-interval has elapsed since its last wake-dispatch (`last_ping_at`); the stamp
-written for each interval-due member prevents a wake-storm while the watcher is
-still working (a stall-check-only due member keeps its `last_ping_at` untouched
-— only its stall baseline advances).
-
-Four reasons can flag a member:
+A watched member enters the due set only from a normal trigger. The scan order
+is lifecycle reconciliation, `interval`, durable `stall-check`, native herdr
+`status:done`, then `unacked` annotation. One synchronized wake carries the
+complete union:
 
 | Reason | Fires when | Advances `last_ping_at`? | Availability | Silenced by |
 |---|---|---|---|---|
 | `interval` | The member is enabled, its pane is alive, and its own interval has elapsed since `last_ping_at` | yes | Both backends | `cafleet monitor config --disable` |
-| `unacked` | Its oldest un-acked delivery has waited at least the member's own `interval_seconds` | no | Both backends | `cafleet monitor config --disable` — there is no dedicated switch |
+| `unacked` | Annotation only: the already-due member's oldest un-acked delivery is at least its own interval old | no | Both backends | It never creates a due row |
 | `stall-check` | The stall-check interval has elapsed since that pane's last stall-check wake | no | Both backends | `CAFLEET_MONITOR_STALL_INTERVAL=0`, or `cafleet monitor config --disable` |
 | `status:done` | The member's native agent status transitions into `done` | yes | herdr only | `cafleet monitor config --disable` |
 
-A watched member is additionally flagged with reason `unacked` when its oldest
-un-acked delivery — an `input_required` message other than a
-`broadcast_summary` — has waited at least the member's own `interval_seconds`:
-the broker's inline-preview keystroke was missed and the delivery sits
-unconsumed. The member is re-flagged every `interval_seconds` while any such
-delivery remains and stops being flagged once every one is acked. An
-unacked-only wake never advances `last_ping_at` — the ping cadence and the
-unacked cadence stay independent.
+A stale un-acked delivery is context, not proof of a stall: it can annotate an
+interval-, stall-check-, or native-due row, always last in the reason list, but
+cannot add a row or wake the monitoring member. In particular,
+`working + unacked` remains `working` and causes no action by itself. There is
+no process-local unacked re-fire map.
 
 On the **herdr** backend a watched member is additionally due when its native
 agent status transitions into `done`; a transition into `blocked` (awaiting a
@@ -98,45 +94,37 @@ in its own pane and applies LLM judgment to the watched members' state. It is
 identified by `member_card_json.cafleet.kind == "monitoring-member"`; a second
 `--role monitor` spawn is rejected.
 
-On each wake it runs a routine bounded to two read/act commands — read-only
-`cafleet member capture` and `cafleet message send`:
+On each wake the monitoring member:
 
-1. **Read the due members named in the wake nudge** — that list is
-   authoritative; those members, plus the Director, are who it inspects.
-2. **Capture each named pane** (always also the Director's) and classify it
-   from the capture content only, first match wins:
+1. Captures every named pane and the Director at
+   `--lines 120 --no-ansi --json`. Capture JSON includes `captured_at` and
+   `content_sha256` of the exact emitted content. Each target's rendered
+   `coding_agent` selects its own overlay cues.
+2. Classifies content as `awaiting_user`, `unknown`, `finished`, `working`, or
+   quiet `stall_candidate`. Any affirmative or ambiguous active-work cue is
+   `working`; only the broker can resolve `stall_candidate` to `stalled`.
+3. Reads durable `escalation_pending` rows, then submits ordinary observations
+   to `monitor stall observe`. A first candidate seeds the durable baseline;
+   only a byte-identical second candidate whose validated capture timestamp is
+   a full stall interval later claims `nudge_claimed` and returns
+   `action = ping`.
+4. For that action only, invokes the fixed `cafleet member ping` once and
+   records `monitor stall ping-result`. Success becomes `nudged`; failure
+   becomes sticky `escalation_pending/ping_failed`. An unchanged next
+   synchronized observation becomes
+   `escalation_pending/unchanged_after_nudge`. Restart after a claim never
+   repeats the ping and instead records `ping_interrupted`.
+5. After ordinary actions, re-captures the Director and submits
+   `--director-gate`. Only `finished` or broker-resolved `stalled` issues a
+   fresh 30-second, single-use token backed by `monitor_director_gate`. It then calls `monitor report-batch`
+   immediately with no intervening command. This is the sole Director-delivery
+   path during a wake.
 
-   | State | Evidence | Monitor action | Action when the member is tagged `unacked` |
-   |---|---|---|---|
-   | `awaiting_user` | An unanswered question or permission prompt | **None** — never re-engage | **None** — report suppressed |
-   | `unknown` | Dead/unreadable pane, or a stall-check wake with no remembered baseline | **None** — fail-safe | **None** — report suppressed |
-   | `finished` | A completed turn at an empty input prompt | Report to the Director | Report to the Director |
-   | `stalled` | A stall-check capture identical to the previous stall-check capture | Report to the Director | Report to the Director |
-   | `working` | In-flight work matched by no earlier rule | None | Report to the Director |
-
-   When a capture cannot distinguish `awaiting_user` from `finished`, classify
-   `awaiting_user`: a missed `finished` delays a nudge by one cycle, but a
-   misjudged `awaiting_user` destroys the user's pending prompt.
-3. **Keep one stall baseline per pane** — the capture from that pane's last
-   stall-check wake, replaced unconditionally on every stall-check wake.
-4. **Apply the unacked report rule** — for a member tagged `unacked`, its
-   oldest un-acked delivery has waited at least one full member interval (a
-   missed poll trigger), and the rubric's fourth column gives the report
-   behavior per state. A busy pane is still reported and the Director decides;
-   `awaiting_user` suppresses the report because the member is waiting on the
-   user rather than on a nudge, and `unknown` suppresses it because an
-   unreadable capture cannot rule out a pending prompt.
-5. **Re-engage the Director** via `cafleet message send` when a due member is
-   `stalled` or `finished`, or an `unacked`-tagged member is reportable per
-   the rule above — **unless the Director's own pane is
-   `awaiting_user`**, in which case send nothing this wake: the message's
-   inline-preview keystroke leads with `Esc` and would cancel the Director's
-   pending prompt. The suppressed report re-surfaces on the member's next wake.
-
-Observation spans the Director and every due member, but actuation is
-Director-only: the monitoring member never keystrokes ordinary members —
-all member-driving routes back through the Director, whose re-engagement is
-itself capture-gated (see *Heartbeat vs facilitation* above).
+The aggregate is durable and bounded to one open message per fleet. Preview
+retries reuse the same message ID; only Director ACK completes delivery. The
+Director first retrieves the exact ID with `message show --full`, processes the
+untruncated body, deduplicates by message ID, and ACKs once. `finished` remains
+report-only: only the Director knows whether assigned work remains.
 
 ## Cadence and tick precision {#cadence-and-tick-precision}
 
@@ -145,24 +133,19 @@ itself capture-gated (see *Heartbeat vs facilitation* above).
 | Root Director ping interval | `180s` | `monitor_config.interval_seconds` (the Director's row) |
 | Ordinary member ping interval | `720s` | `monitor_config.interval_seconds` (each member's row) |
 | Stall-check interval | `240s` | `monitor_stall_interval` / `CAFLEET_MONITOR_STALL_INTERVAL` |
-| Unacked-delivery staleness / re-fire | the member's own ping interval | `monitor_config.interval_seconds` (no dedicated knob) |
+| Unacked-delivery annotation threshold | the member's own ping interval | `monitor_config.interval_seconds` (no independent trigger) |
 | Scan tick | `5s` | `monitor start --tick N` (per run) |
 
 The monitor scans once per **tick** and a member only comes due at a tick
-boundary, so the tick is the floor on interval precision — set it smaller than
-the smallest interval you care about. Per-member intervals are editable via
-`cafleet monitor config` or the admin WebUI. Stall detection runs on its own
-independent cadence: a stall-check wake compares the pane's capture against its
-previous stall-check baseline, so two unchanged observations one interval apart
-classify it `stalled` without waiting for the (much longer) member interval.
-The unacked trigger reuses the member's own `interval_seconds` as both its
-staleness threshold and its re-fire period, coupling staleness tolerance to
-check cadence by design — tightening a member's ping interval also tightens
-how long its deliveries may sit un-acked. It has no dedicated switch — each
-reason's disable path is the *Silenced by* column of the wake-reason table in
-[The watched set](#the-watched-set), where `cafleet monitor config --disable`
-(`enabled = 0`) silences a member from **all** triggers while
-`CAFLEET_MONITOR_STALL_INTERVAL=0` reaches only stall-check.
+boundary, so the tick is the floor on interval precision. Per-member intervals
+are editable via `cafleet monitor config` or the admin WebUI.
+`last_stall_check_at` is persisted separately from `last_ping_at`, so an
+immediate monitor-loop restart honors the remaining stall cadence. The broker
+also persists `last_stall_candidate_at` independently and rejects hash
+promotion until two actual captures are a full interval apart. A failed watcher
+wake commits neither dispatch timestamp. `CAFLEET_MONITOR_STALL_INTERVAL=0`
+disables stall classification and therefore direct monitor pings. Unacked
+staleness only controls whether the hint is appended to a normal due row.
 
 ## Single-instance and liveness
 
@@ -195,7 +178,11 @@ pane; a runtime row the pane kill leaves behind is removed by `fleet delete`.
 `fleet delete` alone also ends a still-running loop — its next tick sees the
 soft-deleted fleet and self-terminates.
 
-Per-member schedule (`interval_seconds`, `enabled`, `last_ping_at`) is persisted
-in `monitor_config`, so cadence resumes across a restart — see
-[Data model](../spec/data-model.md) for the two backing tables and
+Per-member schedule and episode state (`interval_seconds`, `enabled`,
+`last_ping_at`, `last_stall_check_at`, candidate timestamp/fingerprint,
+episode state, and escalation reason) are persisted in `monitor_config`.
+Disable/dead/pending-pane cleanup resets non-pending episodes, converts an
+in-flight claim to sticky interruption escalation, and preserves pending
+reports; soft deregistration explicitly deletes the row. See
+[Data model](../spec/data-model.md) for the backing tables and
 [CLI options](../spec/cli-options.md#cafleet-monitor) for the command surface.

@@ -54,8 +54,9 @@ class Settings(BaseSettings):
             ``CAFLEET_MONITOR_STALL_INTERVAL``; defaults to ``240``. A watched
             member is stall-check due every ``monitor_stall_interval`` seconds;
             ``0`` disables stall detection entirely (no ``stall-check`` wake
-            reason is emitted). Tracked process-locally in the running loop —
-            there is no DB column.
+            reason is emitted). A successful watcher wake persists its dispatch
+            time in ``monitor_config.last_stall_check_at``, so a restarted
+            monitor honors the remaining cadence.
     """
 
     database_url: str = Field(

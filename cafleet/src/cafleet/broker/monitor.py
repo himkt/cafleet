@@ -12,19 +12,25 @@ function casts it to a Python ``bool`` at the boundary, so the integer
 representation never leaks past the broker.
 """
 
+import hashlib
 import os
-from datetime import datetime
+import re
+import secrets
+from datetime import UTC, datetime, timedelta
 
 import click
 from sqlalchemy import delete, func, select, update
 
 from cafleet.broker import _shared
+from cafleet.config import settings
 from cafleet.db.models import (
     Fleet,
     Member,
     MemberPlacement,
     Message,
     MonitorConfig,
+    MonitorDirectorGate,
+    MonitorReportDelivery,
     MonitorRuntime,
 )
 
@@ -46,6 +52,11 @@ def _config_dict(row) -> dict:
         "interval_seconds": row.interval_seconds,
         "last_ping_at": row.last_ping_at,
         "enabled": bool(row.enabled),
+        "last_stall_check_at": row.last_stall_check_at,
+        "last_stall_candidate_at": row.last_stall_candidate_at,
+        "last_stall_capture_sha256": row.last_stall_capture_sha256,
+        "stall_episode_state": row.stall_episode_state,
+        "stall_escalation_reason": row.stall_escalation_reason,
     }
 
 
@@ -54,6 +65,11 @@ _CONFIG_COLS = (
     MonitorConfig.interval_seconds,
     MonitorConfig.last_ping_at,
     MonitorConfig.enabled,
+    MonitorConfig.last_stall_check_at,
+    MonitorConfig.last_stall_candidate_at,
+    MonitorConfig.last_stall_capture_sha256,
+    MonitorConfig.stall_episode_state,
+    MonitorConfig.stall_escalation_reason,
 )
 
 
@@ -130,6 +146,21 @@ def list_monitor_configs(fleet_id: int) -> list[dict]:
     return [_config_dict(row) for row in rows]
 
 
+def _apply_nonlive_episode_cleanup(config: MonitorConfig) -> None:
+    """Apply the shared disable/dead/pending-placement episode transition."""
+    config.last_stall_check_at = None
+    if config.stall_episode_state == "nudge_claimed":
+        config.stall_episode_state = "escalation_pending"
+        config.stall_escalation_reason = "ping_interrupted"
+        return
+    if config.stall_episode_state == "escalation_pending":
+        return
+    config.last_stall_candidate_at = None
+    config.last_stall_capture_sha256 = None
+    config.stall_episode_state = "clear"
+    config.stall_escalation_reason = None
+
+
 def update_monitor_config(
     fleet_id: int,
     member_id: int,
@@ -157,21 +188,34 @@ def update_monitor_config(
                 f"for fleet {fleet_id}."
             )
 
-        values: dict = {}
-        if interval_seconds is not None:
-            values["interval_seconds"] = interval_seconds
-        if enabled is not None:
-            values["enabled"] = 1 if enabled else 0
-        if values:
-            session.execute(
-                update(MonitorConfig)
-                .where(MonitorConfig.member_id == member_id)
-                .values(**values)
+        config = session.get(MonitorConfig, member_id)
+        if config is None:  # Defensive: enrollment was verified in this transaction.
+            raise click.ClickException(
+                f"member {member_id} is not enrolled in monitoring "
+                f"for fleet {fleet_id}."
             )
+        if interval_seconds is not None:
+            config.interval_seconds = interval_seconds
+        if enabled is not None:
+            config.enabled = 1 if enabled else 0
+            if not enabled:
+                _apply_nonlive_episode_cleanup(config)
+                session.execute(
+                    delete(MonitorDirectorGate).where(
+                        MonitorDirectorGate.director_member_id == member_id,
+                        MonitorDirectorGate.fleet_id == fleet_id,
+                    )
+                )
 
+        session.flush()
         row = session.execute(
             select(*_CONFIG_COLS).where(MonitorConfig.member_id == member_id)
         ).first()
+        if row is None:
+            raise click.ClickException(
+                f"member {member_id} is not enrolled in monitoring "
+                f"for fleet {fleet_id}."
+            )
         return _config_dict(row)
 
 
@@ -191,6 +235,60 @@ def record_pings(member_ids: list[int], when: str) -> None:
             .where(MonitorConfig.member_id.in_(member_ids))
             .values(last_ping_at=when)
         )
+
+
+def record_monitor_dispatch(
+    ping_member_ids: list[int],
+    stall_check_member_ids: list[int],
+    when: str,
+) -> None:
+    """Atomically commit the interval and durable stall dispatch cadences."""
+    if not ping_member_ids and not stall_check_member_ids:
+        return
+    with _shared.write_session() as session:
+        if ping_member_ids:
+            session.execute(
+                update(MonitorConfig)
+                .where(MonitorConfig.member_id.in_(ping_member_ids))
+                .values(last_ping_at=when)
+            )
+        if stall_check_member_ids:
+            session.execute(
+                update(MonitorConfig)
+                .where(MonitorConfig.member_id.in_(stall_check_member_ids))
+                .values(last_stall_check_at=when)
+            )
+
+
+def reconcile_monitor_lifecycle(
+    fleet_id: int, unavailable_member_ids: list[int]
+) -> None:
+    """Batch-clean disabled, placement-pending, and dead watched members."""
+    if not unavailable_member_ids:
+        return
+    member_ids = sorted(set(unavailable_member_ids))
+    with _shared.write_session() as session:
+        rows = session.execute(
+            select(MonitorConfig, Fleet.director_member_id)
+            .join(Member, Member.member_id == MonitorConfig.member_id)
+            .join(Fleet, Fleet.fleet_id == Member.fleet_id)
+            .where(
+                Member.fleet_id == fleet_id,
+                Member.member_id.in_(member_ids),
+                Member.status == "active",
+            )
+        ).all()
+        director_unavailable = False
+        for config, director_member_id in rows:
+            _apply_nonlive_episode_cleanup(config)
+            if config.member_id == director_member_id:
+                director_unavailable = True
+        if director_unavailable:
+            session.execute(
+                delete(MonitorDirectorGate).where(
+                    MonitorDirectorGate.fleet_id == fleet_id
+                )
+            )
 
 
 def list_monitor_targets(fleet_id: int) -> list[dict]:
@@ -234,10 +332,12 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
             Member.member_id,
             Member.name,
             MemberPlacement.mux_pane_id,
+            MemberPlacement.coding_agent,
             Fleet.director_member_id,
             MonitorConfig.interval_seconds,
             MonitorConfig.last_ping_at,
             MonitorConfig.enabled,
+            MonitorConfig.last_stall_check_at,
             pending_sq.label("pending_count"),
             oldest_pending_sq.label("oldest_pending_ts"),
         )
@@ -254,14 +354,723 @@ def list_monitor_targets(fleet_id: int) -> list[dict]:
             "name": row.name,
             "is_director": row.member_id == row.director_member_id,
             "pane_id": row.mux_pane_id,
+            "coding_agent": row.coding_agent,
             "interval_seconds": row.interval_seconds,
             "last_ping_at": row.last_ping_at,
             "enabled": bool(row.enabled),
+            "last_stall_check_at": row.last_stall_check_at,
             "pending_count": row.pending_count,
             "oldest_pending_ts": row.oldest_pending_ts,
         }
         for row in rows
     ]
+
+
+_CAPTURE_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+_STALL_CLASSIFICATIONS = {
+    "awaiting_user",
+    "unknown",
+    "finished",
+    "working",
+    "stall_candidate",
+}
+_OPEN_PREVIEW_STATES = ("pending", "awaiting_ack")
+
+
+def _clear_stall_episode(
+    config: MonitorConfig, *, clear_candidate: bool = True
+) -> None:
+    if clear_candidate:
+        config.last_stall_candidate_at = None
+        config.last_stall_capture_sha256 = None
+    config.stall_episode_state = "clear"
+    config.stall_escalation_reason = None
+
+
+def _stall_result(
+    config: MonitorConfig,
+    *,
+    classification: str,
+    action: str = "none",
+    director_gate_token: str | None = None,
+) -> dict:
+    return {
+        "member_id": config.member_id,
+        "classification": classification,
+        "action": action,
+        "episode_state": config.stall_episode_state,
+        "escalation_reason": config.stall_escalation_reason,
+        "director_gate_token": director_gate_token,
+    }
+
+
+def _parse_capture_identity(
+    classification: str,
+    captured_at: str | None,
+    content_sha256: str | None,
+    *,
+    now: datetime,
+) -> datetime | None:
+    if classification not in _STALL_CLASSIFICATIONS:
+        raise click.ClickException(
+            f"invalid monitor stall classification: {classification}"
+        )
+    if (captured_at is None) != (content_sha256 is None):
+        raise click.ClickException(
+            "captured_at and content_sha256 must be provided together"
+        )
+    if captured_at is None:
+        if classification != "unknown":
+            raise click.ClickException(
+                "readable monitor observations require capture identity"
+            )
+        return None
+    if classification == "unknown":
+        raise click.ClickException(
+            "loss-tolerant unknown observations must omit capture identity"
+        )
+    if not _CAPTURE_SHA256_RE.fullmatch(content_sha256 or ""):
+        raise click.ClickException(
+            "content_sha256 must be 64 lowercase hexadecimal characters"
+        )
+    try:
+        parsed = datetime.fromisoformat(captured_at)
+    except ValueError as exc:
+        raise click.ClickException(
+            "captured_at must be a timezone-aware UTC ISO-8601 timestamp"
+        ) from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+        raise click.ClickException(
+            "captured_at must be a timezone-aware UTC ISO-8601 timestamp"
+        )
+    if parsed > now:
+        raise click.ClickException("captured_at cannot be in the future")
+    return parsed
+
+
+def _stall_target(
+    session,
+    fleet_id: int,
+    member_id: int,
+    *,
+    director_gate: bool,
+    require_live: bool,
+):
+    row = session.execute(
+        select(
+            Member,
+            MonitorConfig,
+            MemberPlacement.mux_pane_id,
+            Fleet.director_member_id,
+            _shared.CARD_KIND_SQL.label("card_kind"),
+        )
+        .join(Fleet, Fleet.fleet_id == Member.fleet_id)
+        .join(MonitorConfig, MonitorConfig.member_id == Member.member_id)
+        .outerjoin(MemberPlacement, MemberPlacement.member_id == Member.member_id)
+        .where(
+            Member.fleet_id == fleet_id,
+            Member.member_id == member_id,
+            Member.status == "active",
+            Fleet.deleted_at.is_(None),
+        )
+    ).first()
+    if row is None:
+        raise click.ClickException(
+            f"member {member_id} is not an active enrolled member of fleet {fleet_id}"
+        )
+    is_director = member_id == row.director_member_id
+    is_monitor = row.card_kind == _shared.MONITORING_MEMBER_KIND
+    if director_gate:
+        if not is_director:
+            raise click.ClickException(
+                f"member {member_id} is not the active root Director"
+            )
+    elif is_director or is_monitor:
+        raise click.ClickException(
+            f"member {member_id} is not an eligible ordinary monitor target"
+        )
+    if require_live and row.mux_pane_id is None:
+        raise click.ClickException(f"member {member_id} does not have a live placement")
+    if require_live and not director_gate and not bool(row.MonitorConfig.enabled):
+        raise click.ClickException(
+            f"member {member_id} does not have an enabled live placement"
+        )
+    return row
+
+
+def _issue_director_gate(
+    session,
+    *,
+    fleet_id: int,
+    director_member_id: int,
+    classification: str,
+    now: datetime,
+) -> str:
+    raw_token = secrets.token_bytes(32)
+    token = raw_token.hex()
+    issued_at = now.isoformat()
+    session.add(
+        MonitorDirectorGate(
+            fleet_id=fleet_id,
+            director_member_id=director_member_id,
+            token_sha256=hashlib.sha256(raw_token).hexdigest(),
+            classification=classification,
+            issued_at=issued_at,
+            expires_at=(now + timedelta(seconds=30)).isoformat(),
+        )
+    )
+    return token
+
+
+def _observe_director_candidate(
+    config: MonitorConfig,
+    *,
+    captured_time: datetime,
+    captured_at: str,
+    content_sha256: str,
+) -> str:
+    if settings.monitor_stall_interval <= 0:
+        config.last_stall_candidate_at = None
+        config.last_stall_capture_sha256 = None
+        return "unknown"
+    if config.last_stall_candidate_at is None:
+        config.last_stall_candidate_at = captured_at
+        config.last_stall_capture_sha256 = content_sha256
+        return "unknown"
+    previous = datetime.fromisoformat(config.last_stall_candidate_at)
+    elapsed = (captured_time - previous).total_seconds()
+    if captured_time <= previous or elapsed < settings.monitor_stall_interval:
+        return "unknown"
+    changed = config.last_stall_capture_sha256 != content_sha256
+    config.last_stall_candidate_at = captured_at
+    config.last_stall_capture_sha256 = content_sha256
+    return "working" if changed else "stalled"
+
+
+def _observe_ordinary_candidate(
+    config: MonitorConfig,
+    *,
+    captured_time: datetime,
+    captured_at: str,
+    content_sha256: str,
+    stall_check: bool,
+) -> tuple[str, str]:
+    state = config.stall_episode_state
+    previous_at = (
+        datetime.fromisoformat(config.last_stall_candidate_at)
+        if config.last_stall_candidate_at is not None
+        else None
+    )
+
+    if state == "escalation_pending":
+        return "unknown", "escalate"
+
+    if state in {"nudge_claimed", "nudged", "escalated"}:
+        if previous_at is None or captured_time <= previous_at:
+            return "unknown", "none"
+        if config.last_stall_capture_sha256 == content_sha256:
+            if state == "nudge_claimed":
+                config.stall_episode_state = "escalation_pending"
+                config.stall_escalation_reason = "ping_interrupted"
+                return "stalled", "escalate"
+            if state == "nudged":
+                config.stall_episode_state = "escalation_pending"
+                config.stall_escalation_reason = "unchanged_after_nudge"
+                return "stalled", "escalate"
+            config.last_stall_candidate_at = captured_at
+            return "stalled", "none"
+        _clear_stall_episode(config, clear_candidate=not stall_check)
+        if stall_check:
+            config.last_stall_candidate_at = captured_at
+            config.last_stall_capture_sha256 = content_sha256
+        return "working", "none"
+
+    if not stall_check or settings.monitor_stall_interval <= 0:
+        return "unknown", "none"
+    if previous_at is None:
+        config.last_stall_candidate_at = captured_at
+        config.last_stall_capture_sha256 = content_sha256
+        return "unknown", "none"
+    elapsed = (captured_time - previous_at).total_seconds()
+    if captured_time <= previous_at or elapsed < settings.monitor_stall_interval:
+        return "unknown", "none"
+    if config.last_stall_capture_sha256 != content_sha256:
+        config.last_stall_candidate_at = captured_at
+        config.last_stall_capture_sha256 = content_sha256
+        return "working", "none"
+    config.last_stall_candidate_at = captured_at
+    config.last_stall_capture_sha256 = content_sha256
+    config.stall_episode_state = "nudge_claimed"
+    config.stall_escalation_reason = None
+    return "stalled", "ping"
+
+
+def observe_stall_episode(
+    fleet_id: int,
+    member_id: int,
+    *,
+    classification: str,
+    captured_at: str | None = None,
+    content_sha256: str | None = None,
+    stall_check: bool = False,
+    director_gate: bool = False,
+) -> dict:
+    """Atomically observe an ordinary stall episode or issue a Director gate."""
+    if stall_check and director_gate:
+        raise click.ClickException(
+            "stall_check and director_gate are mutually exclusive"
+        )
+    now = datetime.now(UTC)
+    captured_time = _parse_capture_identity(
+        classification,
+        captured_at,
+        content_sha256,
+        now=now,
+    )
+    with _shared.write_session() as session:
+        row = _stall_target(
+            session,
+            fleet_id,
+            member_id,
+            director_gate=director_gate,
+            require_live=captured_time is not None,
+        )
+        config = row.MonitorConfig
+
+        if director_gate:
+            session.execute(
+                delete(MonitorDirectorGate).where(
+                    MonitorDirectorGate.fleet_id == fleet_id
+                )
+            )
+            resolved = classification
+            if classification == "stall_candidate":
+                assert captured_time is not None
+                assert captured_at is not None
+                assert content_sha256 is not None
+                resolved = _observe_director_candidate(
+                    config,
+                    captured_time=captured_time,
+                    captured_at=captured_at,
+                    content_sha256=content_sha256,
+                )
+            elif classification == "unknown":
+                config.last_stall_candidate_at = None
+                config.last_stall_capture_sha256 = None
+            else:
+                _clear_stall_episode(config)
+
+            token = None
+            if resolved in {"finished", "stalled"}:
+                token = _issue_director_gate(
+                    session,
+                    fleet_id=fleet_id,
+                    director_member_id=member_id,
+                    classification=resolved,
+                    now=now,
+                )
+            return _stall_result(
+                config,
+                classification=resolved,
+                director_gate_token=token,
+            )
+
+        if classification == "unknown":
+            _apply_nonlive_episode_cleanup(config)
+            action = (
+                "escalate"
+                if config.stall_episode_state == "escalation_pending"
+                else "none"
+            )
+            return _stall_result(config, classification="unknown", action=action)
+
+        if classification != "stall_candidate":
+            if config.stall_episode_state == "escalation_pending":
+                return _stall_result(
+                    config, classification=classification, action="escalate"
+                )
+            _clear_stall_episode(config)
+            return _stall_result(config, classification=classification)
+
+        assert captured_time is not None
+        assert captured_at is not None
+        assert content_sha256 is not None
+        resolved, action = _observe_ordinary_candidate(
+            config,
+            captured_time=captured_time,
+            captured_at=captured_at,
+            content_sha256=content_sha256,
+            stall_check=stall_check,
+        )
+        return _stall_result(config, classification=resolved, action=action)
+
+
+def record_stall_ping_result(
+    fleet_id: int,
+    member_id: int,
+    *,
+    success: bool,
+) -> dict:
+    """Record one claimed fixed-ping result without rechecking pane liveness."""
+    with _shared.write_session() as session:
+        row = _stall_target(
+            session,
+            fleet_id,
+            member_id,
+            director_gate=False,
+            require_live=False,
+        )
+        config = row.MonitorConfig
+        state = config.stall_episode_state
+        reason = config.stall_escalation_reason
+        if state == "nudge_claimed":
+            if success:
+                config.stall_episode_state = "nudged"
+            else:
+                config.stall_episode_state = "escalation_pending"
+                config.stall_escalation_reason = "ping_failed"
+        elif (state == "nudged" and success) or (
+            state == "escalation_pending" and reason == "ping_failed" and not success
+        ):
+            pass
+        elif state == "escalation_pending" and reason == "ping_interrupted":
+            if not success:
+                config.stall_escalation_reason = "ping_failed"
+        else:
+            raise click.ClickException(
+                f"ping result conflicts with monitor stall episode "
+                f"{state}/{reason or '-'}"
+            )
+        return {
+            "member_id": member_id,
+            "episode_state": config.stall_episode_state,
+            "escalation_reason": config.stall_escalation_reason,
+        }
+
+
+def list_pending_stall_escalations(fleet_id: int) -> list[dict]:
+    """Return durable pending ordinary-member escalations in stable order."""
+    with _shared.read_session() as session:
+        rows = session.execute(
+            select(
+                Member.member_id,
+                Member.name,
+                MonitorConfig.stall_escalation_reason,
+            )
+            .join(MonitorConfig, MonitorConfig.member_id == Member.member_id)
+            .join(Fleet, Fleet.fleet_id == Member.fleet_id)
+            .where(
+                Member.fleet_id == fleet_id,
+                Member.status == "active",
+                Member.member_id != Fleet.director_member_id,
+                MonitorConfig.stall_episode_state == "escalation_pending",
+            )
+            .order_by(Member.member_id)
+        ).all()
+    return [
+        {
+            "member_id": row.member_id,
+            "name": row.name,
+            "escalation_reason": row.stall_escalation_reason,
+        }
+        for row in rows
+    ]
+
+
+def _sanitize_monitor_report_name(name: str) -> str:
+    return (
+        name.replace("\r\n", "⏎")
+        .replace("\n", "⏎")
+        .replace("\r", "⏎")
+        .replace("\t", "⏎")
+        .replace("`", "ˋ")
+        .replace("$(", "$﹙")
+        .replace("|", "│")
+    )
+
+
+def _report_entry(member_id: int, name: str, reason: str) -> str:
+    safe_name = _sanitize_monitor_report_name(name)
+    if reason == "ping_failed":
+        detail = "direct inbox-poll nudge failed"
+    elif reason == "ping_interrupted":
+        detail = (
+            "direct inbox-poll nudge outcome unknown before its result was recorded"
+        )
+    else:
+        detail = "unchanged at next synchronized check after direct inbox-poll nudge"
+    return f"monitor escalation: member {member_id} ({safe_name}) {detail}"
+
+
+def _finished_entry(member_id: int, name: str) -> str:
+    return (
+        f"monitor finished: member {member_id} "
+        f"({_sanitize_monitor_report_name(name)}) is at an empty input prompt; "
+        "Director must decide whether assigned work remains"
+    )
+
+
+def _validate_director_gate_token(
+    session,
+    *,
+    fleet_id: int,
+    token: str,
+    now: datetime,
+):
+    if not _CAPTURE_SHA256_RE.fullmatch(token):
+        raise click.ClickException(
+            "director gate token must be 64 lowercase hexadecimal characters"
+        )
+    expected = hashlib.sha256(bytes.fromhex(token)).hexdigest()
+    current_director_id = (
+        select(Fleet.director_member_id)
+        .where(
+            Fleet.fleet_id == fleet_id,
+            Fleet.deleted_at.is_(None),
+        )
+        .scalar_subquery()
+    )
+    consumed = session.execute(
+        delete(MonitorDirectorGate)
+        .where(
+            MonitorDirectorGate.fleet_id == fleet_id,
+            MonitorDirectorGate.director_member_id == current_director_id,
+            MonitorDirectorGate.token_sha256 == expected,
+            MonitorDirectorGate.expires_at > now.isoformat(),
+        )
+        .returning(MonitorDirectorGate.director_member_id)
+        .execution_options(synchronize_session=False)
+    ).first()
+    if consumed is None:
+        raise click.ClickException(
+            "monitor Director gate token is absent, mismatched, or expired"
+        )
+
+    fleet = session.execute(
+        select(Fleet).where(
+            Fleet.fleet_id == fleet_id,
+            Fleet.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+    if fleet is None or fleet.director_member_id is None:
+        raise click.ClickException(f"fleet {fleet_id} has no active Director")
+    director = session.execute(
+        select(Member, MemberPlacement.mux_pane_id, MonitorConfig.interval_seconds)
+        .join(MemberPlacement, MemberPlacement.member_id == Member.member_id)
+        .join(MonitorConfig, MonitorConfig.member_id == Member.member_id)
+        .where(
+            Member.member_id == fleet.director_member_id,
+            Member.fleet_id == fleet_id,
+            Member.status == "active",
+            MemberPlacement.mux_pane_id.is_not(None),
+        )
+    ).first()
+    if director is None:
+        raise click.ClickException("monitor report Director is unavailable")
+    return fleet, director
+
+
+def _find_monitoring_member_in_session(session, fleet_id: int):
+    row = session.execute(
+        select(Member.member_id, MemberPlacement.mux_pane_id)
+        .join(MemberPlacement, MemberPlacement.member_id == Member.member_id)
+        .where(
+            Member.fleet_id == fleet_id,
+            Member.status == "active",
+            MemberPlacement.mux_pane_id.is_not(None),
+            _shared.CARD_KIND_SQL == _shared.MONITORING_MEMBER_KIND,
+        )
+    ).first()
+    if row is None:
+        raise click.ClickException(f"fleet {fleet_id} has no active monitoring member")
+    return row
+
+
+def report_monitor_batch(
+    fleet_id: int,
+    *,
+    director_gate_token: str,
+    finished_member_ids: list[int],
+) -> dict:
+    """Consume a safe Director gate and reconcile/create/preview one aggregate."""
+    now = datetime.now(UTC)
+    now_iso = now.isoformat()
+    preview_message: dict | None = None
+    preview_recipient_id: int | None = None
+    preview_sender_id: int | None = None
+    result: dict[str, object] = {
+        "created_message_id": None,
+        "open_message_id": None,
+        "preview_message_id": None,
+        "escalated_member_ids": [],
+        "finished_member_ids": [],
+        "created": False,
+        "preview_outcome": "none",
+    }
+
+    with _shared.write_session() as session:
+        fleet, director = _validate_director_gate_token(
+            session,
+            fleet_id=fleet_id,
+            token=director_gate_token,
+            now=now,
+        )
+        watcher = _find_monitoring_member_in_session(session, fleet_id)
+
+        open_delivery = session.execute(
+            select(MonitorReportDelivery)
+            .where(
+                MonitorReportDelivery.fleet_id == fleet_id,
+                MonitorReportDelivery.preview_state.in_(_OPEN_PREVIEW_STATES),
+            )
+            .order_by(MonitorReportDelivery.message_id)
+        ).scalar_one_or_none()
+        if open_delivery is not None:
+            open_message = session.get(Message, open_delivery.message_id)
+            if open_message is None or open_message.status_state != "input_required":
+                open_delivery.preview_state = "delivered"
+                open_delivery.delivered_at = now_iso
+                open_delivery = None
+
+        if open_delivery is None:
+            escalation_rows = session.execute(
+                select(Member, MonitorConfig)
+                .join(MonitorConfig, MonitorConfig.member_id == Member.member_id)
+                .where(
+                    Member.fleet_id == fleet_id,
+                    Member.status == "active",
+                    Member.member_id != fleet.director_member_id,
+                    MonitorConfig.stall_episode_state == "escalation_pending",
+                )
+                .order_by(Member.member_id)
+            ).all()
+
+            finished_ids = sorted(set(finished_member_ids))
+            finished_rows: list[Member] = []
+            for finished_id in finished_ids:
+                finished = session.execute(
+                    select(Member)
+                    .join(
+                        MonitorConfig,
+                        MonitorConfig.member_id == Member.member_id,
+                    )
+                    .where(
+                        Member.member_id == finished_id,
+                        Member.fleet_id == fleet_id,
+                        Member.status == "active",
+                        Member.member_id != fleet.director_member_id,
+                        _shared.CARD_KIND_SQL != _shared.MONITORING_MEMBER_KIND,
+                    )
+                ).scalar_one_or_none()
+                if finished is None:
+                    raise click.ClickException(
+                        f"finished member {finished_id} is not an active "
+                        "enrolled ordinary member"
+                    )
+                finished_rows.append(finished)
+
+            if escalation_rows or finished_rows:
+                entries = [
+                    _report_entry(
+                        member.member_id,
+                        member.name,
+                        config.stall_escalation_reason,
+                    )
+                    for member, config in escalation_rows
+                ]
+                entries.extend(
+                    _finished_entry(member.member_id, member.name)
+                    for member in finished_rows
+                )
+                message_dict = {
+                    "owner_member_id": fleet.director_member_id,
+                    "from_member_id": watcher.member_id,
+                    "to_member_id": fleet.director_member_id,
+                    "type": "unicast",
+                    "created_at": now_iso,
+                    "status_state": "input_required",
+                    "status_timestamp": now_iso,
+                    "origin_message_id": None,
+                    "text": "monitor report batch:\n- " + "\n- ".join(entries),
+                }
+                from cafleet.broker.messaging import _insert_message
+
+                message_id = _insert_message(session, message_dict)
+                message_dict["message_id"] = message_id
+                session.add(
+                    MonitorReportDelivery(
+                        message_id=message_id,
+                        fleet_id=fleet_id,
+                        preview_state="pending",
+                        attempt_count=0,
+                    )
+                )
+                for _member, config in escalation_rows:
+                    config.stall_episode_state = "escalated"
+                result.update(
+                    {
+                        "created_message_id": message_id,
+                        "open_message_id": message_id,
+                        "escalated_member_ids": [
+                            member.member_id for member, _config in escalation_rows
+                        ],
+                        "finished_member_ids": [
+                            member.member_id for member in finished_rows
+                        ],
+                        "created": True,
+                    }
+                )
+                open_delivery = session.get(MonitorReportDelivery, message_id)
+                preview_message = message_dict
+        else:
+            result["open_message_id"] = open_delivery.message_id
+
+        if open_delivery is not None:
+            result["open_message_id"] = open_delivery.message_id
+            preview_due = open_delivery.preview_state == "pending"
+            if (
+                open_delivery.preview_state == "awaiting_ack"
+                and open_delivery.last_attempt_at is not None
+            ):
+                elapsed = (
+                    now - datetime.fromisoformat(open_delivery.last_attempt_at)
+                ).total_seconds()
+                preview_due = elapsed >= director.interval_seconds
+            if preview_due and preview_message is None:
+                message_row = session.get(Message, open_delivery.message_id)
+                if message_row is not None:
+                    preview_message = _shared.row_to_message_dict(message_row)
+
+        if preview_message is not None:
+            preview_recipient_id = fleet.director_member_id
+            preview_sender_id = watcher.member_id
+
+    if preview_message is None:
+        return result
+
+    assert preview_recipient_id is not None
+    assert preview_sender_id is not None
+    from cafleet.broker.messaging import _try_notify_recipient
+
+    with _shared.read_session() as session:
+        preview_sent = _try_notify_recipient(
+            session,
+            recipient_id=preview_recipient_id,
+            sender_id=preview_sender_id,
+            message_dict=preview_message,
+        )
+    attempted_at = _shared.now_iso()
+    with _shared.write_session() as session:
+        delivery = session.get(MonitorReportDelivery, preview_message["message_id"])
+        if delivery is not None and delivery.preview_state in _OPEN_PREVIEW_STATES:
+            delivery.attempt_count += 1
+            delivery.last_attempt_at = attempted_at
+            if preview_sent:
+                delivery.preview_state = "awaiting_ack"
+
+    result["preview_message_id"] = preview_message["message_id"]
+    result["preview_outcome"] = "awaiting_ack" if preview_sent else "failed"
+    return result
 
 
 def _is_live(row, now: datetime) -> bool:
@@ -447,12 +1256,18 @@ def monitor_members_payload(fleet_id: int, now: datetime) -> list[dict]:
 
 
 def delete_fleet_monitor_rows(session, fleet_id: int) -> None:
-    """Delete the fleet's ``monitor_config`` rows and its ``monitor_runtime`` row.
+    """Delete all durable monitor state for one fleet.
 
     Called inside ``delete_fleet``'s transaction, mirroring the explicit
     ``member_placements`` cleanup.
     """
     members_in_fleet = select(Member.member_id).where(Member.fleet_id == fleet_id)
+    session.execute(
+        delete(MonitorReportDelivery).where(MonitorReportDelivery.fleet_id == fleet_id)
+    )
+    session.execute(
+        delete(MonitorDirectorGate).where(MonitorDirectorGate.fleet_id == fleet_id)
+    )
     session.execute(
         delete(MonitorConfig).where(MonitorConfig.member_id.in_(members_in_fleet))
     )
