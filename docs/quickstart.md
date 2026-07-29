@@ -67,7 +67,6 @@ commands into a member's pane; the operator should confirm each invocation.
 
 ```toml
 [sandbox_workspace_write]
-network_access = true
 writable_roots = ["/home/<you>/.local/share/cafleet"]
 ```
 
