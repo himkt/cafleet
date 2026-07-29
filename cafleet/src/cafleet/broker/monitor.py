@@ -489,9 +489,9 @@ def _stall_target(
         raise click.ClickException(
             f"member {member_id} is not an eligible ordinary monitor target"
         )
-    if require_live and (
-        not bool(row.MonitorConfig.enabled) or row.mux_pane_id is None
-    ):
+    if require_live and row.mux_pane_id is None:
+        raise click.ClickException(f"member {member_id} does not have a live placement")
+    if require_live and not director_gate and not bool(row.MonitorConfig.enabled):
         raise click.ClickException(
             f"member {member_id} does not have an enabled live placement"
         )
@@ -785,6 +785,7 @@ def _sanitize_monitor_report_name(name: str) -> str:
         .replace("\t", "⏎")
         .replace("`", "ˋ")
         .replace("$(", "$﹙")
+        .replace("|", "│")
     )
 
 
