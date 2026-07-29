@@ -726,9 +726,40 @@ def test_disabling_director_deletes_outstanding_gate(broker_session):
         assert session.get(models.MonitorDirectorGate, fleet["fleet_id"]) is None
 
 
+def test_disabled_live_director_can_gate_and_drain_pending_report():
+    fleet, member = _setup_report_fleet()
+    _queue_ping_failure(fleet, member["member_id"])
+    broker.update_monitor_config(
+        fleet["fleet_id"],
+        fleet["director"]["member_id"],
+        enabled=False,
+    )
+
+    observed = _observe(
+        fleet["fleet_id"],
+        fleet["director"]["member_id"],
+        "finished",
+        captured_at=datetime.now(UTC).isoformat(),
+        content_sha256=HASH_A,
+        director_gate=True,
+    )
+    report = broker.report_monitor_batch(
+        fleet["fleet_id"],
+        director_gate_token=observed["director_gate_token"],
+        finished_member_ids=[],
+    )
+
+    assert observed["classification"] == "finished"
+    assert observed["action"] == "none"
+    assert isinstance(observed["director_gate_token"], str)
+    assert report["created"] is True
+    assert report["escalated_member_ids"] == [member["member_id"]]
+    assert broker.list_pending_stall_escalations(fleet["fleet_id"]) == []
+
+
 def test_report_batch_creates_sorted_sanitized_aggregate_and_escalates_rows():
     fleet, first = _setup_report_fleet()
-    second = _ordinary(fleet, name="line\ninject", pane_id="%6")
+    second = _ordinary(fleet, name="line\ninject|pipe", pane_id="%6")
     finished = _ordinary(fleet, name="finished", pane_id="%7")
     _queue_ping_failure(fleet, second["member_id"])
     _queue_ping_failure(fleet, first["member_id"])
@@ -756,6 +787,8 @@ def test_report_batch_creates_sorted_sanitized_aggregate_and_escalates_rows():
     assert message["status_state"] == "input_required"
     assert message["text"].startswith("monitor report batch:\n")
     assert "\ninject" not in message["text"]
+    assert "line⏎inject│pipe" in message["text"]
+    assert "|" not in message["text"]
     assert message["text"].count("\n- ") == 3
 
 

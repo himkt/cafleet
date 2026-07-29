@@ -60,7 +60,7 @@ EXPECTED_WAKE_PAYLOAD = (
     "lifecycle cleanup "
     "preserves sticky escalation_pending and resets non-pending disabled, "
     "dead, or placement-pending episodes. The Director being awaiting_user, "
-    "working, unknown, disabled, dead, or unreadable suppresses only the final "
+    "working, unknown, dead, or unreadable suppresses only the final "
     "aggregate, never an eligible ordinary-member ping. After all ordinary "
     "actions, recapture Director 332 (coding_agent=opencode) and submit "
     "--director-gate; only finished or broker-resolved stalled after two "
@@ -122,10 +122,11 @@ def test_send_wake_trigger__director_state_does_not_suppress_ordinary_ping(
 ):
     payload = _capture_tmux_payload(monkeypatch)
     assert (
-        "The Director being awaiting_user, working, unknown, disabled, dead, or "
+        "The Director being awaiting_user, working, unknown, dead, or "
         "unreadable suppresses only the final aggregate, never an eligible "
         "ordinary-member ping."
     ) in payload
+    assert "unknown, disabled, dead" not in payload
     assert (
         "Run cafleet member ping only when observe atomically returns action=ping"
         in (payload)
