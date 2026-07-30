@@ -338,6 +338,41 @@ fn broadcast_prints_the_recipients_and_delivered_counts() {
 }
 
 #[test]
+fn broadcast_full_json_summary_carries_the_null_recipient() {
+    let cli = Cli::new();
+    let (fleet_id, director_id, _member_id) = fleet_with_member(&cli);
+    let output = cli.run(&[
+        "message",
+        "broadcast",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--from-member-id",
+        &director_id.to_string(),
+        "--text",
+        "all hands",
+        "--full",
+        "--json",
+    ]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    let envelope = &payload[0];
+    assert_eq!(envelope["recipients"], 1);
+    assert_eq!(envelope["delivered"], 1);
+    let summary = &envelope["message"];
+    assert_eq!(summary["type"], "broadcast_summary");
+    assert_eq!(
+        summary["to_member_id"],
+        serde_json::Value::Null,
+        "the summary row has no single recipient — never a 0 sentinel"
+    );
+    assert_eq!(
+        summary["origin_message_id"], summary["message_id"],
+        "self-referential origin"
+    );
+    assert_eq!(summary["text"], "Broadcast sent to 1 recipients");
+}
+
+#[test]
 fn show_full_json_pins_the_typed_column_envelope() {
     let cli = Cli::new();
     let (fleet_id, director_id, member_id) = fleet_with_member(&cli);

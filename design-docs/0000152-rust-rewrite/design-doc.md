@@ -80,6 +80,7 @@ The broker stays synchronous (one `rusqlite` connection per process, PRAGMAs app
 
 The crates pinned in this table are the dependency ceiling, not a floor: no convenience extras beyond them — no tower-http (the embedded SPA is served by hand), no serde derive (result shapes reuse `serde_json` values), minimal feature flags on axum/tokio and every other dependency — and no new direct dependency lands without Director arbitration. Dev-dependencies follow the same rule; `tower` stays only for the `ServiceExt` oneshot harness named in § Testing.
 
+
 | Python dependency | Rust replacement | Notes |
 |---|---|---|
 | click | `clap` (derive) | Custom top-level error mapping preserves the exit-code polarity; parse-error text is clap-native (SPEC amendment A1). |
@@ -87,8 +88,8 @@ The crates pinned in this table are the dependency ceiling, not a floor: no conv
 | Alembic | `refinery` (`embed_migrations!`) | Own `refinery_schema_history` ledger; squashed baseline (SPEC amendment A2). |
 | pydantic / pydantic-settings | hand-rolled `std::env` reader | Six variables, one explicit binding each; non-integer numerics fail loudly at startup. |
 | FastAPI + uvicorn | `axum` + `tokio` | Scoped to the `server` subcommand; SPA served from the embedded dist. |
-| `urllib` + `zipfile` (setup assets) | deleted | Assets embedded via `include_dir!`; setup installs offline (SPEC amendment A3). |
-| `importlib.metadata` / `importlib.resources` | `env!("CARGO_PKG_VERSION")` / `include_dir!` + `rust-embed` | One canonical version string feeds `--version`, the stale-assets guard, and `asset_installs`. |
+| `urllib` + `zipfile` (setup assets) | deleted | Assets embedded via `rust-embed` (`debug-embed` feature, so debug binaries carry their own assets too); setup installs offline (SPEC amendment A3). |
+| `importlib.metadata` / `importlib.resources` | `env!("CARGO_PKG_VERSION")` / `rust-embed` | One canonical version string feeds `--version`, the stale-assets guard, and `asset_installs`. The migration chain's metadata (head version, chain guard) comes from refinery's own embedded runner, not a second embed crate. |
 | `hashlib` | `sha2` | Capture content sha256 in `monitor capture --json`. |
 | `signal` / `os.kill(pid, 0)` | `signal-hook` + `nix` `kill(pid, None)` | `EPERM` → alive, `ESRCH` → dead, matching the Python branches. |
 | `datetime` | `chrono` with a pinned formatter | See § Timestamps. |
@@ -158,13 +159,13 @@ axum app construction mirrors `create_app`: `/api` router registered ahead of th
 `cafleet setup [--skip …]` keeps its two-half structure and failure envelopes:
 
 - **db half**: refinery migrate-to-head per § Persistence and migrations.
-- **assets half**: preflight (`asset_installs` table exists) unchanged; then, per non-skipped agent, delete-and-reinstall skills into `~/.claude/skills` / `~/.codex/skills` / `~/.config/opencode/skills` and presets into `~/.codex/rules/cafleet.rules` / `~/.opencode/agents/cafleet.md` from the data embedded at build time (`include_dir!` over the repo-root `skills/` and `presets/` trees), record `asset_installs(agent, CARGO_PKG_VERSION)`, and echo the existing per-target lines. No network. The zip/GitHub-API code path and the release `upload-assets` job are deleted.
+- **assets half**: preflight (`asset_installs` table exists) unchanged; then, per non-skipped agent, delete-and-reinstall skills into `~/.claude/skills` / `~/.codex/skills` / `~/.config/opencode/skills` and presets into `~/.codex/rules/cafleet.rules` / `~/.opencode/agents/cafleet.md` from the data embedded at build time (`rust-embed` over the repo-root `skills/` and `presets/` trees), record `asset_installs(agent, CARGO_PKG_VERSION)`, and echo the existing per-target lines. No network. The zip/GitHub-API code path and the release `upload-assets` job are deleted.
 
 Embedding also fixes the dev-build problem: a locally built binary always carries matching assets, so the stale-assets guard compares against the binary's own version.
 
 ### Build, packaging, and release
 
-- **build.rs** fails loudly when `cafleet/webui-dist/` is missing (fail-fast per repo rules) with a message naming `mise //admin:build`. `admin/vite.config.ts` `outDir` retargets to `../cafleet/webui-dist`. The dist is embedded via `rust-embed`; skills/presets/migrations via `include_dir!`.
+- **build.rs** fails loudly when `cafleet/webui-dist/` is missing (fail-fast per repo rules) with a message naming `mise //admin:build`. `admin/vite.config.ts` `outDir` retargets to `../cafleet/webui-dist`. The dist, skills, and presets are embedded via `rust-embed` (`debug-embed`); the migrations via refinery's `embed_migrations!` alone.
 - **Versioning**: `Cargo.toml` starts at the version recorded in `cafleet/pyproject.toml` at cutover (0.22.0 at drafting). `.bumpversion.toml` rewrites `cafleet/Cargo.toml` and `Cargo.lock`; the single-line `Bump version: X → Y` commit convention and bare-version tags are kept.
 - **Release workflow** (replaces `publish.yml`): on `release: published`, a matrix builds the three targets — `aarch64-apple-darwin` on a macOS arm runner, the two musl targets on ubuntu (cross-compiled; `cargo-zigbuild` or `cross`, chosen at implementation time for whichever links the bundled SQLite cleanly) — each preceded by `mise //admin:build`, then packages `cafleet-v<version>-<target>.tar.gz` (single binary inside) and uploads via `gh release upload --clobber`. The PyPI OIDC job and the assets-zip job are deleted.
 - **CI** (`ci.yml`): lint job → `mise //cafleet:lint` (clippy `-D warnings` + `cargo fmt --check`), test job → `mise //cafleet:test` (`cargo test`), both preceded by `mise //admin:build` (build.rs requires the dist), with Rust toolchain + cargo cache via mise.

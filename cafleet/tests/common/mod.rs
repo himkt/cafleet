@@ -193,6 +193,16 @@ impl Cli {
             .expect("the first token is the member id")
     }
 
+    /// Spawn a long-running command (e.g. `monitor start`) inside the fake
+    /// tmux context, with stdout/stderr piped for later collection.
+    pub fn spawn(&self, args: &[&str]) -> std::process::Child {
+        self.command(args, true)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    }
+
     pub fn shim_calls(&self) -> Vec<String> {
         std::fs::read_to_string(&self.shim_log)
             .unwrap_or_default()

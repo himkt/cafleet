@@ -386,6 +386,66 @@ fn member_prompt_dispatches_and_validates_the_text() {
 }
 
 #[test]
+fn member_prompt_shell_form_types_the_bang_line_without_the_esc_safeguard() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_fleet();
+    let member_id = cli.create_member(fleet_id, "worker");
+    let output = cli.run(&[
+        "member",
+        "prompt",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
+        "--shell",
+        "ls -la",
+    ]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("Sent shell prompt"), "got: {out}");
+    assert!(out.contains("worker (%7)."), "got: {out}");
+    let calls = cli.shim_calls();
+    assert!(
+        calls.iter().any(|line| line.contains("-l ! ls -la")),
+        "the shell form types the bang line literally: {calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|line| line.contains("Escape")),
+        "no Esc before the shell form — it honors the ! shortcut: {calls:?}"
+    );
+}
+
+#[test]
+fn monitor_capture_of_a_pending_placement_is_a_hard_error() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_fleet();
+    let member_id = cli.create_member(fleet_id, "worker");
+    cli.sqlite()
+        .execute(
+            "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=?1",
+            [member_id],
+        )
+        .unwrap();
+
+    let output = cli.run(&[
+        "monitor",
+        "capture",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
+    ]);
+    assert_eq!(code(&output), 1, "capture rejects a pending placement");
+    assert!(
+        stderr(&output).contains(&format!(
+            "member {member_id} has no pane yet (pending placement) — nothing to capture."
+        )),
+        "got: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn member_ping_skips_a_pending_placement_and_exits_zero() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.with_fleet();
@@ -428,6 +488,39 @@ fn member_ping_skips_a_pending_placement_and_exits_zero() {
     assert_eq!(payload["member_id"], member_id);
     assert_eq!(payload["pane_id"], serde_json::Value::Null);
     assert_eq!(payload["skipped"], true);
+    assert!(
+        !cli.shim_calls()
+            .iter()
+            .any(|line| line.contains("message poll")),
+        "the skip sends no keystroke"
+    );
+
+    // The skip is a no-op, not a terminal state: once the placement binds a
+    // pane, the same member is pinged normally.
+    cli.sqlite()
+        .execute(
+            "UPDATE member_placements SET mux_pane_id='%9' WHERE member_id=?1",
+            [member_id],
+        )
+        .unwrap();
+    let output = cli.run(&[
+        "member",
+        "ping",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
+        "--json",
+    ]);
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(payload["pane_id"], "%9");
+    assert_eq!(payload["skipped"], false);
+    assert!(
+        cli.shim_calls().iter().any(|line| line.contains(&format!(
+            "send-keys -t %9 -l cafleet message poll --fleet-id {fleet_id} --member-id {member_id}"
+        ))),
+        "the late-bound pane is pinged normally"
+    );
 }
 
 #[test]
