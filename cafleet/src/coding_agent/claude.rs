@@ -2,6 +2,72 @@
 //! effort enum, and the only backend that honors `display_name`. The colocated
 //! tests pin the contract; see [`super::test_support`] for the API.
 
+use super::{CodingAgent, SpawnProbe, missing_binary};
+use crate::error::CafleetError;
+
+const EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+pub struct Claude;
+
+impl CodingAgent for Claude {
+    fn name(&self) -> &'static str {
+        "claude"
+    }
+
+    fn binary_name(&self) -> &'static str {
+        "claude"
+    }
+
+    fn validate_model(&self, _model: Option<&str>) -> Result<(), CafleetError> {
+        Ok(())
+    }
+
+    fn validate_effort(&self, effort: Option<&str>) -> Result<(), CafleetError> {
+        match effort {
+            None => Ok(()),
+            Some(level) if EFFORT_LEVELS.contains(&level) => Ok(()),
+            Some(level) => Err(CafleetError::Usage(format!(
+                "--effort for the claude backend must be one of low, medium, high, \
+                 xhigh, max (got '{level}')."
+            ))),
+        }
+    }
+
+    fn ensure_available(&self, probe: &dyn SpawnProbe) -> Result<(), CafleetError> {
+        if probe.binary_on_path(self.binary_name()) {
+            Ok(())
+        } else {
+            Err(missing_binary(self.binary_name()))
+        }
+    }
+
+    fn build_spawn_argv(
+        &self,
+        prompt: &str,
+        display_name: &str,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> Vec<String> {
+        let mut argv = vec![
+            "claude".to_string(),
+            "--permission-mode".to_string(),
+            "dontAsk".to_string(),
+            "--name".to_string(),
+            display_name.to_string(),
+        ];
+        if let Some(model) = model {
+            argv.push("--model".to_string());
+            argv.push(model.to_string());
+        }
+        if let Some(effort) = effort {
+            argv.push("--effort".to_string());
+            argv.push(effort.to_string());
+        }
+        argv.push(prompt.to_string());
+        argv
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;

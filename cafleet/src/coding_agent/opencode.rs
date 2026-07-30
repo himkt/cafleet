@@ -3,6 +3,83 @@
 //! `--prompt` flag-pair prompt. The colocated tests pin the contract; see
 //! [`super::test_support`] for the API.
 
+use super::{CodingAgent, SpawnProbe, missing_binary};
+use crate::error::CafleetError;
+
+pub struct Opencode;
+
+impl CodingAgent for Opencode {
+    fn name(&self) -> &'static str {
+        "opencode"
+    }
+
+    fn binary_name(&self) -> &'static str {
+        "opencode"
+    }
+
+    fn validate_model(&self, model: Option<&str>) -> Result<(), CafleetError> {
+        let Some(model) = model else {
+            return Ok(());
+        };
+        let valid = model
+            .split_once('/')
+            .is_some_and(|(provider, id)| !provider.is_empty() && !id.is_empty());
+        if valid {
+            Ok(())
+        } else {
+            Err(CafleetError::Usage(format!(
+                "--model for the opencode backend must be \
+                 '<provider-id>/<model-id>' (got '{model}')."
+            )))
+        }
+    }
+
+    fn validate_effort(&self, effort: Option<&str>) -> Result<(), CafleetError> {
+        match effort {
+            None => Ok(()),
+            Some(_) => Err(CafleetError::Usage(
+                "opencode does not support reasoning effort.".to_string(),
+            )),
+        }
+    }
+
+    fn ensure_available(&self, probe: &dyn SpawnProbe) -> Result<(), CafleetError> {
+        if !probe.binary_on_path(self.binary_name()) {
+            return Err(missing_binary(self.binary_name()));
+        }
+        let preset = probe.home_dir().join(".opencode/agents/cafleet.md");
+        if preset.is_file() {
+            Ok(())
+        } else {
+            Err(CafleetError::App(format!(
+                "opencode agent preset not found at {}; run 'cafleet setup' first",
+                preset.display()
+            )))
+        }
+    }
+
+    fn build_spawn_argv(
+        &self,
+        prompt: &str,
+        _display_name: &str,
+        model: Option<&str>,
+        _effort: Option<&str>,
+    ) -> Vec<String> {
+        let mut argv = vec![
+            "opencode".to_string(),
+            "--agent".to_string(),
+            "cafleet".to_string(),
+        ];
+        if let Some(model) = model {
+            argv.push("--model".to_string());
+            argv.push(model.to_string());
+        }
+        argv.push("--prompt".to_string());
+        argv.push(prompt.to_string());
+        argv
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;

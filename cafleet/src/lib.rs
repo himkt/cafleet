@@ -1,8 +1,10 @@
 pub mod assets;
 pub mod broker;
+pub mod coding_agent;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod multiplexer;
 pub mod output;
 pub mod spawn_prompt;
 pub mod time;

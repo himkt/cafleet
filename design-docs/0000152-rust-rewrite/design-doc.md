@@ -1,7 +1,7 @@
 # Rust Rewrite of the cafleet Package
 
 **Status**: Approved
-**Progress**: 26/44 tasks complete
+**Progress**: 30/44 tasks complete
 **Last Updated**: 2026-07-30
 
 ## Overview
@@ -267,10 +267,10 @@ Total-removal (same change): `cafleet/src/**` (Python), `cafleet/tests/**` (pyte
 
 ### Step 5: Multiplexer and coding agents
 
-- [ ] Multiplexer trait + tmux backend (argv, Esc matrix, timings, capture semantics, pane-gone tolerance, best-effort sends) <!-- completed: -->
-- [ ] herdr backend (JSON envelope, layout ratio arithmetic, agent_status, kill/rebalance) <!-- completed: -->
-- [ ] Shared wake-payload builder + unified sanitization map, pinned by a golden-string test <!-- completed: -->
-- [ ] CodingAgent trait + claude/codex/opencode argv builders with validation error strings <!-- completed: -->
+- [x] Multiplexer trait + tmux backend (argv, Esc matrix, timings, capture semantics, pane-gone tolerance, best-effort sends) <!-- completed: 2026-07-30T12:24 -->
+- [x] herdr backend (JSON envelope, layout ratio arithmetic, agent_status, kill/rebalance) <!-- completed: 2026-07-30T12:24 -->
+- [x] Shared wake-payload builder + unified sanitization map, pinned by a golden-string test <!-- completed: 2026-07-30T12:24 -->
+- [x] CodingAgent trait + claude/codex/opencode argv builders with validation error strings <!-- completed: 2026-07-30T12:24 -->
 
 ### Step 6: CLI commands
 

@@ -3,6 +3,71 @@
 //! `display_name`. The colocated tests pin the contract; see
 //! [`super::test_support`] for the API.
 
+use super::{CodingAgent, SpawnProbe, missing_binary};
+use crate::error::CafleetError;
+
+const EFFORT_LEVELS: [&str; 5] = ["minimal", "low", "medium", "high", "xhigh"];
+
+pub struct Codex;
+
+impl CodingAgent for Codex {
+    fn name(&self) -> &'static str {
+        "codex"
+    }
+
+    fn binary_name(&self) -> &'static str {
+        "codex"
+    }
+
+    fn validate_model(&self, _model: Option<&str>) -> Result<(), CafleetError> {
+        Ok(())
+    }
+
+    fn validate_effort(&self, effort: Option<&str>) -> Result<(), CafleetError> {
+        match effort {
+            None => Ok(()),
+            Some(level) if EFFORT_LEVELS.contains(&level) => Ok(()),
+            Some(level) => Err(CafleetError::Usage(format!(
+                "--effort for the codex backend must be one of minimal, low, medium, \
+                 high, xhigh (got '{level}')."
+            ))),
+        }
+    }
+
+    fn ensure_available(&self, probe: &dyn SpawnProbe) -> Result<(), CafleetError> {
+        if probe.binary_on_path(self.binary_name()) {
+            Ok(())
+        } else {
+            Err(missing_binary(self.binary_name()))
+        }
+    }
+
+    fn build_spawn_argv(
+        &self,
+        prompt: &str,
+        _display_name: &str,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> Vec<String> {
+        let mut argv = vec![
+            "codex".to_string(),
+            "--ask-for-approval".to_string(),
+            "never".to_string(),
+            "--sandbox".to_string(),
+            "workspace-write".to_string(),
+        ];
+        if let Some(model) = model {
+            argv.push("--model".to_string());
+            argv.push(model.to_string());
+        }
+        if let Some(effort) = effort {
+            argv.push(format!("--config=model_reasoning_effort={effort}"));
+        }
+        argv.push(prompt.to_string());
+        argv
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;

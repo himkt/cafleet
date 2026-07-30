@@ -9,6 +9,170 @@ pub mod herdr;
 pub mod test_support;
 pub mod tmux;
 
+use std::fmt;
+
+use serde_json::Value;
+
+use crate::coding_agent::coding_agent;
+
+// COMMENT(director): the design's crate layout pins `multiplexer/` as "trait + tmux + herdr" (closed enum implementing a trait; herdr's agent_status as an Option-returning trait method). The two backends currently expose parallel inherent methods with no shared trait — introduce the Multiplexer trait (+ the closed dispatch enum the CLI resolver returns) as part of the Step 6 CLI wiring, without changing any tested behavior.
+pub use herdr::HerdrMultiplexer;
+pub use tmux::TmuxMultiplexer;
+
+pub(crate) const ESC_SETTLE_DELAY: f64 = 0.1;
+pub(crate) const SUBMIT_DELAY: f64 = 1.0;
+
+/// Resolved pane identity, returned by `context_discovery` (SPEC §6.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MultiplexerContext {
+    pub session: String,
+    pub window_id: String,
+    pub pane_id: String,
+}
+
+/// A terminal-multiplexer backend failure; `Display` renders the backend
+/// message.
+#[derive(Debug)]
+pub struct MultiplexerError(String);
+
+impl MultiplexerError {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
+        MultiplexerError(message.into())
+    }
+}
+
+impl fmt::Display for MultiplexerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for MultiplexerError {}
+
+/// A subprocess failure below the backend's message mapping.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunError {
+    BinaryNotFound(String),
+    Timeout,
+    Failed { stderr: String },
+}
+
+/// The injectable subprocess seam (SPEC §9): `sleep` goes through the runner
+/// so the Esc-settle and submit delays are observable events, not wall-clock
+/// waits.
+pub trait CommandRunner {
+    fn binary_exists(&self, name: &str) -> bool;
+    fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError>;
+    fn sleep(&self, seconds: f64);
+}
+
+/// Keep a user-controlled field inside the one-line wake envelope: line
+/// breaks and tabs → `⏎`, backtick → `ˋ`, `$(` → `$﹙`, pipe → `│`.
+pub fn sanitize_wake_field(value: &str) -> String {
+    value
+        .replace("\r\n", "⏎")
+        .replace(['\n', '\r', '\t'], "⏎")
+        .replace('`', "ˋ")
+        .replace("$(", "$﹙")
+        .replace('|', "│")
+}
+
+/// Build the byte-identical tmux/herdr pure-trigger wake payload. An
+/// unregistered coding agent — a member's or the Director's — aborts the wake.
+pub fn build_wake_payload(
+    due_members: &[Value],
+    director: &Value,
+) -> Result<String, MultiplexerError> {
+    for target in due_members {
+        let agent = target["coding_agent"].as_str().unwrap_or("");
+        if coding_agent(agent).is_none() {
+            return Err(MultiplexerError::new(format!(
+                "member {} has invalid coding_agent '{agent}'",
+                target["member_id"]
+            )));
+        }
+    }
+    let director_agent = director["coding_agent"].as_str().unwrap_or("");
+    if coding_agent(director_agent).is_none() {
+        return Err(MultiplexerError::new(format!(
+            "Director {} has invalid coding_agent '{director_agent}'",
+            director["member_id"]
+        )));
+    }
+
+    let noun = if due_members.len() == 1 {
+        "member"
+    } else {
+        "members"
+    };
+    let entries = due_members
+        .iter()
+        .map(|target| {
+            let role = if target["is_director"].as_bool().unwrap_or(false) {
+                "director"
+            } else {
+                "member"
+            };
+            let name = target["name"].as_str().unwrap_or("");
+            let agent = target["coding_agent"].as_str().unwrap_or("");
+            let reasons = target["wake_reasons"]
+                .as_array()
+                .map(|reasons| {
+                    reasons
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .unwrap_or_default();
+            format!(
+                "{role} {} ({}; coding_agent={agent}) [{reasons}]",
+                target["member_id"],
+                sanitize_wake_field(name)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(format!(
+        "[monitor] wake: {} {noun} due — {entries}. Director: {} \
+         (coding_agent={director_agent}). Follow your monitor role protocol.",
+        due_members.len(),
+        director["member_id"]
+    ))
+}
+
+/// Backend resolution precedence (SPEC §6.5): an explicit override must name
+/// a registry key; otherwise auto-detect from `HERDR_ENV` / `TMUX` (an empty
+/// value counts as unset); ambiguity and absence are hard errors.
+pub fn resolve_multiplexer_name(
+    override_value: Option<&str>,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<&'static str, MultiplexerError> {
+    if let Some(value) = override_value {
+        return match value {
+            "tmux" => Ok("tmux"),
+            "herdr" => Ok("herdr"),
+            other => Err(MultiplexerError::new(format!(
+                "CAFLEET_MULTIPLEXER='{other}' is not a supported multiplexer \
+                 (expected one of: herdr, tmux)"
+            ))),
+        };
+    }
+    let present = |name: &str| env(name).is_some_and(|value| !value.is_empty());
+    match (present("HERDR_ENV"), present("TMUX")) {
+        (true, true) => Err(MultiplexerError::new(
+            "ambiguous multiplexer environment: both HERDR_ENV and TMUX are set; \
+             set CAFLEET_MULTIPLEXER to 'tmux' or 'herdr' to disambiguate",
+        )),
+        (true, false) => Ok("herdr"),
+        (false, true) => Ok("tmux"),
+        (false, false) => Err(MultiplexerError::new(
+            "no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; \
+             run cafleet inside a tmux or herdr session, or set CAFLEET_MULTIPLEXER",
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
@@ -130,14 +294,20 @@ mod tests {
                 &director(1, "claude"),
             )
             .expect_err("an unknown member agent must abort");
-            assert!(err.to_string().contains("invalid coding_agent"), "got: {err}");
+            assert!(
+                err.to_string().contains("invalid coding_agent"),
+                "got: {err}"
+            );
 
             let err = build_wake_payload(
                 &[due(4, "worker", false, "codex", &["interval"])],
                 &director(1, "not-an-agent"),
             )
             .expect_err("an unknown Director agent must abort");
-            assert!(err.to_string().contains("invalid coding_agent"), "got: {err}");
+            assert!(
+                err.to_string().contains("invalid coding_agent"),
+                "got: {err}"
+            );
         }
     }
 
@@ -150,7 +320,10 @@ mod tests {
 
         #[test]
         fn a_valid_override_wins() {
-            assert_eq!(resolve_multiplexer_name(Some("tmux"), no_env).unwrap(), "tmux");
+            assert_eq!(
+                resolve_multiplexer_name(Some("tmux"), no_env).unwrap(),
+                "tmux"
+            );
             assert_eq!(
                 resolve_multiplexer_name(Some("herdr"), no_env).unwrap(),
                 "herdr"
@@ -191,7 +364,10 @@ mod tests {
             };
             let err = resolve_multiplexer_name(None, empty_both)
                 .expect_err("empty presence vars mean no backend");
-            assert!(err.to_string().starts_with("no supported multiplexer detected:"));
+            assert!(
+                err.to_string()
+                    .starts_with("no supported multiplexer detected:")
+            );
         }
 
         #[test]

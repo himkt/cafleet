@@ -3,17 +3,334 @@
 //! tolerance, and the best-effort-vs-fail-fast split. The colocated tests pin
 //! the contract; see [`super::test_support`] for the API.
 
+use std::collections::{BTreeSet, HashMap};
+use std::rc::Rc;
+
+use serde_json::Value;
+
+use super::{
+    CommandRunner, ESC_SETTLE_DELAY, MultiplexerContext, MultiplexerError, RunError, SUBMIT_DELAY,
+    build_wake_payload,
+};
+
+const PANE_GONE_MARKERS: [&str; 2] = ["can't find pane", "no such pane"];
+
+fn tmux_argv(parts: &[&str]) -> Vec<String> {
+    parts.iter().map(|part| part.to_string()).collect()
+}
+
+fn is_pane_gone(stderr: &str) -> bool {
+    let lowered = stderr.to_lowercase();
+    PANE_GONE_MARKERS
+        .iter()
+        .any(|marker| lowered.contains(marker))
+}
+
+fn map_run_error(argv: &[String], timeout_secs: Option<u64>, error: RunError) -> MultiplexerError {
+    let joined = argv.join(" ");
+    match error {
+        RunError::BinaryNotFound(detail) => {
+            MultiplexerError::new(format!("tmux binary not found: {detail}"))
+        }
+        RunError::Timeout => {
+            let secs = timeout_secs.expect("a timeout error implies a timeout was set");
+            MultiplexerError::new(format!("tmux command timed out after {secs}s: {joined}"))
+        }
+        RunError::Failed { stderr } => MultiplexerError::new(format!(
+            "tmux command failed: {joined}\nstderr: {}",
+            stderr.trim()
+        )),
+    }
+}
+
+pub struct TmuxMultiplexer {
+    runner: Rc<dyn CommandRunner>,
+    env: HashMap<String, String>,
+}
+
+impl TmuxMultiplexer {
+    pub fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
+        TmuxMultiplexer { runner, env }
+    }
+
+    pub fn name(&self) -> &'static str {
+        "tmux"
+    }
+
+    fn env_var(&self, name: &str) -> Option<&str> {
+        self.env
+            .get(name)
+            .map(String::as_str)
+            .filter(|value| !value.is_empty())
+    }
+
+    fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, MultiplexerError> {
+        self.runner
+            .run(argv, timeout_secs)
+            .map_err(|error| map_run_error(argv, timeout_secs, error))
+    }
+
+    fn run_tolerating_pane_gone(
+        &self,
+        argv: &[String],
+        ignore_missing: bool,
+        timeout_secs: Option<u64>,
+    ) -> Result<(), MultiplexerError> {
+        match self.runner.run(argv, timeout_secs) {
+            Ok(_) => Ok(()),
+            Err(RunError::Failed { ref stderr }) if ignore_missing && is_pane_gone(stderr) => {
+                Ok(())
+            }
+            Err(error) => Err(map_run_error(argv, timeout_secs, error)),
+        }
+    }
+
+    /// The literal-then-Enter keystroke shape shared by every submit path:
+    /// optional `Escape` safeguard + settle, the `-l` literal payload, the
+    /// submit delay, and the trailing `Enter`.
+    fn send_literal_then_enter(
+        &self,
+        target_pane_id: &str,
+        payload: &str,
+        timeout_secs: Option<u64>,
+        ignore_missing: bool,
+        esc_first: bool,
+    ) -> Result<(), MultiplexerError> {
+        if esc_first {
+            self.run_tolerating_pane_gone(
+                &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "Escape"]),
+                ignore_missing,
+                timeout_secs,
+            )?;
+            self.runner.sleep(ESC_SETTLE_DELAY);
+        }
+        self.run_tolerating_pane_gone(
+            &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "-l", payload]),
+            ignore_missing,
+            timeout_secs,
+        )?;
+        self.runner.sleep(SUBMIT_DELAY);
+        self.run_tolerating_pane_gone(
+            &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "Enter"]),
+            ignore_missing,
+            timeout_secs,
+        )
+    }
+
+    fn best_effort_send(&self, target_pane_id: &str, payload: &str, esc_first: bool) -> bool {
+        if !self.runner.binary_exists("tmux") {
+            return false;
+        }
+        self.send_literal_then_enter(target_pane_id, payload, Some(5), false, esc_first)
+            .is_ok()
+    }
+
+    pub fn ensure_available(&self) -> Result<(), MultiplexerError> {
+        if !self.runner.binary_exists("tmux") {
+            return Err(MultiplexerError::new("tmux binary not found on PATH"));
+        }
+        if self.env_var("TMUX").is_none() {
+            return Err(MultiplexerError::new(
+                "cafleet member commands must be run inside a tmux session",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
+        let Some(tmux_pane) = self.env_var("TMUX_PANE") else {
+            return Err(MultiplexerError::new(
+                "TMUX_PANE is not set; not running inside a tmux pane",
+            ));
+        };
+        let out = self.run(
+            &tmux_argv(&[
+                "tmux",
+                "display-message",
+                "-p",
+                "-t",
+                tmux_pane,
+                "#{session_name}|#{window_id}|#{pane_id}",
+            ]),
+            None,
+        )?;
+        let parts: Vec<&str> = out.trim().splitn(3, '|').collect();
+        let [session, window_id, pane_id] = parts.as_slice() else {
+            return Err(MultiplexerError::new(format!(
+                "unexpected tmux display-message output: {out:?}"
+            )));
+        };
+        Ok(MultiplexerContext {
+            session: session.to_string(),
+            window_id: window_id.to_string(),
+            pane_id: pane_id.to_string(),
+        })
+    }
+
+    /// Split `reference.window_id` detached (`-d`) and return the new pane
+    /// id; the post-split `main-vertical` reflow is best-effort.
+    pub fn split_window(
+        &self,
+        reference: &MultiplexerContext,
+        env: &[(String, String)],
+        command: &[String],
+    ) -> Result<String, MultiplexerError> {
+        let mut args = tmux_argv(&[
+            "tmux",
+            "split-window",
+            "-t",
+            &reference.window_id,
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-d",
+        ]);
+        for (key, value) in env {
+            args.push("-e".to_string());
+            args.push(format!("{key}={value}"));
+        }
+        args.extend(command.iter().cloned());
+        let pane_id = self.run(&args, None)?.trim().to_string();
+        let _ = self.run(
+            &tmux_argv(&[
+                "tmux",
+                "select-layout",
+                "-t",
+                &reference.window_id,
+                "main-vertical",
+            ]),
+            None,
+        );
+        Ok(pane_id)
+    }
+
+    pub fn send_exit(
+        &self,
+        target_pane_id: &str,
+        ignore_missing: bool,
+    ) -> Result<(), MultiplexerError> {
+        self.send_literal_then_enter(target_pane_id, "/exit", None, ignore_missing, false)
+    }
+
+    pub fn send_poll_trigger(&self, target_pane_id: &str, fleet_id: i64, member_id: i64) -> bool {
+        let payload = format!("cafleet message poll --fleet-id {fleet_id} --member-id {member_id}");
+        self.best_effort_send(target_pane_id, &payload, true)
+    }
+
+    pub fn send_wake_trigger(
+        &self,
+        target_pane_id: &str,
+        due_members: &[Value],
+        director: &Value,
+    ) -> Result<bool, MultiplexerError> {
+        let payload = build_wake_payload(due_members, director)?;
+        Ok(self.best_effort_send(target_pane_id, &payload, false))
+    }
+
+    pub fn send_inline_preview(
+        &self,
+        target_pane_id: &str,
+        message_id: i64,
+        sender_id: i64,
+        ts: &str,
+        text: &str,
+    ) -> bool {
+        let sanitized = text.replace("\r\n", "⏎").replace(['\n', '\r'], "⏎");
+        let payload = format!("[cafleet msg {message_id} from {sender_id} {ts}]\n{sanitized}");
+        self.best_effort_send(target_pane_id, &payload, true)
+    }
+
+    pub fn send_prompt(
+        &self,
+        target_pane_id: &str,
+        text: &str,
+        shell: bool,
+    ) -> Result<(), MultiplexerError> {
+        let stripped = text.trim();
+        if stripped.is_empty() {
+            return Err(MultiplexerError::new("send_prompt: text may not be empty"));
+        }
+        if text.contains('\n') || text.contains('\r') {
+            return Err(MultiplexerError::new(
+                "send_prompt: text may not contain newlines",
+            ));
+        }
+        let payload = if shell {
+            format!("! {stripped}")
+        } else {
+            stripped.to_string()
+        };
+        self.send_literal_then_enter(target_pane_id, &payload, None, false, !shell)
+    }
+
+    /// Capture the last `lines` of the pane buffer, splitting on `\n` only so
+    /// `\r` survives for the CLI-side defrag; the trailing newline is kept.
+    pub fn capture_pane(
+        &self,
+        target_pane_id: &str,
+        lines: i64,
+    ) -> Result<String, MultiplexerError> {
+        if lines <= 0 {
+            return Err(MultiplexerError::new(format!(
+                "capture_pane: lines must be positive, got {lines}"
+            )));
+        }
+        let raw = self.run(
+            &tmux_argv(&[
+                "tmux",
+                "capture-pane",
+                "-p",
+                "-t",
+                target_pane_id,
+                "-S",
+                &format!("-{lines}"),
+            ]),
+            None,
+        )?;
+        let parts: Vec<&str> = raw.split('\n').collect();
+        let keep = usize::try_from(lines).expect("lines is positive") + 1;
+        let start = parts.len().saturating_sub(keep);
+        Ok(parts[start..].join("\n"))
+    }
+
+    pub fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError> {
+        let out = self.run(
+            &tmux_argv(&["tmux", "list-panes", "-a", "-F", "#{pane_id}"]),
+            Some(5),
+        )?;
+        Ok(out.split_whitespace().map(str::to_string).collect())
+    }
+
+    pub fn kill_pane(
+        &self,
+        target_pane_id: &str,
+        ignore_missing: bool,
+    ) -> Result<(), MultiplexerError> {
+        self.run_tolerating_pane_gone(
+            &tmux_argv(&["tmux", "kill-pane", "-t", target_pane_id]),
+            ignore_missing,
+            None,
+        )
+    }
+
+    /// tmux tracks no native agent state.
+    pub fn agent_status(&self, _target_pane_id: &str) -> Result<Option<String>, MultiplexerError> {
+        Ok(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use crate::multiplexer::test_support::{
-        FakeRunner, argv, env, run_event, sleep_event,
-    };
-    use crate::multiplexer::{MultiplexerContext, TmuxMultiplexer, build_wake_payload, RunError};
+    use crate::multiplexer::test_support::{FakeRunner, argv, env, run_event, sleep_event};
+    use crate::multiplexer::{MultiplexerContext, RunError, TmuxMultiplexer, build_wake_payload};
 
     fn tmux_env() -> std::collections::HashMap<String, String> {
-        env(&[("TMUX", "/tmp/tmux-1000/default,123,0"), ("TMUX_PANE", "%1")])
+        env(&[
+            ("TMUX", "/tmp/tmux-1000/default,123,0"),
+            ("TMUX_PANE", "%1"),
+        ])
     }
 
     fn reference() -> MultiplexerContext {
@@ -54,7 +371,11 @@ mod tests {
         );
 
         let runner = FakeRunner::with_binary("tmux");
-        assert!(TmuxMultiplexer::new(runner, tmux_env()).ensure_available().is_ok());
+        assert!(
+            TmuxMultiplexer::new(runner, tmux_env())
+                .ensure_available()
+                .is_ok()
+        );
     }
 
     #[test]
@@ -312,14 +633,19 @@ mod tests {
             "send_prompt: text may not be empty"
         );
         assert_eq!(
-            mux.send_prompt("%5", "a\nb", false).unwrap_err().to_string(),
+            mux.send_prompt("%5", "a\nb", false)
+                .unwrap_err()
+                .to_string(),
             "send_prompt: text may not contain newlines"
         );
         assert_eq!(
             mux.send_prompt("%5", "a\rb", true).unwrap_err().to_string(),
             "send_prompt: text may not contain newlines"
         );
-        assert!(runner.events().is_empty(), "validation precedes any keystroke");
+        assert!(
+            runner.events().is_empty(),
+            "validation precedes any keystroke"
+        );
     }
 
     #[test]
@@ -386,10 +712,7 @@ mod tests {
         runner.respond(Ok("%1\n%2\n".to_string()));
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let panes = mux.list_pane_ids().unwrap();
-        assert_eq!(
-            panes,
-            ["%1", "%2"].iter().map(|s| s.to_string()).collect()
-        );
+        assert_eq!(panes, ["%1", "%2"].iter().map(|s| s.to_string()).collect());
         assert_eq!(
             runner.events(),
             vec![run_event(

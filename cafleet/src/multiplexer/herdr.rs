@@ -3,6 +3,624 @@
 //! phases. The colocated tests pin the contract; see [`super::test_support`]
 //! for the API.
 
+use std::collections::{BTreeSet, HashMap};
+use std::rc::Rc;
+
+use serde_json::Value;
+
+use super::{
+    CommandRunner, ESC_SETTLE_DELAY, MultiplexerContext, MultiplexerError, RunError, SUBMIT_DELAY,
+    build_wake_payload,
+};
+
+const PANE_NOT_FOUND: &str = "pane_not_found";
+
+fn herdr_argv(parts: &[&str]) -> Vec<String> {
+    parts.iter().map(|part| part.to_string()).collect()
+}
+
+/// The herdr error envelope's `error.code`, when the stderr carries one.
+fn error_code(stderr: &str) -> Option<String> {
+    let payload: Value = serde_json::from_str(stderr).ok()?;
+    payload
+        .get("error")?
+        .get("code")?
+        .as_str()
+        .map(str::to_string)
+}
+
+fn map_run_error(argv: &[String], timeout_secs: Option<u64>, error: RunError) -> MultiplexerError {
+    let joined = argv.join(" ");
+    match error {
+        RunError::BinaryNotFound(detail) => {
+            MultiplexerError::new(format!("herdr binary not found: {detail}"))
+        }
+        RunError::Timeout => {
+            let secs = timeout_secs.expect("a timeout error implies a timeout was set");
+            MultiplexerError::new(format!("herdr command timed out after {secs}s: {joined}"))
+        }
+        RunError::Failed { stderr } => MultiplexerError::new(format!(
+            "herdr command failed: {joined}\nstderr: {}",
+            stderr.trim()
+        )),
+    }
+}
+
+fn parse_envelope(out: &str) -> Result<Value, MultiplexerError> {
+    let payload: Value = serde_json::from_str(out)
+        .map_err(|_| MultiplexerError::new(format!("herdr returned non-JSON output: {out:?}")))?;
+    match payload.get("result") {
+        Some(result) if result.is_object() => Ok(result.clone()),
+        _ => Err(MultiplexerError::new(format!(
+            "herdr output missing 'result' object: {out:?}"
+        ))),
+    }
+}
+
+fn str_field<'a>(value: &'a Value, context: &str, key: &str) -> Result<&'a str, MultiplexerError> {
+    value[key]
+        .as_str()
+        .ok_or_else(|| MultiplexerError::new(format!("herdr {context} missing '{key}' field")))
+}
+
+fn f64_field(value: &Value, context: &str, key: &str) -> Result<f64, MultiplexerError> {
+    value[key]
+        .as_f64()
+        .ok_or_else(|| MultiplexerError::new(format!("herdr {context} missing '{key}' field")))
+}
+
+fn round4(value: f64) -> f64 {
+    (value * 10_000.0).round() / 10_000.0
+}
+
+fn shlex_quote(token: &str) -> String {
+    let safe = !token.is_empty()
+        && token
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c));
+    if safe {
+        token.to_string()
+    } else {
+        format!("'{}'", token.replace('\'', "'\"'\"'"))
+    }
+}
+
+fn shlex_join(command: &[String]) -> String {
+    command
+        .iter()
+        .map(|token| shlex_quote(token))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub struct HerdrMultiplexer {
+    runner: Rc<dyn CommandRunner>,
+    env: HashMap<String, String>,
+}
+
+impl HerdrMultiplexer {
+    pub fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
+        HerdrMultiplexer { runner, env }
+    }
+
+    pub fn name(&self) -> &'static str {
+        "herdr"
+    }
+
+    fn env_var(&self, name: &str) -> Option<&str> {
+        self.env
+            .get(name)
+            .map(String::as_str)
+            .filter(|value| !value.is_empty())
+    }
+
+    fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, MultiplexerError> {
+        self.runner
+            .run(argv, timeout_secs)
+            .map_err(|error| map_run_error(argv, timeout_secs, error))
+    }
+
+    fn run_json(
+        &self,
+        argv: &[String],
+        timeout_secs: Option<u64>,
+    ) -> Result<Value, MultiplexerError> {
+        let out = self.run(argv, timeout_secs)?;
+        parse_envelope(&out)
+    }
+
+    fn run_tolerating_missing(
+        &self,
+        argv: &[String],
+        ignore_missing: bool,
+        timeout_secs: Option<u64>,
+    ) -> Result<(), MultiplexerError> {
+        match self.runner.run(argv, timeout_secs) {
+            Ok(_) => Ok(()),
+            Err(RunError::Failed { ref stderr })
+                if ignore_missing && error_code(stderr).as_deref() == Some(PANE_NOT_FOUND) =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(map_run_error(argv, timeout_secs, error)),
+        }
+    }
+
+    fn send_esc(&self, target_pane_id: &str) -> Result<(), MultiplexerError> {
+        self.run(
+            &herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "esc"]),
+            Some(5),
+        )?;
+        self.runner.sleep(ESC_SETTLE_DELAY);
+        Ok(())
+    }
+
+    fn best_effort(&self, steps: impl FnOnce() -> Result<(), MultiplexerError>) -> bool {
+        if !self.runner.binary_exists("herdr") {
+            return false;
+        }
+        steps().is_ok()
+    }
+
+    pub fn ensure_available(&self) -> Result<(), MultiplexerError> {
+        if !self.runner.binary_exists("herdr") {
+            return Err(MultiplexerError::new("herdr binary not found on PATH"));
+        }
+        if self.env_var("HERDR_ENV").is_none() {
+            return Err(MultiplexerError::new(
+                "cafleet member commands must be run inside a herdr session",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
+        let result = self.run_json(&herdr_argv(&["herdr", "pane", "current"]), None)?;
+        let pane = &result["pane"];
+        Ok(MultiplexerContext {
+            session: str_field(pane, "pane current", "workspace_id")?.to_string(),
+            window_id: str_field(pane, "pane current", "tab_id")?.to_string(),
+            pane_id: str_field(pane, "pane current", "pane_id")?.to_string(),
+        })
+    }
+
+    /// Emulate tmux main-vertical: the first member splits the Director pane
+    /// rightward; later members split the column's max pane downward, then the
+    /// column is rebalanced to equal heights (best-effort, anchored on the
+    /// Director's own pane).
+    pub fn split_window(
+        &self,
+        reference: &MultiplexerContext,
+        env: &[(String, String)],
+        command: &[String],
+    ) -> Result<String, MultiplexerError> {
+        let cwd = std::env::current_dir()
+            .map_err(|e| {
+                MultiplexerError::new(format!(
+                    "cannot resolve the working directory for pane spawn: {e}"
+                ))
+            })?
+            .display()
+            .to_string();
+        let result = self.run_json(&herdr_argv(&["herdr", "pane", "list"]), None)?;
+        let panes = result["panes"]
+            .as_array()
+            .ok_or_else(|| MultiplexerError::new("herdr pane list missing 'panes' field"))?;
+        let mut column: Vec<String> = Vec::new();
+        for pane in panes {
+            let pane_id = str_field(pane, "pane list", "pane_id")?;
+            if pane["tab_id"].as_str() == Some(&reference.window_id) && pane_id != reference.pane_id
+            {
+                column.push(pane_id.to_string());
+            }
+        }
+        let new_pane_id = match column.iter().max() {
+            None => self.split_pane(&reference.pane_id, "right", &cwd, env)?,
+            Some(target) => {
+                let pane = self.split_pane(target, "down", &cwd, env)?;
+                let _ = self.resize_tab_column(&reference.pane_id);
+                pane
+            }
+        };
+        self.run(
+            &herdr_argv(&["herdr", "pane", "run", &new_pane_id, &shlex_join(command)]),
+            None,
+        )?;
+        Ok(new_pane_id)
+    }
+
+    fn split_pane(
+        &self,
+        pane_id: &str,
+        direction: &str,
+        cwd: &str,
+        env: &[(String, String)],
+    ) -> Result<String, MultiplexerError> {
+        let mut args = herdr_argv(&[
+            "herdr",
+            "pane",
+            "split",
+            pane_id,
+            "--direction",
+            direction,
+            "--no-focus",
+            "--cwd",
+            cwd,
+        ]);
+        for (key, value) in env {
+            args.push("--env".to_string());
+            args.push(format!("{key}={value}"));
+        }
+        let result = self.run_json(&args, None)?;
+        Ok(str_field(&result["pane"], "pane split", "pane_id")?.to_string())
+    }
+
+    fn read_tab_layout(
+        &self,
+        anchor_pane_id: &str,
+    ) -> Result<(Vec<Value>, Vec<Value>), MultiplexerError> {
+        let result = self.run_json(
+            &herdr_argv(&["herdr", "pane", "layout", "--pane", anchor_pane_id]),
+            None,
+        )?;
+        let layout = &result["layout"];
+        let panes = layout["panes"]
+            .as_array()
+            .ok_or_else(|| MultiplexerError::new("herdr pane layout missing 'panes' field"))?;
+        let splits = layout["splits"]
+            .as_array()
+            .ok_or_else(|| MultiplexerError::new("herdr pane layout missing 'splits' field"))?;
+        Ok((panes.clone(), splits.clone()))
+    }
+
+    /// Rebalance the members' right column on the anchor's tab to equal
+    /// heights — the tmux `select-layout main-vertical` reflow herdr has no
+    /// single command for.
+    fn resize_tab_column(&self, anchor_pane_id: &str) -> Result<(), MultiplexerError> {
+        let (panes, splits) = self.read_tab_layout(anchor_pane_id)?;
+        let column = right_column(&panes)?;
+        if column.len() < 2 {
+            return Ok(());
+        }
+        self.equalize_column(&column, &splits)
+    }
+
+    /// A right column of N stacked members is a right-leaning chain of `down`
+    /// splits: split_k separates member_k from the subtree below it, so equal
+    /// heights ⇔ split_k has ratio 1/(N-k). `resize --amount` is a signed
+    /// delta on a split's ratio, so each split is driven to its target by one
+    /// arithmetic resize.
+    fn equalize_column(&self, column: &[Value], splits: &[Value]) -> Result<(), MultiplexerError> {
+        let n = column.len();
+        let col_x = f64_field(&column[0]["rect"], "pane layout", "x")?;
+        let mut down_splits: Vec<&Value> = Vec::new();
+        for split in splits {
+            if split["direction"].as_str() == Some("down")
+                && f64_field(&split["rect"], "pane layout", "x")? == col_x
+            {
+                down_splits.push(split);
+            }
+        }
+        down_splits.sort_by(|a, b| {
+            a["rect"]["y"]
+                .as_f64()
+                .partial_cmp(&b["rect"]["y"].as_f64())
+                .expect("layout rects carry numeric y")
+        });
+        if down_splits.len() != n - 1 {
+            return Ok(()); // not the expected right-leaning chain — leave it untouched
+        }
+        for (i, split) in down_splits.iter().enumerate() {
+            let ratio = f64_field(split, "pane layout", "ratio")?;
+            let delta = round4(1.0 / (n - i) as f64 - ratio);
+            if delta.abs() < 1e-3 {
+                continue;
+            }
+            let (pane, direction, amount) = if delta > 0.0 {
+                (&column[i], "down", delta)
+            } else {
+                (&column[i + 1], "up", -delta)
+            };
+            let pane_id = str_field(pane, "pane layout", "pane_id")?;
+            self.run(
+                &herdr_argv(&[
+                    "herdr",
+                    "pane",
+                    "resize",
+                    "--pane",
+                    pane_id,
+                    "--direction",
+                    direction,
+                    "--amount",
+                    &amount.to_string(),
+                ]),
+                None,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn send_exit(
+        &self,
+        target_pane_id: &str,
+        ignore_missing: bool,
+    ) -> Result<(), MultiplexerError> {
+        self.run_tolerating_missing(
+            &herdr_argv(&["herdr", "pane", "run", target_pane_id, "/exit"]),
+            ignore_missing,
+            None,
+        )
+    }
+
+    pub fn send_poll_trigger(&self, target_pane_id: &str, fleet_id: i64, member_id: i64) -> bool {
+        let payload = format!("cafleet message poll --fleet-id {fleet_id} --member-id {member_id}");
+        self.best_effort(|| {
+            self.send_esc(target_pane_id)?;
+            self.run(
+                &herdr_argv(&["herdr", "pane", "run", target_pane_id, &payload]),
+                Some(5),
+            )?;
+            Ok(())
+        })
+    }
+
+    /// No esc: the monitoring member's own pane is never on a permission
+    /// prompt.
+    pub fn send_wake_trigger(
+        &self,
+        target_pane_id: &str,
+        due_members: &[Value],
+        director: &Value,
+    ) -> Result<bool, MultiplexerError> {
+        let payload = build_wake_payload(due_members, director)?;
+        Ok(self.best_effort(|| {
+            self.run(
+                &herdr_argv(&["herdr", "pane", "run", target_pane_id, &payload]),
+                Some(5),
+            )?;
+            Ok(())
+        }))
+    }
+
+    /// `send-text` delivers the raw 2-line payload without submitting; the
+    /// single trailing enter submits the whole payload as one recipient turn.
+    pub fn send_inline_preview(
+        &self,
+        target_pane_id: &str,
+        message_id: i64,
+        sender_id: i64,
+        ts: &str,
+        text: &str,
+    ) -> bool {
+        let sanitized = text.replace("\r\n", "⏎").replace(['\n', '\r'], "⏎");
+        let payload = format!("[cafleet msg {message_id} from {sender_id} {ts}]\n{sanitized}");
+        self.best_effort(|| {
+            self.send_esc(target_pane_id)?;
+            self.run(
+                &herdr_argv(&["herdr", "pane", "send-text", target_pane_id, &payload]),
+                Some(5),
+            )?;
+            self.runner.sleep(SUBMIT_DELAY);
+            self.run(
+                &herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
+                Some(5),
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn send_prompt(
+        &self,
+        target_pane_id: &str,
+        text: &str,
+        shell: bool,
+    ) -> Result<(), MultiplexerError> {
+        let stripped = text.trim();
+        if stripped.is_empty() {
+            return Err(MultiplexerError::new("send_prompt: text may not be empty"));
+        }
+        if text.contains('\n') || text.contains('\r') {
+            return Err(MultiplexerError::new(
+                "send_prompt: text may not contain newlines",
+            ));
+        }
+        if shell {
+            self.run(
+                &herdr_argv(&[
+                    "herdr",
+                    "pane",
+                    "run",
+                    target_pane_id,
+                    &format!("! {stripped}"),
+                ]),
+                None,
+            )?;
+        } else {
+            self.send_esc(target_pane_id)?;
+            self.run(
+                &herdr_argv(&["herdr", "pane", "run", target_pane_id, stripped]),
+                None,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// `herdr pane read` prints the raw terminal buffer (no envelope).
+    pub fn capture_pane(
+        &self,
+        target_pane_id: &str,
+        lines: i64,
+    ) -> Result<String, MultiplexerError> {
+        if lines <= 0 {
+            return Err(MultiplexerError::new(format!(
+                "capture_pane: lines must be positive, got {lines}"
+            )));
+        }
+        self.run(
+            &herdr_argv(&[
+                "herdr",
+                "pane",
+                "read",
+                target_pane_id,
+                "--source",
+                "recent-unwrapped",
+                "--lines",
+                &lines.to_string(),
+            ]),
+            None,
+        )
+    }
+
+    pub fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError> {
+        let result = self.run_json(&herdr_argv(&["herdr", "pane", "list"]), Some(5))?;
+        let panes = result["panes"]
+            .as_array()
+            .ok_or_else(|| MultiplexerError::new("herdr pane list missing 'panes' field"))?;
+        panes
+            .iter()
+            .map(|pane| Ok(str_field(pane, "pane list", "pane_id")?.to_string()))
+            .collect()
+    }
+
+    pub fn kill_pane(
+        &self,
+        target_pane_id: &str,
+        ignore_missing: bool,
+    ) -> Result<(), MultiplexerError> {
+        let target_tab_id = self.pane_tab_id(target_pane_id);
+        self.run_tolerating_missing(
+            &herdr_argv(&["herdr", "pane", "close", target_pane_id]),
+            ignore_missing,
+            None,
+        )?;
+        if let Some(tab_id) = target_tab_id {
+            let _ = self.resize_after_close(&tab_id);
+        }
+        Ok(())
+    }
+
+    /// Best-effort pre-close read of the target pane's tab; `None` (the
+    /// rebalance skips) when the pane is already gone or the read fails — the
+    /// close must proceed regardless.
+    fn pane_tab_id(&self, pane_id: &str) -> Option<String> {
+        let result = self
+            .run_json(&herdr_argv(&["herdr", "pane", "get", pane_id]), None)
+            .ok()?;
+        result["pane"]["tab_id"].as_str().map(str::to_string)
+    }
+
+    fn resize_after_close(&self, target_tab_id: &str) -> Result<(), MultiplexerError> {
+        let Some(anchor_pane_id) = self.surviving_pane_in_tab(target_tab_id)? else {
+            return Ok(()); // the tab has no panes left — nothing to rebalance
+        };
+        let (panes, splits) = self.read_tab_layout(&anchor_pane_id)?;
+        if panes.is_empty() {
+            return Ok(());
+        }
+        let column = right_column(&panes)?;
+        if column.len() >= 2 {
+            self.equalize_column(&column, &splits)
+        } else if column.is_empty() {
+            self.restore_director_full_width(&panes, &splits)
+        } else {
+            // A lone member pane spans the column natively; the right split's
+            // ratio is unaffected by a down-close.
+            Ok(())
+        }
+    }
+
+    fn surviving_pane_in_tab(&self, tab_id: &str) -> Result<Option<String>, MultiplexerError> {
+        let result = self.run_json(&herdr_argv(&["herdr", "pane", "list"]), None)?;
+        let panes = result["panes"]
+            .as_array()
+            .ok_or_else(|| MultiplexerError::new("herdr pane list missing 'panes' field"))?;
+        for pane in panes {
+            if pane["tab_id"].as_str() == Some(tab_id) {
+                return Ok(Some(str_field(pane, "pane list", "pane_id")?.to_string()));
+            }
+        }
+        Ok(None)
+    }
+
+    fn restore_director_full_width(
+        &self,
+        panes: &[Value],
+        splits: &[Value],
+    ) -> Result<(), MultiplexerError> {
+        if panes.len() != 1 {
+            return Ok(()); // not the single-Director shape — leave it untouched
+        }
+        // Empty `splits` ⇒ the sole pane is already structurally full-width;
+        // any residue other than exactly one right split is anomalous.
+        if splits.len() != 1 || splits[0]["direction"].as_str() != Some("right") {
+            return Ok(());
+        }
+        let delta = round4(1.0 - f64_field(&splits[0], "pane layout", "ratio")?);
+        if delta < 1e-3 {
+            return Ok(());
+        }
+        let pane_id = str_field(&panes[0], "pane layout", "pane_id")?;
+        self.run(
+            &herdr_argv(&[
+                "herdr",
+                "pane",
+                "resize",
+                "--pane",
+                pane_id,
+                "--direction",
+                "right",
+                "--amount",
+                &delta.to_string(),
+            ]),
+            None,
+        )?;
+        Ok(())
+    }
+
+    /// A pane closing between the tick's `list_pane_ids` and this read is a
+    /// teardown race, not an error: `pane_not_found` reads as "no agent".
+    pub fn agent_status(&self, target_pane_id: &str) -> Result<Option<String>, MultiplexerError> {
+        let argv = herdr_argv(&["herdr", "pane", "get", target_pane_id]);
+        let out = match self.runner.run(&argv, None) {
+            Ok(out) => out,
+            Err(RunError::Failed { ref stderr })
+                if error_code(stderr).as_deref() == Some(PANE_NOT_FOUND) =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(map_run_error(&argv, None, error)),
+        };
+        let result = parse_envelope(&out)?;
+        let status = result["pane"]["agent_status"]
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        Ok(status)
+    }
+}
+
+/// The members' right column: every pane outside the leftmost (Director)
+/// column, sorted top to bottom.
+fn right_column(panes: &[Value]) -> Result<Vec<Value>, MultiplexerError> {
+    let mut min_x = f64::INFINITY;
+    for pane in panes {
+        min_x = min_x.min(f64_field(&pane["rect"], "pane layout", "x")?);
+    }
+    let mut column: Vec<Value> = Vec::new();
+    for pane in panes {
+        if f64_field(&pane["rect"], "pane layout", "x")? != min_x {
+            column.push(pane.clone());
+        }
+    }
+    column.sort_by(|a, b| {
+        a["rect"]["y"]
+            .as_f64()
+            .partial_cmp(&b["rect"]["y"].as_f64())
+            .expect("layout rects carry numeric y")
+    });
+    Ok(column)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -25,7 +643,11 @@ mod tests {
     }
 
     fn cwd() -> String {
-        std::env::current_dir().unwrap().to_str().unwrap().to_string()
+        std::env::current_dir()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
     }
 
     #[test]
@@ -82,7 +704,8 @@ mod tests {
         let mux = HerdrMultiplexer::new(runner, herdr_env());
         let err = mux.context_discovery().unwrap_err();
         assert!(
-            err.to_string().starts_with("herdr returned non-JSON output:"),
+            err.to_string()
+                .starts_with("herdr returned non-JSON output:"),
             "got: {err}"
         );
 
@@ -173,13 +796,27 @@ mod tests {
             vec![
                 argv(&["herdr", "pane", "list"]),
                 argv(&[
-                    "herdr", "pane", "split", "w1:p2", "--direction", "down", "--no-focus",
-                    "--cwd", &cwd(),
+                    "herdr",
+                    "pane",
+                    "split",
+                    "w1:p2",
+                    "--direction",
+                    "down",
+                    "--no-focus",
+                    "--cwd",
+                    &cwd(),
                 ]),
                 argv(&["herdr", "pane", "layout", "--pane", "w1:p1"]),
                 argv(&[
-                    "herdr", "pane", "resize", "--pane", "w1:p3", "--direction", "up",
-                    "--amount", "0.2",
+                    "herdr",
+                    "pane",
+                    "resize",
+                    "--pane",
+                    "w1:p3",
+                    "--direction",
+                    "up",
+                    "--amount",
+                    "0.2",
                 ]),
                 argv(&["herdr", "pane", "run", "w1:p3", "claude"]),
             ],
@@ -349,7 +986,9 @@ mod tests {
 
         let mux = HerdrMultiplexer::new(FakeRunner::with_binary("herdr"), herdr_env());
         assert_eq!(
-            mux.send_prompt("w1:p2", " ", false).unwrap_err().to_string(),
+            mux.send_prompt("w1:p2", " ", false)
+                .unwrap_err()
+                .to_string(),
             "send_prompt: text may not be empty"
         );
         assert_eq!(
@@ -433,8 +1072,15 @@ mod tests {
                 argv(&["herdr", "pane", "list"]),
                 argv(&["herdr", "pane", "layout", "--pane", "w1:p1"]),
                 argv(&[
-                    "herdr", "pane", "resize", "--pane", "w1:p1", "--direction", "right",
-                    "--amount", "0.4",
+                    "herdr",
+                    "pane",
+                    "resize",
+                    "--pane",
+                    "w1:p1",
+                    "--direction",
+                    "right",
+                    "--amount",
+                    "0.4",
                 ]),
             ],
             "pre-close tab read → close → anchor on a survivor → restore width"
