@@ -203,9 +203,41 @@ async fn the_roster_wraps_members_and_projects_the_monitor_config() {
         "active rows + the deregistered message holder"
     );
 
+    let expected_keys: std::collections::BTreeSet<&str> = [
+        "member_id",
+        "name",
+        "description",
+        "status",
+        "registered_at",
+        "kind",
+        "placement",
+        "monitor",
+    ]
+    .into();
+    for member in members {
+        let row_keys: std::collections::BTreeSet<&str> = member
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            row_keys, expected_keys,
+            "the full roster row key set is pinned (SPEC §6.4), got: {member}"
+        );
+    }
+
     let by_id = |id: i64| members.iter().find(|m| m["member_id"] == id).unwrap();
     let director = by_id(director_id);
     assert_eq!(director["kind"], "director");
+    assert_eq!(
+        director["description"], "Root Director for this fleet",
+        "the SPA renders the description"
+    );
+    assert!(
+        cafleet::time::parse_lenient(director["registered_at"].as_str().unwrap()).is_ok(),
+        "the SPA sorts on registered_at"
+    );
     assert_eq!(
         director["monitor"],
         json!({"interval_seconds": 180, "last_ping_at": null, "enabled": true}),

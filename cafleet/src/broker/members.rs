@@ -392,6 +392,8 @@ struct RosterRow {
     last_sent: Option<String>,
     last_recv: Option<String>,
     last_ack: Option<String>,
+    description: String,
+    registered_at: String,
 }
 
 fn roster_rows(
@@ -411,7 +413,8 @@ fn roster_rows(
                      WHERE owner_member_id=m.member_id AND type='unicast'), \
                     (SELECT MAX(status_timestamp) FROM messages \
                      WHERE owner_member_id=m.member_id AND type='unicast' \
-                       AND status_state='completed') \
+                       AND status_state='completed'), \
+                    m.description, m.registered_at \
              FROM members m LEFT JOIN member_placements p ON p.member_id=m.member_id \
              WHERE m.fleet_id=?1 AND (m.status='active' OR (?2 AND EXISTS( \
                    SELECT 1 FROM messages WHERE owner_member_id=m.member_id))) \
@@ -442,6 +445,8 @@ fn roster_rows(
                 last_sent: row.get(11)?,
                 last_recv: row.get(12)?,
                 last_ack: row.get(13)?,
+                description: row.get(14)?,
+                registered_at: row.get(15)?,
             })
         })
         .map_err(db_err)?
@@ -484,21 +489,17 @@ pub fn list_roster(
     fleet_id: i64,
     include_message_holders: bool,
 ) -> Result<Vec<Value>, CafleetError> {
-    let now = now_utc();
     Ok(roster_rows(conn, fleet_id, include_message_holders)?
         .into_iter()
         .map(|row| {
-            let idle = idle_seconds(&row, now);
             json!({
                 "member_id": row.member_id,
                 "name": row.name,
+                "description": row.description,
                 "status": row.status,
+                "registered_at": row.registered_at,
                 "kind": derive_member_kind(row.is_director, &row.card),
                 "placement": row.placement.clone().unwrap_or(Value::Null),
-                "last_sent": row.last_sent,
-                "last_recv": row.last_recv,
-                "last_ack": row.last_ack,
-                "idle": idle,
             })
         })
         .collect())

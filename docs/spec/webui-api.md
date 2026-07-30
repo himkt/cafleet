@@ -73,6 +73,7 @@ Returns the selected fleet's roster via `list_roster(include_message_holders=Tru
       "status": "active",
       "registered_at": "2026-04-15T09:59:00+00:00",
       "kind": "director",
+      "placement": null,
       "monitor": {"interval_seconds": 180, "last_ping_at": null, "enabled": true}
     },
     {
@@ -82,6 +83,7 @@ Returns the selected fleet's roster via `list_roster(include_message_holders=Tru
       "status": "active",
       "registered_at": "2026-04-15T10:05:00+00:00",
       "kind": "monitor",
+      "placement": {"backend": "tmux", "mux_session": "main", "mux_window_id": "@1", "mux_pane_id": "%12", "coding_agent": "claude", "created_at": "2026-04-15T10:05:00+00:00"},
       "monitor": null
     },
     {
@@ -91,6 +93,7 @@ Returns the selected fleet's roster via `list_roster(include_message_holders=Tru
       "status": "active",
       "registered_at": "2026-04-15T10:06:00+00:00",
       "kind": "member",
+      "placement": {"backend": "tmux", "mux_session": "main", "mux_window_id": "@1", "mux_pane_id": "%13", "coding_agent": "claude", "created_at": "2026-04-15T10:06:00+00:00"},
       "monitor": {"interval_seconds": 720, "last_ping_at": null, "enabled": true}
     }
   ]
