@@ -1,7 +1,7 @@
 # Rust Rewrite of the cafleet Package
 
 **Status**: Approved
-**Progress**: 36/44 tasks complete
+**Progress**: 38/44 tasks complete
 **Last Updated**: 2026-07-30
 
 ## Overview
@@ -77,6 +77,8 @@ cafleet/
 The broker stays synchronous (one `rusqlite` connection per process, PRAGMAs applied on every open). The only async component is the `server` subcommand: axum + tokio, whose handlers call the sync broker via `spawn_blocking`. Multiplexers and coding agents are closed enums implementing a trait; herdr's `agent_status` capability becomes an `Option`-returning trait method.
 
 ### Crate mapping
+
+The crates pinned in this table are the dependency ceiling, not a floor: no convenience extras beyond them — no tower-http (the embedded SPA is served by hand), no serde derive (result shapes reuse `serde_json` values), minimal feature flags on axum/tokio and every other dependency — and no new direct dependency lands without Director arbitration. Dev-dependencies follow the same rule; `tower` stays only for the `ServiceExt` oneshot harness named in § Testing.
 
 | Python dependency | Rust replacement | Notes |
 |---|---|---|
@@ -286,8 +288,8 @@ Total-removal (same change): `cafleet/src/**` (Python), `cafleet/tests/**` (pyte
 
 ### Step 8: WebUI server
 
-- [ ] axum app: 9 routes, X-Fleet-Id dependency, wire renames, spawn_blocking bridge, 422 detail body, SPA fallback over embedded dist <!-- completed: -->
-- [ ] server subcommand with settings-derived defaults shown in --help <!-- completed: -->
+- [x] axum app: 9 routes, X-Fleet-Id dependency, wire renames, spawn_blocking bridge, 422 detail body, SPA fallback over embedded dist <!-- completed: 2026-07-30T22:09 -->
+- [x] server subcommand with settings-derived defaults shown in --help <!-- completed: 2026-07-30T22:09 -->
 
 ### Step 9: Test-port completion
 

@@ -49,8 +49,8 @@ fn placed(pane: &str) -> NewPlacement {
 /// Fleet 1 with director 1 (`%0`), an enrolled worker (`%2`), and a
 /// monitoring member (`%3`).
 fn seeded_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
-    let fleet = broker::create_fleet(conn, Some("web"), "main", "@1", "%0", "claude", "tmux")
-        .unwrap();
+    let fleet =
+        broker::create_fleet(conn, Some("web"), "main", "@1", "%0", "claude", "tmux").unwrap();
     let fleet_id = fleet["fleet_id"].as_i64().unwrap();
     let director_id = fleet["director"]["member_id"].as_i64().unwrap();
     let member_id = broker::register_member(
@@ -148,7 +148,10 @@ async fn the_fleet_header_dependency_resolves_in_the_pinned_order() {
 
     let (status, body) = call(app.clone(), "GET", "/api/members", Some(""), None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(body, r#"{"detail":"X-Fleet-Id header required"}"#, "empty counts as missing");
+    assert_eq!(
+        body, r#"{"detail":"X-Fleet-Id header required"}"#,
+        "empty counts as missing"
+    );
 
     let (status, body) = call(app.clone(), "GET", "/api/members", Some("abc"), None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -157,8 +160,7 @@ async fn the_fleet_header_dependency_resolves_in_the_pinned_order() {
     let (status, body) = call(app.clone(), "GET", "/api/members", Some(" "), None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(
-        body,
-        r#"{"detail":"X-Fleet-Id must be an integer"}"#,
+        body, r#"{"detail":"X-Fleet-Id must be an integer"}"#,
         "whitespace-only passes the presence check and fails the parse"
     );
 
@@ -195,7 +197,11 @@ async fn the_roster_wraps_members_and_projects_the_monitor_config() {
     assert_eq!(status, StatusCode::OK);
     let payload = parsed(&body);
     let members = payload["members"].as_array().expect("wrapped in members");
-    assert_eq!(members.len(), 4, "active rows + the deregistered message holder");
+    assert_eq!(
+        members.len(),
+        4,
+        "active rows + the deregistered message holder"
+    );
 
     let by_id = |id: i64| members.iter().find(|m| m["member_id"] == id).unwrap();
     let director = by_id(director_id);
@@ -234,8 +240,7 @@ async fn member_monitor_get_returns_the_exact_projection_or_404() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        body,
-        r#"{"interval_seconds":720,"last_ping_at":null,"enabled":true}"#,
+        body, r#"{"interval_seconds":720,"last_ping_at":null,"enabled":true}"#,
         "the projected config, key order pinned"
     );
 
@@ -270,7 +275,10 @@ async fn patch_monitor_applies_partial_updates_and_validates_the_interval() {
     assert_eq!(status, StatusCode::OK);
     let payload = parsed(&body);
     assert_eq!(payload["interval_seconds"], 300);
-    assert_eq!(payload["enabled"], true, "the unspecified field is untouched");
+    assert_eq!(
+        payload["enabled"], true,
+        "the unspecified field is untouched"
+    );
 
     let (status, body) = call(
         app.clone(),
@@ -378,14 +386,7 @@ async fn inbox_and_sent_carry_the_formatted_message_wire_shape() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(parsed(&body)["messages"].as_array().unwrap().len(), 1);
 
-    let (status, body) = call(
-        app,
-        "GET",
-        "/api/members/999/inbox",
-        Some("1"),
-        None,
-    )
-    .await;
+    let (status, body) = call(app, "GET", "/api/members/999/inbox", Some("1"), None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body, r#"{"detail":"Member not found"}"#);
 }
@@ -445,7 +446,11 @@ async fn post_send_handles_unicast_broadcast_and_the_error_surfaces() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(parsed(&body)["status"], "completed", "the broadcast returns its summary");
+    assert_eq!(
+        parsed(&body)["status"],
+        "completed",
+        "the broadcast returns its summary"
+    );
 
     let (status, body) = call(
         app.clone(),
@@ -526,7 +531,11 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     assert_eq!(status, StatusCode::OK);
     let payload = parsed(&body);
     assert_eq!(payload["running"], false);
-    assert_eq!(payload["pid"], Value::Null, "a stale row never leaks its pid");
+    assert_eq!(
+        payload["pid"],
+        Value::Null,
+        "a stale row never leaks its pid"
+    );
     assert_eq!(payload["tick_seconds"], 5, "only tick_seconds survives");
     assert_eq!(payload["last_tick_at"], Value::Null);
     assert_eq!(payload["started_at"], Value::Null);
@@ -540,10 +549,17 @@ async fn the_spa_fallback_serves_index_except_for_reserved_prefixes() {
 
     let (status, body) = call(app.clone(), "GET", "/", None, None).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("<div id="), "the embedded SPA index, got: {body}");
+    assert!(
+        body.contains("<div id="),
+        "the embedded SPA index, got: {body}"
+    );
 
     let (status, fallback_body) = call(app.clone(), "GET", "/fleets/1/details", None, None).await;
-    assert_eq!(status, StatusCode::OK, "unknown paths fall back to the SPA entry");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "unknown paths fall back to the SPA entry"
+    );
     assert_eq!(fallback_body, body, "the fallback serves index.html itself");
 
     let (status, body) = call(app.clone(), "GET", "/api/nope", None, None).await;
@@ -555,5 +571,8 @@ async fn the_spa_fallback_serves_index_except_for_reserved_prefixes() {
 
     let (status, body) = call(app, "GET", "/ui/missing.js", None, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    assert!(!body.contains("<div id="), "reserved prefixes hard-404, got: {body}");
+    assert!(
+        !body.contains("<div id="),
+        "reserved prefixes hard-404, got: {body}"
+    );
 }

@@ -15,8 +15,14 @@ fn server_help_shows_the_settings_derived_defaults() {
     let out = stdout(&output);
     assert!(out.contains("--host"), "got: {out}");
     assert!(out.contains("--port"), "got: {out}");
-    assert!(out.contains("127.0.0.1"), "the settings default host, got: {out}");
-    assert!(out.contains("8000"), "the settings default port, got: {out}");
+    assert!(
+        out.contains("127.0.0.1"),
+        "the settings default host, got: {out}"
+    );
+    assert!(
+        out.contains("8000"),
+        "the settings default port, got: {out}"
+    );
 }
 
 #[test]
@@ -30,6 +36,12 @@ fn server_help_defaults_follow_the_broker_env_vars() {
         .unwrap();
     assert_eq!(output.status.code(), Some(0));
     let out = text(&output.stdout);
-    assert!(out.contains("0.0.0.0"), "CAFLEET_BROKER_HOST is honored, got: {out}");
-    assert!(out.contains("9005"), "CAFLEET_BROKER_PORT is honored, got: {out}");
+    assert!(
+        out.contains("0.0.0.0"),
+        "CAFLEET_BROKER_HOST is honored, got: {out}"
+    );
+    assert!(
+        out.contains("9005"),
+        "CAFLEET_BROKER_PORT is honored, got: {out}"
+    );
 }

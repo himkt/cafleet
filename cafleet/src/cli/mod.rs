@@ -5,10 +5,11 @@
 
 mod doctor;
 mod fleet;
-mod helpers;
+pub(crate) mod helpers;
 mod member;
 mod message;
 mod monitor;
+mod server;
 mod setup;
 mod system;
 
@@ -38,6 +39,8 @@ enum Command {
     /// Print the resolved multiplexer backend, the calling pane's
     /// identifiers, and the assets-install report.
     Doctor(doctor::DoctorArgs),
+    /// Start the admin WebUI server.
+    Server(server::ServerArgs),
     /// Fleet lifecycle.
     #[command(subcommand)]
     Fleet(fleet::FleetCommand),
@@ -69,6 +72,7 @@ pub fn run() -> Result<(), CafleetError> {
     match args.command {
         Command::Setup(cmd) => setup::run(&settings, cmd),
         Command::Doctor(cmd) => doctor::run(&settings, cmd),
+        Command::Server(cmd) => server::run(&settings, cmd),
         Command::Fleet(cmd) => {
             helpers::stale_assets_guard(&settings)?;
             fleet::run(&settings, cmd)
