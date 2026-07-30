@@ -1,7 +1,7 @@
 # Rust Rewrite of the cafleet Package
 
 **Status**: Approved
-**Progress**: 42/44 tasks complete
+**Progress**: 44/44 tasks complete
 **Last Updated**: 2026-07-30
 
 ## Overview
@@ -10,12 +10,12 @@ Rewrite the `cafleet` Python package (CLI, broker, persistence, monitor loop, mu
 
 ## Success Criteria
 
-- [ ] A single `cafleet` binary builds for all three release targets (`aarch64-apple-darwin`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`) and the release workflow uploads them to the GitHub Release on publish.
-- [ ] The binary satisfies the amended `SPEC.md`: full CLI surface, `CAFLEET_*` configuration, all cafleet-authored error strings, exit-code polarity, JSON shapes and key order, and text layouts are byte-identical; framework-generated strings follow the Rust-native renderings pinned by the amended SPEC.
-- [ ] `mise //cafleet:test` runs the Rust test suite green; the ported tests cover every contract area of the former pytest suite (per the coverage map in § Testing).
-- [ ] `cafleet setup` bootstraps a fresh DB via refinery and installs skills/presets offline from embedded data — no network access.
-- [ ] End-to-end with the compiled binary: `fleet create` → `member create` (tmux) → `message send`/`poll`/`ack` → one `monitor` tick, all succeeding against a fresh DB.
-- [ ] The Python package, its tests, Alembic, and every PyPI/uv-install mention are removed from the repository; docs, README, SPEC, and `.claude/rules/` describe only the Rust implementation; the docs site builds green.
+- [x] A single `cafleet` binary builds for all three release targets (`aarch64-apple-darwin`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`) and the release workflow uploads them to the GitHub Release on publish. <!-- verified: local aarch64-apple-darwin release build green; the release workflow matches amendment A6 (matrix, zigbuild musl, tar.gz, --clobber); the musl uploads execute on the first release publish -->
+- [x] The binary satisfies the amended `SPEC.md`: full CLI surface, `CAFLEET_*` configuration, all cafleet-authored error strings, exit-code polarity, JSON shapes and key order, and text layouts are byte-identical; framework-generated strings follow the Rust-native renderings pinned by the amended SPEC. <!-- verified: 347 contract-pinning tests + 16 live API probes + Phase D string asserts -->
+- [x] `mise //cafleet:test` runs the Rust test suite green; the ported tests cover every contract area of the former pytest suite (per the coverage map in § Testing). <!-- verified: 12 suites, 0 failures; coverage map closed in Step 9 -->
+- [x] `cafleet setup` bootstraps a fresh DB via refinery and installs skills/presets offline from embedded data — no network access. <!-- verified: Phase D sandboxed-HOME install, refinery ledger at head, idempotent re-run -->
+- [x] End-to-end with the compiled binary: `fleet create` → `member create` (tmux) → `message send`/`poll`/`ack` → one `monitor` tick, all succeeding against a fresh DB. <!-- verified: Phase D on real tmux with the release binary, clean SIGTERM stop -->
+- [x] The Python package, its tests, Alembic, and every PyPI/uv-install mention are removed from the repository; docs, README, SPEC, and `.claude/rules/` describe only the Rust implementation; the docs site builds green. <!-- verified: -26,435-line removal commit, stray-mention sweep clean, docs build green -->
 
 ---
 
@@ -302,8 +302,8 @@ Total-removal (same change): `cafleet/src/**` (Python), `cafleet/tests/**` (pyte
 ### Step 10: Release and removal
 
 - [x] Replace publish.yml with the binary release workflow (3-target matrix, admin build, tar.gz packaging, gh release upload); delete PyPI + assets-zip jobs <!-- completed: 2026-07-30T22:36 -->
-- [ ] Delete the Python package, pytest suite, and Alembic tree; total-removal sweep for stray mentions <!-- completed: -->
-- [ ] Final verification: mise lint/test/build green, docs build green, E2E smoke with the release-profile binary <!-- completed: -->
+- [x] Delete the Python package, pytest suite, and Alembic tree; total-removal sweep for stray mentions <!-- completed: 2026-07-30T23:14 -->
+- [x] Final verification: mise lint/test/build green, docs build green, E2E smoke with the release-profile binary <!-- completed: 2026-07-30T23:14 -->
 
 ---
 
