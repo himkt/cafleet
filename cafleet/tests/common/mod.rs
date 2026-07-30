@@ -43,13 +43,10 @@ impl Cli {
         let home = TempDir::new().unwrap();
         let shim_dir = home.path().join("shim-bin");
         std::fs::create_dir_all(&shim_dir).unwrap();
-        let shim = shim_dir.join("tmux");
-        std::fs::write(&shim, TMUX_SHIM).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        write_executable(&shim_dir.join("tmux"), TMUX_SHIM);
+        // member create's spawn preconditions PATH-check the backend binary
+        // (SPEC §6.3 step 4) — a no-op claude satisfies the default backend.
+        write_executable(&shim_dir.join("claude"), "#!/bin/sh\nexit 0\n");
         let shim_log = home.path().join("tmux-shim.log");
         Cli {
             home,
@@ -208,6 +205,15 @@ impl Cli {
             .lines()
             .map(str::to_string)
             .collect()
+    }
+}
+
+fn write_executable(path: &Path, contents: &str) {
+    std::fs::write(path, contents).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 }
 

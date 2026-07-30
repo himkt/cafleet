@@ -138,6 +138,31 @@ fn member_create_validates_model_and_effort_before_any_side_effect() {
 }
 
 #[test]
+fn member_create_requires_the_backend_binary_on_path() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_fleet();
+    let output = cli.run(&[
+        "member", "create",
+        "--fleet-id", &fleet_id.to_string(),
+        "--name", "worker",
+        "--description", "d",
+        "--coding-agent", "codex",
+        "--text", "prompt",
+    ]);
+    assert_eq!(code(&output), 1, "the precondition fires before registration");
+    assert!(
+        stderr(&output).contains("binary codex not found on PATH"),
+        "got: {}",
+        stderr(&output)
+    );
+    let members: i64 = cli
+        .sqlite()
+        .query_row("SELECT COUNT(*) FROM members", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(members, 1, "no registration side effect before the precondition");
+}
+
+#[test]
 fn member_create_unknown_fleet_is_a_usage_error() {
     let cli = Cli::new();
     cli.ready();
