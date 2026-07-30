@@ -20,5 +20,8 @@ sha2 = "0.10"
 signal-hook = "0.3"
 
 [dev-dependencies]
+axum = "0.8"
 sha2 = "0.10"
 tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
