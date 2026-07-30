@@ -11,7 +11,7 @@ Replace the Python-based zensical documentation toolchain with rspress v2, makin
 ## Success Criteria
 
 - [ ] `mise //:docs-build` builds the rspress site into `docs/doc_build` with all 19 pages, sidebar parity with the zensical nav, built-in search, and the light/dark toggle
-- [ ] No mermaid content remains: no fenced mermaid blocks, no `.mmd` sources, no diagram image references, and no mermaid tooling anywhere outside `design-docs/` and git history
+- [ ] No mermaid content remains: no fenced mermaid blocks, no `.mmd` sources, no diagram image references, and no mermaid tooling anywhere outside `design-docs/` and git history. Exempt: generic mentions of mermaid as a presentation-authoring feature in the extraction-bound cafleet-research skill — `skills/cafleet-research/reference/slidev.md:95` (Slidev's built-in slide-diagram feature) and `skills/cafleet-research/presentation/roles/presentation.md:42` (chart-type guidance)
 - [ ] The two `??? example` collapsibles render as `:::details` containers
 - [ ] The five `&#124;` table cells and the literal-brace headings in `spec/webui-api.md` render intact in the built HTML
 - [ ] Internal links resolve (`markdown.checkDeadLinks` fails the build on a broken route target) and fragment anchors resolve (verified by the dedicated Step 7 anchor task)
@@ -64,7 +64,9 @@ Full Python removal therefore requires decisions on both; the user has made them
 docs/
 ├── package.json              # workspace package "cafleet-docs"
 ├── rspress.config.ts
+├── theme/index.tsx           # HomeLayout override (afterHero mounts the home markdown body)
 └── docs/                     # rspress content root
+    ├── _nav.json
     ├── _meta.json
     ├── index.md              # hero home page
     ├── quickstart.md
@@ -110,7 +112,6 @@ export default defineConfig({
     checkDeadLinks: true,
   },
   themeConfig: {
-    nav: [{ text: 'Docs', link: '/quickstart' }],
     socialLinks: [
       { icon: 'github', mode: 'link', content: 'https://github.com/himkt/cafleet' },
     ],
@@ -118,11 +119,19 @@ export default defineConfig({
 });
 ```
 
-The config file is TypeScript and type-checked against `@rspress/core` at build time, so a drifted field name fails loudly; the implementer adjusts exact `themeConfig` field shapes to the installed v2 types if they differ. Search and the light/dark toggle are rspress theme defaults and need no configuration.
+The config file is TypeScript and type-checked against `@rspress/core` at build time, so a drifted field name fails loudly; the implementer adjusts exact `themeConfig` field shapes to the installed v2 types if they differ. Search and the light/dark toggle are rspress theme defaults and need no configuration. `themeConfig` defines neither `nav` nor `sidebar` — rspress v2 auto-generates both only when the config omits them, taking the navbar from `_nav.json` and the sidebar from the `_meta.json` files (v2 contract, guide/basic/auto-nav-sidebar).
 
-### Sidebar (`_meta.json`)
+### Navbar (`_nav.json`) and sidebar (`_meta.json`)
 
-Sidebar order and labels reproduce the zensical `nav` exactly. `index.md` (`pageType: home`) stays out of the sidebar. File entries pin the zensical label explicitly so a page's h1 cannot drift the nav.
+The navbar comes from `docs/docs/_nav.json` (the v2 rename of the v1 navbar-level `_meta.json`):
+
+```json
+[
+  { "text": "Docs", "link": "/quickstart" }
+]
+```
+
+Sidebar order and labels reproduce the zensical `nav` exactly. `index.md` (`pageType: home`) stays out of the sidebar. File entries pin the zensical label explicitly so a page's h1 cannot drift the nav. The root `_meta.json` is the single global sidebar.
 
 `docs/docs/_meta.json`:
 
@@ -206,7 +215,7 @@ hero:
 ---
 ```
 
-The markdown body below the frontmatter keeps the current content minus the converted pieces: the YouTube `<iframe>` demo embed and the descriptive paragraph ("CAFleet is a message broker and member registry…") render beneath the hero. The old button line is dropped (replaced by the hero actions).
+The markdown body below the frontmatter keeps the current content minus the converted pieces: the YouTube `<iframe>` demo embed and the descriptive paragraph ("CAFleet is a message broker and member registry…"). rspress v2's home layout renders only frontmatter-defined sections, so a minimal custom theme (`docs/theme/index.tsx`, execute-time amendment) re-exports the default theme and overrides `HomeLayout`, mounting the page's markdown body through the `afterHero` slot (via the runtime `Content` component, adjusted to the installed v2 API if the export differs). `index.md` remains the single source of the body content; the old button line is dropped (replaced by the hero actions).
 
 ### Mermaid diagram removal
 
@@ -313,6 +322,8 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 - [ ] Visual pass over the built site (`pnpm --dir docs preview`): hero home with demo embed, sidebar parity, the two details containers, the former diagram sites reading as continuous prose, search and dark toggle working <!-- completed: -->
 - [ ] Final reference sweep is clean: no live reference to this repo's `zensical` / `uv` / `bump-my-version` toolchain outside `design-docs/` and git history (generic tool-name examples exempt per Success Criteria) <!-- completed: -->
 
+COMMENT(verifier): test gap — the search modal could not be exercised end-to-end: the allowlisted agent-browser command set (open/snapshot/screenshot/get/console/errors/reload) has no click/fill, so only static evidence was collected (Search button with ⌘K hint present in the navbar; `static/search_index.en.*.json` emitted by the build). Suggested tooling: allow `pnpm exec agent-browser --session vr-batch-* click *` and `fill *`, or a Director-driven manual spot-check of search (and of the dark toggle once it renders).
+
 ---
 
 ## Changelog
@@ -323,3 +334,4 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 | 2026-07-31 | Reviewer round 1: recorded the nested-layout decision and its consequences (`docs_sync.rs`, path-reference sweep), sweep exemption policy, corrected MDX-hazard inventory, concrete `.gitignore` edits, `docs-build` task dependency, anchor-verification task |
 | 2026-07-31 | Execute-time amendment (user decision): dropped the `@mermaid-js/mermaid-cli` devDependency and the `diagrams` script; SVG regeneration is a one-off `pnpm dlx --allow-build=puppeteer` invocation, keeping puppeteer/Chrome out of the workspace lockfile |
 | 2026-07-31 | Execute-time amendment 2 (user decision): the five mermaid diagrams are removed from the docs entirely — no `.mmd` sources, no SVGs, no mermaid tooling; the surrounding prose carries the content. Step 4 rewritten as a removal step |
+| 2026-07-31 | Verifier round: rspress v2 nav contract adopted (`_nav.json` navbar + root `_meta.json` global sidebar, `themeConfig.nav` dropped); execute-time amendment 3 (user decision): `docs/theme/index.tsx` HomeLayout override mounts the home markdown body via `afterHero` |

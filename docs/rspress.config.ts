@@ -9,7 +9,6 @@ export default defineConfig({
     checkDeadLinks: true,
   },
   themeConfig: {
-    nav: [{ text: 'Docs', link: '/quickstart' }],
     socialLinks: [
       { icon: 'github', mode: 'link', content: 'https://github.com/himkt/cafleet' },
     ],
