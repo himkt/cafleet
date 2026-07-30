@@ -236,13 +236,34 @@ fn foreign_key_on_delete_rules_match_the_head_schema() {
     );
 }
 
+// A CHECK constraint is a `CHECK` token (not part of an identifier such as
+// `last_stall_check_at`) followed by an opening parenthesis.
+fn has_check_constraint(sql: &str) -> bool {
+    let upper = sql.to_uppercase();
+    let bytes = upper.as_bytes();
+    let mut start = 0;
+    while let Some(pos) = upper[start..].find("CHECK") {
+        let idx = start + pos;
+        let boundary_before = idx == 0 || {
+            let c = bytes[idx - 1] as char;
+            !(c.is_ascii_alphanumeric() || c == '_')
+        };
+        let boundary_after = upper[idx + "CHECK".len()..].trim_start().starts_with('(');
+        if boundary_before && boundary_after {
+            return true;
+        }
+        start = idx + "CHECK".len();
+    }
+    false
+}
+
 #[test]
 fn no_check_constraints_at_head() {
     let dir = TempDir::new().unwrap();
     let conn = migrated_conn(&dir);
     for table in APP_TABLES {
         assert!(
-            !table_sql(&conn, table).to_uppercase().contains("CHECK"),
+            !has_check_constraint(&table_sql(&conn, table)),
             "{table} must carry no CHECK constraint"
         );
     }
