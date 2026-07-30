@@ -2,13 +2,15 @@
 
 # ==== Global-gitignore overrides ====
 # Our user-global ~/.config/git/ignore excludes design-docs/, CLAUDE.md, and .claude/.
-# This repo tracks them, so override.
+# This repo tracks them, so override. The leading `.*` blanket also needs the
+# tracked dot-directories re-included.
 !design-docs
 !CLAUDE.md
 !.claude
 !.claude/rules
 !.claude/skills
 !.claude/settings.json
+!.github
 
 # Per-session harness state inside .claude/ — never committed.
 .claude/scheduled_tasks.lock

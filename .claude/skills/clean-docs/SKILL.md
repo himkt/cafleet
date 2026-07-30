@@ -101,11 +101,8 @@ workflow.
 ## Scope and exempt set
 
 **In scope**: the whole tracked tree minus the exempt set. **Exempt (never
-modified)**: `design-docs/`, `researches/`,
-`cafleet/src/cafleet/db/alembic/versions/**`, `cafleet/src/cafleet/webui/dist/**`,
-and lock files. A migration legitimately references prior state; the generated
-`dist/` bundle is not authored prose; the design/research folders are the
-historical record.
+modified)**: `design-docs/`, `researches/`, and lock files. The design/research
+folders are the historical record.
 
 Per surface, the scope of what may change:
 

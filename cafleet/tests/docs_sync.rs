@@ -1,7 +1,5 @@
-//! Step 9 docs-sync contracts (ported from the pytest `tests/docs/` suite —
-//! the language-neutral rows; the `docs/api/*` rows dropped with that
-//! surface): the repository documentation is the public contract for the
-//! simplified monitor ping protocol — the pure-trigger wake, the monitoring
+//! Docs-sync contracts: the repository documentation is the public contract
+//! for the monitor ping protocol — the pure-trigger wake, the monitoring
 //! member's two-wake in-context judgment, the `member ping`
 //! pending-placement skip, and the `monitor` group surface.
 

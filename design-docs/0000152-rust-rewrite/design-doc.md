@@ -1,7 +1,7 @@
 # Rust Rewrite of the cafleet Package
 
 **Status**: Approved
-**Progress**: 38/44 tasks complete
+**Progress**: 42/44 tasks complete
 **Last Updated**: 2026-07-30
 
 ## Overview
@@ -294,13 +294,13 @@ Total-removal (same change): `cafleet/src/**` (Python), `cafleet/tests/**` (pyte
 
 ### Step 9: Test-port completion
 
-- [ ] Fake tmux/herdr PATH shims + assert_cmd harness; port remaining CLI contract tests (exit codes, exact strings, JSON shapes) <!-- completed: -->
-- [ ] Verify the coverage map: every pytest area has Rust tests asserting the same contracts; close gaps <!-- completed: -->
-- [ ] End-to-end binary test: fleet create → member create → send/poll/ack → monitor tick on a fresh temp DB <!-- completed: -->
+- [x] Fake tmux/herdr PATH shims + assert_cmd harness; port remaining CLI contract tests (exit codes, exact strings, JSON shapes) <!-- completed: 2026-07-30T13:27 -->
+- [x] Verify the coverage map: every pytest area has Rust tests asserting the same contracts; close gaps <!-- completed: 2026-07-30T13:27 -->
+- [x] End-to-end binary test: fleet create → member create → send/poll/ack → monitor tick on a fresh temp DB <!-- completed: 2026-07-30T13:27 -->
 
 ### Step 10: Release and removal
 
-- [ ] Replace publish.yml with the binary release workflow (3-target matrix, admin build, tar.gz packaging, gh release upload); delete PyPI + assets-zip jobs <!-- completed: -->
+- [x] Replace publish.yml with the binary release workflow (3-target matrix, admin build, tar.gz packaging, gh release upload); delete PyPI + assets-zip jobs <!-- completed: 2026-07-30T22:36 -->
 - [ ] Delete the Python package, pytest suite, and Alembic tree; total-removal sweep for stray mentions <!-- completed: -->
 - [ ] Final verification: mise lint/test/build green, docs build green, E2E smoke with the release-profile binary <!-- completed: -->
 

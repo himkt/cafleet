@@ -8,15 +8,12 @@ every hit and may classify a hit no pattern named.
 ## Scope: whole tracked tree minus the exempt set
 
 Sweep **tracked files only** — a multi-pass `git grep` over the tracked tree
-naturally excludes untracked generated output such as `webui/dist`. The exempt
-set is canonical in the umbrella [`SKILL.md`](../../SKILL.md) § *Scope and
+naturally excludes untracked generated output such as `cafleet/webui-dist`. The
+exempt set is canonical in the umbrella [`SKILL.md`](../../SKILL.md) § *Scope and
 exempt set*; exclude it from every pass:
 
 - `design-docs/` — the historical record.
 - `researches/` — gitignored analysis (not tracked; already excluded).
-- `cafleet/src/cafleet/db/alembic/versions/**` — a migration legitimately
-  references prior/renamed state.
-- `cafleet/src/cafleet/webui/dist/**` — generated bundle, not authored prose.
 - Lock files (`uv.lock`, `pnpm-lock.yaml`, `package-lock.json`, …).
 
 Everything else tracked is in scope, per the umbrella's scope statement: any
@@ -31,8 +28,6 @@ umbrella's canonical exempt-set list — one authority, no second list to drift:
 ```
 git grep -nIiP -e '<pattern>' -- \
   ':(exclude)design-docs/**' \
-  ':(exclude)cafleet/src/cafleet/db/alembic/versions/**' \
-  ':(exclude)cafleet/src/cafleet/webui/dist/**' \
   ':(exclude)*.lock' ':(exclude)uv.lock' ':(exclude)pnpm-lock.yaml'
 ```
 
