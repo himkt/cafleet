@@ -1,7 +1,7 @@
 # Migrate the Documentation Site from Zensical to Rspress
 
 **Status**: Approved
-**Progress**: 23/28 tasks complete
+**Progress**: 28/28 tasks complete
 **Last Updated**: 2026-07-31
 
 ## Overview
@@ -10,13 +10,13 @@ Replace the Python-based zensical documentation toolchain with rspress v2, makin
 
 ## Success Criteria
 
-- [ ] `mise //:docs-build` builds the rspress site into `docs/doc_build` with all 19 pages, sidebar parity with the zensical nav, built-in search, and the light/dark toggle
-- [ ] No mermaid content remains: no fenced mermaid blocks, no `.mmd` sources, no diagram image references, and no mermaid tooling anywhere outside `design-docs/` and git history. Exempt: generic mentions of mermaid as a presentation-authoring feature in the extraction-bound cafleet-research skill — `skills/cafleet-research/reference/slidev.md:95` (Slidev's built-in slide-diagram feature) and `skills/cafleet-research/presentation/roles/presentation.md:42` (chart-type guidance)
-- [ ] The two `??? example` collapsibles render as `:::details` containers
-- [ ] The five `&#124;` table cells and the literal-brace headings in `spec/webui-api.md` render intact in the built HTML
-- [ ] Internal links resolve (`markdown.checkDeadLinks` fails the build on a broken route target) and fragment anchors resolve (verified by the dedicated Step 7 anchor task)
-- [ ] `.github/workflows/docs.yml` keeps its trigger shape (build on PR, deploy Pages on push to `main`) on the pnpm toolchain
-- [ ] No live reference to this repository's zensical / uv / bump-my-version toolchain remains outside `design-docs/` and git history. Exempt: generic tool-name examples that do not describe this repo's toolchain — `uv run` as a generic invocation example at `skills/cafleet-research/reference/visualization.md:72`, `uv.lock` as a generic lock-file example at `.claude/skills/clean-docs/residue/reference/patterns.md:17,31`
+- [x] `mise //:docs-build` builds the rspress site into `docs/doc_build` with all 19 pages, sidebar parity with the zensical nav, built-in search, and the light/dark toggle
+- [x] No mermaid content remains: no fenced mermaid blocks, no `.mmd` sources, no diagram image references, and no mermaid tooling anywhere outside `design-docs/` and git history. Exempt: generic mentions of mermaid as a presentation-authoring feature in the extraction-bound cafleet-research skill — `skills/cafleet-research/reference/slidev.md:95` (Slidev's built-in slide-diagram feature) and `skills/cafleet-research/presentation/roles/presentation.md:42` (chart-type guidance)
+- [x] The two `??? example` collapsibles render as `:::details` containers
+- [x] The five `&#124;` table cells and the literal-brace headings in `spec/webui-api.md` render intact in the built HTML
+- [x] Internal links resolve (`markdown.checkDeadLinks` fails the build on a broken route target) and fragment anchors resolve (verified by the dedicated Step 7 anchor task)
+- [x] `.github/workflows/docs.yml` keeps its trigger shape (build on PR, deploy Pages on push to `main`) on the pnpm toolchain
+- [x] No live reference to this repository's zensical / uv / bump-my-version toolchain remains outside `design-docs/` and git history. Exempt: generic tool-name examples that do not describe this repo's toolchain — `uv run` as a generic invocation example at `skills/cafleet-research/reference/visualization.md:72`, `uv.lock` as a generic lock-file example at `.claude/skills/clean-docs/residue/reference/patterns.md:17,31`
 
 ---
 
@@ -316,11 +316,11 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 
 ### Step 7: Verification
 
-- [ ] `mise //:docs-build` completes cleanly with `checkDeadLinks` enabled <!-- completed: -->
-- [ ] Apply the MDX-hazard decision rule: inspect the rendered HTML at every inventory location; remediate minimally where broken and re-verify inbound anchors <!-- completed: -->
-- [ ] Verify fragment anchors: extract every internal `#fragment` link from the built HTML and confirm each target id exists <!-- completed: -->
-- [ ] Visual pass over the built site (`pnpm --dir docs preview`): hero home with demo embed, sidebar parity, the two details containers, the former diagram sites reading as continuous prose, search and dark toggle working <!-- completed: -->
-- [ ] Final reference sweep is clean: no live reference to this repo's `zensical` / `uv` / `bump-my-version` toolchain outside `design-docs/` and git history (generic tool-name examples exempt per Success Criteria) <!-- completed: -->
+- [x] `mise //:docs-build` completes cleanly with `checkDeadLinks` enabled <!-- completed: 2026-07-31T08:30 -->
+- [x] Apply the MDX-hazard decision rule: inspect the rendered HTML at every inventory location; remediate minimally where broken and re-verify inbound anchors <!-- completed: 2026-07-31T08:30 -->
+- [x] Verify fragment anchors: extract every internal `#fragment` link from the built HTML and confirm each target id exists <!-- completed: 2026-07-31T08:30 -->
+- [x] Visual pass over the built site (`pnpm --dir docs preview`): hero home with demo embed, sidebar parity, the two details containers, the former diagram sites reading as continuous prose, search and dark toggle working <!-- completed: 2026-07-31T08:30 -->
+- [x] Final reference sweep is clean: no live reference to this repo's `zensical` / `uv` / `bump-my-version` toolchain outside `design-docs/` and git history (generic tool-name examples exempt per Success Criteria) <!-- completed: 2026-07-31T08:30 -->
 
 ---
 
