@@ -17,7 +17,7 @@ exempt set*; exclude it from every pass:
 - `cafleet/src/cafleet/db/alembic/versions/**` — a migration legitimately
   references prior/renamed state.
 - `cafleet/src/cafleet/webui/dist/**` — generated bundle, not authored prose.
-- Lock files (`uv.lock`, `bun.lock` / `bun.lockb`, `package-lock.json`, …).
+- Lock files (`uv.lock`, `pnpm-lock.yaml`, `package-lock.json`, …).
 
 Everything else tracked is in scope, per the umbrella's scope statement: any
 tracked file outside the exempt set is swept — `docs/`, `README.md`, `SPEC.md`,
@@ -33,7 +33,7 @@ git grep -nIiP -e '<pattern>' -- \
   ':(exclude)design-docs/**' \
   ':(exclude)cafleet/src/cafleet/db/alembic/versions/**' \
   ':(exclude)cafleet/src/cafleet/webui/dist/**' \
-  ':(exclude)*.lock' ':(exclude)uv.lock' ':(exclude)bun.lockb'
+  ':(exclude)*.lock' ':(exclude)uv.lock' ':(exclude)pnpm-lock.yaml'
 ```
 
 Run every pass with **`-i` and `-P`**. `-i` (case-insensitive) is required — a
