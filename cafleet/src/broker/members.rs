@@ -12,8 +12,10 @@ use crate::time::{format_utc, now_utc, parse_lenient};
 
 pub const MONITORING_MEMBER_KIND: &str = "monitoring-member";
 
-pub(crate) const DIRECTOR_INTERVAL_SECONDS: i64 = 180;
-pub(crate) const MEMBER_INTERVAL_SECONDS: i64 = 720;
+/// The auto-enrollment ping cadences (SPEC §6.2) — the policy tunables'
+/// single home, re-exported by the monitor module.
+pub const DIRECTOR_PING_INTERVAL_SECONDS: i64 = 180;
+pub const MEMBER_PING_INTERVAL_SECONDS: i64 = 720;
 
 #[derive(Debug, Clone)]
 pub struct NewPlacement {
@@ -187,7 +189,7 @@ pub fn register_member(
         )
         .map_err(db_err)?;
         if !is_monitor {
-            enroll(&tx, member_id, MEMBER_INTERVAL_SECONDS)?;
+            enroll(&tx, member_id, MEMBER_PING_INTERVAL_SECONDS)?;
         }
     }
     tx.commit().map_err(db_err)?;

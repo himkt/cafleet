@@ -14,8 +14,13 @@ const PENDING_COUNT_SUBQUERY: &str = "(SELECT COUNT(*) FROM messages \
 const OLDEST_PENDING_SUBQUERY: &str = "(SELECT MIN(status_timestamp) FROM messages \
      WHERE owner_member_id=m.member_id AND status_state='input_required' AND type='unicast')";
 
+/// The runtime-staleness tunables (SPEC §6.2) — the policy's single home,
+/// re-exported by the monitor module.
+pub const MONITOR_STALE_FACTOR: i64 = 3;
+pub const MONITOR_STALE_FLOOR_SECONDS: i64 = 15;
+
 fn stale_after_seconds(tick_seconds: i64) -> i64 {
-    (3 * tick_seconds).max(15)
+    (MONITOR_STALE_FACTOR * tick_seconds).max(MONITOR_STALE_FLOOR_SECONDS)
 }
 
 /// Signal-0 process probe: `EPERM` corroborates alive, `ESRCH` dead.

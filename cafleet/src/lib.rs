@@ -5,6 +5,7 @@ pub mod coding_agent;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod monitor;
 pub mod multiplexer;
 pub mod output;
 pub mod spawn_prompt;

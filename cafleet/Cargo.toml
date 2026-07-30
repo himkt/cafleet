@@ -17,6 +17,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 rust-embed = "8"
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
+signal-hook = "0.3"
 
 [dev-dependencies]
 sha2 = "0.10"
