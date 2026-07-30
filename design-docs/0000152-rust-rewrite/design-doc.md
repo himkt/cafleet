@@ -1,7 +1,7 @@
 # Rust Rewrite of the cafleet Package
 
 **Status**: Approved
-**Progress**: 8/44 tasks complete
+**Progress**: 14/44 tasks complete
 **Last Updated**: 2026-07-30
 
 ## Overview
@@ -240,12 +240,12 @@ Total-removal (same change): `cafleet/src/**` (Python), `cafleet/tests/**` (pyte
 
 ### Step 2: Workspace scaffolding
 
-- [ ] Create root Cargo workspace and `cafleet/` package (version continued from current), with clippy/rustfmt config <!-- completed: -->
-- [ ] Retarget admin/vite.config.ts outDir to `../cafleet/webui-dist`; add build.rs failing loudly when the dist is missing <!-- completed: -->
-- [ ] Wire embeds: rust-embed for webui-dist; include_dir for skills/, presets/, migrations/ <!-- completed: -->
-- [ ] Rewrite mise tasks per the tooling table; delete makemigration/publish; reduce root uv workspace (drop cafleet member + mkdocstrings, keep docs/research groups) and re-lock <!-- completed: -->
-- [ ] Retarget .bumpversion.toml to Cargo.toml + Cargo.lock <!-- completed: -->
-- [ ] Update ci.yml: admin build + clippy/fmt lint job + cargo test job with caching <!-- completed: -->
+- [x] Create root Cargo workspace and `cafleet/` package (version continued from current), with clippy/rustfmt config <!-- completed: 2026-07-30T10:34 -->
+- [x] Retarget admin/vite.config.ts outDir to `../cafleet/webui-dist`; add build.rs failing loudly when the dist is missing <!-- completed: 2026-07-30T10:34 -->
+- [x] Wire embeds: rust-embed for webui-dist; include_dir for skills/, presets/, migrations/ <!-- completed: 2026-07-30T10:34 -->
+- [x] Rewrite mise tasks per the tooling table; delete makemigration/publish; reduce root uv workspace (drop cafleet member + mkdocstrings, keep docs/research groups) and re-lock <!-- completed: 2026-07-30T10:32 -->
+- [x] Retarget .bumpversion.toml to Cargo.toml + Cargo.lock <!-- completed: 2026-07-30T10:32 -->
+- [x] Update ci.yml: admin build + clippy/fmt lint job + cargo test job with caching <!-- completed: 2026-07-30T10:32 -->
 
 ### Step 3: Core foundations
 

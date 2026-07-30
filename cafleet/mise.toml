@@ -1,47 +1,36 @@
 [tasks.dev]
-run = "uv run --package cafleet uvicorn cafleet.webui.app:app --host 127.0.0.1 --port 8000"
+depends = ["//admin:build"]
+run = "cargo run -- server"
 description = "Start the admin WebUI server on 127.0.0.1:8000 (no hot-reload; restart manually between edits)"
 
 [tasks.test]
-run = "uv run --package cafleet python -m pytest"
-description = "Run all tests"
+depends = ["//admin:build"]
+run = "cargo test"
+description = "Run all tests (positional args forward to the cargo test harness)"
 
 [tasks.lint]
+depends = ["//admin:build"]
 run = [
-  "uv run --package cafleet ruff check .",
-  "uv run --package cafleet ruff format --check .",
+  "cargo clippy --all-targets -- -D warnings",
+  "cargo fmt --check",
 ]
-description = "Run ruff linter and format check"
+description = "Run clippy (deny warnings) and the rustfmt check"
 
 [tasks.format]
-run = [
-  "uv run --package cafleet ruff check --fix .",
-  "uv run --package cafleet ruff format .",
-]
-description = "Format code with ruff (applies ruff check --fix then ruff format)"
+run = "cargo fmt"
+description = "Format the Rust sources with rustfmt"
 
 [tasks.typecheck]
-run = "uv run --package cafleet ty check"
-description = "Run ty type checker"
+depends = ["//admin:build"]
+run = "cargo check"
+description = "Type-check the package without producing a binary"
 
 [tasks.install]
-run = "uv tool install --reinstall --editable ."
-description = "Install the cafleet CLI as an editable uv tool (source edits take effect without a second reinstall)"
+depends = ["//admin:build"]
+run = "cargo install --path ."
+description = "Install the cafleet CLI from the working tree (re-run after source edits to refresh the installed binary)"
 
 [tasks.build]
-run = "uv build --wheel --package cafleet --out-dir ./dist"
-description = "Build the cafleet wheel into cafleet/dist/ (the explicit --out-dir prevents uv from writing to the uv-workspace root by default)"
-
-[tasks.makemigration]
-usage = 'arg "<message>" help="Message passed to alembic revision -m"'
-run = 'uv run --package cafleet alembic -c src/cafleet/db/alembic/alembic.ini revision --autogenerate -m "$usage_message"'
-description = "Autogenerate an Alembic migration into src/cafleet/db/alembic/versions/. Requires the DB at head first (run `cafleet setup --skip claude --skip codex --skip opencode`). The env.py process_revision_directives hook mints the next zero-padded sequential id (000N). Pass the message positionally, e.g. `mise //cafleet:makemigration \"add widget table\"`. Autogenerate cannot detect renames (it emits drop+add) — review and hand-edit the generated file."
-
-[tasks.publish]
-run = [
-  { task = "//admin:install" },
-  { task = "//admin:build" },
-  { task = "//cafleet:build" },
-  "uv publish",
-]
-description = "Publish cafleet to PyPI (builds admin assets, builds the wheel, then uv publish)"
+depends = ["//admin:build"]
+run = "cargo build --release"
+description = "Build the release binary into target/release/cafleet"

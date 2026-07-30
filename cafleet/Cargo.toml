@@ -1,0 +1,11 @@
+[package]
+name = "cafleet"
+version = "0.22.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+include_dir = "0.7"
+rust-embed = "8"
