@@ -151,7 +151,10 @@ fn multiplexer_backends_pins_the_pure_trigger_payload() {
             "Follow your monitor role protocol",
         ],
     );
-    assert_absent("docs/docs/spec/multiplexer-backends.md", &REMOVED_VOCABULARY);
+    assert_absent(
+        "docs/docs/spec/multiplexer-backends.md",
+        &REMOVED_VOCABULARY,
+    );
 }
 
 #[test]
