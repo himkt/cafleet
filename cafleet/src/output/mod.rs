@@ -6,6 +6,6 @@ pub use formatters::{
     format_member_list, format_message,
 };
 pub use render::{
-    format_json, render_message, render_messages_in_result, strip_ansi, truncate_message_text,
-    truncate_text,
+    format_json, is_visually_blank, render_message, render_messages_in_result, strip_ansi,
+    truncate_message_text, truncate_text,
 };

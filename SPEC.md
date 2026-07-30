@@ -1761,12 +1761,14 @@ Director's `MultiplexerContext` and passes it directly.
   0` → `capture_pane: lines must be positive, got <lines>`. Run `tmux
   capture-pane -p -t <target_pane_id> -S -<lines>`, split the raw output on
   `"\n"` **only** (not a general line-splitter — must not also split on `\r`, to
-  preserve the CLI's CR-defrag), drop the trailing run of whitespace-only lines,
-  then return the last `lines` remaining lines joined with `"\n"` (no trailing
-  newline; an all-blank buffer captures as the empty string). Interior blank
-  lines are preserved — only the trailing blank run is dropped, so a small
-  `lines` window shows the pane's drawn bottom rather than the blank area under
-  the cursor.
+  preserve the CLI's CR-defrag), drop the trailing run of visually-blank lines —
+  a line is blank when it is whitespace-only after per-line CSI stripping (the
+  emptiness check only; kept lines keep their original bytes, TUI-painted empty
+  rows carry ANSI sequences) — then return the last `lines` remaining lines
+  joined with `"\n"` (no trailing newline; an all-blank buffer captures as the
+  empty string). Interior blank lines are preserved — only the trailing blank
+  run is dropped, so a small `lines` window shows the pane's drawn bottom rather
+  than the blank area under the cursor.
 - **`list_pane_ids() -> set`** — fail-fast. `tmux list-panes -a -F "#{pane_id}"`
   with `timeout=5`s; split on whitespace; return the pane-id set. One call
   resolves liveness for every member in a monitor tick.
@@ -1947,9 +1949,10 @@ Each method's herdr realization:
   0` → `capture_pane: lines must be positive, got <lines>`. Run `herdr pane read
   <id> --source recent-unwrapped --lines <lines>`, then apply the same
   windowing as the tmux backend: split on `"\n"` only, drop the trailing run of
-  whitespace-only lines, and return the last `lines` remaining lines joined
-  with `"\n"` (no trailing newline; the last-N window is enforced client-side
-  because the daemon may return more rows than requested).
+  visually-blank lines (whitespace-only after per-line CSI stripping; kept
+  lines keep their original bytes), and return the last `lines` remaining lines
+  joined with `"\n"` (no trailing newline; the last-N window is enforced
+  client-side because the daemon may return more rows than requested).
 
 **`_SUBMIT_DELAY` (`1.0`s).** herdr `pane run` submits text **and** Enter
 atomically, so the run-based paths (`send_poll_trigger`, `send_wake_trigger`,

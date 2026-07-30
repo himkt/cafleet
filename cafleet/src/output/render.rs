@@ -8,6 +8,13 @@ const TRUNCATION_SUFFIX: char = '…';
 static ANSI_ESCAPE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\x1b\[[0-?]*[ -/]*[@-~]").expect("the CSI pattern is valid"));
 
+/// The A8 visual-blank test (SPEC §6.5): a line is blank when it is
+/// whitespace-only after CSI stripping. Emptiness check only — the caller
+/// keeps the line's original bytes.
+pub fn is_visually_blank(line: &str) -> bool {
+    ANSI_ESCAPE_RE.replace_all(line, "").trim().is_empty()
+}
+
 /// Strip ANSI CSI escape sequences and collapse `\r`-rewritten line segments:
 /// only the segment after the last `\r` of each line survives, so the
 /// captured buffer matches what an operator sees.

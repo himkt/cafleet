@@ -1036,6 +1036,24 @@ mod tests {
         );
     }
 
+    // A8: TUI-painted empty rows carry ANSI sequences — a trailing line is
+    // blank when it is whitespace-only AFTER per-line CSI stripping; the kept
+    // lines keep their original bytes.
+    #[test]
+    fn capture_pane_blank_detection_is_ansi_aware() {
+        let runner = FakeRunner::with_binary("herdr");
+        runner.respond(Ok(
+            "one\ntwo\x1b[0m\n\x1b[39m\x1b[49m\n \x1b[2K\n".to_string()
+        ));
+        let mux = HerdrMultiplexer::new(runner, herdr_env());
+        assert_eq!(
+            mux.capture_pane("w1:p2", 2).unwrap(),
+            "one\ntwo\x1b[0m",
+            "CSI-only trailing rows are visually blank and dropped; the kept \
+             lines' ANSI survives untouched"
+        );
+    }
+
     // A8: the daemon may return more rows than requested; after the blank tail
     // is dropped, the last-N window is enforced client-side.
     #[test]

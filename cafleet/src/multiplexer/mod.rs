@@ -67,12 +67,16 @@ pub trait CommandRunner {
 
 /// The shared capture windowing (SPEC §6.5, amendment A8): split the fetched
 /// buffer on `\n` only (so `\r` survives for the CLI-side defrag), drop the
-/// trailing run of whitespace-only lines, and keep the last `lines` remaining
-/// lines — a small window shows the pane's drawn bottom, not the blank area
-/// under the cursor.
+/// trailing run of visually-blank lines (whitespace-only after per-line CSI
+/// stripping — the emptiness check only; kept lines keep their bytes), and
+/// keep the last `lines` remaining lines — a small window shows the pane's
+/// drawn bottom, not the blank area under the cursor.
 pub(crate) fn capture_window(raw: &str, lines: i64) -> String {
     let mut parts: Vec<&str> = raw.split('\n').collect();
-    while parts.last().is_some_and(|line| line.trim().is_empty()) {
+    while parts
+        .last()
+        .is_some_and(|line| crate::output::is_visually_blank(line))
+    {
         parts.pop();
     }
     let keep = usize::try_from(lines).expect("lines is positive");

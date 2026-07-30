@@ -731,6 +731,24 @@ mod tests {
         );
     }
 
+    // A8: TUI-painted empty rows carry ANSI sequences — a trailing line is
+    // blank when it is whitespace-only AFTER per-line CSI stripping; the kept
+    // lines keep their original bytes.
+    #[test]
+    fn capture_pane_blank_detection_is_ansi_aware() {
+        let runner = FakeRunner::with_binary("tmux");
+        runner.respond(Ok(
+            "top\nkept \x1b[31mred\x1b[0m\n\x1b[39m\x1b[49m\n\x1b[2K \n\n".to_string(),
+        ));
+        let mux = TmuxMultiplexer::new(runner, tmux_env());
+        assert_eq!(
+            mux.capture_pane("%5", 2).unwrap(),
+            "top\nkept \x1b[31mred\x1b[0m",
+            "CSI-only trailing rows are visually blank and dropped; the kept \
+             lines' ANSI survives untouched"
+        );
+    }
+
     #[test]
     fn capture_pane_of_an_all_blank_buffer_is_empty() {
         let runner = FakeRunner::with_binary("tmux");
