@@ -94,8 +94,7 @@ mod tests {
 
     #[test]
     fn substitutes_repeated_placeholders() {
-        let out =
-            substitute_spawn_placeholders("{fleet_id}-{fleet_id}", 7, 1, 2, "codex").unwrap();
+        let out = substitute_spawn_placeholders("{fleet_id}-{fleet_id}", 7, 1, 2, "codex").unwrap();
         assert_eq!(out, "7-7");
     }
 

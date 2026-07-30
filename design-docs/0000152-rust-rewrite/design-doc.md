@@ -1,7 +1,7 @@
 # Rust Rewrite of the cafleet Package
 
 **Status**: Approved
-**Progress**: 20/44 tasks complete
+**Progress**: 26/44 tasks complete
 **Last Updated**: 2026-07-30
 
 ## Overview
@@ -258,12 +258,12 @@ Total-removal (same change): `cafleet/src/**` (Python), `cafleet/tests/**` (pyte
 
 ### Step 4: Broker layer
 
-- [ ] fleets: atomic fleet+Director bootstrap with director_member_id backfill, list/get/soft-delete <!-- completed: -->
-- [ ] members: register/deregister, monitoring-member invariants, auto-enrollment, roster, placement patch, idle proxies (lexicographic max) <!-- completed: -->
-- [ ] messaging: send/broadcast/poll/ack with write-then-best-effort-preview ordering and all error strings <!-- completed: -->
-- [ ] queries: inbox/sent/timeline (cap 200)/get_message visibility rule <!-- completed: -->
-- [ ] monitor broker: enroll/config CRUD, list_monitor_targets per-tick scan, record_pings/record_monitor_dispatch, reconcile_monitor_lifecycle, runtime claim/heartbeat/clear, runtime/members payloads, fleet/member monitor-row deletes <!-- completed: -->
-- [ ] asset_installs: existence check, list, upsert <!-- completed: -->
+- [x] fleets: atomic fleet+Director bootstrap with director_member_id backfill, list/get/soft-delete <!-- completed: 2026-07-30T11:59 -->
+- [x] members: register/deregister, monitoring-member invariants, auto-enrollment, roster, placement patch, idle proxies (lexicographic max) <!-- completed: 2026-07-30T11:59 -->
+- [x] messaging: send/broadcast/poll/ack with write-then-best-effort-preview ordering and all error strings <!-- completed: 2026-07-30T11:59 -->
+- [x] queries: inbox/sent/timeline (cap 200)/get_message visibility rule <!-- completed: 2026-07-30T11:59 -->
+- [x] monitor broker: enroll/config CRUD, list_monitor_targets per-tick scan, record_pings/record_monitor_dispatch, reconcile_monitor_lifecycle, runtime claim/heartbeat/clear, runtime/members payloads, fleet/member monitor-row deletes <!-- completed: 2026-07-30T11:59 -->
+- [x] asset_installs: existence check, list, upsert <!-- completed: 2026-07-30T11:59 -->
 
 ### Step 5: Multiplexer and coding agents
 

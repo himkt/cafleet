@@ -4,19 +4,28 @@ use std::fmt;
 pub enum CafleetError {
     Usage(String),
     App(String),
+    /// A broker value error (bad input / missing row), translated by callers:
+    /// the CLI wraps to exit 1, the WebUI maps to an HTTP status.
+    Value(String),
+    /// A broker permission error (e.g. a non-recipient ack), translated by
+    /// callers like [`CafleetError::Value`].
+    Permission(String),
 }
 
 impl CafleetError {
     pub fn exit_code(&self) -> i32 {
         match self {
             CafleetError::Usage(_) => 2,
-            CafleetError::App(_) => 1,
+            CafleetError::App(_) | CafleetError::Value(_) | CafleetError::Permission(_) => 1,
         }
     }
 
     pub fn message(&self) -> &str {
         match self {
-            CafleetError::Usage(message) | CafleetError::App(message) => message,
+            CafleetError::Usage(message)
+            | CafleetError::App(message)
+            | CafleetError::Value(message)
+            | CafleetError::Permission(message) => message,
         }
     }
 }
@@ -48,7 +57,10 @@ mod tests {
 
     #[test]
     fn app_error_maps_to_exit_code_1() {
-        assert_eq!(CafleetError::App("runtime conflict".to_string()).exit_code(), 1);
+        assert_eq!(
+            CafleetError::App("runtime conflict".to_string()).exit_code(),
+            1
+        );
     }
 
     #[test]

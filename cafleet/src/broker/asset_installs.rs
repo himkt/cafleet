@@ -1,6 +1,61 @@
 //! Assets-install version recording (SPEC §5.2 *AssetInstalls*). The
 //! colocated tests pin the contract; see [`super::test_support`] for the API.
 
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
+
+use super::members::db_err;
+use crate::error::CafleetError;
+use crate::time::{format_utc, now_utc};
+
+pub fn asset_installs_table_exists(conn: &Connection) -> bool {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master \
+         WHERE type='table' AND name='asset_installs')",
+        [],
+        |row| row.get(0),
+    )
+    .expect("sqlite_master is always queryable")
+}
+
+pub fn list_asset_installs(conn: &Connection) -> Result<Vec<Value>, CafleetError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT coding_agent, cafleet_version, installed_at \
+             FROM asset_installs ORDER BY coding_agent",
+        )
+        .map_err(db_err)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(json!({
+                "coding_agent": row.get::<_, String>(0)?,
+                "cafleet_version": row.get::<_, String>(1)?,
+                "installed_at": row.get::<_, String>(2)?,
+            }))
+        })
+        .map_err(db_err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(db_err)?;
+    Ok(rows)
+}
+
+pub fn record_asset_install(
+    conn: &mut Connection,
+    coding_agent: &str,
+    cafleet_version: &str,
+) -> Result<(), CafleetError> {
+    let now = format_utc(now_utc());
+    conn.execute(
+        "INSERT INTO asset_installs (coding_agent, cafleet_version, installed_at) \
+         VALUES (?1, ?2, ?3) \
+         ON CONFLICT(coding_agent) DO UPDATE SET \
+             cafleet_version=excluded.cafleet_version, installed_at=excluded.installed_at",
+        params![coding_agent, cafleet_version, now],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;

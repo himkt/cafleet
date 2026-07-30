@@ -2,6 +2,197 @@
 //! `director_member_id` backfill, list/get/soft-delete + cascade. The
 //! colocated tests pin the contract; see [`super::test_support`] for the API.
 
+use rusqlite::{Connection, OptionalExtension, params};
+use serde_json::{Value, json};
+
+use super::members::{DIRECTOR_INTERVAL_SECONDS, db_err, enroll, member_card};
+use crate::error::CafleetError;
+use crate::time::{format_utc, now_utc};
+
+const DIRECTOR_NAME: &str = "Director";
+const DIRECTOR_DESCRIPTION: &str = "Root Director for this fleet";
+
+pub(crate) struct FleetRow {
+    pub fleet_id: i64,
+    pub name: Option<String>,
+    pub created_at: String,
+    pub deleted_at: Option<String>,
+    pub director_member_id: Option<i64>,
+}
+
+pub(crate) fn fetch_fleet(
+    conn: &Connection,
+    fleet_id: i64,
+) -> Result<Option<FleetRow>, CafleetError> {
+    conn.query_row(
+        "SELECT fleet_id, name, created_at, deleted_at, director_member_id \
+         FROM fleets WHERE fleet_id=?1",
+        [fleet_id],
+        |row| {
+            Ok(FleetRow {
+                fleet_id: row.get(0)?,
+                name: row.get(1)?,
+                created_at: row.get(2)?,
+                deleted_at: row.get(3)?,
+                director_member_id: row.get(4)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(db_err)
+}
+
+/// Atomic fleet + root-Director bootstrap: fleet row → Director member →
+/// placement → `director_member_id` backfill → Director enrollment at 180 s.
+pub fn create_fleet(
+    conn: &mut Connection,
+    name: Option<&str>,
+    mux_session: &str,
+    mux_window_id: &str,
+    mux_pane_id: &str,
+    coding_agent: &str,
+    backend: &str,
+) -> Result<Value, CafleetError> {
+    let now = format_utc(now_utc());
+    let card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[], None);
+    let tx = conn.transaction().map_err(db_err)?;
+    tx.execute(
+        "INSERT INTO fleets (name, created_at) VALUES (?1, ?2)",
+        params![name, now],
+    )
+    .map_err(db_err)?;
+    let fleet_id = tx.last_insert_rowid();
+    tx.execute(
+        "INSERT INTO members (fleet_id, name, description, status, registered_at, member_card_json) \
+         VALUES (?1, ?2, ?3, 'active', ?4, ?5)",
+        params![fleet_id, DIRECTOR_NAME, DIRECTOR_DESCRIPTION, now, card],
+    )
+    .map_err(db_err)?;
+    let director_id = tx.last_insert_rowid();
+    tx.execute(
+        "INSERT INTO member_placements \
+         (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            director_id,
+            mux_session,
+            mux_window_id,
+            mux_pane_id,
+            backend,
+            coding_agent,
+            now
+        ],
+    )
+    .map_err(db_err)?;
+    tx.execute(
+        "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
+        params![director_id, fleet_id],
+    )
+    .map_err(db_err)?;
+    enroll(&tx, director_id, DIRECTOR_INTERVAL_SECONDS)?;
+    tx.commit().map_err(db_err)?;
+    Ok(json!({
+        "fleet_id": fleet_id,
+        "name": name,
+        "created_at": now,
+        "director": {
+            "member_id": director_id,
+            "name": DIRECTOR_NAME,
+            "description": DIRECTOR_DESCRIPTION,
+            "registered_at": now,
+            "placement": {
+                "backend": backend,
+                "mux_session": mux_session,
+                "mux_window_id": mux_window_id,
+                "mux_pane_id": mux_pane_id,
+                "coding_agent": coding_agent,
+                "created_at": now,
+            },
+        },
+    }))
+}
+
+pub fn list_fleets(conn: &Connection) -> Result<Vec<Value>, CafleetError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT f.fleet_id, f.name, f.created_at, f.director_member_id, \
+                    (SELECT COUNT(*) FROM members m \
+                     WHERE m.fleet_id=f.fleet_id AND m.status='active') \
+             FROM fleets f WHERE f.deleted_at IS NULL \
+             ORDER BY f.created_at DESC, f.fleet_id DESC",
+        )
+        .map_err(db_err)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(json!({
+                "fleet_id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, Option<String>>(1)?,
+                "created_at": row.get::<_, String>(2)?,
+                "director_member_id": row.get::<_, Option<i64>>(3)?,
+                "member_count": row.get::<_, i64>(4)?,
+            }))
+        })
+        .map_err(db_err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(db_err)?;
+    Ok(rows)
+}
+
+pub fn get_fleet(conn: &Connection, fleet_id: i64) -> Result<Option<Value>, CafleetError> {
+    Ok(fetch_fleet(conn, fleet_id)?.map(|fleet| {
+        json!({
+            "fleet_id": fleet.fleet_id,
+            "name": fleet.name,
+            "created_at": fleet.created_at,
+            "deleted_at": fleet.deleted_at,
+            "director_member_id": fleet.director_member_id,
+        })
+    }))
+}
+
+/// Soft-delete + cascade: stamp `deleted_at`, deregister every active member
+/// (root Director included), drop their placement and monitor-config rows and
+/// the fleet's runtime row; messages are untouched. Idempotent.
+pub fn delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value, CafleetError> {
+    let fleet = fetch_fleet(conn, fleet_id)?
+        .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
+    let now = format_utc(now_utc());
+    let tx = conn.transaction().map_err(db_err)?;
+    if fleet.deleted_at.is_none() {
+        tx.execute(
+            "UPDATE fleets SET deleted_at=?1 WHERE fleet_id=?2",
+            params![now, fleet_id],
+        )
+        .map_err(db_err)?;
+    }
+    let deregistered = tx
+        .execute(
+            "UPDATE members SET status='deregistered', deregistered_at=?1 \
+             WHERE fleet_id=?2 AND status='active'",
+            params![now, fleet_id],
+        )
+        .map_err(db_err)?;
+    tx.execute(
+        "DELETE FROM member_placements WHERE member_id IN \
+         (SELECT member_id FROM members WHERE fleet_id=?1)",
+        [fleet_id],
+    )
+    .map_err(db_err)?;
+    tx.execute(
+        "DELETE FROM monitor_config WHERE member_id IN \
+         (SELECT member_id FROM members WHERE fleet_id=?1)",
+        [fleet_id],
+    )
+    .map_err(db_err)?;
+    tx.execute("DELETE FROM monitor_runtime WHERE fleet_id=?1", [fleet_id])
+        .map_err(db_err)?;
+    tx.commit().map_err(db_err)?;
+    Ok(json!({
+        "fleet_id": fleet_id,
+        "deregistered_count": deregistered,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;
@@ -39,9 +230,16 @@ mod tests {
     fn create_fleet_result_shape_is_pinned() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let fleet =
-            broker::create_fleet(&mut conn, Some("alpha"), "main", "@1", "%0", "claude", "tmux")
-                .unwrap();
+        let fleet = broker::create_fleet(
+            &mut conn,
+            Some("alpha"),
+            "main",
+            "@1",
+            "%0",
+            "claude",
+            "tmux",
+        )
+        .unwrap();
         let fleet_id = fleet["fleet_id"].as_i64().unwrap();
         let director_id = fleet["director"]["member_id"].as_i64().unwrap();
         let ts = fleet["created_at"].as_str().unwrap().to_string();
@@ -68,9 +266,16 @@ mod tests {
     fn create_fleet_timestamps_are_canonical() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let fleet =
-            broker::create_fleet(&mut conn, Some("alpha"), "main", "@1", "%0", "claude", "tmux")
-                .unwrap();
+        let fleet = broker::create_fleet(
+            &mut conn,
+            Some("alpha"),
+            "main",
+            "@1",
+            "%0",
+            "claude",
+            "tmux",
+        )
+        .unwrap();
         let created_at = fleet["created_at"].as_str().unwrap();
         assert_eq!(created_at.len(), 32, "fixed-width form, got: {created_at}");
         assert!(created_at.ends_with("+00:00"));

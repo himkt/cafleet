@@ -1,4 +1,5 @@
 pub mod assets;
+pub mod broker;
 pub mod config;
 pub mod db;
 pub mod error;

@@ -616,9 +616,27 @@ mod tests {
                     json!(59),
                 ),
                 row(2, "analyst", "member", Value::Null, Value::Null),
-                row(3, "watch", "monitor", placed("codex", Value::Null), json!(60)),
-                row(4, "w2", "member", placed("opencode", json!("%9")), json!(3599)),
-                row(5, "w3", "member", placed("claude", json!("%10")), json!(3600)),
+                row(
+                    3,
+                    "watch",
+                    "monitor",
+                    placed("codex", Value::Null),
+                    json!(60),
+                ),
+                row(
+                    4,
+                    "w2",
+                    "member",
+                    placed("opencode", json!("%9")),
+                    json!(3599),
+                ),
+                row(
+                    5,
+                    "w3",
+                    "member",
+                    placed("claude", json!("%10")),
+                    json!(3600),
+                ),
             ];
             let expected = [
                 "5 members:",
