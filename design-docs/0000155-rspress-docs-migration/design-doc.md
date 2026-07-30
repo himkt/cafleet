@@ -322,8 +322,6 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 - [ ] Visual pass over the built site (`pnpm --dir docs preview`): hero home with demo embed, sidebar parity, the two details containers, the former diagram sites reading as continuous prose, search and dark toggle working <!-- completed: -->
 - [ ] Final reference sweep is clean: no live reference to this repo's `zensical` / `uv` / `bump-my-version` toolchain outside `design-docs/` and git history (generic tool-name examples exempt per Success Criteria) <!-- completed: -->
 
-COMMENT(verifier): test gap — the search modal could not be exercised end-to-end: the allowlisted agent-browser command set (open/snapshot/screenshot/get/console/errors/reload) has no click/fill, so only static evidence was collected (Search button with ⌘K hint present in the navbar; `static/search_index.en.*.json` emitted by the build). Suggested tooling: allow `pnpm exec agent-browser --session vr-batch-* click *` and `fill *`, or a Director-driven manual spot-check of search (and of the dark toggle once it renders).
-
 ---
 
 ## Changelog
