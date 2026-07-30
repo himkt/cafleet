@@ -1,0 +1,20 @@
+name: cpu.renovate
+on:
+  schedule:
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    steps:
+      - id: github-app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+      - uses: actions/checkout@v7.0.0
+      - uses: renovatebot/github-action@v46.1.19
+        with:
+          token: '${{ steps.github-app-token.outputs.token }}'
+        env:
+          RENOVATE_REPOSITORIES: '${{ github.repository }}'
