@@ -1,7 +1,7 @@
 # Migrate the Documentation Site from Zensical to Rspress
 
 **Status**: Approved
-**Progress**: 5/29 tasks complete
+**Progress**: 13/29 tasks complete
 **Last Updated**: 2026-07-31
 
 ## Overview
@@ -44,7 +44,7 @@ Full Python removal therefore requires decisions on both; the user has made them
 | 1 | bump-my-version fate | Dropped entirely. `.bumpversion.toml` is deleted; releases bump the single `version` line in `cafleet/Cargo.toml` by hand and let the next cargo build refresh `Cargo.lock`. |
 | 2 | matplotlib / research group fate | Removed. The cafleet-research skill is to be isolated into a separate repository (see *Scope*). |
 | 3 | Workspace shape | rspress v2, with `docs/` added to `pnpm-workspace.yaml`; dependencies in `docs/package.json`; shared root `pnpm-lock.yaml`. |
-| 4 | Mermaid diagrams | Pre-rendered to committed static SVGs; no runtime plugin. |
+| 4 | Mermaid diagrams | Pre-rendered to committed static SVGs; no runtime plugin. Rendering uses a one-off `pnpm dlx @mermaid-js/mermaid-cli` invocation — no in-repo mermaid-cli devDependency (user decision at execute time: keep puppeteer/Chrome out of the lockfile). |
 | 5 | Page icons | The `icon: lucide/...` frontmatter is deleted from all 19 pages. |
 | 6 | Home page | rspress hero home layout (`pageType: home`) with tagline and action buttons. |
 | 7 | CI / task | The root-level `mise //:docs-build` task name is kept, retargeted to the pnpm-driven rspress build. Same GitHub Pages URL (`base: '/cafleet/'`), same `docs.yml` trigger shape. |
@@ -88,17 +88,15 @@ The nested content root follows decision 8. Its two repo-wide consequences are h
   "scripts": {
     "dev": "rspress dev",
     "build": "rspress build",
-    "preview": "rspress preview",
-    "diagrams": "for f in diagrams/*.mmd; do mmdc -i \"$f\" -o \"docs/public/diagrams/$(basename \"$f\" .mmd).svg\" -b white; done"
+    "preview": "rspress preview"
   },
   "devDependencies": {
-    "@rspress/core": "^2",
-    "@mermaid-js/mermaid-cli": "^11"
+    "@rspress/core": "^2"
   }
 }
 ```
 
-`@rspress/core` is the rspress v2 package (provides the `rspress` binary; `defineConfig` is imported from it). `@mermaid-js/mermaid-cli` provides `mmdc` for the pre-render step; SVGs are committed, and `pnpm --dir docs run diagrams` regenerates them after a `.mmd` edit.
+`@rspress/core` is the rspress v2 package (provides the `rspress` binary; `defineConfig` is imported from it). The rendered SVGs are committed; after a `.mmd` edit, regenerate them with a one-off invocation from `docs/`: `pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli -i diagrams/<name>.mmd -o docs/public/diagrams/<name>.svg -b white` (the dlx cache holds mermaid-cli and its Chrome outside the workspace lockfile; `--allow-build` permits puppeteer's one-time Chrome download inside the dlx sandbox).
 
 ### docs/rspress.config.ts
 
@@ -280,14 +278,14 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 
 ### Step 2: Scaffold the rspress workspace
 
-- [ ] Add `docs` to `pnpm-workspace.yaml` <!-- completed: -->
-- [ ] Create `docs/package.json` per the specification <!-- completed: -->
-- [ ] Create `docs/rspress.config.ts` per the specification <!-- completed: -->
-- [ ] Move the 19 pages into `docs/docs/` preserving the `how-to/`, `concepts/`, `spec/` subdirectories <!-- completed: -->
-- [ ] Create the four `_meta.json` files per the specification <!-- completed: -->
-- [ ] Apply the `.gitignore` edits per the change table, then run `mise //:pnpm-install` <!-- completed: -->
-- [ ] Update `cafleet/tests/docs_sync.rs` page paths to `docs/docs/...` and confirm `mise //cafleet:test` passes <!-- completed: -->
-- [ ] Sweep repo-internal references to moved page paths (`rg -n 'docs/(concepts|spec|how-to|quickstart|index|contributing)' --glob '!docs/**' --glob '!design-docs/**'`) and update each per the change table <!-- completed: -->
+- [x] Add `docs` to `pnpm-workspace.yaml` <!-- completed: 2026-07-31T07:30 -->
+- [x] Create `docs/package.json` per the specification <!-- completed: 2026-07-31T07:30 -->
+- [x] Create `docs/rspress.config.ts` per the specification <!-- completed: 2026-07-31T07:30 -->
+- [x] Move the 19 pages into `docs/docs/` preserving the `how-to/`, `concepts/`, `spec/` subdirectories <!-- completed: 2026-07-31T07:40 -->
+- [x] Create the four `_meta.json` files per the specification <!-- completed: 2026-07-31T07:30 -->
+- [x] Apply the `.gitignore` edits per the change table, then run `mise //:pnpm-install` <!-- completed: 2026-07-31T07:40 -->
+- [x] Update `cafleet/tests/docs_sync.rs` page paths to `docs/docs/...` and confirm `mise //cafleet:test` passes <!-- completed: 2026-07-31T07:40 -->
+- [x] Sweep repo-internal references to moved page paths (`rg -n 'docs/(concepts|spec|how-to|quickstart|index|contributing)' --glob '!docs/**' --glob '!design-docs/**'`) and update each per the change table <!-- completed: 2026-07-31T07:40 -->
 
 ### Step 3: Page conversions
 
@@ -299,7 +297,7 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 ### Step 4: Mermaid pre-rendering
 
 - [ ] Extract the five fenced mermaid sources to `docs/diagrams/*.mmd` per the inventory table <!-- completed: -->
-- [ ] Render the SVGs via `pnpm --dir docs run diagrams` and commit them under `docs/docs/public/diagrams/` <!-- completed: -->
+- [ ] Render the SVGs via the one-off `pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli` invocation per the specification and commit them under `docs/docs/public/diagrams/` <!-- completed: -->
 - [ ] Replace each fenced block with the image reference (alt text from the surrounding prose) <!-- completed: -->
 
 ### Step 5: Python toolchain removal
@@ -328,3 +326,4 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 |------|---------|
 | 2026-07-31 | Initial draft |
 | 2026-07-31 | Reviewer round 1: recorded the nested-layout decision and its consequences (`docs_sync.rs`, path-reference sweep), sweep exemption policy, corrected MDX-hazard inventory, concrete `.gitignore` edits, `docs-build` task dependency, anchor-verification task |
+| 2026-07-31 | Execute-time amendment (user decision): dropped the `@mermaid-js/mermaid-cli` devDependency and the `diagrams` script; SVG regeneration is a one-off `pnpm dlx --allow-build=puppeteer` invocation, keeping puppeteer/Chrome out of the workspace lockfile |

@@ -1,6 +1,6 @@
 # CAFleet CLI — Fuller Command Catalog
 
-Read this file for the broker CLI surface beyond the core identity / poll / send / ack lifecycle in [`SKILL.md`](../SKILL.md): environment variables, global options, output flags, coding-agent backends, cancel / show / broadcast / roster introspection / doctor / the monitor group / fleet delete, the typical workflow, the message lifecycle, and error handling. Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-options.md`](../../../docs/spec/cli-options.md).
+Read this file for the broker CLI surface beyond the core identity / poll / send / ack lifecycle in [`SKILL.md`](../SKILL.md): environment variables, global options, output flags, coding-agent backends, cancel / show / broadcast / roster introspection / doctor / the monitor group / fleet delete, the typical workflow, the message lifecycle, and error handling. Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-options.md`](../../../docs/docs/spec/cli-options.md).
 
 ## Environment variables
 
@@ -23,7 +23,7 @@ cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id> --json
 
 ### `--full` (cross-subcommand escape hatch)
 
-`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch over a single flag covering four overloaded surfaces: `message {send,poll,ack,cancel,show}` → untruncated `text` + the full typed-column envelope; `message broadcast` → the single `broadcast_summary` message rendered verbose (never per-recipient rows or a `recipient_ids` list); `member show` → the labeled block (`kind`, `skills`, placement sub-block) in **text mode only** (JSON is the unprojected broker dict regardless of `--full`); `member create` → the 6-line `Member registered and spawned.` block. Per-surface detail: [`cli-options.md`](../../../docs/spec/cli-options.md#output-shapes).
+`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch over a single flag covering four overloaded surfaces: `message {send,poll,ack,cancel,show}` → untruncated `text` + the full typed-column envelope; `message broadcast` → the single `broadcast_summary` message rendered verbose (never per-recipient rows or a `recipient_ids` list); `member show` → the labeled block (`kind`, `skills`, placement sub-block) in **text mode only** (JSON is the unprojected broker dict regardless of `--full`); `member create` → the 6-line `Member registered and spawned.` block. Per-surface detail: [`cli-options.md`](../../../docs/docs/spec/cli-options.md#output-shapes).
 
 ### `--json` (per-subcommand, machine-parseable)
 
@@ -36,7 +36,7 @@ cafleet message poll --fleet-id <fleet-id> --member-id <m> --full --json
 
 ### `CAFLEET_MAX_TEXT_LEN`
 
-Environment variable controlling body truncation in the rendered envelope; default `200` codepoints, suffix the single codepoint `…` (U+2026). Separate hard-coded caps apply to `member.description` (`60`) and metadata strings (`80`); `--full` bypasses all three. See [`cli-options.md`](../../../docs/spec/cli-options.md#message-body-truncation).
+Environment variable controlling body truncation in the rendered envelope; default `200` codepoints, suffix the single codepoint `…` (U+2026). Separate hard-coded caps apply to `member.description` (`60`) and metadata strings (`80`); `--full` bypasses all three. See [`cli-options.md`](../../../docs/docs/spec/cli-options.md#message-body-truncation).
 
 ## Coding-agent backends
 
@@ -77,7 +77,7 @@ Recipients ack their own delivery row exactly like a unicast message; the summar
 cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --message-id <message-id>
 ```
 
-For the row schema, the `"Broadcast sent to N recipients"` summary string, and `origin_message_id` grouping/threading, see [`docs/spec/data-model.md`](../../../docs/spec/data-model.md#broadcast-grouping) and [`docs/spec/message-envelope.md`](../../../docs/spec/message-envelope.md).
+For the row schema, the `"Broadcast sent to N recipients"` summary string, and `origin_message_id` grouping/threading, see [`docs/docs/spec/data-model.md`](../../../docs/docs/spec/data-model.md#broadcast-grouping) and [`docs/docs/spec/message-envelope.md`](../../../docs/docs/spec/message-envelope.md).
 
 ## List Members
 
@@ -121,7 +121,7 @@ cafleet monitor capture --fleet-id <fleet-id> --member-id <target-member-id> --l
 cafleet member delete --fleet-id <fleet-id> --member-id <target-member-id>
 ```
 
-The root Director cannot be deregistered (exit 1 — see [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages)). Use `cafleet fleet delete --fleet-id <fleet-id>` for fleet teardown.
+The root Director cannot be deregistered (exit 1 — see [`cli-options.md`](../../../docs/docs/spec/cli-options.md#error-messages)). Use `cafleet fleet delete --fleet-id <fleet-id>` for fleet teardown.
 
 ## Fleet Delete
 
@@ -130,7 +130,7 @@ cafleet fleet delete --fleet-id <fleet-id>
 # → Deleted fleet <fleet-id>. Deregistered N members.
 ```
 
-Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters every active member, deletes placement rows; messages preserved; idempotent). It does **not** close member panes — run `cafleet member delete` per member first, in the [`reference/recovery.md`](recovery.md) Shutdown order. Full behavior: [`cli-options.md`](../../../docs/spec/cli-options.md#fleet-delete).
+Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters every active member, deletes placement rows; messages preserved; idempotent). It does **not** close member panes — run `cafleet member delete` per member first, in the [`reference/recovery.md`](recovery.md) Shutdown order. Full behavior: [`cli-options.md`](../../../docs/docs/spec/cli-options.md#fleet-delete).
 
 ## Typical Workflow
 
@@ -152,4 +152,4 @@ A `messages` row moves through two states: **input_required** (delivered, awaiti
 
 ## Error Handling
 
-Errors print to stderr and exit non-zero; `cafleet <cmd> … --json` emits them machine-parseably. The most common: missing `--fleet-id` (`Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`, exit 1), missing `--member-id` (`Error: Missing option '--member-id'.`, exit 2), and `member *` commands outside a supported multiplexer session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages).
+Errors print to stderr and exit non-zero; `cafleet <cmd> … --json` emits them machine-parseably. The most common: missing `--fleet-id` (`Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`, exit 1), missing `--member-id` (`Error: Missing option '--member-id'.`, exit 2), and `member *` commands outside a supported multiplexer session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/docs/spec/cli-options.md#error-messages).

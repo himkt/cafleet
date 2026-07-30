@@ -71,7 +71,7 @@ const REMOVED_VOCABULARY: [&str; 10] = [
 #[test]
 fn monitoring_concept_covers_the_judgment_protocol_and_pure_trigger_wake() {
     assert_terms(
-        "docs/concepts/monitoring.md",
+        "docs/docs/concepts/monitoring.md",
         &[
             "awaiting_user",
             "unknown",
@@ -89,7 +89,7 @@ fn monitoring_concept_covers_the_judgment_protocol_and_pure_trigger_wake() {
             "role protocol",
         ],
     );
-    assert_absent("docs/concepts/monitoring.md", &REMOVED_VOCABULARY);
+    assert_absent("docs/docs/concepts/monitoring.md", &REMOVED_VOCABULARY);
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn spec_defines_the_ping_skip_and_monitor_group_contract() {
 #[test]
 fn data_model_defines_the_trimmed_monitor_config() {
     assert_terms(
-        "docs/spec/data-model.md",
+        "docs/docs/spec/data-model.md",
         &[
             "monitor_config",
             "interval_seconds",
@@ -121,13 +121,13 @@ fn data_model_defines_the_trimmed_monitor_config() {
     );
     let mut absent = vec!["last_stall_candidate_at", "last_stall_capture_sha256"];
     absent.extend(REMOVED_VOCABULARY);
-    assert_absent("docs/spec/data-model.md", &absent);
+    assert_absent("docs/docs/spec/data-model.md", &absent);
 }
 
 #[test]
 fn cli_options_defines_the_ping_skip_and_moved_capture() {
     assert_terms(
-        "docs/spec/cli-options.md",
+        "docs/docs/spec/cli-options.md",
         &[
             "monitor capture",
             "ping skipped",
@@ -138,20 +138,20 @@ fn cli_options_defines_the_ping_skip_and_moved_capture() {
     );
     let mut absent = vec!["member capture", "monitor status", "monitor config"];
     absent.extend(REMOVED_VOCABULARY);
-    assert_absent("docs/spec/cli-options.md", &absent);
+    assert_absent("docs/docs/spec/cli-options.md", &absent);
 }
 
 #[test]
 fn multiplexer_backends_pins_the_pure_trigger_payload() {
     assert_terms(
-        "docs/spec/multiplexer-backends.md",
+        "docs/docs/spec/multiplexer-backends.md",
         &[
             "[monitor] wake:",
             "coding_agent=",
             "Follow your monitor role protocol",
         ],
     );
-    assert_absent("docs/spec/multiplexer-backends.md", &REMOVED_VOCABULARY);
+    assert_absent("docs/docs/spec/multiplexer-backends.md", &REMOVED_VOCABULARY);
 }
 
 #[test]
@@ -293,7 +293,7 @@ fn fixed_ping_surfaces_carry_no_nudge_vocabulary() {
         "skills/cafleet/reference/prompt-routing.md",
         "skills/cafleet/reference/director.md",
         "skills/cafleet/roles/monitor.md",
-        "docs/concepts/overview.md",
+        "docs/docs/concepts/overview.md",
     ] {
         assert_absent(relative_path, &["nudge"]);
     }
@@ -304,5 +304,5 @@ fn the_readme_and_webui_api_stay_free_of_internal_monitor_state() {
     let mut readme_absent = vec!["stall_candidate"];
     readme_absent.extend(REMOVED_VOCABULARY);
     assert_absent("README.md", &readme_absent);
-    assert_absent("docs/spec/webui-api.md", &REMOVED_VOCABULARY);
+    assert_absent("docs/docs/spec/webui-api.md", &REMOVED_VOCABULARY);
 }

@@ -22,4 +22,4 @@ Authors write the base neutrally, put every backend specific in the overlay, and
 
 ## Two independent homes
 
-The agent-facing overlay home (`skills/cafleet/reference/coding-agent/`) and the human-facing operator docs (`docs/spec/coding-agent-backends.md`) serve different audiences and stay independent: they never cross-link in either direction. Restating the same operational fact in both homes is fine; linking between them is not.
+The agent-facing overlay home (`skills/cafleet/reference/coding-agent/`) and the human-facing operator docs (`docs/docs/spec/coding-agent-backends.md`) serve different audiences and stay independent: they never cross-link in either direction. Restating the same operational fact in both homes is fine; linking between them is not.

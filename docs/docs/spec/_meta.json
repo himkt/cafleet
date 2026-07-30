@@ -1,0 +1,8 @@
+[
+  { "type": "file", "name": "data-model", "label": "Data model" },
+  { "type": "file", "name": "message-envelope", "label": "Message envelope" },
+  { "type": "file", "name": "cli-options", "label": "CLI options" },
+  { "type": "file", "name": "multiplexer-backends", "label": "Multiplexer backends" },
+  { "type": "file", "name": "coding-agent-backends", "label": "Agent backends" },
+  { "type": "file", "name": "webui-api", "label": "WebUI API" }
+]
