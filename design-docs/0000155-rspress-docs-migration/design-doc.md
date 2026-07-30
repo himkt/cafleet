@@ -1,7 +1,7 @@
 # Migrate the Documentation Site from Zensical to Rspress
 
 **Status**: Approved
-**Progress**: 19/28 tasks complete
+**Progress**: 22/28 tasks complete
 **Last Updated**: 2026-07-31
 
 ## Overview
@@ -297,9 +297,9 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 
 ### Step 5: Python toolchain removal
 
-- [ ] Delete `pyproject.toml`, `uv.lock`, `zensical.toml`, `.bumpversion.toml` <!-- completed: -->
-- [ ] Edit `mise.toml`: drop the uv pin and `uv-sync`; retarget `docs-build`; update the `pnpm-install` description <!-- completed: -->
-- [ ] Edit `.claude/settings.json`: remove the three uv-related allow entries <!-- completed: -->
+- [x] Delete `pyproject.toml`, `uv.lock`, `zensical.toml`, `.bumpversion.toml` <!-- completed: 2026-07-31T07:57 -->
+- [x] Edit `mise.toml`: drop the uv pin and `uv-sync`; retarget `docs-build`; update the `pnpm-install` description <!-- completed: 2026-07-31T07:57 -->
+- [x] Edit `.claude/settings.json`: remove the three uv-related allow entries <!-- completed: 2026-07-31T07:57 -->
 
 ### Step 6: CI
 
