@@ -253,7 +253,7 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 | `.bumpversion.toml` | Delete |
 | `mise.toml` | Remove the `"aqua:astral-sh/uv"` tool pin and `[tasks.uv-sync]`; retarget `[tasks."docs-build"]` to `run = "pnpm --dir docs build"` with `depends = ["pnpm-install"]` (a fresh clone works with no manual prerequisite, matching the cargo-task convention) and description "Build the rspress documentation site"; extend the `pnpm-install` description to mention the docs site |
 | `pnpm-workspace.yaml` | Add `docs` to `packages` |
-| `.claude/settings.json` | Remove the allow entries `Bash(mise //:uv-sync)`, `Bash(uv run --frozen --group research *)`, `Bash(uv run python -m *)`; keep `Bash(mise //:docs-build)` |
+| `.claude/settings.json` | Remove the allow entries `Bash(mise //:uv-sync)`, `Bash(uv run --frozen --group research *)`, `Bash(uv run python -m *)`; keep `Bash(mise //:docs-build)`. Execute-time amendment (user-approved): add `Bash(pnpm exec agent-browser --session vr-batch-* click *)` and `... fill *` allow entries so the Verifier can exercise search and the dark toggle end-to-end, and narrow `pnpm exec agent-browser * --help` / `* --version` to the bare `--help` / `--version` forms |
 | `presets/opencode/cafleet.md` | Remove the `"mise //:uv-sync": "allow"` row |
 | `SPEC.md` | Update the embedded opencode preset block to match the preset file (smallest edit removing the drift) |
 | `.claude/rules/commands.md` | Remove the `uv-sync` bullet and the cafleet-research visualization-runner row from the Skill artifact runners table |
@@ -333,3 +333,4 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 | 2026-07-31 | Execute-time amendment (user decision): dropped the `@mermaid-js/mermaid-cli` devDependency and the `diagrams` script; SVG regeneration is a one-off `pnpm dlx --allow-build=puppeteer` invocation, keeping puppeteer/Chrome out of the workspace lockfile |
 | 2026-07-31 | Execute-time amendment 2 (user decision): the five mermaid diagrams are removed from the docs entirely — no `.mmd` sources, no SVGs, no mermaid tooling; the surrounding prose carries the content. Step 4 rewritten as a removal step |
 | 2026-07-31 | Verifier round: rspress v2 nav contract adopted (`_nav.json` navbar + root `_meta.json` global sidebar, `themeConfig.nav` dropped); execute-time amendment 3 (user decision): `docs/theme/index.tsx` HomeLayout override mounts the home markdown body via `afterHero` |
+| 2026-07-31 | Reviewer round: recorded the user-approved `.claude/settings.json` agent-browser permission amendments (click/fill for verification sessions, help/version narrowing) in the change table |
