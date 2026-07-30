@@ -1,11 +1,11 @@
 [tasks.lint]
-run = "bun lint"
+run = "pnpm lint"
 
 [tasks.dev]
-run = "bun dev"
+run = "pnpm dev"
 
 [tasks.install]
-run = "bun install --frozen-lockfile"
+run = "pnpm install --frozen-lockfile"
 
 [tasks.build]
-run = "bun run build"
+run = "pnpm build"

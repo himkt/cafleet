@@ -16,7 +16,7 @@ path.
 | `cafleet/` | The `cafleet` Python package (FastAPI + SQLAlchemy + Alembic + click). |
 | `admin/` | Admin WebUI SPA (Vite + React + TypeScript + Tailwind CSS). |
 | `skills/` | Coding-agent skill files (`cafleet`, `cafleet-design-doc`, `cafleet-research`), installed into the agent homes by `cafleet setup` / `mise //:skill-install`. |
-| `package.json` + `bun.lock` (repo root) | Bun toolchain manifests for the Slidev + agent-browser tools used in the repo. Driven via `mise //:bun-install` / `mise //:slidev <deck>`; `node_modules/` is gitignored. |
+| `package.json` + `pnpm-lock.yaml` (repo root) | pnpm toolchain manifests for the Slidev + agent-browser tools used in the repo. Driven via `mise //:pnpm-install` / `mise //:slidev <deck>`; `node_modules/` is gitignored. |
 | `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
 | `docs/` | CLI reference, message envelope, and other operator-facing docs. |
 
@@ -28,7 +28,7 @@ path.
 | Server | [FastAPI](https://fastapi.tiangolo.com/) | Admin WebUI only |
 | Database | [SQLAlchemy](https://www.sqlalchemy.org/) 2.x + SQLite | Sync `pysqlite` driver |
 | CLI | [click](https://click.palletsprojects.com/) | — |
-| Admin frontend | Vite + Bun | SPA served at `/` |
+| Admin frontend | Vite + pnpm | SPA served at `/` |
 | Task runner | [mise](https://mise.jdx.dev/) | — |
 
 ## Development
@@ -52,13 +52,13 @@ After that, pick the task you need by name:
 | `mise //cafleet:format` | `ruff check --fix` + `ruff format` | Applying Python formatting fixes |
 | `mise //cafleet:typecheck` | `ty` | Type-checking the Python package |
 | `mise //cafleet:test` | `pytest` | Running the test suite |
-| `mise //admin:lint` | `bun lint` | Checking the WebUI sources |
+| `mise //admin:lint` | `pnpm lint` | Checking the WebUI sources |
 | `mise //admin:build` | Vite build | Required before `/` is served |
 | `mise //admin:dev` | Vite dev server | Working on the WebUI with hot reload |
-| `mise //admin:install` | `bun install --frozen-lockfile` | Reinstalling WebUI deps from the committed lockfile |
+| `mise //admin:install` | `pnpm install --frozen-lockfile` | Reinstalling WebUI deps from the committed lockfile |
 
 To change the WebUI's dependencies, edit `admin/package.json` and run plain
-`bun install` inside `admin/` to regenerate `admin/bun.lock` —
+`pnpm install --no-frozen-lockfile` from the repository root to regenerate `pnpm-lock.yaml` —
 `mise //admin:install` installs with `--frozen-lockfile` and cannot update
 the lockfile.
 

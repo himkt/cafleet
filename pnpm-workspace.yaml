@@ -1,0 +1,5 @@
+packages:
+  - admin
+
+allowBuilds:
+  agent-browser: true
