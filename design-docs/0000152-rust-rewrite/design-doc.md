@@ -1,7 +1,7 @@
 # Rust Rewrite of the cafleet Package
 
 **Status**: Approved
-**Progress**: 30/44 tasks complete
+**Progress**: 34/44 tasks complete
 **Last Updated**: 2026-07-30
 
 ## Overview
@@ -274,11 +274,11 @@ Total-removal (same change): `cafleet/src/**` (Python), `cafleet/tests/**` (pyte
 
 ### Step 6: CLI commands
 
-- [ ] clap tree, shared option decorator equivalents, stale-assets guard prologue <!-- completed: -->
-- [ ] fleet + message command groups <!-- completed: -->
-- [ ] member commands: create (full sequencing + rollback), delete, show/list, prompt, ping <!-- completed: -->
+- [x] clap tree, shared option decorator equivalents, stale-assets guard prologue <!-- completed: 2026-07-30T12:59 -->
+- [x] fleet + message command groups <!-- completed: 2026-07-30T12:59 -->
+- [x] member commands: create (full sequencing + rollback), delete, show/list, prompt, ping <!-- completed: 2026-07-30T12:59 -->
 - [ ] monitor commands: start, capture (`--json` capture fields incl. content_sha256) <!-- completed: -->
-- [ ] setup (refinery db half + offline assets half) and doctor <!-- completed: -->
+- [x] setup (refinery db half + offline assets half) and doctor <!-- completed: 2026-07-30T12:59 -->
 
 ### Step 7: Monitor loop
 

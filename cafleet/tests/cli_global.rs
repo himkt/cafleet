@@ -18,7 +18,11 @@ fn an_unknown_pre_subcommand_option_is_a_parse_error() {
     let cli = Cli::new();
     cli.ready();
     let output = cli.run(&["--json", "fleet", "list"]);
-    assert_eq!(code(&output), 2, "only --version lives before the subcommand");
+    assert_eq!(
+        code(&output),
+        2,
+        "only --version lives before the subcommand"
+    );
 }
 
 #[test]
@@ -102,8 +106,17 @@ fn unscoped_commands_reject_fleet_id() {
     cli.ready();
     for args in [
         ["setup", "--fleet-id", "1"].as_slice(),
-        ["fleet", "create", "--fleet-id", "1", "--name", "x", "--coding-agent", "claude"]
-            .as_slice(),
+        [
+            "fleet",
+            "create",
+            "--fleet-id",
+            "1",
+            "--name",
+            "x",
+            "--coding-agent",
+            "claude",
+        ]
+        .as_slice(),
         ["fleet", "list", "--fleet-id", "1"].as_slice(),
     ] {
         let output = cli.run(args);

@@ -118,13 +118,7 @@ impl Cli {
     /// nothing).
     pub fn migrate(&self) {
         let output = self.run(&[
-            "setup",
-            "--skip",
-            "claude",
-            "--skip",
-            "codex",
-            "--skip",
-            "opencode",
+            "setup", "--skip", "claude", "--skip", "codex", "--skip", "opencode",
         ]);
         assert!(
             output.status.success(),

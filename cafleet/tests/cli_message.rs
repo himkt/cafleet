@@ -17,16 +17,24 @@ fn send_prints_the_header_and_the_compact_echo() {
     let cli = Cli::new();
     let (fleet_id, director_id, member_id) = fleet_with_member(&cli);
     let output = cli.run(&[
-        "message", "send",
-        "--fleet-id", &fleet_id.to_string(),
-        "--from-member-id", &director_id.to_string(),
-        "--to-member-id", &member_id.to_string(),
-        "--text", "hello worker",
+        "message",
+        "send",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &member_id.to_string(),
+        "--text",
+        "hello worker",
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(out.starts_with("Message sent.\n"), "got: {out}");
-    assert!(out.contains(&format!("| from:{director_id} |")), "got: {out}");
+    assert!(
+        out.contains(&format!("| from:{director_id} |")),
+        "got: {out}"
+    );
     assert!(out.contains("hello worker"), "got: {out}");
 }
 
@@ -36,11 +44,16 @@ fn send_truncates_the_echo_but_never_the_persisted_text() {
     let (fleet_id, director_id, member_id) = fleet_with_member(&cli);
     let long_text = "a".repeat(250);
     let output = cli.run(&[
-        "message", "send",
-        "--fleet-id", &fleet_id.to_string(),
-        "--from-member-id", &director_id.to_string(),
-        "--to-member-id", &member_id.to_string(),
-        "--text", &long_text,
+        "message",
+        "send",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &member_id.to_string(),
+        "--text",
+        &long_text,
     ]);
     assert_eq!(code(&output), 0);
     let out = stdout(&output);
@@ -48,13 +61,18 @@ fn send_truncates_the_echo_but_never_the_persisted_text() {
         out.contains(&format!("{}…", "a".repeat(200))),
         "the echo truncates at max_text_len (200), got: {out}"
     );
-    assert!(!out.contains(&long_text), "the echo never carries the full body");
+    assert!(
+        !out.contains(&long_text),
+        "the echo never carries the full body"
+    );
 
     let stored: String = cli
         .sqlite()
-        .query_row("SELECT text FROM messages WHERE type='unicast'", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT text FROM messages WHERE type='unicast'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     assert_eq!(stored, long_text, "persistence is never truncated");
 }
@@ -64,21 +82,30 @@ fn quiet_send_and_ack_print_the_bare_message_id() {
     let cli = Cli::new();
     let (fleet_id, director_id, member_id) = fleet_with_member(&cli);
     let output = cli.run(&[
-        "message", "send",
-        "--fleet-id", &fleet_id.to_string(),
-        "--from-member-id", &director_id.to_string(),
-        "--to-member-id", &member_id.to_string(),
-        "--text", "hi",
+        "message",
+        "send",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &member_id.to_string(),
+        "--text",
+        "hi",
         "--quiet",
     ]);
     assert_eq!(code(&output), 0);
     let message_id: i64 = stdout(&output).trim().parse().expect("a bare message id");
 
     let output = cli.run(&[
-        "message", "ack",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
-        "--message-id", &message_id.to_string(),
+        "message",
+        "ack",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
+        "--message-id",
+        &message_id.to_string(),
         "--quiet",
     ]);
     assert_eq!(code(&output), 0);
@@ -90,30 +117,50 @@ fn poll_and_ack_walk_the_delivery_lifecycle() {
     let cli = Cli::new();
     let (fleet_id, director_id, member_id) = fleet_with_member(&cli);
     cli.run(&[
-        "message", "send",
-        "--fleet-id", &fleet_id.to_string(),
-        "--from-member-id", &director_id.to_string(),
-        "--to-member-id", &member_id.to_string(),
-        "--text", "task one",
+        "message",
+        "send",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &member_id.to_string(),
+        "--text",
+        "task one",
     ]);
 
     let output = cli.run(&[
-        "message", "poll",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
+        "message",
+        "poll",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
     ]);
     assert_eq!(code(&output), 0);
-    assert!(stdout(&output).contains("task one"), "got: {}", stdout(&output));
+    assert!(
+        stdout(&output).contains("task one"),
+        "got: {}",
+        stdout(&output)
+    );
 
     let message_id: i64 = cli
         .sqlite()
-        .query_row("SELECT message_id FROM messages WHERE type='unicast'", [], |r| r.get(0))
+        .query_row(
+            "SELECT message_id FROM messages WHERE type='unicast'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     let output = cli.run(&[
-        "message", "ack",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
-        "--message-id", &message_id.to_string(),
+        "message",
+        "ack",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
+        "--message-id",
+        &message_id.to_string(),
     ]);
     assert_eq!(code(&output), 0);
     assert!(
@@ -123,11 +170,18 @@ fn poll_and_ack_walk_the_delivery_lifecycle() {
     );
 
     let output = cli.run(&[
-        "message", "poll",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
+        "message",
+        "poll",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
     ]);
-    assert!(stdout(&output).contains("No messages found."), "got: {}", stdout(&output));
+    assert!(
+        stdout(&output).contains("No messages found."),
+        "got: {}",
+        stdout(&output)
+    );
 }
 
 #[test]
@@ -135,9 +189,12 @@ fn the_fleet_gate_runs_before_the_handler_body() {
     let cli = Cli::new();
     let (fleet_id, _, _) = fleet_with_member(&cli);
     let output = cli.run(&[
-        "message", "poll",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", "999",
+        "message",
+        "poll",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        "999",
     ]);
     assert_eq!(code(&output), 1);
     assert!(
@@ -152,10 +209,14 @@ fn text_body_usage_errors_exit_2() {
     let cli = Cli::new();
     let (fleet_id, director_id, member_id) = fleet_with_member(&cli);
     let base = [
-        "message", "send",
-        "--fleet-id", "1",
-        "--from-member-id", "1",
-        "--to-member-id", "2",
+        "message",
+        "send",
+        "--fleet-id",
+        "1",
+        "--from-member-id",
+        "1",
+        "--to-member-id",
+        "2",
     ];
     let _ = (fleet_id, director_id, member_id);
 
@@ -194,11 +255,16 @@ fn text_file_surfaces_are_application_errors() {
     let (fleet_id, director_id, member_id) = fleet_with_member(&cli);
     let base = |file: &str| {
         vec![
-            "message".to_string(), "send".to_string(),
-            "--fleet-id".to_string(), fleet_id.to_string(),
-            "--from-member-id".to_string(), director_id.to_string(),
-            "--to-member-id".to_string(), member_id.to_string(),
-            "--text-file".to_string(), file.to_string(),
+            "message".to_string(),
+            "send".to_string(),
+            "--fleet-id".to_string(),
+            fleet_id.to_string(),
+            "--from-member-id".to_string(),
+            director_id.to_string(),
+            "--to-member-id".to_string(),
+            member_id.to_string(),
+            "--text-file".to_string(),
+            file.to_string(),
         ]
     };
     let run = |file: &str| {
@@ -253,10 +319,14 @@ fn broadcast_prints_the_recipients_and_delivered_counts() {
     let cli = Cli::new();
     let (fleet_id, director_id, _member_id) = fleet_with_member(&cli);
     let output = cli.run(&[
-        "message", "broadcast",
-        "--fleet-id", &fleet_id.to_string(),
-        "--from-member-id", &director_id.to_string(),
-        "--text", "all hands",
+        "message",
+        "broadcast",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--from-member-id",
+        &director_id.to_string(),
+        "--text",
+        "all hands",
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
@@ -272,23 +342,37 @@ fn show_full_json_pins_the_typed_column_envelope() {
     let cli = Cli::new();
     let (fleet_id, director_id, member_id) = fleet_with_member(&cli);
     cli.run(&[
-        "message", "send",
-        "--fleet-id", &fleet_id.to_string(),
-        "--from-member-id", &director_id.to_string(),
-        "--to-member-id", &member_id.to_string(),
-        "--text", "hi",
+        "message",
+        "send",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &member_id.to_string(),
+        "--text",
+        "hi",
     ]);
     let message_id: i64 = cli
         .sqlite()
-        .query_row("SELECT message_id FROM messages WHERE type='unicast'", [], |r| r.get(0))
+        .query_row(
+            "SELECT message_id FROM messages WHERE type='unicast'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
 
     let output = cli.run(&[
-        "message", "show",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
-        "--message-id", &message_id.to_string(),
-        "--full", "--json",
+        "message",
+        "show",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
+        "--message-id",
+        &message_id.to_string(),
+        "--full",
+        "--json",
     ]);
     assert_eq!(code(&output), 0);
     let raw = stdout(&output);
@@ -297,5 +381,9 @@ fn show_full_json_pins_the_typed_column_envelope() {
     let expected = format!(
         r#"{{"message":{{"message_id":{message_id},"owner_member_id":{member_id},"from_member_id":{director_id},"to_member_id":{member_id},"type":"unicast","created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","origin_message_id":null,"text":"hi"}}}}"#
     );
-    assert_eq!(raw.trim(), expected, "compact JSON with the pinned key order");
+    assert_eq!(
+        raw.trim(),
+        expected,
+        "compact JSON with the pinned key order"
+    );
 }

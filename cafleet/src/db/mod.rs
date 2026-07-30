@@ -34,7 +34,9 @@ pub fn migrate_to_head(conn: &mut Connection) -> Result<u32, CafleetError> {
     Ok(head_version())
 }
 
-fn head_version() -> u32 {
+/// The embedded chain's head version (`1` at cutover), derived from the
+/// migration filenames.
+pub fn head_version() -> u32 {
     MIGRATIONS
         .files()
         .filter_map(|file| {

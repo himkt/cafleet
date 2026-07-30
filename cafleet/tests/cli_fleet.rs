@@ -9,7 +9,12 @@ fn fleet_create_outside_any_multiplexer_is_the_hardcoded_error() {
     let cli = Cli::new();
     cli.ready();
     let output = cli.run_outside_tmux(&[
-        "fleet", "create", "--name", "alpha", "--coding-agent", "claude",
+        "fleet",
+        "create",
+        "--name",
+        "alpha",
+        "--coding-agent",
+        "claude",
     ]);
     assert_eq!(code(&output), 1, "no DB writes, exit 1");
     assert!(
@@ -24,7 +29,14 @@ fn fleet_create_outside_any_multiplexer_is_the_hardcoded_error() {
 fn fleet_create_reports_the_compact_line_and_backfills_the_director() {
     let cli = Cli::new();
     cli.ready();
-    let output = cli.run(&["fleet", "create", "--name", "alpha", "--coding-agent", "claude"]);
+    let output = cli.run(&[
+        "fleet",
+        "create",
+        "--name",
+        "alpha",
+        "--coding-agent",
+        "claude",
+    ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     assert_eq!(stdout(&output), "1 director=1\n");
 }
@@ -34,18 +46,33 @@ fn fleet_create_full_and_json_forms() {
     let cli = Cli::new();
     cli.ready();
     let output = cli.run(&[
-        "fleet", "create", "--name", "alpha", "--coding-agent", "claude", "--full",
+        "fleet",
+        "create",
+        "--name",
+        "alpha",
+        "--coding-agent",
+        "claude",
+        "--full",
     ]);
     assert_eq!(code(&output), 0);
     let out = stdout(&output);
-    assert!(out.starts_with("1\n1\nname:             alpha\ncreated_at:       "), "got: {out}");
+    assert!(
+        out.starts_with("1\n1\nname:             alpha\ncreated_at:       "),
+        "got: {out}"
+    );
     assert!(out.contains("director_name:    Director"), "got: {out}");
     assert!(out.contains("pane:             main:@1:%0"), "got: {out}");
 
     let cli = Cli::new();
     cli.ready();
     let output = cli.run(&[
-        "fleet", "create", "--name", "beta", "--coding-agent", "claude", "--json",
+        "fleet",
+        "create",
+        "--name",
+        "beta",
+        "--coding-agent",
+        "claude",
+        "--json",
     ]);
     assert_eq!(code(&output), 0);
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
@@ -82,9 +109,20 @@ fn fleet_list_reports_empty_then_the_created_fleet() {
     cli.ready();
     let output = cli.run(&["fleet", "list"]);
     assert_eq!(code(&output), 0);
-    assert!(stdout(&output).contains("No fleets found."), "got: {}", stdout(&output));
+    assert!(
+        stdout(&output).contains("No fleets found."),
+        "got: {}",
+        stdout(&output)
+    );
 
-    cli.run(&["fleet", "create", "--name", "alpha", "--coding-agent", "claude"]);
+    cli.run(&[
+        "fleet",
+        "create",
+        "--name",
+        "alpha",
+        "--coding-agent",
+        "claude",
+    ]);
     let output = cli.run(&["fleet", "list"]);
     assert_eq!(code(&output), 0);
     let out = stdout(&output);
@@ -92,8 +130,7 @@ fn fleet_list_reports_empty_then_the_created_fleet() {
     assert!(out.contains("alpha"), "got: {out}");
 
     let json_output = cli.run(&["fleet", "list", "--json"]);
-    let payload: serde_json::Value =
-        serde_json::from_str(stdout(&json_output).trim()).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(stdout(&json_output).trim()).unwrap();
     assert_eq!(payload[0]["fleet_id"], 1);
     assert_eq!(payload[0]["member_count"], 1);
 }
@@ -109,7 +146,11 @@ fn fleet_show_renders_the_row_and_hides_nothing_soft_deleted() {
 
     cli.run(&["fleet", "delete", "--fleet-id", &fleet_id.to_string()]);
     let output = cli.run(&["fleet", "show", "--fleet-id", &fleet_id.to_string()]);
-    assert_eq!(code(&output), 0, "soft-deleted rows are returned intentionally");
+    assert_eq!(
+        code(&output),
+        0,
+        "soft-deleted rows are returned intentionally"
+    );
     assert!(
         stdout(&output).contains("deleted_at:"),
         "got: {}",

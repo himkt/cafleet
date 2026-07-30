@@ -15,7 +15,6 @@ use serde_json::Value;
 
 use crate::coding_agent::coding_agent;
 
-// COMMENT(director): the design's crate layout pins `multiplexer/` as "trait + tmux + herdr" (closed enum implementing a trait; herdr's agent_status as an Option-returning trait method). The two backends currently expose parallel inherent methods with no shared trait — introduce the Multiplexer trait (+ the closed dispatch enum the CLI resolver returns) as part of the Step 6 CLI wiring, without changing any tested behavior.
 pub use herdr::HerdrMultiplexer;
 pub use tmux::TmuxMultiplexer;
 
@@ -139,6 +138,162 @@ pub fn build_wake_payload(
         due_members.len(),
         director["member_id"]
     ))
+}
+
+/// The pane-hosting backend surface (SPEC §6.5). `agent_status` is the
+/// `Option`-returning native-state capability: herdr reads its native state,
+/// tmux always answers `None`.
+pub trait Multiplexer {
+    fn name(&self) -> &'static str;
+    fn ensure_available(&self) -> Result<(), MultiplexerError>;
+    fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError>;
+    fn split_window(
+        &self,
+        reference: &MultiplexerContext,
+        env: &[(String, String)],
+        command: &[String],
+    ) -> Result<String, MultiplexerError>;
+    fn send_exit(&self, target_pane_id: &str, ignore_missing: bool)
+    -> Result<(), MultiplexerError>;
+    fn send_poll_trigger(&self, target_pane_id: &str, fleet_id: i64, member_id: i64) -> bool;
+    fn send_wake_trigger(
+        &self,
+        target_pane_id: &str,
+        due_members: &[Value],
+        director: &Value,
+    ) -> Result<bool, MultiplexerError>;
+    fn send_inline_preview(
+        &self,
+        target_pane_id: &str,
+        message_id: i64,
+        sender_id: i64,
+        ts: &str,
+        text: &str,
+    ) -> bool;
+    fn send_prompt(
+        &self,
+        target_pane_id: &str,
+        text: &str,
+        shell: bool,
+    ) -> Result<(), MultiplexerError>;
+    fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError>;
+    fn list_pane_ids(&self) -> Result<std::collections::BTreeSet<String>, MultiplexerError>;
+    fn kill_pane(&self, target_pane_id: &str, ignore_missing: bool)
+    -> Result<(), MultiplexerError>;
+    fn agent_status(&self, target_pane_id: &str) -> Result<Option<String>, MultiplexerError>;
+}
+
+/// The closed backend dispatch the resolver returns.
+pub enum AnyMultiplexer {
+    Tmux(TmuxMultiplexer),
+    Herdr(HerdrMultiplexer),
+}
+
+macro_rules! dispatch {
+    ($self:ident, $mux:ident => $call:expr) => {
+        match $self {
+            AnyMultiplexer::Tmux($mux) => $call,
+            AnyMultiplexer::Herdr($mux) => $call,
+        }
+    };
+}
+
+impl Multiplexer for AnyMultiplexer {
+    fn name(&self) -> &'static str {
+        dispatch!(self, mux => mux.name())
+    }
+
+    fn ensure_available(&self) -> Result<(), MultiplexerError> {
+        dispatch!(self, mux => mux.ensure_available())
+    }
+
+    fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
+        dispatch!(self, mux => mux.context_discovery())
+    }
+
+    fn split_window(
+        &self,
+        reference: &MultiplexerContext,
+        env: &[(String, String)],
+        command: &[String],
+    ) -> Result<String, MultiplexerError> {
+        dispatch!(self, mux => mux.split_window(reference, env, command))
+    }
+
+    fn send_exit(
+        &self,
+        target_pane_id: &str,
+        ignore_missing: bool,
+    ) -> Result<(), MultiplexerError> {
+        dispatch!(self, mux => mux.send_exit(target_pane_id, ignore_missing))
+    }
+
+    fn send_poll_trigger(&self, target_pane_id: &str, fleet_id: i64, member_id: i64) -> bool {
+        dispatch!(self, mux => mux.send_poll_trigger(target_pane_id, fleet_id, member_id))
+    }
+
+    fn send_wake_trigger(
+        &self,
+        target_pane_id: &str,
+        due_members: &[Value],
+        director: &Value,
+    ) -> Result<bool, MultiplexerError> {
+        dispatch!(self, mux => mux.send_wake_trigger(target_pane_id, due_members, director))
+    }
+
+    fn send_inline_preview(
+        &self,
+        target_pane_id: &str,
+        message_id: i64,
+        sender_id: i64,
+        ts: &str,
+        text: &str,
+    ) -> bool {
+        dispatch!(self, mux => mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text))
+    }
+
+    fn send_prompt(
+        &self,
+        target_pane_id: &str,
+        text: &str,
+        shell: bool,
+    ) -> Result<(), MultiplexerError> {
+        dispatch!(self, mux => mux.send_prompt(target_pane_id, text, shell))
+    }
+
+    fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError> {
+        dispatch!(self, mux => mux.capture_pane(target_pane_id, lines))
+    }
+
+    fn list_pane_ids(&self) -> Result<std::collections::BTreeSet<String>, MultiplexerError> {
+        dispatch!(self, mux => mux.list_pane_ids())
+    }
+
+    fn kill_pane(
+        &self,
+        target_pane_id: &str,
+        ignore_missing: bool,
+    ) -> Result<(), MultiplexerError> {
+        dispatch!(self, mux => mux.kill_pane(target_pane_id, ignore_missing))
+    }
+
+    fn agent_status(&self, target_pane_id: &str) -> Result<Option<String>, MultiplexerError> {
+        dispatch!(self, mux => mux.agent_status(target_pane_id))
+    }
+}
+
+/// Resolve the backend per the SPEC precedence and construct it over the
+/// given runner and environment snapshot.
+pub fn resolve_multiplexer(
+    override_value: Option<&str>,
+    env: std::collections::HashMap<String, String>,
+    runner: std::rc::Rc<dyn CommandRunner>,
+) -> Result<AnyMultiplexer, MultiplexerError> {
+    let name = resolve_multiplexer_name(override_value, |key| env.get(key).cloned())?;
+    Ok(match name {
+        "herdr" => AnyMultiplexer::Herdr(HerdrMultiplexer::new(runner, env)),
+        _ => AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner, env)),
+    })
 }
 
 /// Backend resolution precedence (SPEC §6.5): an explicit override must name

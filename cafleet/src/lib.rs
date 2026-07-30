@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod broker;
+pub mod cli;
 pub mod coding_agent;
 pub mod config;
 pub mod db;

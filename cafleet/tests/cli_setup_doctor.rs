@@ -37,7 +37,8 @@ fn schema_only_setup_migrates_and_reports_the_head() {
 fn setup_refuses_an_unversioned_database_with_existing_tables() {
     let cli = Cli::new();
     let conn = rusqlite::Connection::open(cli.db_path()).unwrap();
-    conn.execute_batch("CREATE TABLE junk (x INTEGER);").unwrap();
+    conn.execute_batch("CREATE TABLE junk (x INTEGER);")
+        .unwrap();
     drop(conn);
 
     let output = cli.run(&[
@@ -74,7 +75,12 @@ fn full_setup_installs_skills_and_presets_offline_and_records_rows() {
             "per-target skills echo for {agent}, got: {out}"
         );
         for skill in ["cafleet", "cafleet-design-doc", "cafleet-research"] {
-            let installed = cli.home.path().join(skills_dir).join(skill).join("SKILL.md");
+            let installed = cli
+                .home
+                .path()
+                .join(skills_dir)
+                .join(skill)
+                .join("SKILL.md");
             assert!(installed.is_file(), "missing {}", installed.display());
         }
     }
@@ -83,7 +89,10 @@ fn full_setup_installs_skills_and_presets_offline_and_records_rows() {
         "the codex preset lands at ~/.codex/rules/cafleet.rules"
     );
     assert!(
-        cli.home.path().join(".opencode/agents/cafleet.md").is_file(),
+        cli.home
+            .path()
+            .join(".opencode/agents/cafleet.md")
+            .is_file(),
         "the opencode preset lands at ~/.opencode/agents/cafleet.md"
     );
 
@@ -121,8 +130,14 @@ fn doctor_reports_the_multiplexer_and_the_assets_install_state() {
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(out.contains("assets:"), "got: {out}");
-    assert!(out.contains(&format!("cli_version: {VERSION}")), "got: {out}");
-    assert!(out.contains("ok"), "the current-version row reports ok: {out}");
+    assert!(
+        out.contains(&format!("cli_version: {VERSION}")),
+        "got: {out}"
+    );
+    assert!(
+        out.contains("ok"),
+        "the current-version row reports ok: {out}"
+    );
 
     let json_output = cli.run(&["doctor", "--json"]);
     assert_eq!(code(&json_output), 0);

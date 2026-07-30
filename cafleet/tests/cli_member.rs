@@ -11,11 +11,16 @@ fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.with_fleet();
     let output = cli.run(&[
-        "member", "create",
-        "--fleet-id", &fleet_id.to_string(),
-        "--name", "worker",
-        "--description", "does work",
-        "--text", "FLEET {fleet_id} ME {member_id} DIRECTOR {director_member_id} AGENT {coding_agent}",
+        "member",
+        "create",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--name",
+        "worker",
+        "--description",
+        "does work",
+        "--text",
+        "FLEET {fleet_id} ME {member_id} DIRECTOR {director_member_id} AGENT {coding_agent}",
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     assert_eq!(stdout(&output), "2 worker backend=claude pane=%7\n");
@@ -44,7 +49,11 @@ fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(pane.as_deref(), Some("%7"), "the pane id is patched post-split");
+    assert_eq!(
+        pane.as_deref(),
+        Some("%7"),
+        "the pane id is patched post-split"
+    );
 }
 
 #[test]
@@ -52,13 +61,22 @@ fn member_create_unknown_placeholder_exits_2_and_leaves_no_orphan() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.with_fleet();
     let output = cli.run(&[
-        "member", "create",
-        "--fleet-id", &fleet_id.to_string(),
-        "--name", "worker",
-        "--description", "d",
-        "--text", "hello {foo}",
+        "member",
+        "create",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--name",
+        "worker",
+        "--description",
+        "d",
+        "--text",
+        "hello {foo}",
     ]);
-    assert_eq!(code(&output), 2, "the original usage error is re-raised unwrapped");
+    assert_eq!(
+        code(&output),
+        2,
+        "the original usage error is re-raised unwrapped"
+    );
     assert!(
         stderr(&output).contains(
             "Unknown placeholder 'foo' in custom prompt. Supported placeholders: \
@@ -77,7 +95,10 @@ fn member_create_unknown_placeholder_exits_2_and_leaves_no_orphan() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(members, 1, "the substitution failure deregisters the member");
+    assert_eq!(
+        members, 1,
+        "the substitution failure deregisters the member"
+    );
 }
 
 #[test]
@@ -86,11 +107,16 @@ fn member_create_split_failure_rolls_back_the_registration() {
     let (fleet_id, _) = cli.with_fleet();
     cli.fail_subcommand = Some("split-window".to_string());
     let output = cli.run(&[
-        "member", "create",
-        "--fleet-id", &fleet_id.to_string(),
-        "--name", "worker",
-        "--description", "d",
-        "--text", "prompt",
+        "member",
+        "create",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--name",
+        "worker",
+        "--description",
+        "d",
+        "--text",
+        "prompt",
     ]);
     assert_eq!(code(&output), 1);
     let err = stderr(&output);
@@ -113,13 +139,20 @@ fn member_create_validates_model_and_effort_before_any_side_effect() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.with_fleet();
     let output = cli.run(&[
-        "member", "create",
-        "--fleet-id", &fleet_id.to_string(),
-        "--name", "worker",
-        "--description", "d",
-        "--coding-agent", "claude",
-        "--effort", "turbo",
-        "--text", "prompt",
+        "member",
+        "create",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--name",
+        "worker",
+        "--description",
+        "d",
+        "--coding-agent",
+        "claude",
+        "--effort",
+        "turbo",
+        "--text",
+        "prompt",
     ]);
     assert_eq!(code(&output), 2);
     assert!(
@@ -142,14 +175,24 @@ fn member_create_requires_the_backend_binary_on_path() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.with_fleet();
     let output = cli.run(&[
-        "member", "create",
-        "--fleet-id", &fleet_id.to_string(),
-        "--name", "worker",
-        "--description", "d",
-        "--coding-agent", "codex",
-        "--text", "prompt",
+        "member",
+        "create",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--name",
+        "worker",
+        "--description",
+        "d",
+        "--coding-agent",
+        "codex",
+        "--text",
+        "prompt",
     ]);
-    assert_eq!(code(&output), 1, "the precondition fires before registration");
+    assert_eq!(
+        code(&output),
+        1,
+        "the precondition fires before registration"
+    );
     assert!(
         stderr(&output).contains("binary codex not found on PATH"),
         "got: {}",
@@ -159,7 +202,10 @@ fn member_create_requires_the_backend_binary_on_path() {
         .sqlite()
         .query_row("SELECT COUNT(*) FROM members", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(members, 1, "no registration side effect before the precondition");
+    assert_eq!(
+        members, 1,
+        "no registration side effect before the precondition"
+    );
 }
 
 #[test]
@@ -167,11 +213,16 @@ fn member_create_unknown_fleet_is_a_usage_error() {
     let cli = Cli::new();
     cli.ready();
     let output = cli.run(&[
-        "member", "create",
-        "--fleet-id", "999",
-        "--name", "worker",
-        "--description", "d",
-        "--text", "prompt",
+        "member",
+        "create",
+        "--fleet-id",
+        "999",
+        "--name",
+        "worker",
+        "--description",
+        "d",
+        "--text",
+        "prompt",
     ]);
     assert_eq!(code(&output), 2);
     assert!(
@@ -188,17 +239,23 @@ fn member_show_compact_full_and_not_found() {
     let member_id = cli.create_member(fleet_id, "worker");
 
     let output = cli.run(&[
-        "member", "show",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
+        "member",
+        "show",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
     ]);
     assert_eq!(code(&output), 0);
     assert_eq!(stdout(&output), format!("{member_id} worker active\n"));
 
     let output = cli.run(&[
-        "member", "show",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
+        "member",
+        "show",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
         "--full",
     ]);
     let out = stdout(&output);
@@ -206,9 +263,12 @@ fn member_show_compact_full_and_not_found() {
     assert!(out.contains("    pane_id:    %7"), "got: {out}");
 
     let output = cli.run(&[
-        "member", "show",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", "99",
+        "member",
+        "show",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        "99",
     ]);
     assert_eq!(code(&output), 1);
     assert!(
@@ -241,9 +301,12 @@ fn member_delete_kills_the_pane_and_reports_it() {
     let (fleet_id, _) = cli.with_fleet();
     let member_id = cli.create_member(fleet_id, "worker");
     let output = cli.run(&[
-        "member", "delete",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
+        "member",
+        "delete",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
@@ -262,9 +325,12 @@ fn member_delete_of_the_root_director_is_rejected() {
     let cli = Cli::new();
     let (fleet_id, director_id) = cli.with_fleet();
     let output = cli.run(&[
-        "member", "delete",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &director_id.to_string(),
+        "member",
+        "delete",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &director_id.to_string(),
     ]);
     assert_eq!(code(&output), 1);
     assert!(
@@ -283,9 +349,12 @@ fn member_prompt_dispatches_and_validates_the_text() {
     let member_id = cli.create_member(fleet_id, "worker");
 
     let output = cli.run(&[
-        "member", "prompt",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
+        "member",
+        "prompt",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
         "hello worker",
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
@@ -300,9 +369,12 @@ fn member_prompt_dispatches_and_validates_the_text() {
     );
 
     let output = cli.run(&[
-        "member", "prompt",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
+        "member",
+        "prompt",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
         "a\nb",
     ]);
     assert_eq!(code(&output), 2);
@@ -326,9 +398,12 @@ fn member_ping_skips_a_pending_placement_and_exits_zero() {
         .unwrap();
 
     let output = cli.run(&[
-        "member", "ping",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
+        "member",
+        "ping",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
     ]);
     assert_eq!(code(&output), 0, "the skip path is a success");
     assert!(
@@ -341,9 +416,12 @@ fn member_ping_skips_a_pending_placement_and_exits_zero() {
     );
 
     let output = cli.run(&[
-        "member", "ping",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
+        "member",
+        "ping",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
         "--json",
     ]);
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
@@ -358,14 +436,20 @@ fn member_ping_dispatches_the_poll_keystroke_with_skipped_false() {
     let (fleet_id, _) = cli.with_fleet();
     let member_id = cli.create_member(fleet_id, "worker");
     let output = cli.run(&[
-        "member", "ping",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
+        "member",
+        "ping",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
         "--json",
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
-    assert_eq!(payload["skipped"], false, "the skipped key is present on both paths");
+    assert_eq!(
+        payload["skipped"], false,
+        "the skipped key is present on both paths"
+    );
     assert!(
         cli.shim_calls().iter().any(|line| line.contains(&format!(
             "-l cafleet message poll --fleet-id {fleet_id} --member-id {member_id}"
@@ -380,9 +464,12 @@ fn monitor_capture_json_carries_the_content_hash() {
     let (fleet_id, _) = cli.with_fleet();
     let member_id = cli.create_member(fleet_id, "worker");
     let output = cli.run(&[
-        "monitor", "capture",
-        "--fleet-id", &fleet_id.to_string(),
-        "--member-id", &member_id.to_string(),
+        "monitor",
+        "capture",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--member-id",
+        &member_id.to_string(),
         "--json",
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
@@ -410,12 +497,18 @@ fn monitor_capture_json_carries_the_content_hash() {
     assert_eq!(payload["pane_id"], "%7");
     assert_eq!(payload["lines"], 20);
     let content = payload["content"].as_str().unwrap();
-    assert!(content.contains("line1"), "the shim's canned buffer, got: {content}");
+    assert!(
+        content.contains("line1"),
+        "the shim's canned buffer, got: {content}"
+    );
 
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(content.as_bytes());
     let expected: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-    assert_eq!(payload["content_sha256"], expected, "mode-exact hash of the emitted content");
+    assert_eq!(
+        payload["content_sha256"], expected,
+        "mode-exact hash of the emitted content"
+    );
     assert!(
         cli.shim_calls()
             .iter()
