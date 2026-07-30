@@ -279,7 +279,6 @@ Total-removal (same change): `cafleet/src/**` (Python), `cafleet/tests/**` (pyte
 
 ### Step 6: CLI commands
 
-COMMENT(reviewer): [COMPLIANCE] The user-relay marker below is resolved — the diagnosis was reported, the user ruled (amendment A8), and fa94fb37 landed the fix with tests on both backends. Per the coordination protocol the resolver removes the marker as part of the fix; remove it (this reviewer marker rides along), otherwise the doc cannot pass the finalize-time marker-free check.
 - [x] clap tree, shared option decorator equivalents, stale-assets guard prologue <!-- completed: 2026-07-30T12:59 -->
 - [x] fleet + message command groups <!-- completed: 2026-07-30T12:59 -->
 - [x] member commands: create (full sequencing + rollback), delete, show/list, prompt, ping <!-- completed: 2026-07-30T12:59 -->
