@@ -9,3 +9,6 @@ workspace = true
 [dependencies]
 include_dir = "0.7"
 rust-embed = "8"
+
+[dev-dependencies]
+tempfile = "3"
