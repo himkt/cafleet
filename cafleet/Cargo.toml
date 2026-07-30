@@ -14,7 +14,6 @@ nix = { version = "0.29", features = ["signal"] }
 refinery = { version = "0.8", features = ["rusqlite"] }
 regex = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
-rust-embed = { version = "8", features = ["debug-embed"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 signal-hook = "0.3"

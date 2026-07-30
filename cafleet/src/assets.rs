@@ -6,18 +6,10 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
-use rust_embed::RustEmbed;
 
 use crate::broker::record_asset_install;
+use crate::embedded::{PRESETS, SKILLS, lookup};
 use crate::error::CafleetError;
-
-#[derive(RustEmbed)]
-#[folder = "../skills"]
-pub struct Skills;
-
-#[derive(RustEmbed)]
-#[folder = "../presets"]
-pub struct Presets;
 
 const SKILL_NAMES: [&str; 3] = ["cafleet", "cafleet-design-doc", "cafleet-research"];
 const TARGET_AGENTS: [&str; 3] = ["claude", "codex", "opencode"];
@@ -85,20 +77,20 @@ fn install_skills(home: &Path, agent: &str, version: &str) -> Result<(), Cafleet
             std::fs::remove_dir_all(&target).map_err(fail)?;
         }
         let prefix = format!("{skill}/");
-        let paths: Vec<_> = Skills::iter()
-            .filter(|path| path.starts_with(&prefix))
+        let files: Vec<_> = SKILLS
+            .iter()
+            .filter(|(path, _)| path.starts_with(&prefix))
             .collect();
         assert!(
-            !paths.is_empty(),
+            !files.is_empty(),
             "the embedded skills tree carries '{skill}'"
         );
-        for path in paths {
-            let file = Skills::get(&path).expect("iterated embedded paths resolve");
-            let dest = skills_dir.join(path.as_ref());
+        for (path, bytes) in files {
+            let dest = skills_dir.join(path);
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent).map_err(fail)?;
             }
-            std::fs::write(&dest, file.data.as_ref()).map_err(fail)?;
+            std::fs::write(&dest, bytes).map_err(fail)?;
         }
     }
     println!(
@@ -135,9 +127,9 @@ fn install_preset(home: &Path, agent: &str, version: &str) -> Result<(), Cafleet
         }
         Err(_) => {}
     }
-    let embedded = Presets::get(source)
+    let bytes = lookup(PRESETS, source)
         .unwrap_or_else(|| panic!("the embedded presets tree carries '{source}'"));
-    std::fs::write(&target, embedded.data.as_ref()).map_err(fail)?;
+    std::fs::write(&target, bytes).map_err(fail)?;
     println!(
         "{agent}: installed preset (v{version}) -> {}",
         target.display()

@@ -13,7 +13,6 @@ use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::Response;
 use axum::routing::{get, post};
 use rusqlite::Connection;
-use rust_embed::RustEmbed;
 use serde_json::{Value, json};
 
 use crate::broker;
@@ -22,10 +21,6 @@ use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::format_json;
 use crate::time::now_utc;
-
-#[derive(RustEmbed)]
-#[folder = "webui-dist"]
-pub struct WebuiDist;
 
 const RESERVED_PREFIXES: [&str; 2] = ["ui", "api"];
 
@@ -494,27 +489,20 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
 }
 
 fn mime_for(path: &str) -> &'static str {
-    match path.rsplit('.').next().unwrap_or("") {
-        "html" => "text/html",
-        "js" => "text/javascript",
-        "css" => "text/css",
-        "svg" => "image/svg+xml",
-        "png" => "image/png",
-        "ico" => "image/x-icon",
-        "json" => "application/json",
-        "woff2" => "font/woff2",
-        "woff" => "font/woff",
-        _ => "application/octet-stream",
-    }
+    let extension = path.rsplit('.').next().unwrap_or("");
+    crate::embedded::CONTENT_TYPES
+        .iter()
+        .find(|(known, _)| *known == extension)
+        .map_or("application/octet-stream", |(_, mime)| *mime)
 }
 
 fn embedded_file(path: &str) -> Option<Response> {
-    let file = WebuiDist::get(path)?;
+    let bytes = crate::embedded::lookup(crate::embedded::WEBUI_DIST, path)?;
     Some(
         Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, mime_for(path))
-            .body(file.data.to_vec().into())
+            .body(bytes.to_vec().into())
             .expect("an embedded-asset response always builds"),
     )
 }
