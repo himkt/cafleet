@@ -3,12 +3,12 @@ current_version = "0.22.0"
 commit = true
 
 [[tool.bumpversion.files]]
-filename = "cafleet/pyproject.toml"
+filename = "cafleet/Cargo.toml"
 search   = "version = \"{current_version}\""
 replace  = "version = \"{new_version}\""
 
 [[tool.bumpversion.files]]
-filename = "uv.lock"
+filename = "Cargo.lock"
 search   = """
 name = \"cafleet\"
 version = \"{current_version}\""""

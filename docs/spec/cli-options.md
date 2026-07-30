@@ -5,9 +5,7 @@ icon: lucide/square-terminal
 # CLI options
 
 How the unified CAFleet CLI (`cafleet`) accepts configuration parameters. This
-page catalogs the flags, conventions, and error strings; each subcommand's
-behavior detail lives on the docstring of its broker function in the
-[API reference](../api/broker.md).
+page catalogs the flags, conventions, and error strings.
 
 ## Subcommand summary
 
@@ -16,7 +14,7 @@ members: `--member-id` names **the member in question** on single-member
 commands, and two-party commands name both parties as `--from-member-id`
 (sender) + `--to-member-id` (recipient/target). In the `--fleet-id` column,
 **yes** means the flag is a required per-subcommand option; **no** means the
-subcommand rejects it with `No such option`.
+subcommand rejects it with the parser's unknown-argument error.
 
 | Subcommand | Purpose | `--fleet-id` | Identity flag | Section |
 |---|---|---|---|---|
@@ -48,7 +46,7 @@ Each parameter has exactly one input source:
 | Parameter | Source |
 |---|---|
 | Fleet ID | `--fleet-id <int>` per-subcommand option (placed after the subcommand name) |
-| Database URL | `CAFLEET_DATABASE_URL` env var (optional) — see [config](../api/config.md) for its default and the absolute-path requirement. |
+| Database URL | `CAFLEET_DATABASE_URL` env var (optional) — defaults to `sqlite:///` + `~/.local/share/cafleet/cafleet_v6.db` (home expanded at startup); a user-supplied value must be an absolute-path `sqlite:///` URL. |
 | Multiplexer backend | `CAFLEET_MULTIPLEXER` env var (optional) — unset ⇒ auto-detect. See [Multiplexer backends](multiplexer-backends.md#backend-selection). |
 | Member ID | `--member-id <int>` subcommand option (the member in question) |
 | Sender / recipient member IDs | `--from-member-id <int>` / `--to-member-id <int>` on two-party subcommands |
@@ -60,7 +58,7 @@ Every `CAFLEET_`-prefixed variable cafleet reads:
 
 | Environment variable | Settings field | Default | Controls | Overridden by |
 |---|---|---|---|---|
-| `CAFLEET_DATABASE_URL` | `database_url` | see [config](../api/config.md) | The registry database location; an absolute path is required | — |
+| `CAFLEET_DATABASE_URL` | `database_url` | `sqlite:///` + `~/.local/share/cafleet/cafleet_v6.db` | The registry database location; an absolute path is required | — |
 | `CAFLEET_MULTIPLEXER` | `multiplexer` | unset ⇒ auto-detect | The multiplexer backend, per [Backend selection](multiplexer-backends.md#backend-selection) | — |
 | `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Body truncation on `message {send,poll,ack,show}`, and the broker's inline-preview truncation | `--full` |
 | `CAFLEET_BROKER_HOST` | `broker_host` | `127.0.0.1` | The `cafleet server` bind address | `--host` |
@@ -156,8 +154,8 @@ Subcommands accepting `--json`, one row per subcommand:
 | `member ping` | `member` |
 | `monitor capture` | `monitor` |
 
-All other subcommands reject `--json` with Click's standard
-`No such option` error (exit 2) — including the root group itself, so a
+All other subcommands reject `--json` with the parser's unknown-argument
+error (exit 2) — including the root group itself, so a
 pre-subcommand `cafleet --json <grp> <cmd>` does not parse.
 
 ## Fleet ID (`--fleet-id`) {#fleet-id}
@@ -175,7 +173,7 @@ strings, and matching also depends on the canonical flag order (see
 
 `--member-id` is a per-subcommand option typed `int` (as are
 `--from-member-id`, `--to-member-id`, and `--message-id`; each rejects a
-non-integer with Click's standard invalid-integer error, exit 2). Ids are
+non-integer with the parser's invalid-integer error, exit 2). Ids are
 DB-assigned integers, typically 1–4 digits, pasted in full — there is no
 prefix resolution. `--member-id` always names **the member in question**: the
 requester on `message poll` / `ack` / `show`, and the target on
@@ -217,14 +215,14 @@ The four subcommands that emit a user-supplied delivery body —
 `cafleet message {send,poll,ack,show}` — truncate the `text` body to
 the first `CAFLEET_MAX_TEXT_LEN` Unicode codepoints plus a single `…`
 (U+2026) suffix by default, uniformly in text and `--json` output. Length is
-measured in Python `str` codepoints, never bytes. Pass `--full` (a documented
+measured in Unicode codepoints, never bytes. Pass `--full` (a documented
 per-subcommand option) to disable truncation; it composes orthogonally with
 `--json`.
 
 The limit is `CAFLEET_MAX_TEXT_LEN` — see
 [Environment variables](#environment-variables).
 
-This applies to CLI emit sites only — FastAPI `/api/*` responses
+This applies to CLI emit sites only — the WebUI `/api/*` responses
 ([webui-api.md](./webui-api.md)) and `monitor capture` content are untouched.
 
 ## `cafleet setup` — Onboarding and Schema Management {#cafleet-setup}
@@ -233,34 +231,34 @@ This applies to CLI emit sites only — FastAPI `/api/*` responses
 schema-management entry point (the recommended end-user path — see
 [Quickstart](../quickstart.md#install)). Command help: `Migrate the database
 schema and install the coding-agent assets (skills and presets).` It takes no
-positional arguments — `cafleet setup <word>` fails with Click's standard
-`Got unexpected extra argument (<word>)` error — and does not accept
+positional arguments — `cafleet setup <word>` fails with the parser's
+unexpected-argument error — and does not accept
 `--fleet-id`.
 
-The one flag is `--skip AGENT`: optional and repeatable, typed
-`click.Choice(["claude", "codex", "opencode"])`, with duplicates deduplicated
-and an unknown value failing with Click's standard invalid-choice error
+The one flag is `--skip AGENT`: optional and repeatable, a choice over
+`claude` / `codex` / `opencode`, with duplicates deduplicated
+and an unknown value failing with the parser's invalid-value error
 (exit 2). Its help text is
 `Skip the named agent's assets install (repeatable).`
 
 The command runs two halves, in order:
 
-1. **db half** — initializes or migrates the registry database to the bundled
-   Alembic head revision (idempotent). Each refusal message below becomes the
-   db-half failure `<msg>`:
+1. **db half** — initializes or migrates the registry database to the head of
+   the migration chain embedded in the binary (idempotent). Each refusal
+   message below becomes the db-half failure `<msg>`; `<M>` / `<N>` are the
+   integer migration versions:
 
     | Prior DB state | Outcome | Output / refusal message |
     |---|---|---|
-    | No DB file | Created and migrated to head | `Created <db_file> and applied migrations to head (<head>).` |
-    | Behind head | Upgraded | `Upgraded from <old_rev> to <head>.` |
-    | At head | No-op | `Already at head (<head>); nothing to do.` |
-    | Tables present but no `alembic_version` | Refused | ``DB has existing tables but no alembic_version. Run `alembic stamp head` manually if you are sure the schema matches.`` |
-    | Revision unknown to this CLI version | Refused | `DB schema is at revision <rev> which is unknown to this version of cafleet. Refusing to downgrade automatically.` |
+    | No DB file | Created and migrated to head | `Created <db_file> and applied migrations to head (<N>).` |
+    | Behind head | Upgraded | `Upgraded from <M> to <N>.` |
+    | At head | No-op | `Already at head (<N>); nothing to do.` |
+    | Tables present but no `refinery_schema_history` | Refused | `DB has existing tables but no refinery_schema_history. Refusing to migrate an unversioned database.` |
+    | Version unknown to this CLI version | Refused | `DB schema is at version <M> which is unknown to this version of cafleet. Refusing to downgrade automatically.` |
 
 2. **assets half** — targets are the fixed list `claude`, `codex`, `opencode`
-   (in that order) minus the skipped agents. Downloads the
-   `cafleet-assets-v<version>.zip` asset matching the installed CLI version
-   from the corresponding GitHub Release, then per target installs the three
+   (in that order) minus the skipped agents. Installs, from the data embedded
+   in the binary at build time with no network access, per target the three
    skill directories plus the agent's bundled preset where one exists
    (creating the agent's directories as needed), and records one
    `asset_installs` row per target (see [Assets half](#assets-half)). When
@@ -276,8 +274,6 @@ halves joined by `' and '`.
 |---|---|---|---|
 | db | Either refusal state in the table above | The refusal message, as `db half failed: <msg>` | Exit 1 |
 | assets | The `asset_installs` table is missing as the half starts | `the database schema is missing or outdated; run 'cafleet setup' first` | Exit 1 |
-| assets | No GitHub Release for the installed CLI version | `no release found for version <version>` | Exit 1 |
-| assets | The release exists but the asset is absent | `asset cafleet-assets-v<version>.zip not found in release <version>` | Exit 1 |
 | assets | A skills install fails for a target | `failed to install skills into <skills_dir>: <error>` | Aborts the loop; rows recorded before the failure remain |
 | assets | A preset install fails for a target | `failed to install preset into <target>: <error>` | Aborts the loop; rows recorded before the failure remain |
 | assets | All three agents skipped | `assets half skipped (all agents skipped)` | Not-run; cannot contribute a failure |
@@ -289,21 +285,20 @@ is kept as defense.
 ### Schema-only invocation {#schema-only}
 
 The documented invocation for "bring the DB to head without touching assets"
-(the contributor and CI path — e.g. the prerequisite for
-`mise //cafleet:makemigration`):
+(the contributor and CI path):
 
 ```bash
 cafleet setup --skip claude --skip codex --skip opencode
 ```
 
-It is deterministic (independent of which agent homes exist), exits 0 when
-the db half succeeds, and never contacts GitHub — so it works on unreleased
-dev versions. The schema-only invocation never records `asset_installs` rows.
+It is deterministic (independent of which agent homes exist) and exits 0 when
+the db half succeeds. The schema-only invocation never records
+`asset_installs` rows.
 
 ### Assets half {#assets-half}
 
-Each agent's preset, where one exists, is a static file shipped in the release
-archive next to the skills:
+Each agent's preset, where one exists, is a static file embedded in the
+binary next to the skills:
 
 | Agent | Bundled preset | Install target |
 |---|---|---|
@@ -352,17 +347,14 @@ Agents with no recorded row are not checked. Three surfaces are exempt:
 | `doctor` | It reports instead of blocking | Prints each recorded row marked `ok` or `STALE` |
 | `server` | It serves the WebUI rather than running a fleet-scoped command, and the guard wraps only the four fleet-scoped groups | Starts normally |
 
-Group-level help (`cafleet fleet --help`) prints before the callback
-runs and always works; subcommand help runs the group callback first, so under
-a missing/stale install the guard errors instead of printing help.
+`--help` renders at parse time and exits before any command body runs, so
+neither group-level help (`cafleet fleet --help`) nor subcommand help
+(`cafleet fleet create --help`) triggers the guard — both always print help,
+even under a missing or stale install.
 
 ## `cafleet fleet` — Fleet Management
 
-Fleet lifecycle; writes directly to SQLite — no server required. Behavior
-detail: [`create_fleet`](../api/broker.md#cafleet.broker.create_fleet),
-[`list_fleets`](../api/broker.md#cafleet.broker.list_fleets),
-[`get_fleet`](../api/broker.md#cafleet.broker.get_fleet),
-[`delete_fleet`](../api/broker.md#cafleet.broker.delete_fleet).
+Fleet lifecycle; writes directly to SQLite — no server required.
 
 ### `fleet create`
 
@@ -373,15 +365,8 @@ detail: [`create_fleet`](../api/broker.md#cafleet.broker.create_fleet),
 | `--json` | no | Output as JSON |
 | `--full` | no | Switches the non-JSON output from the compact one-line form to a labeled block. |
 
-Omitting `--coding-agent` exits 2 with Click's missing-option error for a
-required `Choice` option, printed after the auto-generated usage block:
-
-```
-Error: Missing option '--coding-agent'. Choose from:
-	claude,
-	codex,
-	opencode
-```
+Omitting `--coding-agent` exits 2 with the parser's native
+missing-required-argument error naming `--coding-agent`.
 
 **Must be run inside a tmux or herdr session** — outside one it exits 1 with
 `Error: cafleet fleet create must be run inside a tmux or herdr session` and
@@ -449,9 +434,8 @@ detected, ambiguous environment, binary not on `PATH`, pane not discoverable).
 
 ## `cafleet server` — Admin WebUI Server {#cafleet-server}
 
-Starts the admin WebUI FastAPI app via uvicorn (uvicorn defaults — no reload,
-workers, or log-level flags; users who need them invoke uvicorn directly,
-which is what `mise //cafleet:dev` does). CLI commands do not require this
+Starts the admin WebUI app under the built-in HTTP server (single process, no
+auto-reload, no worker or log-level flags). CLI commands do not require this
 server. Does not accept `--fleet-id`.
 
 | Flag | Default | Notes |
@@ -459,10 +443,9 @@ server. Does not accept `--fleet-id`.
 | `--host` | `settings.broker_host` (default `127.0.0.1`) | Bind address. Overrides `CAFLEET_BROKER_HOST` when both are set. |
 | `--port` | `settings.broker_port` (default `8000`) | Bind port. Overrides `CAFLEET_BROKER_PORT` when both are set. |
 
-Flag wins over env var; env var wins over the hardcoded default. If the
-bundled WebUI dist directory does not exist, the app warns on stderr
-(`warning: admin WebUI is not built. / will return 404. Run 'mise
-//admin:build'.`); port-in-use errors propagate unwrapped from uvicorn.
+Flag wins over env var; env var wins over the hardcoded default. The WebUI
+assets are embedded in the binary at build time, so the served SPA always
+matches the binary; port-in-use errors propagate unwrapped.
 
 ## `cafleet message` — Message Broker
 
@@ -473,12 +456,7 @@ All five subcommands require `--fleet-id`, name the acting member
 The envelope schema is canonical in
 [Message envelope](./message-envelope.md); truncation and `--full` are
 canonical [above](#message-body-truncation); per-subcommand output shapes are
-in [Output shapes](#output-shapes). Behavior detail:
-[`send_message`](../api/broker.md#cafleet.broker.send_message),
-[`broadcast_message`](../api/broker.md#cafleet.broker.broadcast_message),
-[`poll_messages`](../api/broker.md#cafleet.broker.poll_messages),
-[`ack_message`](../api/broker.md#cafleet.broker.ack_message),
-[`get_message`](../api/broker.md#cafleet.broker.get_message).
+in [Output shapes](#output-shapes).
 
 ### `message send`
 
@@ -533,11 +511,7 @@ The `cafleet member` subgroup owns the member lifecycle: `create` registers a
 member **and** spawns its coding-agent pane; `delete` tears it down; `prompt`
 / `ping` keystroke an existing member's pane;
 `show` and `list` are registry reads (no multiplexer requirement). All run
-behind the [stale-assets guard](#stale-assets-guard). Behavior detail:
-[`register_member`](../api/broker.md#cafleet.broker.register_member),
-[`deregister_member`](../api/broker.md#cafleet.broker.deregister_member),
-[`get_member`](../api/broker.md#cafleet.broker.get_member),
-[`list_members`](../api/broker.md#cafleet.broker.list_members).
+behind the [stale-assets guard](#stale-assets-guard).
 
 ### Member targeting and key delivery
 
@@ -748,14 +722,12 @@ behind the [stale-assets guard](#stale-assets-guard). The conceptual model is
 canonical on the [Monitoring](../concepts/monitoring.md) concepts page; there
 is no `monitor stop` — the loop terminates with the monitoring member's pane
 (`member delete`), and a still-running loop self-terminates on its next tick
-after `fleet delete`. Behavior detail:
-[`list_monitor_targets`](../api/broker.md#cafleet.broker.list_monitor_targets),
-[`record_pings`](../api/broker.md#cafleet.broker.record_pings).
+after `fleet delete`.
 
 ### `monitor start`
 
 The one flag is `--tick` (optional): the scan-tick cadence in seconds
-(`click.IntRange(min=1)`, default **5**). The tick is the floor on interval
+(an integer ≥ 1, default **5**). The tick is the floor on interval
 precision — see
 [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
 

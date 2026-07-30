@@ -29,12 +29,6 @@ nav = [
         { "Agent backends" = "spec/coding-agent-backends.md" },
         { "WebUI API" = "spec/webui-api.md" },
     ] },
-    { "API Reference" = [
-        { "broker" = "api/broker.md" },
-        { "config" = "api/config.md" },
-        { "coding_agent" = "api/coding-agent.md" },
-        { "multiplexer" = "api/multiplexer.md" },
-    ] },
     { "Contributing" = "contributing.md" },
 ]
 
@@ -107,20 +101,3 @@ combine_header_slug = true
 [project.markdown_extensions.pymdownx.tasklist]
 custom_checkbox = true
 [project.markdown_extensions.pymdownx.tilde]
-
-# mkdocstrings — resolves "::: <module>" directives against cafleet/src.
-[project.plugins.mkdocstrings]
-default_handler = "python"
-
-[project.plugins.mkdocstrings.handlers.python]
-paths = ["cafleet/src"]
-
-[project.plugins.mkdocstrings.handlers.python.options]
-docstring_style = "google"
-show_source = true
-show_root_heading = true
-show_root_full_path = false
-members_order = "source"
-separate_signature = true
-show_signature_annotations = true
-filters = ["!^_"]

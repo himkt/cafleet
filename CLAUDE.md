@@ -11,14 +11,14 @@ The system-reminder lists every available skill with its trigger description. Re
 A message broker and member registry for coding agents.
 
 - **Single package**:
-  - `cafleet/` — `cafleet` (FastAPI + SQLAlchemy + Alembic + click)
+  - `cafleet/` — `cafleet` (clap + rusqlite + refinery + axum, single static binary)
 - **Unified CLI command**: `cafleet` (with a single `setup` command for onboarding and schema management, and all member/messaging commands)
 
 ## Tech Stack
 
-- Python 3.12+ managed with uv
-- Server: FastAPI + SQLAlchemy + Alembic
-- CLI: click (direct SQLite via broker module)
+- Rust (toolchain pinned with mise; root Cargo workspace)
+- Server: axum + tokio (the `server` subcommand)
+- CLI: clap (direct SQLite via broker module)
 
 ## Commands
 

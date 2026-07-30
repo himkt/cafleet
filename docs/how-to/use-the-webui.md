@@ -15,18 +15,13 @@ and never require one — and it is read/write for messages only.
 cafleet server
 ```
 
-```
-INFO:     Started server process [12345]
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-```
-
-Open `http://127.0.0.1:8000`. Host/port overrides (`--host` / `--port` and
-the matching env vars) are documented in
+Open `http://127.0.0.1:8000` (press ++ctrl+c++ to stop the server). Host/port
+overrides (`--host` / `--port` and the matching env vars) are documented in
 [CLI options](../spec/cli-options.md#cafleet-server).
 
-Running from a source checkout instead of an installed wheel? `/` returns
-404 until you build the UI with `mise //admin:build` — installed wheels
-bundle the built UI.
+The built UI is embedded in the `cafleet` binary at build time, so the served
+dashboard always matches the binary — there is nothing extra to build or
+deploy at runtime.
 
 ## Pick a fleet
 

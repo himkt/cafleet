@@ -40,8 +40,8 @@ behavior's full contract stays under its own heading below.
 
 ## Backend selection {#backend-selection}
 
-Every call site resolves its backend through `resolve_multiplexer()`
-([API reference](../api/multiplexer.md)) rather than hardcoding one. Resolution
+Every call site resolves its backend through one shared resolver rather than
+hardcoding one. Resolution
 precedence:
 
 1. **Explicit override.** If `CAFLEET_MULTIPLEXER` is set, it must name a
@@ -143,7 +143,7 @@ Esc-safeguarded inline-preview path every fleet message uses.
 ## Access mechanism
 
 Each backend's access mechanism is in the [backend matrix](#backend-matrix) —
-no new Python dependency either way; the binary is expected on `PATH`. herdr
+no new dependency either way; the binary is expected on `PATH`. herdr
 also exposes a JSON unix-socket API whose only unique
 capability is a push event stream; that would require a persistent connection
 and a concurrent reader that cafleet's synchronous `scan → wake → sleep`
@@ -156,7 +156,7 @@ A member pane spawned by `cafleet member create` starts in the invoking
 process's working directory (the Director's pane cwd); each backend realizes
 this differently, per the [backend matrix](#backend-matrix).
 
-On herdr, `<dir>` is `os.getcwd()` of the invoking process. herdr's own
+On herdr, `<dir>` is the invoking process's current working directory. herdr's own
 inheritance is not relied upon because herdr spawns `/bin/sh` instead of the
 passwd login shell when `SHELL` is unset
 ([herdr discussion #1517](https://github.com/ogulcancelik/herdr/discussions/1517)).
@@ -185,11 +185,8 @@ pane is closed and the member deregistered regardless.
 
 ## Prompt dispatch (`send_prompt`) {#prompt-dispatch}
 
-`cafleet member prompt` delivers its keystrokes through the Protocol method
-
-```python
-def send_prompt(self, *, target_pane_id: str, text: str, shell: bool = False) -> None
-```
+`cafleet member prompt` delivers its keystrokes through the multiplexer
+interface's `send_prompt(target_pane_id, text, shell = false)` operation.
 
 Both backends validate fail-fast: text empty after strip →
 `send_prompt: text may not be empty`; the **original** text containing `\n` or

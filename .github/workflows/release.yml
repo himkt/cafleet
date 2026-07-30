@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        with:
+          experimental: true
+      - run: mise //admin:install
+      - run: mise //admin:build
+      - run: rustup target add ${{ matrix.target }}
+      - name: Install cargo-zigbuild
+        if: contains(matrix.target, 'musl')
+        run: pipx install cargo-zigbuild
+      - name: Build the release binary
+        if: "!contains(matrix.target, 'musl')"
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Build the release binary (zig-linked musl cross-compile)
+        if: contains(matrix.target, 'musl')
+        run: cargo zigbuild --release --target ${{ matrix.target }}
+      - name: Package and upload the release archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar -czf "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" cafleet
+          gh release upload "${{ github.event.release.tag_name }}" "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" --clobber

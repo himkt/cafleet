@@ -13,8 +13,9 @@ path.
 
 | Top-level entry | Purpose |
 |---|---|
-| `cafleet/` | The `cafleet` Python package (FastAPI + SQLAlchemy + Alembic + click). |
-| `admin/` | Admin WebUI SPA (Vite + React + TypeScript + Tailwind CSS). |
+| `Cargo.toml` | The Cargo workspace root. |
+| `cafleet/` | The `cafleet` Rust package (clap CLI + axum server + rusqlite persistence); builds the single `cafleet` binary. |
+| `admin/` | Admin WebUI SPA (Vite + React + TypeScript + Tailwind CSS); its build output is embedded in the binary. |
 | `skills/` | Coding-agent skill files (`cafleet`, `cafleet-design-doc`, `cafleet-research`), installed into the agent homes by `cafleet setup` / `mise //:skill-install`. |
 | `package.json` + `pnpm-lock.yaml` (repo root) | pnpm toolchain manifests for the Slidev + agent-browser tools used in the repo. Driven via `mise //:pnpm-install` / `mise //:slidev <deck>`; `node_modules/` is gitignored. |
 | `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
@@ -24,11 +25,11 @@ path.
 
 | Concern | Technology | Notes |
 |---|---|---|
-| Language | Python 3.12+, managed with [uv](https://docs.astral.sh/uv/) | — |
-| Server | [FastAPI](https://fastapi.tiangolo.com/) | Admin WebUI only |
-| Database | [SQLAlchemy](https://www.sqlalchemy.org/) 2.x + SQLite | Sync `pysqlite` driver |
-| CLI | [click](https://click.palletsprojects.com/) | — |
-| Admin frontend | Vite + pnpm | SPA served at `/` |
+| Language | Rust (stable toolchain, managed with [mise](https://mise.jdx.dev/)) | — |
+| CLI | [clap](https://docs.rs/clap/) | — |
+| Database | [rusqlite](https://docs.rs/rusqlite/) (bundled SQLite) | Migrations via [refinery](https://docs.rs/refinery/) (embedded SQL chain) |
+| Server | [axum](https://docs.rs/axum/) | Admin WebUI only |
+| Admin frontend | Vite + pnpm | SPA embedded in the binary at build time, served at `/` |
 | Task runner | [mise](https://mise.jdx.dev/) | — |
 
 ## Development
@@ -39,21 +40,23 @@ Clone the repo and run the first-time setup once:
 git clone https://github.com/himkt/cafleet.git
 cd cafleet
 
-mise //:uv-sync
-mise //cafleet:install    # editable uv tool install of the cafleet CLI
+mise //cafleet:install    # builds the WebUI dist, then cargo-installs the cafleet CLI (re-run after source edits)
 cafleet setup --skip claude --skip codex --skip opencode   # migrate the database schema only (idempotent)
 ```
 
-After that, pick the task you need by name:
+After that, pick the task you need by name. Every cargo-invoking task first
+builds the WebUI dist (the cargo build embeds it and fails without it), so a
+fresh clone needs no manual prerequisite:
 
 | Task | Runs | When you need it |
 |---|---|---|
-| `mise //cafleet:lint` | `ruff check` + `ruff format --check` | Checking Python style before a commit |
-| `mise //cafleet:format` | `ruff check --fix` + `ruff format` | Applying Python formatting fixes |
-| `mise //cafleet:typecheck` | `ty` | Type-checking the Python package |
-| `mise //cafleet:test` | `pytest` | Running the test suite |
+| `mise //cafleet:lint` | `cargo clippy --all-targets -- -D warnings` + `cargo fmt --check` | Checking Rust style before a commit |
+| `mise //cafleet:format` | `cargo fmt` | Applying Rust formatting fixes |
+| `mise //cafleet:typecheck` | `cargo check` | Fast type-checking without producing a binary |
+| `mise //cafleet:test` | `cargo test` | Running the test suite |
+| `mise //cafleet:build` | `cargo build --release` | Building the release binary |
 | `mise //admin:lint` | `pnpm lint` | Checking the WebUI sources |
-| `mise //admin:build` | Vite build | Required before `/` is served |
+| `mise //admin:build` | Vite build | Producing the WebUI dist the binary embeds |
 | `mise //admin:dev` | Vite dev server | Working on the WebUI with hot reload |
 | `mise //admin:install` | `pnpm install --frozen-lockfile` | Reinstalling WebUI deps from the committed lockfile |
 
@@ -64,9 +67,9 @@ the lockfile.
 
 ### Installing the skills from your checkout
 
-`cafleet setup` installs the assets from a published Release, so it is the
-**end-user (installed-CLI)** path. Contributors working from a clone install
-the skills from the working tree instead:
+`cafleet setup` installs the assets embedded in the installed binary at its
+build time, so it is the **end-user (installed-CLI)** path. Contributors
+working from a clone install the skills from the working tree instead:
 
 ```bash
 mise //:skill-install
@@ -79,7 +82,9 @@ homes.
 
 ## Building docs locally
 
-Build the documentation site (this site) locally with:
+The docs toolchain is Python-based and managed with
+[uv](https://docs.astral.sh/uv/) (`mise //:uv-sync` installs it). Build the
+documentation site (this site) locally with:
 
 ```bash
 mise //:docs-build

@@ -7,25 +7,25 @@
 - Lint (admin): `mise //admin:lint`
 - Format: `mise //cafleet:format`
 - Type check: `mise //cafleet:typecheck`
-- Sync dependencies: `mise //:uv-sync`
-- Install the `cafleet` CLI (editable uv tool): `mise //cafleet:install` — run this after pulling any change under `cafleet/src/cafleet/` if the global `cafleet` binary was previously installed non-editably; the editable reinstall makes future source edits take effect without another install.
-- Build cafleet wheel: `mise //cafleet:build` — emits the wheel into `cafleet/dist/`.
-- Generate a DB migration: `mise //cafleet:makemigration "short description"` — autogenerates an Alembic migration with the next sequential `000N` id. Requires the DB at head first (`cafleet setup --skip claude --skip codex --skip opencode`). This is the **only** supported way to create a migration — see `database-migrations.md`; never invoke `alembic revision` directly.
-- Publish cafleet: `mise //cafleet:publish` — chained task that builds admin assets, builds the wheel, then runs `uv publish`.
-- Start admin WebUI server: either `cafleet server` (packaged launcher; `--host` / `--port` flags, defaults `127.0.0.1:8000` from `settings.broker_host` / `settings.broker_port`, also honors `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT`) **or** `mise //cafleet:dev` (runs `uv run --package cafleet uvicorn cafleet.webui.app:app --host 127.0.0.1 --port 8000` directly; does NOT delegate to `cafleet server`). Both are independent entry points for the same FastAPI app and neither runs with `--reload` — contributors restart manually between edits. WebUI-only: CLI commands do not require a running server. Serves `/` only after `mise //admin:build` has been run.
+- Sync docs/research dependencies: `mise //:uv-sync` — the root uv workspace provides the docs toolchain (zensical, bump-my-version) and the `research` group (matplotlib) only.
+- Install the `cafleet` CLI: `mise //cafleet:install` — runs `cargo install --path cafleet`. The install copies the compiled binary, so re-run it after pulling or editing any Rust source under `cafleet/src/` for the global `cafleet` binary to pick up the change.
+- Build the release binary: `mise //cafleet:build` — emits `target/release/cafleet`.
+- Database migrations are hand-written SQL files guarded by the chain test — see `database-migrations.md`. There is no migration-autogeneration task.
+- Publishing is release-CI-only: on release publish, the GitHub Actions release workflow builds the three target binaries and uploads them to the GitHub Release. There is no local publish task.
+- Start admin WebUI server: either `cafleet server` (packaged launcher; `--host` / `--port` flags, defaults `127.0.0.1:8000` from `settings.broker_host` / `settings.broker_port`, also honors `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT`) **or** `mise //cafleet:dev` (runs `cargo run -- server`). Both are entry points to the same app and neither auto-reloads — contributors restart manually between edits. WebUI-only: CLI commands do not require a running server. The WebUI dist is embedded into the binary at build time.
 - Start admin dev server: `mise //admin:dev`
 - Build admin: `mise //admin:build`
+
+Every cargo-invoking task (`test`, `lint`, `typecheck`, `build`, `install`, `dev`) depends on `//admin:build`, because the cargo build embeds the admin dist and fails loudly when `cafleet/webui-dist/` is missing — a fresh clone works with no manual prerequisite.
 
 ## mise Tasks
 
 - Use full-path notation: `mise //[package]:[task]`. Do NOT use short-form `mise <task>`.
 - Do NOT use `mise run <task>` — the `run` subcommand is unnecessary.
-- **mise tasks forward positional args to the underlying command.** When you need to pass pytest args (test selectors, `-x`, `-v`, etc.), pass them directly to the mise task — do NOT fall back to `uv run python -m pytest` to "get more control". Examples:
-  - Run one test: `mise //cafleet:test tests/cli/test_fleet.py::test_my_case`
-  - Stop on first failure with verbose output: `mise //cafleet:test -xvs tests/test_my.py`
-  - Match a keyword: `mise //cafleet:test -k my_keyword`
-  - Package-relative paths only (`tests/...`, not `cafleet/tests/...`), because the mise task's working directory is `cafleet/`.
-  - **Defensive `--` separator** for args that might collide with a mise flag: `mise //cafleet:test -- --collect-only -q tests/`. The bare form (without `--`) works in practice for the common pytest flags above; reach for `--` when an arg starts with two dashes AND could plausibly be parsed by mise itself.
+- **mise tasks forward positional args to the underlying command.** When you need to pass cargo-test args (test-name filters, `--nocapture`, etc.), pass them directly to the mise task — do NOT fall back to `cargo test` to "get more control". Examples:
+  - Run tests matching a name: `mise //cafleet:test my_test_name`
+  - Show test output: `mise //cafleet:test my_test_name -- --nocapture`
+  - **Defensive `--` separator** for args that might collide with a mise flag: the bare form works for plain test-name filters; reach for `--` when an arg starts with two dashes AND could plausibly be parsed by mise itself (all `--`-prefixed args after the first `--` reach the test harness).
 
 ## NEVER bypass mise with the underlying tool
 
@@ -33,11 +33,11 @@ The commands above are the **only** way to run these operations. Do NOT invoke t
 
 | NEVER | Use instead | Why |
 |---|---|---|
-| `uv run ruff check .` | `mise //cafleet:lint` | bypasses project lint config |
-| `uv run ruff format [--check] .` | `mise //cafleet:format` | bypasses project format config |
-| `uv run ty check` | `mise //cafleet:typecheck` | bypasses project typecheck config |
-| `uv run --frozen --package cafleet python -m pytest ...` | `mise //cafleet:test` | bypasses the project's test runner config and env setup |
-| `uv run cafleet ...` for verification/smoke | delegate to a teammate that already has permission, or ask the user | see `skills/cafleet/reference/supervision.md` § *Authorization-Scope Guard* |
+| `cargo clippy ...` | `mise //cafleet:lint` | bypasses project lint config |
+| `cargo fmt [--check]` | `mise //cafleet:format` | bypasses project format config |
+| `cargo check` | `mise //cafleet:typecheck` | bypasses project typecheck config |
+| `cargo test ...` | `mise //cafleet:test` | bypasses the project's test runner config and env setup |
+| `cargo run -- ...` / `cafleet ...` for verification/smoke | delegate to a teammate that already has permission, or ask the user | see `skills/cafleet/reference/supervision.md` § *Authorization-Scope Guard* |
 
 This rule applies **even when a teammate is blocked on permissions** and you are tempted to "just run it yourself" — using `mise` keeps commands matching the project's `permissions.allow` patterns, which is the entire point of this project's fleet-id / member-id CLI design.
 

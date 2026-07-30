@@ -44,9 +44,7 @@
       "Bash(pnpm exec agent-browser wait *)",
       "Bash(mise run *)",
       "Bash(sqlite3 *)",
-      "Bash(uv run pytest *)",
-      "Bash(uv run python -m *)",
-      "Bash(uv run --package *)"
+      "Bash(uv run python -m *)"
     ]
   }
 }
