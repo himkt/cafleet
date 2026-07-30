@@ -1,13 +1,21 @@
-use include_dir::{Dir, include_dir};
 use rusqlite::Connection;
 
 use crate::error::CafleetError;
 
-/// The embedded `V<N>__<slug>.sql` chain (SPEC §8).
-pub static MIGRATIONS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/migrations");
-
 mod embedded {
     refinery::embed_migrations!("migrations");
+}
+
+/// The embedded `V<N>__<slug>.sql` chain (SPEC §8) as the refinery runner's
+/// `(version, slug)` pairs, sorted ascending.
+pub fn migration_chain() -> Vec<(u32, String)> {
+    let mut chain: Vec<(u32, String)> = embedded::migrations::runner()
+        .get_migrations()
+        .iter()
+        .map(|migration| (migration.version(), migration.name().to_string()))
+        .collect();
+    chain.sort();
+    chain
 }
 
 /// Open a connection to `database_url` (the `sqlite:///<path>` form only) and
@@ -34,18 +42,12 @@ pub fn migrate_to_head(conn: &mut Connection) -> Result<u32, CafleetError> {
     Ok(head_version())
 }
 
-/// The embedded chain's head version (`1` at cutover), derived from the
-/// migration filenames.
+/// The embedded chain's head version (`1` at cutover).
 pub fn head_version() -> u32 {
-    MIGRATIONS
-        .files()
-        .filter_map(|file| {
-            let name = file.path().file_name()?.to_str()?;
-            let (version, _slug) = name.strip_prefix('V')?.split_once("__")?;
-            version.parse().ok()
-        })
-        .max()
+    migration_chain()
+        .last()
         .expect("the embedded migration chain has at least the baseline")
+        .0
 }
 
 #[cfg(test)]
@@ -343,35 +345,26 @@ mod tests {
         assert_eq!(versions, vec![1]);
     }
 
+    // The chain guard reads the refinery-embedded listing, not the filesystem:
+    // `migration_chain()` returns the `(version, name)` pairs of the embedded
+    // runner's migrations, sorted ascending.
     #[test]
     fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_1() {
-        let mut versions: Vec<u32> = MIGRATIONS
-            .files()
-            .map(|file| {
-                let name = file.path().file_name().unwrap().to_str().unwrap();
-                assert!(name.ends_with(".sql"), "non-SQL migration file: {name}");
-                let rest = name
-                    .strip_prefix('V')
-                    .unwrap_or_else(|| panic!("migration {name} must start with V"));
-                let (version, slug) = rest
-                    .split_once("__")
-                    .unwrap_or_else(|| panic!("migration {name} must match V<N>__<slug>.sql"));
-                assert!(
-                    slug.strip_suffix(".sql").is_some_and(|s| !s.is_empty()),
-                    "migration {name} must carry a slug"
-                );
-                version
-                    .parse()
-                    .unwrap_or_else(|_| panic!("migration {name} must carry a numeric version"))
-            })
-            .collect();
-        versions.sort_unstable();
+        let chain = migration_chain();
+        let versions: Vec<u32> = chain.iter().map(|(version, _)| *version).collect();
         let contiguous: Vec<u32> = (1..=versions.len() as u32).collect();
         assert_eq!(versions, contiguous, "chain must be contiguous from 1");
-        assert!(
-            MIGRATIONS.get_file("V1__baseline.sql").is_some(),
-            "the single baseline must be V1__baseline.sql"
+        assert_eq!(
+            chain
+                .first()
+                .map(|(version, name)| (*version, name.as_str())),
+            Some((1, "baseline")),
+            "the single baseline heads the chain"
         );
-        assert_eq!(*versions.last().unwrap(), 1, "expected head version is 1");
+        assert!(
+            chain.iter().all(|(_, name)| !name.is_empty()),
+            "every migration carries a slug"
+        );
+        assert_eq!(versions.last(), Some(&1), "expected head version is 1");
     }
 }
