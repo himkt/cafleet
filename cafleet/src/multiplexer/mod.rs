@@ -65,6 +65,10 @@ pub trait CommandRunner {
     fn sleep(&self, seconds: f64);
 }
 
+/// The A8 over-fetch margin: both backends fetch `lines + 1000` so a blank
+/// tail deeper than the requested window still leaves drawn lines to keep.
+pub(crate) const CAPTURE_OVER_FETCH_LINES: i64 = 1000;
+
 /// The shared capture windowing (SPEC §6.5, amendment A8): split the fetched
 /// buffer on `\n` only (so `\r` survives for the CLI-side defrag), drop the
 /// trailing run of visually-blank lines (whitespace-only after per-line CSI

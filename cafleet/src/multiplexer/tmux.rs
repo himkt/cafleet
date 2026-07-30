@@ -275,6 +275,7 @@ impl TmuxMultiplexer {
                 "capture_pane: lines must be positive, got {lines}"
             )));
         }
+        let fetch_depth = lines + super::CAPTURE_OVER_FETCH_LINES;
         let raw = self.run(
             &tmux_argv(&[
                 "tmux",
@@ -283,7 +284,7 @@ impl TmuxMultiplexer {
                 "-t",
                 target_pane_id,
                 "-S",
-                &format!("-{lines}"),
+                &format!("-{fetch_depth}"),
             ]),
             None,
         )?;
@@ -698,10 +699,36 @@ mod tests {
         assert_eq!(
             runner.events(),
             vec![run_event(
-                &["tmux", "capture-pane", "-p", "-t", "%5", "-S", "-2"],
+                &["tmux", "capture-pane", "-p", "-t", "%5", "-S", "-1002"],
                 None,
             )],
-            "the fetch argv is unchanged by A8"
+            "A8 over-fetches by the fixed 1000-line margin"
+        );
+    }
+
+    // A8: the fetch depth is requested lines + 1000, so a blank tail deeper
+    // than N still leaves the drawn bottom inside the fetched buffer.
+    #[test]
+    fn capture_pane_over_fetch_survives_a_blank_tail_deeper_than_n() {
+        let runner = FakeRunner::with_binary("tmux");
+        runner.respond(Ok("drawn1\ndrawn2\n\n\n\n\n\n\n".to_string()));
+        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+        assert_eq!(
+            mux.capture_pane("%5", 2).unwrap(),
+            "drawn1\ndrawn2",
+            "a depth-N fetch window would have been all-blank here"
+        );
+        assert_eq!(
+            runner.run_argvs(),
+            vec![argv(&[
+                "tmux",
+                "capture-pane",
+                "-p",
+                "-t",
+                "%5",
+                "-S",
+                "-1002"
+            ])]
         );
     }
 

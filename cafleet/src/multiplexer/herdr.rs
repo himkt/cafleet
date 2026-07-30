@@ -458,6 +458,7 @@ impl HerdrMultiplexer {
                 "capture_pane: lines must be positive, got {lines}"
             )));
         }
+        let fetch_depth = lines + super::CAPTURE_OVER_FETCH_LINES;
         let raw = self.run(
             &herdr_argv(&[
                 "herdr",
@@ -467,7 +468,7 @@ impl HerdrMultiplexer {
                 "--source",
                 "recent-unwrapped",
                 "--lines",
-                &lines.to_string(),
+                &fetch_depth.to_string(),
             ]),
             None,
         )?;
@@ -1023,11 +1024,11 @@ mod tests {
                     "--source",
                     "recent-unwrapped",
                     "--lines",
-                    "20",
+                    "1020",
                 ],
                 None,
             )],
-            "the fetch argv is unchanged by A8"
+            "A8 over-fetches by the fixed 1000-line margin"
         );
 
         assert_eq!(
@@ -1070,8 +1071,35 @@ mod tests {
             runner
                 .run_argvs()
                 .iter()
-                .any(|argv| argv.contains(&"2".to_string())),
-            "the requested window still reaches the fetch argv"
+                .any(|argv| argv.contains(&"1002".to_string())),
+            "the over-fetched window (N + 1000) reaches the fetch argv"
+        );
+    }
+
+    // A8: the fetch depth is requested lines + 1000, so a blank tail deeper
+    // than N still leaves the drawn bottom inside the fetched buffer.
+    #[test]
+    fn capture_pane_over_fetch_survives_a_blank_tail_deeper_than_n() {
+        let runner = FakeRunner::with_binary("herdr");
+        runner.respond(Ok("drawn1\ndrawn2\n\n\n\n\n\n\n".to_string()));
+        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        assert_eq!(
+            mux.capture_pane("w1:p2", 2).unwrap(),
+            "drawn1\ndrawn2",
+            "a depth-N fetch window would have been all-blank here"
+        );
+        assert_eq!(
+            runner.run_argvs(),
+            vec![argv(&[
+                "herdr",
+                "pane",
+                "read",
+                "w1:p2",
+                "--source",
+                "recent-unwrapped",
+                "--lines",
+                "1002",
+            ])]
         );
     }
 

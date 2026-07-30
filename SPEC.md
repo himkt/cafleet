@@ -1759,7 +1759,9 @@ Director's `MultiplexerContext` and passes it directly.
   the Esc (honors the coding-agent `!` shortcut).
 - **`capture_pane(*, target_pane_id, lines=20) -> str`** — fail-fast. `lines <=
   0` → `capture_pane: lines must be positive, got <lines>`. Run `tmux
-  capture-pane -p -t <target_pane_id> -S -<lines>`, split the raw output on
+  capture-pane -p -t <target_pane_id> -S -<lines + 1000>` (the fixed
+  1000-line over-fetch margin, so a blank tail deeper than the requested window
+  still leaves drawn lines to keep), split the raw output on
   `"\n"` **only** (not a general line-splitter — must not also split on `\r`, to
   preserve the CLI's CR-defrag), drop the trailing run of visually-blank lines —
   a line is blank when it is whitespace-only after per-line CSI stripping (the
@@ -1947,8 +1949,9 @@ Each method's herdr realization:
   `send_poll_trigger`'s esc-then-run shape).
 - **`capture_pane(*, target_pane_id, lines=20) -> str`** — fail-fast. `lines <=
   0` → `capture_pane: lines must be positive, got <lines>`. Run `herdr pane read
-  <id> --source recent-unwrapped --lines <lines>`, then apply the same
-  windowing as the tmux backend: split on `"\n"` only, drop the trailing run of
+  <id> --source recent-unwrapped --lines <lines + 1000>` (the same fixed
+  1000-line over-fetch margin as the tmux backend), then apply the same
+  windowing: split on `"\n"` only, drop the trailing run of
   visually-blank lines (whitespace-only after per-line CSI stripping; kept
   lines keep their original bytes), and return the last `lines` remaining lines
   joined with `"\n"` (no trailing newline; the last-N window is enforced

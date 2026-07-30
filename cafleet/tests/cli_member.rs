@@ -605,7 +605,7 @@ fn monitor_capture_json_carries_the_content_hash() {
     assert!(
         cli.shim_calls()
             .iter()
-            .any(|line| line.contains("capture-pane -p -t %7 -S -20")),
-        "the default --lines is 20"
+            .any(|line| line.contains("capture-pane -p -t %7 -S -1020")),
+        "the default --lines is 20, over-fetched by the A8 margin"
     );
 }
