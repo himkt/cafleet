@@ -1,7 +1,3 @@
----
-icon: lucide/square-terminal
----
-
 # CLI options
 
 How the unified CAFleet CLI (`cafleet`) accepts configuration parameters. This

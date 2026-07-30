@@ -1,7 +1,3 @@
----
-icon: lucide/globe
----
-
 # WebUI API
 
 Base path: `/api`

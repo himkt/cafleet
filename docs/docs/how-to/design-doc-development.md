@@ -1,7 +1,3 @@
----
-icon: lucide/file-text
----
-
 # Design-doc-driven development
 
 CAFleet ships three skills that run spec-driven development as

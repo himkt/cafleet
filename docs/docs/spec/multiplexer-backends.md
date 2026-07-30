@@ -1,7 +1,3 @@
----
-icon: lucide/layout-grid
----
-
 # Multiplexer backends
 
 cafleet hosts every coding-agent member inside a **terminal-multiplexer pane**.

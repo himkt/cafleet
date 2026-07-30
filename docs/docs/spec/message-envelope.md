@@ -1,7 +1,3 @@
----
-icon: lucide/mail
----
-
 # Message envelope
 
 The shape of a `Message` envelope as it is persisted in SQLite, returned by the broker layer, and rendered by the CLI.

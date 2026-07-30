@@ -1,7 +1,3 @@
----
-icon: lucide/heart-handshake
----
-
 # Contributing
 
 CAFleet is developed using its own CAFleet-orchestrated skills — the

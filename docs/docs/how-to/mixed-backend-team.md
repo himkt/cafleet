@@ -1,7 +1,3 @@
----
-icon: lucide/users
----
-
 # Run a mixed-backend team
 
 A single Director can spawn `claude`, `codex`, and `opencode` members in the
@@ -54,104 +50,106 @@ deletes the fleet.
 The commands the agent runs, with literal ids — fleet `1`, root Director
 `2`, members `3`/`4`/`5`; your ids will differ.
 
-??? example "Expand the walkthrough"
+:::details Expand the walkthrough
 
-    Create the fleet — the operator declares the binary running in *your* pane
-    via `--coding-agent` because cafleet cannot auto-detect it
-    ([Coding agents](../concepts/coding-agents.md)):
+Create the fleet — the operator declares the binary running in *your* pane
+via `--coding-agent` because cafleet cannot auto-detect it
+([Coding agents](../concepts/coding-agents.md)):
 
-    ```bash
-    cafleet fleet create --name "demo" --coding-agent claude
-    ```
+```bash
+cafleet fleet create --name "demo" --coding-agent claude
+```
 
-    ```
-    1 director=2
-    ```
+```
+1 director=2
+```
 
-    Spawn one member per backend:
+Spawn one member per backend:
 
-    ```bash
-    cafleet member create --fleet-id 1 \
-      --name "alice" --description "claude member" \
-      --coding-agent claude --text "You are alice. Wait for instructions."
-    ```
+```bash
+cafleet member create --fleet-id 1 \
+  --name "alice" --description "claude member" \
+  --coding-agent claude --text "You are alice. Wait for instructions."
+```
 
-    ```
-    3 alice backend=claude pane=%7
-    ```
+```
+3 alice backend=claude pane=%7
+```
 
-    ```bash
-    cafleet member create --fleet-id 1 \
-      --name "bob" --description "codex member" \
-      --coding-agent codex --text "You are bob. Wait for instructions."
-    ```
+```bash
+cafleet member create --fleet-id 1 \
+  --name "bob" --description "codex member" \
+  --coding-agent codex --text "You are bob. Wait for instructions."
+```
 
-    ```
-    4 bob backend=codex pane=%8
-    ```
+```
+4 bob backend=codex pane=%8
+```
 
-    ```bash
-    cafleet member create --fleet-id 1 \
-      --name "carol" --description "opencode member" \
-      --coding-agent opencode --text "You are carol. Wait for instructions."
-    ```
+```bash
+cafleet member create --fleet-id 1 \
+  --name "carol" --description "opencode member" \
+  --coding-agent opencode --text "You are carol. Wait for instructions."
+```
 
-    ```
-    5 carol backend=opencode pane=%9
-    ```
+```
+5 carol backend=opencode pane=%9
+```
 
-    List the panes — only the `claude` pane titles itself with the member name
-    ([Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals)),
-    so use the `pane_id` column to locate `bob` and `carol`:
+List the panes — only the `claude` pane titles itself with the member name
+([Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals)),
+so use the `pane_id` column to locate `bob` and `carol`:
 
-    ```bash
-    cafleet member list --fleet-id 1
-    ```
+```bash
+cafleet member list --fleet-id 1
+```
 
-    ```
-    4 members:
-      member_id  name           kind      backend   pane_id  idle
-      ---------  -------------  --------  --------  -------  ----
-      2          Director       director  claude    %0       -
-      3          alice          member    claude    %7       -
-      4          bob            member    codex     %8       -
-      5          carol          member    opencode  %9       -
-    ```
+```
+4 members:
+  member_id  name           kind      backend   pane_id  idle
+  ---------  -------------  --------  --------  -------  ----
+  2          Director       director  claude    %0       -
+  3          alice          member    claude    %7       -
+  4          bob            member    codex     %8       -
+  5          carol          member    opencode  %9       -
+```
 
-    Message each member — repeat with `--to-member-id 4` and `--to-member-id 5`;
-    the envelope and the 2-line inline preview are identical for every backend
-    ([Push notifications](../spec/multiplexer-backends.md#push-notifications)):
+Message each member — repeat with `--to-member-id 4` and `--to-member-id 5`;
+the envelope and the 2-line inline preview are identical for every backend
+([Push notifications](../spec/multiplexer-backends.md#push-notifications)):
 
-    ```bash
-    cafleet message send --fleet-id 1 --from-member-id 2 --to-member-id 3 --text "alice: report status"
-    ```
+```bash
+cafleet message send --fleet-id 1 --from-member-id 2 --to-member-id 3 --text "alice: report status"
+```
 
-    ```
-    Message sent.
-    [10 | from:2 | 2026-06-11T09:05:00.123456+00:00]
-    alice: report status
-    ```
+```
+Message sent.
+[10 | from:2 | 2026-06-11T09:05:00.123456+00:00]
+alice: report status
+```
 
-    Tear down — repeat `member delete` for members `4` and `5`, then delete the
-    fleet:
+Tear down — repeat `member delete` for members `4` and `5`, then delete the
+fleet:
 
-    ```bash
-    cafleet member delete --fleet-id 1 --member-id 3
-    ```
+```bash
+cafleet member delete --fleet-id 1 --member-id 3
+```
 
-    ```
-    Member deleted.
-      member_id:  3
-      pane_id:    %7 (killed)
-    ```
+```
+Member deleted.
+  member_id:  3
+  pane_id:    %7 (killed)
+```
 
-    ```bash
-    cafleet fleet delete --fleet-id 1
-    ```
+```bash
+cafleet fleet delete --fleet-id 1
+```
 
-    ```
-    Deleted fleet 1. Deregistered 1 members.
-    ```
+```
+Deleted fleet 1. Deregistered 1 members.
+```
+
+:::
 
 Every `member create` / `member delete` flag and exit code is documented in
 [CLI options](../spec/cli-options.md#member-create).

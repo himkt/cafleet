@@ -1,7 +1,3 @@
----
-icon: lucide/scale
----
-
 # Model selection
 
 CAFleet Directors choose each member's backend and model by reading a local

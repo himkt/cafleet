@@ -1,7 +1,3 @@
----
-icon: lucide/layers
----
-
 # Overview
 
 CAFleet is a message broker and member registry for coding agents. All CLI

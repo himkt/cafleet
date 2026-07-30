@@ -1,7 +1,7 @@
 # Migrate the Documentation Site from Zensical to Rspress
 
 **Status**: Approved
-**Progress**: 13/29 tasks complete
+**Progress**: 17/29 tasks complete
 **Last Updated**: 2026-07-31
 
 ## Overview
@@ -289,10 +289,10 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 
 ### Step 3: Page conversions
 
-- [ ] Delete the `icon:` frontmatter from all 19 pages (drop empty frontmatter blocks) <!-- completed: -->
-- [ ] Convert `index.md` to the hero home page per the specification <!-- completed: -->
-- [ ] Convert the two `??? example` collapsibles to `:::details` containers (dedent bodies) <!-- completed: -->
-- [ ] Sweep internal links: fix the directory-style `quickstart/` link; leave relative `.md` links for `checkDeadLinks` to validate <!-- completed: -->
+- [x] Delete the `icon:` frontmatter from all 19 pages (drop empty frontmatter blocks) <!-- completed: 2026-07-31T07:46 -->
+- [x] Convert `index.md` to the hero home page per the specification <!-- completed: 2026-07-31T07:46 -->
+- [x] Convert the two `??? example` collapsibles to `:::details` containers (dedent bodies) <!-- completed: 2026-07-31T07:46 -->
+- [x] Sweep internal links: fix the directory-style `quickstart/` link; leave relative `.md` links for `checkDeadLinks` to validate <!-- completed: 2026-07-31T07:46 -->
 
 ### Step 4: Mermaid pre-rendering
 

@@ -1,7 +1,3 @@
----
-icon: lucide/cpu
----
-
 # Coding agents
 
 cafleet supports three coding-agent binaries inside member panes. The backend

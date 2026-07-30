@@ -1,7 +1,3 @@
----
-icon: lucide/heart-pulse
----
-
 # Monitoring
 
 `cafleet monitor` is a fleet-scoped foreground loop — `scan → wake → sleep` —

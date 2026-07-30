@@ -1,7 +1,3 @@
----
-icon: lucide/users
----
-
 # Member lifecycle
 
 The `cafleet member` CLI group wraps the two-step "register + spawn a

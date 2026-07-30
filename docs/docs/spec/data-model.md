@@ -1,7 +1,3 @@
----
-icon: lucide/table
----
-
 # Data model
 
 The `Message` payload is fully relational: every routing field plus the message
