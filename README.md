@@ -6,8 +6,11 @@ Agent Teams reinvented for collaborative coding across multiple coding-agent bac
 
 ## Install
 
+Download the archive for your platform from [GitHub Releases](https://github.com/himkt/cafleet/releases) — `cafleet-v<version>-<target>.tar.gz` for `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`, or `aarch64-unknown-linux-musl` — then extract the single `cafleet` binary onto your `PATH`:
+
 ```bash
-uv tool install cafleet     # or: pip install cafleet
+tar -xzf cafleet-v<version>-<target>.tar.gz
+mv cafleet ~/.local/bin/    # any directory on your PATH
 cafleet setup               # migrate the database schema + install the assets (skills and presets) for claude, codex, and opencode — repeat --skip AGENT to skip agents
 ```
 
@@ -19,7 +22,6 @@ Full guide: <https://himkt.github.io/cafleet/quickstart/>
 - [How-to guides](https://himkt.github.io/cafleet/how-to/mixed-backend-team/) — prompt-first task guides.
 - [Concepts](https://himkt.github.io/cafleet/concepts/overview/) — architecture and the ideas behind it.
 - [Specification](https://himkt.github.io/cafleet/spec/data-model/) — data model, message envelope, CLI, multiplexer backends, agent backends, WebUI API.
-- [API Reference](https://himkt.github.io/cafleet/api/broker/) — Python API generated from source.
 - [Contributing](https://himkt.github.io/cafleet/contributing/) — project layout, local development loop, and the contribution flow.
 
 ## License

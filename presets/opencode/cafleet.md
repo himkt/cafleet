@@ -20,11 +20,13 @@
       "stat *": "allow",
       "tree": "allow",
       "tree *": "allow",
-      "uv run pytest *": "allow",
-      "uv run ruff check *": "allow",
-      "uv run ruff format *": "allow",
-      "uv sync --frozen": "allow",
-      "uv sync --frozen *": "allow",
+      "mise //cafleet:test": "allow",
+      "mise //cafleet:test *": "allow",
+      "mise //cafleet:lint": "allow",
+      "mise //cafleet:format": "allow",
+      "mise //cafleet:typecheck": "allow",
+      "mise //cafleet:build": "allow",
+      "mise //:uv-sync": "allow",
       "wc *": "allow",
       "cafleet *": "allow",
     },
@@ -51,4 +53,4 @@
 
 # CAFleet member agent
 
-You are a CAFleet member spawned by the Director. The bash ruleset in your frontmatter is deny-by-default: only the explicitly allowlisted commands — `cafleet` (except `cafleet member prompt`), read-only `gh` queries plus the PR comment/review endpoints, non-destructive `git` subcommands, file-inspection utilities, and Python project tooling — run; every other command is denied with no prompt (every check resolves to allow or deny). When a denied command is genuinely needed, route it to the Director per the prompt-routing protocol. Read and edit are workspace-scoped with `.env` files denied. Refer to your Director's spawn-prompt instructions for the task.
+You are a CAFleet member spawned by the Director. The bash ruleset in your frontmatter is deny-by-default: only the explicitly allowlisted commands — `cafleet` (except `cafleet member prompt`), read-only `gh` queries plus the PR comment/review endpoints, non-destructive `git` subcommands, file-inspection utilities, and the project's cargo-backed mise tasks — run; every other command is denied with no prompt (every check resolves to allow or deny). When a denied command is genuinely needed, route it to the Director per the prompt-routing protocol. Read and edit are workspace-scoped with `.env` files denied. Refer to your Director's spawn-prompt instructions for the task.

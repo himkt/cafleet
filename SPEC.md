@@ -21,7 +21,7 @@ choice, not a merge.
 
 | Module | Scope |
 |---|---|
-| Persistence & Schema | data models, connection factory, Alembic-migrated SQLite schema |
+| Persistence & Schema | data models, connection factory, migration-managed SQLite schema |
 | Broker | synchronous data-access layer |
 | CLI | the whole `cafleet` command tree |
 | Output | text/JSON formatting, truncation, ANSI strip |
@@ -126,7 +126,7 @@ structure** below is the contract.
 ```
 cafleet
 ├── config          config half: Settings singleton, CAFLEET_* env
-├── db              connection factory, Alembic migration chain
+├── db              connection factory, embedded migration chain
 ├── multiplexer     Multiplexer interface, tmux + herdr backends, resolver, keystrokes
 ├── coding-agent    coding-agent interface + claude/codex/opencode
 ├── output          render + formatter layers
@@ -172,7 +172,7 @@ Edges (who depends on whom):
 
 - **config** — leaf. No internal deps.
 - **db** — depends on `config` (reads `settings.database_url`). Owns the
-  connection factory and the Alembic migration chain.
+  connection factory and the embedded migration chain.
 - **output** — depends on `config` (reads `settings.max_text_len`). Pure
   string/structure transforms otherwise.
 - **multiplexer** — leaf (process invocation only). Truncation for inline
@@ -233,12 +233,19 @@ boolean); map them to the target language's natural types.
 Every timestamp column (`created_at`, `registered_at`, `deregistered_at`,
 `status_timestamp`, `deleted_at`, `last_ping_at`, `started_at`, `last_tick_at`)
 is stored as an **ISO-8601 string** in UTC with an explicit `+00:00` offset and
-microsecond precision (the reference's `datetime.now(UTC).isoformat()` form).
+**fixed-width 6-digit microsecond precision**
+(`YYYY-MM-DDTHH:MM:SS.ffffff+00:00`).
 
 - **Storage type:** string (TEXT in SQLite).
-- **Production:** the current UTC time formatted as ISO-8601 with the `+00:00`
-  offset and microsecond precision, so rows written by any implementation
-  interleave and sort identically.
+- **Production:** the current UTC time formatted as
+  `YYYY-MM-DDTHH:MM:SS.ffffff+00:00`. The fractional part is always exactly
+  six zero-padded digits — including when the microsecond value is zero — so
+  every produced timestamp has the same width and rows interleave and sort
+  identically.
+- **Parsing:** the reader stays lenient for externally supplied values (CLI
+  inputs): it accepts a missing fractional part and any UTC offset spelling.
+  Leniency applies to parsing only; production always emits the fixed-width
+  form above.
 - **Comparison/ordering:** done **lexicographically on the string** in SQL
   (`ORDER BY status_timestamp DESC`) and in any max-over-timestamps (e.g.
   idle-seconds computation). This is correct only because all timestamps share
@@ -327,7 +334,7 @@ The unified shapes:
 | Field | Type | Notes |
 |---|---|---|
 | `coding_agent` | string | PK; one of `"claude"` / `"codex"` / `"opencode"` |
-| `cafleet_version` | string | the `importlib.metadata.version("cafleet")` string at install time |
+| `cafleet_version` | string | the CLI's compile-time version string at install time (§7.6) |
 | `installed_at` | string | UTC ISO-8601 with microsecond precision |
 
 Writes are upserts. Rows are written by the assets half of `cafleet setup` — one row per target agent (`claude`, `codex`, `opencode`, minus any `--skip`ped agent) — after that agent's skills and preset (where one exists) install successfully, so a row attests skills + preset; the db half never touches the rows. The rows feed the stale-assets guard on every fleet-scoped command group and the `cafleet doctor` assets report.
@@ -393,7 +400,7 @@ contract error string.
 ### 6.1 Persistence & Schema
 
 **Scope:** the nine data models (§5.2), the connection factory, and the
-Alembic-migrated SQLite schema. This module owns **no** CRUD/query logic and no
+migration-managed SQLite schema. This module owns **no** CRUD/query logic and no
 HTTP surface; all reads/writes/joins live in the broker (§6.2). Schema
 management is detailed in §8; this section covers the connection factory, the
 per-connection PRAGMAs, and the structural invariants.
@@ -409,12 +416,11 @@ disposes its own short-lived engine when it finishes.
   **no fallback** if construction fails — a bad `database_url` raises at
   connect time and propagates. Do not substitute an in-memory database or any
   other default on error.
-- **URL drivername normalization.** Before building the engine, the configured
-  database URL has its drivername **force-set to `sqlite`** (e.g. an async
-  `sqlite+aiosqlite://…` is rewritten to sync `sqlite://…`). The default URL is
-  already `sqlite://…`, so this is a no-op in the common case. The same
-  normalization is applied independently by the `setup` db-migration driver. An
-  async-driver suffix is stripped to the sync driver, never rejected.
+- **URL scheme validation.** The configured database URL must use the `sqlite`
+  scheme (`sqlite:///<path>`); a URL with any other scheme **fails loudly** at
+  connect time. The default URL is already `sqlite://…`. A user-supplied
+  `CAFLEET_DATABASE_URL` is otherwise passed through verbatim (§7.1). The same
+  validation is applied independently by the `setup` db-migration driver.
 - **Cross-thread sharing.** The connection is shared across threads (the
   reference disables SQLite's same-thread check). This is part of the contract.
 - Post-commit object usability (the reference keeps loaded attributes valid
@@ -833,6 +839,13 @@ section gives the per-command semantics. Exit codes are §7.2; application error
 (exit 1) and usage errors (exit 2) are printed as `Error: <message>` to stderr
 (usage errors additionally print a usage line).
 
+Framework-generated parse errors — usage banners, missing-required-argument,
+invalid-value / invalid-integer, unknown-argument, and unexpected-argument
+renderings — are **clap's native renderings**. For these, the contract is the
+exit code (2) and the identity of the offending flag or argument, not the exact
+text. Cafleet-authored strings (every error string quoted in this document)
+remain byte-exact.
+
 #### Global options & top-level group
 
 The top-level command is `cafleet`, group help `CAFleet — CLI for the message
@@ -842,7 +855,7 @@ broker and member registry.`. One option lives before any subcommand:
   subcommand dispatch, so it **bypasses** the `--fleet-id` requirement.
 
 Any other pre-subcommand option — including `--json` — is the parser's
-unknown-option usage error (`No such option`, exit 2).
+unknown-argument usage error (clap's native rendering, exit 2).
 
 #### The `--fleet-id` required option
 
@@ -1006,19 +1019,11 @@ Does **not** follow the shared `message` handler sequence. `fleet create`,
 `fleet delete` take the **required `--fleet-id` option** like every other
 fleet-scoped command (§6.3 `--fleet-id`).
 
-- **create** — `--name` (string, **required**; no `--name` → Click usage error
-  `Missing option '--name'.`, exit 2), `--coding-agent` (choice over the
-  coding-agent names, **required**), `--json` (shared), `--full` (documented).
-  Omitting `--coding-agent` exits 2 with Click's missing-option error for a
-  required `Choice` option, printed after the auto-generated usage block:
-
-  ```
-  Error: Missing option '--coding-agent'. Choose from:
-  	claude,
-  	codex,
-  	opencode
-  ```
-
+- **create** — `--name` (string, **required**; no `--name` → clap's native
+  missing-required-argument error naming `--name`, exit 2), `--coding-agent`
+  (choice over the coding-agent names, **required**; omitted → clap's native
+  missing-required-argument error naming `--coding-agent`, exit 2), `--json`
+  (shared), `--full` (documented).
   Requires a supported multiplexer: on a `MultiplexerError`
   → application error `cafleet fleet create must be run inside a tmux or herdr
   session` (exit 1, no DB writes).
@@ -1286,16 +1291,16 @@ errors propagate unwrapped.
 
 #### `setup`
 
-`setup` is a plain Click **command** (no subcommands) — the single onboarding
+`setup` is a plain **command** (no subcommands) — the single onboarding
 and schema-management entry point. Command help: `Migrate the database schema
 and install the coding-agent assets (skills and presets).` It takes no
-positional arguments — `cafleet setup <word>` fails with Click's standard
-`Got unexpected extra argument (<word>)` error — and does not accept
+positional arguments — `cafleet setup <word>` fails with clap's native
+unexpected-argument error — and does not accept
 `--fleet-id`.
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--skip AGENT` | no | Repeatable. `click.Choice(["claude", "codex", "opencode"])`; an unknown value fails with Click's standard invalid-choice error (exit 2). Duplicates are deduplicated. Help: `Skip the named agent's assets install (repeatable).` |
+| `--skip AGENT` | no | Repeatable. A choice over `claude` / `codex` / `opencode`; an unknown value fails with clap's native invalid-value error (exit 2). Duplicates are deduplicated. Help: `Skip the named agent's assets install (repeatable).` |
 
 Reads the CLI's own version and runs two independent halves, **in order** (db
 first, then assets):
@@ -1308,8 +1313,9 @@ first, then assets):
   both halves are reported failed.
 - **Assets half** — targets are the fixed list `claude`, `codex`, `opencode`
   (in that order) minus the `--skip`ped agents (no home auto-detection: each
-  target's agent directories are created as needed). Downloads the release
-  archive and installs the skills plus each target's bundled preset (where one
+  target's agent directories are created as needed). Installs, from the data
+  embedded in the binary at build time (§7.6) with **no network access**, the
+  skills plus each target's bundled preset (where one
   exists), upserting one `asset_installs` row per target after that target's
   install succeeds. On an application error, print `assets half failed:
   <message>` and record the failure. When all three agents are skipped, the
@@ -1324,41 +1330,30 @@ first, then assets):
 
 `cafleet setup --skip claude --skip codex --skip opencode` is the documented
 contributor/CI path: it is deterministic (independent of which agent homes
-exist), runs the db half only (the assets half is skipped and cannot
-contribute a failure), and never contacts GitHub — so it works on unreleased
-dev versions. It never records `asset_installs` rows.
+exist) and runs the db half only (the assets half is skipped and cannot
+contribute a failure). It never records `asset_installs` rows.
 
 ##### Shared helpers (the assets half)
 
 **resolve-targets** (the fixed list `claude`, `codex`, `opencode` minus the
 `--skip`ped agents, in that fixed order; all three skipped → the assets half
 is skipped entirely, per above);
-**resolve-download-url** (GET the GitHub release for the tag matching the CLI
-version, 30 s timeout; 404 → `no release found for version <version>`; other
-HTTP/network error → `could not reach the GitHub API (<reason>)`; find asset
-`cafleet-assets-v<version>.zip`; parse failure → `could not parse the GitHub API
-response`; missing asset → `asset cafleet-assets-v<version>.zip not found in
-release <version>`); **download-and-extract** (download to a temp file named
-`assets.zip`; **reject any member whose path is absolute or contains a `..`
-component** with `archive member '<member>' has an unsafe path; rejecting the
-archive`; a malformed/unreadable archive → `release asset is malformed`;
-validate the extracted `skills/` dir contains exactly the three skill dirs
-`cafleet`, `cafleet-design-doc`, `cafleet-research`, and that both preset
-archive sources `presets/opencode/cafleet.md` and `presets/codex/cafleet.rules`
-are regular files in the extracted root, else `release asset is malformed`);
 **install-skills** (per target, create the target's skills dir as needed, then
-copy each skill dir into it, removing any existing copy first; a filesystem
-error → `failed to install skills into <skills_dir>: <error>`; success prints
+copy each embedded skill dir — exactly the three skill dirs `cafleet`,
+`cafleet-design-doc`, `cafleet-research` — into it, removing any existing copy
+first; a filesystem error → `failed to install skills into <skills_dir>: <error>`;
+success prints
 `<agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>)
 -> <skills dir>`);
-**install-preset** (per target with a preset — codex: archive source
+**install-preset** (per target with a preset — codex: embedded source
 `presets/codex/cafleet.rules` → `~/.codex/rules/cafleet.rules`; opencode:
 `presets/opencode/cafleet.md` → `~/.opencode/agents/cafleet.md`; claude has
 none: create the target's parent directory chain recursively, remove any
-existing target in this explicit check order — `is_symlink()` → unlink; else
-`is_dir()` → rmtree; else if it exists → unlink (the symlink check comes first
-because `is_dir()` follows symlinks and `shutil.rmtree` refuses them) — then
-copy the archive source in; a filesystem error → `failed to install preset into
+existing target in this explicit check order — a symlink → unlink; else a
+directory → recursive delete; else if it exists → unlink (the symlink check
+comes first because the directory check follows symlinks and the recursive
+delete refuses them) — then
+copy the embedded source in; a filesystem error → `failed to install preset into
 <target>: <error>`; success prints `<agent>: installed preset (v<version>) ->
 <target>`). A target's `asset_installs` row is upserted only after both its
 skills and its preset (where one exists) install successfully. Known skills
@@ -1398,11 +1393,10 @@ checked. Exempt surfaces: `setup` (must remain runnable to repair), `doctor`
 (reports instead of blocking), and `server` (human-facing WebUI, not
 fleet-scoped).
 
-**Help interaction.** Group-level help (`cafleet fleet --help`) is parsed
-eagerly before the callback runs and always works — even under a missing or
-stale install. Subcommand help (`cafleet fleet create --help`) runs the group
-callback first, so under a missing/stale install the guard **errors instead of
-printing help**.
+**Help interaction.** `--help` renders at parse time and exits before any
+command body runs, so neither group-level help (`cafleet fleet --help`) nor
+subcommand help (`cafleet fleet create --help`) triggers the guard — both
+always print help, even under a missing or stale install.
 
 #### Spawn-prompt resolution (used by `member create`)
 
@@ -2085,7 +2079,7 @@ One scan pass, steps in order:
        `wake_reasons` as a ` [<reasons joined by ",">]` suffix before ` -> wake
        monitor`, with this **exact** format:
        ```
-       {now.isoformat()} due member {member_id} ({name}) [{reasons}] -> wake monitor
+       {now as canonical ISO-8601, §5.1} due member {member_id} ({name}) [{reasons}] -> wake monitor
        ```
        `name` is emitted **raw** (sanitization applies only to the keystroke
        payload). The only native-status reason that can appear is `status:done`,
@@ -2308,8 +2302,8 @@ positional.
 
 #### codex rules file
 
-The codex auto-approval rules for `cafleet` commands are a static file shipped
-in the assets release archive as `presets/codex/cafleet.rules` and installed to
+The codex auto-approval rules for `cafleet` commands are a static file embedded
+in the binary (source `presets/codex/cafleet.rules`) and installed to
 `~/.codex/rules/cafleet.rules` (expanding `~`) by the assets half of `setup`
 (§6.3), overwriting any existing target. The file is not a spawn precondition —
 codex's `ensure_available` is PATH-check-only — and codex loads every `*.rules`
@@ -2329,8 +2323,8 @@ prefix_rule(
 
 #### opencode preset
 
-The `cafleet` agent definition is a static file shipped in the assets release
-archive as `presets/opencode/cafleet.md` and installed to
+The `cafleet` agent definition is a static file embedded in the binary
+(source `presets/opencode/cafleet.md`) and installed to
 `~/.opencode/agents/cafleet.md` (expanding `~`) by the assets half of `setup`
 (§6.3), overwriting any existing target. **Two opencode base directories serve
 two distinct purposes** and are not interchangeable: the agent preset lives
@@ -2377,11 +2371,13 @@ around command names and `.env`):
       "stat *": "allow",
       "tree": "allow",
       "tree *": "allow",
-      "uv run pytest *": "allow",
-      "uv run ruff check *": "allow",
-      "uv run ruff format *": "allow",
-      "uv sync --frozen": "allow",
-      "uv sync --frozen *": "allow",
+      "mise //cafleet:test": "allow",
+      "mise //cafleet:test *": "allow",
+      "mise //cafleet:lint": "allow",
+      "mise //cafleet:format": "allow",
+      "mise //cafleet:typecheck": "allow",
+      "mise //cafleet:build": "allow",
+      "mise //:uv-sync": "allow",
       "wc *": "allow",
       "cafleet *": "allow",
     },
@@ -2408,7 +2404,7 @@ around command names and `.env`):
 
 # CAFleet member agent
 
-You are a CAFleet member spawned by the Director. The bash ruleset in your frontmatter is deny-by-default: only the explicitly allowlisted commands — `cafleet` (except `cafleet member prompt`), read-only `gh` queries plus the PR comment/review endpoints, non-destructive `git` subcommands, file-inspection utilities, and Python project tooling — run; every other command is denied with no prompt (every check resolves to allow or deny). When a denied command is genuinely needed, route it to the Director per the prompt-routing protocol. Read and edit are workspace-scoped with `.env` files denied. Refer to your Director's spawn-prompt instructions for the task.
+You are a CAFleet member spawned by the Director. The bash ruleset in your frontmatter is deny-by-default: only the explicitly allowlisted commands — `cafleet` (except `cafleet member prompt`), read-only `gh` queries plus the PR comment/review endpoints, non-destructive `git` subcommands, file-inspection utilities, and the project's cargo-backed mise tasks — run; every other command is denied with no prompt (every check resolves to allow or deny). When a denied command is genuinely needed, route it to the Director per the prompt-routing protocol. Read and edit are workspace-scoped with `.env` files denied. Refer to your Director's spawn-prompt instructions for the task.
 ````
 
 The body is a single physical paragraph (no internal hard line breaks after the
@@ -2438,37 +2434,22 @@ env-var table is §7.1.
 
 #### App factory (`create_app`)
 
-Takes an optional explicit "WebUI dist directory" argument and returns the
-configured HTTP application:
+Returns the configured HTTP application:
 
-1. Constructs an app titled `CAFleet Admin`, version `0.1.0`. **This `0.1.0` is a
-   hardcoded literal, independent of the CLI's package version.** The CLI
-   `--version` output and `setup`'s assets-release tag (§6.3) read the **installed
-   package version** dynamically; the WebUI app-version string does not track it.
-   Keep them decoupled.
-2. **Registers the `/api/*` router before mounting the static file server.**
+1. Constructs the HTTP application. The app exposes **no framework metadata
+   surface** — no OpenAPI/schema or interactive-docs endpoints and no
+   app-version string. The one canonical version is the binary's compile-time
+   version (§7.6), read by `--version` and the stale-assets guard.
+2. **Registers the `/api/*` router before the static file server.**
    This ordering is load-bearing: unmatched `/api/*` paths must produce a JSON
    404 from the router, never be swallowed by the SPA fallback.
-3. The "not built" warning is enabled only when the caller passed no explicit
-   dist directory (the default-dir branch); an explicit directory **suppresses**
-   it. With no directory given, it resolves the default dist dir (`<webui module
-   dir>/dist`).
-4. If the warning is enabled **and** the resolved dist path does not exist, print
-   this exact one-line text to **stderr** (one time, at factory call):
-   ```
-   warning: admin WebUI is not built. / will return 404. Run 'mise //admin:build'.
-   ```
-5. If the dist path exists, mount the SPA static file server at `/`, named
-   `webui`. If it does not exist, no mount is added: `/` and every non-API path
-   404, while `/api/*` still works.
-
-A module-level app singleton is created by calling `create_app()` with no
-argument (the server target); because it uses the default dir, it emits the
-stderr warning when the SPA is unbuilt.
+3. Serves the SPA from the **admin WebUI dist embedded in the binary at build
+   time** (§7.6). A missing dist cannot occur at runtime — the build fails
+   without the dist — so there is no unmounted state.
 
 #### SPA static file server
 
-Wraps a directory and a reserved-prefix set `("ui", "api")`. Delegates to the
+Wraps the embedded dist and a reserved-prefix set `("ui", "api")`. Delegates to the
 static handler; returns any non-404 result unchanged. On a 404: if the **first
 path segment** (the path with the leading `/` stripped — split on the first `/`,
 take segment 0) is in the reserved set, re-raise the genuine 404; otherwise serve
@@ -2498,8 +2479,8 @@ nothing but **drops** `member_id` and `last_stall_check_at`, exposing
 `{interval_seconds, last_ping_at, enabled}`. `GET /api/fleets` returns a **bare JSON
 array**; every other list endpoint wraps in an object (member rows under
 `members`, message rows under `messages`). All HTTP errors serialize as
-`{"detail": <string>}`; body-validation failures use the framework's default
-`422` validation-error body instead.
+`{"detail": <string>}`; a request-validation failure returns `422` with the
+same `{"detail": <string>}` shape (a single human-readable string).
 
 #### The 9 routes
 
@@ -2532,7 +2513,7 @@ array**; every other list endpoint wraps in an object (member rows under
   object).
 - **`PATCH /api/members/{member_id}/monitor`** — fleet-scoped. Body
   `{interval_seconds?: int, enabled?: bool}` (both optional). A present
-  `interval_seconds` must be **≥ 1**; `< 1` → `422` (framework default). A
+  `interval_seconds` must be **≥ 1**; `< 1` → `422`, `{"detail": <string>}`. A
   `null`/`null` patch is a valid no-op. Pre-check the config; absent → `404`,
   detail `Member not enrolled`. Then update; if the member was deregistered
   between the pre-check and the update (TOCTOU), the raised error is caught and
@@ -2569,10 +2550,11 @@ silent fallback. `status` is the renamed `status_state`; `body` the renamed
 
 #### `cafleet server` launcher
 
-Runs the WebUI app under an HTTP server. `--host` (default `settings.broker_host`)
+Runs the WebUI app under the **built-in HTTP server** (in-process — no
+external server program). `--host` (default `settings.broker_host`)
 and `--port` (default `settings.broker_port`, integer) both read their defaults
 from settings at command-definition time and are shown in `--help`. Serves the
-app singleton in a single process **with no auto-reload**. Because the defaults
+app in a single process **with no auto-reload**. Because the defaults
 come from settings, `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` are honored
 indirectly. This is the only entry point to the HTTP server.
 
@@ -2610,7 +2592,7 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 
 | Field | Env var | Type | Default |
 |---|---|---|---|
-| `database_url` | `CAFLEET_DATABASE_URL` | string | `sqlite:///` + `~/.local/share/cafleet/cafleet_v5.db` (home expanded **at startup**) |
+| `database_url` | `CAFLEET_DATABASE_URL` | string | `sqlite:///` + `~/.local/share/cafleet/cafleet_v6.db` (home expanded **at startup**) |
 | `broker_host` | `CAFLEET_BROKER_HOST` | string | `"127.0.0.1"` |
 | `broker_port` | `CAFLEET_BROKER_PORT` | integer (16-bit port) | `8000` |
 | `max_text_len` | `CAFLEET_MAX_TEXT_LEN` | non-negative integer | `200` |
@@ -2631,7 +2613,7 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 - **Default DB URL** expands `~` to `$HOME` **only for the factory default**; a
   user-supplied `CAFLEET_DATABASE_URL` is passed through verbatim (no `~`
   expansion, so a user value must already be absolute). Net default on home
-  `/home/u`: `sqlite:////home/u/.local/share/cafleet/cafleet_v5.db` (four slashes).
+  `/home/u`: `sqlite:////home/u/.local/share/cafleet/cafleet_v6.db` (four slashes).
 - A non-integer `broker_port`/`max_text_len` must **fail loudly at startup** (a
   hard validation error, not a silent default).
 - `max_text_len` truncates only CLI echo + the broker inline-preview keystroke.
@@ -2710,10 +2692,9 @@ UTF-8 (no ASCII escaping).
 - The monitor loop emits per-due-member heartbeat lines to **stdout**
   (`{iso} due member {id} ({name}) [{reasons}] -> wake monitor`), `name` raw
   (unsanitized), the `[{reasons}]` suffix listing that member's joined wake reasons.
-- The "WebUI not built" warning, `member create` rollback diagnostics,
-  and `monitor start`'s "no monitoring member" warning all
-  go to **stderr**. Preserve the stream choice (stdout vs. stderr) — it is part
-  of the observable contract.
+- `member create` rollback diagnostics and `monitor start`'s "no monitoring
+  member" warning go to **stderr**. Preserve the stream choice (stdout vs.
+  stderr) — it is part of the observable contract.
 
 ### 7.5 Time discipline
 
@@ -2721,16 +2702,37 @@ Every "now" is timezone-aware UTC; every DB-boundary write serializes to the
 canonical ISO-8601 string. See §5.1 — string comparison for ordering, parse only
 for age math.
 
+### 7.6 Packaging & distribution
+
+`cafleet` ships as a **single static binary** distributed on GitHub Releases.
+
+- **Release targets:** `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`,
+  `aarch64-unknown-linux-musl`.
+- **Tag = bare version:** a release is tagged with the bare version string
+  (e.g. `0.22.0`) — no `v` prefix.
+- **Assets:** one archive per target, named
+  `cafleet-v<version>-<target>.tar.gz`, each containing exactly one file: the
+  `cafleet` binary.
+- **Version string:** the binary's compile-time package version is the single
+  canonical version. It feeds `--version` (`cafleet <version>`), the
+  stale-assets guard comparison (§6.3), and the
+  `asset_installs.cafleet_version` rows (§5.2).
+- **Embedded data:** the skills tree, the presets (§6.7), the migration chain
+  (§8), and the admin WebUI dist (§6.8) are embedded in the binary at build
+  time; `cafleet setup` installs assets offline from the embedded data (§6.3)
+  with no network access.
+
 ---
 
 ## 8. Database schema
 
-**Schema** = the seven application tables of §5.2 plus Alembic's
-`alembic_version` bookkeeping table (a single-column `version_num` table holding
-one row: the current revision). The schema is created and evolved by a
-**chain of Alembic migrations** bundled inside the wheel; applying the chain in
-place preserves existing data (§11). Column types, defaults, FK rules,
-AUTOINCREMENT, and the create-order quirk are in §6.1.
+**Schema** = the seven application tables of §5.2 plus the migration ledger
+table `refinery_schema_history` (the bookkeeping table recording one row per
+applied migration: version, name, applied-on timestamp, checksum). The schema
+is created and evolved by a **chain of embedded SQL migrations** — numbered
+files `V<N>__<slug>.sql`, contiguous from 1, compiled into the binary;
+applying the chain in place preserves existing data (§11). Column types,
+defaults, FK rules, AUTOINCREMENT, and the create-order quirk are in §6.1.
 
 **Indexes (non-unique), at head:**
 
@@ -2738,47 +2740,24 @@ AUTOINCREMENT, and the create-order quirk are in §6.1.
 - `idx_messages_owner_member_status_ts` on `messages(owner_member_id, status_timestamp)`
 - `idx_messages_from_member_status_ts` on `messages(from_member_id, status_timestamp)`
 
-**The migration chain.** Six linear revisions: the initial revision `0001`
-(no predecessor), `0002` (`down_revision` `0001`), which drops the
-`member_placements.coding_agent` DDL default via a batch `alter_column`,
-`0003` (`down_revision` `0002`), which renames the `skill_installs`
-table to `asset_installs` (create `asset_installs`, copy every row across,
-drop `skill_installs`; the `downgrade()` reverses the same three steps) —
-data-preserving in both directions; the columns are unchanged — `0004`
-(`down_revision` `0003`), a data-only migration folding legacy
-`messages.status_state = 'canceled'` rows into `completed`
-(`status_timestamp` untouched; `downgrade()` is a no-op — the fold is not
-invertible), `0005` (`down_revision` `0004`), which adds the monitor
-stall-episode columns and delivery/gate tables that revision `0006` removes
-again, and the head revision `0006` (`down_revision` `0005`).
-
-Revision `0006` narrows `monitor_config` to the four §5.2 schedule columns via
-a **batch recreate** (SQLite cannot drop table-level CHECK constraints in
-place; safe under FK enforcement because `monitor_config` is a child table),
-**preserving** `member_id`, `interval_seconds`, `enabled`, `last_ping_at`, and
-`last_stall_check_at` for every row, and drops the two runtime-ephemeral
-monitor delivery/gate tables of the pre-0006 schema. Its `downgrade()`
-re-adds the dropped columns with their constraints (the episode state
-defaulting to `"clear"`, the rest NULL) and recreates the two tables empty —
-the pre-0006 schema, with episode state legitimately reset because it was
-runtime-ephemeral.
-`0001` creates the full §5.2 schema in one step, in this order:
+**The migration chain.** One migration at cutover: the baseline
+`V1__baseline.sql`, which creates the full §5.2 head schema in one step, in
+this order:
 
 1. `members` (+ `idx_members_fleet_status`) — created **first** because every
    other FK-bearing table references it; `members.fleet_id` forward-references
    the still-uncreated `fleets` (§6.1). AUTOINCREMENT.
 2. `fleets` — AUTOINCREMENT.
-3. `skill_installs` (renamed to `asset_installs` by revision `0003`) — TEXT PK
-   `coding_agent`, no AUTOINCREMENT, no FK constraint. Columns: `coding_agent`
-   TEXT PK, `cafleet_version` TEXT NOT NULL, `installed_at` TEXT NOT NULL.
-   Upsert semantics; rows written by the assets half of `setup` — one row per
-   target agent (the fixed list `claude`, `codex`, `opencode` minus any
-   `--skip`ped agent) — after that target's skills and preset (where one
-   exists) install successfully — the row attests skills + preset; never
-   written by the db half. Feeds the stale-assets guard and `doctor`.
+3. `asset_installs` — TEXT PK `coding_agent`, no AUTOINCREMENT, no FK
+   constraint. Columns: `coding_agent` TEXT PK, `cafleet_version` TEXT NOT
+   NULL, `installed_at` TEXT NOT NULL. Upsert semantics; rows written by the
+   assets half of `setup` — one row per target agent (the fixed list `claude`,
+   `codex`, `opencode` minus any `--skip`ped agent) — after that target's
+   skills and preset (where one exists) install successfully — the row attests
+   skills + preset; never written by the db half. Feeds the stale-assets guard
+   and `doctor`.
 4. `member_placements` — PK=FK `member_id`, not AUTOINCREMENT; `backend` DDL
-   default `"tmux"`; `0001` creates `coding_agent` with a DDL default
-   `"claude"` that revision `0002` removes (no default at head).
+   default `"tmux"`; `coding_agent` NOT NULL with no DDL default.
 5. `monitor_config` — PK=FK `member_id` ON DELETE CASCADE, `interval_seconds`
    default 60, `enabled` default 1; not AUTOINCREMENT.
 6. `monitor_runtime` — PK=FK `fleet_id` ON DELETE RESTRICT, `tick_seconds`
@@ -2786,22 +2765,32 @@ runtime-ephemeral.
 7. `messages` (+ `idx_messages_owner_member_status_ts`, `idx_messages_from_member_status_ts`)
    — AUTOINCREMENT.
 
+There are no CHECK constraints. Future schema changes are hand-written
+numbered files `V<N>__<slug>.sql` appended to the chain; the chain stays
+contiguous from 1 with exactly one baseline.
+
 A fresh DB starts with **no rows in any application table** (only
-`alembic_version` holds its single revision row); monitor enrollment is written
+`refinery_schema_history` holds its per-migration rows); monitor enrollment is written
 at runtime (the Director at 180s by `create_fleet`, pane-bound members at 720s
 by `register_member`, §6.2), never seeded by the schema. `asset_installs` rows
 are written at install time, not by the schema.
 
 **`setup` db-migration driver** (the db half of `setup`, §6.3). Procedure: (1)
-derive a sync SQLite URL by forcing the drivername to `sqlite`; (2) extract the
-DB file path — if empty → application error `database URL has no file path`;
-(3) create the file's parent directory; (4) inspect the DB: existing tables but
-no `alembic_version` → the unversioned-DB refusal (§6.3); a recorded revision
-unknown to the bundled chain → the ahead-of-head refusal (§6.3); (5) already at
-head (`current_rev == head_rev`) → print `Already at head (<head>); nothing to
-do.` and stop; (6) otherwise upgrade to head and print the created/upgraded
-line (§6.3). The driver's engine is disposed when the command finishes
-(success or failure).
+validate the URL scheme is `sqlite` (§6.1); (2) extract the DB file path — if
+empty → application error `database URL has no file path`; (3) create the
+file's parent directory; (4) inspect the DB: existing tables but no
+`refinery_schema_history` → the **unversioned-DB refusal**, application error
+`DB has existing tables but no refinery_schema_history. Refusing to migrate an
+unversioned database.`; a recorded version greater than the embedded chain's
+head → the **ahead-of-head refusal**, application error `DB schema is at
+version <M> which is unknown to this version of cafleet. Refusing to downgrade
+automatically.`; (5) already at head (recorded version == head) → print
+`Already at head (<N>); nothing to do.` and stop; (6) otherwise apply the
+pending migrations to head and print `Created <db_file> and applied migrations
+to head (<N>).` when no version was recorded before the run (a fresh or
+table-less DB), else `Upgraded from <M> to <N>.`. `<M>` / `<N>` are the
+integer migration versions (the head is `1` at cutover). The driver's
+connection is closed when the command finishes (success or failure).
 
 ---
 
@@ -2921,15 +2910,15 @@ The decisions that shape this surface (full rationale in the design doc):
 - **`--fleet-id` is a required option with no environment default** (§6.3); a
   missing value is the shared callback's exit-1 error.
 - **One error/exit model** (§7.2): usage → exit 2, application/runtime → exit 1.
-- **Alembic-migrated schema** (§8): a linear chain (`0001 → 0002 → 0003 → 0004`)
-  with the current revision recorded in `alembic_version`; no
-  cross-implementation DB interoperability. Re-running `cafleet setup` (the db
-  half runs first) on a database created by this chain applies any pending
+- **Migration-managed schema** (§8): an embedded chain of numbered SQL
+  migrations with the applied versions recorded in `refinery_schema_history`;
+  no cross-implementation DB interoperability. Re-running `cafleet setup` (the
+  db half runs first) on a database created by this chain applies any pending
   migrations in place and preserves all existing rows, message history
   included; it refuses to auto-downgrade an ahead-of-head database and
   refuses an unversioned database with existing tables. Upgrade path: after
-  `uv tool upgrade cafleet`, the first fleet-scoped command errors with the
-  stale-assets message and instructs the operator to run `cafleet setup`
+  installing a new release binary, the first fleet-scoped command errors with
+  the stale-assets message and instructs the operator to run `cafleet setup`
   to reinstall.
 - **Stale-assets guard** (§6.3): every fleet-scoped group callback validates
   recorded `asset_installs` versions against the runtime CLI version before any

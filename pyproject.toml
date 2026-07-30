@@ -9,7 +9,6 @@ members = ["./cafleet"]
 [dependency-groups]
 dev = [
   "bump-my-version>=1.3.0",
-  "mkdocstrings-python>=2.0.3",
   "zensical>=0.0.43",
 ]
 research = [

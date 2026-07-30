@@ -40,8 +40,8 @@ You are a documentation writer for the CAFleet project. Your job is to keep two 
 README.md is a thin entry point with exactly four surfaces, in order:
 
 1. **Title, demo video, and pitch** -- Project name, the demo video asset, and a one-paragraph pitch aligned with docs/index.md (no bullet list)
-2. **Install** -- The two-command install block (`uv tool install cafleet` / `cafleet setup`) plus a link to the full install guide
-3. **Documentation** -- Links to the docs-site sections (Quickstart, How-to guides, Concepts, Specification, Contributing, API Reference)
+2. **Install** -- The GitHub-Releases install block (download the per-target `cafleet-v<version>-<target>.tar.gz` archive, place the single `cafleet` binary on `PATH`, then run `cafleet setup`) plus a link to the full install guide
+3. **Documentation** -- Links to the docs-site sections (Quickstart, How-to guides, Concepts, Specification, Contributing)
 4. **License** -- MIT
 
 All other descriptive content (features, architecture, quick start, CLI usage, API overview, tech stack, project structure, development) lives in docs/ only -- never add it back to README.md.

@@ -144,7 +144,7 @@ missing.
 The preset's `bash` ruleset is deny-by-default: a `"*": "deny"` base first,
 then an explicit allowlist translated from the operator's Claude Code
 `permissions.allow` set (`cafleet *`, non-destructive `git` subcommands,
-file-inspection utilities, and Python project tooling). opencode selects the
+file-inspection utilities, and the project's cargo-backed mise tasks). opencode selects the
 **last** matching rule, so this order is the safety floor — every check
 resolves to `allow` or `deny`, never `ask`. A permission popup in an opencode pane is
 therefore a regression escape, not a runtime decision: capture the pane,
@@ -161,7 +161,7 @@ classes of bypass under allowed globs persist:
 |---|---|---|
 | MCP-contributed tools | — | They bypass the permission evaluator entirely |
 | Shell chaining or argument-space abuse inside an allowed `cmd *` match | <code>git log --stat; curl … &#124; sh</code> matching `git log *` | The compound line's leading tokens match the allowed glob |
-| Interpreter or hook execution via allowed tooling | `uv run pytest *` executes workspace-writable test code; `git commit *` runs `.git/hooks` | The allowed command is itself the execution vector |
+| Interpreter or hook execution via allowed tooling | `mise //cafleet:test *` executes workspace-writable test code; `git commit *` runs `.git/hooks` | The allowed command is itself the execution vector |
 
 cafleet ships no MCP stanzas, and operators MUST NOT add MCP servers to any
 opencode config their machine loads.

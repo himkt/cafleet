@@ -31,8 +31,8 @@ each other; members in different fleets are invisible to one another.
 ```mermaid
 %%{init: {'theme': 'default', 'themeVariables': {'fontSize': '16px'}}}%%
 flowchart LR
-    CLI["CLI (click)"] --> Broker["broker<br/>(sync SQLAlchemy)"]
-    WebUI["Admin WebUI"] --> Server["FastAPI server"]
+    CLI["CLI"] --> Broker["broker<br/>(sync SQLite access)"]
+    WebUI["Admin WebUI"] --> Server["HTTP server"]
     Server --> WebUIAPI["WebUI API layer"]
     WebUIAPI --> Broker
     Monitor["monitor loop<br/>(per-fleet heartbeat, member background task)"] --> Broker

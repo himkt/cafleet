@@ -191,8 +191,7 @@ Updates a member's interval and/or enabled flag and returns the new config.
 }
 ```
 
-Both fields are optional (Pydantic `MonitorPatch`); `interval_seconds >= 1` —
-the same lower bound the CLI `--interval` (`click.IntRange(min=1)`) enforces.
+Both fields are optional; a present `interval_seconds` must be `>= 1`.
 
 **Response** (200 OK): the updated config, same shape as the `GET` above.
 
@@ -201,7 +200,7 @@ the same lower bound the CLI `--interval` (`click.IntRange(min=1)`) enforces.
 
 | Status | `detail` | Trigger |
 |---|---|---|
-| 422 | A validation array, not a string — see [Error Format](#error-format) | An invalid body: `interval_seconds < 1`, or a wrong type |
+| 422 | A `detail` string — see [Error Format](#error-format) | An invalid body: `interval_seconds < 1`, or a wrong type |
 | 404 | `Member not enrolled` | The member is not in the fleet, or is not one of the [enrolled member classes](../concepts/monitoring.md#the-watched-set) |
 
 ### GET /api/members/{member_id}/inbox — Inbox Messages
@@ -339,16 +338,15 @@ X-Fleet-Id: <fleet_id>
 
 | Status | `detail` | Trigger |
 |---|---|---|
-| 422 | A validation array, not a string — see [Error Format](#error-format) | Missing or invalid `from_member_id`, `to_member_id`, or `text` |
+| 422 | A `detail` string — see [Error Format](#error-format) | Missing or invalid `from_member_id`, `to_member_id`, or `text` |
 | 400 | `from_member not in fleet` | `from_member_id` is not an active member in the caller's fleet |
 | 404 | `Member not found` | `to_member_id` does not resolve to an active member in the fleet (unknown, cross-fleet, or deregistered) |
 
 ## Error Format
 
-WebUI API errors use FastAPI's default error shape. `HTTPException` responses (400 / 404) carry a `detail` string:
+Every WebUI API error — the 400 / 404 responses and request-validation
+failures (422) alike — carries a single `detail` string:
 
 ```json
 {"detail": "Error message"}
 ```
-
-Request-body validation failures (422) use FastAPI's default validation error format — a `detail` array of per-field error objects.

@@ -6,9 +6,9 @@ icon: lucide/table
 
 The `Message` payload is fully relational: every routing field plus the message
 body lives in its own typed column. The only JSON `TEXT` blob is
-`members.member_card_json`. The runtime engine is SQLAlchemy 2.x with the
-synchronous `pysqlite` driver; the schema is managed by a chain of Alembic
-migrations bundled inside the wheel — run `cafleet setup` to migrate to head
+`members.member_card_json`. The database is SQLite, accessed synchronously
+and bundled into the binary; the schema is managed by a chain of SQL
+migrations embedded in the binary — run `cafleet setup` to migrate to head
 (idempotent, data-preserving; see [Storage](../concepts/storage.md)). The exact column-level DDL contract lives
 in the repository's `SPEC.md`.
 
@@ -143,10 +143,6 @@ in its conversation context, not in the database.
 members are enrolled and the cadence semantics are defined in
 [Monitoring](../concepts/monitoring.md#the-watched-set).
 
-Alembic revision `0006` (the head) narrows `monitor_config` to the four
-schedule columns via a data-preserving batch recreate and removes the
-runtime-ephemeral monitor delivery/gate tables of the pre-0006 schema.
-
 ### `asset_installs`
 
 One upserted row per coding agent, recording the CLI version whose skills
@@ -158,7 +154,7 @@ guard and the `cafleet doctor` report (see
 ## Foreign key enforcement
 
 SQLite ignores FK declarations unless `PRAGMA foreign_keys=ON` is issued per
-connection; a SQLAlchemy `connect` event listener does so. FKs use
+connection; the connection opener applies it on every connection. FKs use
 `ON DELETE RESTRICT` except the `member_id` PK=FK of the two 1:1 child tables
 (`member_placements`, `monitor_config`), which uses `CASCADE` so a hard-deleted
 member cannot leave dangling rows. Normal delete paths are soft-deletes, so

@@ -15,12 +15,19 @@ Prerequisites:
 
 | Requirement | Accepted | Notes |
 |---|---|---|
-| Python | 3.12 or newer | — |
+| Platform | macOS (Apple Silicon) or Linux (x86_64 / aarch64) | One prebuilt binary per target — see the install block below |
 | Terminal multiplexer | tmux or herdr | Auto-detected — see [Multiplexer backends](spec/multiplexer-backends.md) |
 | Coding agent | `claude` (Claude Code), `codex` (OpenAI Codex CLI), or `opencode` | At least one; a mixed fleet may use all three — see [Coding agents](concepts/coding-agents.md) |
 
+Download the archive for your platform from
+[GitHub Releases](https://github.com/himkt/cafleet/releases) —
+`cafleet-v<version>-<target>.tar.gz` for `aarch64-apple-darwin`,
+`x86_64-unknown-linux-musl`, or `aarch64-unknown-linux-musl` — then extract
+the single `cafleet` binary onto your `PATH` and run the setup:
+
 ```bash
-uv tool install cafleet     # or: pip install cafleet
+tar -xzf cafleet-v<version>-<target>.tar.gz
+mv cafleet ~/.local/bin/    # any directory on your PATH
 cafleet setup               # migrate the database schema + install the assets (skills and presets) for claude, codex, and opencode — repeat --skip AGENT to skip agents
 ```
 

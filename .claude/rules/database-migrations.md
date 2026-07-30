@@ -1,26 +1,17 @@
 # Database Migrations
 
-Alembic migrations live in `cafleet/src/cafleet/db/alembic/versions/` as a linear chain of zero-padded sequential revisions (`0001`, `0002`, … `000N`), each with a manual `down_revision` link.
+Database migrations live in `cafleet/migrations/` as hand-written SQL files named `V<N>__<slug>.sql`, numbered contiguously from 1 with exactly one baseline (`V1__baseline.sql`). The chain is embedded in the binary at build time and applied by refinery, which records applied versions in the `refinery_schema_history` ledger.
 
-## Generate a migration with the mise task
+## Write a migration by hand
 
-Always generate a new migration with the project's mise task — never invoke `alembic revision` directly:
+1. Create `cafleet/migrations/V<N>__<slug>.sql`, where `<N>` is the current head version + 1 and `<slug>` is a short snake_case description.
+2. Write plain SQLite SQL. Keep every migration data-preserving:
+   - For a column rename, use `ALTER TABLE <table> RENAME COLUMN <old> TO <new>` (SQLite ≥ 3.25, in place, FK-safe). A recreate that `DROP TABLE`s a parent fails under FK enforcement on a populated DB.
+   - Never drop-and-recreate a populated table when an in-place `ALTER TABLE` form exists.
+3. Apply it with the schema-only setup invocation: `cafleet setup --skip claude --skip codex --skip opencode` (idempotent; migrates to head).
 
-```bash
-mise //cafleet:makemigration "short description of the change"
-```
-
-- Run `cafleet setup --skip claude --skip codex --skip opencode` (the schema-only invocation) first so the DB is at head — `--autogenerate` requires it.
-- The message becomes the migration docstring and the filename slug.
-- `env.py`'s `process_revision_directives` hook mints the next sequential id, so the file lands as `000N_<slug>.py`, matching the chain and the chain-guard snapshot in `tests/db/test_alembic_smoke.py`. Raw `alembic revision` mints a random hex id and breaks both.
-
-## Review and hand-edit the generated migration
-
-`--autogenerate` diffs the model against the DB and **cannot detect a column rename** — it emits `drop_column` + `add_column`, which loses data. Review every generated migration:
-
-- For a column rename, replace the drop+add with `op.execute("ALTER TABLE <table> RENAME COLUMN <old> TO <new>")` (SQLite ≥ 3.25, in place, FK-safe). A batch-recreate that `DROP TABLE`s a parent fails under FK enforcement on a populated DB.
-- Keep every migration data-preserving, and write the matching `downgrade()`.
+refinery has no down migrations — a schema change that must be reversible ships its reversal as the next numbered migration.
 
 ## Update the chain guard
 
-After adding a migration, update the chain-guard tests in `tests/db/test_alembic_smoke.py` (currently `test_four_revision_migration_chain_exists`, asserting the linear chain `0004` → `0003` → `0002` → `0001` → `None`, and `test_alembic_version_table_records_head_0004`, asserting the recorded head) — bump the expected count, rename both tests to match the new chain length and head, and add the new revision id plus its `down_revision` link. That snapshot keeps the chain sequential and linear.
+After adding a migration, update the chain-guard test in `cafleet/tests/` — it asserts the chain is contiguous from 1, has exactly one baseline, and names the expected head version. Bump the expected head and add the new file's version. That snapshot keeps the chain sequential and linear.
