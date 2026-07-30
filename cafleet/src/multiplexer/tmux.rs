@@ -263,8 +263,8 @@ impl TmuxMultiplexer {
         self.send_literal_then_enter(target_pane_id, &payload, None, false, !shell)
     }
 
-    /// Capture the last `lines` of the pane buffer, splitting on `\n` only so
-    /// `\r` survives for the CLI-side defrag; the trailing newline is kept.
+    /// Capture the last `lines` drawn lines of the pane buffer via the shared
+    /// A8 windowing ([`super::capture_window`]).
     pub fn capture_pane(
         &self,
         target_pane_id: &str,
@@ -287,10 +287,7 @@ impl TmuxMultiplexer {
             ]),
             None,
         )?;
-        let parts: Vec<&str> = raw.split('\n').collect();
-        let keep = usize::try_from(lines).expect("lines is positive") + 1;
-        let start = parts.len().saturating_sub(keep);
-        Ok(parts[start..].join("\n"))
+        Ok(super::capture_window(&raw, lines))
     }
 
     pub fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError> {
@@ -688,22 +685,58 @@ mod tests {
     }
 
     #[test]
-    fn capture_pane_keeps_the_last_lines_and_the_final_newline() {
+    fn capture_pane_keeps_the_last_lines_after_dropping_the_blank_tail() {
         let runner = FakeRunner::with_binary("tmux");
         runner.respond(Ok("l1\nl2\nl3\nx\rY\n".to_string()));
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let captured = mux.capture_pane("%5", 2).unwrap();
         assert_eq!(
-            captured, "l3\nx\rY\n",
-            "split on \\n only — the \\r survives for CLI-side defrag"
+            captured, "l3\nx\rY",
+            "split on \\n only — the \\r survives for CLI-side defrag; \
+             the trailing blank line is dropped before the slice (A8)"
         );
         assert_eq!(
             runner.events(),
             vec![run_event(
                 &["tmux", "capture-pane", "-p", "-t", "%5", "-S", "-2"],
                 None,
-            )]
+            )],
+            "the fetch argv is unchanged by A8"
         );
+    }
+
+    // A8: a small --lines window on a tall pane must show the drawn bottom,
+    // not the blank area under the cursor.
+    #[test]
+    fn capture_pane_drops_trailing_whitespace_only_lines_before_the_slice() {
+        let runner = FakeRunner::with_binary("tmux");
+        runner.respond(Ok("scrollback\nprompt>\ncomposer\n \n\t\n\n\n".to_string()));
+        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+        assert_eq!(
+            mux.capture_pane("%5", 2).unwrap(),
+            "prompt>\ncomposer",
+            "spaces, tabs, and empty lines all count as a blank tail"
+        );
+    }
+
+    #[test]
+    fn capture_pane_keeps_interior_blank_lines() {
+        let runner = FakeRunner::with_binary("tmux");
+        runner.respond(Ok("a\n\nb\n\n\n".to_string()));
+        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+        assert_eq!(
+            mux.capture_pane("%5", 3).unwrap(),
+            "a\n\nb",
+            "only the trailing blank run is dropped"
+        );
+    }
+
+    #[test]
+    fn capture_pane_of_an_all_blank_buffer_is_empty() {
+        let runner = FakeRunner::with_binary("tmux");
+        runner.respond(Ok("\n \n\n".to_string()));
+        let mux = TmuxMultiplexer::new(runner, tmux_env());
+        assert_eq!(mux.capture_pane("%5", 2).unwrap(), "");
     }
 
     #[test]

@@ -65,6 +65,21 @@ pub trait CommandRunner {
     fn sleep(&self, seconds: f64);
 }
 
+/// The shared capture windowing (SPEC §6.5, amendment A8): split the fetched
+/// buffer on `\n` only (so `\r` survives for the CLI-side defrag), drop the
+/// trailing run of whitespace-only lines, and keep the last `lines` remaining
+/// lines — a small window shows the pane's drawn bottom, not the blank area
+/// under the cursor.
+pub(crate) fn capture_window(raw: &str, lines: i64) -> String {
+    let mut parts: Vec<&str> = raw.split('\n').collect();
+    while parts.last().is_some_and(|line| line.trim().is_empty()) {
+        parts.pop();
+    }
+    let keep = usize::try_from(lines).expect("lines is positive");
+    let start = parts.len().saturating_sub(keep);
+    parts[start..].join("\n")
+}
+
 /// Keep a user-controlled field inside the one-line wake envelope: line
 /// breaks and tabs → `⏎`, backtick → `ˋ`, `$(` → `$﹙`, pipe → `│`.
 pub fn sanitize_wake_field(value: &str) -> String {

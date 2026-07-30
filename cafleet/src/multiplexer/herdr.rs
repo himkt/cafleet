@@ -445,7 +445,9 @@ impl HerdrMultiplexer {
         Ok(())
     }
 
-    /// `herdr pane read` prints the raw terminal buffer (no envelope).
+    /// `herdr pane read` prints the raw terminal buffer (no envelope); the
+    /// shared A8 windowing ([`super::capture_window`]) enforces the last-N
+    /// window client-side — the daemon may return more rows than requested.
     pub fn capture_pane(
         &self,
         target_pane_id: &str,
@@ -456,7 +458,7 @@ impl HerdrMultiplexer {
                 "capture_pane: lines must be positive, got {lines}"
             )));
         }
-        self.run(
+        let raw = self.run(
             &herdr_argv(&[
                 "herdr",
                 "pane",
@@ -468,7 +470,8 @@ impl HerdrMultiplexer {
                 &lines.to_string(),
             ]),
             None,
-        )
+        )?;
+        Ok(super::capture_window(&raw, lines))
     }
 
     pub fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError> {
@@ -1000,11 +1003,15 @@ mod tests {
     }
 
     #[test]
-    fn capture_pane_returns_the_raw_buffer() {
+    fn capture_pane_drops_the_blank_tail_and_keeps_the_buffer() {
         let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Ok("raw\nbuffer\n".to_string()));
+        runner.respond(Ok("raw\nbuffer\n\n \n".to_string()));
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        assert_eq!(mux.capture_pane("w1:p2", 20).unwrap(), "raw\nbuffer\n");
+        assert_eq!(
+            mux.capture_pane("w1:p2", 20).unwrap(),
+            "raw\nbuffer",
+            "trailing whitespace-only lines are dropped before the slice (A8)"
+        );
         assert_eq!(
             runner.events(),
             vec![run_event(
@@ -1019,12 +1026,34 @@ mod tests {
                     "20",
                 ],
                 None,
-            )]
+            )],
+            "the fetch argv is unchanged by A8"
         );
 
         assert_eq!(
             mux.capture_pane("w1:p2", 0).unwrap_err().to_string(),
             "capture_pane: lines must be positive, got 0"
+        );
+    }
+
+    // A8: the daemon may return more rows than requested; after the blank tail
+    // is dropped, the last-N window is enforced client-side.
+    #[test]
+    fn capture_pane_enforces_the_last_n_window_client_side() {
+        let runner = FakeRunner::with_binary("herdr");
+        runner.respond(Ok("one\ntwo\nthree\n\n\n".to_string()));
+        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        assert_eq!(
+            mux.capture_pane("w1:p2", 2).unwrap(),
+            "two\nthree",
+            "the drawn bottom survives a small --lines window"
+        );
+        assert!(
+            runner
+                .run_argvs()
+                .iter()
+                .any(|argv| argv.contains(&"2".to_string())),
+            "the requested window still reaches the fetch argv"
         );
     }
 

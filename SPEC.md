@@ -1761,8 +1761,12 @@ Director's `MultiplexerContext` and passes it directly.
   0` → `capture_pane: lines must be positive, got <lines>`. Run `tmux
   capture-pane -p -t <target_pane_id> -S -<lines>`, split the raw output on
   `"\n"` **only** (not a general line-splitter — must not also split on `\r`, to
-  preserve the CLI's CR-defrag), return the last `lines + 1` elements joined with
-  `"\n"` (tmux terminates output with `\n`, so this restores the final newline).
+  preserve the CLI's CR-defrag), drop the trailing run of whitespace-only lines,
+  then return the last `lines` remaining lines joined with `"\n"` (no trailing
+  newline; an all-blank buffer captures as the empty string). Interior blank
+  lines are preserved — only the trailing blank run is dropped, so a small
+  `lines` window shows the pane's drawn bottom rather than the blank area under
+  the cursor.
 - **`list_pane_ids() -> set`** — fail-fast. `tmux list-panes -a -F "#{pane_id}"`
   with `timeout=5`s; split on whitespace; return the pane-id set. One call
   resolves liveness for every member in a monitor tick.
@@ -1939,8 +1943,13 @@ Each method's herdr realization:
   `herdr pane run <id> "! <text>"` (no Esc); plain form: `herdr pane send-keys
   <id> esc`, then `herdr pane run <id> "<text>"` (mirroring
   `send_poll_trigger`'s esc-then-run shape).
-- **`capture_pane(*, target_pane_id, lines=20) -> str`** — `herdr pane read <id>
-  --source recent-unwrapped --lines <lines>`.
+- **`capture_pane(*, target_pane_id, lines=20) -> str`** — fail-fast. `lines <=
+  0` → `capture_pane: lines must be positive, got <lines>`. Run `herdr pane read
+  <id> --source recent-unwrapped --lines <lines>`, then apply the same
+  windowing as the tmux backend: split on `"\n"` only, drop the trailing run of
+  whitespace-only lines, and return the last `lines` remaining lines joined
+  with `"\n"` (no trailing newline; the last-N window is enforced client-side
+  because the daemon may return more rows than requested).
 
 **`_SUBMIT_DELAY` (`1.0`s).** herdr `pane run` submits text **and** Enter
 atomically, so the run-based paths (`send_poll_trigger`, `send_wake_trigger`,

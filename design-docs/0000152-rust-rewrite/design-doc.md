@@ -138,6 +138,7 @@ All amendments land in Step 1, before code. Each is the smallest edit that remov
 | A5 | HTTP validation | The FastAPI default 422 body is replaced: every request-validation failure returns 422 with `{"detail": "<string>"}` (one string, same shape the SPA already parses). FastAPI-specific app metadata (openapi/docs endpoints, the hardcoded `0.1.0` app version) is dropped. |
 | A6 | Packaging | PyPI/wheel sections replaced by the GitHub-Releases binary contract: tag = bare version, assets `cafleet-v<version>-<target>.tar.gz` each containing the single `cafleet` binary; the assets-zip contract is deleted. Version string source is the binary's compile-time version. |
 | A7 | Server | uvicorn replaced by the built-in axum server; `cafleet server` flags, defaults (settings-derived, shown in `--help`), single-process no-reload semantics unchanged. |
+| A8 | Capture anchoring | `capture_pane` on both backends drops trailing whitespace-only lines from the fetched buffer before keeping the last N lines, so a small `--lines` window always shows the pane's drawn bottom instead of the blank area under the cursor on a tall pane (user ruling after the Phase-D-era bug report; the Python reference's blanks-passthrough is deliberately not preserved). Fetch argv, ANSI handling, the `--json` shape (sha over the emitted content), and the no-trailing-newline emit are unchanged. |
 
 ### CLI layer
 
@@ -277,6 +278,8 @@ Total-removal (same change): `cafleet/src/**` (Python), `cafleet/tests/**` (pyte
 - [x] CodingAgent trait + claude/codex/opencode argv builders with validation error strings <!-- completed: 2026-07-30T12:24 -->
 
 ### Step 6: CLI commands
+
+COMMENT(user-relay): User bug report against the debug binary, run from target/debug against their own live fleet (herdr-chrome pane "test-1", fleet 1, member 2): `./cafleet monitor capture --member-id 2 --fleet-id 1 --lines 40` appeared to print nothing, while the identical command with `--lines 50` nine seconds later printed the pane bottom (composer + status bar, no trailing newline). Diagnose the capture path for small `--lines` values on both backends against the Python reference semantics — herdr `pane capture` lines-parameter passing, the client-side last-N slice, trailing-blank handling, and the missing trailing newline on emit — and report findings before changing code.
 
 - [x] clap tree, shared option decorator equivalents, stale-assets guard prologue <!-- completed: 2026-07-30T12:59 -->
 - [x] fleet + message command groups <!-- completed: 2026-07-30T12:59 -->
