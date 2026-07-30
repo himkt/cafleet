@@ -10,7 +10,7 @@ config_roots = [
 "aqua:astral-sh/uv" = "0.11.29"
 "aqua:pnpm/pnpm" = "11.15.0"
 "core:node" = "26.5.0"
-"core:rust" = "1.97.1"
+"core:rust" = { version = "1.97.1", components = ["clippy", "rustfmt"] }
 
 [tasks.uv-sync]
 run = "uv sync --all-groups --frozen"
