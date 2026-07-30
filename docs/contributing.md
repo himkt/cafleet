@@ -19,7 +19,7 @@ path.
 | `skills/` | Coding-agent skill files (`cafleet`, `cafleet-design-doc`, `cafleet-research`), installed into the agent homes by `cafleet setup` / `mise //:skill-install`. |
 | `package.json` + `pnpm-lock.yaml` (repo root) | pnpm toolchain manifests for the Slidev + agent-browser tools used in the repo. Driven via `mise //:pnpm-install` / `mise //:slidev <deck>`; `node_modules/` is gitignored. |
 | `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
-| `docs/` | CLI reference, message envelope, and other operator-facing docs. |
+| `docs/` | The rspress documentation-site project (workspace package `cafleet-docs`): `rspress.config.ts`, mermaid sources in `diagrams/`, and the operator-facing pages in its nested `docs/` content root. |
 
 ## Tech stack
 
@@ -82,16 +82,18 @@ homes.
 
 ## Building docs locally
 
-The docs toolchain is Python-based and managed with
-[uv](https://docs.astral.sh/uv/) (`mise //:uv-sync` installs it). Build the
-documentation site (this site) locally with:
+The docs site is an [rspress](https://rspress.rs/) project rooted at `docs/`,
+a package in the repo's pnpm workspace. Build the documentation site (this
+site) locally with:
 
 ```bash
 mise //:docs-build
 ```
 
-That task is a thin wrapper around `uv run zensical build --clean` and is the
-same command the GitHub Actions workflow runs.
+That task is a thin wrapper around `pnpm --dir docs build` and is the same
+command the GitHub Actions workflow runs; it installs the pnpm dependencies
+first, so a fresh clone needs no manual prerequisite. For a live-reloading
+local preview while editing pages, run `pnpm --dir docs dev`.
 
 ## Contributing changes
 

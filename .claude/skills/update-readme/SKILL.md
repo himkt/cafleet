@@ -30,7 +30,7 @@ You are a documentation writer for the CAFleet project. Your job is to keep two 
 
 1. Read all docs/concepts/*.md files (use Glob to enumerate) for the canonical architecture
 2. Discover and read all files under docs/ (use Glob to find them)
-3. Read the zensical.toml nav (repo root) for the docs-site section layout, then read the current README.md
+3. Read the rspress sidebar source (the `docs/docs/**/_meta.json` files) for the docs-site section layout, then read the current README.md
 4. Sync README.md's thin surface: align the pitch paragraph with docs/index.md, the Install block with the Install section of docs/quickstart.md, and the Documentation links with the nav
 5. Read the current SPEC.md (the reimplementation specification, at the repo root)
 6. Reconcile SPEC.md against the source materials per the "SPEC.md Maintenance" rules below, updating only where the contract surfaces have drifted

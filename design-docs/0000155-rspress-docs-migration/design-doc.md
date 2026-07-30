@@ -1,0 +1,330 @@
+# Migrate the Documentation Site from Zensical to Rspress
+
+**Status**: Approved
+**Progress**: 5/29 tasks complete
+**Last Updated**: 2026-07-31
+
+## Overview
+
+Replace the Python-based zensical documentation toolchain with rspress v2, making `docs/` the rspress project root as a pnpm workspace package. The Python toolchain leaves the repository entirely: `pyproject.toml`, `uv.lock`, the uv tool pin, `zensical.toml`, and `.bumpversion.toml` are all removed. The published site keeps its URL (`https://himkt.github.io/cafleet/`), navigation structure, and content parity across all 19 pages.
+
+## Success Criteria
+
+- [ ] `mise //:docs-build` builds the rspress site into `docs/doc_build` with all 19 pages, sidebar parity with the zensical nav, built-in search, and the light/dark toggle
+- [ ] The five mermaid diagrams render as committed static SVGs (no runtime mermaid plugin)
+- [ ] The two `??? example` collapsibles render as `:::details` containers
+- [ ] The five `&#124;` table cells and the literal-brace headings in `spec/webui-api.md` render intact in the built HTML
+- [ ] Internal links resolve (`markdown.checkDeadLinks` fails the build on a broken route target) and fragment anchors resolve (verified by the dedicated Step 7 anchor task)
+- [ ] `.github/workflows/docs.yml` keeps its trigger shape (build on PR, deploy Pages on push to `main`) on the pnpm toolchain
+- [ ] No live reference to this repository's zensical / uv / bump-my-version toolchain remains outside `design-docs/` and git history. Exempt: generic tool-name examples that do not describe this repo's toolchain — `uv run` as a generic invocation example at `skills/cafleet-research/reference/visualization.md:72`, `uv.lock` as a generic lock-file example at `.claude/skills/clean-docs/residue/reference/patterns.md:17,31`
+
+---
+
+## Background
+
+The docs site is built by zensical (a Python static-site generator) configured in `zensical.toml`, installed through the root uv workspace (`pyproject.toml` + `uv.lock`, `mise //:uv-sync`), and built by `mise //:docs-build` (`uv run zensical build --clean`) both locally and in `.github/workflows/docs.yml`, which deploys `site/` to GitHub Pages.
+
+The root `pyproject.toml` carries two residents beyond zensical:
+
+| Resident | Group | Current use |
+|---|---|---|
+| `bump-my-version` | `dev` | Release version bumps via `.bumpversion.toml` (rewrites the version in `cafleet/Cargo.toml` and `Cargo.lock`) |
+| `matplotlib` | `research` | The cafleet-research visualization runner (`uv run --frozen --group research python <script>`, catalogued in `.claude/rules/commands.md`) |
+
+Full Python removal therefore requires decisions on both; the user has made them (see *Recorded decisions*).
+
+---
+
+## Specification
+
+### Recorded decisions (user-confirmed)
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | bump-my-version fate | Dropped entirely. `.bumpversion.toml` is deleted; releases bump the single `version` line in `cafleet/Cargo.toml` by hand and let the next cargo build refresh `Cargo.lock`. |
+| 2 | matplotlib / research group fate | Removed. The cafleet-research skill is to be isolated into a separate repository (see *Scope*). |
+| 3 | Workspace shape | rspress v2, with `docs/` added to `pnpm-workspace.yaml`; dependencies in `docs/package.json`; shared root `pnpm-lock.yaml`. |
+| 4 | Mermaid diagrams | Pre-rendered to committed static SVGs; no runtime plugin. |
+| 5 | Page icons | The `icon: lucide/...` frontmatter is deleted from all 19 pages. |
+| 6 | Home page | rspress hero home layout (`pageType: home`) with tagline and action buttons. |
+| 7 | CI / task | The root-level `mise //:docs-build` task name is kept, retargeted to the pnpm-driven rspress build. Same GitHub Pages URL (`base: '/cafleet/'`), same `docs.yml` trigger shape. |
+| 8 | Content-root nesting | The user's original request makes `docs/` the rspress **project root**, scaffolded per the official getting-started guide — whose layout nests content in `<project-root>/docs`. The pages therefore move to `docs/docs/`, and the two repo-wide consequences (the `docs_sync.rs` test paths and every repo-internal reference to a `docs/...` page path) are updated in the same change. |
+
+### Scope
+
+**In scope**: the docs-site migration; total zensical removal; total Python toolchain removal (`pyproject.toml`, `uv.lock`, the uv tool pin and `uv-sync` task in `mise.toml`, the uv permission allows); removal of bump-my-version and `.bumpversion.toml`.
+
+**Out of scope**: extracting `skills/cafleet-research/` into its own repository. That is a user-directed follow-up task. Interim consequence accepted here: the cafleet-research visualization runner row is removed from `.claude/rules/commands.md` together with the Python toolchain, so until the extraction lands the skill's visualization workflow has no in-repo Python runner (the skill itself is invocation-agnostic and needs no edit). The Director confirms this interim gap with the user at review time.
+
+### Target layout
+
+`docs/` becomes the rspress project root; the 19 markdown pages move one level down into the content root (`docs/docs/`, rspress's `root: 'docs'` scaffold default):
+
+```
+docs/
+├── package.json              # workspace package "cafleet-docs"
+├── rspress.config.ts
+├── diagrams/                 # mermaid sources (*.mmd), outside the content root
+└── docs/                     # rspress content root
+    ├── public/diagrams/      # rendered *.svg (committed)
+    ├── _meta.json
+    ├── index.md              # hero home page
+    ├── quickstart.md
+    ├── contributing.md
+    ├── how-to/  (+ _meta.json)
+    ├── concepts/ (+ _meta.json)
+    └── spec/     (+ _meta.json)
+```
+
+The nested content root follows decision 8. Its two repo-wide consequences are handled by dedicated tasks in Step 2 and rows in the change table: `cafleet/tests/docs_sync.rs` reads six pages by repo-root-relative `docs/...` paths and must move to `docs/docs/...`, and every repo-internal reference to a moved page path (relative links across `skills/cafleet/SKILL.md` and `skills/cafleet/reference/*.md`, plus `CONTRIBUTING.md`, `.claude/rules/documentation-maintenance.md`, `.claude/skills/update-readme/SKILL.md`, `.claude/skills/skill-author/SKILL.md`, and `.claude/skills/clean-docs/reference/review-format.md`) is updated via the path-reference sweep.
+
+### docs/package.json
+
+```json
+{
+  "name": "cafleet-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "rspress dev",
+    "build": "rspress build",
+    "preview": "rspress preview",
+    "diagrams": "for f in diagrams/*.mmd; do mmdc -i \"$f\" -o \"docs/public/diagrams/$(basename \"$f\" .mmd).svg\" -b white; done"
+  },
+  "devDependencies": {
+    "@rspress/core": "^2",
+    "@mermaid-js/mermaid-cli": "^11"
+  }
+}
+```
+
+`@rspress/core` is the rspress v2 package (provides the `rspress` binary; `defineConfig` is imported from it). `@mermaid-js/mermaid-cli` provides `mmdc` for the pre-render step; SVGs are committed, and `pnpm --dir docs run diagrams` regenerates them after a `.mmd` edit.
+
+### docs/rspress.config.ts
+
+```ts
+import { defineConfig } from '@rspress/core';
+
+export default defineConfig({
+  root: 'docs',
+  base: '/cafleet/',
+  title: 'CAFleet',
+  description: 'Message broker and member registry for coding agents.',
+  markdown: {
+    checkDeadLinks: true,
+  },
+  themeConfig: {
+    nav: [{ text: 'Docs', link: '/quickstart' }],
+    socialLinks: [
+      { icon: 'github', mode: 'link', content: 'https://github.com/himkt/cafleet' },
+    ],
+  },
+});
+```
+
+The config file is TypeScript and type-checked against `@rspress/core` at build time, so a drifted field name fails loudly; the implementer adjusts exact `themeConfig` field shapes to the installed v2 types if they differ. Search and the light/dark toggle are rspress theme defaults and need no configuration.
+
+### Sidebar (`_meta.json`)
+
+Sidebar order and labels reproduce the zensical `nav` exactly. `index.md` (`pageType: home`) stays out of the sidebar. File entries pin the zensical label explicitly so a page's h1 cannot drift the nav.
+
+`docs/docs/_meta.json`:
+
+```json
+[
+  { "type": "file", "name": "quickstart", "label": "Quickstart" },
+  { "type": "dir", "name": "how-to", "label": "How-to guides" },
+  { "type": "dir", "name": "concepts", "label": "Concepts" },
+  { "type": "dir", "name": "spec", "label": "Specification" },
+  { "type": "file", "name": "contributing", "label": "Contributing" }
+]
+```
+
+`docs/docs/how-to/_meta.json`:
+
+```json
+[
+  { "type": "file", "name": "mixed-backend-team", "label": "Mixed-backend Team" },
+  { "type": "file", "name": "design-doc-development", "label": "Spec Driven Dev" },
+  { "type": "file", "name": "use-the-webui", "label": "Admin WebUI" }
+]
+```
+
+`docs/docs/concepts/_meta.json`:
+
+```json
+[
+  { "type": "file", "name": "overview", "label": "Overview" },
+  { "type": "file", "name": "fleet-isolation", "label": "Fleet isolation" },
+  { "type": "file", "name": "storage", "label": "Storage" },
+  { "type": "file", "name": "member-lifecycle", "label": "Member lifecycle" },
+  { "type": "file", "name": "coding-agents", "label": "Coding agents" },
+  { "type": "file", "name": "model-selection", "label": "Model selection" },
+  { "type": "file", "name": "monitoring", "label": "Monitoring" }
+]
+```
+
+`docs/docs/spec/_meta.json`:
+
+```json
+[
+  { "type": "file", "name": "data-model", "label": "Data model" },
+  { "type": "file", "name": "message-envelope", "label": "Message envelope" },
+  { "type": "file", "name": "cli-options", "label": "CLI options" },
+  { "type": "file", "name": "multiplexer-backends", "label": "Multiplexer backends" },
+  { "type": "file", "name": "coding-agent-backends", "label": "Agent backends" },
+  { "type": "file", "name": "webui-api", "label": "WebUI API" }
+]
+```
+
+### Page conversion rules
+
+Pages keep the `.md` extension. Conversions:
+
+| Zensical construct | Occurrences | rspress replacement |
+|---|---|---|
+| `icon: lucide/...` frontmatter | all 19 pages | Delete the line; delete the whole frontmatter block where it becomes empty |
+| `??? example "Expand the walkthrough"` | `quickstart.md:122`, `how-to/mixed-backend-team.md:57` | `:::details Expand the walkthrough` container: dedent the 4-space-indented body, close with `:::` |
+| Fenced ` ```mermaid ` block | 5 (inventory below) | Markdown image referencing the committed SVG |
+| `:material-arrow-right:` shortcode + `{ .md-button ... }` attr_list | `index.md:25` only | Removed by the hero home conversion (the Quickstart button becomes a hero action) |
+| Directory-style link `quickstart/` | `index.md:25` only | Route link `/quickstart` in the hero action |
+
+Relative `.md` links between pages (the dominant link form) are supported by rspress natively and stay as-is. `markdown.checkDeadLinks` validates route targets at build time; it is not relied on for `#fragment` targets — those are covered by Step 7's dedicated anchor-verification task (extract every internal fragment link from the built HTML and confirm each target id exists).
+
+### Home page (`index.md`)
+
+```yaml
+---
+pageType: home
+hero:
+  name: CAFleet
+  text: Agent Teams reinvented
+  tagline: Collaborative coding across multiple coding-agent backends, with full code transparency.
+  actions:
+    - theme: brand
+      text: Quickstart
+      link: /quickstart
+    - theme: alt
+      text: GitHub
+      link: https://github.com/himkt/cafleet
+---
+```
+
+The markdown body below the frontmatter keeps the current content minus the converted pieces: the YouTube `<iframe>` demo embed and the descriptive paragraph ("CAFleet is a message broker and member registry…") render beneath the hero. The old button line is dropped (replaced by the hero actions).
+
+### Mermaid pre-rendering
+
+Each diagram's fenced source moves to a `.mmd` file; the rendered SVG is committed and referenced by absolute public path (rspress prefixes `base` on public assets). Rendering uses `mmdc` defaults with `-b white` — a white canvas stays readable under both color schemes (dark mode shows it as a light panel).
+
+| Source | `.mmd` file | Image reference in page |
+|---|---|---|
+| `concepts/overview.md:31` | `docs/diagrams/overview.mmd` | `![…](/diagrams/overview.svg)` |
+| `concepts/member-lifecycle.md:25` | `docs/diagrams/member-lifecycle.mmd` | `![…](/diagrams/member-lifecycle.svg)` |
+| `concepts/monitoring.md:179` | `docs/diagrams/monitoring.mmd` | `![…](/diagrams/monitoring.svg)` |
+| `spec/data-model.md:17` | `docs/diagrams/data-model.mmd` | `![…](/diagrams/data-model.svg)` |
+| `spec/multiplexer-backends.md:216` | `docs/diagrams/multiplexer-backends.mmd` | `![…](/diagrams/multiplexer-backends.svg)` |
+
+Alt text (`…` above) is written per diagram from the page's surrounding prose during conversion.
+
+### MDX-hazard inventory and decision rule
+
+rspress compiles pages with the MDX toolchain, and the official docs do not state whether `.md` files get a plain-markdown parse (where these constructs are inert) or a full-MDX parse (where they break the build or get swallowed as expressions). The hazard inventory:
+
+| Hazard | Where |
+|---|---|
+| `&#124;` entity inside `<code>` table cells | `spec/coding-agent-backends.md:163`, `spec/message-envelope.md:24,29,32`, `spec/cli-options.md:799` (5 total) |
+| Literal `{member_id}`-style braces outside code spans | The four `spec/webui-api.md` headings at 159, 184, 209, 251 |
+| Raw HTML (`<code>`, `<iframe>`) | spec tables; `index.md` |
+
+Brace occurrences elsewhere (`spec/cli-options.md:578-581,815` and the `spec/webui-api.md` table cells at 33-36, 217-218) sit inside backtick code spans, which the MDX parser leaves untouched; they are not hazards and are excluded from the inventory.
+
+Decision rule (applied in Step 7): build the site and inspect the rendered HTML at each inventory location. If everything renders literally, no page edit is needed. If a location breaks the build or renders wrong, remediate **minimally and locally**: wrap the affected literal in a code span (for heading paths like `GET /api/members/{member_id}/monitor`, code-span the path portion and re-verify every inbound anchor to that heading), or backslash-escape the character where a code span would distort the content. No blanket rewrite of the spec pages.
+
+### Toolchain and configuration changes
+
+| File | Change |
+|---|---|
+| `pyproject.toml` | Delete |
+| `uv.lock` | Delete |
+| `zensical.toml` | Delete |
+| `.bumpversion.toml` | Delete |
+| `mise.toml` | Remove the `"aqua:astral-sh/uv"` tool pin and `[tasks.uv-sync]`; retarget `[tasks."docs-build"]` to `run = "pnpm --dir docs build"` with `depends = ["pnpm-install"]` (a fresh clone works with no manual prerequisite, matching the cargo-task convention) and description "Build the rspress documentation site"; extend the `pnpm-install` description to mention the docs site |
+| `pnpm-workspace.yaml` | Add `docs` to `packages` |
+| `.claude/settings.json` | Remove the allow entries `Bash(mise //:uv-sync)`, `Bash(uv run --frozen --group research *)`, `Bash(uv run python -m *)`; keep `Bash(mise //:docs-build)` |
+| `presets/opencode/cafleet.md` | Remove the `"mise //:uv-sync": "allow"` row |
+| `SPEC.md` | Update the embedded opencode preset block to match the preset file (smallest edit removing the drift) |
+| `.claude/rules/commands.md` | Remove the `uv-sync` bullet and the cafleet-research visualization-runner row from the Skill artifact runners table |
+| `docs/contributing.md` | Rewrite § *Building docs locally* for the pnpm/rspress flow (`mise //:docs-build` wraps `pnpm --dir docs build`; local preview via `pnpm --dir docs dev`); update the project-structure table's `docs/` row to describe the rspress project layout |
+| `.gitignore` | Remove the `/site/` entry and its zensical comment; remove the dead Python entries `/.venv/`, `__pycache__/`, `*.pyc`; add `/docs/doc_build/` and `/docs/node_modules/` (the root-anchored `/node_modules/` does not cover nested directories — `admin/node_modules/` already has its own entry) |
+| `.claude/skills/update-readme/SKILL.md` | Retarget the "Read the `zensical.toml` nav" step to the rspress sidebar source (the `docs/docs/**/_meta.json` files); its `docs/` page paths are updated by the path-reference sweep |
+| `cafleet/tests/docs_sync.rs` | Update the repo-root-relative page paths (`docs/concepts/...`, `docs/spec/...`) to `docs/docs/...` |
+| Repo-internal `docs/` path references | Update every reference to a moved page path to its `docs/docs/...` location (relative links from `skills/` gain one segment): `skills/cafleet/SKILL.md`, `skills/cafleet/reference/*.md`, `CONTRIBUTING.md`, `.claude/rules/documentation-maintenance.md`, `.claude/skills/skill-author/SKILL.md`, `.claude/skills/clean-docs/reference/review-format.md`, plus any further hits from the Step 2 sweep |
+| `.github/workflows/docs.yml` | Build job steps become: checkout → mise-action → `mise //:docs-build` (its `pnpm-install` dependency installs first) → upload-pages-artifact with `path: docs/doc_build`. Deploy job and both triggers unchanged |
+
+`README.md` is unaffected (its thin surface — pitch, install commands, docs-site links — does not change). The cafleet-research skill files are unaffected (the visualization reference is invocation-agnostic and points at the host project's rules, which this change edits).
+
+---
+
+## Implementation
+
+> Task format: `- [x] Done task <!-- completed: 2026-02-13T14:30 -->`
+> When completing a task, check the box and record the timestamp in the same edit.
+
+### Step 1: Documentation-first updates
+
+- [x] Rewrite `docs/contributing.md` § *Building docs locally* and the project-structure `docs/` row for the pnpm/rspress flow <!-- completed: 2026-07-31T07:23 -->
+- [x] Update `.claude/rules/commands.md`: remove the `uv-sync` bullet and the visualization-runner row <!-- completed: 2026-07-31T07:26 -->
+- [x] Update `presets/opencode/cafleet.md` (drop the `uv-sync` allow) and mirror the change in the `SPEC.md` embedded preset block <!-- completed: 2026-07-31T07:23 -->
+- [x] Retarget `.claude/skills/update-readme/SKILL.md` from the `zensical.toml` nav to the `_meta.json` sidebar source per the change table <!-- completed: 2026-07-31T07:26 -->
+- [x] Sweep remaining live references (`rg -n 'zensical|uv-sync|bump-my-version|uv run|uv\.lock' --glob '!design-docs/**'` plus lockfiles excluded) and update each hit that describes this repo's toolchain — generic tool-name examples are exempt per Success Criteria; hits deleted by Step 5 are skipped <!-- completed: 2026-07-31T07:26 -->
+
+### Step 2: Scaffold the rspress workspace
+
+- [ ] Add `docs` to `pnpm-workspace.yaml` <!-- completed: -->
+- [ ] Create `docs/package.json` per the specification <!-- completed: -->
+- [ ] Create `docs/rspress.config.ts` per the specification <!-- completed: -->
+- [ ] Move the 19 pages into `docs/docs/` preserving the `how-to/`, `concepts/`, `spec/` subdirectories <!-- completed: -->
+- [ ] Create the four `_meta.json` files per the specification <!-- completed: -->
+- [ ] Apply the `.gitignore` edits per the change table, then run `mise //:pnpm-install` <!-- completed: -->
+- [ ] Update `cafleet/tests/docs_sync.rs` page paths to `docs/docs/...` and confirm `mise //cafleet:test` passes <!-- completed: -->
+- [ ] Sweep repo-internal references to moved page paths (`rg -n 'docs/(concepts|spec|how-to|quickstart|index|contributing)' --glob '!docs/**' --glob '!design-docs/**'`) and update each per the change table <!-- completed: -->
+
+### Step 3: Page conversions
+
+- [ ] Delete the `icon:` frontmatter from all 19 pages (drop empty frontmatter blocks) <!-- completed: -->
+- [ ] Convert `index.md` to the hero home page per the specification <!-- completed: -->
+- [ ] Convert the two `??? example` collapsibles to `:::details` containers (dedent bodies) <!-- completed: -->
+- [ ] Sweep internal links: fix the directory-style `quickstart/` link; leave relative `.md` links for `checkDeadLinks` to validate <!-- completed: -->
+
+### Step 4: Mermaid pre-rendering
+
+- [ ] Extract the five fenced mermaid sources to `docs/diagrams/*.mmd` per the inventory table <!-- completed: -->
+- [ ] Render the SVGs via `pnpm --dir docs run diagrams` and commit them under `docs/docs/public/diagrams/` <!-- completed: -->
+- [ ] Replace each fenced block with the image reference (alt text from the surrounding prose) <!-- completed: -->
+
+### Step 5: Python toolchain removal
+
+- [ ] Delete `pyproject.toml`, `uv.lock`, `zensical.toml`, `.bumpversion.toml` <!-- completed: -->
+- [ ] Edit `mise.toml`: drop the uv pin and `uv-sync`; retarget `docs-build`; update the `pnpm-install` description <!-- completed: -->
+- [ ] Edit `.claude/settings.json`: remove the three uv-related allow entries <!-- completed: -->
+
+### Step 6: CI
+
+- [ ] Update `.github/workflows/docs.yml` per the specification (single `mise //:docs-build` build step, upload path `docs/doc_build`) <!-- completed: -->
+
+### Step 7: Verification
+
+- [ ] `mise //:docs-build` completes cleanly with `checkDeadLinks` enabled <!-- completed: -->
+- [ ] Apply the MDX-hazard decision rule: inspect the rendered HTML at every inventory location; remediate minimally where broken and re-verify inbound anchors <!-- completed: -->
+- [ ] Verify fragment anchors: extract every internal `#fragment` link from the built HTML and confirm each target id exists <!-- completed: -->
+- [ ] Visual pass over the built site (`pnpm --dir docs preview`): hero home with demo embed, sidebar parity, the two details containers, the five SVGs readable in both color schemes, search and dark toggle working <!-- completed: -->
+- [ ] Final reference sweep is clean: no live reference to this repo's `zensical` / `uv` / `bump-my-version` toolchain outside `design-docs/` and git history (generic tool-name examples exempt per Success Criteria) <!-- completed: -->
+
+---
+
+## Changelog
+
+| Date | Changes |
+|------|---------|
+| 2026-07-31 | Initial draft |
+| 2026-07-31 | Reviewer round 1: recorded the nested-layout decision and its consequences (`docs_sync.rs`, path-reference sweep), sweep exemption policy, corrected MDX-hazard inventory, concrete `.gitignore` edits, `docs-build` task dependency, anchor-verification task |
