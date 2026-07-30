@@ -1,0 +1,31 @@
+/* Tighten the home hero so the hero plus the demo embed fit on one screen.
+   globalStyles is bundled before the theme CSS, so each selector is doubled
+   to out-rank the equal-specificity theme defaults. */
+.rp-home-hero.rp-home-hero {
+  margin: 2rem auto;
+  padding: 12px 40px;
+}
+
+.rp-home-hero .rp-home-hero__container {
+  gap: 20px;
+}
+
+.rp-home-hero .rp-home-hero__title,
+.rp-home-hero .rp-home-hero__subtitle {
+  font-size: 2.5rem;
+}
+
+.rp-home-hero .rp-home-hero__tagline {
+  font-size: 1rem;
+}
+
+@media (max-width: 768px) {
+  .rp-home-hero.rp-home-hero {
+    padding: 10px;
+  }
+
+  .rp-home-hero .rp-home-hero__title,
+  .rp-home-hero .rp-home-hero__subtitle {
+    font-size: 2rem;
+  }
+}

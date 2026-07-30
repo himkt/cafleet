@@ -65,6 +65,7 @@ docs/
 ├── package.json              # workspace package "cafleet-docs"
 ├── rspress.config.ts
 ├── theme/index.tsx           # HomeLayout override (afterHero mounts the home markdown body)
+├── theme/styles.css          # globalStyles: tightened hero sizing
 └── docs/                     # rspress content root
     ├── _nav.json
     ├── _meta.json
@@ -101,13 +102,16 @@ The nested content root follows decision 8. Its two repo-wide consequences are h
 ### docs/rspress.config.ts
 
 ```ts
+import path from 'node:path';
 import { defineConfig } from '@rspress/core';
 
 export default defineConfig({
   root: 'docs',
   base: '/cafleet/',
+  globalStyles: path.join(__dirname, 'theme/styles.css'),
   title: 'CAFleet',
   description: 'Message broker and member registry for coding agents.',
+  llms: true,
   markdown: {
     checkDeadLinks: true,
   },
@@ -119,7 +123,7 @@ export default defineConfig({
 });
 ```
 
-The config file is TypeScript and type-checked against `@rspress/core` at build time, so a drifted field name fails loudly; the implementer adjusts exact `themeConfig` field shapes to the installed v2 types if they differ. Search and the light/dark toggle are rspress theme defaults and need no configuration. `themeConfig` defines neither `nav` nor `sidebar` — rspress v2 auto-generates both only when the config omits them, taking the navbar from `_nav.json` and the sidebar from the `_meta.json` files (v2 contract, guide/basic/auto-nav-sidebar).
+The config file is TypeScript and type-checked against `@rspress/core` at build time, so a drifted field name fails loudly; the implementer adjusts exact `themeConfig` field shapes to the installed v2 types if they differ. Search and the light/dark toggle are rspress theme defaults and need no configuration. `llms: true` (execute-time amendment, user decision) makes the static build additionally emit `llms.txt`, `llms-full.txt`, and a per-page `.md` beside every `.html`, so each page's markdown source is reachable by swapping the URL's `.html`/route for `.md` on any static host. `themeConfig` defines neither `nav` nor `sidebar` — rspress v2 auto-generates both only when the config omits them, taking the navbar from `_nav.json` and the sidebar from the `_meta.json` files (v2 contract, guide/basic/auto-nav-sidebar).
 
 ### Navbar (`_nav.json`) and sidebar (`_meta.json`)
 
@@ -215,7 +219,7 @@ hero:
 ---
 ```
 
-The markdown body below the frontmatter keeps the current content minus the converted pieces: the YouTube `<iframe>` demo embed and the descriptive paragraph ("CAFleet is a message broker and member registry…"). rspress v2's home layout renders only frontmatter-defined sections, so a minimal custom theme (`docs/theme/index.tsx`, execute-time amendment) re-exports the default theme and overrides `HomeLayout`, mounting the page's markdown body through the `afterHero` slot (via the runtime `Content` component, adjusted to the installed v2 API if the export differs). `index.md` remains the single source of the body content; the old button line is dropped (replaced by the hero actions).
+The markdown body below the frontmatter keeps the current content minus the converted pieces: the YouTube `<iframe>` demo embed and the descriptive paragraph ("CAFleet is a message broker and member registry…"). rspress v2's home layout renders only frontmatter-defined sections, so a minimal custom theme (`docs/theme/index.tsx`, execute-time amendment) re-exports the default theme and overrides `HomeLayout`, mounting the page's markdown body through the `afterHero` slot (via the runtime `Content` component, adjusted to the installed v2 API if the export differs). `index.md` remains the single source of the body content; the old button line is dropped (replaced by the hero actions). A small stylesheet (`docs/theme/styles.css`, wired via the config's `globalStyles`) tightens the hero — reduced vertical margin/padding and scaled-down name/tagline typography — so the hero plus the demo embed fit on one screen; it overrides only the hero classes, with doubled selectors because `globalStyles` is bundled before the theme CSS.
 
 ### Mermaid diagram removal
 
@@ -334,3 +338,4 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 | 2026-07-31 | Execute-time amendment 2 (user decision): the five mermaid diagrams are removed from the docs entirely — no `.mmd` sources, no SVGs, no mermaid tooling; the surrounding prose carries the content. Step 4 rewritten as a removal step |
 | 2026-07-31 | Verifier round: rspress v2 nav contract adopted (`_nav.json` navbar + root `_meta.json` global sidebar, `themeConfig.nav` dropped); execute-time amendment 3 (user decision): `docs/theme/index.tsx` HomeLayout override mounts the home markdown body via `afterHero` |
 | 2026-07-31 | Reviewer round: recorded the user-approved `.claude/settings.json` agent-browser permission amendments (click/fill for verification sessions, help/version narrowing) in the change table |
+| 2026-07-31 | User-review revision round: hero tightened via `theme/styles.css` (`globalStyles`); execute-time amendment 4 (user decision): `llms: true` emits `llms.txt` / `llms-full.txt` / per-page `.md` in the static build |
