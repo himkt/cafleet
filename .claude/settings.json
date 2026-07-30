@@ -2,8 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(pnpm install --frozen-lockfile)",
-      "Bash(pnpm exec agent-browser * --help)",
-      "Bash(pnpm exec agent-browser * --version)",
+      "Bash(pnpm exec agent-browser --help)",
+      "Bash(pnpm exec agent-browser --version)",
       "Bash(pnpm exec agent-browser --session vr-batch-* get *)",
       "Bash(pnpm exec agent-browser --session vr-batch-* open http://localhost*)",
       "Bash(pnpm exec agent-browser --session vr-batch-* snapshot)",
