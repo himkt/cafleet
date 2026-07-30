@@ -330,7 +330,10 @@ mod format_member_tests {
             "  window_id: @2",
         ]
         .join("\n");
-        assert_eq!(format_member(&member_create_result(json!("%5")), true), expected);
+        assert_eq!(
+            format_member(&member_create_result(json!("%5")), true),
+            expected
+        );
     }
 }
 
@@ -382,11 +385,35 @@ mod format_member_list_tests {
     #[test]
     fn table_renders_columns_dashes_pending_and_humanized_idle() {
         let members = vec![
-            row(1, "Director", "director", placed("claude", json!("%1")), json!(59)),
+            row(
+                1,
+                "Director",
+                "director",
+                placed("claude", json!("%1")),
+                json!(59),
+            ),
             row(2, "analyst", "member", Value::Null, Value::Null),
-            row(3, "watch", "monitor", placed("codex", Value::Null), json!(60)),
-            row(4, "w2", "member", placed("opencode", json!("%9")), json!(3599)),
-            row(5, "w3", "member", placed("claude", json!("%10")), json!(3600)),
+            row(
+                3,
+                "watch",
+                "monitor",
+                placed("codex", Value::Null),
+                json!(60),
+            ),
+            row(
+                4,
+                "w2",
+                "member",
+                placed("opencode", json!("%9")),
+                json!(3599),
+            ),
+            row(
+                5,
+                "w3",
+                "member",
+                placed("claude", json!("%10")),
+                json!(3600),
+            ),
         ];
         let expected = [
             "5 members:",

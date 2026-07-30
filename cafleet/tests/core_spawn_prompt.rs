@@ -21,10 +21,7 @@ fn assert_malformed_usage_error(result: Result<String, CafleetError>) {
     assert!(matches!(err, CafleetError::Usage(_)));
     assert_eq!(err.exit_code(), 2);
     let msg = err.message().to_string();
-    assert!(
-        msg.starts_with("Malformed custom prompt: "),
-        "got: {msg}"
-    );
+    assert!(msg.starts_with("Malformed custom prompt: "), "got: {msg}");
     assert!(
         msg.ends_with("Double literal braces ({{, }}) to keep them as text."),
         "got: {msg}"
@@ -65,8 +62,7 @@ fn doubled_braces_render_literal_braces() {
 
 #[test]
 fn doubled_braces_compose_with_substitution() {
-    let out =
-        substitute_spawn_placeholders("{{x}} and {fleet_id}", 42, 2, 3, "opencode").unwrap();
+    let out = substitute_spawn_placeholders("{{x}} and {fleet_id}", 42, 2, 3, "opencode").unwrap();
     assert_eq!(out, "{x} and 42");
 }
 

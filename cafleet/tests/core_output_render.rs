@@ -168,7 +168,8 @@ mod truncate_message_text_tests {
 
     #[test]
     fn truncates_inside_a_message_envelope() {
-        let mut result = json!({"message": unicast(1, 2, &"b".repeat(10)), "notification_sent": true});
+        let mut result =
+            json!({"message": unicast(1, 2, &"b".repeat(10)), "notification_sent": true});
         truncate_message_text(&mut result, false, 5);
         assert_eq!(result["message"]["text"], "bbbbb…");
         assert_eq!(result["notification_sent"], true);
@@ -280,7 +281,10 @@ mod render_messages_in_result_tests {
     fn projects_the_message_inside_an_envelope_and_keeps_siblings() {
         let result = json!({"message": unicast(1, 2, "a"), "recipients": 2, "delivered": 1});
         let rendered = render_messages_in_result(&result, false);
-        assert_eq!(rendered["message"], render_message(&unicast(1, 2, "a"), false));
+        assert_eq!(
+            rendered["message"],
+            render_message(&unicast(1, 2, "a"), false)
+        );
         assert_eq!(rendered["recipients"], 2);
         assert_eq!(rendered["delivered"], 1);
     }

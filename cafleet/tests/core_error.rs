@@ -18,7 +18,10 @@ fn usage_error_maps_to_exit_code_2() {
 
 #[test]
 fn app_error_maps_to_exit_code_1() {
-    assert_eq!(CafleetError::App("runtime conflict".to_string()).exit_code(), 1);
+    assert_eq!(
+        CafleetError::App("runtime conflict".to_string()).exit_code(),
+        1
+    );
 }
 
 #[test]

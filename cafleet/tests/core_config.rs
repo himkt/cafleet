@@ -40,16 +40,14 @@ fn default_database_url_points_at_expanded_home_cafleet_v6() {
 
 #[test]
 fn each_field_binds_to_its_exact_env_var() {
-    let s = Settings::from_lookup(|name| {
-        match name {
-            "CAFLEET_DATABASE_URL" => Some("sqlite:///srv/db/registry.db".to_string()),
-            "CAFLEET_BROKER_HOST" => Some("0.0.0.0".to_string()),
-            "CAFLEET_BROKER_PORT" => Some("9001".to_string()),
-            "CAFLEET_MAX_TEXT_LEN" => Some("50".to_string()),
-            "CAFLEET_MULTIPLEXER" => Some("herdr".to_string()),
-            "CAFLEET_MONITOR_STALL_INTERVAL" => Some("600".to_string()),
-            _ => None,
-        }
+    let s = Settings::from_lookup(|name| match name {
+        "CAFLEET_DATABASE_URL" => Some("sqlite:///srv/db/registry.db".to_string()),
+        "CAFLEET_BROKER_HOST" => Some("0.0.0.0".to_string()),
+        "CAFLEET_BROKER_PORT" => Some("9001".to_string()),
+        "CAFLEET_MAX_TEXT_LEN" => Some("50".to_string()),
+        "CAFLEET_MULTIPLEXER" => Some("herdr".to_string()),
+        "CAFLEET_MONITOR_STALL_INTERVAL" => Some("600".to_string()),
+        _ => None,
     })
     .unwrap();
     assert_eq!(s.database_url, "sqlite:///srv/db/registry.db");

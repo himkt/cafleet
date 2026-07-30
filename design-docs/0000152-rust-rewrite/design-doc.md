@@ -1,7 +1,7 @@
 # Rust Rewrite of the cafleet Package
 
 **Status**: Approved
-**Progress**: 14/44 tasks complete
+**Progress**: 20/44 tasks complete
 **Last Updated**: 2026-07-30
 
 ## Overview
@@ -249,12 +249,12 @@ Total-removal (same change): `cafleet/src/**` (Python), `cafleet/tests/**` (pyte
 
 ### Step 3: Core foundations
 
-- [ ] error.rs: CafleetError Usage/App enum + top-level exit-code mapping; `--fleet-id` post-parse check <!-- completed: -->
-- [ ] config.rs: six CAFLEET_* settings with loud parse failures and default-only `~` expansion <!-- completed: -->
-- [ ] time.rs: pinned timestamp formatter + lenient parser, with round-trip tests <!-- completed: -->
-- [ ] output/: codepoint truncation, ANSI strip + `\r` defrag, compact serde_json envelopes with pinned key order, text formatters <!-- completed: -->
-- [ ] Spawn-placeholder mini-formatter (brace grammar, doubled-brace escape, unknown-vs-malformed error taxonomy) with unit tests <!-- completed: -->
-- [ ] db/: connection opener applying PRAGMAs, refinery runner, V1__baseline.sql from SPEC §8 DDL, chain-guard test, DDL introspection test <!-- completed: -->
+- [x] error.rs: CafleetError Usage/App enum + top-level exit-code mapping; `--fleet-id` post-parse check <!-- completed: 2026-07-30T11:07 -->
+- [x] config.rs: six CAFLEET_* settings with loud parse failures and default-only `~` expansion <!-- completed: 2026-07-30T11:07 -->
+- [x] time.rs: pinned timestamp formatter + lenient parser, with round-trip tests <!-- completed: 2026-07-30T11:07 -->
+- [x] output/: codepoint truncation, ANSI strip + `\r` defrag, compact serde_json envelopes with pinned key order, text formatters <!-- completed: 2026-07-30T11:07 -->
+- [x] Spawn-placeholder mini-formatter (brace grammar, doubled-brace escape, unknown-vs-malformed error taxonomy) with unit tests <!-- completed: 2026-07-30T11:07 -->
+- [x] db/: connection opener applying PRAGMAs, refinery runner, V1__baseline.sql from SPEC §8 DDL, chain-guard test, DDL introspection test <!-- completed: 2026-07-30T11:07 -->
 
 ### Step 4: Broker layer
 

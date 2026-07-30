@@ -14,8 +14,8 @@ use chrono::{Duration, TimeZone, Utc};
 
 #[test]
 fn format_emits_six_digit_microseconds_and_offset() {
-    let dt = Utc.with_ymd_and_hms(2026, 7, 30, 9, 53, 43).unwrap()
-        + Duration::microseconds(198_561);
+    let dt =
+        Utc.with_ymd_and_hms(2026, 7, 30, 9, 53, 43).unwrap() + Duration::microseconds(198_561);
     assert_eq!(format_utc(dt), "2026-07-30T09:53:43.198561+00:00");
 }
 
@@ -33,15 +33,18 @@ fn format_zero_pads_short_microsecond_values() {
 
 #[test]
 fn format_round_trips_through_parse() {
-    let dt = Utc.with_ymd_and_hms(2026, 7, 30, 9, 53, 43).unwrap()
-        + Duration::microseconds(198_561);
+    let dt =
+        Utc.with_ymd_and_hms(2026, 7, 30, 9, 53, 43).unwrap() + Duration::microseconds(198_561);
     assert_eq!(parse_lenient(&format_utc(dt)).unwrap(), dt);
 }
 
 #[test]
 fn parse_accepts_missing_fractional_part() {
     let expected = Utc.with_ymd_and_hms(2026, 7, 30, 9, 53, 43).unwrap();
-    assert_eq!(parse_lenient("2026-07-30T09:53:43+00:00").unwrap(), expected);
+    assert_eq!(
+        parse_lenient("2026-07-30T09:53:43+00:00").unwrap(),
+        expected
+    );
 }
 
 #[test]

@@ -40,9 +40,7 @@ fn table_sql(conn: &Connection, table: &str) -> String {
 
 fn column_info(conn: &Connection, table: &str, column: &str) -> (i64, Option<String>) {
     conn.query_row(
-        &format!(
-            "SELECT \"notnull\", dflt_value FROM pragma_table_info('{table}') WHERE name=?1"
-        ),
+        &format!("SELECT \"notnull\", dflt_value FROM pragma_table_info('{table}') WHERE name=?1"),
         [column],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )
@@ -74,7 +72,9 @@ const APP_TABLES: [&str; 7] = [
 fn connect_applies_the_foreign_keys_pragma() {
     let dir = TempDir::new().unwrap();
     let conn = connect(&temp_db_url(&dir)).unwrap();
-    let fk: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0)).unwrap();
+    let fk: i64 = conn
+        .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(fk, 1);
 }
 
@@ -82,7 +82,9 @@ fn connect_applies_the_foreign_keys_pragma() {
 fn connect_applies_the_busy_timeout_pragma() {
     let dir = TempDir::new().unwrap();
     let conn = connect(&temp_db_url(&dir)).unwrap();
-    let timeout: i64 = conn.query_row("PRAGMA busy_timeout", [], |r| r.get(0)).unwrap();
+    let timeout: i64 = conn
+        .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(timeout, 5000);
 }
 
@@ -190,7 +192,11 @@ fn ddl_defaults_match_the_head_schema() {
         Some("'tmux'".to_string())
     );
     let (notnull, default) = column_info(&conn, "member_placements", "coding_agent");
-    assert_eq!((notnull, default), (1, None), "coding_agent: NOT NULL, no DDL default");
+    assert_eq!(
+        (notnull, default),
+        (1, None),
+        "coding_agent: NOT NULL, no DDL default"
+    );
 }
 
 #[test]
