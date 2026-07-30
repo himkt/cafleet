@@ -1,7 +1,7 @@
 # Migrate the Documentation Site from Zensical to Rspress
 
 **Status**: Approved
-**Progress**: 22/28 tasks complete
+**Progress**: 23/28 tasks complete
 **Last Updated**: 2026-07-31
 
 ## Overview
@@ -303,7 +303,7 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 
 ### Step 6: CI
 
-- [ ] Update `.github/workflows/docs.yml` per the specification (single `mise //:docs-build` build step, upload path `docs/doc_build`) <!-- completed: -->
+- [x] Update `.github/workflows/docs.yml` per the specification (single `mise //:docs-build` build step, upload path `docs/doc_build`) <!-- completed: 2026-07-31T07:58 -->
 
 ### Step 7: Verification
 
