@@ -186,7 +186,7 @@ Edges (who depends on whom):
 - **monitor** — depends on `broker` (monitor DB ops + `get_fleet`) and
   `multiplexer` (`list_pane_ids`, `send_wake_trigger`).
 - **webui** — depends on `broker` and `config`. Treats broker results as
-  pass-through payloads (renaming two keys, dropping one).
+  pass-through payloads (renaming two keys, dropping two).
 - **cli** — depends on all of the above; it is the orchestration glue that
   wires broker ↔ multiplexer ↔ coding-agent ↔ output, and embeds `webui` for
   `cafleet server`.
@@ -311,14 +311,6 @@ The unified shapes:
 | `last_ping_at` | optional string | |
 | `enabled` | boolean | stored INTEGER 0/1; exposed as boolean at the broker boundary |
 | `last_stall_check_at` | optional string | last successfully dispatched stall-check wake |
-| `last_stall_candidate_at` | optional string | validated UTC capture time paired with the hash |
-| `last_stall_capture_sha256` | optional string | lowercase 64-hex capture fingerprint |
-| `stall_episode_state` | string | `clear`, `nudge_claimed`, `nudged`, `escalation_pending`, or `escalated`; DDL default `clear` |
-| `stall_escalation_reason` | optional string | `ping_failed`, `ping_interrupted`, or `unchanged_after_nudge` only for pending/escalated |
-
-Candidate time and fingerprint are paired-null. Every non-`clear` episode has
-both. Clear/claimed/nudged require a null reason; pending/escalated require a
-non-null reason.
 
 **MonitorRuntime** (1:1 with Fleet; `fleet_id` is PK = FK, not autoincrement)
 
@@ -329,31 +321,6 @@ non-null reason.
 | `started_at` | optional string | |
 | `last_tick_at` | optional string | |
 | `tick_seconds` | integer | DDL default 5 |
-
-**MonitorReportDelivery** (1:1 with an aggregate Message)
-
-| Field | Type | Notes |
-|---|---|---|
-| `message_id` | integer | PK, FK→messages, ON DELETE CASCADE |
-| `fleet_id` | integer | FK→fleets, ON DELETE RESTRICT |
-| `preview_state` | string | `pending`, `awaiting_ack`, or `delivered`; DDL default `pending` |
-| `attempt_count` | integer | non-negative; DDL default 0 |
-| `last_attempt_at` | optional string | null iff attempt_count is zero |
-| `delivered_at` | optional string | non-null exactly for `delivered` |
-
-A partial unique index on `fleet_id` for `pending`/`awaiting_ack` enforces one
-open aggregate per fleet. `awaiting_ack` requires at least one recorded attempt.
-
-**MonitorDirectorGate** (1:1 with Fleet)
-
-| Field | Type | Notes |
-|---|---|---|
-| `fleet_id` | integer | PK, FK→fleets, ON DELETE RESTRICT |
-| `director_member_id` | integer | FK→members, ON DELETE RESTRICT |
-| `token_sha256` | string | lowercase 64-hex digest; raw token never stored |
-| `classification` | string | `finished` or broker-resolved `stalled` |
-| `issued_at` | string | broker-clock UTC |
-| `expires_at` | string | exactly 30 seconds after issue |
 
 **AssetInstalls** (`coding_agent` TEXT PK, not autoincrement, not FK-linked)
 
@@ -490,9 +457,6 @@ not a no-op. Both must run on every connection the reimplementation opens.
   omitted from an INSERT (distinct from values the application writes
   explicitly): `monitor_config.interval_seconds` → `60`,
   `monitor_config.enabled` → `1` (stored as INTEGER 0/1, a boolean-as-int),
-  `monitor_config.stall_episode_state` → `"clear"`,
-  `monitor_report_delivery.preview_state` → `"pending"`,
-  `monitor_report_delivery.attempt_count` → `0`,
   `monitor_runtime.tick_seconds` → `5`. `member_placements.coding_agent`
   carries no DDL default — every writer passes an explicit value.
 - **No-FK message columns.** `messages.from_member_id`, `messages.to_member_id`, and
@@ -507,10 +471,6 @@ not a no-op. Both must run on every connection the reimplementation opens.
   persistence.
 - All timestamp columns are stored as ISO-8601 text (§5.1);
   `monitor_config.enabled` is stored as an integer 0/1 used as a boolean.
-- Monitor checks enforce the §5.2 episode/reason and paired-candidate
-  invariants, lowercase 64-hex fingerprints/tokens, valid delivery
-  attempt/timestamp state, one open aggregate per fleet, and
-  `monitor_director_gate.expires_at > issued_at`.
 
 ### 6.2 Broker
 
@@ -742,18 +702,15 @@ documented non-match, not an error mask.
   card kind** (not a monitor_config row — it is the unenrolled watcher); must be
   active in the fleet **and pane-bound** (a null pane is treated as absent).
   Returns `{member_id, name, pane_id}` or None.
-- **`get_monitor_config(fleet_id, member_id)`** — public schedule fields plus
-  the five durable stall fields from §5.2, with `enabled` as a boolean; None if
-  not enrolled / not in fleet.
+- **`get_monitor_config(fleet_id, member_id)`** — the four schedule fields of
+  §5.2, with `enabled` as a boolean; None if not enrolled / not in fleet.
 - **`list_monitor_configs(fleet_id)`** — every enrolled member's config in the
   fleet, `enabled` as boolean.
 - **`update_monitor_config(fleet_id, member_id, interval_seconds=None,
   enabled=None)`** — if not enrolled → application error `member {member_id} is
   not enrolled in monitoring for fleet {fleet_id}.`. **Partial update** — only
   supplied fields change (`enabled` stored as 0/1). Disabling always clears
-  `last_stall_check_at`; `nudge_claimed` becomes sticky
-  `escalation_pending/ping_interrupted`, pending state is preserved, and other
-  episode/candidate state clears. Disabling the Director deletes its gate.
+  `last_stall_check_at`.
 - **`record_pings(member_ids, when)`** — empty list → no-op (no transaction);
   else set `last_ping_at = when` for all listed configs.
 - **`list_monitor_targets(fleet_id)`** — one row per **active, enrolled** member
@@ -767,78 +724,18 @@ documented non-match, not an error mask.
   (a second correlated scalar subquery; `None` when the member has no pending
   delivery).
 
-#### Monitor — durable stall episode and aggregate delivery
+#### Monitor — no broker stall state
 
-`observe_stall_episode(...)` owns every episode transition. Readable ordinary
-observations require an active, enabled, enrolled ordinary member with a live
-placement plus paired validated `captured_at`/`content_sha256`. A no-capture
-`unknown` is loss-tolerant for a retained row: it converts `nudge_claimed` to
-sticky `escalation_pending/ping_interrupted`, preserves an existing pending
-reason, and otherwise clears the candidate/episode. The monitoring member is
-always rejected.
+The broker exposes **no stall-episode API**: capture classification, quiet
+confirmation across two stall-check wakes, the at-most-one fixed ping, and
+Director escalation are all instruction-level behavior of the monitoring
+member (§6.6), remembered in its own conversation notes. Anything needing
+Director attention travels as a plain per-event `send_message` on the ordinary
+messaging path — no monitor-specific delivery state exists.
 
-Only typed `stall_candidate` on a scheduler-authorized `stall-check` can
-promote:
-
-1. no baseline → seed candidate time/hash and resolve `unknown`;
-2. duplicate/out-of-order or less than `monitor_stall_interval` elapsed →
-   resolve `unknown` without mutation;
-3. full-spacing changed hash → resolve `working` and replace the baseline;
-4. full-spacing identical hash → resolve `stalled`, atomically write
-   `nudge_claimed`, and return `action = ping`.
-
-Explicit or ambiguous `working` is always non-actionable and resets a
-non-pending episode regardless of hash equality. Once claimed/nudged, the next
-strictly newer unchanged candidate queues `escalation_pending` with
-`ping_interrupted`/`unchanged_after_nudge`; changed or higher-precedence state
-resets. Pending state is sticky until aggregate insertion. `escalated` never
-re-pings during unchanged content.
-
-Director-gate mode accepts only the active enrolled root Director, deletes any
-prior gate at transaction start, applies the same validated full-spacing
-candidate resolution, but permanently returns `action = none`. Resolved
-`finished` or `stalled` issues a random 32-byte raw token once, stores only its
-SHA-256 digest with the Director identity and broker-clock 30-second expiry, and
-returns the 64-hex raw encoding. Unsafe/unknown results issue none. No Director
-observation can claim an ordinary-member ping.
-
-`record_stall_ping_result(...)` accepts exactly one success/failure for a
-claimed ordinary episode without rechecking pane liveness. Success records
-`nudged`; failure records `escalation_pending/ping_failed`. Exact replay and
-late-success-after-interruption are idempotent; contradictory results fail.
-`list_pending_stall_escalations(...)` returns all pending ordinary rows in
-ascending member ID, including disabled/dead targets.
-
-`report_monitor_batch(...)` validates and consumes a fresh Director token in
-the same SQLite transaction that reconciles an older open delivery by ACK,
-selects pending rows, validates/deduplicates finished IDs, creates at most one
-aggregate message/delivery row, and transitions only included escalations to
-`escalated`. Token consumption rolls back on later validation/insertion error
-and is single-use under concurrency. Missing/malformed token is usage-class;
-expired, mismatched, replayed, wrong-Director, or already-consumed token is
-application-class with no preview/state mutation.
-
-One-open backpressure is strict: a surviving `pending`/`awaiting_ack` aggregate
-causes no new message, leaves escalations pending, and ignores ephemeral
-finished IDs. Without an open delivery, escalation entries precede finished
-entries, groups sort by member ID, and sanitized names cannot inject a line.
-The fixed message begins `monitor report batch:`.
-
-After commit, at most one `send_inline_preview` occurs. Known success moves
-`pending → awaiting_ack`; known failure increments/stamps the attempt while
-retaining the open state. Only later message ACK reconciliation records
-`delivered`. Pending failure retries on the next safe normal wake;
-`awaiting_ack` retries after a full Director interval; every retry uses the
-same message ID. The result keys in order are `created_message_id`,
-`open_message_id`, `preview_message_id`, `escalated_member_ids`,
-`finished_member_ids`, `created`, `preview_outcome`.
-
-Lifecycle cleanup batches placement-pending/dead rows before due filtering:
-clear dispatch/candidate/non-pending episode state, convert `nudge_claimed` to
-sticky interruption escalation, preserve pending reason, and delete a Director
-gate. Re-enable/live rebind reseeds from a first candidate. Soft deregistration
-explicitly deletes the member's monitor row; fleet teardown explicitly deletes
-delivery and gate rows.
+Lifecycle cleanup batches placement-pending/dead rows before due filtering and
+clears `last_stall_check_at`. Soft deregistration explicitly deletes the
+member's monitor row.
 
 #### Monitor — runtime claim / heartbeat / clear + liveness
 
@@ -868,13 +765,12 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
 - **`monitor_is_live(fleet_id, now)`** — `false` if no row, else `_is_live`. An
   advisory pre-check for `monitor start`; the atomic claim is authoritative.
 - **`monitor_runtime_payload(fleet_id, now)`** — the runtime-liveness dict
-  consumed by `cafleet monitor status`: `{running, pid,
+  consumed by the WebUI `GET /api/monitor`: `{running, pid,
   tick_seconds, last_tick_at, last_tick_age_seconds, started_at}`, with the
   process fields null when the monitor is not live (no row, or a stale/cleared
   heartbeat).
-- **`monitor_members_payload(fleet_id, now)`** — the per-member rows shared by
-  `cafleet monitor status` and the WebUI `GET /api/monitor` (both call this
-  builder so the two payloads cannot drift): one dict per
+- **`monitor_members_payload(fleet_id, now)`** — the per-member rows consumed
+  by the WebUI `GET /api/monitor`: one dict per
   `list_monitor_targets` row — `{member_id, name, role, interval_seconds,
   last_ping_at, last_ping_age_seconds, enabled, pending_count,
   oldest_pending_ts, oldest_pending_age_seconds}` — with `role` =
@@ -885,18 +781,15 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
 - **`delete_fleet_monitor_rows(session, fleet_id)`** /
   **`delete_member_monitor_row(session, member_id)`** (in caller's transaction) —
   in-transaction cascade deletes: the fleet variant deletes the fleet's
-  monitor_config rows (by fleet membership), monitor runtime, report-delivery,
-  and Director-gate rows; the member variant explicitly deletes the single
-  member's monitor_config row. Director deregistration/replacement separately
-  deletes its gate.
+  monitor_config rows (by fleet membership) and the monitor runtime row; the
+  member variant explicitly deletes the single member's monitor_config row.
 
 #### Soft-delete + cascade summary
 
 - Members and fleets are **never row-deleted** — they flip to
   `status="deregistered"` / `deleted_at` set.
-- Placements and monitor rows (`monitor_config`, `monitor_runtime`,
-  `monitor_report_delivery`, `monitor_director_gate`) are hard-deleted by their
-  explicit lifecycle owners (with delivery additionally message-FK-cascaded).
+- Placements and monitor rows (`monitor_config`, `monitor_runtime`) are
+  hard-deleted by their explicit lifecycle owners.
 - **Messages are never deleted** — audit history is permanent.
 - Deregistered members remain visible via `verify_member_fleet`,
   `get_member_names` (both status-agnostic), and
@@ -932,7 +825,7 @@ HTTP status); permission errors gate authorization. The exit-code policy is
 
 ### 6.3 CLI
 
-**Scope:** the entire `cafleet` command tree (22 commands across 4 groups + 3
+**Scope:** the entire `cafleet` command tree (17 commands across 4 groups + 3
 top-level commands — §1, §10), the shared option guards, and the `member create`
 spawn orchestration + rollback ladder. Orchestration glue only — it wires
 broker/multiplexer/output/coding-agent. The command/option checklist is §10; this
@@ -978,15 +871,15 @@ unknown-option error (exit 2).
   JSON format.`; a shared per-subcommand flag (declaration `json_flag` in
   `cli/_helpers.py`), canonically written **trailing**, after all other flags.
   On every `message` subcommand; `member create` / `delete` / `show` / `list` /
-  `capture` / `prompt` / `ping`; `monitor status` / `config`;
+  `prompt` / `ping`; `monitor capture`;
   `fleet create` / `list` / `show`; and `doctor`. Emits compact single-line
   JSON instead of text; composes with `--full` (truncation is applied to the
   result before the json-vs-text fork); `--quiet` is a text-only shortcut,
   ignored in the JSON branch.
 - `--member-id` — required integer naming **the member in question**, one
   meaning everywhere: the requester on `message poll` / `ack` /
-  `show`, the target on `member delete` / `show` / `capture` / `prompt` / `ping`,
-  and the enrolled member on `monitor config`. Help text: `Member ID (the
+  `show`, and the target on `member delete` / `show` / `prompt` / `ping` and
+  `monitor capture`. Help text: `Member ID (the
   member in question)`. Shared declaration `member_id_option` in
   `cli/_helpers.py`.
 - `--from-member-id` / `--to-member-id` — required integers naming both parties
@@ -1174,8 +1067,9 @@ These helpers back the `member` subcommands. The target member is named by
 `--member-id` (§1).
 
 - **Require-pane** — given a placement and an action label
-  (`capture`/`prompt`/`ping`), no pane id → application error `member
+  (`capture`/`prompt`), no pane id → application error `member
   <member_id> has no pane yet (pending placement) — nothing to <action>.`.
+  `member ping` does not use it — a pending placement takes ping's skip path.
 - **Load-authorized-member** — fetch the member within the fleet: not found →
   `Member <member_id> not found`; other fetch failure → `failed to fetch member:
   <error>`; absent placement → application error ``member <member_id> has no
@@ -1318,23 +1212,6 @@ columns (§6.4 `format_member_list`); a placementless row renders `-` in the
 the raw `list_members` rows (`member_id`, `name`, `kind`, `placement` — null
 when placementless — `last_sent`, `last_recv`, `last_ack`, `idle`).
 
-#### `member capture`
-
-Options: `--member-id` (integer, required), `--lines` (integer, default **20**,
-shown in help), `--ansi` /
-`--no-ansi` (boolean pair, default `false`).
-Ensure tmux, load the member, require a pane (`capture`). Capture the last N lines
-(a tmux error → application error `capture failed: <error>`). When `--ansi` is
-not set, strip ANSI. JSON begins `{member_id, pane_id, lines, content, ...}`; text
-emits the content with no trailing newline, **preserving ANSI even on a non-TTY
-sink** when `--ansi` is set.
-
-JSON adds `captured_at`, stamped from local UTC at the capture read boundary,
-and `content_sha256 = sha256(content.encode("utf-8"))`, in key order after
-`content`. The hash is mode-exact: no-ANSI hashes the stripped,
-carriage-return-defragmented emitted string; ANSI hashes the preserving emitted
-string. Text output stays byte-identical. Capture content is not stored.
-
 #### `member prompt`
 
 Options: `--member-id` (integer, required), `--shell` (boolean flag, default
@@ -1356,15 +1233,21 @@ sufficient).
 
 Re-pokes a member's inbox. Options: `--member-id` (integer, required — the
 **target**), `--quiet` (boolean, default `false` — success output is the
-bare member id). Ensure tmux, load the target, require a pane (`ping`).
-Inject the inbox-poll keystroke via the multiplexer's
+bare member id). Ensure tmux and load the target (a missing placement row is
+still the hard error of the shared loader). A **pending placement** (a
+placement row with no pane id) takes the **skip path**: no keystroke is sent
+and the command exits 0 — text `Member <name> has no pane yet (pending
+placement) — ping skipped; it will poll its inbox on spawn.`, JSON
+`{"member_id": <id>, "pane_id": null, "skipped": true}`, `--quiet` the bare
+member id. With a pane, inject the inbox-poll keystroke via the multiplexer's
 `send_poll_trigger`, which is **best-effort** (§6.5) — it returns a boolean and
 never raises. A returned `false` (non-delivery) → application error `send
 failed: tmux send-keys did not deliver the poll-trigger keystroke to pane
 <pane_id>.`. Because `send_poll_trigger` swallows its own `TmuxError` and
 returns `false`, the only reachable failure surface is the non-delivery message
-above. JSON: `{member_id, pane_id}`; text: `Pinged member <name>
-(<pane_id>) — poll keystroke dispatched.`.
+above. JSON: `{member_id, pane_id, skipped}` — the `skipped` key is present on
+**both** success paths (`false` on a dispatched ping); text: `Pinged member
+<name> (<pane_id>) — poll keystroke dispatched.`.
 
 #### `monitor` group
 
@@ -1375,55 +1258,24 @@ A shared `_require_live_fleet` guard fetches the fleet; missing or soft-deleted
   fleet, then tmux. No monitoring member → a warn-but-run line to **stderr**:
   `Warning: fleet <fleet_id> has no monitoring member; the monitor heartbeat
   will wake no member. Spawn one first with 'cafleet member create --role
-  monitor'.`. Then run the monitor loop in-process (blocking).
-- **status** — requires a live fleet; reads the runtime row at the current UTC
-  time. Not running / no row → a not-running payload (`running` false; `pid`,
-  `last_tick_at`, `last_tick_age_seconds`, `started_at` null; `tick_seconds`
-  from the row when present, else null). Else a live payload with
-  `last_tick_age_seconds`. Per-member rows from the shared
-  `monitor_members_payload` builder (§6.2), each carrying `member_id`, `name`,
-  `interval_seconds`, `last_ping_at`, `last_ping_age_seconds`, `enabled`,
-  `pending_count`, `oldest_pending_ts`, `oldest_pending_age_seconds`, and a
-  `role` of `director`/`member`; the builder receives the same `now` passed to
-  `monitor_runtime_payload`. Payload `{runtime, members}`.
-- **config** — `--member-id` (integer, required), `--interval` (integer ≥1,
-  optional), `--enable` / `--disable` (boolean, default `false`). `--enable`
-  with `--disable` → usage error `--enable and --disable are mutually
-  exclusive.`. When both `--interval` and the enabled value are unset (read-only
-  mode), fetch the config; not enrolled → application error `member <member_id>
-  is not enrolled in monitoring for fleet <fleet_id>.`. Else update.
-- **stall observe** — `--member-id`, typed `--classification`
-  (`awaiting_user|unknown|finished|working|stall_candidate`), paired
-  `--captured-at`/`--capture-sha256`, and mutually exclusive optional
-  `--stall-check`/`--director-gate`. Readable observations require the pair;
-  loss-tolerant unknown omits it. JSON key order: `member_id`,
-  `classification`, `action`, `episode_state`, `escalation_reason`,
-  `director_gate_token`. Text:
-  `member <id>: <classification>, action <action>, episode <state>, reason
-  <reason-or->, director gate <token-or->`.
-- **stall ping-result** — `--member-id` plus exactly one
-  `--success|--failure`. JSON: `member_id`, `episode_state`,
-  `escalation_reason`; text:
-  `member <id>: episode <state>, reason <reason-or->`.
-- **stall pending** — stable ascending pending-member listing. JSON top-level
-  `members`, with each row `member_id`, `name`, `escalation_reason`; empty text
-  `(no pending stall escalations)`.
-- **report-batch** — required `--director-gate-token` and repeatable
-  `--finished-member-id`; accepts no arbitrary body. It consumes the fresh
-  single-use token, enforces one-open backpressure/ACK-only completion, and
-  records at most one same-message-ID preview outcome. JSON keys:
-  `created_message_id`, `open_message_id`, `preview_message_id`,
-  `escalated_member_ids`, `finished_member_ids`, `created`,
-  `preview_outcome`; text:
-  `monitor report batch: created <id-or->, open <id-or->, preview <id-or->
-  <awaiting_ack|failed|none>, <n> escalated, <n> finished`.
-
-The monitoring member calls `monitor stall pending` before ordinary
-observations, records every claimed ping result, performs an authoritative final
-Director `--director-gate` observation, then immediately calls
-`monitor report-batch` with no intervening command. Aggregate previews are
-notifications: the Director retrieves the message ID via `message show --full`,
-processes the untruncated body, deduplicates by ID, then ACKs once.
+  monitor'.`. Then run the monitor loop in-process (blocking). Immediately
+  after the successful runtime claim, before the first tick, the loop prints
+  the startup line backing the `ready: monitor live` handshake:
+  `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)`.
+- **capture** — `--member-id` (integer, required), `--lines` (integer, default
+  **20**, shown in help), `--ansi` / `--no-ansi` (boolean pair, default
+  `false`), plus the shared `--json`. Ensure tmux, load the member (the shared
+  `member`-group loader), require a pane (`capture`). Capture the last N lines
+  (a tmux error → application error `capture failed: <error>`). When `--ansi`
+  is not set, strip ANSI. JSON begins `{member_id, pane_id, lines, content,
+  ...}`; text emits the content with no trailing newline, **preserving ANSI
+  even on a non-TTY sink** when `--ansi` is set. JSON adds `captured_at`,
+  stamped from local UTC at the capture read boundary, and
+  `content_sha256 = sha256(content.encode("utf-8"))`, in key order after
+  `content`. The hash is mode-exact: no-ANSI hashes the stripped,
+  carriage-return-defragmented emitted string; ANSI hashes the preserving
+  emitted string. Text output stays byte-identical. Capture content is not
+  stored.
 
 #### `server`
 
@@ -1615,9 +1467,8 @@ envelopes and flat message dicts).
 **Formatter functions:** `format_message`; `format_indexed_list`
 (joins formatted items with one blank line between, `empty_msg` when empty —
 not numbered); `format_member_detail`; `format_fleet_create`; `format_member`;
-`format_member_list`; `format_monitor_status`;
-`format_monitor_config`. Private contract helpers: an ISO→`HH:MM:SS` extractor;
-an idle-seconds humanizer; a ping-age humanizer.
+`format_member_list`. Private contract helpers: an ISO→`HH:MM:SS` extractor;
+an idle-seconds humanizer.
 
 #### Truncation rules
 
@@ -1652,9 +1503,8 @@ types (e.g. `broadcast_summary`) surface a `kind`.
 
 Every formatter uses **one** absent/empty placeholder — the **ASCII
 hyphen-minus `-`** (U+002D). It marks an absent or empty cell everywhere: the
-ISO→HMS helper (null/unparseable timestamp), the idle humanizer (null), the
-ping-age humanizer (null age, in `format_monitor_status`'s `last_ping` column),
-and `format_monitor_config` (null `last_ping_at`). There is no EM DASH `—`
+ISO→HMS helper (null/unparseable timestamp) and the idle humanizer (null).
+There is no EM DASH `—`
 absent-glyph: it is portable, has no Unicode dependency, and the golden-output
 tests assert this single glyph.
 
@@ -1712,15 +1562,8 @@ Every field is read with required access unless marked optional; required access
 - **Roster row (the WebUI `GET /api/members` roster)**: `member_id`, `name`,
   `description`, `status`, `registered_at`, `kind` (the three `get_member`
   values), `placement` (null when placementless); serialized directly by the
-  WebUI, not by a formatter.
-- **Monitor-status payload**: `{runtime, members}`. `runtime.running` (bool, req);
-  when true also `pid`, `last_tick_age_seconds`, `tick_seconds`, `started_at`.
-  Each member: `member_id`, `name`, `role`, `interval_seconds`,
-  `last_ping_at` (str | null), `last_ping_age_seconds` (int | null), `enabled`
-  (bool), `pending_count`, `oldest_pending_ts` (str | null),
-  `oldest_pending_age_seconds` (int | null).
-- **Monitor-config** (`format_monitor_config`): `member_id`, `interval_seconds`,
-  `enabled` (bool), `last_ping_at` (str | null; `-` when null).
+  WebUI, not by a formatter. The monitor runtime/member payloads (§6.2) are
+  likewise serialized directly by the WebUI (§6.8), not by a formatter.
 
 The `(pending)` fallback for `mux_pane_id` appears in the compact member render
 and both list rows, but **not** in the verbose `format_member` block.
@@ -1788,20 +1631,6 @@ placement's `coding_agent`; `-` when placementless) 8, `mux_pane_id`
 (→`(pending)` when unset; `-` when placementless) 7, then
 the humanized `idle` with no padding (last column). `member_id` is stringified.
 
-`format_monitor_status` — line 1 when running: `monitor: running (pid <pid>,
-last tick <last_tick_age_seconds>s ago, tick <tick_seconds>s, started
-<started_at>)`; else `monitor: stopped`. If `members` is non-empty, append a
-column header and separator, then one row per member, left-justified: `member_id`
-9, `name` 11, `role` 8, then `<interval_seconds>s` width 8, the humanized
-ping-age width 9 (ASCII `-` when null), then `yes`/`no` for `enabled` width 7,
-then `pending_count` width 7 (header `pending`), then the humanized ping-age
-over `oldest_pending_age_seconds` (`<n>s ago`; ASCII `-` when null) with no
-padding (last column, header `unacked`).
-
-`format_monitor_config` — one line: `member <member_id>: interval
-<interval_seconds>s, <state>, last_ping <last_ping>` where `<state>` is
-`enabled`/`disabled` and `<last_ping>` is `last_ping_at` or ASCII `-` when null.
-
 #### Private helper semantics
 
 - **ISO→HMS** — returns the `HH:MM:SS` portion: the substring after `T`,
@@ -1810,9 +1639,8 @@ padding (last column, header `unacked`).
   portion yields a shorter (unpadded) string — slice, do not validate or pad.
 - **idle humanizer** — null → `-`; `< 60` → `<n>s`; `< 3600` → `<n // 60>m`;
   else `<n // 3600>h` (integer floor division).
-- **ping-age humanizer** — null → ASCII `-`; else `<n>s ago`.
 
-All four absent-cell helpers above use the single ASCII `-` glyph (§6.4 *The
+Both absent-cell helpers above use the single ASCII `-` glyph (§6.4 *The
 single absent glyph*). The conditional fields `kind`, `origin`, and the verbose
 `text:` line are gated on truthiness — omitted, never emitted empty. The verbose
 `to:` line is instead gated on **non-null** (`to_member_id is not None`): a
@@ -1904,24 +1732,17 @@ Director's `MultiplexerContext` and passes it directly.
   Render each entry as `<role> <id> (<name>; coding_agent=<agent>)
   [<reasons>]`.
 
-  The tmux/herdr payload is byte-identical and pins the full routine: capture
-  every named pane plus the Director at `--lines 120 --no-ansi --json`; select
-  target overlays from `coding_agent=`; treat `unacked` only as annotation;
-  distinguish affirmative/ambiguous `working` from quiet `stall_candidate`;
-  query `monitor stall pending` before ordinary observations; submit capture
-  time/hash to durable `monitor stall observe`; invoke `cafleet member ping`
-  only for atomically claimed `action = ping`, then record `ping-result`; retain
-  sticky pending/lifecycle/restart behavior; collect finished IDs; re-capture
-  the Director last and submit `--director-gate`; only `finished` or
-  full-spacing resolved `stalled` returns a token; immediately call
-  `monitor report-batch` once with no intervening command; allow no second
-  preview, task text, or other ordinary action; require same-message-ID
-  aggregate recovery and Director `message show --full` consumption; keep
-  finished-work judgment with only the Director.
+  The tmux/herdr payload is byte-identical and is a **pure trigger** — the due
+  list, the Director descriptor, and one pointer sentence naming the
+  monitoring member's role protocol; no protocol clauses:
 
-  The nudge is literal-then-Enter with `timeout=5`s and **Esc-first=NO**; any
-  error returns false. It contains no backtick, command-substitution sequence,
-  or pipe.
+  ```
+  [monitor] wake: <N> <member|members> due — <entries>. Director: <id> (coding_agent=<agent>). Follow your monitor role protocol.
+  ```
+
+  The wake keystroke is literal-then-Enter with `timeout=5`s and
+  **Esc-first=NO**; any error returns false. It contains no backtick,
+  command-substitution sequence, or pipe.
 - **`send_inline_preview(*, target_pane_id, message_id, sender_id, ts, text) ->
   bool`** — best-effort; the broker's inline-preview path (the broker truncates
   `text` first). tmux missing → `false`; cosmetic CR/LF strip on `text`
@@ -2231,13 +2052,11 @@ One scan pass, steps in order:
    ordered and deduped, drawn from `{"interval", "status:done", "stall-check",
    "unacked"}`:
    - **Lifecycle reconciliation first.** Batch-clear disabled,
-     placement-pending, and dead rows before due filtering. Convert a durable
-     claim to sticky interruption escalation, preserve pending state, and
-     clear other episode/candidate state. Pending escalation never creates a
-     due row.
+     placement-pending, and dead rows before due filtering (clearing
+     `last_stall_check_at`).
    - **Stall-check trigger.** When `monitor_stall_interval > 0`, union each
      enabled live row whose persisted `last_stall_check_at` is null or a full
-     interval old. Zero disables this branch and direct monitor nudges.
+     interval old. Zero disables this branch and direct monitor pings.
    - **Native `done` trigger (`AgentStateAware` backend, herdr only).** Additionally
      point-read each **enabled** watched live member's `agent_status`, and union into
      the due set any member whose status **transitioned into** `done` since the loop's
@@ -2299,7 +2118,7 @@ passes `isinstance(mux, AgentStateAware)`:
 3. A **transition into `blocked`** is **recorded but never flags a wake.** `blocked`
    means the member is awaiting a user answer; waking about it would only have the
    watcher classify the pane `awaiting_user` and take no action (§ classification
-   rubric), at pure token cost plus a risk it misjudges and nudges — the destructive
+   rubric), at pure token cost plus a risk it misjudges and pings — the destructive
    path this design closes. The `blocked` read is still committed to `last_status`
    (step 4) so the episode is tracked and a later `blocked → working` recovery is
    detected as a transition; it produces no due flag and no wake-reason.
@@ -2325,14 +2144,9 @@ Independent of the interval trigger and driven by `settings.monitor_stall_interv
 cadence is durable in each row's `last_stall_check_at`. A null timestamp is due
 immediately; otherwise the full interval must elapse. Successful synchronized
 wake persists `now`; failure persists nothing. Immediate loop restart therefore
-honors the remaining interval.
-
-Candidate confidence is a separate durable clock:
-`last_stall_candidate_at` is the validated capture boundary, not dispatch time.
-`observe` refuses duplicate/out-of-order/future timestamps and refuses hash
-promotion until a full interval elapsed between actual accepted captures.
-Delayed wake handling and direct duplicate calls cannot manufacture a confident
-stall. A stall-check-only member never advances `last_ping_at`.
+honors the remaining interval. A stall-check-only member never advances
+`last_ping_at`. Quiet-baseline confirmation across stall-check wakes is the
+monitoring member's own in-context judgment (§6.2), not loop state.
 
 #### Unacked-delivery annotation
 
@@ -2349,12 +2163,15 @@ Foreground driver. The fleet's monitor-runtime row is the **only** coordination
 artifact (no PID file); identity throughout is the OS process id.
 
 1. Reset the shared stop flag to false and clear only the native-status
-   transition cache; durable dispatch/episode state remains in SQLite. Capture
-   `pid = this-pid`.
+   transition cache; durable dispatch state (`last_stall_check_at`) remains in
+   SQLite. Capture `pid = this-pid`.
 2. **Claim the slot** via the broker's atomic claim `(fleet_id, pid,
    tick_seconds, now-as-ISO)`. On refusal (returns false) → application error
    (exit 1) `monitor already running for fleet {fleet_id}`. There is no silent
-   fallback.
+   fallback. On success, print the startup line
+   `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` to
+   stdout before the first tick — the line the monitoring member confirms
+   before sending `ready: monitor live`.
 3. **Install signal handlers** for SIGTERM and SIGINT; each flips the shared stop
    flag to true (the handler is minimal — just a flag flip).
 4. **Loop** while the stop flag is false: if `monitor_tick(fleet_id, now)` (each
@@ -2677,7 +2494,8 @@ exact error details (each serialized as `{"detail": <string>}`):
 
 When projecting broker message rows to the wire (inbox / sent / timeline):
 `status_state` → `status`, `text` → `body`. The monitor-config projection renames
-nothing but **drops** `member_id`. `GET /api/fleets` returns a **bare JSON
+nothing but **drops** `member_id` and `last_stall_check_at`, exposing
+`{interval_seconds, last_ping_at, enabled}`. `GET /api/fleets` returns a **bare JSON
 array**; every other list endpoint wraps in an object (member rows under
 `members`, message rows under `messages`). All HTTP errors serialize as
 `{"detail": <string>}`; body-validation failures use the framework's default
@@ -2774,7 +2592,7 @@ truncation scope — is specified in §7.1.
    `started_at` / `last_tick_at` / `last_tick_age_seconds` are all `null` even if
    a stale row exists; only `tick_seconds` survives from a stale row.
 4. **Field renames are wire contract** — `status_state → status`, `text → body`,
-   `member_id` dropped from the monitor projection.
+   `member_id` / `last_stall_check_at` dropped from the monitor projection.
 5. **`list_fleets` returns a bare array**; every other list wraps in
    `{"members"|"messages": [...]}`.
 6. **PATCH TOCTOU collapses to 404**, not 500.
@@ -2806,11 +2624,10 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 - **`monitor_stall_interval`** is the per-member stall-check cadence (seconds)
   driven by the monitor loop, independent of the `monitor_config.interval_seconds`
   ping intervals. A watched member is stall-check due every `monitor_stall_interval`
-  seconds; `0` disables stall detection entirely (no `stall-check` wake-reason tag
-  is ever emitted and no monitor-direct ping can be claimed). Dispatch cadence
-  is persisted in `monitor_config.last_stall_check_at`; candidate confidence uses
-  the separate persisted capture timestamp. `unacked` remains only an annotation
-  on another normal trigger (§6.6).
+  seconds; `0` disables stall-check wakes entirely (no `stall-check` wake-reason
+  tag is ever emitted, and therefore no monitor-direct ping fires). Dispatch
+  cadence is persisted in `monitor_config.last_stall_check_at`. `unacked`
+  remains only an annotation on another normal trigger (§6.6).
 - **Default DB URL** expands `~` to `$HOME` **only for the factory default**; a
   user-supplied `CAFLEET_DATABASE_URL` is passed through verbatim (no `~`
   expansion, so a user value must already be absolute). Net default on home
@@ -2908,7 +2725,7 @@ for age math.
 
 ## 8. Database schema
 
-**Schema** = the nine application tables of §5.2 plus Alembic's
+**Schema** = the seven application tables of §5.2 plus Alembic's
 `alembic_version` bookkeeping table (a single-column `version_num` table holding
 one row: the current revision). The schema is created and evolved by a
 **chain of Alembic migrations** bundled inside the wheel; applying the chain in
@@ -2920,15 +2737,8 @@ AUTOINCREMENT, and the create-order quirk are in §6.1.
 - `idx_members_fleet_status` on `members(fleet_id, status)`
 - `idx_messages_owner_member_status_ts` on `messages(owner_member_id, status_timestamp)`
 - `idx_messages_from_member_status_ts` on `messages(from_member_id, status_timestamp)`
-- `idx_monitor_report_delivery_fleet_state_message` on
-  `monitor_report_delivery(fleet_id, preview_state, message_id)`
 
-The partial unique index
-`uq_monitor_report_delivery_one_open_per_fleet` covers
-`monitor_report_delivery(fleet_id) WHERE preview_state IN
-('pending','awaiting_ack')`.
-
-**The migration chain.** Five linear revisions: the initial revision `0001`
+**The migration chain.** Six linear revisions: the initial revision `0001`
 (no predecessor), `0002` (`down_revision` `0001`), which drops the
 `member_placements.coding_agent` DDL default via a batch `alter_column`,
 `0003` (`down_revision` `0002`), which renames the `skill_installs`
@@ -2938,17 +2748,20 @@ data-preserving in both directions; the columns are unchanged — `0004`
 (`down_revision` `0003`), a data-only migration folding legacy
 `messages.status_state = 'canceled'` rows into `completed`
 (`status_timestamp` untouched; `downgrade()` is a no-op — the fold is not
-invertible), and head revision `0005_add_monitor_stall_episode_state.py`
-(`down_revision` `0004`).
+invertible), `0005` (`down_revision` `0004`), which adds the monitor
+stall-episode columns and delivery/gate tables that revision `0006` removes
+again, and the head revision `0006` (`down_revision` `0005`).
 
-Revision `0005` batch-adds the five §5.2 `monitor_config` columns with server
-defaults that backfill existing rows to `(NULL, NULL, NULL, "clear", NULL)`,
-retains the `"clear"` default, installs all episode/candidate/reason checks,
-and creates `monitor_report_delivery` plus `monitor_director_gate` with their
-FKs/checks/indexes. Downgrade drops both new tables before removing the five
-columns. Fleet teardown explicitly deletes both tables; message deletion also
-cascades a delivery row, Director lifecycle removes its gate, and soft member
-deregistration retains the explicit monitor-config deletion.
+Revision `0006` narrows `monitor_config` to the four §5.2 schedule columns via
+a **batch recreate** (SQLite cannot drop table-level CHECK constraints in
+place; safe under FK enforcement because `monitor_config` is a child table),
+**preserving** `member_id`, `interval_seconds`, `enabled`, `last_ping_at`, and
+`last_stall_check_at` for every row, and drops the two runtime-ephemeral
+monitor delivery/gate tables of the pre-0006 schema. Its `downgrade()`
+re-adds the dropped columns with their constraints (the episode state
+defaulting to `"clear"`, the rest NULL) and recreates the two tables empty —
+the pre-0006 schema, with episode state legitimately reset because it was
+runtime-ephemeral.
 `0001` creates the full §5.2 schema in one step, in this order:
 
 1. `members` (+ `idx_members_fleet_status`) — created **first** because every
@@ -3032,7 +2845,7 @@ line (§6.3). The driver's engine is disposed when the command finishes
 
 ## 10. CLI command checklist
 
-The full command surface — **27 commands across 5 groups + 3 top-level commands**.
+The full command surface — **17 commands across 4 groups + 3 top-level commands**.
 Each must be reproduced with identical option names, types, defaults,
 required-ness, documented-vs-hidden status, output shapes, and exit codes. Every
 interaction flag is now **documented** (there are no hidden flags). Per-command
@@ -3060,9 +2873,8 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 - [ ] `cafleet member delete` (`--member-id` target, `--json`; pane path kills immediately and always exits 0; placementless target → registry soft-delete, exit 0)
 - [ ] `cafleet member show` (`--member-id` target, `--full`, `--json`)
 - [ ] `cafleet member list` (`--json`)
-- [ ] `cafleet member capture` (`--member-id`, `--lines`=**20**, `--ansi`/`--no-ansi`, `--json`)
 - [ ] `cafleet member prompt` (`--member-id`, `--shell`, positional `text`, `--json`)
-- [ ] `cafleet member ping` (`--member-id`, `--quiet`, `--json`)
+- [ ] `cafleet member ping` (`--member-id`, `--quiet`, `--json`; pending placement skips the keystroke and exits 0, `skipped` key on both JSON paths)
 
 **`message`:**
 
@@ -3074,13 +2886,8 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 
 **`monitor`:**
 
-- [ ] `cafleet monitor start` (`--tick`≥1=5)
-- [ ] `cafleet monitor status` (`--json`)
-- [ ] `cafleet monitor config` (`--member-id`, `--interval`≥1, `--enable`/`--disable`, `--json`)
-- [ ] `cafleet monitor stall observe` (`--member-id`, `--classification`, paired capture fields, `--stall-check`/`--director-gate`, `--json`)
-- [ ] `cafleet monitor stall ping-result` (`--member-id`, `--success`/`--failure`, `--json`)
-- [ ] `cafleet monitor stall pending` (`--json`)
-- [ ] `cafleet monitor report-batch` (`--director-gate-token`, repeatable `--finished-member-id`, `--json`)
+- [ ] `cafleet monitor start` (`--tick`≥1=5; prints the startup line after a successful runtime claim)
+- [ ] `cafleet monitor capture` (`--member-id`, `--lines`=**20**, `--ansi`/`--no-ansi`, `--json`)
 
 Every `member *`, `message *`, and `monitor *` command, plus `fleet
 show` and `fleet delete`, takes the **required `--fleet-id` option** (integer);

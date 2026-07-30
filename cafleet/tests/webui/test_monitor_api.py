@@ -122,11 +122,18 @@ def test_get_monitor__members_key_with_unchanged_runtime_keys(api_db, client):
     assert resp.status_code == 200, resp.text
     data = resp.json()
 
-    # the existing flat runtime keys are unchanged
+    # the existing flat runtime keys are unchanged — and exactly these
+    assert set(data) == {
+        "running",
+        "pid",
+        "tick_seconds",
+        "last_tick_at",
+        "last_tick_age_seconds",
+        "started_at",
+        "members",
+    }
     assert data["running"] is True
     assert data["pid"] == os.getpid()
-    for key in ("tick_seconds", "last_tick_at", "last_tick_age_seconds", "started_at"):
-        assert key in data
 
     members = {m["member_id"]: m for m in data["members"]}
     # the watched set only — the monitoring member is the unenrolled watcher
@@ -134,6 +141,20 @@ def test_get_monitor__members_key_with_unchanged_runtime_keys(api_db, client):
     assert watcher_id not in members
 
     m = members[member_id]
+    # the per-member row carries the shared builder's exact shape — no
+    # episode fields
+    assert set(m) == {
+        "member_id",
+        "name",
+        "role",
+        "interval_seconds",
+        "last_ping_at",
+        "last_ping_age_seconds",
+        "enabled",
+        "pending_count",
+        "oldest_pending_ts",
+        "oldest_pending_age_seconds",
+    }
     assert m["name"] == "alice"
     assert m["role"] == "member"
     assert m["interval_seconds"] == 720
@@ -166,8 +187,13 @@ def test_get_members__monitor_field_folded(api_db, client):
 
     # the watched set folds a non-null monitor: the root Director @180 and every
     # ordinary member @720. The monitoring member is the unenrolled watcher, so
-    # it folds null.
+    # it folds null. The folded object carries exactly the trimmed shape.
     assert members[director_id]["monitor"] is not None
+    assert set(members[director_id]["monitor"]) == {
+        "interval_seconds",
+        "last_ping_at",
+        "enabled",
+    }
     assert members[director_id]["monitor"]["enabled"] is True
     assert members[director_id]["monitor"]["interval_seconds"] == 180
     assert members[member_id]["monitor"] is not None
@@ -188,9 +214,9 @@ def test_get_member_monitor__200_for_director(api_db, client):
     resp = client.get(f"/api/members/{director_id}/monitor", headers=_headers(sid))
     assert resp.status_code == 200, resp.text
     data = resp.json()
+    assert set(data) == {"interval_seconds", "last_ping_at", "enabled"}
     assert data["interval_seconds"] == 180
     assert data["enabled"] is True
-    assert "last_ping_at" in data
 
 
 def test_get_member_monitor__200_for_member(api_db, client):
@@ -239,6 +265,7 @@ def test_patch_member_monitor__updates_member_interval_and_enabled(api_db, clien
     )
     assert resp.status_code == 200, resp.text
     data = resp.json()
+    assert set(data) == {"interval_seconds", "last_ping_at", "enabled"}
     assert data["interval_seconds"] == 30
     assert data["enabled"] is False
 

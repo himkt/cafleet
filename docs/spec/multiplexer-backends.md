@@ -101,7 +101,7 @@ member is awaiting a user answer and must not be woken about. No DB column
 backs the native status; the last-seen state lives only in the running loop's
 memory. See [Monitoring](../concepts/monitoring.md).
 
-## Synchronized monitor wake and fixed direct nudge
+## Synchronized monitor wake and fixed direct ping
 
 The monitor loop remains one fixed-cadence
 `scan → one synchronized watcher wake → sleep` path on both backends. It never
@@ -109,26 +109,36 @@ calls `send_poll_trigger` and never keystrokes a watched pane. `unacked` is
 appended only as an annotation after interval, durable stall-check, and native
 done trigger construction; a stale delivery cannot create a due row.
 
-`send_wake_trigger` receives every due target plus the Director descriptor.
-Each rendered entry includes a sanitized name and sanitized
+`send_wake_trigger` receives every due target plus the Director descriptor and
+emits a **pure trigger** — the due list, the Director descriptor, and one
+pointer sentence naming the monitoring member's role protocol; no protocol
+clauses. Each rendered entry includes a sanitized name and sanitized
 `coding_agent=<claude|codex|opencode>` so the monitoring member applies the
-target's overlay cues. tmux and herdr emit a byte-identical policy payload that
-requires JSON capture at `--lines 120 --no-ansi`, durable
-`stall_candidate` observation, and broker claim before action.
+target's overlay cues; an entry or Director descriptor whose `coding_agent` is
+not a supported backend name fails the wake closed. tmux and herdr emit the
+payload byte-identically:
 
-The monitoring member may reuse the existing `cafleet member ping` only when
-the broker returns `action = ping` for a confidently stalled ordinary member.
-The primitive is unchanged on both backends: `Esc`, a literal target
-`cafleet message poll`, then `Enter`. It cannot carry arbitrary text, cannot
-target the Director/monitoring member, and runs at most once per durable stall
-episode.
+```text
+[monitor] wake: <N> <member|members> due — <entries>. Director: <id> (coding_agent=<backend>). Follow your monitor role protocol.
+```
 
-At the end of the wake, a fresh safe Director-gate token authorizes one
-`monitor report-batch`. The command may invoke `send_inline_preview` at most
-once for the fleet's open aggregate. Failure/success recovery always retries
-the **same message ID**; one-open backpressure prevents a second aggregate
-preview in that wake. The Director retrieves the aggregate with
-`message show --full` before processing and ACK.
+Example:
+
+```text
+[monitor] wake: 2 members due — director 332 (Director; coding_agent=codex) [interval], member 336 (alice; coding_agent=claude) [interval,stall-check]. Director: 332 (coding_agent=codex). Follow your monitor role protocol.
+```
+
+The monitoring member may invoke the existing `cafleet member ping` at most
+once per confirmed quiet ordinary member, after two byte-identical stall-check
+captures. The primitive is unchanged on both backends: `Esc`, a literal target
+`cafleet message poll`, then `Enter` (a pending-placement target skips the
+keystroke and succeeds). It cannot carry arbitrary text and, per the
+monitoring member's role protocol, never targets the Director or the
+monitoring member itself.
+
+Anything needing Director attention travels as a plain per-event
+`cafleet message send` to the Director — the same persisted queue and
+Esc-safeguarded inline-preview path every fleet message uses.
 
 ## Access mechanism
 
@@ -231,10 +241,9 @@ so Member → Director notifications work automatically. The recipient acks via
 Body truncation in the preview (`…` at `CAFLEET_MAX_TEXT_LEN` codepoints) is
 documented in [CLI options](cli-options.md#message-body-truncation).
 
-Monitor aggregates use the same preview mechanism, but delivery state is
-durable: a successful preview remains `awaiting_ack`, an interval-stale retry
-reuses the same message ID, and only Director ACK completes it. The preview is
-notification only; its full body is retrieved by ID before action.
+The monitoring member's Director messages ride this same ordinary path — a
+plain `cafleet message send` per event, with no monitor-specific delivery
+state.
 
 ### The `Esc` safeguard {#esc-safeguard}
 
@@ -247,7 +256,7 @@ lets the pane settle ~0.1 s, then types the payload and `Enter`.
 | `cafleet member ping` | yes (`send_poll_trigger`, `esc_first=True`) | A literal `cafleet message poll` command + `Enter` | The manual re-poke for a pane that missed an inline preview |
 | `cafleet member prompt` (plain form) | yes | The text + `Enter` | The same safeguard, protecting the submitted user turn |
 | `cafleet member prompt --shell` | **no** — a deliberate omission | `! <cmd>` + `Enter` | `! <cmd>` must land in the bare composer, and an `Esc` before it would mis-fire (see [Prompt dispatch](#prompt-dispatch)) |
-| Monitor-loop wake nudge | no | — | It targets only the monitoring member's own pane, which is never parked on a permission prompt (see [Monitoring](../concepts/monitoring.md)) |
+| Monitor-loop wake trigger | no | — | It targets only the monitoring member's own pane, which is never parked on a permission prompt (see [Monitoring](../concepts/monitoring.md)) |
 
 ### Design principles
 

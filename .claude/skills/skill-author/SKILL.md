@@ -92,12 +92,12 @@ If the user is not inside a tmux session, `cafleet fleet create` exits 1 with `E
 
 CAFleet members do not auto-poll. The broker delivers a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview` keystroke; that preview is the trigger that wakes the recipient. If the keystroke is missed (pane buffered, recipient mid-Bash, etc.), the message just sits in `INPUT_REQUIRED` until the recipient runs `cafleet message poll` themselves.
 
-Every CAFleet-orchestrated skill runs a dedicated **monitoring member** — it is a session-level requirement, not a per-skill choice. The Director NEVER runs `cafleet monitor start` itself. Instead, the **first** `cafleet member create` in the fleet is a dedicated monitoring member spawned with `--role monitor --model sonnet`; it runs `cafleet monitor start` as a background task in its own pane and reports `ready: monitor live`, which **gates the first ordinary `member create`** (first-in). The monitor loop wakes **only** the monitoring member; on each wake the monitoring member captures the Director's pane, judges it active vs idle, and re-engages an idle Director on demand via `cafleet message send` (which persists an ACKable broker task **and** fires the hardened, `Esc`-safeguarded inline preview). The Director is never keystroked by the loop. The `cafleet` skill's `roles/monitor.md` documents the monitoring member's canonical spawn prompt and the first-in / first-out lifecycle (the heartbeat mechanism itself lives in `reference/supervision.md`); the heartbeat is identical on any backend (claude, codex, opencode).
+Every CAFleet-orchestrated skill runs a dedicated **monitoring member** — it is a session-level requirement, not a per-skill choice. The Director NEVER runs `cafleet monitor start` itself. Instead, the **first** `cafleet member create` in the fleet is a dedicated monitoring member spawned with `--role monitor --model sonnet`; it runs `cafleet monitor start` as a background task in its own pane and reports `ready: monitor live`, which **gates the first ordinary `member create`** (first-in). The monitor loop wakes **only** the monitoring member; on each wake the monitoring member captures the due ordinary panes, confirms quiet members across two stall-check wakes, and messages the Director per event via `cafleet message send` (which persists an ACKable broker task **and** fires the hardened, `Esc`-safeguarded inline preview). The Director is never keystroked by the loop. The `cafleet` skill's `roles/monitor.md` documents the monitoring member's canonical spawn prompt and the first-in / first-out lifecycle (the heartbeat mechanism itself lives in `reference/supervision.md`); the heartbeat is identical on any backend (claude, codex, opencode).
 
-The monitoring member runs one of two idle-nudge routines (both spawn the monitoring member; the difference is only *when* it nudges the idle Director):
+The monitoring member runs one of two escalation routines (both spawn the monitoring member; the difference is only *when* it messages the Director):
 
-- **Conditional idle-nudge (canonical).** The monitoring member re-engages the Director only when it can name what needs attention (un-acked inbox items, stalled members). Use this for skills whose Director makes forward progress from member replies — the conditional nudge surfaces real stalls without busy-waking the Director.
-- **Unconditional idle-nudge (extended).** For skills whose Director must wake on a cadence that is NOT driven by member replies — e.g. polling an external service (CI, a code-review bot) that never keystrokes the Director's pane — the monitoring member nudges the idle Director unconditionally, granting it a re-poll turn even when the inbox is empty.
+- **Per-event escalation (canonical).** The monitoring member messages the Director only when it can name what needs attention (a member still unchanged after its ping, a ping delivery failure, a capture failure). Use this for skills whose Director makes forward progress from member replies — the per-event message surfaces real stalls without busy-waking the Director.
+- **Cadence escalation (extended).** For skills whose Director must wake on a cadence that is NOT driven by member replies — e.g. polling an external service (CI, a code-review bot) that never keystrokes the Director's pane — the monitoring member messages the Director on each wake, granting it a re-poll turn even when the inbox is empty.
 
 ### 2.4 Spawn members with `cafleet member create --text-file <abs path>`
 
@@ -358,10 +358,10 @@ Substitute `7` and `8` literally into every subsequent call the Director makes.
 
 ### Supervision model
 
-Like every CAFleet-orchestrated skill, `summarize-pr` spawns a dedicated monitoring member **first**, before the Summarizer (§ 2.3). It uses the canonical conditional-idle-nudge routine — the Director makes forward progress from the Summarizer's replies, and the monitoring member is the heartbeat backstop that surfaces a stall. The Director never runs `cafleet monitor start` itself.
+Like every CAFleet-orchestrated skill, `summarize-pr` spawns a dedicated monitoring member **first**, before the Summarizer (§ 2.3). It uses the canonical per-event escalation routine — the Director makes forward progress from the Summarizer's replies, and the monitoring member is the heartbeat backstop that surfaces a stall. The Director never runs `cafleet monitor start` itself.
 
 ```bash
-# First member create: the monitoring member (canonical conditional-nudge routine).
+# First member create: the monitoring member (canonical per-event escalation routine).
 cafleet member create --fleet-id 7 \
   --name "monitor" --description "Monitoring member: owns the heartbeat" \
   --role monitor --model sonnet \

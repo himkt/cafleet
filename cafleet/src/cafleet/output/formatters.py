@@ -162,66 +162,6 @@ def _format_idle(seconds: int | None) -> str:
     return f"{seconds // 3600}h"
 
 
-def _format_ping_age(age_seconds: int | None) -> str:
-    """Render a watched member's last-ping age for the status table."""
-    if age_seconds is None:
-        return "-"
-    return f"{age_seconds}s ago"
-
-
-def format_monitor_status(payload: dict) -> str:
-    """Render ``monitor status`` as text: a runtime line + watched-member table.
-
-    ``payload`` is ``{"runtime": {...}, "members": [...]}`` (the same shape the
-    ``--json`` path emits). The runtime line reads ``running``/``stopped`` from
-    the DB heartbeat; the table lists the watched set (the root Director + every
-    ordinary member) with role / interval / last-ping age / enabled / pending /
-    oldest-pending (``unacked``) age.
-    The monitoring member is the unenrolled watcher and never appears here.
-    """
-    rt = payload["runtime"]
-    if rt["running"]:
-        line1 = (
-            f"monitor: running (pid {rt['pid']}, "
-            f"last tick {rt['last_tick_age_seconds']}s ago, "
-            f"tick {rt['tick_seconds']}s, started {rt['started_at']})"
-        )
-    else:
-        line1 = "monitor: stopped"
-    lines = [line1]
-    members = payload["members"]
-    if members:
-        lines.append(
-            "  member_id  name         role      interval  last_ping  enabled  "
-            "pending  unacked"
-        )
-        lines.append(
-            "  ---------  -----------  --------  --------  ---------  -------  "
-            "-------  -------"
-        )
-        for m in members:
-            interval_s = f"{m['interval_seconds']}s"
-            last_ping = _format_ping_age(m["last_ping_age_seconds"])
-            enabled_s = "yes" if m["enabled"] else "no"
-            unacked = _format_ping_age(m["oldest_pending_age_seconds"])
-            lines.append(
-                f"  {str(m['member_id']):<9}  {m['name']:<11}  {m['role']:<8}  "
-                f"{interval_s:<8}  {last_ping:<9}  {enabled_s:<7}  "
-                f"{str(m['pending_count']):<7}  {unacked}"
-            )
-    return "\n".join(lines)
-
-
-def format_monitor_config(cfg: dict) -> str:
-    """Render one member's ``monitor config`` row as a single compact line."""
-    state = "enabled" if cfg["enabled"] else "disabled"
-    last_ping = cfg["last_ping_at"] or "-"
-    return (
-        f"member {cfg['member_id']}: interval {cfg['interval_seconds']}s, "
-        f"{state}, last_ping {last_ping}"
-    )
-
-
 def format_member_list(members: list) -> str:
     """Render the single ``member list`` table as text.
 

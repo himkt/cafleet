@@ -1,9 +1,9 @@
-"""Documentation contracts for direct fixed-action monitor nudges.
+"""Documentation contracts for the simplified monitor ping protocol.
 
-These tests intentionally exercise the repository documentation as the public
-contract.  Step 1 of design document 0000151 must land before the runtime
-implementation, so the suite should fail until those documents and role assets
-describe the new protocol.
+These tests exercise the repository documentation as the public contract:
+the pure-trigger wake, the monitoring member's two-wake in-context judgment,
+the ``member ping`` pending-placement skip, plain per-event Director messages,
+and the ``monitor`` group = ``start`` + ``capture`` surface.
 """
 
 import re
@@ -30,225 +30,193 @@ def _assert_terms(relative_path: str, *terms: str) -> None:
     assert not missing, f"{relative_path} is missing required terms: {missing}"
 
 
-def test_monitoring_concept_covers_direct_nudge_safety_and_delivery_contract():
+def _assert_absent(relative_path: str, *terms: str) -> None:
+    text = _read(relative_path).lower()
+    present = [term for term in terms if term.lower() in text]
+    assert not present, f"{relative_path} still mentions removed terms: {present}"
+
+
+# Episode-machine vocabulary that must not survive on any contract page.
+_REMOVED_VOCABULARY = (
+    "nudge_claimed",
+    "escalation_pending",
+    "ping_failed",
+    "ping_interrupted",
+    "unchanged_after_nudge",
+    "stall_episode_state",
+    "monitor_report_delivery",
+    "monitor_director_gate",
+    "report-batch",
+    "monitor stall",
+)
+
+
+def test_monitoring_concept_covers_judgment_protocol():
     _assert_terms(
         "docs/concepts/monitoring.md",
-        "synchronized",
-        "annotation-only",
-        "stall_candidate",
-        "working",
-        "last_stall_check_at",
-        "escalation_pending",
-        "cafleet member ping",
-        "monitor_director_gate",
-        "message show",
+        "awaiting_user",
+        "unknown",
         "finished",
-        "Director",
+        "working",
+        "stall_candidate",
+        "quiet",
+        "byte-identical",
+        "stall-check",
+        "cafleet member ping",
+        "cafleet message send",
+        "monitor loop started",
+    )
+    _assert_absent("docs/concepts/monitoring.md", *_REMOVED_VOCABULARY)
+
+
+def test_monitoring_concept_documents_pure_trigger_wake():
+    _assert_terms(
+        "docs/concepts/monitoring.md",
+        "wake trigger",
+        "pointer sentence",
+        "role protocol",
     )
 
 
-def test_spec_defines_durable_episode_and_delivery_schema():
+def test_spec_defines_ping_skip_and_monitor_group_contract():
     _assert_terms(
         "SPEC.md",
-        "0005_add_monitor_stall_episode_state.py",
+        "skipped",
+        "pending placement",
+        "monitor capture",
+        "monitor loop started",
+        "Follow your monitor role protocol",
+        "0006",
+    )
+    _assert_absent("SPEC.md", *_REMOVED_VOCABULARY)
+
+
+def test_data_model_defines_trimmed_monitor_config():
+    _assert_terms(
+        "docs/spec/data-model.md",
+        "monitor_config",
+        "interval_seconds",
+        "last_ping_at",
+        "enabled",
         "last_stall_check_at",
+        "0006",
+    )
+    _assert_absent(
+        "docs/spec/data-model.md",
         "last_stall_candidate_at",
         "last_stall_capture_sha256",
-        "stall_episode_state",
-        "stall_escalation_reason",
-        "monitor_report_delivery",
-        "monitor_director_gate",
-        "one open",
-        "30 second",
+        *_REMOVED_VOCABULARY,
     )
 
 
-def test_spec_defines_capture_and_monitor_cli_contracts():
+def test_cli_options_defines_ping_skip_and_moved_capture():
     _assert_terms(
-        "SPEC.md",
-        "captured_at",
-        "content_sha256",
-        "monitor stall observe",
-        "monitor stall ping-result",
-        "monitor stall pending",
-        "monitor report-batch",
-        "--director-gate-token",
-        "--finished-member-id",
-        "awaiting_ack",
-        "preview_outcome",
-        "message show",
+        "docs/spec/cli-options.md",
+        "monitor capture",
+        "ping skipped",
+        "skipped",
+        "pending placement",
+        "nothing to",
+    )
+    _assert_absent(
+        "docs/spec/cli-options.md",
+        "member capture",
+        "monitor status",
+        "monitor config",
+        *_REMOVED_VOCABULARY,
     )
 
 
-def test_spec_defines_atomic_episode_and_report_delivery_semantics():
+def test_multiplexer_backends_pins_pure_trigger_payload():
     _assert_terms(
-        "SPEC.md",
-        "nudge_claimed",
-        "ping_failed",
-        "ping_interrupted",
-        "unchanged_after_nudge",
-        "single-use",
-        "backpressure",
-        "ack",
-        "same message id",
-        "escalation_pending",
-    )
-
-
-def test_spec_defines_annotation_only_synchronized_monitor_loop():
-    _assert_terms(
-        "SPEC.md",
-        "annotation-only",
-        "last_stall_check_at",
-        "coding_agent",
-        "status:done",
-        "stall-check",
-        "unacked",
-        "append",
-        "one synchronized wake",
-    )
-
-
-def test_spec_removes_process_local_stall_and_unacked_maps():
-    spec = _read("SPEC.md")
-    assert "_last_stall_check_at" not in spec
-    assert "_last_unacked_wake_at" not in spec
-
-
-def test_spec_defines_token_gated_byte_identical_wake_contract():
-    _assert_terms(
-        "SPEC.md",
-        "byte-identical",
+        "docs/spec/multiplexer-backends.md",
+        "[monitor] wake:",
         "coding_agent=",
-        "stall_candidate",
-        "working",
-        "monitor stall pending",
-        "cafleet member ping",
-        "monitor report-batch",
-        "director-gate",
-        "no intervening",
-        "only the Director",
+        "Follow your monitor role protocol",
     )
+    _assert_absent("docs/spec/multiplexer-backends.md", *_REMOVED_VOCABULARY)
 
 
-@pytest.mark.parametrize(
-    ("relative_path", "required_terms"),
-    [
-        pytest.param(
-            "docs/spec/data-model.md",
-            (
-                "last_stall_check_at",
-                "last_stall_candidate_at",
-                "last_stall_capture_sha256",
-                "stall_episode_state",
-                "stall_escalation_reason",
-                "monitor_report_delivery",
-                "monitor_director_gate",
-            ),
-            id="data-model",
-        ),
-        pytest.param(
-            "docs/spec/cli-options.md",
-            (
-                "captured_at",
-                "content_sha256",
-                "monitor stall observe",
-                "monitor stall ping-result",
-                "monitor stall pending",
-                "monitor report-batch",
-                "--director-gate-token",
-                "message show",
-            ),
-            id="cli-options",
-        ),
-        pytest.param(
-            "docs/spec/multiplexer-backends.md",
-            (
-                "annotation",
-                "coding_agent",
-                "cafleet member ping",
-                "aggregate",
-                "same message id",
-            ),
-            id="multiplexer-backends",
-        ),
-    ],
-)
-def test_focused_reference_pages_cover_their_monitor_contracts(
-    relative_path: str, required_terms: tuple[str, ...]
-):
-    _assert_terms(relative_path, *required_terms)
-
-
-def test_monitor_role_defines_target_specific_durable_action_order():
+def test_monitor_role_is_sole_normative_protocol_carrier():
     _assert_terms(
         "skills/cafleet/roles/monitor.md",
-        "coding_agent=",
         "--lines 120",
         "--no-ansi",
+        "--json",
+        "content_sha256",
         "stall_candidate",
-        "working",
-        "monitor stall pending",
-        "monitor stall observe",
+        "finished",
+        "quiet",
+        "byte-identical",
+        "stall-check",
         "cafleet member ping",
-        "monitor stall ping-result",
-        "--director-gate",
-        "monitor report-batch",
-        "no intervening",
-        "sole Director-delivery path",
-        "message show --full",
+        "cafleet message send",
+        "ready: monitor live",
+        "monitor loop started",
     )
+    _assert_absent("skills/cafleet/roles/monitor.md", *_REMOVED_VOCABULARY)
 
 
 @pytest.mark.parametrize("backend", ["claude", "codex", "opencode"])
 def test_backend_overlay_defines_working_and_stall_candidate_cues(backend: str):
+    overlay = f"skills/cafleet/reference/coding-agent/{backend}-overlay.md"
     _assert_terms(
-        f"skills/cafleet/reference/coding-agent/{backend}-overlay.md",
+        overlay,
         "working",
         "stall_candidate",
-        "affirmative",
         "quiet",
         "ambiguous",
+        "pre-ping capture gate",
     )
+    _assert_absent(overlay, "pre-nudge", *_REMOVED_VOCABULARY)
 
 
-def test_overlay_template_binds_working_and_candidate_cues_to_monitor():
+def test_overlay_template_binds_cues_to_monitor():
     _assert_terms(
         "skills/cafleet/reference/coding-agent/_template.md",
         "working",
         "stall_candidate",
         "monitoring member",
         "Note → applies at",
-        "target",
+    )
+    _assert_absent(
+        "skills/cafleet/reference/coding-agent/_template.md",
+        "pre-nudge",
+        *_REMOVED_VOCABULARY,
     )
 
 
-def test_supervision_contract_assigns_first_fixed_ping_to_monitor():
+def test_supervision_contract_covers_quiet_members_and_plain_messages():
     _assert_terms(
         "skills/cafleet/reference/supervision.md",
         "monitoring member",
-        "first confident",
         "cafleet member ping",
-        "escalation_pending",
-        "message show --full",
-        "target-specific",
-        "fresh capture",
-        "Director",
+        "quiet",
+        "finished",
+        "pre-ping",
+        "monitor capture",
+    )
+    _assert_absent(
+        "skills/cafleet/reference/supervision.md",
+        "pre-nudge",
+        *_REMOVED_VOCABULARY,
     )
 
 
-def test_director_role_requires_full_aggregate_consumption_and_dedup():
+def test_director_role_renames_ping_heading_and_drops_aggregates():
     _assert_terms(
-        "skills/cafleet/roles/director.md",
-        "monitor report batch",
-        "message show",
-        "--full",
-        "message id",
-        "ack",
-        "monitoring member",
+        "skills/cafleet/reference/director.md",
+        "## Member Ping (manual inbox-poll)",
         "member ping",
-        "exception",
-        "finished",
+        "monitoring member",
+        "pre-ping",
+        "monitor capture",
+    )
+    _assert_absent(
+        "skills/cafleet/reference/director.md",
+        "(manual inbox-poll nudge)",
+        "pre-nudge",
+        *_REMOVED_VOCABULARY,
     )
 
 
@@ -260,7 +228,6 @@ def test_ordinary_member_role_preserves_ping_and_prompt_prohibition():
         "member ping",
         "member prompt",
         "ordinary",
-        "must not",
     )
 
 
@@ -271,10 +238,10 @@ def test_cafleet_skill_documents_narrow_monitor_ping_exception():
         "fixed",
         "member ping",
         "exception",
-        "arbitrary",
-        "finished",
-        "Director",
+        "quiet",
+        "message send",
     )
+    _assert_absent("skills/cafleet/SKILL.md", *_REMOVED_VOCABULARY)
 
 
 def test_bash_rule_documents_preapproved_fixed_monitor_ping_only():
@@ -283,18 +250,33 @@ def test_bash_rule_documents_preapproved_fixed_monitor_ping_only():
         "monitoring member",
         "fixed",
         "member ping",
-        "exception",
-        "arbitrary",
+        "quiet period",
+        "byte-identical",
         "Esc",
         "message poll",
     )
+    _assert_absent(".claude/rules/bash-tool.md", "action = ping", *_REMOVED_VOCABULARY)
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "skills/cafleet/reference/recovery.md",
+        "skills/cafleet/reference/prompt-routing.md",
+        "skills/cafleet/reference/director.md",
+        "skills/cafleet/roles/monitor.md",
+        "docs/concepts/overview.md",
+    ],
+)
+def test_fixed_ping_surfaces_carry_no_nudge_vocabulary(relative_path: str):
+    """The fixed-ping / wake-trigger senses of "nudge" are respelled; the
+    Director's message-level stall-nudge concept lives only in the
+    cafleet-design-doc skill's coordination protocol."""
+    _assert_absent(relative_path, "nudge")
 
 
 def test_readme_remains_free_of_deep_monitor_protocol_details():
-    readme = _read("README.md")
-    assert "monitor report-batch" not in readme
-    assert "monitor_director_gate" not in readme
-    assert "stall_candidate" not in readme
+    _assert_absent("README.md", "stall_candidate", *_REMOVED_VOCABULARY)
 
 
 @pytest.mark.parametrize(
@@ -308,6 +290,4 @@ def test_readme_remains_free_of_deep_monitor_protocol_details():
 def test_unrelated_api_and_webui_contracts_do_not_gain_internal_state(
     relative_path: str,
 ):
-    text = _read(relative_path)
-    assert "monitor_director_gate" not in text
-    assert "stall_episode_state" not in text
+    _assert_absent(relative_path, *_REMOVED_VOCABULARY)

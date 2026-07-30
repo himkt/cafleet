@@ -22,11 +22,11 @@ Required section. Convert every note (a constraint/caveat the inline value shoul
 | Note | Applies at |
 |------|-----------|
 | <the caveat, one row each> | `{token}` — `<skill>/<file>` § <base heading> |
-| *Pane-state capture cues* (below) — this backend's `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate` discriminators. | the monitoring member's target-specific classification rubric — `cafleet/roles/monitor.md` § On each wake; the pane-state taxonomy in `docs/concepts/monitoring.md`; the Director's pre-nudge capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response (both consumers apply the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — this backend's `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate` discriminators. | the monitoring member's target-specific classification rubric — `cafleet/roles/monitor.md` § On each wake; the pane-state taxonomy in `docs/concepts/monitoring.md`; the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response (both consumers apply the cues of the **target member's** backend overlay). |
 
 ## Pane-state capture cues
 
-Required section. Give concrete capture-content discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`, from pane text alone and never native `agent_status`. `working` includes visible streaming, generation, tool execution, or any ambiguous/truncated state that might still be active. `stall_candidate` is quiet, non-finished content with no prompt and no active-work cue; it is only a typed observation, and only the broker may promote two byte-identical, full-spacing observations to resolved `stalled`. Register the table in *Note → applies at* and bind it to both the monitoring member's target-specific rubric and the Director's pre-nudge gate.
+Required section. Give concrete capture-content discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`, from pane text alone and never native `agent_status`. `working` includes visible streaming, generation, tool execution, or any ambiguous/truncated state that might still be active. `stall_candidate` is quiet, non-finished content with no prompt and no active-work cue; it and `finished` are the two quiet families the monitoring member confirms itself — two byte-identical captures across consecutive stall-check wakes, recorded in its own notes, confirm the member quiet. Register the table in *Note → applies at* and bind it to both the monitoring member's target-specific rubric and the Director's pre-ping gate.
 
 | State | <backend> capture cue |
 |---|---|

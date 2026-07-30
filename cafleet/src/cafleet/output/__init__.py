@@ -7,8 +7,6 @@ from cafleet.output.formatters import (
     format_member_detail,
     format_member_list,
     format_message,
-    format_monitor_config,
-    format_monitor_status,
 )
 from cafleet.output.render import (
     format_json,
@@ -32,6 +30,4 @@ __all__ = [
     "format_fleet_create",
     "format_member",
     "format_member_list",
-    "format_monitor_status",
-    "format_monitor_config",
 ]

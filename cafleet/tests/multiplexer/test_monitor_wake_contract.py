@@ -1,4 +1,9 @@
-"""Exact cross-backend contract for the synchronized monitoring-member wake."""
+"""Exact cross-backend contract for the pure-trigger monitoring-member wake.
+
+The wake payload is a pure trigger: the due list, the Director descriptor, and
+one pointer sentence naming the monitor role protocol. The full on-wake
+protocol lives in the cafleet skill's monitor role file, never in the payload.
+"""
 
 import pytest
 
@@ -36,49 +41,8 @@ def _director(
 EXPECTED_WAKE_PAYLOAD = (
     "[monitor] wake: 1 member due — member 336 "
     "(alice; coding_agent=claude) [interval,stall-check,unacked]. "
-    "Capture every named pane and the initial Director 332 "
-    "(coding_agent=opencode) at --lines 120 --no-ansi --json; apply each "
-    "target's coding_agent overlay. Treat unacked only as context on an "
-    "already-due member; it never authorizes an action. Classify capture "
-    "content only in this precedence: awaiting_user, unknown, finished, "
-    "working, stall_candidate. Backend-overlay active tool, stream, "
-    "generation, working, ambiguous, or truncated cues force working; only "
-    "quiet non-finished content with no prompt or active-work cue is a "
-    "stall_candidate. Never classify stalled yourself or remember hashes in "
-    "process. Query monitor stall pending before ordinary observations, "
-    "including durable disabled or dead reports absent from this batch. "
-    "Submit every named ordinary observation through monitor stall observe "
-    "with the captured_at and content_sha256 from that same capture; add "
-    "--stall-check only for that reason, and use loss-tolerant unknown without "
-    "capture fields when unreadable. working is always non-actionable, "
-    "including when tagged unacked or byte-identical. Run cafleet member ping "
-    "only when observe atomically returns action=ping, then immediately record "
-    "ping-result --success or --failure; never retry a claimed, nudged, or "
-    "pending episode. A failed ping queues ping_failed immediately; an "
-    "unchanged next synchronized capture after a successful nudge queues "
-    "unchanged_after_nudge exactly once. Restart from durable broker state; "
-    "lifecycle cleanup "
-    "preserves sticky escalation_pending and resets non-pending disabled, "
-    "dead, or placement-pending episodes. The Director being awaiting_user, "
-    "working, unknown, dead, or unreadable suppresses only the final "
-    "aggregate, never an eligible ordinary-member ping. After all ordinary "
-    "actions, recapture Director 332 (coding_agent=opencode) and submit "
-    "--director-gate; only finished or broker-resolved stalled after two "
-    "byte-identical captures separated by a full stall interval returns a "
-    "token, and Director observation never authorizes ping. With that fresh "
-    "token, immediately call monitor report-batch exactly once with collected "
-    "finished IDs and no intervening command, even when no new entry is known; "
-    "without a token make no Director-targeting call. report-batch is the sole "
-    "Director-delivery path; it collects every durable pending or newly queued "
-    "escalation plus this wake's finished IDs, applies one-open backpressure, "
-    "and retries the "
-    "same message ID at most once this wake; a surviving open aggregate leaves "
-    "new escalations pending and finished IDs ephemeral. The Director must "
-    "retrieve an aggregate with message show --full before acting and ACK it "
-    "once. Never call message send, message broadcast, or member prompt this "
-    "wake; attach no task text or arbitrary instruction, and take no ordinary "
-    "action except the fixed member ping. finished is report-only; the Director "
-    "alone judges whether assigned work remains."
+    "Director: 332 (coding_agent=opencode). "
+    "Follow your monitor role protocol."
 )
 
 
@@ -109,74 +73,61 @@ def test_send_wake_trigger__payload_exact_text(monkeypatch):
     assert _capture_tmux_payload(monkeypatch) == EXPECTED_WAKE_PAYLOAD
 
 
-def test_send_wake_trigger__working_and_unacked_never_authorize_action(monkeypatch):
-    payload = _capture_tmux_payload(monkeypatch)
-    assert "Treat unacked only as context on an already-due member" in payload
-    assert "working is always non-actionable" in payload
-    assert "including when tagged unacked or byte-identical" in payload
-    assert "ambiguous, or truncated cues force working" in payload
-
-
-def test_send_wake_trigger__director_state_does_not_suppress_ordinary_ping(
-    monkeypatch,
-):
-    payload = _capture_tmux_payload(monkeypatch)
-    assert (
-        "The Director being awaiting_user, working, unknown, dead, or "
-        "unreadable suppresses only the final aggregate, never an eligible "
-        "ordinary-member ping."
-    ) in payload
-    assert "unknown, disabled, dead" not in payload
-    assert (
-        "Run cafleet member ping only when observe atomically returns action=ping"
-        in (payload)
+def test_send_wake_trigger__payload_exact_text_multi_member(monkeypatch):
+    payload = _capture_tmux_payload(
+        monkeypatch,
+        due_members=[
+            _member(
+                332,
+                name="Director",
+                coding_agent="codex",
+                is_director=True,
+                wake_reasons=["interval"],
+            ),
+            _member(
+                336,
+                name="alice",
+                coding_agent="claude",
+                wake_reasons=["interval", "stall-check"],
+            ),
+        ],
+        director=_director(332, coding_agent="codex"),
+    )
+    assert payload == (
+        "[monitor] wake: 2 members due — "
+        "director 332 (Director; coding_agent=codex) [interval], "
+        "member 336 (alice; coding_agent=claude) [interval,stall-check]. "
+        "Director: 332 (coding_agent=codex). "
+        "Follow your monitor role protocol."
     )
 
 
-def test_send_wake_trigger__broker_owns_spacing_claim_and_restart_state(monkeypatch):
+def test_send_wake_trigger__pure_trigger_carries_no_protocol_clauses(monkeypatch):
+    """The payload names who is due and who the Director is — nothing else.
+
+    The on-wake protocol (capture, classify, two-wake confirmation, ping,
+    per-event Director messages) is carried solely by the monitor role file;
+    none of its vocabulary appears in the wake payload.
+    """
     payload = _capture_tmux_payload(monkeypatch)
-    assert "Never classify stalled yourself or remember hashes in process" in payload
-    assert "two byte-identical captures separated by a full stall interval" in payload
-    assert "Restart from durable broker state" in payload
-    assert "never retry a claimed, nudged, or pending episode" in payload
-    assert "A failed ping queues ping_failed immediately" in payload
-    assert "queues unchanged_after_nudge exactly once" in payload
-    assert "lifecycle cleanup preserves sticky escalation_pending" in payload
-
-
-def test_send_wake_trigger__pending_first_and_loss_tolerant_unknown(monkeypatch):
-    payload = _capture_tmux_payload(monkeypatch)
-    assert "Query monitor stall pending before ordinary observations" in payload
-    assert "disabled or dead reports absent from this batch" in payload
-    assert "use loss-tolerant unknown without capture fields when unreadable" in payload
-
-
-def test_send_wake_trigger__fresh_gate_one_batch_and_same_id_recovery(monkeypatch):
-    payload = _capture_tmux_payload(monkeypatch)
-    assert (
-        "immediately call monitor report-batch exactly once with collected "
-        "finished IDs and no intervening command"
-    ) in payload
-    assert "even when no new entry is known" in payload
-    assert "applies one-open backpressure" in payload
-    assert "every durable pending or newly queued escalation" in payload
-    assert "retries the same message ID at most once this wake" in payload
-    assert "new escalations pending and finished IDs ephemeral" in payload
-
-
-def test_send_wake_trigger__director_full_body_ack_and_completion_ownership(
-    monkeypatch,
-):
-    payload = _capture_tmux_payload(monkeypatch)
-    assert "message show --full before acting and ACK it once" in payload
-    assert "report-batch is the sole Director-delivery path" in payload
-    assert "attach no task text or arbitrary instruction" in payload
-    assert "take no ordinary action except the fixed member ping" in payload
-    assert "finished is report-only" in payload
-    assert "Director alone judges whether assigned work remains" in payload
-    assert "cafleet message send" not in payload
-    assert "cafleet message broadcast" not in payload
-    assert "cafleet member prompt" not in payload
+    lowered = payload.lower()
+    for forbidden in (
+        "capture",
+        "classify",
+        "observe",
+        "ping",
+        "token",
+        "aggregate",
+        "report-batch",
+        "escalat",
+        "stall_candidate",
+        "awaiting_user",
+        "--lines",
+        "message send",
+    ):
+        assert forbidden not in lowered
+    assert "\n" not in payload
+    assert len(payload) < 400
 
 
 def test_send_wake_trigger__mixed_backends_and_sanitized_names(monkeypatch):
@@ -212,7 +163,8 @@ def test_send_wake_trigger__mixed_backends_and_sanitized_names(monkeypatch):
         "[interval,stall-check]"
     ) in payload
     assert "member 337 (bob; coding_agent=codex) [status:done]" in payload
-    assert "Director 332 (coding_agent=opencode)" in payload
+    assert "Director: 332 (coding_agent=opencode)." in payload
+    assert payload.endswith("Follow your monitor role protocol.")
     assert "\n" not in payload
     assert "\r" not in payload
     assert "\t" not in payload
@@ -316,4 +268,5 @@ def test_send_wake_trigger__payload_byte_identical_across_backends(monkeypatch):
     tmux_payload = tmux_calls[0][5]
     herdr_payload = herdr_calls[0][4]
     assert tmux_payload == herdr_payload
-    assert tmux_payload.count("coding_agent=") == 5
+    # three due entries plus the single Director descriptor
+    assert tmux_payload.count("coding_agent=") == 4

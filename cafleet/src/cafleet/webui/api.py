@@ -13,7 +13,11 @@ webui_router = APIRouter(prefix="/api")
 
 
 def _monitor_config_response(cfg: dict) -> dict:
-    """Project a broker config dict to the WebUI's ``monitor`` shape (no ``member_id``)."""
+    """Project a broker config dict to the WebUI's ``monitor`` shape.
+
+    Drops ``member_id`` and ``last_stall_check_at``, exposing exactly
+    ``{interval_seconds, last_ping_at, enabled}``.
+    """
     return {
         "interval_seconds": cfg["interval_seconds"],
         "last_ping_at": cfg["last_ping_at"],

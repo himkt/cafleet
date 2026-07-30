@@ -101,9 +101,9 @@ cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --js
 
 #### 1b. Spawn the monitoring member (first-in)
 
-The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Presentation/Transcript spawns** (1d) — do not spawn an ordinary member until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms the loop's startup line in the task output, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Presentation/Transcript spawns** (1d) — do not spawn an ordinary member until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the conditional idle-nudge routine) and lifecycle. The monitoring member is deleted first in the Step 5 teardown (first-out). Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
+See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the on-wake routine) and lifecycle. The monitoring member is deleted first in the Step 5 teardown (first-out). Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 

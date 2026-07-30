@@ -77,7 +77,7 @@ def register_member(
     with _shared.write_session() as session:
         if kind == _shared.MONITORING_MEMBER_KIND:
             # A monitoring member must be pane-bound: it runs the heartbeat loop
-            # and receives the loop's wake nudges in its own pane. Without a
+            # and receives the loop's wake triggers in its own pane. Without a
             # placement it would consume the one-per-fleet slot yet have no pane
             # to run the loop in or receive wakes.
             if placement is None:

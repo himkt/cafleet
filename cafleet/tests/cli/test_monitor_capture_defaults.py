@@ -1,4 +1,4 @@
-"""Tests for ``cafleet member capture`` defaults."""
+"""Tests for the ``cafleet monitor capture`` contract."""
 
 import hashlib
 import json
@@ -65,7 +65,7 @@ def _record_run(monkeypatch, *, returns: str = "") -> list[list[str]]:
         ("explicit_lines_overrides_default", ["--lines", "150"], ["-S", "-150"]),
     ],
 )
-def test_member_capture__default_lines_and_explicit_flag(
+def test_monitor_capture__default_lines_and_explicit_flag(
     bootstrapped_member, monkeypatch, scenario, extra_args, expected_argv_suffix
 ):
     sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
@@ -73,7 +73,7 @@ def test_member_capture__default_lines_and_explicit_flag(
     result = runner.invoke(
         cli,
         [
-            "member",
+            "monitor",
             "capture",
             "--fleet-id",
             sid,
@@ -113,7 +113,7 @@ def test_member_capture__default_lines_and_explicit_flag(
         ),
     ],
 )
-def test_member_capture__ansi_handling(
+def test_monitor_capture__ansi_handling(
     bootstrapped_member,
     monkeypatch,
     scenario,
@@ -125,7 +125,7 @@ def test_member_capture__ansi_handling(
     sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
     _record_run(monkeypatch, returns=raw)
     args = [
-        "member",
+        "monitor",
         "capture",
         "--fleet-id",
         sid,
@@ -168,7 +168,7 @@ def test_member_capture__ansi_handling(
         ),
     ],
 )
-def test_member_capture__cr_defragmentation(
+def test_monitor_capture__cr_defragmentation(
     bootstrapped_member,
     monkeypatch,
     scenario,
@@ -180,7 +180,7 @@ def test_member_capture__cr_defragmentation(
     sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
     _record_run(monkeypatch, returns=raw)
     args = [
-        "member",
+        "monitor",
         "capture",
         "--fleet-id",
         sid,
@@ -197,7 +197,7 @@ def test_member_capture__cr_defragmentation(
         assert needle not in result.output
 
 
-def test_member_capture__json_envelope_post_processed_and_lines_default(
+def test_monitor_capture__json_envelope_post_processed_and_lines_default(
     bootstrapped_member, monkeypatch
 ):
     sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
@@ -206,7 +206,7 @@ def test_member_capture__json_envelope_post_processed_and_lines_default(
     result = runner.invoke(
         cli,
         [
-            "member",
+            "monitor",
             "capture",
             "--fleet-id",
             sid,
@@ -240,7 +240,7 @@ def test_member_capture__json_envelope_post_processed_and_lines_default(
         ),
     ],
 )
-def test_member_capture__json_stamps_and_hashes_exact_emitted_content(
+def test_monitor_capture__json_stamps_and_hashes_exact_emitted_content(
     bootstrapped_member,
     monkeypatch,
     ansi_flag,
@@ -250,7 +250,7 @@ def test_member_capture__json_stamps_and_hashes_exact_emitted_content(
     sid, _director_id, member_id, _pane_id, runner = bootstrapped_member
     _record_run(monkeypatch, returns=raw)
     args = [
-        "member",
+        "monitor",
         "capture",
         "--fleet-id",
         sid,
@@ -283,4 +283,33 @@ def test_member_capture__json_stamps_and_hashes_exact_emitted_content(
     assert (
         payload["content_sha256"]
         == hashlib.sha256(expected_content.encode("utf-8")).hexdigest()
+    )
+
+
+def test_monitor_capture__pending_placement_exits_one_with_exact_message(
+    bootstrapped_member, monkeypatch
+):
+    sid, _director_id, _member_id, _pane_id, runner = bootstrapped_member
+    pending = broker.register_member(
+        fleet_id=int(sid),
+        name="pending-target",
+        description="member with no pane yet",
+        placement=_member_placement(None),
+    )
+    _record_run(monkeypatch)
+    result = runner.invoke(
+        cli,
+        [
+            "monitor",
+            "capture",
+            "--fleet-id",
+            sid,
+            "--member-id",
+            str(pending["member_id"]),
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    assert (
+        f"member {pending['member_id']} has no pane yet (pending placement) "
+        f"— nothing to capture." in result.output
     )

@@ -40,8 +40,6 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
             "member_placements",
             "monitor_config",
             "monitor_runtime",
-            "monitor_report_delivery",
-            "monitor_director_gate",
             "asset_installs",
             "alembic_version",
         }
@@ -50,19 +48,19 @@ def test_alembic_upgrade_head_creates_expected_tables(alembic_upgraded_db):
         engine.dispose()
 
 
-def test_alembic_version_table_records_head_0005(alembic_upgraded_db):
+def test_alembic_version_table_records_head_0006(alembic_upgraded_db):
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version_num FROM alembic_version"))
             rows = result.fetchall()
-        assert rows == [("0005",)]
+        assert rows == [("0006",)]
     finally:
         engine.dispose()
 
 
-def test_five_revision_migration_chain_exists():
-    """The migration history is linear through the monitor episode revision."""
+def test_six_revision_migration_chain_exists():
+    """The migration history is linear through the episode-drop revision."""
     with importlib.resources.as_file(
         importlib.resources.files("cafleet.db") / "alembic" / "alembic.ini"
     ) as ini_path:
@@ -70,18 +68,20 @@ def test_five_revision_migration_chain_exists():
         script = ScriptDirectory.from_config(cfg)
         revisions = list(script.walk_revisions())
 
-    assert len(revisions) == 5
-    assert revisions[0].revision == "0005"
-    assert revisions[0].down_revision == "0004"
-    assert revisions[1].revision == "0004"
-    assert revisions[1].down_revision == "0003"
-    assert revisions[2].revision == "0003"
-    assert revisions[2].down_revision == "0002"
-    assert revisions[3].revision == "0002"
-    assert revisions[3].down_revision == "0001"
-    assert revisions[4].revision == "0001"
-    assert revisions[4].down_revision is None
-    assert script.get_current_head() == "0005"
+    assert len(revisions) == 6
+    assert revisions[0].revision == "0006"
+    assert revisions[0].down_revision == "0005"
+    assert revisions[1].revision == "0005"
+    assert revisions[1].down_revision == "0004"
+    assert revisions[2].revision == "0004"
+    assert revisions[2].down_revision == "0003"
+    assert revisions[3].revision == "0003"
+    assert revisions[3].down_revision == "0002"
+    assert revisions[4].revision == "0002"
+    assert revisions[4].down_revision == "0001"
+    assert revisions[5].revision == "0001"
+    assert revisions[5].down_revision is None
+    assert script.get_current_head() == "0006"
 
 
 def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
@@ -130,8 +130,6 @@ def test_minted_id_tables_declare_autoincrement(alembic_upgraded_db):
         ("member_placements", "member_id"),
         ("monitor_config", "member_id"),
         ("monitor_runtime", "fleet_id"),
-        ("monitor_report_delivery", "message_id"),
-        ("monitor_director_gate", "fleet_id"),
     ],
 )
 def test_primary_key_columns_are_integer(alembic_upgraded_db, table, pk_column):
@@ -304,39 +302,38 @@ def test_monitor_config_table_created_by_migration(alembic_upgraded_db):
             "last_ping_at",
             "enabled",
             "last_stall_check_at",
-            "last_stall_candidate_at",
-            "last_stall_capture_sha256",
-            "stall_episode_state",
-            "stall_escalation_reason",
         }
         assert set(cols) == expected_cols
 
-        for name in (
-            "last_ping_at",
-            "last_stall_check_at",
-            "last_stall_candidate_at",
-            "last_stall_capture_sha256",
-            "stall_escalation_reason",
-        ):
+        for name in ("last_ping_at", "last_stall_check_at"):
             assert cols[name]["nullable"] is True
 
         # schedule columns are NOT NULL
-        for name in (
-            "member_id",
-            "interval_seconds",
-            "enabled",
-            "stall_episode_state",
-        ):
+        for name in ("member_id", "interval_seconds", "enabled"):
             assert cols[name]["nullable"] is False
 
-        # Existing schedule defaults remain; episode state backfills to clear.
         assert _default_int(cols, "interval_seconds") == 60
         assert _default_int(cols, "enabled") == 1
-        assert "clear" in str(cols["stall_episode_state"]["default"])
 
         # member_id is the members FK reused as a 1:1 PK
         fks = insp.get_foreign_keys("monitor_config")
         assert any(fk["referred_table"] == "members" for fk in fks)
+
+        # No CHECK constraint referencing the episode vocabulary survives
+        with engine.connect() as conn:
+            ddl = conn.execute(
+                text(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type='table' AND name='monitor_config'"
+                )
+            ).scalar_one()
+        for term in (
+            "stall_episode_state",
+            "stall_escalation_reason",
+            "last_stall_candidate_at",
+            "last_stall_capture_sha256",
+        ):
+            assert term.upper() not in ddl.upper()
     finally:
         engine.dispose()
 
@@ -383,12 +380,7 @@ def test_monitor_tables_do_not_declare_autoincrement(alembic_upgraded_db):
     engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
     try:
         with engine.connect() as conn:
-            for table in (
-                "monitor_config",
-                "monitor_runtime",
-                "monitor_report_delivery",
-                "monitor_director_gate",
-            ):
+            for table in ("monitor_config", "monitor_runtime"):
                 ddl = conn.execute(
                     text(
                         "SELECT sql FROM sqlite_master WHERE type='table' AND name=:t"
@@ -397,99 +389,6 @@ def test_monitor_tables_do_not_declare_autoincrement(alembic_upgraded_db):
                 ).scalar()
                 assert ddl is not None
                 assert "AUTOINCREMENT" not in ddl.upper()
-    finally:
-        engine.dispose()
-
-
-def test_monitor_report_delivery_schema_constraints_and_indexes(
-    alembic_upgraded_db,
-):
-    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
-    try:
-        insp = inspect(engine)
-        cols = {col["name"]: col for col in insp.get_columns("monitor_report_delivery")}
-        assert set(cols) == {
-            "message_id",
-            "fleet_id",
-            "preview_state",
-            "attempt_count",
-            "last_attempt_at",
-            "delivered_at",
-        }
-        for name in ("message_id", "fleet_id", "preview_state", "attempt_count"):
-            assert cols[name]["nullable"] is False
-        assert cols["last_attempt_at"]["nullable"] is True
-        assert cols["delivered_at"]["nullable"] is True
-        assert "pending" in str(cols["preview_state"]["default"])
-        assert _default_int(cols, "attempt_count") == 0
-
-        fks = {
-            tuple(fk["constrained_columns"]): fk
-            for fk in insp.get_foreign_keys("monitor_report_delivery")
-        }
-        assert fks[("message_id",)]["referred_table"] == "messages"
-        assert fks[("fleet_id",)]["referred_table"] == "fleets"
-
-        indexes = insp.get_indexes("monitor_report_delivery")
-        assert any(
-            idx["unique"] and idx["column_names"] == ["fleet_id"] for idx in indexes
-        )
-        assert any(
-            idx["column_names"] == ["fleet_id", "preview_state", "message_id"]
-            for idx in indexes
-        )
-
-        with engine.connect() as conn:
-            ddl = conn.execute(
-                text(
-                    "SELECT sql FROM sqlite_master "
-                    "WHERE type='table' AND name='monitor_report_delivery'"
-                )
-            ).scalar_one()
-        for term in (
-            "pending",
-            "awaiting_ack",
-            "delivered",
-            "attempt_count >= 0",
-            "last_attempt_at",
-            "delivered_at",
-        ):
-            assert term.upper() in ddl.upper()
-    finally:
-        engine.dispose()
-
-
-def test_monitor_director_gate_schema_constraints(alembic_upgraded_db):
-    engine = create_engine(f"sqlite:///{alembic_upgraded_db}")
-    try:
-        insp = inspect(engine)
-        cols = {col["name"]: col for col in insp.get_columns("monitor_director_gate")}
-        assert set(cols) == {
-            "fleet_id",
-            "director_member_id",
-            "token_sha256",
-            "classification",
-            "issued_at",
-            "expires_at",
-        }
-        assert all(not col["nullable"] for col in cols.values())
-
-        fks = {
-            tuple(fk["constrained_columns"]): fk
-            for fk in insp.get_foreign_keys("monitor_director_gate")
-        }
-        assert fks[("fleet_id",)]["referred_table"] == "fleets"
-        assert fks[("director_member_id",)]["referred_table"] == "members"
-
-        with engine.connect() as conn:
-            ddl = conn.execute(
-                text(
-                    "SELECT sql FROM sqlite_master "
-                    "WHERE type='table' AND name='monitor_director_gate'"
-                )
-            ).scalar_one()
-        for term in ("finished", "stalled", "token_sha256", "expires_at"):
-            assert term.upper() in ddl.upper()
     finally:
         engine.dispose()
 
@@ -566,6 +465,122 @@ def test_migration_0005_backfills_existing_monitor_rows_and_downgrades(tmp_path)
             assert "last_stall_capture_sha256" not in cols
             assert "stall_episode_state" not in cols
             assert "stall_escalation_reason" not in cols
+        finally:
+            engine.dispose()
+
+
+def test_migration_0006_preserves_kept_columns_and_downgrades(tmp_path):
+    """Upgrading ``0005`` → ``0006`` drops the four episode columns and the two
+    delivery/gate tables while preserving the five kept ``monitor_config``
+    columns; downgrading restores the pre-0006 schema with episode state reset."""
+    db_path = tmp_path / "episode-drop.db"
+    kept = ("2026-07-29T00:00:00+00:00", "2026-07-29T00:05:00+00:00")
+
+    with importlib.resources.as_file(
+        importlib.resources.files("cafleet.db") / "alembic" / "alembic.ini"
+    ) as ini_path:
+        cfg = Config(str(ini_path))
+        cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+        command.upgrade(cfg, "0005")
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO fleets"
+                        " (fleet_id, name, created_at, deleted_at, director_member_id)"
+                        " VALUES (1, 'fleet', :now, NULL, NULL)"
+                    ),
+                    {"now": "2026-07-29T00:00:00+00:00"},
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO members"
+                        " (member_id, fleet_id, name, description, status,"
+                        " registered_at, deregistered_at, member_card_json)"
+                        " VALUES (1, 1, 'director', 'root', 'active',"
+                        " :now, NULL, '{}')"
+                    ),
+                    {"now": "2026-07-29T00:00:00+00:00"},
+                )
+                conn.execute(
+                    text("UPDATE fleets SET director_member_id = 1 WHERE fleet_id = 1")
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO monitor_config"
+                        " (member_id, interval_seconds, last_ping_at, enabled,"
+                        " last_stall_check_at, last_stall_candidate_at,"
+                        " last_stall_capture_sha256, stall_episode_state,"
+                        " stall_escalation_reason)"
+                        " VALUES (1, 180, :ping, 1, :check, :check, :sha,"
+                        " 'nudged', NULL)"
+                    ),
+                    {"ping": kept[0], "check": kept[1], "sha": "a" * 64},
+                )
+        finally:
+            engine.dispose()
+
+        command.upgrade(cfg, "0006")
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            insp = inspect(engine)
+            assert "monitor_report_delivery" not in insp.get_table_names()
+            assert "monitor_director_gate" not in insp.get_table_names()
+            cols = {col["name"] for col in insp.get_columns("monitor_config")}
+            assert cols == {
+                "member_id",
+                "interval_seconds",
+                "last_ping_at",
+                "enabled",
+                "last_stall_check_at",
+            }
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text(
+                        "SELECT member_id, interval_seconds, last_ping_at,"
+                        " enabled, last_stall_check_at FROM monitor_config"
+                        " WHERE member_id = 1"
+                    )
+                ).one()
+            assert tuple(row) == (1, 180, kept[0], 1, kept[1])
+        finally:
+            engine.dispose()
+
+        command.downgrade(cfg, "0005")
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            insp = inspect(engine)
+            tables = set(insp.get_table_names())
+            assert "monitor_report_delivery" in tables
+            assert "monitor_director_gate" in tables
+            with engine.connect() as conn:
+                for table in ("monitor_report_delivery", "monitor_director_gate"):
+                    count = conn.execute(
+                        text(f"SELECT COUNT(*) FROM {table}")  # noqa: S608
+                    ).scalar_one()
+                    assert count == 0
+                row = conn.execute(
+                    text(
+                        "SELECT member_id, interval_seconds, last_ping_at,"
+                        " enabled, last_stall_check_at, last_stall_candidate_at,"
+                        " last_stall_capture_sha256, stall_episode_state,"
+                        " stall_escalation_reason FROM monitor_config"
+                        " WHERE member_id = 1"
+                    )
+                ).one()
+            assert tuple(row) == (
+                1,
+                180,
+                kept[0],
+                1,
+                kept[1],
+                None,
+                None,
+                "clear",
+                None,
+            )
         finally:
             engine.dispose()
 

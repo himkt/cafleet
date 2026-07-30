@@ -38,7 +38,7 @@ Before your first action other than these Reads, Read every file in the **Load-b
 |------|------|
 | [`reference/cli.md`](reference/cli.md) | you need a CLI subcommand beyond send/poll/ack — global options, output flags (`--full` / `--json` opt-back-in semantics, `CAFLEET_MAX_TEXT_LEN`), coding-agent backends, `message show` / `broadcast`, `member show` / `member list`, `doctor`, `fleet delete`, the typical workflow |
 
-Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`member create` / `member delete` / `member list` / `member capture` / `member prompt` / `member ping`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
+Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`member create` / `member delete` / `member list` / `monitor capture` / `member prompt` / `member ping`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
 
 Exhaustive per-subcommand flags, exit codes, and error strings live in [`docs/spec/cli-options.md`](../../docs/spec/cli-options.md).
 
@@ -72,8 +72,8 @@ Used only when your overlay omits a token or your backend is unknown. Each defau
 Every `cafleet` invocation that touches members or messages is **fleet-scoped** — it carries `--fleet-id` — and most additionally carry a member-identity flag with exactly one meaning per spelling:
 
 - `--fleet-id <int>` — per-subcommand (placed **after** the subcommand name), required on every `member *` / `message *` / `monitor *` subcommand plus `fleet show` / `fleet delete`. There is **no environment default**; a missing value exits 1 with the shared callback error naming `cafleet fleet create`. Rejected with `No such option` on `setup` / `fleet create` / `fleet list` / `server` / `doctor`.
-- `--member-id <int>` — **the member in question**: the requester on `message poll` / `ack` / `show`, the target on `member delete` / `show` / `capture` / `prompt` / `ping`, and the member whose schedule is shown/edited on `monitor config`.
-- `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient** on `message send`; `message broadcast` takes the sender only. (`member create` takes **no** identity flag — the Director is auto-resolved from the fleet row; `member list`, `monitor start` / `monitor status`, and the `fleet *` commands take none either.)
+- `--member-id <int>` — **the member in question**: the requester on `message poll` / `ack` / `show`, and the target on `member delete` / `show` / `prompt` / `ping` and `monitor capture`.
+- `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient** on `message send`; `message broadcast` takes the sender only. (`member create` takes **no** identity flag — the Director is auto-resolved from the fleet row; `member list`, `monitor start`, and the `fleet *` commands take none either.)
 
 In the Director's own commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet member create` — never your own exported shell variables. `permissions.allow` matches Bash invocations as fixed strings, so an ad-hoc `export FLEET_ID=…; --fleet-id $FLEET_ID` breaks the match and forces prompts. See [`cli-options.md`](../../docs/spec/cli-options.md#fleet-id) for the rationale and [`permissions.allow` coverage](../../docs/spec/cli-options.md#permissionsallow-coverage) for the pattern set.
 
@@ -143,15 +143,18 @@ cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --message-i
 
 Ordinary members never call `cafleet member ping`, `member prompt`, or any
 other pane-driving primitive. The dedicated monitoring member has one narrow
-exception: after two full-spacing, byte-identical quiet `stall_candidate`
-captures make the broker atomically return `action = ping`, it may invoke the
-existing fixed `member ping` once for that ordinary member's stall episode and
-must immediately record success or failure. The command accepts no arbitrary
-body and injects only `Esc` plus the target's `cafleet message poll`.
+exception: when its own conversation notes confirm an ordinary member quiet —
+a `stall_candidate` or `finished` capture byte-identical to the capture it
+recorded on the previous stall-check wake — it may invoke the existing fixed
+`member ping` at most once for that member's quiet period (idle and stalled
+members receive the same treatment). The command accepts no arbitrary body and
+injects only `Esc` plus the target's `cafleet message poll`; against a
+pending-placement member it skips the keystroke and succeeds.
 
-The monitoring member never pings the Director or itself, never promotes
-affirmative/ambiguous `working`, and never acts from `unacked` alone. It reports
-durable escalations and `finished` observations only through the token-gated
-aggregate command; the Director retrieves the aggregate's full body, decides
-whether finished members still owe work, and ACKs it. This exception does not
-broaden ordinary-member authority.
+The monitoring member never pings the Director or itself, never acts on
+affirmative/ambiguous `working`, and never acts from `unacked` alone. Anything
+needing Director attention — a member still unchanged at the next stall-check
+wake after its ping, a ping delivery failure, a capture failure — travels as a
+plain per-event `cafleet message send` to the Director, said once per quiet
+period; the Director decides whether the member still owes work and ACKs the
+message normally. This exception does not broaden ordinary-member authority.

@@ -1,8 +1,8 @@
 # Monitor Ping Simplification
 
-**Status**: Approved
-**Progress**: 0/38 tasks complete
-**Last Updated**: 2026-07-29
+**Status**: Complete
+**Progress**: 38/38 tasks complete
+**Last Updated**: 2026-07-30
 
 ## Overview
 
@@ -10,15 +10,15 @@ Reduce monitoring to its minimal shape — `monitor start` + capture + ping, plu
 
 ## Success Criteria
 
-- [ ] `cafleet member ping` against a pending-placement member exits 0 in all three output modes (text, `--json`, `--quiet`) with the skip contract below (stable `skipped` JSON key on both success paths); `member prompt` keeps its pending-placement hard error; `message send` is unchanged.
-- [ ] `cafleet monitor --help` lists exactly two subcommands: `start` and `capture`; `cafleet member --help` no longer lists `capture`; the removed subcommands (`monitor status`, `monitor config`, `monitor stall observe|ping-result|pending`, `monitor report-batch`, `member capture`) fail with Click's default no-such-command error.
-- [ ] The tmux/herdr wake payload is the pure-trigger form specified below, byte-identical across both backends, containing no protocol clauses; `skills/cafleet/roles/monitor.md` is the sole normative protocol carrier.
-- [ ] An ordinary member whose capture classifies `finished` (e.g. a claude member at the empty at-rest composer) receives the same two-wake treatment as a `stall_candidate`: byte-identical captures across two consecutive stall-check wakes yield at most one fixed `cafleet member ping`; a member still unchanged at the next stall-check wake, or a failed ping, is reported to the Director by a plain `cafleet message send`.
-- [ ] The broker exposes no stall-episode API (`observe_stall_episode`, `record_stall_ping_result`, `list_pending_stall_escalations`, the report-batch/gate path are gone) and no durable episode state exists anywhere; no durable ping/episode log is added.
-- [ ] Migration `0006` drops the four episode columns from `monitor_config` and the `monitor_director_gate` / `monitor_report_delivery` tables, preserving the five kept columns, with a working `downgrade()`; the chain-guard tests in `tests/db/test_alembic_smoke.py` assert the six-revision chain and head `0006`.
-- [ ] A repo-wide sweep for the removed vocabulary (`monitor stall`, `monitor status`, `monitor config`, `report-batch`, `ping_failed`, `ping_interrupted`, `unchanged_after_nudge`, `nudge_claimed`, `escalation_pending`, `stall_episode_state`, `director_gate`, `member capture`, the deleted broker function names, `format_monitor_status`, `format_monitor_config`, and — for the fixed-ping/wake-trigger senses — `nudge`) returns zero hits outside `design-docs/` and git history. Carve-outs for the `nudge` term: the Director's message-level stall-nudge concept (the cafleet-design-doc skill's coordination protocol and workflow role files) is a different concept and stays, as do the kept test module names `test_direct_member_nudge.py` / `test_direct_member_nudge_docs.py`.
-- [ ] The five-state classification taxonomy, the scheduler loop's triggers/cadence/annotation-only `unacked`, `monitor_runtime`, and the fixed `member ping` action are unchanged; the WebUI `monitor` object simply loses the four episode fields.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass.
+- [x] `cafleet member ping` against a pending-placement member exits 0 in all three output modes (text, `--json`, `--quiet`) with the skip contract below (stable `skipped` JSON key on both success paths); `member prompt` keeps its pending-placement hard error; `message send` is unchanged.
+- [x] `cafleet monitor --help` lists exactly two subcommands: `start` and `capture`; `cafleet member --help` no longer lists `capture`.
+- [x] The tmux/herdr wake payload is the pure-trigger form specified below, byte-identical across both backends, containing no protocol clauses; `skills/cafleet/roles/monitor.md` is the sole normative protocol carrier.
+- [x] An ordinary member whose capture classifies `finished` (e.g. a claude member at the empty at-rest composer) receives the same two-wake treatment as a `stall_candidate`: byte-identical captures across two consecutive stall-check wakes yield at most one fixed `cafleet member ping`; a member still unchanged at the next stall-check wake, or a failed ping, is reported to the Director by a plain `cafleet message send`.
+- [x] The broker exposes no stall-episode API (`observe_stall_episode`, `record_stall_ping_result`, `list_pending_stall_escalations`, the report-batch/gate path are gone) and no durable episode state exists anywhere; no durable ping/episode log is added.
+- [x] Migration `0006` drops the four episode columns from `monitor_config` and the `monitor_director_gate` / `monitor_report_delivery` tables, preserving the five kept columns, with a working `downgrade()`; the chain-guard tests in `tests/db/test_alembic_smoke.py` assert the six-revision chain and head `0006`.
+- [x] A repo-wide sweep for the removed vocabulary (`monitor stall`, `monitor status`, `monitor config`, `report-batch`, `ping_failed`, `ping_interrupted`, `unchanged_after_nudge`, `nudge_claimed`, `escalation_pending`, `stall_episode_state`, `director_gate`, `member capture`, the deleted broker function names, `format_monitor_status`, `format_monitor_config`, and — for the fixed-ping/wake-trigger senses — `nudge`) returns zero hits outside `design-docs/` and git history. Carve-outs for the `nudge` term: the Director's message-level stall-nudge concept (the cafleet-design-doc skill's coordination protocol and workflow role files) is a different concept and stays, as do the kept test module names `test_direct_member_nudge.py` / `test_direct_member_nudge_docs.py`.
+- [x] The five-state classification taxonomy, the scheduler loop's triggers/cadence/annotation-only `unacked`, `monitor_runtime`, and the fixed `member ping` action are unchanged; the WebUI `monitor` object simply loses the four episode fields.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass.
 
 ---
 
@@ -191,62 +191,64 @@ Generated via `mise //cafleet:makemigration "drop monitor stall episode state"` 
 
 ### Step 1: Documentation (docs-first — before any code)
 
-- [ ] Rewrite `docs/concepts/monitoring.md`: keep the heartbeat/facilitation split and the watched-set/cadence/single-instance/lifecycle sections; replace the "Fixed stall recovery" layer and the on-wake numbered protocol with the §4 judgment protocol (quiet = `stall_candidate` + `finished`, two-wake confirmation, at most one ping, plain per-event Director messages); document the §3 pure-trigger wake; replace the `monitor status` handshake with the startup-line handshake; remove episode-machine, report-batch, gate, and `monitor config` mentions <!-- completed: -->
-- [ ] Update `docs/concepts/member-lifecycle.md`: pending placement is ping-tolerant (skip semantics), one-line note in the lifecycle narrative <!-- completed: -->
-- [ ] Update `docs/spec/cli-options.md`: subcommand summary table; `member ping` section (skip contract of §1, `skipped` JSON key); delete the `member capture` section and add `monitor capture` under the monitor group; delete `monitor status` / `monitor config` / `monitor stall *` / `monitor report-batch` sections; update the error-message table; update `permissions.allow` coverage for the respelled capture <!-- completed: -->
-- [ ] Update `docs/spec/data-model.md`: `monitor_config` column list, drop the two tables, remove episode-state vocabulary, document revision `0006` <!-- completed: -->
-- [ ] Update `docs/spec/multiplexer-backends.md`: the exact §3 pure-trigger wake payload and unchanged poll/preview primitives <!-- completed: -->
-- [ ] Update `docs/api/*` pages that reference deleted broker functions or removed CLI endpoints <!-- completed: -->
-- [ ] Update `SPEC.md`: §5.3 enums (episode states/reasons gone), §6.2 broker (stall machine removal, plain per-event Director messaging), §6.3 CLI (require-pane helper narrowed to capture/prompt; `member ping` skip contract; monitor group = `start` + `capture`), §6.5/§6.6 (pure-trigger wake payload, startup line), §6.8 (WebUI monitor shape), §8 schema, §10 checklist <!-- completed: -->
-- [ ] Update `skills/cafleet/SKILL.md`: Team supervision section and the fixed monitoring-member ping exception paragraph (two-wake self-confirmation covering idle and stalled members, plain per-event message-send escalation, no broker claim/aggregate) <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/supervision.md`: stall-response and escalation flow (plain per-event messages replace the aggregate/gate), Idle Semantics (`finished` members become ping-eligible after two quiet wakes), the "pre-nudge" → "pre-ping" gate respelling, `monitor capture` respelling, handshake wording <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/director.md`: respell the capture gate "pre-nudge" → "pre-ping" and its read → `monitor capture`; rename the heading `## Member Ping (manual inbox-poll nudge)` → `## Member Ping (manual inbox-poll)`; remove stall-episode/aggregate retrieval instructions (the Director now receives plain messages and ACKs them normally) <!-- completed: -->
-- [ ] Respell the remaining fixed-ping/wake-trigger "nudge" wording: `skills/cafleet/reference/prompt-routing.md` ("Fixed-action inbox-poll nudge" and its link to the renamed `director.md` heading anchor), `skills/cafleet/reference/recovery.md` ("ping … to nudge"), and `docs/concepts/overview.md` (mermaid edge label "wake nudge" → "wake trigger") <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/cli.md`: command catalog (monitor group, capture move, ping skip) <!-- completed: -->
-- [ ] Rewrite `skills/cafleet/roles/monitor.md`: startup (launch task, confirm startup line, `ready: monitor live`), the §4 on-wake protocol as the sole normative carrier, the short §3 wake-trigger example, teardown unchanged <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/coding-agent/` overlays + `_template.md`: replace "only the broker may promote … to `stalled`" with the two-wake self-confirmation rule covering both quiet families; respell "pre-nudge capture gate" → "pre-ping capture gate" in every *Note → applies at* row; respell capture commands <!-- completed: -->
-- [ ] Update `.claude/rules/bash-tool.md`: the monitoring-member ping exception paragraph (no broker claim / `action = ping`) <!-- completed: -->
-- [ ] Verify `README.md`'s thin surface is unaffected and the `skills/cafleet-research` "aggregate" mentions are generic wording; sync via `/update-readme` only if drift exists <!-- completed: -->
+- [x] Rewrite `docs/concepts/monitoring.md`: keep the heartbeat/facilitation split and the watched-set/cadence/single-instance/lifecycle sections; replace the "Fixed stall recovery" layer and the on-wake numbered protocol with the §4 judgment protocol (quiet = `stall_candidate` + `finished`, two-wake confirmation, at most one ping, plain per-event Director messages); document the §3 pure-trigger wake; replace the `monitor status` handshake with the startup-line handshake; remove episode-machine, report-batch, gate, and `monitor config` mentions <!-- completed: 2026-07-30T07:16 -->
+- [x] Update `docs/concepts/member-lifecycle.md`: pending placement is ping-tolerant (skip semantics), one-line note in the lifecycle narrative <!-- completed: 2026-07-30T07:17 -->
+- [x] Update `docs/spec/cli-options.md`: subcommand summary table; `member ping` section (skip contract of §1, `skipped` JSON key); delete the `member capture` section and add `monitor capture` under the monitor group; delete `monitor status` / `monitor config` / `monitor stall *` / `monitor report-batch` sections; update the error-message table; update `permissions.allow` coverage for the respelled capture <!-- completed: 2026-07-30T07:24 -->
+- [x] Update `docs/spec/data-model.md`: `monitor_config` column list, drop the two tables, remove episode-state vocabulary, document revision `0006` <!-- completed: 2026-07-30T07:27 -->
+- [x] Update `docs/spec/multiplexer-backends.md`: the exact §3 pure-trigger wake payload and unchanged poll/preview primitives <!-- completed: 2026-07-30T07:31 -->
+- [x] Update `docs/api/*` pages that reference deleted broker functions or removed CLI endpoints — audited all four pages; they name only kept functions, so no edit was needed <!-- completed: 2026-07-30T07:33 -->
+- [x] Update `SPEC.md`: §5.3 enums (episode states/reasons gone), §6.2 broker (stall machine removal, plain per-event Director messaging), §6.3 CLI (require-pane helper narrowed to capture/prompt; `member ping` skip contract; monitor group = `start` + `capture`), §6.5/§6.6 (pure-trigger wake payload, startup line), §6.8 (WebUI monitor shape), §8 schema, §10 checklist <!-- completed: 2026-07-30T07:52 -->
+- [x] Update `skills/cafleet/SKILL.md`: Team supervision section and the fixed monitoring-member ping exception paragraph (two-wake self-confirmation covering idle and stalled members, plain per-event message-send escalation, no broker claim/aggregate) <!-- completed: 2026-07-30T07:55 -->
+- [x] Update `skills/cafleet/reference/supervision.md`: stall-response and escalation flow (plain per-event messages replace the aggregate/gate), Idle Semantics (`finished` members become ping-eligible after two quiet wakes), the "pre-nudge" → "pre-ping" gate respelling, `monitor capture` respelling, handshake wording <!-- completed: 2026-07-30T08:05 -->
+- [x] Update `skills/cafleet/reference/director.md`: respell the capture gate "pre-nudge" → "pre-ping" and its read → `monitor capture`; rename the heading `## Member Ping (manual inbox-poll nudge)` → `## Member Ping (manual inbox-poll)`; remove stall-episode/aggregate retrieval instructions (the Director now receives plain messages and ACKs them normally) <!-- completed: 2026-07-30T08:09 -->
+- [x] Respell the remaining fixed-ping/wake-trigger "nudge" wording: `skills/cafleet/reference/prompt-routing.md` ("Fixed-action inbox-poll nudge" and its link to the renamed `director.md` heading anchor), `skills/cafleet/reference/recovery.md` ("ping … to nudge"), and `docs/concepts/overview.md` (mermaid edge label "wake nudge" → "wake trigger") <!-- completed: 2026-07-30T08:12 -->
+- [x] Update `skills/cafleet/reference/cli.md`: command catalog (monitor group, capture move, ping skip) <!-- completed: 2026-07-30T08:15 -->
+- [x] Rewrite `skills/cafleet/roles/monitor.md`: startup (launch task, confirm startup line, `ready: monitor live`), the §4 on-wake protocol as the sole normative carrier, the short §3 wake-trigger example, teardown unchanged <!-- completed: 2026-07-30T08:19 -->
+- [x] Update `skills/cafleet/reference/coding-agent/` overlays + `_template.md`: replace "only the broker may promote … to `stalled`" with the two-wake self-confirmation rule covering both quiet families; respell "pre-nudge capture gate" → "pre-ping capture gate" in every *Note → applies at* row; respell capture commands <!-- completed: 2026-07-30T08:23 -->
+- [x] Update `.claude/rules/bash-tool.md`: the monitoring-member ping exception paragraph (no broker claim / `action = ping`) <!-- completed: 2026-07-30T08:52 -->
+
+- [x] Verify `README.md`'s thin surface is unaffected and the `skills/cafleet-research` "aggregate" mentions are generic wording; sync via `/update-readme` only if drift exists — README unaffected; "aggregate" mentions are the generic compile-findings sense; fixed sweep-relevant drift found in `skills/cafleet-research`, `skills/cafleet-design-doc`, and `skills/cafleet/roles/director.md` (`monitor status` handshake, `member capture` respell, monitoring-sense "idle-nudge") <!-- completed: 2026-07-30T08:38 -->
 
 ### Step 2: Schema
 
-- [ ] Update `db/models.py`: remove the four `MonitorConfig` episode columns and their CHECK constraints; delete the `MonitorDirectorGate` and `MonitorReportDelivery` models <!-- completed: -->
-- [ ] Generate migration 0006 via `mise //cafleet:makemigration "drop monitor stall episode state"`; hand-review to the §6 shape (batch recreate of `monitor_config` preserving the five kept columns; table drops; full `downgrade()`) <!-- completed: -->
-- [ ] Update the chain-guard and schema tests in `tests/db/test_alembic_smoke.py` per §6 <!-- completed: -->
+- [x] Update `db/models.py`: remove the four `MonitorConfig` episode columns and their CHECK constraints; delete the `MonitorDirectorGate` and `MonitorReportDelivery` models <!-- completed: 2026-07-30T08:56 -->
+- [x] Generate migration 0006 via `mise //cafleet:makemigration "drop monitor stall episode state"`; hand-review to the §6 shape (batch recreate of `monitor_config` preserving the five kept columns; table drops; full `downgrade()`) <!-- completed: 2026-07-30T09:35 -->
+- [x] Update the chain-guard and schema tests in `tests/db/test_alembic_smoke.py` per §6 — done by the Tester (commit bda93e09) <!-- completed: 2026-07-30T08:56 -->
 
 ### Step 3: Broker
 
-- [ ] Delete the stall-episode API and helpers listed in §2 from `broker/monitor.py` (and their `broker/__init__.py` exports); trim `_config_dict` / `_CONFIG_COLS` to the five kept fields <!-- completed: -->
-- [ ] Simplify lifecycle reconciliation: disable/dead/pending cleanup now only clears `last_stall_check_at` (no episode transitions) <!-- completed: -->
-- [ ] Trim `delete_fleet_monitor_rows` to `monitor_config` + `monitor_runtime` <!-- completed: -->
+- [x] Delete the stall-episode API and helpers listed in §2 from `broker/monitor.py` (and their `broker/__init__.py` exports); trim `_config_dict` / `_CONFIG_COLS` to the five kept fields <!-- completed: 2026-07-30T09:35 -->
+- [x] Simplify lifecycle reconciliation: disable/dead/pending cleanup now only clears `last_stall_check_at` (no episode transitions) <!-- completed: 2026-07-30T09:35 -->
+- [x] Trim `delete_fleet_monitor_rows` to `monitor_config` + `monitor_runtime` <!-- completed: 2026-07-30T09:35 -->
 
 ### Step 4: CLI
 
-- [ ] `cli/member.py`: implement the §1 ping skip (drop `_require_member_pane` from `member ping`; add the `skipped` key to both JSON paths; skip text line); narrow `_require_member_pane` docs/action set to capture/prompt; delete the `member capture` command <!-- completed: -->
-- [ ] `cli/monitor.py`: delete `status`, `config`, the `stall` group, and `report-batch`; add `monitor capture` (the moved implementation, contract unchanged) <!-- completed: -->
-- [ ] Update any internal callers/help text referencing the removed or moved commands (e.g. `doctor`, `member create` spawn scaffolding, `fleet delete` messages) found by the Step 7 sweep <!-- completed: -->
+- [x] `cli/member.py`: implement the §1 ping skip (drop `_require_member_pane` from `member ping`; add the `skipped` key to both JSON paths; skip text line); narrow `_require_member_pane` docs/action set to capture/prompt; delete the `member capture` command <!-- completed: 2026-07-30T09:55 -->
+- [x] `cli/monitor.py`: delete `status`, `config`, the `stall` group, and `report-batch`; add `monitor capture` (the moved implementation, contract unchanged) <!-- completed: 2026-07-30T09:55 -->
+- [x] Update any internal callers/help text referencing the removed or moved commands (e.g. `doctor`, `member create` spawn scaffolding, `fleet delete` messages) found by the Step 7 sweep — swept `src/`: the dead `format_monitor_status` / `format_monitor_config` / `_format_ping_age` formatters and their `output/__init__.py` exports removed; `monitor/loop.py` `should_ping` docstring respelled; the remaining `multiplexer/base.py` payload body is Step 5 scope <!-- completed: 2026-07-30T09:55 -->
 
 ### Step 5: Monitor loop and wake payload
 
-- [ ] `monitor/loop.py`: emit the startup line `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` after a successful runtime claim, before the first tick <!-- completed: -->
-- [ ] `multiplexer/base.py`: rewrite `_monitor_wake_payload` to the exact §3 pure-trigger form (unchanged signature, entry rendering, sanitization, and validation) and update the `send_wake_trigger` docstrings; respell fixed-ping/wake-trigger "nudge" wording in source docstrings repo-wide (`multiplexer/tmux.py`, `broker/members.py`, `monitor/loop.py`) <!-- completed: -->
+- [x] `monitor/loop.py`: emit the startup line `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` after a successful runtime claim, before the first tick <!-- completed: 2026-07-30T10:15 -->
+- [x] `multiplexer/base.py`: rewrite `_monitor_wake_payload` to the exact §3 pure-trigger form (unchanged signature, entry rendering, sanitization, and validation) and update the `send_wake_trigger` docstrings; respell fixed-ping/wake-trigger "nudge" wording in source docstrings repo-wide (`multiplexer/tmux.py`, `broker/members.py`, `monitor/loop.py`) <!-- completed: 2026-07-30T10:15 -->
 
 ### Step 6: WebUI
 
-- [ ] `webui/api.py`: confirm `GET /api/monitor` and `GET`/`PATCH /api/members/{id}/monitor` still function on the trimmed config dict; update the `monitor` response shape and any typed models <!-- completed: -->
-- [ ] Sweep `admin/src` for episode-field usage (none expected) and rebuild via `mise //admin:build` if the API types are generated <!-- completed: -->
+- [x] `webui/api.py`: confirm `GET /api/monitor` and `GET`/`PATCH /api/members/{id}/monitor` still function on the trimmed config dict; update the `monitor` response shape and any typed models — the projection already exposes exactly `{interval_seconds, last_ping_at, enabled}`; docstring updated, all 30 webui tests pass <!-- completed: 2026-07-30T10:25 -->
+- [x] Sweep `admin/src` for episode-field usage (none expected) and rebuild via `mise //admin:build` if the API types are generated — zero episode-field hits; `types.ts` is hand-written and already matches the trimmed shape, so no rebuild; `mise //admin:lint` green <!-- completed: 2026-07-30T10:25 -->
 
 ### Step 7: Tests and verification
 
-- [ ] Delete `tests/broker/test_monitor_stall_state.py`, `tests/cli/test_monitor_stall.py`, and — with the output formatters — `tests/output/test_monitor_status_table.py` and `tests/output/test_ping_age_ascii.py` <!-- completed: -->
-- [ ] Rewrite `tests/multiplexer/test_monitor_wake_contract.py` against the §3 pure-trigger payload: exact-string pin, tmux/herdr byte parity, sanitizer coverage, invalid-`coding_agent` fail-closed <!-- completed: -->
-- [ ] Update `tests/cli/test_monitor.py`: delete the `monitor status` / `monitor config` sections; add the startup-line assertion to the `monitor start` tests <!-- completed: -->
-- [ ] Update `tests/monitor/test_loop.py` (startup line; unchanged scan/wake behavior) and `tests/integration/test_direct_member_nudge.py` + `tests/docs/test_direct_member_nudge_docs.py` for the ping skip, respelled capture, and removed broker machinery <!-- completed: -->
-- [ ] Update `tests/cli/test_member_ping.py` (existing ping tests take the `skipped` JSON key), rename `tests/cli/test_member_capture_defaults.py` → `tests/cli/test_monitor_capture_defaults.py` with its invocations respelled to `monitor capture`, and update `tests/cli/test_help_budget.py` (the `("member", "capture")` budget entry moves to the monitor group) <!-- completed: -->
-- [ ] Update `tests/webui/test_monitor_api.py` (trimmed `monitor` shape) and `tests/broker/test_monitor.py` (config-dict assertions lose the episode columns) <!-- completed: -->
-- [ ] Add CLI tests: ping skip in text/`--json`/`--quiet` (exit 0, `skipped` key both paths), placementless ping still errors, `monitor capture` contract (including the pending-placement hard error), and absence guards for every removed command via Click's default no-such-command error <!-- completed: -->
-- [ ] Repo-wide vocabulary sweep per Success Criteria (rg over source, docs, skills, rules, tests) <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` <!-- completed: -->
+- [x] Delete `tests/broker/test_monitor_stall_state.py`, `tests/cli/test_monitor_stall.py`, and — with the output formatters — `tests/output/test_monitor_status_table.py` and `tests/output/test_ping_age_ascii.py` <!-- completed: 2026-07-30T08:58 -->
+- [x] Rewrite `tests/multiplexer/test_monitor_wake_contract.py` against the §3 pure-trigger payload: exact-string pin, tmux/herdr byte parity, sanitizer coverage, invalid-`coding_agent` fail-closed <!-- completed: 2026-07-30T08:58 -->
+- [x] Update `tests/cli/test_monitor.py`: delete the `monitor status` / `monitor config` sections; add the startup-line assertion to the `monitor start` tests <!-- completed: 2026-07-30T08:58 -->
+- [x] Update `tests/monitor/test_loop.py` (startup line; unchanged scan/wake behavior) and `tests/integration/test_direct_member_nudge.py` + `tests/docs/test_direct_member_nudge_docs.py` for the ping skip, respelled capture, and removed broker machinery <!-- completed: 2026-07-30T08:58 -->
+- [x] Update `tests/cli/test_member_ping.py` (existing ping tests take the `skipped` JSON key), rename `tests/cli/test_member_capture_defaults.py` → `tests/cli/test_monitor_capture_defaults.py` with its invocations respelled to `monitor capture`, and update `tests/cli/test_help_budget.py` (the `("member", "capture")` budget entry moves to the monitor group) <!-- completed: 2026-07-30T08:58 -->
+- [x] Update `tests/webui/test_monitor_api.py` (trimmed `monitor` shape) and `tests/broker/test_monitor.py` (config-dict assertions lose the episode columns) <!-- completed: 2026-07-30T08:58 -->
+- [x] Add CLI tests: ping skip in text/`--json`/`--quiet` (exit 0, `skipped` key both paths), placementless ping still errors, and the `monitor capture` contract (including the pending-placement hard error) <!-- completed: 2026-07-30T08:58 -->
+- [x] Repo-wide vocabulary sweep per Success Criteria (rg over source, docs, skills, rules, tests) <!-- completed: 2026-07-30T08:58 -->
+
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` <!-- completed: 2026-07-30T08:58 -->
 
 ---
 
@@ -260,3 +262,5 @@ Generated via `mise //cafleet:makemigration "drop monitor stall episode state"` 
 | 2026-07-29 | User feedback: "nudge" vocabulary replaced with "ping" (the real primitive) throughout, including the title, the guiding principle, and the authored doc/skill text (capture gate respelled "pre-ping"); removed-vocabulary literals, test filenames, and slugs kept verbatim. |
 | 2026-07-29 | User feedback: batch-report semantics dropped — the monitoring member sends a plain per-event `cafleet message send` for anything needing Director attention, with no per-wake aggregation, summary framing, or one-message-per-wake rule; the once-per-quiet-period non-repetition rule stays. |
 | 2026-07-29 | Reviewer round: nudge→ping respell coverage completed — overlay gate rows, the `director.md` heading/anchor rename with `prompt-routing.md`, `recovery.md`, and the `overview.md` mermaid label added to the task list; source docstrings declared in scope; a `nudge` sweep term added with carve-outs for the message-level stall-nudge concept and the kept test filenames. |
+| 2026-07-30 | User feedback: absence-guard tests for removed subcommands dropped from the Step 7 task and the Success Criteria — once a command is gone, its absence is the test (removal rule); the `--help` listing assertions stay. |
+| 2026-07-30 | Execution complete: all 38 tasks and 9 Success Criteria verified (Verifier Phase 2 PASS, all four quality gates green), Reviewer approved the full branch diff, PR #233 opened. Status → Complete. |

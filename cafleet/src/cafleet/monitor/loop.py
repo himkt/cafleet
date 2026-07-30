@@ -25,7 +25,7 @@ from cafleet.multiplexer import AgentStateAware, resolve_multiplexer
 # The sole native agent status that flags a wake. ``blocked`` is deliberately
 # excluded: it means the member awaits a user answer, and the
 # monitoring member's only correct action there is inaction — waking about it is
-# pure token cost plus a nonzero chance of a destructive nudge. ``blocked`` is
+# pure token cost plus a nonzero chance of a destructive ping. ``blocked`` is
 # still recorded in ``_last_member_status`` so the episode is tracked and a later
 # recovery is detected; it simply never flags a wake.
 _WAKE_ON_STATUS = ("done",)
@@ -57,9 +57,9 @@ def should_ping(target: dict, now: datetime) -> bool:
     Director (180 s) or an ordinary member (720 s). The dedicated monitoring
     member is the unenrolled watcher and never appears here. A watched member is
     due once its interval has elapsed, regardless of ``pending_count`` (R2). The
-    policy is role-agnostic (``is_director`` is retained for ``monitor status``
-    labeling, not consulted here). Disabled members and dead/missing panes are
-    always skipped, and a not-yet-due member waits.
+    policy is role-agnostic (``is_director`` is retained for the wake-entry
+    role label, not consulted here). Disabled members and dead/missing panes
+    are always skipped, and a not-yet-due member waits.
     """
     if not target["enabled"]:
         return False
@@ -80,7 +80,7 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
     soft-deleted; otherwise ``CONTINUE``. The pane-liveness set is fetched once
     per tick (one tmux call). The due set is computed over the WATCHED members
     (the root Director + ordinary members); when ≥ 1 is due and the monitoring
-    member's pane is live, the loop keystrokes a single wake nudge — naming the
+    member's pane is live, the loop keystrokes a single wake trigger — naming the
     freshly-due members and the Director id — into the watcher's own pane (never
     into a watched pane) and advances each due member's cadence in one write.
     With no live watcher to wake, nothing is recorded.
@@ -150,11 +150,11 @@ def monitor_tick(fleet_id: int, now: datetime) -> _Sentinel:
             "member_id": director_target["member_id"],
             "coding_agent": director_target["coding_agent"],
         }
-        # The loop's only keystroke: a single best-effort wake nudge into the
-        # watcher's own pane. The nudge NAMES the due members (each with its
-        # ``wake_reasons``) and the Director id, driving the watcher's
-        # capture-classify-reengage routine over exactly those panes plus the
-        # Director. A watched pane (Director / member) is never keystroked.
+        # The loop's only keystroke: a single best-effort wake trigger into the
+        # watcher's own pane. The trigger NAMES the due members (each with its
+        # ``wake_reasons``) and the Director descriptor, pointing the watcher
+        # at its role protocol for exactly those panes. A watched pane
+        # (Director / member) is never keystroked.
         woke = mux.send_wake_trigger(
             target_pane_id=watcher["pane_id"],
             due_members=due,
@@ -333,6 +333,11 @@ def run_monitor_loop(fleet_id: int, tick_seconds: int) -> None:
         fleet_id, pid, tick_seconds, datetime.now(UTC).isoformat()
     ):
         raise click.ClickException(f"monitor already running for fleet {fleet_id}")
+    # The startup line backs the monitoring member's `ready: monitor live`
+    # handshake: it confirms this line in the task output before reporting.
+    click.echo(
+        f"monitor loop started (fleet {fleet_id}, tick {tick_seconds}s, pid {pid})"
+    )
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
     try:

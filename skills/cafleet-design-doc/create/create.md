@@ -95,9 +95,9 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 1b. Spawn the monitoring member (first-in)
 
-The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms with `cafleet monitor status`, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms the loop's startup line in the task output, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
 
-See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the conditional idle-nudge routine) and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The heartbeat runs unchanged through the quality loop; the monitoring member is deleted first in Step 6's teardown (first-out), which terminates the loop with its pane.
+See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the on-wake routine) and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The heartbeat runs unchanged through the quality loop; the monitoring member is deleted first in Step 6's teardown (first-out), which terminates the loop with its pane.
 
 #### 1c. Locate role definitions (path-by-reference)
 

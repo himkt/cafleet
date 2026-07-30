@@ -197,19 +197,8 @@ def _insert_stale_pending(
     )
 
 
-def _set_episode(
-    session,
-    member_id: int,
-    state: str,
-    *,
-    reason: str | None = None,
-) -> None:
-    config = session.get(MonitorConfig, member_id)
-    config.last_stall_check_at = (_NOW - timedelta(seconds=60)).isoformat()
-    config.last_stall_candidate_at = (_NOW - timedelta(seconds=60)).isoformat()
-    config.last_stall_capture_sha256 = "a" * 64
-    config.stall_episode_state = state
-    config.stall_escalation_reason = reason
+def _set_stall_check_at(session, member_id: int, when: str) -> None:
+    session.get(MonitorConfig, member_id).last_stall_check_at = when
 
 
 def _stub_tmux(monkeypatch, live_panes, *, wake_ok=True):
@@ -220,7 +209,7 @@ def _stub_tmux(monkeypatch, live_panes, *, wake_ok=True):
     ``send_wake_trigger`` returns — pass ``False`` to model a best-effort
     keystroke that was attempted but failed to land. Each ``wakes`` entry is
     ``(target_pane_id, [conveyed due-member ids], director_member_id)`` — the due
-    set and the Director id the wake nudge names (§2/§4)."""
+    set and the Director id the wake trigger names (§2/§4)."""
     monkeypatch.setattr(
         "cafleet.multiplexer.tmux.TmuxMultiplexer.list_pane_ids",
         lambda self: set(live_panes),
@@ -1117,6 +1106,44 @@ def test_run_monitor_loop__does_not_reset_durable_stall_dispatch(
     )
 
 
+# --- startup line (the ready-handshake backing) ------------------------------
+#
+# ``run_monitor_loop`` emits ``monitor loop started (fleet <fleet_id>, tick
+# <tick>s, pid <pid>)`` to stdout immediately after claiming the runtime row and
+# before the first tick. The monitoring member confirms this line in its
+# background-task output before sending ``ready: monitor live``.
+
+
+def test_run_monitor_loop__emits_startup_line_after_claim_before_first_tick(
+    capsys, monkeypatch
+):
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+
+    def fake_tick(fleet_id, now):
+        click.echo("tick-ran")
+        return STOP
+
+    monkeypatch.setattr(monitor_loop_module, "monitor_tick", fake_tick)
+
+    run_monitor_loop(sid, 5)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == f"monitor loop started (fleet {sid}, tick 5s, pid {os.getpid()})"
+    assert lines[1] == "tick-ran"
+
+
+def test_run_monitor_loop__no_startup_line_when_claim_refused(capsys, monkeypatch):
+    fleet = _create_fleet()
+    sid = fleet["fleet_id"]
+    monkeypatch.setattr(broker, "claim_monitor_runtime", lambda *_a, **_kw: False)
+
+    with pytest.raises(click.ClickException, match="already running"):
+        run_monitor_loop(sid, 5)
+
+    assert "monitor loop started" not in capsys.readouterr().out
+
+
 # --- unacked-delivery annotation -------------------------------------------
 #
 # Only rows already due for interval, durable stall-check, or native done can
@@ -1426,11 +1453,12 @@ def test_monitor_tick__invalid_coding_agent_fails_closed_without_cadence_commit(
     assert config["last_stall_check_at"] is None
 
 
-def test_monitor_tick__reconciles_nonlive_episodes_before_due_filtering(
+def test_monitor_tick__reconciles_nonlive_members_before_due_filtering(
     broker_session, monkeypatch
 ):
-    """Dead, placement-pending, and disabled targets are cleaned in one scan;
-    claimed/pending escalations stay discoverable but cannot trigger a wake."""
+    """Dead, placement-pending, and disabled targets are cleaned in one scan:
+    lifecycle reconciliation clears only ``last_stall_check_at``, leaving the
+    schedule fields untouched."""
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
     director_id = fleet["director"]["member_id"]
@@ -1443,15 +1471,11 @@ def test_monitor_tick__reconciles_nonlive_episodes_before_due_filtering(
     )["member_id"]
     disabled = _register_watched_member(fleet, "disabled", "%11")
     broker.record_pings([director_id, dead, paneless, disabled], _NOW.isoformat())
+    checked = (_NOW - timedelta(seconds=60)).isoformat()
     with broker_session() as session:
-        _set_episode(session, dead, "nudge_claimed")
-        _set_episode(session, paneless, "nudged")
-        _set_episode(
-            session,
-            disabled,
-            "escalation_pending",
-            reason="ping_failed",
-        )
+        _set_stall_check_at(session, dead, checked)
+        _set_stall_check_at(session, paneless, checked)
+        _set_stall_check_at(session, disabled, checked)
         session.get(MonitorConfig, disabled).enabled = 0
         session.commit()
     broker.claim_monitor_runtime(
@@ -1462,84 +1486,19 @@ def test_monitor_tick__reconciles_nonlive_episodes_before_due_filtering(
     assert monitor_tick(sid, _NOW) is CONTINUE
     assert wakes == []
 
-    dead_config = broker.get_monitor_config(sid, dead)
-    assert dead_config["last_stall_check_at"] is None
-    assert dead_config["stall_episode_state"] == "escalation_pending"
-    assert dead_config["stall_escalation_reason"] == "ping_interrupted"
-    assert dead_config["last_stall_candidate_at"] is not None
-
-    paneless_config = broker.get_monitor_config(sid, paneless)
-    assert paneless_config["last_stall_check_at"] is None
-    assert paneless_config["stall_episode_state"] == "clear"
-    assert paneless_config["last_stall_candidate_at"] is None
-    assert paneless_config["last_stall_capture_sha256"] is None
-
-    disabled_config = broker.get_monitor_config(sid, disabled)
-    assert disabled_config["last_stall_check_at"] is None
-    assert disabled_config["stall_episode_state"] == "escalation_pending"
-    assert disabled_config["stall_escalation_reason"] == "ping_failed"
-    assert disabled_config["last_stall_candidate_at"] is not None
-
-
-@pytest.mark.parametrize("director_unavailable", ["disabled", "dead"])
-def test_monitor_tick__pending_only_waits_for_director_recovery_and_normal_due(
-    broker_session, monkeypatch, director_unavailable
-):
-    """Sticky pending escalation neither schedules a wake nor bypasses an
-    unavailable Director; a later ordinary interval event resumes one batch."""
-    fleet = _create_fleet()
-    sid = fleet["fleet_id"]
-    director_id = fleet["director"]["member_id"]
-    _register_monitoring_member(fleet, "watcher", "%7")
-    member = _register_watched_member(fleet, "alice", "%9")
-    broker.record_pings([director_id, member], _NOW.isoformat())
-    with broker_session() as session:
-        _set_episode(
-            session,
-            member,
-            "escalation_pending",
-            reason="ping_failed",
-        )
-        if director_unavailable == "disabled":
-            session.get(MonitorConfig, director_id).enabled = 0
-        session.commit()
-    broker.claim_monitor_runtime(
-        sid, os.getpid(), 5, (_NOW - timedelta(seconds=30)).isoformat()
-    )
-
-    first_live = {"%7", "%9"}
-    if director_unavailable == "disabled":
-        first_live.add("%0")
-    _, first_wakes = _stub_tmux(monkeypatch, first_live)
-    assert monitor_tick(sid, _NOW) is CONTINUE
-    assert first_wakes == []
-    assert (
-        broker.get_monitor_config(sid, member)["stall_episode_state"]
-        == "escalation_pending"
-    )
-
-    if director_unavailable == "disabled":
-        with broker_session() as session:
-            session.get(MonitorConfig, director_id).enabled = 1
-            session.commit()
-    due_at = _NOW + timedelta(seconds=720)
-    _, recovery_wakes = _stub_tmux(monkeypatch, {"%0", "%7", "%9"})
-
-    assert monitor_tick(sid, due_at) is CONTINUE
-    assert len(recovery_wakes) == 1
-    assert set(recovery_wakes[0][1]) == {director_id, member}
-    assert recovery_wakes[0][2] == director_id
-    assert (
-        broker.get_monitor_config(sid, member)["stall_episode_state"]
-        == "escalation_pending"
-    )
+    for member_id in (dead, paneless, disabled):
+        config = broker.get_monitor_config(sid, member_id)
+        assert config["last_stall_check_at"] is None
+        # only the stall-check cadence is cleared — the schedule survives
+        assert config["last_ping_at"] == _NOW.isoformat()
+        assert config["interval_seconds"] == 720
 
 
 def test_monitor_tick__live_rebind_reseeds_stall_dispatch_after_cleanup(
     broker_session, monkeypatch
 ):
-    """A pending placement clears a non-pending episode and dispatch timestamp;
-    once rebound live, the next scan seeds a fresh durable stall-check cadence."""
+    """A pending placement clears the dispatch timestamp; once rebound live,
+    the next scan seeds a fresh durable stall-check cadence."""
     monkeypatch.setattr(settings, "monitor_stall_interval", 240)
     fleet = _create_fleet()
     sid = fleet["fleet_id"]
@@ -1552,7 +1511,7 @@ def test_monitor_tick__live_rebind_reseeds_stall_dispatch_after_cleanup(
     )["member_id"]
     broker.record_pings([director_id, member], _NOW.isoformat())
     with broker_session() as session:
-        _set_episode(session, member, "nudged")
+        _set_stall_check_at(session, member, (_NOW - timedelta(seconds=60)).isoformat())
         session.get(MonitorConfig, director_id).last_stall_check_at = _NOW.isoformat()
         session.commit()
     broker.claim_monitor_runtime(
@@ -1563,8 +1522,6 @@ def test_monitor_tick__live_rebind_reseeds_stall_dispatch_after_cleanup(
     assert monitor_tick(sid, _NOW) is CONTINUE
     assert first_wakes == []
     cleaned = broker.get_monitor_config(sid, member)
-    assert cleaned["stall_episode_state"] == "clear"
-    assert cleaned["last_stall_candidate_at"] is None
     assert cleaned["last_stall_check_at"] is None
 
     broker.update_placement_pane_id(member, "%9")

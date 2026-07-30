@@ -30,7 +30,9 @@ FLEET_SCOPED_INVOCATIONS = [
     pytest.param(
         ["message", "poll", "--fleet-id", "1", "--member-id", "1"], id="message"
     ),
-    pytest.param(["monitor", "status", "--fleet-id", "1"], id="monitor"),
+    pytest.param(
+        ["monitor", "capture", "--fleet-id", "1", "--member-id", "1"], id="monitor"
+    ),
 ]
 
 
