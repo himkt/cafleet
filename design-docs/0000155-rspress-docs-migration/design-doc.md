@@ -1,17 +1,17 @@
 # Migrate the Documentation Site from Zensical to Rspress
 
 **Status**: Approved
-**Progress**: 17/29 tasks complete
+**Progress**: 19/28 tasks complete
 **Last Updated**: 2026-07-31
 
 ## Overview
 
-Replace the Python-based zensical documentation toolchain with rspress v2, making `docs/` the rspress project root as a pnpm workspace package. The Python toolchain leaves the repository entirely: `pyproject.toml`, `uv.lock`, the uv tool pin, `zensical.toml`, and `.bumpversion.toml` are all removed. The published site keeps its URL (`https://himkt.github.io/cafleet/`), navigation structure, and content parity across all 19 pages.
+Replace the Python-based zensical documentation toolchain with rspress v2, making `docs/` the rspress project root as a pnpm workspace package. The Python toolchain leaves the repository entirely: `pyproject.toml`, `uv.lock`, the uv tool pin, `zensical.toml`, and `.bumpversion.toml` are all removed. The published site keeps its URL (`https://himkt.github.io/cafleet/`), navigation structure, and content parity across all 19 pages — except the five mermaid diagrams, which are removed entirely by execute-time amendment (their surrounding prose stands alone).
 
 ## Success Criteria
 
 - [ ] `mise //:docs-build` builds the rspress site into `docs/doc_build` with all 19 pages, sidebar parity with the zensical nav, built-in search, and the light/dark toggle
-- [ ] The five mermaid diagrams render as committed static SVGs (no runtime mermaid plugin)
+- [ ] No mermaid content remains: no fenced mermaid blocks, no `.mmd` sources, no diagram image references, and no mermaid tooling anywhere outside `design-docs/` and git history
 - [ ] The two `??? example` collapsibles render as `:::details` containers
 - [ ] The five `&#124;` table cells and the literal-brace headings in `spec/webui-api.md` render intact in the built HTML
 - [ ] Internal links resolve (`markdown.checkDeadLinks` fails the build on a broken route target) and fragment anchors resolve (verified by the dedicated Step 7 anchor task)
@@ -44,7 +44,7 @@ Full Python removal therefore requires decisions on both; the user has made them
 | 1 | bump-my-version fate | Dropped entirely. `.bumpversion.toml` is deleted; releases bump the single `version` line in `cafleet/Cargo.toml` by hand and let the next cargo build refresh `Cargo.lock`. |
 | 2 | matplotlib / research group fate | Removed. The cafleet-research skill is to be isolated into a separate repository (see *Scope*). |
 | 3 | Workspace shape | rspress v2, with `docs/` added to `pnpm-workspace.yaml`; dependencies in `docs/package.json`; shared root `pnpm-lock.yaml`. |
-| 4 | Mermaid diagrams | Pre-rendered to committed static SVGs; no runtime plugin. Rendering uses a one-off `pnpm dlx @mermaid-js/mermaid-cli` invocation — no in-repo mermaid-cli devDependency (user decision at execute time: keep puppeteer/Chrome out of the lockfile). |
+| 4 | Mermaid diagrams | Removed entirely (user decision at execute time): the five diagrams are deleted from the docs — no `.mmd` sources, no rendered SVGs, no mermaid tooling anywhere in the repo. The prose surrounding each former diagram carries the content on its own. |
 | 5 | Page icons | The `icon: lucide/...` frontmatter is deleted from all 19 pages. |
 | 6 | Home page | rspress hero home layout (`pageType: home`) with tagline and action buttons. |
 | 7 | CI / task | The root-level `mise //:docs-build` task name is kept, retargeted to the pnpm-driven rspress build. Same GitHub Pages URL (`base: '/cafleet/'`), same `docs.yml` trigger shape. |
@@ -64,9 +64,7 @@ Full Python removal therefore requires decisions on both; the user has made them
 docs/
 ├── package.json              # workspace package "cafleet-docs"
 ├── rspress.config.ts
-├── diagrams/                 # mermaid sources (*.mmd), outside the content root
 └── docs/                     # rspress content root
-    ├── public/diagrams/      # rendered *.svg (committed)
     ├── _meta.json
     ├── index.md              # hero home page
     ├── quickstart.md
@@ -96,7 +94,7 @@ The nested content root follows decision 8. Its two repo-wide consequences are h
 }
 ```
 
-`@rspress/core` is the rspress v2 package (provides the `rspress` binary; `defineConfig` is imported from it). The rendered SVGs are committed; after a `.mmd` edit, regenerate them with a one-off invocation from `docs/`: `pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli -i diagrams/<name>.mmd -o docs/public/diagrams/<name>.svg -b white` (the dlx cache holds mermaid-cli and its Chrome outside the workspace lockfile; `--allow-build` permits puppeteer's one-time Chrome download inside the dlx sandbox).
+`@rspress/core` is the rspress v2 package (provides the `rspress` binary; `defineConfig` is imported from it). It is the docs package's only dependency.
 
 ### docs/rspress.config.ts
 
@@ -183,7 +181,7 @@ Pages keep the `.md` extension. Conversions:
 |---|---|---|
 | `icon: lucide/...` frontmatter | all 19 pages | Delete the line; delete the whole frontmatter block where it becomes empty |
 | `??? example "Expand the walkthrough"` | `quickstart.md:122`, `how-to/mixed-backend-team.md:57` | `:::details Expand the walkthrough` container: dedent the 4-space-indented body, close with `:::` |
-| Fenced ` ```mermaid ` block | 5 (inventory below) | Markdown image referencing the committed SVG |
+| Fenced ` ```mermaid ` block | 5 (inventory below) | Deleted (execute-time amendment); the surrounding prose stands alone |
 | `:material-arrow-right:` shortcode + `{ .md-button ... }` attr_list | `index.md:25` only | Removed by the hero home conversion (the Quickstart button becomes a hero action) |
 | Directory-style link `quickstart/` | `index.md:25` only | Route link `/quickstart` in the hero action |
 
@@ -210,19 +208,17 @@ hero:
 
 The markdown body below the frontmatter keeps the current content minus the converted pieces: the YouTube `<iframe>` demo embed and the descriptive paragraph ("CAFleet is a message broker and member registry…") render beneath the hero. The old button line is dropped (replaced by the hero actions).
 
-### Mermaid pre-rendering
+### Mermaid diagram removal
 
-Each diagram's fenced source moves to a `.mmd` file; the rendered SVG is committed and referenced by absolute public path (rspress prefixes `base` on public assets). Rendering uses `mmdc` defaults with `-b white` — a white canvas stays readable under both color schemes (dark mode shows it as a light panel).
+The five fenced mermaid diagrams are deleted outright (execute-time amendment of decision 4). Each deletion site keeps its surrounding prose, which describes the same behavior in words; no image, source file, or tooling replaces the block.
 
-| Source | `.mmd` file | Image reference in page |
-|---|---|---|
-| `concepts/overview.md:31` | `docs/diagrams/overview.mmd` | `![…](/diagrams/overview.svg)` |
-| `concepts/member-lifecycle.md:25` | `docs/diagrams/member-lifecycle.mmd` | `![…](/diagrams/member-lifecycle.svg)` |
-| `concepts/monitoring.md:179` | `docs/diagrams/monitoring.mmd` | `![…](/diagrams/monitoring.svg)` |
-| `spec/data-model.md:17` | `docs/diagrams/data-model.mmd` | `![…](/diagrams/data-model.svg)` |
-| `spec/multiplexer-backends.md:216` | `docs/diagrams/multiplexer-backends.mmd` | `![…](/diagrams/multiplexer-backends.svg)` |
-
-Alt text (`…` above) is written per diagram from the page's surrounding prose during conversion.
+| Diagram removal site (pre-move path) |
+|---|
+| `concepts/overview.md:31` |
+| `concepts/member-lifecycle.md:25` |
+| `concepts/monitoring.md:179` |
+| `spec/data-model.md:17` |
+| `spec/multiplexer-backends.md:216` |
 
 ### MDX-hazard inventory and decision rule
 
@@ -294,11 +290,10 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 - [x] Convert the two `??? example` collapsibles to `:::details` containers (dedent bodies) <!-- completed: 2026-07-31T07:46 -->
 - [x] Sweep internal links: fix the directory-style `quickstart/` link; leave relative `.md` links for `checkDeadLinks` to validate <!-- completed: 2026-07-31T07:46 -->
 
-### Step 4: Mermaid pre-rendering
+### Step 4: Mermaid diagram removal
 
-- [ ] Extract the five fenced mermaid sources to `docs/diagrams/*.mmd` per the inventory table <!-- completed: -->
-- [ ] Render the SVGs via the one-off `pnpm dlx --allow-build=puppeteer @mermaid-js/mermaid-cli` invocation per the specification and commit them under `docs/docs/public/diagrams/` <!-- completed: -->
-- [ ] Replace each fenced block with the image reference (alt text from the surrounding prose) <!-- completed: -->
+- [x] Remove the five diagram references from the pages so each removal site reads as continuous prose <!-- completed: 2026-07-31T07:55 -->
+- [x] Delete the `docs/diagrams/` mermaid sources; confirm no mermaid content remains under `docs/` <!-- completed: 2026-07-31T07:55 -->
 
 ### Step 5: Python toolchain removal
 
@@ -315,7 +310,7 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 - [ ] `mise //:docs-build` completes cleanly with `checkDeadLinks` enabled <!-- completed: -->
 - [ ] Apply the MDX-hazard decision rule: inspect the rendered HTML at every inventory location; remediate minimally where broken and re-verify inbound anchors <!-- completed: -->
 - [ ] Verify fragment anchors: extract every internal `#fragment` link from the built HTML and confirm each target id exists <!-- completed: -->
-- [ ] Visual pass over the built site (`pnpm --dir docs preview`): hero home with demo embed, sidebar parity, the two details containers, the five SVGs readable in both color schemes, search and dark toggle working <!-- completed: -->
+- [ ] Visual pass over the built site (`pnpm --dir docs preview`): hero home with demo embed, sidebar parity, the two details containers, the former diagram sites reading as continuous prose, search and dark toggle working <!-- completed: -->
 - [ ] Final reference sweep is clean: no live reference to this repo's `zensical` / `uv` / `bump-my-version` toolchain outside `design-docs/` and git history (generic tool-name examples exempt per Success Criteria) <!-- completed: -->
 
 ---
@@ -327,3 +322,4 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 | 2026-07-31 | Initial draft |
 | 2026-07-31 | Reviewer round 1: recorded the nested-layout decision and its consequences (`docs_sync.rs`, path-reference sweep), sweep exemption policy, corrected MDX-hazard inventory, concrete `.gitignore` edits, `docs-build` task dependency, anchor-verification task |
 | 2026-07-31 | Execute-time amendment (user decision): dropped the `@mermaid-js/mermaid-cli` devDependency and the `diagrams` script; SVG regeneration is a one-off `pnpm dlx --allow-build=puppeteer` invocation, keeping puppeteer/Chrome out of the workspace lockfile |
+| 2026-07-31 | Execute-time amendment 2 (user decision): the five mermaid diagrams are removed from the docs entirely — no `.mmd` sources, no SVGs, no mermaid tooling; the surrounding prose carries the content. Step 4 rewritten as a removal step |

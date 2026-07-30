@@ -16,25 +16,6 @@ Director from the fleet row itself, so a member can never be another member's
 Director by construction. The team model is a single flat tier; there is no
 team nesting.
 
-## Lifecycle state diagram
-
-```mermaid
-%%{init: {'theme': 'default', 'themeVariables': {'fontSize': '15px'}}}%%
-stateDiagram-v2
-    [*] --> Pending: cafleet member create
-    Pending --> Spawning: register with pending placement
-    Spawning --> Patching: pane spawned
-    Patching --> Active: record real pane id
-
-    Spawning --> Rollback1: pane spawn fails
-    Patching --> Rollback2: pane-id record fails
-    Rollback1 --> [*]: deregister
-    Rollback2 --> [*]: exit pane + deregister
-
-    Active --> Killed: cafleet member delete
-    Killed --> [*]: kill pane + deregister
-```
-
 ## Atomic create flow
 
 `cafleet member create` is atomic: it registers the member with a

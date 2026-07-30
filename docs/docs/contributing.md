@@ -15,7 +15,7 @@ path.
 | `skills/` | Coding-agent skill files (`cafleet`, `cafleet-design-doc`, `cafleet-research`), installed into the agent homes by `cafleet setup` / `mise //:skill-install`. |
 | `package.json` + `pnpm-lock.yaml` (repo root) | pnpm toolchain manifests for the Slidev + agent-browser tools used in the repo. Driven via `mise //:pnpm-install` / `mise //:slidev <deck>`; `node_modules/` is gitignored. |
 | `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
-| `docs/` | The rspress documentation-site project (workspace package `cafleet-docs`): `rspress.config.ts`, mermaid sources in `diagrams/`, and the operator-facing pages in its nested `docs/` content root. |
+| `docs/` | The rspress documentation-site project (workspace package `cafleet-docs`): `rspress.config.ts` and the operator-facing pages in its nested `docs/` content root. |
 
 ## Tech stack
 

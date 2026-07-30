@@ -209,25 +209,6 @@ The keystroke is dispatched through the resolved backend's
 whole 2-line payload — is identical on both, and the per-backend realization is
 in the [backend matrix](#backend-matrix).
 
-```mermaid
-%%{init: {'theme': 'default', 'sequence': {'actorFontSize': 18, 'messageFontSize': 16, 'noteFontSize': 16, 'wrap': true, 'width': 180}}}%%
-sequenceDiagram
-    autonumber
-    participant Sender
-    participant Broker
-    participant DB as SQLite
-    participant Pane
-    participant Recipient
-
-    Sender->>Broker: cafleet message send --to-member-id <recipient-id> --text <body>
-    Broker->>DB: INSERT messages (status=input_required)
-    Broker->>DB: SELECT placement.mux_pane_id
-    DB-->>Broker: pane_id
-    Broker->>Pane: keystroke inline preview
-    Pane-->>Recipient: text appears as user-turn input
-    Recipient->>DB: message ack → status=completed
-```
-
 The recipient pane is resolved from `member_placements` by `member_id` alone,
 so Member → Director notifications work automatically. The recipient acks via
 `cafleet message ack --message-id <message_id>` once it has consumed the message.

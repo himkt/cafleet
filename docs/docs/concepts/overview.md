@@ -22,26 +22,6 @@ each other; members in different fleets are invisible to one another.
 | coding-agent backend | the binary in a member pane: `claude`, `codex`, or `opencode` | [Coding agents](coding-agents.md) |
 | monitor | a fleet-scoped loop that wakes the monitoring member whenever a watched member is due | [Monitoring](monitoring.md) |
 
-## Architecture diagram
-
-```mermaid
-%%{init: {'theme': 'default', 'themeVariables': {'fontSize': '16px'}}}%%
-flowchart LR
-    CLI["CLI"] --> Broker["broker<br/>(sync SQLite access)"]
-    WebUI["Admin WebUI"] --> Server["HTTP server"]
-    Server --> WebUIAPI["WebUI API layer"]
-    WebUIAPI --> Broker
-    Monitor["monitor loop<br/>(per-fleet heartbeat, member background task)"] --> Broker
-    Broker --> DB[(SQLite<br/>fleets / members / messages / member_placements<br/>monitor_config / monitor_runtime / asset_installs)]
-    subgraph Multiplexer["tmux / herdr"]
-        PaneA["coding-agent pane"]
-        PaneB["monitoring member pane"]
-    end
-    Broker -. inline-preview keystroke .-> PaneA
-    Broker -. inline-preview keystroke .-> PaneB
-    Monitor -. wake trigger .-> PaneB
-```
-
 ## CLI
 
 The `cafleet` CLI has seven entry points — three top-level commands and four
