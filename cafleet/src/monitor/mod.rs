@@ -346,6 +346,20 @@ pub fn monitor_tick(
     Ok(TickResult::Continue)
 }
 
+/// The polled tick sleep (SPEC §6.6): a monotonic deadline drained in
+/// `min(0.2s, remaining)` slices, so signal response stays ≤200 ms regardless
+/// of `tick_seconds`.
+fn interruptible_sleep(seconds: u64, stop: &AtomicBool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    while !stop.load(Ordering::Relaxed) {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return;
+        }
+        std::thread::sleep(remaining.min(std::time::Duration::from_millis(200)));
+    }
+}
+
 /// The foreground driver: atomically claim the runtime slot, install the
 /// SIGTERM/SIGINT stop flag, print the startup line, then tick until stopped
 /// or displaced; the exit path is an ownership-checked clear.
@@ -398,9 +412,10 @@ pub fn run_monitor_loop(
             Err(error) => break Err(error),
         }
         out.flush().ok();
-        std::thread::sleep(std::time::Duration::from_secs(
+        interruptible_sleep(
             u64::try_from(tick_seconds).expect("tick_seconds is positive"),
-        ));
+            &stop,
+        );
     };
     broker::clear_monitor_runtime(conn, fleet_id, pid)?;
     outcome
