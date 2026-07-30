@@ -78,7 +78,7 @@ The broker stays synchronous (one `rusqlite` connection per process, PRAGMAs app
 
 ### Crate mapping
 
-The crates pinned in this table are the dependency ceiling, not a floor: no convenience extras beyond them — no tower-http (the embedded SPA is served by hand), no serde derive (result shapes reuse `serde_json` values), minimal feature flags on axum/tokio and every other dependency — and no new direct dependency lands without Director arbitration. Dev-dependencies follow the same rule; `tower` stays only for the `ServiceExt` oneshot harness named in § Testing.
+The crates pinned in this table are the dependency ceiling, not a floor: no convenience extras beyond them — no tower-http (the embedded SPA is served by hand), no serde derive (result shapes reuse `serde_json` values), minimal feature flags on axum/tokio and every other dependency — and no new direct dependency lands without Director arbitration. The arbitrated dev-dependency set is exactly `tempfile` (temp DB/HOME fixtures across every suite) and `tower` (the `ServiceExt` oneshot route harness); the binary tests use no `assert_cmd` — `CARGO_BIN_EXE` + `std::process` covers the same ground with zero additional crates.
 
 
 | Python dependency | Rust replacement | Notes |
@@ -195,13 +195,13 @@ Every cargo-invoking task (`test`, `lint`, `typecheck`, `build`, `install`, `dev
 Rust tests only, two layers:
 
 - **Unit tests** (`#[cfg(test)]` per module): pure logic — truncation, ANSI strip + `\r` defrag, the spawn mini-formatter (brace grammar + error taxonomy), timestamp emit/parse, `should_ping`, the sanitization map, wake-payload text (golden string), and the loop's per-tick status tracking (edge-triggered `status:done`, stall-check cadence, wake-reason computation).
-- **Integration tests** (`cafleet/tests/`): `assert_cmd` drives the compiled binary with a temp `CAFLEET_DATABASE_URL` and a fake `tmux`/`herdr` shim on `PATH` (a script recording argv — replacing pytest's subprocess monkeypatching); asserts exit codes, exact output, and DB rows. axum routes tested in-process via `tower::ServiceExt`. Schema DDL asserted by rusqlite introspection (replacing the Alembic smoke tests) plus the migration chain guard.
+- **Integration tests** (`cafleet/tests/`): a `CARGO_BIN_EXE` + `std::process` harness drives the compiled binary with a temp `CAFLEET_DATABASE_URL` and a fake `tmux`/`herdr` shim on `PATH` (a script recording argv — replacing pytest's subprocess monkeypatching); asserts exit codes, exact output, and DB rows. axum routes tested in-process via `tower::ServiceExt`. Schema DDL asserted by rusqlite introspection (replacing the Alembic smoke tests) plus the migration chain guard.
 
 Coverage map from the pytest suite (the port is complete when each area has Rust tests asserting the same contracts):
 
 | pytest area | Rust home |
 |---|---|
-| `tests/cli/` (CliRunner exit codes + output) | `assert_cmd` integration tests |
+| `tests/cli/` (CliRunner exit codes + output) | compiled-binary integration tests |
 | `tests/broker/` | broker unit/integration tests on temp DBs |
 | `tests/db/` (chain guard, DDL, init refusals) | chain-guard test + DDL introspection + setup db-half tests |
 | `tests/multiplexer/` (argv, timings, wake payload) | shim-recorded argv asserts + golden wake-payload string |
