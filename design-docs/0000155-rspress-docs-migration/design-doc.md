@@ -1,6 +1,6 @@
 # Migrate the Documentation Site from Zensical to Rspress
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 28/28 tasks complete
 **Last Updated**: 2026-07-31
 
@@ -329,3 +329,4 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 | 2026-07-31 | User-review revision round: hero tightened via `theme/styles.css` (`globalStyles`); execute-time amendment 4 (user decision): `llms: true` emits `llms.txt` / `llms-full.txt` / per-page `.md` in the static build |
 | 2026-07-31 | User-review rounds 2–3: demo embed capped at 760px; home body wrapped in a `cafleet-home-body` container (centered, doc-like typography) |
 | 2026-07-31 | User-review final home round (decision 6 amended): rspress.rs-style two-column hero — title/tagline/buttons left, the demo video as the large right-side visual, stacking on narrow viewports; description paragraph dropped (tagline is the pitch; `update-readme` aligns the README to it) |
+| 2026-07-31 | Design-polish rounds (user-driven): fluid desktop-first hero scale, straight depth-card video with `rel=0`, site-wide font-smoothing fix, 17px docs body, 72px navbar with enlarged contents, CSS-mask GitHub action icon, MIT home footer, unified `--cafleet-band` container across nav/hero/docs. Reviewer approved (7 rounds total); user approved; PR #244 opened. Status → Complete |
