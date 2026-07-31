@@ -21,7 +21,7 @@
 cafleet/webui-dist/
 
 # Cargo build directory.
-/target/
+/cafleet/target/
 
 # rspress documentation site built by `mise //:docs-build`.
 /docs/doc_build/

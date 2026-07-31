@@ -3,8 +3,8 @@ name = "cafleet"
 version = "0.22.0"
 edition = "2024"
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "forbid"
 
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
