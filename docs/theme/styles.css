@@ -44,14 +44,13 @@ html body {
   -moz-osx-font-smoothing: auto;
 }
 
-/* Docs body text: readable weight and size for paragraphs, list items, and
-   table cells; headings and code untouched (inline code is pinned to its
-   pre-raise 14px/400 because the theme sizes it em-relative). */
+/* Docs body text: readable size for paragraphs, list items, and table cells;
+   headings and code untouched (inline code is pinned to its pre-raise
+   14px/400 because the theme sizes it em-relative). */
 .rspress-doc p,
 .rspress-doc li,
 .rspress-doc td {
   font-size: 17px;
-  font-weight: 500;
 }
 
 .rspress-doc p code,
