@@ -74,9 +74,9 @@ html {
    doubled to out-rank the equal-specificity theme defaults (globalStyles is
    bundled before the theme CSS). */
 
-/* Fluid hero: widens with the screen (88vw up to 1520px), video column at
-   ~55%; the height band caps at 860px so content sits in the upper region of
-   tall screens instead of the dead middle. */
+/* Fluid hero: widens with the screen (the shared --cafleet-band, 90% up to
+   1680px), video column at 58%; the height band caps at 860px so content sits
+   in the upper region of tall screens instead of the dead middle. */
 .rp-home-hero.rp-home-hero {
   box-sizing: border-box;
   max-width: var(--cafleet-band);
