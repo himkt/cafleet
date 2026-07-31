@@ -1,0 +1,18 @@
+[tool.bumpversion]
+current_version = "0.22.0"
+commit = true
+message = "chore: bump version {current_version} to {new_version}"
+
+[[tool.bumpversion.files]]
+filename = "cafleet/Cargo.toml"
+search   = "version = \"{current_version}\""
+replace  = "version = \"{new_version}\""
+
+[[tool.bumpversion.files]]
+filename = "cafleet/Cargo.lock"
+search   = """
+name = \"cafleet\"
+version = \"{current_version}\""""
+replace   = """
+name = \"cafleet\"
+version = \"{new_version}\""""

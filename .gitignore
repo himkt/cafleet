@@ -11,6 +11,7 @@
 !.claude/skills
 !.claude/settings.json
 !.github
+!.bumpversion.toml
 
 # Per-session harness state inside .claude/ — never committed.
 .claude/scheduled_tasks.lock
