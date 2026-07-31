@@ -1,3 +1,8 @@
+/* Taller site-wide navbar; the hero's min-height calc follows this var. */
+:root:root {
+  --rp-nav-height: 72px;
+}
+
 /* rspress.rs-style two-column home hero: text left, demo-video card right,
    stacking text-above-video below the theme's 1000px breakpoint. Selectors are
    doubled to out-rank the equal-specificity theme defaults (globalStyles is
@@ -85,6 +90,12 @@ html body {
 .rp-home-hero .rp-home-hero__action {
   padding: 0 2rem;
   font-weight: 600;
+  gap: 0.5em;
+}
+
+.rp-home-hero .rp-home-hero__action svg {
+  width: 1.1em;
+  height: 1.1em;
 }
 
 @media (max-width: 1000px) {
