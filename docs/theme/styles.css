@@ -1,31 +1,29 @@
-/* Tighten the home hero so the hero plus the demo embed fit on one screen.
-   globalStyles is bundled before the theme CSS, so each selector is doubled
-   to out-rank the equal-specificity theme defaults. */
-.rp-home-hero.rp-home-hero {
-  margin: 2rem auto;
-  padding: 12px 40px;
-}
-
+/* rspress.rs-style two-column home hero: text left, demo video right at
+   roughly half the width, stacking text-above-video below the theme's
+   1000px breakpoint. Selectors are doubled to out-rank the equal-specificity
+   theme defaults (globalStyles is bundled before the theme CSS). */
 .rp-home-hero .rp-home-hero__container {
-  gap: 20px;
+  flex: 1;
 }
 
-.rp-home-hero .rp-home-hero__title,
-.rp-home-hero .rp-home-hero__subtitle {
-  font-size: 2.5rem;
+.rp-home-hero .rp-home-hero__image {
+  flex: 1;
+  width: 100%;
 }
 
-.rp-home-hero .rp-home-hero__tagline {
-  font-size: 1rem;
+.cafleet-home-demo {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: 8px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1000px) {
   .rp-home-hero.rp-home-hero {
-    padding: 10px;
+    flex-direction: column;
   }
 
-  .rp-home-hero .rp-home-hero__title,
-  .rp-home-hero .rp-home-hero__subtitle {
-    font-size: 2rem;
+  .rp-home-hero .rp-home-hero__image {
+    max-width: 100%;
   }
 }

@@ -46,7 +46,7 @@ Full Python removal therefore requires decisions on both; the user has made them
 | 3 | Workspace shape | rspress v2, with `docs/` added to `pnpm-workspace.yaml`; dependencies in `docs/package.json`; shared root `pnpm-lock.yaml`. |
 | 4 | Mermaid diagrams | Removed entirely (user decision at execute time): the five diagrams are deleted from the docs — no `.mmd` sources, no rendered SVGs, no mermaid tooling anywhere in the repo. The prose surrounding each former diagram carries the content on its own. |
 | 5 | Page icons | The `icon: lucide/...` frontmatter is deleted from all 19 pages. |
-| 6 | Home page | rspress hero home layout (`pageType: home`) with tagline and action buttons. |
+| 6 | Home page | Amended at execute time (user decision, final): an rspress.rs-style two-column hero — gradient `CAFleet` title, tagline, and the Quickstart/GitHub action buttons on the left; the demo video as the large, playable right-side visual; columns stack on narrow viewports. No sidebar on home (inherent to the hero layout). No description paragraph — the tagline is the pitch, and the `update-readme` skill aligns the README pitch with it. |
 | 7 | CI / task | The root-level `mise //:docs-build` task name is kept, retargeted to the pnpm-driven rspress build. Same GitHub Pages URL (`base: '/cafleet/'`), same `docs.yml` trigger shape. |
 | 8 | Content-root nesting | The user's original request makes `docs/` the rspress **project root**, scaffolded per the official getting-started guide — whose layout nests content in `<project-root>/docs`. The pages therefore move to `docs/docs/`, and the two repo-wide consequences (the `docs_sync.rs` test paths and every repo-internal reference to a `docs/...` page path) are updated in the same change. |
 
@@ -64,8 +64,8 @@ Full Python removal therefore requires decisions on both; the user has made them
 docs/
 ├── package.json              # workspace package "cafleet-docs"
 ├── rspress.config.ts
-├── theme/index.tsx           # HomeLayout override (afterHero mounts the home markdown body)
-├── theme/styles.css          # globalStyles: tightened hero sizing
+├── theme/index.tsx           # custom theme: places the demo video as the hero's right-side visual
+├── theme/styles.css          # globalStyles: two-column hero styles + embed sizing
 └── docs/                     # rspress content root
     ├── _nav.json
     ├── _meta.json
@@ -202,24 +202,9 @@ Relative `.md` links between pages (the dominant link form) are supported by rsp
 
 ### Home page (`index.md`)
 
-```yaml
----
-pageType: home
-hero:
-  name: CAFleet
-  text: Agent Teams reinvented
-  tagline: Collaborative coding across multiple coding-agent backends, with full code transparency.
-  actions:
-    - theme: brand
-      text: Quickstart
-      link: /quickstart
-    - theme: alt
-      text: GitHub
-      link: https://github.com/himkt/cafleet
----
-```
+`pageType: home` with a two-column hero modeled on rspress.rs (user decision, final): at wide viewports the left column carries the gradient `CAFleet` name, the "Agent Teams reinvented" heading, the tagline "Collaborative coding across multiple coding-agent backends, with full code transparency.", and the `Quickstart` → `/quickstart` (brand) / `GitHub` → `https://github.com/himkt/cafleet` (alt) action buttons; the right column is the YouTube demo `<iframe>` (title `CAFleet demo video`), large and playable, filling roughly the right half. The columns stack — text above video — on narrow viewports. No sidebar renders on the home page (inherent to the home layout); every other page keeps the global sidebar.
 
-The markdown body below the frontmatter keeps the current content minus the converted pieces: the YouTube `<iframe>` demo embed and the descriptive paragraph ("CAFleet is a message broker and member registry…"). rspress v2's home layout renders only frontmatter-defined sections, so a minimal custom theme (`docs/theme/index.tsx`, execute-time amendment) re-exports the default theme and overrides `HomeLayout`, mounting the page's markdown body through the `afterHero` slot (via the runtime `Content` component, adjusted to the installed v2 API if the export differs). `index.md` remains the single source of the body content; the old button line is dropped (replaced by the hero actions). A small stylesheet (`docs/theme/styles.css`, wired via the config's `globalStyles`) tightens the hero — reduced vertical margin/padding and scaled-down name/tagline typography — so the hero plus the demo embed fit on one screen; it overrides only the hero classes, with doubled selectors because `globalStyles` is bundled before the theme CSS.
+The descriptive paragraph is dropped: the tagline is the page's pitch, and `.claude/skills/update-readme/SKILL.md` aligns the README pitch with the tagline rather than a body paragraph. Implementation freedom: realize the right-side visual with the least custom surface — the hero frontmatter plus the existing custom theme (`docs/theme/index.tsx`) placing the iframe in the hero's visual slot, or an equivalent minimal mechanism; the styling lives in `docs/theme/styles.css` (wired via the config's `globalStyles`), replacing the previous centered-hero and `cafleet-home-body` rules.
 
 ### Mermaid diagram removal
 
@@ -339,3 +324,5 @@ Decision rule (applied in Step 7): build the site and inspect the rendered HTML 
 | 2026-07-31 | Verifier round: rspress v2 nav contract adopted (`_nav.json` navbar + root `_meta.json` global sidebar, `themeConfig.nav` dropped); execute-time amendment 3 (user decision): `docs/theme/index.tsx` HomeLayout override mounts the home markdown body via `afterHero` |
 | 2026-07-31 | Reviewer round: recorded the user-approved `.claude/settings.json` agent-browser permission amendments (click/fill for verification sessions, help/version narrowing) in the change table |
 | 2026-07-31 | User-review revision round: hero tightened via `theme/styles.css` (`globalStyles`); execute-time amendment 4 (user decision): `llms: true` emits `llms.txt` / `llms-full.txt` / per-page `.md` in the static build |
+| 2026-07-31 | User-review rounds 2–3: demo embed capped at 760px; home body wrapped in a `cafleet-home-body` container (centered, doc-like typography) |
+| 2026-07-31 | User-review final home round (decision 6 amended): rspress.rs-style two-column hero — title/tagline/buttons left, the demo video as the large right-side visual, stacking on narrow viewports; description paragraph dropped (tagline is the pitch; `update-readme` aligns the README to it) |

@@ -31,7 +31,7 @@ You are a documentation writer for the CAFleet project. Your job is to keep two 
 1. Read all docs/docs/concepts/*.md files (use Glob to enumerate) for the canonical architecture
 2. Discover and read all pages under docs/docs/ (use Glob to find them)
 3. Read the rspress sidebar source (the `docs/docs/**/_meta.json` files) for the docs-site section layout, then read the current README.md
-4. Sync README.md's thin surface: align the pitch paragraph with docs/docs/index.md, the Install block with the Install section of docs/docs/quickstart.md, and the Documentation links with the nav
+4. Sync README.md's thin surface: align the pitch paragraph with the hero tagline in docs/docs/index.md's frontmatter, the Install block with the Install section of docs/docs/quickstart.md, and the Documentation links with the nav
 5. Read the current SPEC.md (the reimplementation specification, at the repo root)
 6. Reconcile SPEC.md against the source materials per the "SPEC.md Maintenance" rules below, updating only where the contract surfaces have drifted
 
@@ -39,7 +39,7 @@ You are a documentation writer for the CAFleet project. Your job is to keep two 
 
 README.md is a thin entry point with exactly four surfaces, in order:
 
-1. **Title, demo video, and pitch** -- Project name, the demo video asset, and a one-paragraph pitch aligned with docs/docs/index.md (no bullet list)
+1. **Title, demo video, and pitch** -- Project name, the demo video asset, and a one-paragraph pitch aligned with the hero tagline in docs/docs/index.md's frontmatter (no bullet list)
 2. **Install** -- The GitHub-Releases install block (download the per-target `cafleet-v<version>-<target>.tar.gz` archive, place the single `cafleet` binary on `PATH`, then run `cafleet setup`) plus a link to the full install guide
 3. **Documentation** -- Links to the docs-site sections (Quickstart, How-to guides, Concepts, Specification, Contributing)
 4. **License** -- MIT
