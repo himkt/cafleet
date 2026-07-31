@@ -8,7 +8,7 @@
 - Format: `mise //cafleet:format`
 - Type check: `mise //cafleet:typecheck`
 - Install the `cafleet` CLI: `mise //cafleet:install` — runs `cargo install --path cafleet`. The install copies the compiled binary, so re-run it after pulling or editing any Rust source under `cafleet/src/` for the global `cafleet` binary to pick up the change.
-- Build the release binary: `mise //cafleet:build` — emits `target/release/cafleet`.
+- Build the release binary: `mise //cafleet:build` — emits `cafleet/target/release/cafleet`.
 - Database migrations are hand-written SQL files guarded by the chain test — see `database-migrations.md`. There is no migration-autogeneration task.
 - Publishing is release-CI-only: on release publish, the GitHub Actions release workflow builds the three target binaries and uploads them to the GitHub Release. There is no local publish task.
 - Start admin WebUI server: either `cafleet server` (packaged launcher; `--host` / `--port` flags, defaults `127.0.0.1:8000` from `settings.broker_host` / `settings.broker_port`, also honors `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT`) **or** `mise //cafleet:dev` (runs `cargo run -- server`). Both are entry points to the same app and neither auto-reloads — contributors restart manually between edits. WebUI-only: CLI commands do not require a running server. The WebUI dist is embedded into the binary at build time.

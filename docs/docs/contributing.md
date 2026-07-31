@@ -9,7 +9,6 @@ path.
 
 | Top-level entry | Purpose |
 |---|---|
-| `Cargo.toml` | The Cargo workspace root. |
 | `cafleet/` | The `cafleet` Rust package (clap CLI + axum server + rusqlite persistence); builds the single `cafleet` binary. |
 | `admin/` | Admin WebUI SPA (Vite + React + TypeScript + Tailwind CSS); its build output is embedded in the binary. |
 | `skills/` | Coding-agent skill files (`cafleet`, `cafleet-design-doc`, `cafleet-research`), installed into the agent homes by `cafleet setup` / `mise //:skill-install`. |

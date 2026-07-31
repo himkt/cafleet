@@ -32,13 +32,15 @@ jobs:
         run: pipx install cargo-zigbuild
       - name: Build the release binary
         if: "!contains(matrix.target, 'musl')"
+        working-directory: cafleet
         run: cargo build --release --target ${{ matrix.target }}
       - name: Build the release binary (zig-linked musl cross-compile)
         if: contains(matrix.target, 'musl')
+        working-directory: cafleet
         run: cargo zigbuild --release --target ${{ matrix.target }}
       - name: Package and upload the release archive
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tar -czf "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" cafleet
+          tar -czf "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" -C "cafleet/target/${{ matrix.target }}/release" cafleet
           gh release upload "${{ github.event.release.tag_name }}" "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" --clobber

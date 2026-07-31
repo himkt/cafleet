@@ -19,8 +19,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('Cargo.lock') }}
+            cafleet/target
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('cafleet/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-lint-
       - run: mise //admin:install
       - run: mise //admin:build
@@ -39,8 +39,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('Cargo.lock') }}
+            cafleet/target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('cafleet/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-test-
       - run: mise //admin:install
       - run: mise //admin:build

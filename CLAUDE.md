@@ -16,7 +16,7 @@ A message broker and member registry for coding agents.
 
 ## Tech Stack
 
-- Rust (toolchain pinned with mise; root Cargo workspace)
+- Rust (toolchain pinned with mise; single Cargo package at `cafleet/`)
 - Server: axum + tokio (the `server` subcommand)
 - CLI: clap (direct SQLite via broker module)
 

@@ -33,4 +33,4 @@ description = "Install the cafleet CLI from the working tree (re-run after sourc
 [tasks.build]
 depends = ["//admin:build"]
 run = "cargo build --release"
-description = "Build the release binary into target/release/cafleet"
+description = "Build the release binary into cafleet/target/release/cafleet"
