@@ -3,12 +3,13 @@
    doubled to out-rank the equal-specificity theme defaults (globalStyles is
    bundled before the theme CSS). */
 
-/* Viewport-filling hero: vertically centered content, ~1200px container,
-   video column at ~55%. */
+/* Fluid hero: widens with the screen (88vw up to 1520px), video column at
+   ~55%; the height band caps at 860px so content sits in the upper region of
+   tall screens instead of the dead middle. */
 .rp-home-hero.rp-home-hero {
   box-sizing: border-box;
-  max-width: 1200px;
-  min-height: calc(100vh - var(--rp-nav-height, 64px));
+  max-width: min(88vw, 1520px);
+  min-height: min(calc(100vh - var(--rp-nav-height, 64px)), 860px);
   margin: 0 auto;
   align-items: center;
   gap: 4rem;
@@ -25,8 +26,7 @@
   max-width: none;
 }
 
-/* Video card: depth via layered shadow + brand glow, subtle 3D tilt easing to
-   flat on hover. */
+/* Video card: depth via layered shadow + brand glow and a static 3D tilt. */
 .cafleet-home-demo {
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -36,17 +36,12 @@
     0 24px 48px -12px rgb(0 0 0 / 0.35),
     0 8px 32px rgb(99 102 241 / 0.25);
   transform: perspective(1200px) rotateY(-6deg) rotateX(2deg);
-  transition: transform 0.4s ease;
-}
-
-.cafleet-home-demo:hover {
-  transform: perspective(1200px) rotateY(0) rotateX(0);
 }
 
 /* Type scale: tight display heading, muted two-line tagline, roomier buttons. */
 .rp-home-hero .rp-home-hero__title,
 .rp-home-hero .rp-home-hero__subtitle {
-  font-size: 3.5rem;
+  font-size: clamp(3rem, 2.2vw + 1.6rem, 5rem);
   font-weight: 700;
   line-height: 1.1;
   letter-spacing: -0.02em;
@@ -56,7 +51,7 @@
   max-width: 34ch;
   margin-top: 1.5rem;
   color: var(--rp-c-text-2);
-  font-size: 1.125rem;
+  font-size: clamp(1.05rem, 0.45vw + 0.9rem, 1.35rem);
   line-height: 1.6;
 }
 

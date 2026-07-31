@@ -12,6 +12,9 @@ export default defineConfig({
     checkDeadLinks: true,
   },
   themeConfig: {
+    footer: {
+      message: 'Released under the MIT License. © 2026 himkt.',
+    },
     socialLinks: [
       { icon: 'github', mode: 'link', content: 'https://github.com/himkt/cafleet' },
     ],

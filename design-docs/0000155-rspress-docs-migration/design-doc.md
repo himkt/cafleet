@@ -116,6 +116,9 @@ export default defineConfig({
     checkDeadLinks: true,
   },
   themeConfig: {
+    footer: {
+      message: 'Released under the MIT License. © 2026 himkt.',
+    },
     socialLinks: [
       { icon: 'github', mode: 'link', content: 'https://github.com/himkt/cafleet' },
     ],
@@ -204,7 +207,7 @@ Relative `.md` links between pages (the dominant link form) are supported by rsp
 
 `pageType: home` with a two-column hero modeled on rspress.rs (user decision, final): at wide viewports the left column carries the gradient `CAFleet` name, the "Agent Teams reinvented" heading, the tagline "Collaborative coding across multiple coding-agent backends, with full code transparency.", and the `Quickstart` → `/quickstart` (brand) / `GitHub` → `https://github.com/himkt/cafleet` (alt) action buttons; the right column is the YouTube demo `<iframe>` (title `CAFleet demo video`), large and playable, filling roughly the right half. The columns stack — text above video — on narrow viewports. No sidebar renders on the home page (inherent to the home layout); every other page keeps the global sidebar.
 
-The descriptive paragraph is dropped: the tagline is the page's pitch, and `.claude/skills/update-readme/SKILL.md` aligns the README pitch with the tagline rather than a body paragraph. Implementation freedom: realize the right-side visual with the least custom surface — the hero frontmatter plus the existing custom theme (`docs/theme/index.tsx`) placing the iframe in the hero's visual slot, or an equivalent minimal mechanism; the styling lives in `docs/theme/styles.css` (wired via the config's `globalStyles`), replacing the previous centered-hero and `cafleet-home-body` rules. The hero fills the viewport below the navbar (content vertically centered, ~1200px container, video column ~55%); the video renders as a depth card (16px radius, layered shadow with a brand-purple glow, a subtle 3D tilt easing flat on hover, no tilt below the 1000px breakpoint); the display type is ~3.5rem/700 with tight leading and a muted 34ch tagline.
+The descriptive paragraph is dropped: the tagline is the page's pitch, and `.claude/skills/update-readme/SKILL.md` aligns the README pitch with the tagline rather than a body paragraph. Implementation freedom: realize the right-side visual with the least custom surface — the hero frontmatter plus the existing custom theme (`docs/theme/index.tsx`) placing the iframe in the hero's visual slot, or an equivalent minimal mechanism; the styling lives in `docs/theme/styles.css` (wired via the config's `globalStyles`), replacing the previous centered-hero and `cafleet-home-body` rules. The hero scales fluidly with the screen: the container is `min(88vw, 1520px)` wide with the video column at ~55%, vertically centered within a height band of `min(100vh − navbar, 860px)` so content sits in the upper region of tall screens; the video renders as a depth card (16px radius, layered shadow with a brand-purple glow, a static 3D tilt — no hover effect, no tilt below the 1000px breakpoint); the display type is fluid — title/subtitle `clamp(3rem, 2.2vw + 1.6rem, 5rem)` at weight 700 with tight leading, tagline `clamp(1.05rem, 0.45vw + 0.9rem, 1.35rem)` muted at 34ch.
 
 ### Mermaid diagram removal
 
