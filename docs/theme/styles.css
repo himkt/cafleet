@@ -8,7 +8,7 @@
    tall screens instead of the dead middle. */
 .rp-home-hero.rp-home-hero {
   box-sizing: border-box;
-  max-width: min(88vw, 1520px);
+  max-width: min(90vw, 1680px);
   min-height: min(calc(100vh - var(--rp-nav-height, 64px)), 860px);
   margin: 0 auto;
   align-items: center;
@@ -16,17 +16,17 @@
 }
 
 .rp-home-hero .rp-home-hero__container {
-  flex: 1 1 45%;
+  flex: 1 1 42%;
   gap: 0;
 }
 
 .rp-home-hero .rp-home-hero__image {
-  flex: 1 1 55%;
+  flex: 1 1 58%;
   width: 100%;
   max-width: none;
 }
 
-/* Video card: depth via layered shadow + brand glow and a static 3D tilt. */
+/* Video card: depth via layered shadow + brand glow. */
 .cafleet-home-demo {
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -35,14 +35,37 @@
   box-shadow:
     0 24px 48px -12px rgb(0 0 0 / 0.35),
     0 8px 32px rgb(99 102 241 / 0.25);
-  transform: perspective(1200px) rotateY(-6deg) rotateX(2deg);
+}
+
+/* Native subpixel rendering: the theme's antialiased smoothing renders text
+   too thin on macOS/retina displays. */
+html body {
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+
+/* Docs body text: readable weight and size for paragraphs, list items, and
+   table cells; headings and code untouched (inline code is pinned to its
+   pre-raise 14px/400 because the theme sizes it em-relative). */
+.rspress-doc p,
+.rspress-doc li,
+.rspress-doc td {
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.rspress-doc p code,
+.rspress-doc li code,
+.rspress-doc td code {
+  font-size: 14px;
+  font-weight: 400;
 }
 
 /* Type scale: tight display heading, muted two-line tagline, roomier buttons. */
 .rp-home-hero .rp-home-hero__title,
 .rp-home-hero .rp-home-hero__subtitle {
-  font-size: clamp(3rem, 2.2vw + 1.6rem, 5rem);
-  font-weight: 700;
+  font-size: clamp(3rem, 2.6vw + 1.5rem, 5.5rem);
+  font-weight: 800;
   line-height: 1.1;
   letter-spacing: -0.02em;
 }
@@ -52,6 +75,7 @@
   margin-top: 1.5rem;
   color: var(--rp-c-text-2);
   font-size: clamp(1.05rem, 0.45vw + 0.9rem, 1.35rem);
+  font-weight: 500;
   line-height: 1.6;
 }
 
@@ -61,6 +85,7 @@
 
 .rp-home-hero .rp-home-hero__action {
   padding: 0 2rem;
+  font-weight: 600;
 }
 
 @media (max-width: 1000px) {
@@ -73,8 +98,11 @@
   .rp-home-hero .rp-home-hero__image {
     max-width: 100%;
   }
+}
 
-  .cafleet-home-demo {
-    transform: none;
-  }
+/* Home footer message: readable weight and the mid-tier muted color. */
+.rp-home-footer .rp-home-footer__message {
+  color: var(--rp-c-text-2);
+  font-size: 1.05rem;
+  font-weight: 500;
 }
