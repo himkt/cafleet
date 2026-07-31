@@ -1,29 +1,85 @@
-/* rspress.rs-style two-column home hero: text left, demo video right at
-   roughly half the width, stacking text-above-video below the theme's
-   1000px breakpoint. Selectors are doubled to out-rank the equal-specificity
-   theme defaults (globalStyles is bundled before the theme CSS). */
+/* rspress.rs-style two-column home hero: text left, demo-video card right,
+   stacking text-above-video below the theme's 1000px breakpoint. Selectors are
+   doubled to out-rank the equal-specificity theme defaults (globalStyles is
+   bundled before the theme CSS). */
+
+/* Viewport-filling hero: vertically centered content, ~1200px container,
+   video column at ~55%. */
+.rp-home-hero.rp-home-hero {
+  box-sizing: border-box;
+  max-width: 1200px;
+  min-height: calc(100vh - var(--rp-nav-height, 64px));
+  margin: 0 auto;
+  align-items: center;
+  gap: 4rem;
+}
+
 .rp-home-hero .rp-home-hero__container {
-  flex: 1;
+  flex: 1 1 45%;
+  gap: 0;
 }
 
 .rp-home-hero .rp-home-hero__image {
-  flex: 1;
+  flex: 1 1 55%;
   width: 100%;
+  max-width: none;
 }
 
+/* Video card: depth via layered shadow + brand glow, subtle 3D tilt easing to
+   flat on hover. */
 .cafleet-home-demo {
   width: 100%;
   aspect-ratio: 16 / 9;
   border: 0;
-  border-radius: 8px;
+  border-radius: 16px;
+  box-shadow:
+    0 24px 48px -12px rgb(0 0 0 / 0.35),
+    0 8px 32px rgb(99 102 241 / 0.25);
+  transform: perspective(1200px) rotateY(-6deg) rotateX(2deg);
+  transition: transform 0.4s ease;
+}
+
+.cafleet-home-demo:hover {
+  transform: perspective(1200px) rotateY(0) rotateX(0);
+}
+
+/* Type scale: tight display heading, muted two-line tagline, roomier buttons. */
+.rp-home-hero .rp-home-hero__title,
+.rp-home-hero .rp-home-hero__subtitle {
+  font-size: 3.5rem;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.rp-home-hero .rp-home-hero__tagline {
+  max-width: 34ch;
+  margin-top: 1.5rem;
+  color: var(--rp-c-text-2);
+  font-size: 1.125rem;
+  line-height: 1.6;
+}
+
+.rp-home-hero .rp-home-hero__actions {
+  margin-top: 2.25rem;
+}
+
+.rp-home-hero .rp-home-hero__action {
+  padding: 0 2rem;
 }
 
 @media (max-width: 1000px) {
   .rp-home-hero.rp-home-hero {
     flex-direction: column;
+    min-height: 0;
+    gap: 2rem;
   }
 
   .rp-home-hero .rp-home-hero__image {
     max-width: 100%;
+  }
+
+  .cafleet-home-demo {
+    transform: none;
   }
 }
