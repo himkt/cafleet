@@ -1,0 +1,46 @@
+name: Bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.BUMP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BUMP_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Bump version and create pull request
+        run: |
+          pipx install bump-my-version==1.5.0
+          git config user.name "${app_slug}[bot]"
+          git config user.email "${app_slug}[bot]@users.noreply.github.com"
+          branch_name="bump-$bump_type-$GITHUB_RUN_ID"
+          git switch -c "$branch_name"
+          bump-my-version bump "$bump_type"
+          git push --set-upstream origin "$branch_name"
+          gh pr create --base "$default_branch" --head "$branch_name" --fill
+        env:
+          bump_type: ${{ inputs.bump }}
+          app_slug: ${{ steps.app-token.outputs.app-slug }}
+          default_branch: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
