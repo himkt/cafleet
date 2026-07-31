@@ -42,7 +42,7 @@ overlay for capture classification. Durable `last_stall_check_at` preserves
 dispatch cadence across loop restart; the quiet baselines that confirm a stall
 live in the monitoring member's own conversation notes, not the broker.
 
-See [`SKILL.md`](../SKILL.md) and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring/) for the full command surface and policy. **The monitoring member — not the Director — runs `cafleet monitor start`** (see § Monitor Lifecycle).
+See [`SKILL.md`](../SKILL.md) and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring) for the full command surface and policy. **The monitoring member — not the Director — runs `cafleet monitor start`** (see § Monitor Lifecycle).
 
 **The loop never wakes the Director directly.** When an event needs Director
 attention — a member still unchanged at the next stall-check wake after its

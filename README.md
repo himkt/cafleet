@@ -14,15 +14,15 @@ mv cafleet ~/.local/bin/    # any directory on your PATH
 cafleet setup               # migrate the database schema + install the assets (skills and presets) for claude, codex, and opencode — repeat --skip AGENT to skip agents
 ```
 
-Full guide: <https://himkt.github.io/cafleet/quickstart/>
+Full guide: <https://himkt.github.io/cafleet/quickstart>
 
 ## Documentation
 
-- [Quickstart](https://himkt.github.io/cafleet/quickstart/) — install, configure, and run your first fleet.
-- [How-to guides](https://himkt.github.io/cafleet/how-to/mixed-backend-team/) — prompt-first task guides.
-- [Concepts](https://himkt.github.io/cafleet/concepts/overview/) — architecture and the ideas behind it.
-- [Specification](https://himkt.github.io/cafleet/spec/data-model/) — data model, message envelope, CLI, multiplexer backends, agent backends, WebUI API.
-- [Contributing](https://himkt.github.io/cafleet/contributing/) — project layout, local development loop, and the contribution flow.
+- [Quickstart](https://himkt.github.io/cafleet/quickstart) — install, configure, and run your first fleet.
+- [How-to guides](https://himkt.github.io/cafleet/how-to/mixed-backend-team) — prompt-first task guides.
+- [Concepts](https://himkt.github.io/cafleet/concepts/overview) — architecture and the ideas behind it.
+- [Specification](https://himkt.github.io/cafleet/spec/data-model) — data model, message envelope, CLI, multiplexer backends, agent backends, WebUI API.
+- [Contributing](https://himkt.github.io/cafleet/contributing) — project layout, local development loop, and the contribution flow.
 
 ## License
 
