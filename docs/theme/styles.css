@@ -1,11 +1,72 @@
-/* Taller site-wide navbar; the hero's min-height calc follows this var. */
+/* One shared container band for the navbar, the hero, and the docs layout,
+   plus the taller site-wide navbar (the hero's min-height calc follows the
+   nav-height var). The docs layout re-centers through the band: its internal
+   centering margins are zeroed and the content column takes the band minus
+   sidebar and outline. */
 :root:root {
   --rp-nav-height: 72px;
+  --cafleet-band: min(90%, 1680px);
+  --rp-sidebar-margin-left: 0px;
+  --rp-outline-margin-right: 0px;
+  --rp-content-max-width: calc(
+    min(90vw, 1680px) - var(--rp-sidebar-width) - var(--rp-outline-width)
+  );
 }
 
-/* Align the navbar contents with the hero's centered container band. */
+/* Always render a real scrollbar so every page shares the same layout width
+   and the reserved area shows the native track (no empty off-color gutter) —
+   the band uses % units (not vw) for the same reason: identical right-edge
+   positions on the home and docs pages. */
+html {
+  overflow-y: scroll;
+}
+
+/* Align the navbar contents with the shared band. */
 .rp-nav.rp-nav {
-  padding: 0 max(20px, calc((100vw - min(90vw, 1680px)) / 2));
+  padding: 0 max(20px, calc((100vw - var(--cafleet-band)) / 2));
+}
+
+/* Constrain the docs layout (sidebar + content + outline) to the same band. */
+.rp-doc-layout__container.rp-doc-layout__container {
+  max-width: var(--cafleet-band);
+  margin: 0 auto;
+}
+
+/* Larger navbar contents to match the 72px bar. */
+.rp-nav .rp-nav__title__link {
+  font-size: 1.25rem;
+}
+
+/* All three states — the theme's hover/active rules re-declare 14px and
+   would otherwise shrink the link on hover. */
+.rp-nav .rp-nav-menu__item__container,
+.rp-nav .rp-nav-menu__item:hover .rp-nav-menu__item__container,
+.rp-nav .rp-nav-menu__item--active .rp-nav-menu__item__container {
+  font-size: 16px;
+}
+
+.rp-nav .rp-search-button {
+  height: 44px;
+  min-width: 160px;
+}
+
+.rp-nav .rp-search-button__content {
+  font-size: 15px;
+}
+
+.rp-nav .rp-social-links__icon {
+  width: 24px;
+  height: 24px;
+}
+
+.rp-nav .rp-switch-appearance {
+  width: 28px;
+  height: 28px;
+}
+
+.rp-nav .rp-switch-appearance svg {
+  width: 22px;
+  height: 22px;
 }
 
 /* rspress.rs-style two-column home hero: text left, demo-video card right,
@@ -18,7 +79,7 @@
    tall screens instead of the dead middle. */
 .rp-home-hero.rp-home-hero {
   box-sizing: border-box;
-  max-width: min(90vw, 1680px);
+  max-width: var(--cafleet-band);
   min-height: min(calc(100vh - var(--rp-nav-height, 64px)), 860px);
   margin: 0 auto;
   align-items: center;
