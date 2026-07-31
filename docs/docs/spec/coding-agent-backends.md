@@ -1,7 +1,3 @@
----
-icon: lucide/bot
----
-
 # Coding-agent backends
 
 Every member pane runs one of three coding-agent binaries: **claude** (Claude

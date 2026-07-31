@@ -1,7 +1,3 @@
----
-icon: lucide/heart-pulse
----
-
 # Monitoring
 
 `cafleet monitor` is a fleet-scoped foreground loop — `scan → wake → sleep` —
@@ -175,17 +171,6 @@ clear are ownership-checked — a displaced monitor's next heartbeat matches
 zero rows and it self-terminates.
 
 ## Lifecycle
-
-```mermaid
-%%{init: {'theme': 'default', 'themeVariables': {'fontSize': '16px'}}}%%
-flowchart LR
-    Start["monitor start<br/>(monitoring member's background task)"] --> Claim["claim runtime row"]
-    Claim --> Tick["every tick:<br/>heartbeat (STOP if slot lost) → scan watched set → wake monitor if any due"]
-    Tick --> Tick
-    Tick --> Stop["delete the monitoring member /<br/>fleet delete"]
-    Stop --> Clear["clear runtime row"]
-    Tick -. wake trigger .-> PaneMon["monitoring member pane"]
-```
 
 The monitoring member is spawned **first-in**: it launches the loop as a
 background task, confirms the startup line the loop prints immediately after

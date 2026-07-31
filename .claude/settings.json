@@ -2,10 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(pnpm install --frozen-lockfile)",
-      "Bash(pnpm exec agent-browser * --help)",
-      "Bash(pnpm exec agent-browser * --version)",
+      "Bash(pnpm exec agent-browser --help)",
+      "Bash(pnpm exec agent-browser --version)",
       "Bash(pnpm exec agent-browser --session vr-batch-* get *)",
       "Bash(pnpm exec agent-browser --session vr-batch-* open http://localhost*)",
+      "Bash(pnpm exec agent-browser --session vr-batch-* click *)",
+      "Bash(pnpm exec agent-browser --session vr-batch-* fill *)",
       "Bash(pnpm exec agent-browser --session vr-batch-* snapshot)",
       "Bash(pnpm exec agent-browser --session vr-batch-* snapshot *)",
       "Bash(pnpm exec agent-browser --session vr-batch-* screenshot)",
@@ -22,11 +24,9 @@
       "Bash(mise //cafleet*)",
       "Bash(mise //:pnpm-install)",
       "Bash(mise //:docs-build)",
-      "Bash(mise //:uv-sync)",
       "Bash(mise //:slidev *)",
       "Bash(mise tasks)",
       "Bash(mise tasks --all)",
-      "Bash(uv run --frozen --group research *)",
       "Skill(update-readme)"
     ],
     "deny": [
@@ -43,8 +43,7 @@
       "Bash(pnpm exec agent-browser wait)",
       "Bash(pnpm exec agent-browser wait *)",
       "Bash(mise run *)",
-      "Bash(sqlite3 *)",
-      "Bash(uv run python -m *)"
+      "Bash(sqlite3 *)"
     ]
   }
 }

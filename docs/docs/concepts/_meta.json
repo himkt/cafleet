@@ -1,0 +1,9 @@
+[
+  { "type": "file", "name": "overview", "label": "Overview" },
+  { "type": "file", "name": "fleet-isolation", "label": "Fleet isolation" },
+  { "type": "file", "name": "storage", "label": "Storage" },
+  { "type": "file", "name": "member-lifecycle", "label": "Member lifecycle" },
+  { "type": "file", "name": "coding-agents", "label": "Coding agents" },
+  { "type": "file", "name": "model-selection", "label": "Model selection" },
+  { "type": "file", "name": "monitoring", "label": "Monitoring" }
+]

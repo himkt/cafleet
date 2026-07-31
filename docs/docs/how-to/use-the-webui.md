@@ -1,7 +1,3 @@
----
-icon: lucide/monitor
----
-
 # Use the admin WebUI
 
 The admin WebUI is a browser dashboard for watching and joining a fleet's

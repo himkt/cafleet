@@ -28,13 +28,13 @@ cafleet member create --fleet-id <fleet-id> \
 | `--name` | yes | Display name of the new member. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; also recorded as `placement.coding_agent`. When omitted, the member — every role — inherits **your** (the spawning Director's) backend from your placement row, so an unflagged team runs on the same backend as its Director. An explicit value always wins. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent, or with `opencode agent preset not found at <preset>; run 'cafleet setup' first` when the opencode agent preset is missing. |
-| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend; the model list at [`model-list.md`](model-list.md) lists the models for each backend. See [`cli-options.md`](../../../docs/spec/cli-options.md#member-create). |
+| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend; the model list at [`model-list.md`](model-list.md) lists the models for each backend. See [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-create). |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary (omitted → the binary's default; spawn-time only, never persisted). claude: `low`, `medium`, `high`, `xhigh`, `max` (spawned as `--effort <level>`); codex: `minimal`, `low`, `medium`, `high`, `xhigh` (spawned as `--config=model_reasoning_effort=<level>`); opencode: unsupported — any value exits 2 with `opencode does not support reasoning effort.`. An unknown level exits 2 before any side effect. The per-backend level set is your overlay's `{effort_levels}` value. |
 | `--role` | no | One of `member` (default) or `monitor`. `monitor` spawns the fleet's dedicated **monitoring member** (sets `member_card_json.cafleet.kind == "monitoring-member"`); the monitoring member is the unenrolled **watcher** that runs the loop — it is **not** enrolled in `monitor_config` and carries no interval (the loop watches the Director and members on their own intervals and wakes the monitoring member when one is due — see [`reference/supervision.md`](supervision.md)). An ordinary `--role member` with a pane IS enrolled. The LLM is still set by `--model` (the Director passes the monitor model `{monitor_model}`, resolved from its overlay — see § *Model selection before member create*); the backend follows the general inheritance rule when `--coding-agent` is omitted (see the `--coding-agent` row). One per fleet — a second `--role monitor` is rejected (exit 1). Spawned **first** and runs `cafleet monitor start`; see [`roles/monitor.md`](../roles/monitor.md) for the canonical prompt and first-in/first-out lifecycle. |
 | `--text` | no | Inline spawn prompt. Mutually exclusive with `--text-file`; exactly one of the two is required. |
-| `--text-file` | no | Path to a UTF-8 file used as the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Mutually exclusive with `--text`; exactly one of the two is required. Path/file errors are catalogued in [`cli-options.md`](../../../docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
+| `--text-file` | no | Path to a UTF-8 file used as the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Mutually exclusive with `--text`; exactly one of the two is required. Path/file errors are catalogued in [`cli-options.md`](../../../docs/docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 
-The per-backend spawn argv is in [`cli-options.md`](../../../docs/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the denied-command fallback is [`reference/prompt-routing.md`](prompt-routing.md). Per-backend deltas: [`claude`](coding-agent/claude-overlay.md) / [`codex`](coding-agent/codex-overlay.md) / [`opencode`](coding-agent/opencode-overlay.md).
+The per-backend spawn argv is in [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the denied-command fallback is [`reference/prompt-routing.md`](prompt-routing.md). Per-backend deltas: [`claude`](coding-agent/claude-overlay.md) / [`codex`](coding-agent/codex-overlay.md) / [`opencode`](coding-agent/opencode-overlay.md).
 
 ### Model-name-to-backend inference
 
@@ -120,7 +120,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 
 **Backtick caveat (harness-dependent)**: some environments (including this project) run a Bash-validator hook that rejects any backtick in a `Bash` invocation. When in play, strip backticks from spawn-prompt bodies (plain text instead of code spans); path-by-reference keeps the body short enough that this is easy.
 
-**Pane discovery**: discover a member's pane via `cafleet member list` (the `pane_id` column is ground truth for all backends). Pane title: {pane_title}. The spawn is atomic — a `split-window` or placement-patch failure rolls back the registration (and exits the pane on a patch failure) — and uses `-d` so the Director keeps focus. See [`member-lifecycle.md`](../../../docs/concepts/member-lifecycle.md).
+**Pane discovery**: discover a member's pane via `cafleet member list` (the `pane_id` column is ground truth for all backends). Pane title: {pane_title}. The spawn is atomic — a `split-window` or placement-patch failure rolls back the registration (and exits the pane on a patch failure) — and uses `-d` so the Director keeps focus. See [`member-lifecycle.md`](../../../docs/docs/concepts/member-lifecycle.md).
 
 ## Model selection before member create
 
@@ -148,7 +148,7 @@ The CLI kills the pane immediately, then deregisters and rebalances the layout (
 cafleet member delete --fleet-id <fleet-id> --member-id <member-id>
 ```
 
-Fleet-isolation only: a `--member-id` outside `--fleet-id` exits 1 (`Error: Member <member-id> not found`); deleting the root Director stays blocked by the root-Director guard. Exit codes and the output shape: [`cli-options.md`](../../../docs/spec/cli-options.md#member-delete).
+Fleet-isolation only: a `--member-id` outside `--fleet-id` exits 1 (`Error: Member <member-id> not found`); deleting the root Director stays blocked by the root-Director guard. Exit codes and the output shape: [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-delete).
 
 ## Member List
 
@@ -156,7 +156,7 @@ Fleet-isolation only: a `--member-id` outside `--fleet-id` exits 1 (`Error: Memb
 cafleet member list --fleet-id <fleet-id>
 ```
 
-One output shape: every **active** registry entry of the fleet (the root Director, the monitoring member, ordinary members, placementless rows), one row each with `member_id`, `name`, `kind` (`director` / `monitor` / `member`), `backend`, `pane_id` (a pending placement renders `(pending)`; placementless rows render `-` placement cells), and `idle` — the humanized wall-time since the member's most recent message activity (`Ns`/`Nm`/`Nh`, `-` when none). `--json` adds the underlying `last_sent` / `last_recv` / `last_ack` timestamps (output shape in [`cli-options.md`](../../../docs/spec/cli-options.md#member-list)). Use the `idle` column for routine supervision ticks instead of capturing every member every tick — capture is reserved for the cases the idle column flags.
+One output shape: every **active** registry entry of the fleet (the root Director, the monitoring member, ordinary members, placementless rows), one row each with `member_id`, `name`, `kind` (`director` / `monitor` / `member`), `backend`, `pane_id` (a pending placement renders `(pending)`; placementless rows render `-` placement cells), and `idle` — the humanized wall-time since the member's most recent message activity (`Ns`/`Nm`/`Nh`, `-` when none). `--json` adds the underlying `last_sent` / `last_recv` / `last_ack` timestamps (output shape in [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-list)). Use the `idle` column for routine supervision ticks instead of capturing every member every tick — capture is reserved for the cases the idle column flags.
 
 ## Monitor Capture
 
@@ -173,7 +173,7 @@ A fleet member never talks to the user. When it needs a recorded user reaction (
 
 ## Member Prompt
 
-Director-only keystroke primitive with two forms. The positional `TEXT` is a single line (leading/trailing whitespace stripped; pipes / `&&` / `;` / `$(...)` / backticks not special-cased; empty or newline-containing text exits 2). See [`reference/prompt-routing.md`](prompt-routing.md) for the full fallback protocol and [`cli-options.md`](../../../docs/spec/cli-options.md#member-prompt) for validation.
+Director-only keystroke primitive with two forms. The positional `TEXT` is a single line (leading/trailing whitespace stripped; pipes / `&&` / `;` / `$(...)` / backticks not special-cased; empty or newline-containing text exits 2). See [`reference/prompt-routing.md`](prompt-routing.md) for the full fallback protocol and [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-prompt) for validation.
 
 - **`--shell`**: keystrokes `! TEXT` + `Enter` (no Esc) so the coding agent's `!` shortcut runs the command natively (all three backends honor it) — the shell-dispatch half of the bash-via-Director fallback.
 - **Plain** (no `--shell`): keystrokes `Esc` → `TEXT` → `Enter`, submitting `TEXT` as a real user turn in the member's pane. Use it for text that only takes effect as a direct user turn — slash commands, skill invocations, and other magic commands a broker message body cannot trigger. Broker messaging remains the canonical coordination channel; the plain form is not a substitute for `message send` and is not a stall-recovery or urgent-redirect primitive.
@@ -191,7 +191,7 @@ Skip the ping only on non-zero `member prompt` exit (the dispatch did not comple
 
 ## Member Ping (manual inbox-poll)
 
-Keystrokes **`Esc` → `cafleet … message poll` → `Enter`** into a member's pane (the leading `Esc` dismisses any pending permission-approval prompt, so the trailing `Enter` cannot blindly confirm it) for re-poking a member that missed the broker's auto-fired inline preview. The action is fully fixed by the command — no operator-controlled body — so it sits in `permissions.allow` while `member prompt` stays in `permissions.ask`. Keystroke mechanics: [`multiplexer-backends.md`](../../../docs/spec/multiplexer-backends.md#esc-safeguard).
+Keystrokes **`Esc` → `cafleet … message poll` → `Enter`** into a member's pane (the leading `Esc` dismisses any pending permission-approval prompt, so the trailing `Enter` cannot blindly confirm it) for re-poking a member that missed the broker's auto-fired inline preview. The action is fully fixed by the command — no operator-controlled body — so it sits in `permissions.allow` while `member prompt` stays in `permissions.ask`. Keystroke mechanics: [`multiplexer-backends.md`](../../../docs/docs/spec/multiplexer-backends.md#esc-safeguard).
 
 ```bash
 cafleet member ping --fleet-id <fleet-id> --member-id <member-id>

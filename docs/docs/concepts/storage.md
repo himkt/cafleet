@@ -1,7 +1,3 @@
----
-icon: lucide/database
----
-
 # Storage
 
 ## Backend

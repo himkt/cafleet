@@ -26,7 +26,6 @@
       "mise //cafleet:format": "allow",
       "mise //cafleet:typecheck": "allow",
       "mise //cafleet:build": "allow",
-      "mise //:uv-sync": "allow",
       "wc *": "allow",
       "cafleet *": "allow",
     },

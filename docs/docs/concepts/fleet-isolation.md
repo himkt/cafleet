@@ -1,7 +1,3 @@
----
-icon: lucide/box
----
-
 # Fleet isolation
 
 The `fleet_id` serves as the fleet boundary. All members registered with the

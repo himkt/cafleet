@@ -286,7 +286,7 @@ Three pointer shapes:
 | Pointer | When |
 |:--|:--|
 | `paragraph-<HeadingPath>` | A specific section of the document — e.g. `paragraph-Implementation > Step 5`, `paragraph-Specification > 3. Anchor schema`. Use the literal heading text from the document with `>` separators. |
-| `<file>:<line>` | A specific file location — e.g. `cafleet/src/cafleet/broker/messaging.py:142`, `docs/concepts/overview.md:178`. |
+| `<file>:<line>` | A specific file location — e.g. `cafleet/src/cafleet/broker/messaging.py:142`, `docs/docs/concepts/overview.md:178`. |
 | `doc` | The whole document; used for top-level milestones (`complete (doc)`, `approved (doc)`) and document-wide blocks (`blocked (doc) — test framework ambiguous`). |
 
 ### 5.4 The pointer-marker pairing rule
@@ -525,7 +525,7 @@ Wire it up:
 
 1. **Point at the overlay.** `skills/cafleet/SKILL.md` carries the canonical "apply your coding-agent overlay" instruction; every sibling family `SKILL.md` carries a one-line pointer to `../cafleet/reference/coding-agent/<name>-overlay.md`. A new family skill adds the same pointer near its top.
 2. **Stamp the backend into the spawn prompt.** Add a `CODING AGENT: {coding_agent}` line to the spawn prompt's identity block (next to `FLEET ID` / `BASE`). The CLI renders it to the resolved backend name at spawn — no Director-side substitution and no CLI change — so a spawned member knows which overlay to read. A standalone agent uses its own identity instead.
-3. **Keep the homes independent.** The agent-facing overlay home and the human-facing `docs/spec/coding-agent-backends.md` operator docs never cross-link in either direction. Restating an operational fact in both is fine; linking between them is not.
+3. **Keep the homes independent.** The agent-facing overlay home and the human-facing `docs/docs/spec/coding-agent-backends.md` operator docs never cross-link in either direction. Restating an operational fact in both is fine; linking between them is not.
 
 See `.claude/rules/coding-agent-overlay.md` for the convention in brief.
 

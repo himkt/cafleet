@@ -7,7 +7,6 @@
 - Lint (admin): `mise //admin:lint`
 - Format: `mise //cafleet:format`
 - Type check: `mise //cafleet:typecheck`
-- Sync docs/research dependencies: `mise //:uv-sync` — the root uv workspace provides the docs toolchain (zensical, bump-my-version) and the `research` group (matplotlib) only.
 - Install the `cafleet` CLI: `mise //cafleet:install` — runs `cargo install --path cafleet`. The install copies the compiled binary, so re-run it after pulling or editing any Rust source under `cafleet/src/` for the global `cafleet` binary to pick up the change.
 - Build the release binary: `mise //cafleet:build` — emits `target/release/cafleet`.
 - Database migrations are hand-written SQL files guarded by the chain test — see `database-migrations.md`. There is no migration-autogeneration task.
@@ -47,7 +46,6 @@ Skills under `skills/` are deliberately invocation-agnostic — they describe th
 
 | Skill artifact | Cafleet runner |
 |---|---|
-| `cafleet-research` visualization (matplotlib) scripts | `uv run --frozen --group research python <script>` — the `[dependency-groups].research = ["matplotlib"]` block in root `pyproject.toml` provides matplotlib; `uv.lock` pins the version. |
 | `cafleet-research` presentation pnpm deps install | `mise //:pnpm-install` (equivalent to `pnpm install --frozen-lockfile`). |
 | `cafleet-research` presentation Slidev dev server | `mise //:slidev <folder>/slide.md` — PTY-wrapped via `script -qfc 'pnpm exec slidev --open false <slide>' /dev/null`. Default URL `http://localhost:3030`. Run with `run_in_background: true`. |
 | Calling-pane working directory for `pnpm` / `agent-browser` / Slidev | The cafleet repo root (where `package.json` and `node_modules/` live). |

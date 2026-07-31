@@ -1,0 +1,7 @@
+[
+  { "type": "file", "name": "quickstart", "label": "Quickstart" },
+  { "type": "dir", "name": "how-to", "label": "How-to guides" },
+  { "type": "dir", "name": "concepts", "label": "Concepts" },
+  { "type": "dir", "name": "spec", "label": "Specification" },
+  { "type": "file", "name": "contributing", "label": "Contributing" }
+]

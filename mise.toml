@@ -7,18 +7,13 @@ config_roots = [
 ]
 
 [tools]
-"aqua:astral-sh/uv" = "0.11.31"
 "aqua:pnpm/pnpm" = "11.17.0"
 "core:node" = "26.5.0"
 "core:rust" = { version = "1.97.1", components = ["clippy", "rustfmt"] }
 
-[tasks.uv-sync]
-run = "uv sync --all-groups --frozen"
-description = "Sync the root uv dependencies (docs + research groups, frozen lockfile)"
-
 [tasks.pnpm-install]
 run = "pnpm install --frozen-lockfile"
-description = "Install pnpm dependencies (slidev, agent-browser, vue, and admin) into ./node_modules"
+description = "Install pnpm dependencies (slidev, agent-browser, vue, admin, and the docs site) into ./node_modules"
 
 [tasks.skill-install]
 run = [
@@ -43,5 +38,6 @@ run = "script -qfc \"pnpm exec slidev --open false {{ arg(name='slide') }}\" /de
 description = "Start the Slidev dev server inside a PTY (script -qfc) so Slidev does not detect a non-TTY stdout and exit early. The trailing /dev/null is the script(1) typescript output file — discarding it keeps the working tree clean"
 
 [tasks."docs-build"]
-description = "Build the Zensical documentation site (clean rebuild)"
-run = "uv run zensical build --clean"
+description = "Build the rspress documentation site"
+run = "pnpm --dir docs build"
+depends = ["pnpm-install"]

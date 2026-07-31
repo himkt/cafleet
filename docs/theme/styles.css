@@ -1,0 +1,192 @@
+/* One shared container band for the navbar, the hero, and the docs layout,
+   plus the taller site-wide navbar (the hero's min-height calc follows the
+   nav-height var). The docs layout re-centers through the band: its internal
+   centering margins are zeroed and the content column takes the band minus
+   sidebar and outline. */
+:root:root {
+  --rp-nav-height: 72px;
+  --cafleet-band: min(90%, 1680px);
+  --rp-sidebar-margin-left: 0px;
+  --rp-outline-margin-right: 0px;
+  --rp-content-max-width: calc(
+    min(90vw, 1680px) - var(--rp-sidebar-width) - var(--rp-outline-width)
+  );
+}
+
+/* Always render a real scrollbar so every page shares the same layout width
+   and the reserved area shows the native track (no empty off-color gutter) —
+   the band uses % units (not vw) for the same reason: identical right-edge
+   positions on the home and docs pages. */
+html {
+  overflow-y: scroll;
+}
+
+/* Align the navbar contents with the shared band. */
+.rp-nav.rp-nav {
+  padding: 0 max(20px, calc((100vw - var(--cafleet-band)) / 2));
+}
+
+/* Constrain the docs layout (sidebar + content + outline) to the same band. */
+.rp-doc-layout__container.rp-doc-layout__container {
+  max-width: var(--cafleet-band);
+  margin: 0 auto;
+}
+
+/* Larger navbar contents to match the 72px bar. */
+.rp-nav .rp-nav__title__link {
+  font-size: 1.25rem;
+}
+
+/* All three states — the theme's hover/active rules re-declare 14px and
+   would otherwise shrink the link on hover. */
+.rp-nav .rp-nav-menu__item__container,
+.rp-nav .rp-nav-menu__item:hover .rp-nav-menu__item__container,
+.rp-nav .rp-nav-menu__item--active .rp-nav-menu__item__container {
+  font-size: 16px;
+}
+
+.rp-nav .rp-search-button {
+  height: 44px;
+  min-width: 160px;
+}
+
+.rp-nav .rp-search-button__content {
+  font-size: 15px;
+}
+
+.rp-nav .rp-social-links__icon {
+  width: 24px;
+  height: 24px;
+}
+
+.rp-nav .rp-switch-appearance {
+  width: 28px;
+  height: 28px;
+}
+
+.rp-nav .rp-switch-appearance svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* rspress.rs-style two-column home hero: text left, demo-video card right,
+   stacking text-above-video below the theme's 1000px breakpoint. Selectors are
+   doubled to out-rank the equal-specificity theme defaults (globalStyles is
+   bundled before the theme CSS). */
+
+/* Fluid hero: widens with the screen (the shared --cafleet-band, 90% up to
+   1680px), video column at 58%; the height band caps at 860px so content sits
+   in the upper region of tall screens instead of the dead middle. */
+.rp-home-hero.rp-home-hero {
+  box-sizing: border-box;
+  max-width: var(--cafleet-band);
+  min-height: min(calc(100vh - var(--rp-nav-height, 64px)), 860px);
+  margin: 0 auto;
+  align-items: center;
+  gap: 4rem;
+}
+
+.rp-home-hero .rp-home-hero__container {
+  flex: 1 1 42%;
+  gap: 0;
+}
+
+.rp-home-hero .rp-home-hero__image {
+  flex: 1 1 58%;
+  width: 100%;
+  max-width: none;
+}
+
+/* Video card: depth via layered shadow + brand glow. */
+.cafleet-home-demo {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: 16px;
+  box-shadow:
+    0 24px 48px -12px rgb(0 0 0 / 0.35),
+    0 8px 32px rgb(99 102 241 / 0.25);
+}
+
+/* Native subpixel rendering: the theme's antialiased smoothing renders text
+   too thin on macOS/retina displays. */
+html body {
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+
+/* Docs body text: readable size for paragraphs, list items, and table cells;
+   headings and code untouched (inline code is pinned to its pre-raise
+   14px/400 because the theme sizes it em-relative). */
+.rspress-doc p,
+.rspress-doc li,
+.rspress-doc td {
+  font-size: 17px;
+}
+
+.rspress-doc p code,
+.rspress-doc li code,
+.rspress-doc td code {
+  font-size: 14px;
+  font-weight: 400;
+}
+
+/* Type scale: tight display heading, muted two-line tagline, roomier buttons. */
+.rp-home-hero .rp-home-hero__title,
+.rp-home-hero .rp-home-hero__subtitle {
+  font-size: clamp(3rem, 2.6vw + 1.5rem, 5.5rem);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.rp-home-hero .rp-home-hero__tagline {
+  max-width: 34ch;
+  margin-top: 1.5rem;
+  color: var(--rp-c-text-2);
+  font-size: clamp(1.05rem, 0.45vw + 0.9rem, 1.35rem);
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.rp-home-hero .rp-home-hero__actions {
+  margin-top: 2.25rem;
+}
+
+.rp-home-hero .rp-home-hero__action {
+  padding: 0 2rem;
+  font-weight: 600;
+  gap: 0.5em;
+}
+
+/* GitHub mark on the alt action button — the same octocat path the navbar's
+   socialLinks icon uses, applied as a mask (the theme's Button drops HTML
+   action text, so a frontmatter SVG cannot render). */
+.rp-home-hero .rp-button--alt.rp-home-hero__action::before {
+  content: '';
+  flex-shrink: 0;
+  width: 1.1em;
+  height: 1.1em;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 .297c-6.63 0-12 5.373-12 12c0 5.303 3.438 9.8 8.205 11.385c.6.113.82-.258.82-.577c0-.285-.01-1.04-.015-2.04c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729c1.205.084 1.838 1.236 1.838 1.236c1.07 1.835 2.809 1.305 3.495.998c.108-.776.417-1.305.76-1.605c-2.665-.3-5.466-1.332-5.466-5.93c0-1.31.465-2.38 1.235-3.22c-.135-.303-.54-1.523.105-3.176c0 0 1.005-.322 3.3 1.23c.96-.267 1.98-.399 3-.405c1.02.006 2.04.138 3 .405c2.28-1.552 3.285-1.23 3.285-1.23c.645 1.653.24 2.873.12 3.176c.765.84 1.23 1.91 1.23 3.22c0 4.61-2.805 5.625-5.475 5.92c.42.36.81 1.096.81 2.22c0 1.606-.015 2.896-.015 3.286c0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/%3E%3C/svg%3E") no-repeat center / contain;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 .297c-6.63 0-12 5.373-12 12c0 5.303 3.438 9.8 8.205 11.385c.6.113.82-.258.82-.577c0-.285-.01-1.04-.015-2.04c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729c1.205.084 1.838 1.236 1.838 1.236c1.07 1.835 2.809 1.305 3.495.998c.108-.776.417-1.305.76-1.605c-2.665-.3-5.466-1.332-5.466-5.93c0-1.31.465-2.38 1.235-3.22c-.135-.303-.54-1.523.105-3.176c0 0 1.005-.322 3.3 1.23c.96-.267 1.98-.399 3-.405c1.02.006 2.04.138 3 .405c2.28-1.552 3.285-1.23 3.285-1.23c.645 1.653.24 2.873.12 3.176c.765.84 1.23 1.91 1.23 3.22c0 4.61-2.805 5.625-5.475 5.92c.42.36.81 1.096.81 2.22c0 1.606-.015 2.896-.015 3.286c0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/%3E%3C/svg%3E") no-repeat center / contain;
+}
+
+@media (max-width: 1000px) {
+  .rp-home-hero.rp-home-hero {
+    flex-direction: column;
+    min-height: 0;
+    gap: 2rem;
+  }
+
+  .rp-home-hero .rp-home-hero__image {
+    max-width: 100%;
+  }
+}
+
+/* Home footer message: readable weight and the mid-tier muted color. */
+.rp-home-footer .rp-home-footer__message {
+  color: var(--rp-c-text-2);
+  font-size: 1.05rem;
+  font-weight: 500;
+}

@@ -45,4 +45,4 @@ The `member ping` is required — `member prompt --shell` only stages the bang o
 
 **Serialize.** Process requests in poll order, one at a time: `prompt --shell → ping → ack → next`. Two `member prompt` dispatches firing concurrently against the same pane race the keystroke sequence and corrupt output. Within one member, `prompt --shell → ping → prompt --shell → ping`; never two concurrent prompt dispatches.
 
-**Cross-fleet boundary.** `member prompt` reaches any member of the same `--fleet-id` (no caller-auth check); a `--member-id` outside the fleet returns "not found" (see [`cli-options.md`](../../../docs/spec/cli-options.md#member-prompt)). A request naming a member outside your fleet cannot be served — reply with a plain `cafleet message send` explaining the mismatch.
+**Cross-fleet boundary.** `member prompt` reaches any member of the same `--fleet-id` (no caller-auth check); a `--member-id` outside the fleet returns "not found" (see [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-prompt)). A request naming a member outside your fleet cannot be served — reply with a plain `cafleet message send` explaining the mismatch.
