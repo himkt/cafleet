@@ -45,19 +45,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="${{ github.event.release.tag_name }}"
-          archive="cafleet-v${version}-${{ matrix.target }}.tar.gz"
-          tar -czf "${archive}" -C "cafleet/target/${{ matrix.target }}/release" cafleet
-          gh release upload "${version}" "${archive}" --clobber
-      # name and keg layout are what brew derives from the formula's root_url
+          tar -czf "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" -C "cafleet/target/${{ matrix.target }}/release" cafleet
+          gh release upload "${{ github.event.release.tag_name }}" "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" --clobber
       - name: Package and upload the bottle
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="${{ github.event.release.tag_name }}"
-          bottle="cafleet-${version}.${{ matrix.bottle_tag }}.bottle.tar.gz"
-          mkdir -p "keg/cafleet/${version}/bin"
-          cp "cafleet/target/${{ matrix.target }}/release/cafleet" "keg/cafleet/${version}/bin/cafleet"
-          tar -czf "${bottle}" -C keg cafleet
-          gh release upload "${version}" "${bottle}" --clobber
-          echo "${bottle} sha256: $(shasum -a 256 "${bottle}" | cut -d' ' -f1)" >> "${GITHUB_STEP_SUMMARY}"
+          mkdir -p "keg/cafleet/${{ github.event.release.tag_name }}/bin"
+          cp "cafleet/target/${{ matrix.target }}/release/cafleet" "keg/cafleet/${{ github.event.release.tag_name }}/bin/cafleet"
+          tar -czf "cafleet-${{ github.event.release.tag_name }}.${{ matrix.bottle_tag }}.bottle.tar.gz" -C keg cafleet
+          gh release upload "${{ github.event.release.tag_name }}" "cafleet-${{ github.event.release.tag_name }}.${{ matrix.bottle_tag }}.bottle.tar.gz" --clobber
