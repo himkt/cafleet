@@ -12,10 +12,13 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             runner: macos-15
+            bottle_tag: arm64_sonoma
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-24.04
+            bottle_tag: x86_64_linux
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04
+            bottle_tag: arm64_linux
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: write
@@ -42,5 +45,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tar -czf "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" -C "cafleet/target/${{ matrix.target }}/release" cafleet
-          gh release upload "${{ github.event.release.tag_name }}" "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" --clobber
+          version="${{ github.event.release.tag_name }}"
+          archive="cafleet-v${version}-${{ matrix.target }}.tar.gz"
+          tar -czf "${archive}" -C "cafleet/target/${{ matrix.target }}/release" cafleet
+          gh release upload "${version}" "${archive}" --clobber
+      # name and keg layout are what brew derives from the formula's root_url
+      - name: Package and upload the bottle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ github.event.release.tag_name }}"
+          bottle="cafleet-${version}.${{ matrix.bottle_tag }}.bottle.tar.gz"
+          mkdir -p "keg/cafleet/${version}/bin"
+          cp "cafleet/target/${{ matrix.target }}/release/cafleet" "keg/cafleet/${version}/bin/cafleet"
+          tar -czf "${bottle}" -C keg cafleet
+          gh release upload "${version}" "${bottle}" --clobber
+          echo "${bottle} sha256: $(shasum -a 256 "${bottle}" | cut -d' ' -f1)" >> "${GITHUB_STEP_SUMMARY}"
