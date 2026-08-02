@@ -5,7 +5,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
-use super::members::{DIRECTOR_PING_INTERVAL_SECONDS, db_err, enroll, member_card};
+use super::members::{db_err, member_card};
 use crate::error::CafleetError;
 use crate::time::{format_utc, now_utc};
 
@@ -43,7 +43,7 @@ pub(crate) fn fetch_fleet(
 }
 
 /// Atomic fleet + root-Director bootstrap: fleet row → Director member →
-/// placement → `director_member_id` backfill → Director enrollment at 180 s.
+/// placement → `director_member_id` backfill.
 pub fn create_fleet(
     conn: &mut Connection,
     name: Option<&str>,
@@ -89,7 +89,6 @@ pub fn create_fleet(
         params![director_id, fleet_id],
     )
     .map_err(db_err)?;
-    enroll(&tx, director_id, DIRECTOR_PING_INTERVAL_SECONDS)?;
     tx.commit().map_err(db_err)?;
     Ok(json!({
         "fleet_id": fleet_id,

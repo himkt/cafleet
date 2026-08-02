@@ -1,7 +1,7 @@
 # Drop the root Director from the monitor watched set
 
 **Status**: Approved
-**Progress**: 18/35 tasks complete
+**Progress**: 37/37 tasks complete
 **Last Updated**: 2026-08-02
 
 ## Overview
@@ -16,21 +16,21 @@ unreachable as a result.
 
 ## Success Criteria
 
-- [ ] `create_fleet` leaves the root Director unenrolled; `get_monitor_config`
+- [x] `create_fleet` leaves the root Director unenrolled; `get_monitor_config`
       for a freshly bootstrapped Director returns `None`.
-- [ ] `DIRECTOR_PING_INTERVAL_SECONDS` does not exist anywhere in the
+- [x] `DIRECTOR_PING_INTERVAL_SECONDS` does not exist anywhere in the
       repository.
-- [ ] `V2__drop_director_monitor_enrollment.sql` removes every pre-existing
+- [x] `V2__drop_director_monitor_enrollment.sql` removes every pre-existing
       Director row from `monitor_config`, so migrated and fresh databases have
       identical watched sets.
-- [ ] `is_director` is absent from `list_monitor_targets` scan rows and from
+- [x] `is_director` is absent from `list_monitor_targets` scan rows and from
       wake-payload due entries; `role` is absent from `monitor_members_payload`
       rows.
-- [ ] `MEMBER_PING_INTERVAL_SECONDS` remains 720 and
+- [x] `MEMBER_PING_INTERVAL_SECONDS` remains 720 and
       `CAFLEET_MONITOR_STALL_INTERVAL` remains 240; no new interval knob exists.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:format`
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:format`
       all pass.
-- [ ] No repository surface states that the root Director is watched, pinged,
+- [x] No repository surface states that the root Director is watched, pinged,
       or checked more often than an ordinary member.
 
 ---
@@ -244,74 +244,76 @@ the Director "used to be" watched.
 
 ### Step 3: Broker enrollment
 
-- [ ] `cafleet/src/broker/members.rs` — delete
+- [x] `cafleet/src/broker/members.rs` — delete
       `DIRECTOR_PING_INTERVAL_SECONDS`; reword the surviving constant's doc
       comment for a single cadence; change `enroll` to
       `enroll(conn, member_id)` inserting `MEMBER_PING_INTERVAL_SECONDS`
-      directly, and update its call site in `register_member`. <!-- completed: -->
-- [ ] `cafleet/src/broker/fleets.rs` — delete the
+      directly, and update its call site in `register_member`. <!-- completed: 2026-08-02T21:32 -->
+- [x] `cafleet/src/broker/fleets.rs` — delete the
       `enroll(&tx, director_id, DIRECTOR_PING_INTERVAL_SECONDS)?` call and the
       now-unused imports; drop the enrollment clause from `create_fleet`'s doc
-      comment. <!-- completed: -->
-- [ ] `cafleet/src/broker/fleets.rs` — replace
+      comment. <!-- completed: 2026-08-02T21:32 -->
+
+- [x] `cafleet/src/broker/fleets.rs` — replace
       `create_fleet_enrolls_the_director_at_180` with
       `create_fleet_leaves_the_director_unenrolled`, asserting
       `get_monitor_config(&conn, fleet_id, director_id)` returns `None`.
-      <!-- completed: -->
+      <!-- completed: 2026-08-02T21:29 -->
 
 ### Step 4: Scan-row and WebUI payload fields
 
-- [ ] `cafleet/src/broker/monitor.rs` — in `list_monitor_targets`, drop the
+- [x] `cafleet/src/broker/monitor.rs` — in `list_monitor_targets`, drop the
       `director_member_id` correlated subquery from the SELECT list, drop the
       `"is_director"` JSON key, and shift the remaining column indices down by
-      one. <!-- completed: -->
-- [ ] `cafleet/src/broker/monitor.rs` — in `monitor_members_payload`, drop the
+      one. <!-- completed: 2026-08-02T21:37 -->
+- [x] `cafleet/src/broker/monitor.rs` — in `monitor_members_payload`, drop the
       same subquery, the `is_director` tuple element, and the `"role"` JSON key;
-      shift the remaining indices. <!-- completed: -->
-- [ ] `cafleet/src/broker/monitor.rs` tests — retarget every test that uses the
+      shift the remaining indices. <!-- completed: 2026-08-02T21:37 -->
+- [x] `cafleet/src/broker/monitor.rs` tests — retarget every test that uses the
       root Director as a stand-in enrolled member to an ordinary registered
       member: `list_monitor_configs_returns_every_enrolled_member_with_bool_enabled`
       (drop the 180 interval assertion), `record_pings_stamps_last_ping_at_and_ignores_an_empty_list`,
       `record_monitor_dispatch_commits_both_cadences_atomically`,
       `reconcile_monitor_lifecycle_clears_stamps_for_listed_fleet_members_only`,
       `update_monitor_config` / `get_monitor_config` tests, and
-      `list_monitor_targets_counts_pending_deliveries`. <!-- completed: -->
-- [ ] `cafleet/src/broker/monitor.rs` tests — rewrite
+      `list_monitor_targets_counts_pending_deliveries`. <!-- completed: 2026-08-02T21:33 -->
+- [x] `cafleet/src/broker/monitor.rs` tests — rewrite
       `list_monitor_targets_returns_the_watched_set_with_the_scan_row_shape` so
       the full scan-row shape is pinned on an ordinary member (720 s, no
       `is_director` key) and add an assertion that the Director's `member_id`
-      is absent from the returned targets. <!-- completed: -->
-- [ ] `cafleet/src/broker/monitor.rs` tests — rename
+      is absent from the returned targets. <!-- completed: 2026-08-02T21:33 -->
+- [x] `cafleet/src/broker/monitor.rs` tests — rename
       `members_payload_labels_roles_and_truncates_ages` to
       `members_payload_truncates_ages` (the name must not advertise the removed
       labeling) and update it to assert the absence of `role` and the absence
-      of the Director's row. <!-- completed: -->
+      of the Director's row. <!-- completed: 2026-08-02T21:33 -->
 
 ### Step 5: Monitor loop and wake payload
 
-- [ ] `cafleet/src/monitor/mod.rs` — remove `DIRECTOR_PING_INTERVAL_SECONDS`
+- [x] `cafleet/src/monitor/mod.rs` — remove `DIRECTOR_PING_INTERVAL_SECONDS`
       from the `pub use` re-export and from the expected-public-API doc comment;
       drop `"is_director": target["is_director"]` from the due-entry JSON.
-      <!-- completed: -->
-- [ ] `cafleet/src/monitor/mod.rs` — replace the Director `coding_agent`
+      <!-- completed: 2026-08-02T21:34 -->
+- [x] `cafleet/src/monitor/mod.rs` — replace the Director `coding_agent`
       resolution chain with the loud `get_member` form from the Specification.
-      <!-- completed: -->
-- [ ] `cafleet/src/multiplexer/mod.rs` — in the wake-payload builder, delete the
+      <!-- completed: 2026-08-02T21:34 -->
+- [x] `cafleet/src/multiplexer/mod.rs` — in the wake-payload builder, delete the
       `role` computation and emit the literal `member` prefix, keeping the
       rendered text byte-identical; drop the `is_director` parameter and JSON
-      key from the test-fixture helper. <!-- completed: -->
-- [ ] `cafleet/src/multiplexer/tmux.rs` and `cafleet/src/multiplexer/herdr.rs`
+      key from the test-fixture helper. <!-- completed: 2026-08-02T21:34 -->
+
+- [x] `cafleet/src/multiplexer/tmux.rs` and `cafleet/src/multiplexer/herdr.rs`
       — drop the `"is_director": false` keys from the wake-payload test
-      fixtures. <!-- completed: -->
-- [ ] `cafleet/src/monitor/mod.rs` tests — drop the
+      fixtures. <!-- completed: 2026-08-02T21:34 -->
+- [x] `cafleet/src/monitor/mod.rs` tests — drop the
       `DIRECTOR_PING_INTERVAL_SECONDS == 180` assertion from
       `the_policy_tunables_are_pinned`; drop `"is_director"` from the
-      `should_ping` target fixture. <!-- completed: -->
-- [ ] `cafleet/src/monitor/mod.rs` tests — extend the `monitored_fleet` fixture
+      `should_ping` target fixture. <!-- completed: 2026-08-02T21:39 -->
+- [x] `cafleet/src/monitor/mod.rs` tests — extend the `monitored_fleet` fixture
       to register a **second** pane-bound ordinary member, so the tests that
       need two due entries still have them once the Director leaves the watched
-      set. <!-- completed: -->
-- [ ] `cafleet/src/monitor/mod.rs` tests — purge `director_id` from the
+      set. <!-- completed: 2026-08-02T21:39 -->
+- [x] `cafleet/src/monitor/mod.rs` tests — purge `director_id` from the
       `monitor_tick` test module, which breaks in three distinct ways:
       (1) `last_ping` calls on the Director panic on the missing row
       (`due_members_produce_one_wake_and_gated_ledger_writes`,
@@ -328,7 +330,12 @@ the Director "used to be" watched.
       meaningful. Keep every `director` **descriptor** assertion
       (`member_id`, `coding_agent`) intact — that surface is unchanged. Assert
       in at least one tick test that the Director's `member_id` never appears
-      in `due`. <!-- completed: -->
+      in `due`. <!-- completed: 2026-08-02T21:39 -->
+- [x] `cafleet/tests/e2e.rs` — register a second ordinary member, retarget the
+      `due member 1 (Director)` stdout assertion to it so the `2 members due`
+      plural path keeps two end-to-end due entries, and drop member 1 from the
+      `last_ping_at` loop — the Director has no `monitor_config` row to read.
+      <!-- completed: 2026-08-02T21:44 -->
 
 ### Step 6: WebUI expectations
 
@@ -348,10 +355,21 @@ the Director "used to be" watched.
 
 ### Step 7: Verification
 
-- [ ] Run `mise //cafleet:format`, `mise //cafleet:lint`, and
-      `mise //cafleet:test`; all pass. <!-- completed: -->
-- [ ] Grep the repository for `DIRECTOR_PING_INTERVAL`, `Root Director ping`,
+- [x] Run `mise //cafleet:format`, `mise //cafleet:lint`, and
+      `mise //cafleet:test`; all pass. <!-- completed: 2026-08-02T21:48 -->
+- [x] Grep the repository for `DIRECTOR_PING_INTERVAL`, `Root Director ping`,
       `far more often`, `is_director` under the monitor surfaces, and the bare
       literal `180`; confirm no residue outside the registry-identity uses
       named as out of scope. The bare-`180` sweep is the backstop that catches
-      prose naming the value without naming the constant. <!-- completed: -->
+      prose naming the value without naming the constant. <!-- completed: 2026-08-02T21:48 -->
+- [x] `docs/docs/spec/webui-api.md` — in the `GET /api/members` response
+      example, set the root Director's `monitor` field to `null`; in the
+      `GET /api/members/{member_id}/monitor` response example, change
+      `interval_seconds` from `180` to `720`. Surfaced by the bare-`180` sweep;
+      the Documentation-surfaces table did not list this page.
+      <!-- completed: 2026-08-02T21:48 -->
+- [x] `.claude/rules/documentation-tables.md` — the Echo rule's illustrative
+      quote is "the Director is checked far more often than an ordinary member",
+      which now describes a state the system cannot reach. Replace it with a
+      qualitative-magnitude example that is still true, keeping the rule's point
+      about magnitude-not-values intact. <!-- completed: 2026-08-02T21:51 -->

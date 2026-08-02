@@ -59,8 +59,8 @@ a restatement of the owned attributes.
 Two rules keep the non-owning mentions honest:
 
 - **Echo rule.** A non-owning page may describe an owned enumeration in
-  qualitative magnitude terms ("the Director is checked far more often than an
-  ordinary member"); it states no exact values.
+  qualitative magnitude terms ("the stall-check fires several times more often
+  than a member's own ping interval"); it states no exact values.
 - **Term tie-break.** When copies have drifted on what to call something, the
   term in the Core terms table of the concepts overview governs. The owning
   table and every linking mention adopt it.
