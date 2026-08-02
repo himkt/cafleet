@@ -1,6 +1,6 @@
 # Skill Tree Simplification
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 30/30 tasks complete
 **Last Updated**: 2026-08-03
 
@@ -218,3 +218,14 @@ Both checks run against the repository tree; nothing outside it is written (§ *
 
 - [x] Run `mise //cafleet:test` and confirm all three invariants pass, including the nonexistent-path one that was red in Step 1 <!-- completed: 2026-08-03T05:40 -->
 - [x] Run `mise //cafleet:lint` and confirm clean <!-- completed: 2026-08-03T05:40 -->
+
+---
+
+## Changelog
+
+| Date | Entry |
+|---|---|
+| 2026-08-03 | Implemented across 7 commits on `feat/0000157-skill-tree-simplification`; opened PR #261. The guard test was authored first and confirmed red on D4's dead `main.py` reference before any fix landed, then green — the nonexistent-path invariant is proven, not merely passing. |
+| 2026-08-03 | Specification amended mid-run: the token-vocabulary invariant now names the seven brace tokens whose home lies outside the overlay mechanism. As originally worded the invariant was red on the unmodified tree, contradicting its own "expected to pass" row. |
+| 2026-08-03 | Scope reduced mid-run at the user's instruction: promotion to `~/.claude/skills/` was withdrawn, cutting the task count 34 → 30. Success Criterion 7 was rewritten, since the three `diff -rq` checks it demanded became unsatisfiable. No copy ran and no file outside the repository was written. |
+| 2026-08-03 | `Status: Complete`. Reviewer approved twice — once on the implementation, once on the post-approval `expect()` fix. |
