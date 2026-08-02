@@ -250,16 +250,16 @@ mod tests {
     }
 
     #[test]
-    fn create_fleet_enrolls_the_director_at_180() {
+    fn create_fleet_leaves_the_director_unenrolled() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let config = broker::get_monitor_config(&conn, fleet_id, director_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(config["interval_seconds"], 180);
-        assert_eq!(config["enabled"], true);
-        assert_eq!(config["last_ping_at"], serde_json::Value::Null);
+        assert!(
+            broker::get_monitor_config(&conn, fleet_id, director_id)
+                .unwrap()
+                .is_none(),
+            "the root Director is never enrolled"
+        );
     }
 
     #[test]
