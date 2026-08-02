@@ -289,7 +289,7 @@ For each step in the design document:
 
 #### Phase B: Implementation
 
-1. **Assign**: Send the Programmer a verb + pointer poke. The Programmer reads the step spec at the pointer and locates the Tester's freshly-committed test files via git (`git log <base>..HEAD --name-only -- '**/test_*' '**/tests/**'`); the prior Tester `complete (...) — N tests` summary went Tester → Director, not Tester → Programmer.
+1. **Assign**: Send the Programmer a verb + pointer poke. The Programmer reads the step spec at the pointer and locates the Tester's freshly-committed test files via git (`git log <base>..HEAD --name-only`, reading the test content out of the Tester's commits — Rust unit tests live in `#[cfg(test)]` modules inside the source files they cover, which no pathspec can select); the prior Tester `complete (...) — N tests` summary went Tester → Director, not Tester → Programmer.
    ```bash
    cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
      --to-member-id <programmer-member-id> --text "ready (paragraph-Implementation > Step N)"
@@ -384,8 +384,8 @@ Render the spawn prompt to `${BASE}/.prompts/reviewer-<UTC-compact>.md` per the 
 
    | Marker location | Owner | Route |
    |:--|:--|:--|
-   | Test file (`**/test_*.py`, `**/*_test.py`, `**/tests/**`) | Tester — or the Programmer when no Tester was spawned (Programmer-only composition) | `ready (<file>:<line>)` to `<tester-member-id>` (fallback: `<programmer-member-id>`) |
-   | Any other source file | Programmer | `ready (<file>:<line>)` to `<programmer-member-id>` |
+   | Test content — an integration test under `cafleet/tests/`, or a finding inside a `#[cfg(test)]` module of a source file | Tester — or the Programmer when no Tester was spawned (Programmer-only composition) | `ready (<file>:<line>)` to `<tester-member-id>` (fallback: `<programmer-member-id>`) |
+   | Any other source line — a source file outside its `#[cfg(test)]` module | Programmer | `ready (<file>:<line>)` to `<programmer-member-id>` |
    | Design doc | Director | Resolves directly: apply the spec change, remove the marker; no cafleet route (escalate to the user via {decision_surface} only when a product decision is needed) |
 
    The routed member fixes the target, removes the `COMMENT(reviewer)` marker as part of the fix, re-runs tests, and replies `addressed (<file>:<line>)`.

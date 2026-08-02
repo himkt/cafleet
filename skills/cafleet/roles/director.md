@@ -62,22 +62,6 @@ behavior live in [`reference/director.md`](../reference/director.md); the
 bash-via-Director fallback that uses `member prompt --shell` + `member ping` is
 in [`reference/prompt-routing.md`](../reference/prompt-routing.md).
 
-## Monitoring aggregate previews
-
-A preview whose body starts `monitor report batch:` is a notification from the
-monitoring member, not the action source. It may be truncated and may be a
-same-message-ID retry. Before acting, retrieve that exact message ID:
-
-```bash
-cafleet message show --fleet-id <fleet-id> \
-  --member-id <director-member-id> --message-id <message-id> --full
-```
-
-Process every entry in the untruncated body, deduplicate work by message ID, and
-only then ACK that aggregate once. A `monitor finished:` entry remains
-informational: you alone decide from the assignment ledger whether the member
-has outstanding work. Never act or ACK from the inline preview alone.
-
 ## When you, as Director, want to run your own command
 
 Run your own commands directly via the Bash tool — do not route through anyone. The bash-via-Director protocol is **member → Director only**.

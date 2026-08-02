@@ -1,8 +1,8 @@
 # Skill Tree Simplification
 
 **Status**: Approved
-**Progress**: 4/34 tasks complete
-**Last Updated**: 2026-08-02
+**Progress**: 11/34 tasks complete
+**Last Updated**: 2026-08-03
 
 ## Overview
 
@@ -171,13 +171,13 @@ The nonexistent-path invariant is written **before** the content fixes so its re
 
 ### Step 2: Correctness fixes (D1–D5)
 
-- [ ] Delete `cafleet/roles/director.md` § *Monitoring aggregate previews* entirely; leave no residue or deprecation note (D1) <!-- completed: -->
-- [ ] Rewrite `cafleet/roles/member.md:62-69` to name the two-byte-identical-captures mechanism, preserving the durable `last_stall_check_at` cadence fact (D2) <!-- completed: -->
-- [ ] Replace "Click's standard not-a-valid-integer error" at `cafleet/SKILL.md:111` with the neutral wording from `cli-options.md:172` (D3) <!-- completed: -->
-- [ ] Replace `UsageError` at `cafleet/SKILL.md:89` and `cafleet/reference/director.md:58` with the contract strings owned by `cli-options.md:811`; leave `str.format` untouched (D3) <!-- completed: -->
-- [ ] Replace the dead `main.py` pointer example at `cafleet-design-doc/reference/coordination.md:35,73` with a real Rust path (D4) <!-- completed: -->
-- [ ] Rewrite the test-file routing rule at `execute/execute.md:387` for Rust: route by `cafleet/tests/**/*.rs` **and** by a finding landing inside a `#[cfg(test)]` module of a source file (22 files under `cafleet/src/` carry one) (D5) <!-- completed: -->
-- [ ] Replace the `git log` pathspec filter in `execute/execute.md` and `execute/roles/programmer.md` with an unfiltered commit-range read (`git log <base>..HEAD --name-only`, no pathspec). `'**/test_*'` matches nothing in this tree and no pathspec can reach a `#[cfg(test)]` module, so the filter is dropped rather than corrected; the Programmer identifies test content from the Tester's commit range instead (D5) <!-- completed: -->
+- [x] Delete `cafleet/roles/director.md` § *Monitoring aggregate previews* entirely; leave no residue or deprecation note (D1) <!-- completed: 2026-08-03T05:11 -->
+- [x] Rewrite `cafleet/roles/member.md:62-69` to name the two-byte-identical-captures mechanism, preserving the durable `last_stall_check_at` cadence fact (D2) <!-- completed: 2026-08-03T05:11 -->
+- [x] Replace "Click's standard not-a-valid-integer error" at `cafleet/SKILL.md:111` with the neutral wording from `cli-options.md:172` (D3) <!-- completed: 2026-08-03T05:11 -->
+- [x] Replace `UsageError` at `cafleet/SKILL.md:89` and `cafleet/reference/director.md:58` with the contract strings owned by `cli-options.md:811`; leave `str.format` untouched (D3) <!-- completed: 2026-08-03T05:11 -->
+- [x] Replace the dead `main.py` pointer example at `cafleet-design-doc/reference/coordination.md:35,73` with a real Rust path (D4) <!-- completed: 2026-08-03T05:11 -->
+- [x] Rewrite the test-file routing rule at `execute/execute.md:387` for Rust: route by `cafleet/tests/**/*.rs` **and** by a finding landing inside a `#[cfg(test)]` module of a source file (22 files under `cafleet/src/` carry one) (D5) <!-- completed: 2026-08-03T05:11 -->
+- [x] Replace the `git log` pathspec filter in `execute/execute.md` and `execute/roles/programmer.md` with an unfiltered commit-range read (`git log <base>..HEAD --name-only`, no pathspec). `'**/test_*'` matches nothing in this tree and no pathspec can reach a `#[cfg(test)]` module, so the filter is dropped rather than corrected; the Programmer identifies test content from the Tester's commit range instead (D5) <!-- completed: 2026-08-03T05:11 -->
 
 ### Step 3: Path canonicalization — one owner (C)
 
