@@ -26,16 +26,15 @@ The Director's plain output is **not visible to members** — the only Director�
 
 CAFleet members do not act autonomously. The Director drives the team — and the Director needs a way to wake itself up periodically to check inboxes, dispatch queued work, and detect stalls. That heartbeat is supplied by **`cafleet monitor`**, a per-fleet `scan → wake → sleep` loop that the fleet's dedicated **monitoring member** runs as a **background task** in its own pane. Because it is just a backgrounded command, the heartbeat is **backend-agnostic** — a root Director on `claude`, `codex`, or `opencode` gets the identical tick.
 
-Each tick scans the **watched set** — the root Director (default **180 s**) and
-every ordinary member (default **720 s**) — and emits at most one synchronized
-wake to the monitoring member. The loop itself never keystrokes a watched pane.
-Its fixed cadence unions `interval`, durable `stall-check`, and herdr
-`status:done` triggers; only after that union does it append `unacked` as
-annotation-only context to already-due rows. A stale delivery can never create a
-due row or an independent wake.
+Each tick scans the **watched set** — every ordinary member (default **720 s**)
+— and emits at most one synchronized wake to the monitoring member. The loop
+itself never keystrokes a watched pane. Its fixed cadence unions `interval`,
+durable `stall-check`, and herdr `status:done` triggers; only after that union
+does it append `unacked` as annotation-only context to already-due rows. A
+stale delivery can never create a due row or an independent wake.
 
 The byte-identical tmux/herdr wake is a **pure trigger**: it identifies every
-due target as `<role> <id> (<sanitized-name>; coding_agent=<backend>)
+due target as `member <id> (<sanitized-name>; coding_agent=<backend>)
 [<reasons>]`, names the Director, and points the monitoring member at its role
 protocol — nothing else. `coding_agent` selects the **target-specific**
 overlay for capture classification. Durable `last_stall_check_at` preserves
@@ -80,7 +79,7 @@ action is the fixed poll.
 
 ## The monitoring member
 
-The monitoring member is a single, dedicated coding-agent member — spawned **first** in the fleet with `cafleet member create --role monitor --model {monitor_model}` — that owns the heartbeat and applies LLM judgment to the watched members' state (the Director **and** each freshly-due member). `--role monitor` sets `member_card_json.cafleet.kind == "monitoring-member"`; the monitoring member is **not** enrolled in `monitor_config` — it is the watcher, located by that kind marker (`find_monitoring_member`), and carries no interval of its own. Only one is allowed per fleet (a second `--role monitor` spawn is rejected). It is the **one** process that runs `cafleet monitor start` (the Director never runs it — see § Spawn Protocol).
+The monitoring member is a single, dedicated coding-agent member — spawned **first** in the fleet with `cafleet member create --role monitor --model {monitor_model}` — that owns the heartbeat and applies LLM judgment to the watched members' state (each freshly-due member). `--role monitor` sets `member_card_json.cafleet.kind == "monitoring-member"`; the monitoring member is **not** enrolled in `monitor_config` — it is the watcher, located by that kind marker (`find_monitoring_member`), and carries no interval of its own. Only one is allowed per fleet (a second `--role monitor` spawn is rejected). It is the **one** process that runs `cafleet monitor start` (the Director never runs it — see § Spawn Protocol).
 
 The monitoring member's first-person routine — including per-target overlay
 selection, JSON capture identity, the two-wake quiet confirmation, the
@@ -205,7 +204,7 @@ On every supervision tick — whether fired by a monitoring-member escalation me
 |---|---|
 | Spawn the monitoring member (first-in) | The **first** `cafleet member create` in the fleet IS the monitoring member: `cafleet member create --fleet-id <fleet-id> --name monitor --description <…> --role monitor --model {monitor_model} --text-file <rendered monitor prompt>`. It boots, launches `cafleet monitor start` as a background task in its own pane, confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output, and sends `ready: monitor live` to the Director. |
 | Gate ordinary members | Wait for the monitoring member's `ready: monitor live` message before the first ordinary `cafleet member create` (consistent with the async wait rule); the admin WebUI keeps the liveness view. |
-| Run work | The monitor wakes the monitoring member whenever a watched member is due on its own interval (the root Director at 180 s, ordinary members at 720 s); do not intervene unless an escalation arrives. Each monitoring-member escalation message (or inbound work via inline preview) is the Director's cue to run the 5-step facilitation loop above. |
+| Run work | The monitor wakes the monitoring member whenever a watched ordinary member is due on its own interval (default 720 s); do not intervene unless an escalation arrives. Each monitoring-member escalation message (or inbound work via inline preview) is the Director's cue to run the 5-step facilitation loop above. |
 | User review | Keep the monitoring member and its `monitor start` task running during the review cycle — revisions and re-reviews still count as in-progress work. |
 | Teardown (first-out) | Delete the monitoring member FIRST via `cafleet member delete` — the pane kill terminates the `monitor start` loop with it — then delete the ordinary members. The authoritative full ordering is [`reference/recovery.md`](recovery.md) § *Shutdown Protocol*. |
 
