@@ -1,7 +1,7 @@
 # Drop the root Director from the monitor watched set
 
 **Status**: Complete
-**Progress**: 37/37 tasks complete
+**Progress**: 38/38 tasks complete
 **Last Updated**: 2026-08-02
 
 ## Overview
@@ -150,8 +150,10 @@ error now propagates via `?` instead of being swallowed by `.ok()`.
 | `SPEC.md` §6.6 | The re-export list and the "five constants" count; `should_ping`'s row description and its `is_director` sentence |
 | `SPEC.md` §8 | The fresh-DB seeding prose naming the Director at 180 s |
 | `SPEC.md` §11 | The "Policy tunables (180/720/3/15) have a single home" decision line |
-| `skills/cafleet/reference/supervision.md` | The watched-set sentence; the "the Director **and** each freshly-due member" clause; the example wake payload; the Quick Reference "Run work" row |
+| `skills/cafleet/reference/supervision.md` | The watched-set sentence; the "the Director **and** each freshly-due member" clause; the Quick Reference "Run work" row |
 | `skills/cafleet/roles/monitor.md` | Step 1's due-director-entry sentence; the `<role>` token in the wake-entry description; the example wake payload |
+| `docs/docs/spec/webui-api.md` | The `GET /api/members` response example's Director `monitor` field; the `GET /api/members/{member_id}/monitor` response example's `interval_seconds` |
+| `.claude/rules/documentation-tables.md` | The Echo rule's illustrative quote, which names the Director as the more-often-checked party |
 
 `README.md` is untouched — the change does not move its pitch, install
 commands, or docs-site section links.
@@ -163,6 +165,14 @@ carries the same due-director-entry defense and example payload as
 contract text for the `is_director` / `role` fields being removed. Leaving
 either would strand a rule against a state that can no longer occur.
 
+The last two rows are surfaces the residue sweep finds rather than a reading of
+the code: `webui-api.md` carries the enrollment values only inside JSON response
+examples, and the rules file names the Director in an illustrative quote. A
+surface sweep driven by the changed symbols reaches neither, because neither
+mentions `is_director`, `role`, or the constant — they name the **value** `180`
+and the **behavior** in prose. The bare-`180` grep in Step 7 is what catches the
+first; the `far more often` grep catches the second.
+
 Every rewrite states current behavior. No before/after narration, no note that
 the Director "used to be" watched.
 
@@ -172,6 +182,15 @@ the Director "used to be" watched.
 
 > Task format: `- [x] Done task <!-- completed: 2026-02-13T14:30 -->`
 > When completing a task, check the box and record the timestamp in the same edit.
+
+**Steps 3 and 5 land together.** Deleting `DIRECTOR_PING_INTERVAL_SECONDS` in
+Step 3 breaks its four surviving references in `cafleet/src/monitor/mod.rs` —
+the `pub use` re-export and the expected-public-API doc comment (Step 5's first
+impl bullet), plus the test module's import and its `== 180` assertion (Step 5's
+`the_policy_tunables_are_pinned` bullet). The definition and its last references
+sit in different steps, so **no ordering compiles Step 3 alone**: it reaches
+green only once Step 5's constant removal lands, and the two commit as one unit.
+Steps 4 and 6 are independent of both and may run in any order.
 
 ### Step 1: Documentation
 
@@ -211,6 +230,14 @@ the Director "used to be" watched.
       sentence. <!-- completed: 2026-08-02T21:15 -->
 - [x] `SPEC.md` §8 — rewrite the fresh-DB seeding prose to name only
       "pane-bound members at 720s by `register_member`". <!-- completed: 2026-08-02T21:15 -->
+- [x] `docs/docs/spec/webui-api.md` — in the `GET /api/members` response
+      example, set the root Director's `monitor` field to `null`; in the
+      `GET /api/members/{member_id}/monitor` response example, change
+      `interval_seconds` from `180` to `720`. <!-- completed: 2026-08-02T21:48 -->
+- [x] `.claude/rules/documentation-tables.md` — replace the Echo rule's
+      illustrative quote, which names the Director as the more-often-checked
+      party, with a qualitative-magnitude example that is still true; keep the
+      rule's magnitude-not-values point intact. <!-- completed: 2026-08-02T21:51 -->
 - [x] `skills/cafleet/reference/supervision.md` — narrow the watched-set
       sentence to ordinary members at 720 s; drop "the Director **and**" from
       the monitoring-member paragraph; update the Quick Reference "Run work"
@@ -243,6 +270,8 @@ the Director "used to be" watched.
       future migration. <!-- completed: 2026-08-02T21:24 -->
 
 ### Step 3: Broker enrollment
+
+Reaches green only with Step 5 — see the note under *Implementation*.
 
 - [x] `cafleet/src/broker/members.rs` — delete
       `DIRECTOR_PING_INTERVAL_SECONDS`; reword the surviving constant's doc
@@ -289,6 +318,8 @@ the Director "used to be" watched.
       of the Director's row. <!-- completed: 2026-08-02T21:33 -->
 
 ### Step 5: Monitor loop and wake payload
+
+Carries the constant's last references — see the note under *Implementation*.
 
 - [x] `cafleet/src/monitor/mod.rs` — remove `DIRECTOR_PING_INTERVAL_SECONDS`
       from the `pub use` re-export and from the expected-public-API doc comment;
@@ -360,16 +391,8 @@ the Director "used to be" watched.
 - [x] Grep the repository for `DIRECTOR_PING_INTERVAL`, `Root Director ping`,
       `far more often`, `is_director` under the monitor surfaces, and the bare
       literal `180`; confirm no residue outside the registry-identity uses
-      named as out of scope. The bare-`180` sweep is the backstop that catches
-      prose naming the value without naming the constant. <!-- completed: 2026-08-02T21:48 -->
-- [x] `docs/docs/spec/webui-api.md` — in the `GET /api/members` response
-      example, set the root Director's `monitor` field to `null`; in the
-      `GET /api/members/{member_id}/monitor` response example, change
-      `interval_seconds` from `180` to `720`. Surfaced by the bare-`180` sweep;
-      the Documentation-surfaces table did not list this page.
-      <!-- completed: 2026-08-02T21:48 -->
-- [x] `.claude/rules/documentation-tables.md` — the Echo rule's illustrative
-      quote is "the Director is checked far more often than an ordinary member",
-      which now describes a state the system cannot reach. Replace it with a
-      qualitative-magnitude example that is still true, keeping the rule's point
-      about magnitude-not-values intact. <!-- completed: 2026-08-02T21:51 -->
+      named as out of scope. The last two patterns are the backstops for
+      surfaces a symbol-driven sweep cannot reach: bare `180` catches prose and
+      JSON examples naming the value without naming the constant, and
+      `far more often` catches prose describing the cadence without naming
+      either. <!-- completed: 2026-08-02T21:48 -->
