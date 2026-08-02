@@ -13,8 +13,6 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 | 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{task_coord}` / `{decision_surface}` (spawn the monitor with `--model {monitor_model}`), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## Your Accountability
 
 - **Bootstrap the team and spawn the monitoring member first.** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and Stall Response policy. Run `cafleet doctor` then `cafleet fleet create --name "research-[topic-slug]" --coding-agent <backend> --json` (for `<backend>`, substitute the coding agent you are actually running on — your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity, e.g. Claude Code → `claude`) and capture the literal `fleet_id` and `director.member_id` integer ids. The **first** `cafleet member create` is the dedicated monitoring member (`--role monitor --model {monitor_model}`), which runs `cafleet monitor start` in its own pane and reports `ready: monitor live`; gate the Manager/Scout/Researcher spawns on that handshake (first-in). The monitoring member re-engages you via per-event `cafleet message send` escalation messages; you do **not** run the monitor yourself.
@@ -80,4 +78,4 @@ The health-check sequence + tick cadence are canonical in the `cafleet` skill's 
 
 ## Shutdown Protocol
 
-Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): `cafleet member delete` the monitoring member first (the pane kill terminates its `monitor start` loop), then Researchers, any active Scout, and the Manager (`--member-id` takes the integer `member_id`; each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id [fleet-id]`; `cafleet fleet list` to confirm.
+Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol* (first-out). This workflow's ordinary-member order after the monitoring member: Researchers, any active Scout, then the Manager (`--member-id` takes the integer `member_id`; each kills the pane immediately).

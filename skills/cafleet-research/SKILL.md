@@ -38,8 +38,6 @@ Before routing into a workflow or consulting a reference page, Read your overlay
 
 Each workflow body (report / presentation) carries its own Required-reading block for the team it runs — base-dir and supervision are gated there, not on this dispatch surface.
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## Dispatch
 
 When the user's request matches a scenario below, invoke this skill and run the linked workflow as a full CAFleet team — proactively, the moment the request matches, without waiting for the user to say "use cafleet".

@@ -30,8 +30,6 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 |------|------|
 | [`reference/cli.md`](../reference/cli.md) § *Output flags* | you need `--full` / `--json` opt-back-in semantics |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## Model selection
 
 Choose the backend/model pair from [`reference/model-list.md`](../reference/model-list.md) for these spawns; every other spawn keeps the existing workflow behavior (omit `--model` so the binary uses its default, with the normal backend inheritance). Pick the backend first — the fleet's backend unless the user names one — then compare within that backend's table, which is ordered most → least capable (an opencode model keeps its `opencode/` prefix). Pass the pair as `--coding-agent` / `--model`:
@@ -61,22 +59,6 @@ the fixed primitives are pre-approved (`permissions.allow`). Full flags and
 behavior live in [`reference/director.md`](../reference/director.md); the
 bash-via-Director fallback that uses `member prompt --shell` + `member ping` is
 in [`reference/prompt-routing.md`](../reference/prompt-routing.md).
-
-## Monitoring aggregate previews
-
-A preview whose body starts `monitor report batch:` is a notification from the
-monitoring member, not the action source. It may be truncated and may be a
-same-message-ID retry. Before acting, retrieve that exact message ID:
-
-```bash
-cafleet message show --fleet-id <fleet-id> \
-  --member-id <director-member-id> --message-id <message-id> --full
-```
-
-Process every entry in the untruncated body, deduplicate work by message ID, and
-only then ACK that aggregate once. A `monitor finished:` entry remains
-informational: you alone decide from the assignment ledger whether the member
-has outstanding work. Never act or ACK from the inline preview alone.
 
 ## When you, as Director, want to run your own command
 

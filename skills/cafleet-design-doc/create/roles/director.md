@@ -14,11 +14,9 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema (and the Step-2 clarification exemption) — you coordinate in free-form bodies and findings get lost / mis-routed |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## Placeholder convention
 
-Angle-bracket tokens (`<fleet-id>`, `<director-member-id>`, `<drafter-member-id>`, `<reviewer-member-id>`, `<member-id>`) are placeholders, **not** shell variables — substitute the literal integer ids from `cafleet fleet create` (which returns the fleet id AND the root Director's `member_id`) and `cafleet member create`. The rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
+Your tokens: `<fleet-id>`, `<director-member-id>`, `<drafter-member-id>`, `<reviewer-member-id>`, `<member-id>` — substitute the literal integer ids from `cafleet fleet create` (which returns the fleet id AND the root Director's `member_id`) and `cafleet member create`. The rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
 
 ## Your Accountability
 
@@ -60,29 +58,13 @@ See [../../reference/coordination.md](../../reference/coordination.md) § *COMME
 2. **If markers are found**: Route the Drafter to address them in-doc with `ready (doc)`. After the Drafter replies `addressed (doc)`, verify with Grep that no `COMMENT(` markers remain.
 3. **If no markers are found**: Explain the marker convention to the user (`# COMMENT(username): feedback` placed directly in the design document) and show the file path so the user can edit it. Then re-prompt with the same three-option pattern (Approve / Scan for COMMENT markers / built-in Other).
 
-### LLM Intent Judgment
+### Free-form user replies
 
-When the user provides free-form text instead of a listed option, use LLM reasoning to determine intent — not keyword matching. Interpret the user's text to distinguish between:
-
-- **Abort intent** (user wants to stop or cancel the process)
-- **Non-abort intent** (user is providing verbal feedback or asking a question)
-
-### Abort Detection
-
-- If abort intent is detected, trigger the Abort Flow — delete all members, and run `cafleet fleet delete --fleet-id <fleet-id>` to soft-delete the fleet and sweep the root Director in one transaction.
-- If non-abort intent is detected (e.g., verbal feedback), explain that feedback should be provided via COMMENT markers in the design document, then re-prompt with the same three-option pattern.
+Intent judgment and the Abort Flow follow the `cafleet` skill's `reference/supervision.md` § *User Delegation Protocol* → *Free-form replies — judging intent*. This workflow's feedback target: non-abort feedback goes into `COMMENT(` markers **in the design document**, after which you re-prompt with the same three-option pattern.
 
 ## Progress Monitoring
 
-Track team progress on each active turn — woken by members' replies (broker inline previews) and your own periodic polling — using the 2-stage health check (poll → monitor capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next (`cafleet member ping` for manual re-poke). Supervision obligations (Authorization-Scope Guard, idle semantics) come from the `cafleet` skill's `reference/supervision.md`.
-
-### User delegation for a member's relayed question
-
-When a member pauses on a decision-prompt pane frame awaiting a user reaction, the Director MUST delegate the decision to the user via {decision_surface} and then forward the answer using the decision-relay primitive its overlay describes — invoked via the Director's own Bash tool, whose per-call permission prompt is the user-consent surface. Never print a fenced `bash` block containing the resolved command for the user to copy-paste; the concrete decision surface, the three-beat workflow, and the pane-shapes table are backend deltas (see your overlay; the neutral pointer is the cafleet skill's `reference/director.md` § *Answering a member's relayed question*).
-
-### Routing member bash requests
-
-Drafter and Reviewer members are spawned in workspace-scoped auto-approval mode ({permission_flags}; Bash tool enabled, permission prompts auto-resolve), so they run shell commands directly by default. The bash-via-Director protocol is the fallback when a member's Bash invocation is denied by its coding-agent harness (destructive operations such as `git push` on claude/codex; any command outside the preset's deny-by-default allowlist on opencode). In that case the member auto-routes by sending a plain shell-command request via `cafleet message send`, and the Director responds by sending `! <command>` keystrokes through `cafleet member prompt --shell`. Process such requests one at a time in poll order. Full invocation + flag layout in the `cafleet` skill § Routing Bash via the Director.
+Your turns are granted by members' replies (broker inline previews) and your own periodic polling; run the 2-stage health check (poll → monitor capture) on each. What counts as stalled, the nudge shape, and the supervision obligations (Authorization-Scope Guard, idle semantics) are canonical in the `cafleet` skill's `reference/supervision.md` § *Stall Response* and § *Idle Semantics*.
 
 ### Skill-specific milestones
 
@@ -95,4 +77,4 @@ Drafter and Reviewer members are spawned in workspace-scoped auto-approval mode 
 
 ## Shutdown Protocol
 
-Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): `cafleet member delete` the monitoring member first (the pane kill terminates its `monitor start` loop), then each ordinary member → `cafleet member list` verification → `cafleet fleet delete --fleet-id <fleet-id>` → `cafleet fleet list` sanity check.
+Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol* (first-out). This workflow adds no extra teardown steps.

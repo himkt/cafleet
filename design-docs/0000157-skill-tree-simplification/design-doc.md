@@ -1,8 +1,8 @@
 # Skill Tree Simplification
 
-**Status**: Approved
-**Progress**: 0/34 tasks complete
-**Last Updated**: 2026-08-02
+**Status**: Complete
+**Progress**: 30/30 tasks complete
+**Last Updated**: 2026-08-03
 
 ## Overview
 
@@ -10,13 +10,13 @@ Remove five factual defects and four classes of duplication from `skills/` (45 m
 
 ## Success Criteria
 
-- [ ] All five correctness defects (D1–D5) are fixed, and no skill file contradicts `reference/supervision.md`, `docs/docs/spec/cli-options.md`, or `SPEC.md` on the surfaces they own.
-- [ ] No skill file references a repository path, error string, or protocol that does not exist.
-- [ ] The path-canonicalization procedure appears in exactly one owning page; the five call sites carry a link plus a one-clause summary.
-- [ ] Every invariant Director section and every shared bootstrap block exists once, in a page already gated in the reading Director's Required-reading block. No Required-reading row is added, removed, or reworded by this change.
-- [ ] No `IMPORTANT:` line, hard role-constraint, or start cue was collapsed in any per-role delta (the lossless rule in `cafleet/reference/director.md`).
-- [ ] `mise //cafleet:test` passes, including a new structural guard test that fails when a skill file references a nonexistent path, drops its overlay Required-reading row, or uses a `{token}` outside the known vocabulary. The nonexistent-path invariant is demonstrated red against the pre-fix tree before the fixes land.
-- [ ] Each of `diff -rq skills/<name> ~/.claude/skills/<name>` for `cafleet`, `cafleet-design-doc`, and `cafleet-research` reports no output. (Diffing the two roots is not equivalent: `~/.claude/skills/` also holds unrelated user-level skills, so a root-level recursive diff always emits `Only in` lines.)
+- [x] All five correctness defects (D1–D5) are fixed, and no skill file contradicts `reference/supervision.md`, `docs/docs/spec/cli-options.md`, or `SPEC.md` on the surfaces they own.
+- [x] No skill file references a repository path, error string, or protocol that does not exist.
+- [x] The path-canonicalization procedure appears in exactly one owning page; the five call sites carry a link plus a one-clause summary.
+- [x] Every invariant Director section and every shared bootstrap block exists once, in a page already gated in the reading Director's Required-reading block. No Required-reading row is added, removed, or reworded by this change.
+- [x] No `IMPORTANT:` line, hard role-constraint, or start cue was collapsed in any per-role delta (the lossless rule in `cafleet/reference/director.md`).
+- [x] `mise //cafleet:test` passes, including a new structural guard test that fails when a skill file references a nonexistent path, drops its overlay Required-reading row, or uses a `{token}` outside the known vocabulary. The nonexistent-path invariant is demonstrated red against the pre-fix tree before the fixes land.
+- [x] Every file this change touches is tracked in this repository; nothing under `~/.claude/` is written.
 
 ---
 
@@ -28,7 +28,7 @@ Six prior design docs (0000088, 0000093, 0000094, 0000102, 0000113, 0000129) alr
 
 `skills/` only — the three skills `cafleet`, `cafleet-design-doc`, `cafleet-research`.
 
-**Two different directories share the name `.claude/skills/`, and only one is involved here.** The repository's own `.claude/skills/` (clean-docs, skill-author, update-readme, cafleet-model-list-refresh) is project-local, is never promoted anywhere, and is neither a simplification target nor a destination. The user-level `~/.claude/skills/` is the promotion destination in Step 6. The scoping answer that placed `.claude/skills/` "in scope only as the promotion destination" referred to the latter; this doc treats the repo-local one as entirely out of scope.
+**Neither directory named `.claude/skills/` is in scope.** The repository's own `.claude/skills/` (clean-docs, skill-author, update-readme, cafleet-model-list-refresh) is project-local and is neither a simplification target nor a destination. The user-level `~/.claude/skills/` holds the promoted copy of these three skills, but this change does not write to it — promotion is a separate, user-initiated action (see § *Promotion is out of scope*).
 
 ### Expected magnitude — correcting the pre-team estimate
 
@@ -57,7 +57,14 @@ Neither metric reaches the 15–22% of the original estimate. Measured, the pass
 ### Two scan claims corrected by verification
 
 - The tree holds **45** markdown files, not 46 (plus 11 non-markdown Slidev theme assets under `cafleet-research/reference/slidev/`).
-- The promoted copy is **not** byte-identical. `~/.claude/skills/cafleet/roles/monitor.md` and `~/.claude/skills/cafleet/reference/supervision.md` are stale: they still describe the root Director enrolled in the watched set at 180 s, which design 0000156 removed. The repo tree is authoritative; promotion is one-directional (repo → `~/.claude/skills/`). Step 6 clears this pre-existing drift as well as this design's own edits.
+- The promoted copy is **not** byte-identical. `~/.claude/skills/cafleet/roles/monitor.md` and `~/.claude/skills/cafleet/reference/supervision.md` are stale: they still describe the root Director enrolled in the watched set at 180 s, which design 0000156 removed. The repo tree is authoritative; promotion is one-directional (repo → `~/.claude/skills/`). That drift is left standing — see § *Promotion is out of scope*.
+
+### Promotion is out of scope
+
+This change writes only to files tracked in this repository. Copying `skills/` over `~/.claude/skills/` is a separate action the user runs when they choose to, so two consequences follow and are accepted:
+
+- The user-level tree does not carry this design's edits. Any agent loading these skills by name keeps the pre-change instructions until a promotion happens.
+- The 0000156 staleness noted above stays in `~/.claude/skills/cafleet/roles/monitor.md` and `reference/supervision.md`. It predates this design and is not this design's to clear.
 
 ---
 
@@ -151,7 +158,7 @@ Three invariants. Each is a static check over the repo tree, and each fails on a
 
 The path check must tolerate the legitimate non-path uses of slash-bearing text (URLs, glob patterns, `<placeholder>` forms). It asserts over paths that look repo-relative and resolve under the repo root.
 
-**Why the token invariant is a vocabulary check, not an "unresolved token" check.** Base files carrying `{skill_loader}` / `{monitor_model}` / `{decision_surface}` for the reader to resolve *is* the overlay mechanism `.claude/rules/coding-agent-overlay.md` mandates — 37 of the 45 files carry such a token deliberately, so a test forbidding them would fail on the tree's intended design. The defect worth catching statically is a token entering the vocabulary without a home: the check asserts every brace token in `skills/` is one of the ten overlay placeholders or one of the four `str.format` identity placeholders (`{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}`), and that each of the three overlays plus `_template.md` defines all ten. The emission-time self-check in `cafleet/SKILL.md` § *Resolve your overlay* — a token surviving into a rendered prompt or a sent message — is an agent-runtime concern with no artifact in the repo, so no static test can cover it.
+**Why the token invariant is a vocabulary check, not an "unresolved token" check.** Base files carrying `{skill_loader}` / `{monitor_model}` / `{decision_surface}` for the reader to resolve *is* the overlay mechanism `.claude/rules/coding-agent-overlay.md` mandates — 37 of the 45 files carry such a token deliberately, so a test forbidding them would fail on the tree's intended design. The defect worth catching statically is a token entering the vocabulary without a home: the check asserts every brace token in `skills/` is one of the ten overlay placeholders, one of the four `str.format` identity placeholders (`{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}`), or one of a small named set that has a documented home outside the overlay mechanism — `{token}` / `{placeholder}` (meta-references inside the resolution rule itself), `{slug}` / `{dir_path}` (workflow-local path variables), and `{topic}` / `{current_year}` / `{current_month}` (web-researcher discovery-query examples). It further asserts each of the three overlays plus `_template.md` defines all ten. Naming that third set explicitly is what keeps the invariant green on the current tree while a genuinely homeless token still fails. The emission-time self-check in `cafleet/SKILL.md` § *Resolve your overlay* — a token surviving into a rendered prompt or a sent message — is an agent-runtime concern with no artifact in the repo, so no static test can cover it.
 
 ---
 
@@ -164,52 +171,61 @@ The path check must tolerate the legitimate non-path uses of slash-bearing text 
 
 The nonexistent-path invariant is written **before** the content fixes so its red run is against the real pre-fix tree. Written after Step 2, D4's `main.py` would already be gone and the invariant could never fail, leaving it unproven. The other two are regression guards with no present-tree defect to fail on; they are expected to pass from the outset.
 
-- [ ] Add the nonexistent-path invariant to `cafleet/tests/docs_sync.rs`, tolerating URLs, globs, and `<placeholder>` forms <!-- completed: -->
-- [ ] Run `mise //cafleet:test` and confirm the nonexistent-path invariant **fails** on D4's `main.py` before any fix lands <!-- completed: -->
-- [ ] Add the overlay-row-#1 invariant across every role file; expect it to pass on the unmodified tree <!-- completed: -->
-- [ ] Add the token-vocabulary invariant (ten overlay placeholders + four `str.format` identity placeholders; every overlay defines all ten); expect it to pass on the unmodified tree <!-- completed: -->
+- [x] Add the nonexistent-path invariant to `cafleet/tests/docs_sync.rs`, tolerating URLs, globs, and `<placeholder>` forms <!-- completed: 2026-08-02T20:08 -->
+- [x] Run `mise //cafleet:test` and confirm the nonexistent-path invariant **fails** on D4's `main.py` before any fix lands <!-- completed: 2026-08-02T20:08 -->
+- [x] Add the overlay-row-#1 invariant across every role file; expect it to pass on the unmodified tree <!-- completed: 2026-08-02T20:08 -->
+- [x] Add the token-vocabulary invariant (ten overlay placeholders + four `str.format` identity placeholders; every overlay defines all ten); expect it to pass on the unmodified tree <!-- completed: 2026-08-02T20:08 -->
 
 ### Step 2: Correctness fixes (D1–D5)
 
-- [ ] Delete `cafleet/roles/director.md` § *Monitoring aggregate previews* entirely; leave no residue or deprecation note (D1) <!-- completed: -->
-- [ ] Rewrite `cafleet/roles/member.md:62-69` to name the two-byte-identical-captures mechanism, preserving the durable `last_stall_check_at` cadence fact (D2) <!-- completed: -->
-- [ ] Replace "Click's standard not-a-valid-integer error" at `cafleet/SKILL.md:111` with the neutral wording from `cli-options.md:172` (D3) <!-- completed: -->
-- [ ] Replace `UsageError` at `cafleet/SKILL.md:89` and `cafleet/reference/director.md:58` with the contract strings owned by `cli-options.md:811`; leave `str.format` untouched (D3) <!-- completed: -->
-- [ ] Replace the dead `main.py` pointer example at `cafleet-design-doc/reference/coordination.md:35,73` with a real Rust path (D4) <!-- completed: -->
-- [ ] Rewrite the test-file routing rule at `execute/execute.md:387` for Rust: route by `cafleet/tests/**/*.rs` **and** by a finding landing inside a `#[cfg(test)]` module of a source file (22 files under `cafleet/src/` carry one) (D5) <!-- completed: -->
-- [ ] Replace the `git log` pathspec filter in `execute/execute.md` and `execute/roles/programmer.md` with an unfiltered commit-range read (`git log <base>..HEAD --name-only`, no pathspec). `'**/test_*'` matches nothing in this tree and no pathspec can reach a `#[cfg(test)]` module, so the filter is dropped rather than corrected; the Programmer identifies test content from the Tester's commit range instead (D5) <!-- completed: -->
+- [x] Delete `cafleet/roles/director.md` § *Monitoring aggregate previews* entirely; leave no residue or deprecation note (D1) <!-- completed: 2026-08-03T05:11 -->
+- [x] Rewrite `cafleet/roles/member.md:62-69` to name the two-byte-identical-captures mechanism, preserving the durable `last_stall_check_at` cadence fact (D2) <!-- completed: 2026-08-03T05:11 -->
+- [x] Replace "Click's standard not-a-valid-integer error" at `cafleet/SKILL.md:111` with the neutral wording from `cli-options.md:172` (D3) <!-- completed: 2026-08-03T05:11 -->
+- [x] Replace `UsageError` at `cafleet/SKILL.md:89` and `cafleet/reference/director.md:58` with the contract strings owned by `cli-options.md:811`; leave `str.format` untouched (D3) <!-- completed: 2026-08-03T05:11 -->
+- [x] Replace the dead `main.py` pointer example at `cafleet-design-doc/reference/coordination.md:35,73` with a real Rust path (D4) <!-- completed: 2026-08-03T05:11 -->
+- [x] Rewrite the test-file routing rule at `execute/execute.md:387` for Rust: route by `cafleet/tests/**/*.rs` **and** by a finding landing inside a `#[cfg(test)]` module of a source file (22 files under `cafleet/src/` carry one) (D5) <!-- completed: 2026-08-03T05:11 -->
+- [x] Replace the `git log` pathspec filter in `execute/execute.md` and `execute/roles/programmer.md` with an unfiltered commit-range read (`git log <base>..HEAD --name-only`, no pathspec). `'**/test_*'` matches nothing in this tree and no pathspec can reach a `#[cfg(test)]` module, so the filter is dropped rather than corrected; the Programmer identifies test content from the Tester's commit range instead (D5) <!-- completed: 2026-08-03T05:11 -->
 
 ### Step 3: Path canonicalization — one owner (C)
 
-- [ ] Confirm `cafleet/reference/base-dir.md` § *Consumer contract* covers both consumers correctly; extend it if a call site carries a rule the table lacks <!-- completed: -->
-- [ ] Replace the restatement in `create/create.md:58` with a link plus one-clause summary, keeping the accepted-input examples <!-- completed: -->
-- [ ] Same for `execute/execute.md:74` <!-- completed: -->
-- [ ] Same for `interview/interview.md:78` <!-- completed: -->
-- [ ] Same for `presentation/presentation.md:75-77` <!-- completed: -->
-- [ ] Same for `report/report.md` Step 0 <!-- completed: -->
+- [x] Confirm `cafleet/reference/base-dir.md` § *Consumer contract* covers both consumers correctly; extend it if a call site carries a rule the table lacks <!-- completed: 2026-08-03T05:17 -->
+- [x] Replace the restatement in `create/create.md:58` with a link plus one-clause summary, keeping the accepted-input examples <!-- completed: 2026-08-03T05:17 -->
+- [x] Same for `execute/execute.md:74` <!-- completed: 2026-08-03T05:17 -->
+- [x] Same for `interview/interview.md:78` <!-- completed: 2026-08-03T05:17 -->
+- [x] Same for `presentation/presentation.md:75-77` <!-- completed: 2026-08-03T05:17 -->
+- [x] Same for `report/report.md` Step 0 <!-- completed: 2026-08-03T05:17 -->
 
 ### Step 4: Fold invariant Director sections into `supervision.md` (B)
 
-- [ ] Merge LLM Intent Judgment, Abort Detection's shared shape, and User delegation into `supervision.md` § *User Delegation Protocol* as one coherent section, not three appended ones <!-- completed: -->
-- [ ] Merge the invariant remainder of Progress Monitoring into § *Stall Response* <!-- completed: -->
-- [ ] Merge the canonical teardown sentence into § *Cleanup Protocol* <!-- completed: -->
-- [ ] Merge Routing member bash requests (present in `create` and `execute` only) into § *Team-facilitation instructions*, generalizing the member-role list and preserving the pointer to `reference/prompt-routing.md` <!-- completed: -->
-- [ ] Reduce Placeholder convention to its role-token list plus the existing `cafleet/SKILL.md` pointer — in `create/roles/director.md` and `execute/roles/director.md` only; the report and presentation director files carry no such section <!-- completed: -->
-- [ ] Reduce all four workflow director files to their genuine deltas, verifying each retains its workflow-specific wake sources, feedback targets, extra teardown steps, and milestone table <!-- completed: -->
-- [ ] Confirm no Required-reading row was added or removed anywhere in this step <!-- completed: -->
+- [x] Merge LLM Intent Judgment, Abort Detection's shared shape, and User delegation into `supervision.md` § *User Delegation Protocol* as one coherent section, not three appended ones <!-- completed: 2026-08-03T05:23 -->
+- [x] Merge the invariant remainder of Progress Monitoring into § *Stall Response* <!-- completed: 2026-08-03T05:23 -->
+- [x] Merge the canonical teardown sentence into § *Cleanup Protocol* <!-- completed: 2026-08-03T05:23 -->
+- [x] Merge Routing member bash requests (present in `create` and `execute` only) into § *Team-facilitation instructions*, generalizing the member-role list and preserving the pointer to `reference/prompt-routing.md` <!-- completed: 2026-08-03T05:23 -->
+- [x] Reduce Placeholder convention to its role-token list plus the existing `cafleet/SKILL.md` pointer — in `create/roles/director.md` and `execute/roles/director.md` only; the report and presentation director files carry no such section <!-- completed: 2026-08-03T05:23 -->
+- [x] Reduce all four workflow director files to their genuine deltas, verifying each retains its workflow-specific wake sources, feedback targets, extra teardown steps, and milestone table <!-- completed: 2026-08-03T05:23 -->
+- [x] Confirm no Required-reading row was added or removed anywhere in this step <!-- completed: 2026-08-03T05:23 -->
 
 ### Step 5: Shared team-bootstrap preamble (A)
 
-- [ ] A1: remove the trailing resolve sentence from all 27 files, confirming per file that Required-reading row #1 is present before removing; flag to the Director any file that has the sentence without the row rather than choosing silently <!-- completed: -->
-- [ ] A2: move the `cafleet doctor` prerequisites and the `fleet create` + never-shell-variables block into `supervision.md` § *Spawn Protocol*; replace each of the 5 sites with a one-clause pointer <!-- completed: -->
-- [ ] A2: move the spawn-prompt audit-file two-step and the spawn-mechanics / path-by-reference blockquote into `base-dir.md` § *No-bypass write protocol*; replace each site with a one-clause pointer <!-- completed: -->
-- [ ] Verify no `IMPORTANT:` line, hard role-constraint, or start cue was collapsed in any per-role delta (the lossless rule), and that every Required-reading table is byte-unchanged <!-- completed: -->
+- [x] A1: remove the trailing resolve sentence from all 27 files, confirming per file that Required-reading row #1 is present before removing; flag to the Director any file that has the sentence without the row rather than choosing silently <!-- completed: 2026-08-03T05:34 -->
+- [x] A2: move the `cafleet doctor` prerequisites and the `fleet create` + never-shell-variables block into `supervision.md` § *Spawn Protocol*; replace each of the 5 sites with a one-clause pointer <!-- completed: 2026-08-03T05:34 -->
+- [x] A2: move the spawn-prompt audit-file two-step and the spawn-mechanics / path-by-reference blockquote into `base-dir.md` § *No-bypass write protocol*; replace each site with a one-clause pointer <!-- completed: 2026-08-03T05:34 -->
+- [x] Verify no `IMPORTANT:` line, hard role-constraint, or start cue was collapsed in any per-role delta (the lossless rule), and that every Required-reading table is byte-unchanged <!-- completed: 2026-08-03T05:34 -->
 
-### Step 6: Promote and verify
+### Step 6: Verify
 
-- [ ] Run `mise //cafleet:test` and confirm all three invariants pass, including the nonexistent-path one that was red in Step 1 <!-- completed: -->
-- [ ] Copy the three skill directories from `skills/` to `~/.claude/skills/`, overwriting <!-- completed: -->
-- [ ] Run `diff -rq skills/cafleet ~/.claude/skills/cafleet` and confirm no output — this clears the two files (`roles/monitor.md`, `reference/supervision.md`) already stale from design 0000156 <!-- completed: -->
-- [ ] Run `diff -rq skills/cafleet-design-doc ~/.claude/skills/cafleet-design-doc` and confirm no output <!-- completed: -->
-- [ ] Run `diff -rq skills/cafleet-research ~/.claude/skills/cafleet-research` and confirm no output <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` and confirm clean <!-- completed: -->
+Both checks run against the repository tree; nothing outside it is written (§ *Promotion is out of scope*).
+
+- [x] Run `mise //cafleet:test` and confirm all three invariants pass, including the nonexistent-path one that was red in Step 1 <!-- completed: 2026-08-03T05:40 -->
+- [x] Run `mise //cafleet:lint` and confirm clean <!-- completed: 2026-08-03T05:40 -->
+
+---
+
+## Changelog
+
+| Date | Entry |
+|---|---|
+| 2026-08-03 | Implemented across 7 commits on `feat/0000157-skill-tree-simplification`; opened PR #261. The guard test was authored first and confirmed red on D4's dead `main.py` reference before any fix landed, then green — the nonexistent-path invariant is proven, not merely passing. |
+| 2026-08-03 | Specification amended mid-run: the token-vocabulary invariant now names the seven brace tokens whose home lies outside the overlay mechanism. As originally worded the invariant was red on the unmodified tree, contradicting its own "expected to pass" row. |
+| 2026-08-03 | Scope reduced mid-run at the user's instruction: promotion to `~/.claude/skills/` was withdrawn, cutting the task count 34 → 30. Success Criterion 7 was rewritten, since the three `diff -rq` checks it demanded became unsatisfiable. No copy ran and no file outside the repository was written. |
+| 2026-08-03 | `Status: Complete`. Reviewer approved twice — once on the implementation, once on the post-approval `expect()` fix. |

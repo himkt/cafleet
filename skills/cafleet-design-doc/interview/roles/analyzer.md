@@ -14,8 +14,6 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the missing-`BASE` anchorless-status convention and the no-bypass write protocol — you mishandle a `BASE`-less spawn |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the anchorless-status and message-exemption rules — your one-time question-list payload and any status hop get mis-formatted |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## Your Accountability
 
 - Load the listed skills at startup. Skill loading: {skill_loader}.

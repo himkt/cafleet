@@ -14,8 +14,6 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root the spawn-prompt audit files or fall back to `/tmp` |
 | 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised team |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
 | **Director** | Main agent | Bootstrap CAFleet fleet, spawn members, review all deliverables, demand revisions, run Slidev server lifecycle and `agent-browser close --all` safety net | Create slides/transcript, conduct research, modify report, run agent-browser browser-operation commands (except close --all) | [roles/director.md](roles/director.md) |
@@ -43,7 +41,7 @@ User
 
 Members cannot talk to the user directly — the Director always relays.
 
-> **Literal-integer-id flag rule** — every `cafleet ...` invocation carries the literal `fleet_id` / `member_id` integer ids as flags (per-subcommand, after the subcommand name), never shell variables; substitute the integer ids printed by `cafleet fleet create` / `cafleet member create` directly. See the `cafleet` skill for the full convention.
+> **Literal-integer-id flag rule** — every `cafleet ...` call carries the literal integer ids as per-subcommand flags; the convention is canonical in the `cafleet` skill § *Required Flags*.
 
 ## Director Process
 
@@ -72,11 +70,11 @@ Step 5 (cleanup) is autonomous — no user prompt.
 2. Apply the no-bypass write protocol and `<unset>` sentinel contract from the `cafleet` skill's `reference/base-dir.md` (§ Required reading above).
 3. Resolve the task-scoped BASE by calling the resolver positionally with the topic relpath:
 
-   - If `$ARGUMENTS` is a relative folder name (e.g. `my-topic`), **canonicalize first** to the bare topic slug `$CANONICAL_SLUG`: strip a trailing `/report.md` if present, then strip a leading `researches/` prefix if present — so `$CANONICAL_SLUG` carries no `researches/`. Then run the skill's **Step 0 (task-scope resolution)** with the relpath `researches/$CANONICAL_SLUG`; the single `researches/` prepend happens only here, at the call site. Stripping the leading `researches/` during canonicalization is what prevents a doubled `researches/researches/my-topic` when `$ARGUMENTS` already begins with `researches/`.
+   - If `$ARGUMENTS` is a relative folder name (e.g. `my-topic`), **canonicalize first** to `researches/<topic-slug>` per the `cafleet` skill's `reference/base-dir.md` § *Consumer contract*, then run the skill's **Step 0 (task-scope resolution)** with that relpath. Store the bare slug in `$CANONICAL_SLUG`.
 
-   - If `$ARGUMENTS` is an absolute path (e.g. `/abs/path/to/researches/my-topic`), **canonicalize first**: strip a trailing `/report.md` if present. Store the canonicalized absolute folder path in `$CANONICAL_ABS` and run Step 0 with that absolute path.
+   - If `$ARGUMENTS` is an absolute path (e.g. `/abs/path/to/researches/my-topic`), canonicalize per the same § *Consumer contract* row, which leaves the absolute folder path verbatim. Store it in `$CANONICAL_ABS` and run Step 0 with that absolute path.
 
-     Step 0 treats the canonicalized absolute path as the task folder verbatim if it is strictly under the inferred repo root; otherwise it yields the `<unset>` sentinel. Step 0 does no filename folding, so a raw child path like `/abs/path/to/researches/my-topic/report.md` is taken verbatim as the task folder — a `report.md`-named folder rather than the topic folder, with directory creation deferred to the first consumer write.
+     Step 0 treats the canonicalized absolute path as the task folder verbatim if it is strictly under the inferred repo root; otherwise it yields the `<unset>` sentinel.
 
    Branch on Step 0's outcome: when it **resolves**, set both `${FOLDER}` and `${BASE}` to the resolved task folder (the task folder IS the report folder; no further `${BASE}/researches/...` concatenation). When it yields **`<unset>`** (absolute `$ARGUMENTS` outside the repo root), set `${FOLDER}` to the **canonicalized** absolute path (the same trailing-`/report.md`-stripped path you passed to Step 0) so the report-folder check in step 4 still runs against a folder rather than a file, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet` skill's `reference/base-dir.md` § *The `<unset>` sentinel*.
 4. Check that `${FOLDER}/report.md` exists. If not, error: "No report.md found in `${FOLDER}`. Run the report workflow (`../report/report.md`) first to generate a report."
@@ -95,9 +93,9 @@ cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --js
 
 `--coding-agent <backend>` — substitute the coding agent you are actually running on: your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity (e.g. Claude Code → `claude`).
 
-`cafleet doctor` confirms the Director is inside a tmux or herdr session (a hard requirement of `cafleet member create`). On non-zero exit, abort and surface the error to the user — do NOT attempt raw `tmux` probes as a workaround.
+This is the gating env-check per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*.
 
-`cafleet fleet create` atomically creates the fleet and registers a root Director bound to the current tmux pane. Capture `fleet_id` and `director.member_id` from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
+Capture `fleet_id` and `director.member_id` from the JSON response and substitute them into every subsequent `cafleet ...` call, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
 
 #### 1b. Spawn the monitoring member (first-in)
 
@@ -113,7 +111,7 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 - `roles/transcript.md`
 - `roles/visual-reviewer.md`
 
-> **Spawn mechanics**: path-by-reference is required because `cafleet member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The CLI runs `str.format` over the prompt, rendering the four `{fleet_id}` / `{director_member_id}` / `{member_id}` / `{coding_agent}` identity placeholders to literals at spawn — double any literal brace as `{{` / `}}` and leave no other stray single braces. **Two-step audit file**: write the rendered prompt to `${BASE}/.prompts/<role>-<UTC-compact>.md` before `cafleet member create --text-file <abs path>` — the pre-spawn file is both the CLI input and the permanent audit artifact. The placeholders-pre-substitution note and the `${BASE} == <unset>` guarded-skip + inline fallback are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files*.
+> **Spawn mechanics**: render each spawn prompt to `${BASE}/.prompts/<role>-<UTC-compact>.md` and spawn from that file by path — the two-step, the path-by-reference requirement, and the brace-doubling rule are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol*.
 
 #### 1d. Spawn Presentation + Transcript in parallel
 

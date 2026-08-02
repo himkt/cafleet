@@ -21,8 +21,6 @@ At startup — before you process your first task (the `ready` handshake in the 
 |------|------------------|------------------------------|
 | [`reference/prompt-routing.md`](../reference/prompt-routing.md) | route a Bash-denied command to the Director | the reconsider-then-route protocol and the dispatch shape — you stall, fabricate output, or prompt the operator needlessly |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## On spawn — send the ready signal (FIRST ACTION)
 
 Your very first Bash call sends a `ready` message to the Director (it matches the literal `ready` prefix to detect you are alive and dispatches your first task on that tick). Substitute the literal integers from your spawn prompt's `FLEET ID:` / `YOUR MEMBER ID:` / `DIRECTOR MEMBER ID:` lines:
@@ -62,8 +60,11 @@ Identity reaches you as literal labeled lines in your spawn prompt — `FLEET ID
 An **ordinary** member must not invoke `cafleet member ping` or `cafleet member prompt`;
 those remain Director-only. The sole exception belongs to the
 dedicated monitoring member under its separate role contract: it may use the
-fixed, bodyless `member ping` only after the durable stall state machine returns
-`action = ping`. That exception does not grant ordinary members any additional
+fixed, bodyless `member ping` only once its own conversation notes confirm you
+quiet — a capture byte-identical to the one it recorded for you on the previous
+stall-check wake. Those quiet baselines live in its notes, not the broker; what
+the broker keeps is `last_stall_check_at`, which preserves dispatch cadence
+across loop restart. That exception does not grant ordinary members any additional
 authority. You poll your own inbox via `cafleet message poll`; if you missed an
 inline preview, the Director or that narrowly authorized monitoring routine
 re-pokes you via `cafleet member ping`.

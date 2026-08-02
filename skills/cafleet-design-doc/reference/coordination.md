@@ -32,7 +32,7 @@ Exactly 3 canonical forms. Use the tightest one that locates the target.
 | Form | Example | When to use |
 |:--|:--|:--|
 | `paragraph-<HeadingPath>` | `paragraph-Implementation > Step 2` | The target is a heading (or sub-heading) inside the design document. Use the literal heading text. Nest with the three-character separator ` > ` (space, greater-than, space). Heading text is preserved verbatim — slashes, colons, hyphens, and other punctuation inside a heading remain literal. |
-| `<file>:<line>` or `<file>:<line-start>-<line-end>` | `cafleet/src/cafleet/cli/main.py:142` | The target is a specific line (or range) in a source file, test file, or the design doc itself. Used for source-anchored review findings and for source-file `COMMENT` markers added during code review. |
+| `<file>:<line>` or `<file>:<line-start>-<line-end>` | `cafleet/src/cli/member.rs:142` | The target is a specific line (or range) in a source file, test file, or the design doc itself. Used for source-anchored review findings and for source-file `COMMENT` markers added during code review. |
 | `doc` | `doc` | The target is the design document as a whole (e.g., Reviewer signalling overall approval, Drafter signalling the full draft is ready). |
 
 **Pointer-marker pairing rule.** When a verb's spec requires a paired `COMMENT(role)` marker (`blocked` / `escalating`, also Director arbitration replies and source-anchored `COMMENT(reviewer)` placements), the marker MUST live at the SAME pointer as the cafleet body:
@@ -70,7 +70,7 @@ Examples:
 
 - `ready (paragraph-Implementation > Step 1)`
 - `complete (paragraph-Implementation > Step 1) — 12 tests pass`
-- `addressed (cafleet/src/cafleet/cli/main.py:142)`
+- `addressed (cafleet/src/cli/member.rs:142)`
 - `blocked (paragraph-Specification > Retry Strategy)`
 - `escalating (paragraph-Implementation > Step 3)`
 - `approved (doc)`

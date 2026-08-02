@@ -14,8 +14,6 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root scratch / audit writes or fall back to `/tmp` |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema — you can't read the `COMMENT(director)` markers you're routed or place `COMMENT(programmer)` escalation markers, and your `complete` / `escalating` signals get mis-routed |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## Your Accountability
 
 - Load the listed skills at startup. Skill loading: {skill_loader}.
@@ -84,9 +82,9 @@ For each step assigned by the Director (you receive `ready (paragraph-Implementa
 1. **Read the step spec**: Read the step description and checkbox items in the design document at the pointer.
 2. **Locate the tests**: The Tester has already written and committed unit tests for this step. The Tester's `complete (...) — N tests` summary went Tester → Director, NOT Tester → Programmer, so the test file paths are NOT in any cafleet body you received. Locate them yourself via git, e.g.:
    ```bash
-   git log <base>..HEAD --name-only -- '**/test_*' '**/tests/**'
+   git log <base>..HEAD --name-only
    ```
-   Read the test files to understand the expected behavior and interfaces.
+   Read the whole commit range rather than filtering by a test pathspec: Rust unit tests live in `#[cfg(test)]` modules inside the source files they cover, so a pathspec would hide them. Read the test content to understand the expected behavior and interfaces.
 3. **Implement code**: Write implementation code to make ALL tests for the step pass.
 4. **Run tests**: Execute the tests yourself to verify they pass before reporting.
 5. **Handle test results**:

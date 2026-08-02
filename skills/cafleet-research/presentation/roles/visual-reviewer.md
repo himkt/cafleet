@@ -15,8 +15,6 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 | 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root your screenshots / review-log writes or fall back to `/tmp` |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## Your Accountability
 
 - **Detect visual issues including aesthetic quality.** Check for text overflow, broken layouts, missing content, overlapping elements, empty slides, render errors, and aesthetic quality problems such as awkward text wrapping. Aim for visually beautiful slides, not just functionally correct ones.
