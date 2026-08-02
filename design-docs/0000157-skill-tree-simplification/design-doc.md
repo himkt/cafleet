@@ -1,7 +1,7 @@
 # Skill Tree Simplification
 
 **Status**: Approved
-**Progress**: 17/34 tasks complete
+**Progress**: 24/34 tasks complete
 **Last Updated**: 2026-08-03
 
 ## Overview
@@ -190,13 +190,13 @@ The nonexistent-path invariant is written **before** the content fixes so its re
 
 ### Step 4: Fold invariant Director sections into `supervision.md` (B)
 
-- [ ] Merge LLM Intent Judgment, Abort Detection's shared shape, and User delegation into `supervision.md` § *User Delegation Protocol* as one coherent section, not three appended ones <!-- completed: -->
-- [ ] Merge the invariant remainder of Progress Monitoring into § *Stall Response* <!-- completed: -->
-- [ ] Merge the canonical teardown sentence into § *Cleanup Protocol* <!-- completed: -->
-- [ ] Merge Routing member bash requests (present in `create` and `execute` only) into § *Team-facilitation instructions*, generalizing the member-role list and preserving the pointer to `reference/prompt-routing.md` <!-- completed: -->
-- [ ] Reduce Placeholder convention to its role-token list plus the existing `cafleet/SKILL.md` pointer — in `create/roles/director.md` and `execute/roles/director.md` only; the report and presentation director files carry no such section <!-- completed: -->
-- [ ] Reduce all four workflow director files to their genuine deltas, verifying each retains its workflow-specific wake sources, feedback targets, extra teardown steps, and milestone table <!-- completed: -->
-- [ ] Confirm no Required-reading row was added or removed anywhere in this step <!-- completed: -->
+- [x] Merge LLM Intent Judgment, Abort Detection's shared shape, and User delegation into `supervision.md` § *User Delegation Protocol* as one coherent section, not three appended ones <!-- completed: 2026-08-03T05:23 -->
+- [x] Merge the invariant remainder of Progress Monitoring into § *Stall Response* <!-- completed: 2026-08-03T05:23 -->
+- [x] Merge the canonical teardown sentence into § *Cleanup Protocol* <!-- completed: 2026-08-03T05:23 -->
+- [x] Merge Routing member bash requests (present in `create` and `execute` only) into § *Team-facilitation instructions*, generalizing the member-role list and preserving the pointer to `reference/prompt-routing.md` <!-- completed: 2026-08-03T05:23 -->
+- [x] Reduce Placeholder convention to its role-token list plus the existing `cafleet/SKILL.md` pointer — in `create/roles/director.md` and `execute/roles/director.md` only; the report and presentation director files carry no such section <!-- completed: 2026-08-03T05:23 -->
+- [x] Reduce all four workflow director files to their genuine deltas, verifying each retains its workflow-specific wake sources, feedback targets, extra teardown steps, and milestone table <!-- completed: 2026-08-03T05:23 -->
+- [x] Confirm no Required-reading row was added or removed anywhere in this step <!-- completed: 2026-08-03T05:23 -->
 
 ### Step 5: Shared team-bootstrap preamble (A)
 

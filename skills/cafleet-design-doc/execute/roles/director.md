@@ -18,7 +18,7 @@ Before acting, resolve every `{token}` you will use to its overlay value (or the
 
 ## Placeholder convention
 
-Angle-bracket tokens (`<fleet-id>`, `<director-member-id>`, `<programmer-member-id>`, `<tester-member-id>`, `<verifier-member-id>`, `<reviewer-member-id>`, `<member-id>`) are placeholders, **not** shell variables — substitute the literal integer ids from `cafleet fleet create` (which returns the fleet id AND the root Director's `member_id`) and `cafleet member create`. The rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
+Your tokens: `<fleet-id>`, `<director-member-id>`, `<programmer-member-id>`, `<tester-member-id>`, `<verifier-member-id>`, `<reviewer-member-id>`, `<member-id>` — substitute the literal integer ids from `cafleet fleet create` (which returns the fleet id AND the root Director's `member_id`) and `cafleet member create`. The rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
 
 ## Your Accountability
 
@@ -97,29 +97,13 @@ See [../../reference/coordination.md](../../reference/coordination.md) § *COMME
 
 See [../../reference/coordination.md](../../reference/coordination.md) § *Director Per-File Detail Recovery* for the git plumbing (`git status` / `git diff --stat` / `git log --name-only` / `git diff -- <pattern>`). This applies in Phase A (test commits), Phase B/C (impl commits), Step 5 (Reviewer fix commits), and Step 8 (finalize commit).
 
-### LLM Intent Judgment
+### Free-form user replies
 
-When the user provides free-form text instead of a listed option, use LLM reasoning to determine intent — not keyword matching. Interpret the user's text to distinguish between:
-
-- **Abort intent** (user wants to stop or cancel the process)
-- **Non-abort intent** (user is providing verbal feedback or asking a question)
-
-### Abort Detection
-
-- If abort intent is detected, trigger the Abort Flow — delete all members (monitoring member first; the pane kill terminates its `monitor start` loop), and run `cafleet fleet delete --fleet-id <fleet-id>` to soft-delete the fleet and sweep the root Director in one transaction.
-- If non-abort intent is detected (e.g., verbal feedback), explain that feedback should be provided via COMMENT markers in the changed source files, then re-prompt with the same three-option pattern.
+Intent judgment and the Abort Flow follow the `cafleet` skill's `reference/supervision.md` § *User Delegation Protocol* → *Free-form replies — judging intent*. This workflow's feedback target: non-abort feedback goes into `COMMENT(` markers **in the changed source files**, after which you re-prompt with the same three-option pattern.
 
 ## Progress Monitoring
 
-Track team progress on each turn an inbound member reply or a monitoring-member escalation message grants you, using the 2-stage health check (poll → monitor capture). A member is stalled if they went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge stalled members with a specific `cafleet message send` about what you expect next. Supervision obligations (Authorization-Scope Guard, idle semantics) come from the `cafleet` skill's `reference/supervision.md`.
-
-### User delegation for a member's relayed question
-
-When a member pauses on a decision-prompt pane frame awaiting a user reaction, the Director MUST delegate the decision to the user via {decision_surface} and then forward the answer using the decision-relay primitive its overlay describes — invoked via the Director's own Bash tool, whose per-call permission prompt is the user-consent surface. Never print a fenced `bash` block containing the resolved command for the user to copy-paste; the concrete decision surface, the three-beat workflow, and the pane-shapes table are backend deltas (see your overlay; the neutral pointer is the cafleet skill's `reference/director.md` § *Answering a member's relayed question*).
-
-### Routing member bash requests
-
-Programmer / Tester / Verifier / Reviewer members are spawned in workspace-scoped auto-approval mode ({permission_flags}; Bash tool enabled, permission prompts auto-resolve), so they run shell commands directly by default. The bash-via-Director protocol is the fallback when a member's Bash invocation is denied by its coding-agent harness (destructive operations such as `git push` on claude/codex; any command outside the preset's deny-by-default allowlist on opencode). In that case the member auto-routes by sending a plain shell-command request via `cafleet message send`, and the Director responds by sending `! <command>` keystrokes through `cafleet member prompt --shell`. Process such requests one at a time in poll order. Full invocation + flag layout in the `cafleet` skill § Routing Bash via the Director.
+Your turns are granted by an inbound member reply or a monitoring-member escalation message; run the 2-stage health check (poll → monitor capture) on each. What counts as stalled, the nudge shape, and the supervision obligations (Authorization-Scope Guard, idle semantics) are canonical in the `cafleet` skill's `reference/supervision.md` § *Stall Response* and § *Idle Semantics*.
 
 ### Skill-specific milestones
 
@@ -135,4 +119,4 @@ Programmer / Tester / Verifier / Reviewer members are spawned in workspace-scope
 
 Shutdown runs as Step 8's tail — only AFTER Step 8's doc-complete commit (and the conditional `git push` when the branch is tracked on origin) has landed.
 
-Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (`cafleet member delete` the monitoring member first, then each ordinary member → `cafleet member list` verification → `cafleet fleet delete --fleet-id <fleet-id>` → `cafleet fleet list` sanity check). Deleting the monitoring member first (first-out) terminates the heartbeat (the single Step 3b `monitor start`, run unchanged through Steps 3–8) with its pane.
+Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol* (first-out). Deleting the monitoring member first terminates the heartbeat (the single Step 3b `monitor start`, run unchanged through Steps 3–8) with its pane.

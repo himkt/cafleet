@@ -119,4 +119,6 @@ Follow the `cafleet` skill's `reference/supervision.md` for the health-check seq
 
 ## Shutdown Protocol
 
-Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): `cafleet member delete` the monitoring member first (the pane kill terminates its `monitor start` loop), then Presentation, Transcript, and any active VR batch — **for an active VR batch, run the close handshake first** (send `CLOSE:` via `cafleet message send`, wait for the VR's `closed` reply, THEN delete it). Verify the roster is empty with `cafleet member list`. Then the presentation-specific teardown: `pnpm exec agent-browser close --all` (orphan-session safety net); stop the Slidev dev server via {bg_stop} (using the recorded handle) — never the broad `pkill -f slidev`; `cafleet fleet delete --fleet-id [fleet-id]`; `cafleet fleet list` to confirm.
+Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol* (first-out), with this workflow's ordinary-member order after the monitoring member: Presentation, Transcript, and any active VR batch — **for an active VR batch, run the close handshake first** (send `CLOSE:` via `cafleet message send`, wait for the VR's `closed` reply, THEN delete it).
+
+Between the `cafleet member list` verification and `cafleet fleet delete`, release this workflow's non-CAFleet resources: `pnpm exec agent-browser close --all` (orphan-session safety net), then stop the Slidev dev server via {bg_stop} using the recorded handle — never the broad `pkill -f slidev`.

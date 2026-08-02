@@ -198,6 +198,10 @@ On every supervision tick — whether fired by a monitoring-member escalation me
 4. **Run the health-check sequence** for any member that has not reported recent progress — cheapest, least-intrusive check first: (a) `cafleet member list` (enumerate members + pane status); (b) `cafleet message poll` (progress reports / help requests); (c) for a member silent since the last check, a fresh `cafleet monitor capture --lines 120` classified per § Idle Semantics → *The pre-ping capture gate* (a decision-prompt frame → see Stall Response for the decision-relay escape hatch); (d) `cafleet message send` a specific instruction — (c) is the gating precondition: (d) fires only for a member whose (c) capture classified `finished` or `stalled`; on `awaiting_user` or `working`, skip the round and defer the send; (e) once all members report completion, tell the user "All deliverables are ready for review."
 5. **Escalate** to the user via {decision_surface} whenever a queued action requires a *new* user decision (option choice, risky/remote-visible operation, ambiguous teammate question); for the stall path (two fired sends with no progress) see § Stall Response → Escalation. Do **not** emit passive-hold messages like `Skipping. Holding for go.` — the tick is a health check, not a permission renewal.
 
+### Routing member bash requests
+
+The workflow's spawned members run in workspace-scoped auto-approval mode ({permission_flags}; Bash tool enabled, permission prompts auto-resolve), so they run shell commands directly by default. The bash-via-Director protocol is the fallback when a member's Bash invocation is denied by its coding-agent harness (destructive operations such as `git push` on claude/codex; any command outside the preset's deny-by-default allowlist on opencode). The member auto-routes by sending a plain shell-command request via `cafleet message send`, and you respond by sending `! <command>` keystrokes through `cafleet member prompt --shell`. Process such requests one at a time in poll order. Full invocation + flag layout in [`reference/prompt-routing.md`](prompt-routing.md).
+
 ## Monitor Lifecycle
 
 | Phase | Action |
@@ -206,7 +210,7 @@ On every supervision tick — whether fired by a monitoring-member escalation me
 | Gate ordinary members | Wait for the monitoring member's `ready: monitor live` message before the first ordinary `cafleet member create` (consistent with the async wait rule); the admin WebUI keeps the liveness view. |
 | Run work | The monitor wakes the monitoring member whenever a watched ordinary member is due on its own interval (default 720 s); do not intervene unless an escalation arrives. Each monitoring-member escalation message (or inbound work via inline preview) is the Director's cue to run the 5-step facilitation loop above. |
 | User review | Keep the monitoring member and its `monitor start` task running during the review cycle — revisions and re-reviews still count as in-progress work. |
-| Teardown (first-out) | Delete the monitoring member FIRST via `cafleet member delete` — the pane kill terminates the `monitor start` loop with it — then delete the ordinary members. The authoritative full ordering is [`reference/recovery.md`](recovery.md) § *Shutdown Protocol*. |
+| Teardown (first-out) | Delete the monitoring member FIRST via `cafleet member delete` — the pane kill terminates the `monitor start` loop with it. The full ordering is § *Cleanup Protocol*. |
 
 **Lifecycle rule (non-negotiable):** The monitoring member MUST stay running (with its `monitor start` task live) from the first `member create` through every phase, until the first-out teardown above deletes it.
 
@@ -219,7 +223,9 @@ permission to bypass the fresh-capture gate: the monitoring member's own fixed
 ping already happened inside its routine, and every later Director
 re-engagement remains gate-preconditioned.
 
-> **Bash request blocking case**: When `cafleet message poll` returns a member message asking for a shell command, dispatch via `cafleet member prompt --shell "<cmd>"` per [`reference/prompt-routing.md`](prompt-routing.md). Member blocks until the keystroke lands; process requests one at a time, don't skip ahead to other inbox items.
+**What counts as stalled.** A member is stalled if it went idle without delivering expected output, without a meaningful progress update, or when a downstream task should have started but hasn't. Nudge a stalled member with a specific `cafleet message send` about what you expect next. Each workflow states its own wake sources — the turns on which you run this check — in its Director role file.
+
+> **Bash request blocking case**: A member message asking for a shell command is dispatched per § *Team-facilitation instructions* → *Routing member bash requests*. The member blocks until the keystroke lands, so don't skip ahead to other inbox items while it waits.
 
 ### Stage 1 — Message-based check (`cafleet message poll`)
 
@@ -260,6 +266,19 @@ CAFleet members never talk to the user directly — the Director relays. This is
 2. **Ask the user.** No preamble sentence above the question — the conversation context plus the question text carry it.
 3. **Relay the answer back** via `cafleet message send` to the originating member. Pass through the user's selection verbatim; do not substitute your own judgment. If the user provided free-form text instead of a listed option, send that text.
 
+A member that pauses on a decision-prompt pane frame awaiting a user reaction is the same delegation: put the decision to the user via {decision_surface}, then forward the answer with the decision-relay primitive your overlay describes, invoked through your own Bash tool. The concrete surface, the three-beat workflow, and the pane-shapes table are backend deltas — see your overlay; the neutral pointer is [`reference/director.md`](director.md) § *Answering a member's relayed question*.
+
+### Free-form replies — judging intent
+
+When the user supplies free-form text instead of a listed option, use LLM reasoning to determine intent — not keyword matching. Interpret the user's text to distinguish between:
+
+- **Abort intent** (the user wants to stop or cancel the process)
+- **Non-abort intent** (the user is providing verbal feedback or asking a question)
+
+On **abort intent**, run the Abort Flow: tear down the team per § *Cleanup Protocol*, ending in `cafleet fleet delete --fleet-id <fleet-id>`, which soft-deletes the fleet and sweeps the root Director in one transaction.
+
+On **non-abort intent**, explain that feedback belongs in `COMMENT(` markers at the workflow's own feedback target, then re-prompt with the same option pattern. Each workflow names that target in its Director role file.
+
 **What you MUST NOT do:**
 
 - Decide on the user's behalf, even when the answer looks obvious.
@@ -269,7 +288,9 @@ CAFleet members never talk to the user directly — the Director relays. This is
 
 ## Cleanup Protocol
 
-Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol (first-out).
+Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol (first-out): `cafleet member delete` the monitoring member first — the pane kill terminates its `monitor start` loop — then each ordinary member → `cafleet member list` verification → `cafleet fleet delete --fleet-id <fleet-id>` → `cafleet fleet list` sanity check.
+
+A workflow that carries extra teardown — a precondition on when shutdown may begin, a roster-specific delete order, or non-CAFleet resources to release — runs those steps around this sequence and names them in its own Director role file.
 
 ## Quick Reference
 
