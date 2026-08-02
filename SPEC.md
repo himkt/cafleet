@@ -314,7 +314,7 @@ The unified shapes:
 | Field | Type | Notes |
 |---|---|---|
 | `member_id` | integer | FK→members, ON DELETE CASCADE |
-| `interval_seconds` | integer | DDL default 60; enrollment writes 180 (Director) / 720 (member) |
+| `interval_seconds` | integer | DDL default 60; enrollment writes 720 |
 | `last_ping_at` | optional string | |
 | `enabled` | boolean | stored INTEGER 0/1; exposed as boolean at the broker boundary |
 | `last_stall_check_at` | optional string | last successfully dispatched stall-check wake |
@@ -513,11 +513,9 @@ non-object `cafleet` card value collapses to the ordinary kind — a deliberate,
 documented non-match, not an error mask.
 
 - `MONITORING_MEMBER_KIND = "monitoring-member"`.
-- Enrollment intervals: the root Director is enrolled at **180 seconds**
-  (`DIRECTOR_PING_INTERVAL_SECONDS`) by `create_fleet`; ordinary pane-bound
-  members at **720 seconds** (`MEMBER_PING_INTERVAL_SECONDS`) by
-  `register_member`. The monitoring member is **never**
-  enrolled.
+- Enrollment interval: ordinary pane-bound members are enrolled at **720
+  seconds** (`MEMBER_PING_INTERVAL_SECONDS`) by `register_member`. The root
+  Director and the monitoring member are **never** enrolled.
 - Liveness staleness: `MONITOR_STALE_FACTOR = 3`,
   `MONITOR_STALE_FLOOR_SECONDS = 15` → `stale_after = max(3·tick_seconds, 15)`.
 - Root Director identity strings written by `create_fleet`: name `Director`,
@@ -534,9 +532,8 @@ documented non-match, not an error mask.
   Director's placement (the root Director is pane-bound and keeps its own
   placement row) carrying the multiplexer identity (`mux_session`
   / `mux_window_id` / `mux_pane_id`), the `backend` (the resolved `mux.name`),
-  and `coding_agent`;
-  enroll the Director at 180s; back-fill the fleet's `director_member_id`.
-  Returns `{fleet_id, name, created_at, director:{…}}`.
+  and `coding_agent`; back-fill the fleet's `director_member_id`. Returns
+  `{fleet_id, name, created_at, director:{…}}`.
 - **`list_fleets()`** — one record `{fleet_id, director_member_id, name,
   created_at, member_count}` per non-soft-deleted fleet (`deleted_at IS NULL`);
   `member_count` counts only **active** members (0 for empty fleets). Ordering:
@@ -721,14 +718,13 @@ documented non-match, not an error mask.
   else set `last_ping_at = when` for all listed configs.
 - **`list_monitor_targets(fleet_id)`** — one row per **active, enrolled** member
   (the watched set; the monitoring member is excluded by the monitor_config
-  join). Each row: `{member_id, name, is_director, pane_id, coding_agent,
-  interval_seconds, last_ping_at, enabled, last_stall_check_at, pending_count,
-  oldest_pending_ts}`, where
-  `pending_count` counts messages with `owner_member_id = member_id`,
-  `status_state = "input_required"`, `type != "broadcast_summary"`, and
-  `oldest_pending_ts` is `MIN(status_timestamp)` over the same predicate set
-  (a second correlated scalar subquery; `None` when the member has no pending
-  delivery).
+  join). Each row: `{member_id, name, pane_id, coding_agent, interval_seconds,
+  last_ping_at, enabled, last_stall_check_at, pending_count,
+  oldest_pending_ts}`, where `pending_count` counts messages with
+  `owner_member_id = member_id`, `status_state = "input_required"`,
+  `type != "broadcast_summary"`, and `oldest_pending_ts` is
+  `MIN(status_timestamp)` over the same predicate set (a second correlated
+  scalar subquery; `None` when the member has no pending delivery).
 
 #### Monitor — no broker stall state
 
@@ -776,14 +772,12 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
   process fields null when the monitor is not live (no row, or a stale/cleared
   heartbeat).
 - **`monitor_members_payload(fleet_id, now)`** — the per-member rows consumed
-  by the WebUI `GET /api/monitor`: one dict per
-  `list_monitor_targets` row — `{member_id, name, role, interval_seconds,
-  last_ping_at, last_ping_age_seconds, enabled, pending_count,
-  oldest_pending_ts, oldest_pending_age_seconds}` — with `role` =
-  `"director"`/`"member"` from `is_director`, and `last_ping_age_seconds` /
-  `oldest_pending_age_seconds` computed against the single supplied `now`
-  (whole seconds, integer-truncated; `None` when the source timestamp is
-  `None`).
+  by the WebUI `GET /api/monitor`: one dict per `list_monitor_targets` row —
+  `{member_id, name, interval_seconds, last_ping_at, last_ping_age_seconds,
+  enabled, pending_count, oldest_pending_ts, oldest_pending_age_seconds}` —
+  with `last_ping_age_seconds` / `oldest_pending_age_seconds` computed against
+  the single supplied `now` (whole seconds, integer-truncated; `None` when the
+  source timestamp is `None`).
 - **`delete_fleet_monitor_rows(session, fleet_id)`** /
   **`delete_member_monitor_row(session, member_id)`** (in caller's transaction) —
   in-transaction cascade deletes: the fleet variant deletes the fleet's
@@ -1720,11 +1714,10 @@ Director's `MultiplexerContext` and passes it directly.
   **Esc-first=YES**, any error → `false`. Used only by `member ping`.
 - **`send_wake_trigger(*, target_pane_id, due_members, director) -> bool`** —
   best-effort; the **sole** keystroke the monitor loop fires. Each due entry has
-  `member_id`, `name`, `is_director`, validated `coding_agent`, and ordered
-  deduped `wake_reasons`; the Director descriptor has `member_id` and
-  `coding_agent`. Names and agent values pass the single-line sanitizer.
-  Render each entry as `<role> <id> (<name>; coding_agent=<agent>)
-  [<reasons>]`.
+  `member_id`, `name`, validated `coding_agent`, and ordered deduped
+  `wake_reasons`; the Director descriptor has `member_id` and `coding_agent`.
+  Names and agent values pass the single-line sanitizer. Render each entry as
+  `member <id> (<name>; coding_agent=<agent>) [<reasons>]`.
 
   The tmux/herdr payload is byte-identical and is a **pure trigger** — the due
   list, the Director descriptor, and one pointer sentence naming the
@@ -2009,22 +2002,20 @@ internals; it orchestrates calls into both. It resolves its backend via
 - **`CONTINUE` / `STOP`** — tick-result markers distinguishing "keep looping"
   from "self-terminate".
 - **`DEFAULT_TICK_SECONDS = 5`** — default scan cadence (seconds).
-- Re-exports `DIRECTOR_PING_INTERVAL_SECONDS` (180),
-  `MEMBER_PING_INTERVAL_SECONDS` (720), `MONITOR_STALE_FACTOR` (3),
+- Re-exports `MEMBER_PING_INTERVAL_SECONDS` (720), `MONITOR_STALE_FACTOR` (3),
   `MONITOR_STALE_FLOOR_SECONDS` (15) — policy tunables whose single home is the
   broker, re-exported so the loop imports policy from one place.
 
 The stop flag, the sleep helper, the signal handler, and the marker type are
-implementation-private; only the three functions, the markers, and the five
+implementation-private; only the three functions, the markers, and the four
 constants are public.
 
 #### `should_ping(target, now)`
 
-Pure function of one watched-member scan row (`member_id`, `name`, `is_director`,
-`pane_id` optional, `interval_seconds`, `last_ping_at` optional ISO string,
-`enabled`, `pending_count`, `oldest_pending_ts` optional ISO string,
-`pane_alive`) and a tz-aware UTC `now`. Branch
-conditions, in short-circuit order:
+Pure function of one watched-member scan row (`member_id`, `name`, `pane_id`
+optional, `interval_seconds`, `last_ping_at` optional ISO string, `enabled`,
+`pending_count`, `oldest_pending_ts` optional ISO string, `pane_alive`) and a
+tz-aware UTC `now`. Branch conditions, in short-circuit order:
 
 1. `enabled` false → false.
 2. `pane_id` absent **or** `pane_alive` false → false (unplaced or dead/missing
@@ -2034,7 +2025,6 @@ conditions, in short-circuit order:
 4. Otherwise → true. A never-pinged (`last_ping_at` absent) live, enabled member
    is **immediately due** — the elapsed check is skipped entirely.
 
-`is_director` is **not** consulted (retained only for status labeling);
 `pending_count` and `oldest_pending_ts` are **not** consulted (due-ness is
 interval-driven). The monitoring member never appears as a `target` — it is
 the unenrolled watcher.
@@ -2784,10 +2774,10 @@ numbered files `V<N>__<slug>.sql` appended to the chain; the chain stays
 contiguous from 1 with exactly one baseline.
 
 A fresh DB starts with **no rows in any application table** (only
-`refinery_schema_history` holds its per-migration rows); monitor enrollment is written
-at runtime (the Director at 180s by `create_fleet`, pane-bound members at 720s
-by `register_member`, §6.2), never seeded by the schema. `asset_installs` rows
-are written at install time, not by the schema.
+`refinery_schema_history` holds its per-migration rows); monitor enrollment is
+written at runtime (pane-bound members at 720s by `register_member`, §6.2),
+never seeded by the schema. `asset_installs` rows are written at install time,
+not by the schema.
 
 **`setup` db-migration driver** (the db half of `setup`, §6.3). Procedure: (1)
 validate the URL scheme is `sqlite` (§6.1); (2) extract the DB file path — if
@@ -2965,7 +2955,7 @@ specified in the cited section):
 - **Member kind** unified in §5.4 (three distinct representations, not one enum).
 - **`enabled`** stored INTEGER 0/1, exposed as boolean at the broker boundary
   (§6.1/§6.2/§6.6/§6.8).
-- **Policy tunables** (180/720/3/15) have a single home in the broker module,
+- **Policy tunables** (720/3/15) have a single home in the broker module,
   re-exported by the monitor module.
 - **`settings` singleton** is config-module-owned and reachable from every
   module, not webui-local.

@@ -12,9 +12,8 @@ use crate::time::{format_utc, now_utc, parse_lenient};
 
 pub const MONITORING_MEMBER_KIND: &str = "monitoring-member";
 
-/// The auto-enrollment ping cadences (SPEC §6.2) — the policy tunables'
+/// The auto-enrollment ping cadence (SPEC §6.2) — the policy tunables'
 /// single home, re-exported by the monitor module.
-pub const DIRECTOR_PING_INTERVAL_SECONDS: i64 = 180;
 pub const MEMBER_PING_INTERVAL_SECONDS: i64 = 720;
 
 #[derive(Debug, Clone)]
@@ -84,14 +83,10 @@ pub(crate) fn placement_value(
     })
 }
 
-pub(crate) fn enroll(
-    conn: &Connection,
-    member_id: i64,
-    interval_seconds: i64,
-) -> Result<(), CafleetError> {
+pub(crate) fn enroll(conn: &Connection, member_id: i64) -> Result<(), CafleetError> {
     conn.execute(
         "INSERT INTO monitor_config (member_id, interval_seconds, enabled) VALUES (?1, ?2, 1)",
-        params![member_id, interval_seconds],
+        params![member_id, MEMBER_PING_INTERVAL_SECONDS],
     )
     .map_err(db_err)?;
     Ok(())
@@ -189,7 +184,7 @@ pub fn register_member(
         )
         .map_err(db_err)?;
         if !is_monitor {
-            enroll(&tx, member_id, MEMBER_PING_INTERVAL_SECONDS)?;
+            enroll(&tx, member_id)?;
         }
     }
     tx.commit().map_err(db_err)?;

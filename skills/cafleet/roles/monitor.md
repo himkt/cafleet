@@ -51,7 +51,7 @@ During a synchronized wake, never call `message broadcast` or `member prompt`, n
 ## On each wake
 
 A wake is one synchronized `[monitor] wake: …` trigger. It names each due
-target as `<role> <id> (<sanitized-name>; coding_agent=<backend>) [<reasons>]`
+target as `member <id> (<sanitized-name>; coding_agent=<backend>) [<reasons>]`
 and includes the standing Director descriptor — the recipient of your step-5
 messages. Reasons are `interval`, `status:done`, `stall-check`, and the
 annotation-only `unacked`. `unacked` never creates a due row and never
@@ -62,9 +62,9 @@ as you go; no broker state backs you.
 Follow this order exactly:
 
 1. **Capture every named due ordinary pane.** Select each target's overlay from
-   its rendered `coding_agent=` value, not from your own backend. A due
-   `director` entry is **not captured** — you take no Director-directed pane
-   action; the descriptor only identifies your report recipient. Capture with:
+   its rendered `coding_agent=` value, not from your own backend. The
+   `director` descriptor identifies your report recipient only — you take no
+   Director-directed pane action. Capture with:
 
    ```bash
    cafleet monitor capture --fleet-id <fleet-id> \
@@ -133,11 +133,11 @@ Follow this order exactly:
 ## The wake trigger you consume
 
 The loop's wake trigger is a byte-identical single line on tmux and herdr — a
-pure trigger with no protocol clauses. For example, when the Director (332)
-and member 336 "alice" are due:
+pure trigger with no protocol clauses. For example, when members 336 "alice"
+and 340 "bob" are due:
 
 ```text
-[monitor] wake: 2 members due — director 332 (Director; coding_agent=codex) [interval], member 336 (alice; coding_agent=claude) [interval,stall-check]. Director: 332 (coding_agent=codex). Follow your monitor role protocol.
+[monitor] wake: 2 members due — member 336 (alice; coding_agent=claude) [interval], member 340 (bob; coding_agent=codex) [interval,stall-check]. Director: 332 (coding_agent=codex). Follow your monitor role protocol.
 ```
 
 The count, sanitized names, `coding_agent` descriptors, reasons, and Director

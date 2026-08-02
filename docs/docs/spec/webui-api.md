@@ -70,7 +70,7 @@ Returns the selected fleet's roster via `list_roster(include_message_holders=Tru
       "registered_at": "2026-04-15T09:59:00+00:00",
       "kind": "director",
       "placement": null,
-      "monitor": {"interval_seconds": 180, "last_ping_at": null, "enabled": true}
+      "monitor": null
     },
     {
       "member_id": 3,
@@ -162,7 +162,7 @@ Returns one member's monitoring schedule.
 
 ```json
 {
-  "interval_seconds": 180,
+  "interval_seconds": 720,
   "last_ping_at": null,
   "enabled": true
 }

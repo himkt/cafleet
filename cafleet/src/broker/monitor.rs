@@ -245,7 +245,6 @@ pub fn list_monitor_targets(conn: &Connection, fleet_id: i64) -> Result<Vec<Valu
     let mut stmt = conn
         .prepare(&format!(
             "SELECT m.member_id, \
-                    (m.member_id = (SELECT director_member_id FROM fleets WHERE fleet_id=?1)), \
                     m.name, p.mux_pane_id, p.coding_agent, \
                     c.interval_seconds, c.last_ping_at, c.enabled, c.last_stall_check_at, \
                     {PENDING_COUNT_SUBQUERY}, {OLDEST_PENDING_SUBQUERY} \
@@ -259,16 +258,15 @@ pub fn list_monitor_targets(conn: &Connection, fleet_id: i64) -> Result<Vec<Valu
         .query_map([fleet_id], |row| {
             Ok(json!({
                 "member_id": row.get::<_, i64>(0)?,
-                "is_director": row.get::<_, bool>(1)?,
-                "name": row.get::<_, String>(2)?,
-                "pane_id": row.get::<_, Option<String>>(3)?,
-                "coding_agent": row.get::<_, Option<String>>(4)?,
-                "interval_seconds": row.get::<_, i64>(5)?,
-                "last_ping_at": row.get::<_, Option<String>>(6)?,
-                "enabled": row.get::<_, i64>(7)? != 0,
-                "last_stall_check_at": row.get::<_, Option<String>>(8)?,
-                "pending_count": row.get::<_, i64>(9)?,
-                "oldest_pending_ts": row.get::<_, Option<String>>(10)?,
+                "name": row.get::<_, String>(1)?,
+                "pane_id": row.get::<_, Option<String>>(2)?,
+                "coding_agent": row.get::<_, Option<String>>(3)?,
+                "interval_seconds": row.get::<_, i64>(4)?,
+                "last_ping_at": row.get::<_, Option<String>>(5)?,
+                "enabled": row.get::<_, i64>(6)? != 0,
+                "last_stall_check_at": row.get::<_, Option<String>>(7)?,
+                "pending_count": row.get::<_, i64>(8)?,
+                "oldest_pending_ts": row.get::<_, Option<String>>(9)?,
             }))
         })
         .map_err(db_err)?
@@ -439,7 +437,6 @@ pub fn monitor_members_payload(
     let mut stmt = conn
         .prepare(&format!(
             "SELECT m.member_id, m.name, \
-                    (m.member_id = (SELECT director_member_id FROM fleets WHERE fleet_id=?1)), \
                     c.interval_seconds, c.enabled, c.last_ping_at, \
                     {PENDING_COUNT_SUBQUERY}, {OLDEST_PENDING_SUBQUERY} \
              FROM monitor_config c JOIN members m ON m.member_id=c.member_id \
@@ -452,12 +449,11 @@ pub fn monitor_members_payload(
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, bool>(2)?,
+                row.get::<_, i64>(2)?,
                 row.get::<_, i64>(3)?,
-                row.get::<_, i64>(4)?,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, i64>(6)?,
-                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<String>>(6)?,
             ))
         })
         .map_err(db_err)?
@@ -469,7 +465,6 @@ pub fn monitor_members_payload(
             |(
                 member_id,
                 name,
-                is_director,
                 interval_seconds,
                 enabled,
                 last_ping_at,
@@ -479,7 +474,6 @@ pub fn monitor_members_payload(
                 json!({
                     "member_id": member_id,
                     "name": name,
-                    "role": if is_director { "director" } else { "member" },
                     "interval_seconds": interval_seconds,
                     "enabled": enabled != 0,
                     "last_ping_at": last_ping_at,
@@ -521,8 +515,9 @@ mod tests {
     fn get_monitor_config_is_none_for_unenrolled_or_cross_fleet_members() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet_a, director_a) = create_fleet(&mut conn, "alpha");
+        let (fleet_a, _) = create_fleet(&mut conn, "alpha");
         let (fleet_b, _) = create_fleet(&mut conn, "beta");
+        let member_a = register(&mut conn, fleet_a, "worker", Some("%2"));
         let monitor_id = broker::register_member(
             &mut conn,
             fleet_a,
@@ -542,7 +537,7 @@ mod tests {
                 .is_none()
         );
         assert!(
-            broker::get_monitor_config(&conn, fleet_b, director_a)
+            broker::get_monitor_config(&conn, fleet_b, member_a)
                 .unwrap()
                 .is_none(),
             "the fleet gate hides an enrolled member of another fleet"
@@ -553,16 +548,16 @@ mod tests {
     fn update_monitor_config_applies_partial_updates() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
 
         let updated =
-            broker::update_monitor_config(&mut conn, fleet_id, director_id, Some(300), None)
-                .unwrap();
+            broker::update_monitor_config(&mut conn, fleet_id, member_id, Some(300), None).unwrap();
         assert_eq!(updated["interval_seconds"], 300);
         assert_eq!(updated["enabled"], true, "unspecified field untouched");
 
         let updated =
-            broker::update_monitor_config(&mut conn, fleet_id, director_id, None, Some(false))
+            broker::update_monitor_config(&mut conn, fleet_id, member_id, None, Some(false))
                 .unwrap();
         assert_eq!(updated["interval_seconds"], 300);
         assert_eq!(updated["enabled"], false);
@@ -572,16 +567,17 @@ mod tests {
     fn disabling_clears_the_stall_check_stamp() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let when = format_utc(base_time());
-        broker::record_monitor_dispatch(&mut conn, &[], &[director_id], &when).unwrap();
-        let config = broker::get_monitor_config(&conn, fleet_id, director_id)
+        broker::record_monitor_dispatch(&mut conn, &[], &[member_id], &when).unwrap();
+        let config = broker::get_monitor_config(&conn, fleet_id, member_id)
             .unwrap()
             .unwrap();
         assert_eq!(config["last_stall_check_at"], when);
 
-        broker::update_monitor_config(&mut conn, fleet_id, director_id, None, Some(false)).unwrap();
-        let config = broker::get_monitor_config(&conn, fleet_id, director_id)
+        broker::update_monitor_config(&mut conn, fleet_id, member_id, None, Some(false)).unwrap();
+        let config = broker::get_monitor_config(&conn, fleet_id, member_id)
             .unwrap()
             .unwrap();
         assert_eq!(config["last_stall_check_at"], Value::Null);
@@ -605,33 +601,34 @@ mod tests {
     fn list_monitor_configs_returns_every_enrolled_member_with_bool_enabled() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let first_id = register(&mut conn, fleet_id, "worker", Some("%2"));
+        let second_id = register(&mut conn, fleet_id, "helper", Some("%4"));
 
         let configs = broker::list_monitor_configs(&conn, fleet_id).unwrap();
         assert_eq!(configs.len(), 2);
         for config in &configs {
             assert!(config["enabled"].is_boolean());
+            assert_eq!(
+                config["interval_seconds"], 720,
+                "the single enrollment class"
+            );
         }
-        let intervals: Vec<i64> = configs
-            .iter()
-            .map(|c| c["interval_seconds"].as_i64().unwrap())
-            .collect();
-        assert!(intervals.contains(&180) && intervals.contains(&720));
-        assert!(configs.iter().any(|c| c["member_id"] == director_id));
-        assert!(configs.iter().any(|c| c["member_id"] == member_id));
+        assert!(configs.iter().any(|c| c["member_id"] == first_id));
+        assert!(configs.iter().any(|c| c["member_id"] == second_id));
     }
 
     #[test]
     fn record_pings_stamps_last_ping_at_and_ignores_an_empty_list() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let when = format_utc(base_time());
 
         broker::record_pings(&mut conn, &[], &when).unwrap();
-        broker::record_pings(&mut conn, &[director_id], &when).unwrap();
-        let config = broker::get_monitor_config(&conn, fleet_id, director_id)
+        broker::record_pings(&mut conn, &[member_id], &when).unwrap();
+        let config = broker::get_monitor_config(&conn, fleet_id, member_id)
             .unwrap()
             .unwrap();
         assert_eq!(config["last_ping_at"], when);
@@ -641,49 +638,52 @@ mod tests {
     fn record_monitor_dispatch_commits_both_cadences_atomically() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let pinged_id = register(&mut conn, fleet_id, "worker", Some("%2"));
+        let checked_id = register(&mut conn, fleet_id, "helper", Some("%4"));
         let when = format_utc(base_time());
 
-        broker::record_monitor_dispatch(&mut conn, &[director_id], &[member_id], &when).unwrap();
+        broker::record_monitor_dispatch(&mut conn, &[pinged_id], &[checked_id], &when).unwrap();
 
-        let director = broker::get_monitor_config(&conn, fleet_id, director_id)
+        let pinged = broker::get_monitor_config(&conn, fleet_id, pinged_id)
             .unwrap()
             .unwrap();
-        assert_eq!(director["last_ping_at"], when);
-        assert_eq!(director["last_stall_check_at"], Value::Null);
-        let member = broker::get_monitor_config(&conn, fleet_id, member_id)
+        assert_eq!(pinged["last_ping_at"], when);
+        assert_eq!(pinged["last_stall_check_at"], Value::Null);
+        let checked = broker::get_monitor_config(&conn, fleet_id, checked_id)
             .unwrap()
             .unwrap();
-        assert_eq!(member["last_ping_at"], Value::Null);
-        assert_eq!(member["last_stall_check_at"], when);
+        assert_eq!(checked["last_ping_at"], Value::Null);
+        assert_eq!(checked["last_stall_check_at"], when);
     }
 
     #[test]
     fn reconcile_monitor_lifecycle_clears_stamps_for_listed_fleet_members_only() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet_a, director_a) = create_fleet(&mut conn, "alpha");
+        let (fleet_a, _) = create_fleet(&mut conn, "alpha");
         let member_a = register(&mut conn, fleet_a, "worker", Some("%2"));
-        let (fleet_b, director_b) = create_fleet(&mut conn, "beta");
+        let keeper_a = register(&mut conn, fleet_a, "helper", Some("%4"));
+        let (fleet_b, _) = create_fleet(&mut conn, "beta");
+        let member_b = register(&mut conn, fleet_b, "worker", Some("%5"));
         let when = format_utc(base_time());
-        broker::record_monitor_dispatch(&mut conn, &[], &[director_a, member_a, director_b], &when)
+        broker::record_monitor_dispatch(&mut conn, &[], &[keeper_a, member_a, member_b], &when)
             .unwrap();
 
-        broker::reconcile_monitor_lifecycle(&mut conn, fleet_a, &[member_a, director_b]).unwrap();
+        broker::reconcile_monitor_lifecycle(&mut conn, fleet_a, &[member_a, member_b]).unwrap();
 
         let cleared = broker::get_monitor_config(&conn, fleet_a, member_a)
             .unwrap()
             .unwrap();
         assert_eq!(cleared["last_stall_check_at"], Value::Null);
-        let kept = broker::get_monitor_config(&conn, fleet_a, director_a)
+        let kept = broker::get_monitor_config(&conn, fleet_a, keeper_a)
             .unwrap()
             .unwrap();
         assert_eq!(
             kept["last_stall_check_at"], when,
             "unlisted members keep their stamp"
         );
-        let foreign = broker::get_monitor_config(&conn, fleet_b, director_b)
+        let foreign = broker::get_monitor_config(&conn, fleet_b, member_b)
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -712,29 +712,51 @@ mod tests {
         .unwrap();
 
         let targets = broker::list_monitor_targets(&conn, fleet_id).unwrap();
-        assert_eq!(targets.len(), 2, "the monitoring member is never a target");
+        assert_eq!(
+            targets.len(),
+            1,
+            "only the ordinary member is watched, got: {targets:?}"
+        );
+        assert!(
+            !targets.iter().any(|t| t["member_id"] == director_id),
+            "the root Director is never a target"
+        );
 
-        let director = targets
-            .iter()
-            .find(|t| t["member_id"] == director_id)
-            .unwrap();
-        assert_eq!(director["is_director"], true);
-        assert_eq!(director["name"], "Director");
-        assert_eq!(director["pane_id"], "%0");
-        assert_eq!(director["coding_agent"], "claude");
-        assert_eq!(director["interval_seconds"], 180);
-        assert_eq!(director["last_ping_at"], Value::Null);
-        assert_eq!(director["enabled"], true);
-        assert_eq!(director["last_stall_check_at"], Value::Null);
-        assert_eq!(director["pending_count"], 0);
-        assert_eq!(director["oldest_pending_ts"], Value::Null);
-
-        let worker = targets
-            .iter()
-            .find(|t| t["member_id"] == member_id)
-            .unwrap();
-        assert_eq!(worker["is_director"], false);
+        let worker = &targets[0];
+        assert_eq!(worker["member_id"], member_id);
+        assert_eq!(worker["name"], "worker");
+        assert_eq!(worker["pane_id"], "%2");
+        assert_eq!(worker["coding_agent"], "claude");
         assert_eq!(worker["interval_seconds"], 720);
+        assert_eq!(worker["last_ping_at"], Value::Null);
+        assert_eq!(worker["enabled"], true);
+        assert_eq!(worker["last_stall_check_at"], Value::Null);
+        assert_eq!(worker["pending_count"], 0);
+        assert_eq!(worker["oldest_pending_ts"], Value::Null);
+
+        let keys: std::collections::BTreeSet<&str> = worker
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "member_id",
+                "name",
+                "pane_id",
+                "coding_agent",
+                "interval_seconds",
+                "last_ping_at",
+                "enabled",
+                "last_stall_check_at",
+                "pending_count",
+                "oldest_pending_ts",
+            ]
+            .into(),
+            "the scan-row key set is pinned, with no is_director key"
+        );
     }
 
     #[test]
@@ -978,31 +1000,40 @@ mod tests {
     }
 
     #[test]
-    fn members_payload_labels_roles_and_truncates_ages() {
+    fn members_payload_truncates_ages() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
+        let pinged_id = register(&mut conn, fleet_id, "helper", Some("%4"));
         let notifier = FakeNotifier::succeeding();
         common::send(&mut conn, &notifier, fleet_id, director_id, member_id, "hi");
 
         let now = Utc::now() + Duration::seconds(10);
         let ping_when = format_utc(now - Duration::seconds(30));
-        broker::record_pings(&mut conn, &[director_id], &ping_when).unwrap();
+        broker::record_pings(&mut conn, &[pinged_id], &ping_when).unwrap();
 
         let rows = broker::monitor_members_payload(&conn, fleet_id, now).unwrap();
         assert_eq!(rows.len(), 2);
+        assert!(
+            !rows.iter().any(|r| r["member_id"] == director_id),
+            "the root Director has no row"
+        );
+        for row in &rows {
+            assert!(
+                row.as_object().unwrap().get("role").is_none(),
+                "the row carries no role key, got: {row}"
+            );
+        }
 
-        let director = rows.iter().find(|r| r["member_id"] == director_id).unwrap();
-        assert_eq!(director["role"], "director");
-        assert_eq!(director["last_ping_at"], ping_when);
-        assert_eq!(director["last_ping_age_seconds"], 30);
-        assert_eq!(director["pending_count"], 0);
-        assert_eq!(director["oldest_pending_ts"], Value::Null);
-        assert_eq!(director["oldest_pending_age_seconds"], Value::Null);
+        let pinged = rows.iter().find(|r| r["member_id"] == pinged_id).unwrap();
+        assert_eq!(pinged["last_ping_at"], ping_when);
+        assert_eq!(pinged["last_ping_age_seconds"], 30);
+        assert_eq!(pinged["pending_count"], 0);
+        assert_eq!(pinged["oldest_pending_ts"], Value::Null);
+        assert_eq!(pinged["oldest_pending_age_seconds"], Value::Null);
 
         let worker = rows.iter().find(|r| r["member_id"] == member_id).unwrap();
-        assert_eq!(worker["role"], "member");
         assert_eq!(worker["last_ping_at"], Value::Null);
         assert_eq!(worker["last_ping_age_seconds"], Value::Null);
         assert_eq!(worker["pending_count"], 1);

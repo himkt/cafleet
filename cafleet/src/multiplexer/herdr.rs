@@ -920,7 +920,6 @@ mod tests {
         let due = [json!({
             "member_id": 4,
             "name": "worker",
-            "is_director": false,
             "coding_agent": "codex",
             "wake_reasons": ["interval"],
         })];

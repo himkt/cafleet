@@ -9,9 +9,8 @@
 //! ```text
 //! pub const DEFAULT_TICK_SECONDS: i64 = 5;
 //! // Policy tunables re-exported from their single broker home:
-//! pub use crate::broker::{DIRECTOR_PING_INTERVAL_SECONDS /* 180 */,
-//!     MEMBER_PING_INTERVAL_SECONDS /* 720 */, MONITOR_STALE_FACTOR /* 3 */,
-//!     MONITOR_STALE_FLOOR_SECONDS /* 15 */};
+//! pub use crate::broker::{MEMBER_PING_INTERVAL_SECONDS /* 720 */,
+//!     MONITOR_STALE_FACTOR /* 3 */, MONITOR_STALE_FLOOR_SECONDS /* 15 */};
 //!
 //! // What the tick consumes from the resolved backend.
 //! pub trait MonitorMux {
@@ -51,8 +50,7 @@ use serde_json::{Value, json};
 
 use crate::broker;
 pub use crate::broker::{
-    DIRECTOR_PING_INTERVAL_SECONDS, MEMBER_PING_INTERVAL_SECONDS, MONITOR_STALE_FACTOR,
-    MONITOR_STALE_FLOOR_SECONDS,
+    MEMBER_PING_INTERVAL_SECONDS, MONITOR_STALE_FACTOR, MONITOR_STALE_FLOOR_SECONDS,
 };
 use crate::error::CafleetError;
 use crate::multiplexer::{Multiplexer, MultiplexerError};
@@ -277,7 +275,6 @@ pub fn monitor_tick(
         due.push(json!({
             "member_id": member_id,
             "name": target["name"],
-            "is_director": target["is_director"],
             "coding_agent": target["coding_agent"],
             "wake_reasons": reasons,
         }));
@@ -288,17 +285,11 @@ pub fn monitor_tick(
         let director_id = fleet["director_member_id"]
             .as_i64()
             .expect("a live fleet records its Director");
-        let director_agent = targets
-            .iter()
-            .find(|target| target["member_id"] == director_id)
-            .and_then(|target| target["coding_agent"].as_str().map(str::to_string))
-            .or_else(|| {
-                broker::get_member(conn, director_id, fleet_id)
-                    .ok()
-                    .flatten()
-                    .and_then(|d| d["placement"]["coding_agent"].as_str().map(str::to_string))
-            })
-            .unwrap_or_default();
+        let director_agent = broker::get_member(conn, director_id, fleet_id)?
+            .expect("a live fleet's Director is registered")["placement"]["coding_agent"]
+            .as_str()
+            .expect("the root Director is pane-bound")
+            .to_string();
         let director = json!({"member_id": director_id, "coding_agent": director_agent});
         let watcher_pane = watcher["pane_id"].as_str().expect("the watcher has a pane");
         woke = mux
@@ -432,11 +423,13 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::broker;
-    use crate::broker::test_support::{FakeNotifier, create_fleet, migrated_conn, placement};
+    use crate::broker::test_support::{
+        FakeNotifier, create_fleet, migrated_conn, placement, register,
+    };
     use crate::monitor::{
-        DEFAULT_TICK_SECONDS, DIRECTOR_PING_INTERVAL_SECONDS, MEMBER_PING_INTERVAL_SECONDS,
-        MONITOR_STALE_FACTOR, MONITOR_STALE_FLOOR_SECONDS, MonitorMux, MonitorTickState,
-        TickResult, monitor_tick, run_monitor_loop, should_ping,
+        DEFAULT_TICK_SECONDS, MEMBER_PING_INTERVAL_SECONDS, MONITOR_STALE_FACTOR,
+        MONITOR_STALE_FLOOR_SECONDS, MonitorMux, MonitorTickState, TickResult, monitor_tick,
+        run_monitor_loop, should_ping,
     };
     use crate::multiplexer::MultiplexerError;
     use crate::time::format_utc;
@@ -501,22 +494,12 @@ mod tests {
         }
     }
 
-    /// Fleet with a pane-bound worker (enrolled @720) and a monitoring member
-    /// on `%3`; the Director sits on `%0`.
-    fn monitored_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64) {
+    /// Fleet with two pane-bound workers (enrolled @720) on `%2` and `%4` and a
+    /// monitoring member on `%3`; the unenrolled Director sits on `%0`.
+    fn monitored_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
         let (fleet_id, director_id) = create_fleet(conn, "alpha");
-        let member_id = broker::register_member(
-            conn,
-            fleet_id,
-            "worker",
-            "d",
-            &[],
-            Some(&placement(Some("%2"))),
-            None,
-        )
-        .unwrap()["member_id"]
-            .as_i64()
-            .unwrap();
+        let member_id = register(conn, fleet_id, "worker", Some("%2"));
+        let second_id = register(conn, fleet_id, "helper", Some("%4"));
         broker::register_member(
             conn,
             fleet_id,
@@ -527,7 +510,7 @@ mod tests {
             Some("monitoring-member"),
         )
         .unwrap();
-        (fleet_id, director_id, member_id)
+        (fleet_id, director_id, member_id, second_id)
     }
 
     fn claim(conn: &mut rusqlite::Connection, fleet_id: i64, pid: i64, now: DateTime<Utc>) {
@@ -575,7 +558,6 @@ mod tests {
         #[test]
         fn the_policy_tunables_are_pinned() {
             assert_eq!(DEFAULT_TICK_SECONDS, 5);
-            assert_eq!(DIRECTOR_PING_INTERVAL_SECONDS, 180);
             assert_eq!(MEMBER_PING_INTERVAL_SECONDS, 720);
             assert_eq!(MONITOR_STALE_FACTOR, 3);
             assert_eq!(MONITOR_STALE_FLOOR_SECONDS, 15);
@@ -595,7 +577,6 @@ mod tests {
             json!({
                 "member_id": 4,
                 "name": "worker",
-                "is_director": false,
                 "pane_id": pane_id,
                 "coding_agent": "claude",
                 "interval_seconds": interval,
@@ -656,8 +637,8 @@ mod tests {
         fn a_displaced_or_unclaimed_heartbeat_stops_the_loop() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, _, _) = monitored_fleet(&mut conn);
-            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3"]);
+            let (fleet_id, _, _, _) = monitored_fleet(&mut conn);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3", "%4"]);
             let mut state = MonitorTickState::default();
             let now = base_now();
 
@@ -674,7 +655,7 @@ mod tests {
         fn a_deleted_fleet_stops_the_loop_after_the_heartbeat() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, _, _) = monitored_fleet(&mut conn);
+            let (fleet_id, _, _, _) = monitored_fleet(&mut conn);
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
             conn.execute(
@@ -684,7 +665,7 @@ mod tests {
             )
             .unwrap();
 
-            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3"]);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3", "%4"]);
             let mut state = MonitorTickState::default();
             let (result, _) = tick(&mut conn, &mux, &mut state, fleet_id, own_pid(), 0, now);
             assert!(matches!(result, TickResult::Stop));
@@ -694,10 +675,10 @@ mod tests {
         fn due_members_produce_one_wake_and_gated_ledger_writes() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, director_id, member_id) = monitored_fleet(&mut conn);
+            let (fleet_id, director_id, member_id, second_id) = monitored_fleet(&mut conn);
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
-            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3"]);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3", "%4"]);
             let mut state = MonitorTickState::default();
 
             let (result, echo) = tick(&mut conn, &mux, &mut state, fleet_id, own_pid(), 0, now);
@@ -707,31 +688,34 @@ mod tests {
             assert_eq!(wakes.len(), 1, "at most one synchronized wake per tick");
             let (pane, due, director) = &wakes[0];
             assert_eq!(pane, "%3", "the watcher's own pane");
-            assert_eq!(due.len(), 2, "director + worker, never the watcher");
+            assert_eq!(due.len(), 2, "both workers, never the watcher");
             assert_eq!(director["member_id"], director_id);
             assert_eq!(director["coding_agent"], "claude");
-            let director_entry = due.iter().find(|d| d["member_id"] == director_id).unwrap();
-            assert_eq!(director_entry["is_director"], true);
-            assert_eq!(director_entry["wake_reasons"], json!(["interval"]));
+            assert!(
+                due.iter().all(|d| d["member_id"] != director_id),
+                "the Director is never a due entry, got: {due:?}"
+            );
             let worker_entry = due.iter().find(|d| d["member_id"] == member_id).unwrap();
             assert_eq!(worker_entry["wake_reasons"], json!(["interval"]));
+            let second_entry = due.iter().find(|d| d["member_id"] == second_id).unwrap();
+            assert_eq!(second_entry["wake_reasons"], json!(["interval"]));
             drop(wakes);
 
             let iso = format_utc(now);
-            assert!(
-                echo.contains(&format!(
-                    "{iso} due member {director_id} (Director) [interval] -> wake monitor"
-                )),
-                "got: {echo}"
-            );
             assert!(
                 echo.contains(&format!(
                     "{iso} due member {member_id} (worker) [interval] -> wake monitor"
                 )),
                 "got: {echo}"
             );
-            assert_eq!(last_ping(&conn, fleet_id, director_id), json!(iso));
+            assert!(
+                echo.contains(&format!(
+                    "{iso} due member {second_id} (helper) [interval] -> wake monitor"
+                )),
+                "got: {echo}"
+            );
             assert_eq!(last_ping(&conn, fleet_id, member_id), json!(iso));
+            assert_eq!(last_ping(&conn, fleet_id, second_id), json!(iso));
 
             let (_, echo) = tick(
                 &mut conn,
@@ -750,10 +734,10 @@ mod tests {
         fn a_failed_wake_records_nothing_and_retries_next_tick() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, director_id, member_id) = monitored_fleet(&mut conn);
+            let (fleet_id, _, member_id, second_id) = monitored_fleet(&mut conn);
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
-            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3"]);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3", "%4"]);
             mux.wake_ok.set(false);
             let mut state = MonitorTickState::default();
 
@@ -761,8 +745,8 @@ mod tests {
             assert!(matches!(result, TickResult::Continue));
             assert_eq!(mux.wake_count(), 1);
             assert!(echo.is_empty(), "no echo on a failed wake");
-            assert_eq!(last_ping(&conn, fleet_id, director_id), Value::Null);
             assert_eq!(last_ping(&conn, fleet_id, member_id), Value::Null);
+            assert_eq!(last_ping(&conn, fleet_id, second_id), Value::Null);
 
             mux.wake_ok.set(true);
             let (_, echo) = tick(
@@ -786,7 +770,7 @@ mod tests {
         fn dead_panes_are_reconciled_and_never_due() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, director_id, member_id) = monitored_fleet(&mut conn);
+            let (fleet_id, _, member_id, second_id) = monitored_fleet(&mut conn);
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
             broker::record_monitor_dispatch(
@@ -797,7 +781,7 @@ mod tests {
             )
             .unwrap();
 
-            let mux = FakeMux::with_live_panes(&["%0", "%3"]);
+            let mux = FakeMux::with_live_panes(&["%0", "%3", "%4"]);
             let mut state = MonitorTickState::default();
             let (_, _) = tick(&mut conn, &mux, &mut state, fleet_id, own_pid(), 240, now);
 
@@ -808,7 +792,7 @@ mod tests {
                 due.iter().all(|d| d["member_id"] != member_id),
                 "the dead-pane worker is skipped"
             );
-            assert!(due.iter().any(|d| d["member_id"] == director_id));
+            assert!(due.iter().any(|d| d["member_id"] == second_id));
             drop(wakes);
 
             let config = broker::get_monitor_config(&conn, fleet_id, member_id)
@@ -825,10 +809,11 @@ mod tests {
         fn no_live_watcher_means_no_wake_and_no_ledger_writes() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+            let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+            let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
-            let mux = FakeMux::with_live_panes(&["%0"]);
+            let mux = FakeMux::with_live_panes(&["%0", "%2"]);
             let mut state = MonitorTickState::default();
 
             let (result, echo) = tick(&mut conn, &mux, &mut state, fleet_id, own_pid(), 0, now);
@@ -836,7 +821,7 @@ mod tests {
             assert_eq!(mux.wake_count(), 0);
             assert!(echo.is_empty());
             assert_eq!(
-                last_ping(&conn, fleet_id, director_id),
+                last_ping(&conn, fleet_id, member_id),
                 Value::Null,
                 "nothing is recorded without a wake"
             );
@@ -846,13 +831,13 @@ mod tests {
         fn stall_checks_are_durable_and_never_advance_last_ping_at() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, director_id, member_id) = monitored_fleet(&mut conn);
+            let (fleet_id, _, member_id, second_id) = monitored_fleet(&mut conn);
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
             let recent = now - Duration::seconds(10);
-            ping_at(&mut conn, &[director_id, member_id], recent);
+            ping_at(&mut conn, &[member_id, second_id], recent);
 
-            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3"]);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3", "%4"]);
             let mut state = MonitorTickState::default();
             let (_, echo) = tick(&mut conn, &mux, &mut state, fleet_id, own_pid(), 240, now);
 
@@ -902,16 +887,16 @@ mod tests {
         fn a_zero_stall_interval_disables_the_branch() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, director_id, member_id) = monitored_fleet(&mut conn);
+            let (fleet_id, _, member_id, second_id) = monitored_fleet(&mut conn);
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
             ping_at(
                 &mut conn,
-                &[director_id, member_id],
+                &[member_id, second_id],
                 now - Duration::seconds(10),
             );
 
-            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3"]);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3", "%4"]);
             let mut state = MonitorTickState::default();
             let (_, _) = tick(&mut conn, &mux, &mut state, fleet_id, own_pid(), 0, now);
             assert_eq!(mux.wake_count(), 0, "no stall-check wakes when disabled");
@@ -921,12 +906,12 @@ mod tests {
         fn a_done_transition_wakes_once_per_episode() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, director_id, member_id) = monitored_fleet(&mut conn);
+            let (fleet_id, _, member_id, second_id) = monitored_fleet(&mut conn);
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
-            ping_at(&mut conn, &[director_id, member_id], now);
+            ping_at(&mut conn, &[member_id, second_id], now);
 
-            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3"]);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3", "%4"]);
             mux.set_status("%2", "done");
             let mut state = MonitorTickState::default();
 
@@ -971,12 +956,12 @@ mod tests {
         fn a_blocked_transition_is_recorded_but_never_wakes() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, director_id, member_id) = monitored_fleet(&mut conn);
+            let (fleet_id, _, member_id, second_id) = monitored_fleet(&mut conn);
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
-            ping_at(&mut conn, &[director_id, member_id], now);
+            ping_at(&mut conn, &[member_id, second_id], now);
 
-            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3"]);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3", "%4"]);
             mux.set_status("%2", "blocked");
             let mut state = MonitorTickState::default();
             let (_, _) = tick(
@@ -1011,12 +996,12 @@ mod tests {
         fn a_failed_wake_leaves_the_done_episode_unconsumed() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, director_id, member_id) = monitored_fleet(&mut conn);
+            let (fleet_id, _, member_id, second_id) = monitored_fleet(&mut conn);
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
-            ping_at(&mut conn, &[director_id, member_id], now);
+            ping_at(&mut conn, &[member_id, second_id], now);
 
-            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3"]);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3", "%4"]);
             mux.set_status("%2", "done");
             mux.wake_ok.set(false);
             let mut state = MonitorTickState::default();
@@ -1051,7 +1036,7 @@ mod tests {
         fn unacked_annotates_but_never_adds_a_row() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, director_id, member_id) = monitored_fleet(&mut conn);
+            let (fleet_id, director_id, member_id, second_id) = monitored_fleet(&mut conn);
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
             let notifier = FakeNotifier::succeeding();
@@ -1068,9 +1053,9 @@ mod tests {
                 [format_utc(now - Duration::seconds(800))],
             )
             .unwrap();
-            ping_at(&mut conn, &[director_id], now);
+            ping_at(&mut conn, &[second_id], now);
 
-            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3"]);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3", "%4"]);
             let mut state = MonitorTickState::default();
             let (_, echo) = tick(&mut conn, &mux, &mut state, fleet_id, own_pid(), 0, now);
 
@@ -1099,7 +1084,7 @@ mod tests {
         fn a_young_pending_delivery_is_not_annotated() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, director_id, member_id) = monitored_fleet(&mut conn);
+            let (fleet_id, director_id, member_id, second_id) = monitored_fleet(&mut conn);
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
             let notifier = FakeNotifier::succeeding();
@@ -1116,9 +1101,9 @@ mod tests {
                 [format_utc(now - Duration::seconds(30))],
             )
             .unwrap();
-            ping_at(&mut conn, &[director_id], now);
+            ping_at(&mut conn, &[second_id], now);
 
-            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3"]);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3", "%4"]);
             let mut state = MonitorTickState::default();
             let (_, _) = tick(&mut conn, &mux, &mut state, fleet_id, own_pid(), 0, now);
 
@@ -1139,10 +1124,10 @@ mod tests {
         fn a_live_slot_refuses_a_second_loop() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, _, _) = monitored_fleet(&mut conn);
+            let (fleet_id, _, _, _) = monitored_fleet(&mut conn);
             claim(&mut conn, fleet_id, own_pid(), Utc::now());
 
-            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3"]);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%3", "%4"]);
             let mut out = Vec::new();
             let err = run_monitor_loop(&mut conn, &mux, &mut out, fleet_id, 5, 0)
                 .expect_err("the atomic claim is authoritative");

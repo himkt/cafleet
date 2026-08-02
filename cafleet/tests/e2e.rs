@@ -25,6 +25,7 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
     assert_eq!(stdout(&output), "1 director=1\n");
 
     let worker_id = cli.create_member(1, "worker");
+    let helper_id = cli.create_member(1, "helper");
     let output = cli.run(&[
         "member",
         "create",
@@ -113,7 +114,7 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
         "the ready-handshake startup line, got: {loop_stdout}"
     );
     assert!(
-        loop_stdout.contains("due member 1 (Director) ["),
+        loop_stdout.contains(&format!("due member {helper_id} (helper) [")),
         "got: {loop_stdout}"
     );
     assert!(
@@ -133,7 +134,7 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
     );
 
     let conn = cli.sqlite();
-    for member_id in [1, worker_id] {
+    for member_id in [worker_id, helper_id] {
         let last_ping: Option<String> = conn
             .query_row(
                 "SELECT last_ping_at FROM monitor_config WHERE member_id=?1",

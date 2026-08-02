@@ -240,12 +240,16 @@ async fn the_roster_wraps_members_and_projects_the_monitor_config() {
     );
     assert_eq!(
         director["monitor"],
-        json!({"interval_seconds": 180, "last_ping_at": null, "enabled": true}),
-        "the projection drops member_id and last_stall_check_at"
+        Value::Null,
+        "the root Director is unenrolled"
     );
     let worker = by_id(member_id);
     assert_eq!(worker["kind"], "member");
-    assert_eq!(worker["monitor"]["interval_seconds"], 720);
+    assert_eq!(
+        worker["monitor"],
+        json!({"interval_seconds": 720, "last_ping_at": null, "enabled": true}),
+        "the projection drops member_id and last_stall_check_at"
+    );
     let monitor = by_id(monitor_id);
     assert_eq!(monitor["kind"], "monitor");
     assert_eq!(monitor["monitor"], Value::Null, "the watcher is unenrolled");
@@ -259,7 +263,7 @@ async fn the_roster_wraps_members_and_projects_the_monitor_config() {
 async fn member_monitor_get_returns_the_exact_projection_or_404() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
-    let (_, _, member_id, monitor_id) = seeded_fleet(&mut conn);
+    let (_, director_id, member_id, monitor_id) = seeded_fleet(&mut conn);
     let app = app(&url);
 
     let (status, body) = call(
@@ -277,9 +281,20 @@ async fn member_monitor_get_returns_the_exact_projection_or_404() {
     );
 
     let (status, body) = call(
-        app,
+        app.clone(),
         "GET",
         &format!("/api/members/{monitor_id}/monitor"),
+        Some("1"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body, r#"{"detail":"Member not enrolled"}"#);
+
+    let (status, body) = call(
+        app,
+        "GET",
+        &format!("/api/members/{director_id}/monitor"),
         Some("1"),
         None,
     )
@@ -525,7 +540,7 @@ async fn post_send_handles_unicast_broadcast_and_the_error_surfaces() {
 async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
-    let (fleet_id, _, _, _) = seeded_fleet(&mut conn);
+    let (fleet_id, director_id, _, _) = seeded_fleet(&mut conn);
     let app = app(&url);
 
     let (status, body) = call(app.clone(), "GET", "/api/monitor", Some("1"), None).await;
@@ -534,10 +549,11 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     assert_eq!(payload["running"], false);
     assert_eq!(payload["pid"], Value::Null);
     assert_eq!(payload["tick_seconds"], Value::Null, "no row at all");
-    assert_eq!(
-        payload["members"].as_array().unwrap().len(),
-        2,
-        "the watched set rides along"
+    let rows = payload["members"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "the watched set rides along");
+    assert!(
+        !rows.iter().any(|row| row["member_id"] == director_id),
+        "the root Director is not in the watched set, got: {rows:?}"
     );
 
     let now = cafleet::time::now_utc();

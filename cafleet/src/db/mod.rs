@@ -42,7 +42,7 @@ pub fn migrate_to_head(conn: &mut Connection) -> Result<u32, CafleetError> {
     Ok(head_version())
 }
 
-/// The embedded chain's head version (`1` at cutover).
+/// The embedded chain's head version.
 pub fn head_version() -> u32 {
     migration_chain()
         .last()
@@ -136,11 +136,11 @@ mod tests {
     }
 
     #[test]
-    fn migrate_reaches_head_version_1_and_is_idempotent() {
+    fn migrate_reaches_head_version_2_and_is_idempotent() {
         let dir = TempDir::new().unwrap();
         let mut conn = connect(&temp_db_url(&dir)).unwrap();
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 1);
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 1);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 2);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 2);
     }
 
     #[test]
@@ -342,14 +342,14 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        assert_eq!(versions, vec![1]);
+        assert_eq!(versions, vec![1, 2]);
     }
 
     // The chain guard reads the refinery-embedded listing, not the filesystem:
     // `migration_chain()` returns the `(version, name)` pairs of the embedded
     // runner's migrations, sorted ascending.
     #[test]
-    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_1() {
+    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_2() {
         let chain = migration_chain();
         let versions: Vec<u32> = chain.iter().map(|(version, _)| *version).collect();
         let contiguous: Vec<u32> = (1..=versions.len() as u32).collect();
@@ -365,6 +365,6 @@ mod tests {
             chain.iter().all(|(_, name)| !name.is_empty()),
             "every migration carries a slug"
         );
-        assert_eq!(versions.last(), Some(&1), "expected head version is 1");
+        assert_eq!(versions.last(), Some(&2), "expected head version is 2");
     }
 }

@@ -5,7 +5,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
-use super::members::{DIRECTOR_PING_INTERVAL_SECONDS, db_err, enroll, member_card};
+use super::members::{db_err, member_card};
 use crate::error::CafleetError;
 use crate::time::{format_utc, now_utc};
 
@@ -43,7 +43,7 @@ pub(crate) fn fetch_fleet(
 }
 
 /// Atomic fleet + root-Director bootstrap: fleet row → Director member →
-/// placement → `director_member_id` backfill → Director enrollment at 180 s.
+/// placement → `director_member_id` backfill.
 pub fn create_fleet(
     conn: &mut Connection,
     name: Option<&str>,
@@ -89,7 +89,6 @@ pub fn create_fleet(
         params![director_id, fleet_id],
     )
     .map_err(db_err)?;
-    enroll(&tx, director_id, DIRECTOR_PING_INTERVAL_SECONDS)?;
     tx.commit().map_err(db_err)?;
     Ok(json!({
         "fleet_id": fleet_id,
@@ -250,16 +249,16 @@ mod tests {
     }
 
     #[test]
-    fn create_fleet_enrolls_the_director_at_180() {
+    fn create_fleet_leaves_the_director_unenrolled() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let config = broker::get_monitor_config(&conn, fleet_id, director_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(config["interval_seconds"], 180);
-        assert_eq!(config["enabled"], true);
-        assert_eq!(config["last_ping_at"], serde_json::Value::Null);
+        assert!(
+            broker::get_monitor_config(&conn, fleet_id, director_id)
+                .unwrap()
+                .is_none(),
+            "the root Director is never enrolled"
+        );
     }
 
     #[test]

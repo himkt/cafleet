@@ -3,12 +3,12 @@
 `cafleet monitor` is a fleet-scoped foreground loop — `scan → wake → sleep` —
 that the fleet's dedicated **monitoring member** runs as a background task in
 its own pane. It supplies the **heartbeat** a Director needs to supervise its
-team: a plain loop, not agent reasoning, that scans the **watched set** (the
-root Director and every ordinary member, each on its own interval) and, when at
-least one watched member is due, wakes the monitoring member once by keystroking
-into its pane. While the loop runs it spends no model tokens, and because it is
-just a backgrounded command it works identically on any backend. One monitor
-and one monitoring member per fleet; there is no `monitor stop` — deleting the
+team: a plain loop, not agent reasoning, that scans the **watched set** (every
+ordinary member, each on its own interval) and, when at least one watched
+member is due, wakes the monitoring member once by keystroking into its pane.
+While the loop runs it spends no model tokens, and because it is just a
+backgrounded command it works identically on any backend. One monitor and one
+monitoring member per fleet; there is no `monitor stop` — deleting the
 monitoring member kills its pane and the loop terminates with it.
 
 ## Heartbeat vs facilitation
@@ -24,7 +24,7 @@ and may perform one fixed action; task judgment stays with the Director:
 
 The loop's only keystroke is a **wake trigger** into the monitoring member's
 own pane — a pure trigger, not a protocol payload. It names each due member as
-`<role> <id> (<sanitized-name>; coding_agent=<backend>) [<reasons>]`, carries
+`member <id> (<sanitized-name>; coding_agent=<backend>) [<reasons>]`, carries
 the Director descriptor (identifying the recipient of the monitoring member's
 reports), and closes with a single pointer sentence naming the monitoring
 member's role protocol. The tmux and herdr payloads are byte-identical. The
@@ -49,15 +49,14 @@ Enrollment is by member class:
 
 | Member class | Enrolled | `monitor` field on `GET /api/members` |
 |---|---|---|
-| The fleet's root Director | yes | A schedule object |
-| An ordinary member with a placement | yes | A schedule object |
+| An ordinary member with a placement | yes, at 720 s | A schedule object |
+| The fleet's root Director | no | `null` |
 | The dedicated monitoring member | no — it is the watcher | `null` |
 | A deregistered member | no — the row is hard-deleted on deregistration | `null` |
 | A registry row without a placement | no | `null` |
 
-The root Director is checked far more often than an ordinary member; both
-defaults live in the knob table under
-[Cadence and tick precision](#cadence-and-tick-precision).
+That ordinary-member default, and the rest of the cadence knobs, live in the
+knob table under [Cadence and tick precision](#cadence-and-tick-precision).
 
 A watched member enters the due set only from a normal trigger. The scan order
 is lifecycle reconciliation, `interval`, durable `stall-check`, native herdr
@@ -100,9 +99,10 @@ own conversation notes, not broker state. On each wake it:
 1. **Captures** every named due **ordinary** pane with
    `cafleet monitor capture --lines 120 --no-ansi --json`. Capture JSON
    includes `captured_at` and `content_sha256` of the exact emitted content.
-   Each target's rendered `coding_agent` selects its own overlay cues. A due
-   `director` entry is not captured — the monitoring member takes no
-   Director-directed pane action.
+   Each target's rendered `coding_agent` selects its own overlay cues. The
+   payload's `director` descriptor identifies the recipient of the monitoring
+   member's reports; the monitoring member takes no Director-directed pane
+   action.
 2. **Classifies** content as `awaiting_user`, `unknown`, `finished`, `working`,
    or `stall_candidate`. Any affirmative or ambiguous active-work cue is
    `working`; ambiguity between `awaiting_user` and `finished` resolves to
@@ -144,7 +144,6 @@ judgment, prompted by the monitoring member's plain message.
 
 | Knob | Default | Set by |
 |---|---|---|
-| Root Director ping interval | `180s` | `monitor_config.interval_seconds` (the Director's row) |
 | Ordinary member ping interval | `720s` | `monitor_config.interval_seconds` (each member's row) |
 | Stall-check interval | `240s` | `monitor_stall_interval` / `CAFLEET_MONITOR_STALL_INTERVAL` |
 | Unacked-delivery annotation threshold | the member's own ping interval | `monitor_config.interval_seconds` (no independent trigger) |
@@ -159,6 +158,14 @@ watcher wake commits neither dispatch timestamp.
 `CAFLEET_MONITOR_STALL_INTERVAL=0` disables stall-check wakes and therefore
 monitor pings. Unacked staleness only controls whether the hint is appended to
 a normal due row.
+
+The effective wake cadence is the shorter of the two triggers across the
+watched set. A fleet holding at least one ordinary member therefore wakes every
+240 s under the default stall-check interval, and every 720 s when
+`CAFLEET_MONITOR_STALL_INTERVAL=0` leaves only the interval trigger. A fleet
+holding just the Director and the monitoring member has an empty watched set:
+the loop claims the runtime slot and heartbeats every tick, but no wake fires
+until the first ordinary member is spawned.
 
 ## Single-instance and liveness
 
