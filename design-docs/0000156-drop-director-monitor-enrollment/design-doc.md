@@ -1,6 +1,6 @@
 # Drop the root Director from the monitor watched set
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 37/37 tasks complete
 **Last Updated**: 2026-08-02
 
