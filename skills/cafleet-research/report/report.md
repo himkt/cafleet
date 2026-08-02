@@ -58,11 +58,9 @@ Members cannot talk to the user directly — the Director always relays. Members
 Before creating the team, resolve the task-scoped base directory for this run.
 
 1. Apply the no-bypass write protocol and `<unset>` sentinel contract from the `cafleet` skill's `reference/base-dir.md` (§ Required reading above).
-2. Resolve the task-scoped BASE by calling the resolver positionally with the topic relpath:
+2. Canonicalize the topic to `researches/<topic-slug>` per the `cafleet` skill's `reference/base-dir.md` § *Consumer contract*, then run the skill's **Step 0 (task-scope resolution)** with that relpath to resolve `${BASE}`.
 
-   Run the skill's **Step 0 (task-scope resolution)** with the relpath `researches/[topic-slug]`.
-
-   Step 0 infers the repo root via `git rev-parse --show-toplevel`, joins `researches/[topic-slug]` under it, and resolves `${BASE}` to that absolute task folder. The resolver writes nothing at resolution time; `${BASE}` is created by the first write under it — the Director's spawn-prompt audit write to `${BASE}/.prompts/<role>-<UTC-compact>.md`, which lands before any member spawns, so the output directory already exists by the time Researchers write to it (matching `roles/researcher.md` § File Output). Use that `${BASE}` for the rest of this run.
+   `${BASE}` is created by the first write under it — the Director's spawn-prompt audit write to `${BASE}/.prompts/<role>-<UTC-compact>.md`, which lands before any member spawns, so the output directory already exists by the time Researchers write to it (matching `roles/researcher.md` § File Output). Use that `${BASE}` for the rest of this run.
 3. `${OUTPUT_DIR} = ${BASE}` — the task folder IS the output directory. There is no further concatenation.
 4. Pass `${OUTPUT_DIR}` (i.e., `${BASE}`) as the resolved absolute path to the Manager and all Researchers/Scouts in their spawn prompts. The audit-file path `${BASE}/.prompts/<role>-<UTC-compact>.md` is naturally task-scoped — it lives under `<topic-folder>/.prompts/`, not under the repo root.
 

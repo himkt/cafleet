@@ -1,7 +1,7 @@
 # Skill Tree Simplification
 
 **Status**: Approved
-**Progress**: 11/34 tasks complete
+**Progress**: 17/34 tasks complete
 **Last Updated**: 2026-08-03
 
 ## Overview
@@ -181,12 +181,12 @@ The nonexistent-path invariant is written **before** the content fixes so its re
 
 ### Step 3: Path canonicalization — one owner (C)
 
-- [ ] Confirm `cafleet/reference/base-dir.md` § *Consumer contract* covers both consumers correctly; extend it if a call site carries a rule the table lacks <!-- completed: -->
-- [ ] Replace the restatement in `create/create.md:58` with a link plus one-clause summary, keeping the accepted-input examples <!-- completed: -->
-- [ ] Same for `execute/execute.md:74` <!-- completed: -->
-- [ ] Same for `interview/interview.md:78` <!-- completed: -->
-- [ ] Same for `presentation/presentation.md:75-77` <!-- completed: -->
-- [ ] Same for `report/report.md` Step 0 <!-- completed: -->
+- [x] Confirm `cafleet/reference/base-dir.md` § *Consumer contract* covers both consumers correctly; extend it if a call site carries a rule the table lacks <!-- completed: 2026-08-03T05:17 -->
+- [x] Replace the restatement in `create/create.md:58` with a link plus one-clause summary, keeping the accepted-input examples <!-- completed: 2026-08-03T05:17 -->
+- [x] Same for `execute/execute.md:74` <!-- completed: 2026-08-03T05:17 -->
+- [x] Same for `interview/interview.md:78` <!-- completed: 2026-08-03T05:17 -->
+- [x] Same for `presentation/presentation.md:75-77` <!-- completed: 2026-08-03T05:17 -->
+- [x] Same for `report/report.md` Step 0 <!-- completed: 2026-08-03T05:17 -->
 
 ### Step 4: Fold invariant Director sections into `supervision.md` (B)
 
