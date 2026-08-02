@@ -1,7 +1,7 @@
 # Drop the root Director from the monitor watched set
 
 **Status**: Approved
-**Progress**: 11/35 tasks complete
+**Progress**: 15/35 tasks complete
 **Last Updated**: 2026-08-02
 
 ## Overview
@@ -222,25 +222,25 @@ the Director "used to be" watched.
 
 ### Step 2: Migration
 
-- [ ] Add `cafleet/migrations/V2__drop_director_monitor_enrollment.sql` with
+- [x] Add `cafleet/migrations/V2__drop_director_monitor_enrollment.sql` with
       the `DELETE FROM monitor_config` statement from the Specification.
-      <!-- completed: -->
-- [ ] `cafleet/src/db/mod.rs` — rename
+      <!-- completed: 2026-08-02T21:24 -->
+- [x] `cafleet/src/db/mod.rs` — rename
       `migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_1`
       to `..._head_2` and change its final assertion to `Some(&2)`; change
       `refinery_ledger_records_the_baseline`'s expected versions to
-      `vec![1, 2]`. <!-- completed: -->
-- [ ] `cafleet/tests/cli_setup_doctor.rs` — update
+      `vec![1, 2]`. <!-- completed: 2026-08-02T21:24 -->
+- [x] `cafleet/tests/cli_setup_doctor.rs` — update
       `schema_only_setup_migrates_and_reports_the_head` to expect
       `applied migrations to head (2).` and
-      `Already at head (2); nothing to do.`. <!-- completed: -->
-- [ ] `cafleet/src/db/mod.rs` — rename
+      `Already at head (2); nothing to do.`. <!-- completed: 2026-08-02T21:24 -->
+- [x] `cafleet/src/db/mod.rs` — rename
       `migrate_reaches_head_version_1_and_is_idempotent` to
       `migrate_reaches_head_version_2_and_is_idempotent` and change both
       `migrate_to_head` return assertions to `2`; drop the stale `` (`1` at
       cutover) `` parenthetical from the `head_version()` doc comment rather
       than re-pinning it to 2, so the comment does not need editing on every
-      future migration. <!-- completed: -->
+      future migration. <!-- completed: 2026-08-02T21:24 -->
 
 ### Step 3: Broker enrollment
 
