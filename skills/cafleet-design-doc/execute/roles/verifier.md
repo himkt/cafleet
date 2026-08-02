@@ -14,8 +14,6 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root scratch / evidence / audit writes or fall back to `/tmp` |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema (and the Phase-1 discovery exemption) — your `COMMENT(verifier)` markers and `complete (doc)` / `escalating` reports get mis-routed |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## Your Accountability
 
 - Load the listed skills at startup. Skill loading: {skill_loader}.

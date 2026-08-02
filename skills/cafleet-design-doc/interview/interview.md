@@ -15,8 +15,6 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 | 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised Analyzer |
 | 4 | [`../reference/coordination.md`](../reference/coordination.md) | the `COMMENT(user-relay)` marker grammar and anchorless-status rules — your inline annotations are malformed |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
 | **Director (Interviewer)** | Main agent | Resolve doc path, parse `question.md` progress, spawn Analyzer, drive decision-surface Q&A rounds, write answers + COMMENT annotations + progress marker | Read the document for question generation (delegated to Analyzer); conduct the Q&A rounds off {decision_surface} | (inline in this workflow body) |
@@ -45,7 +43,7 @@ User
 
 ## Prerequisites
 
-The Director MUST be running inside a tmux or herdr session (required by `cafleet member create`). Verify by running `cafleet doctor` before spawning the Analyzer — it reports the resolved multiplexer backend and the pane's session/window/pane identifiers, and exits non-zero with a clear message when the environment is not ready. If `cafleet doctor` reports a problem, abort and surface its message to the user. Do NOT invoke `tmux display-message`, `printenv TMUX`, or any other raw tmux/env probe — `cafleet doctor` is the only supported environment check (see `skills/cafleet/SKILL.md` § *use cafleet primitives only*).
+The Director MUST be running inside a tmux or herdr session and pass the gating `cafleet doctor` env-check before spawning the Analyzer, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*.
 
 ## Context Management Strategy
 
@@ -107,7 +105,7 @@ cafleet fleet create --name "design-doc-interview-{slug}" --coding-agent <backen
 
 `--coding-agent <backend>` — substitute the coding agent you are actually running on: your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity (e.g. Claude Code → `claude`).
 
-Capture `fleet_id` and `director.member_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids.
+Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
 
 #### 2b. Spawn the monitoring member (first-in)
 
@@ -119,7 +117,7 @@ See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member
 
 Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it with `Read` on its first turn. Do NOT inline the role content — `cafleet member create` fails with `tmux command failed: command too long` once the shell-quoted prompt grows past a few KB. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up.
 
-> **Spawn-prompt audit file**: the spawn below writes the rendered prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` before invoking `cafleet member create --text-file <abs path>` — the pre-spawn file is both the CLI input and the permanent audit artifact. The `<UTC-compact>` format, the identity-placeholders-pre-substitution note, and the `${BASE} == <unset>` guarded-skip + inline-fallback branch are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files*.
+> **Spawn-prompt audit file**: the spawn below renders the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` and spawns from that file, per the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol*.
 
 #### 2d. Spawn the Analyzer
 

@@ -14,8 +14,6 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema (and the Step-2 clarification exemption) — you coordinate in free-form bodies and findings get lost / mis-routed |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## Placeholder convention
 
 Your tokens: `<fleet-id>`, `<director-member-id>`, `<drafter-member-id>`, `<reviewer-member-id>`, `<member-id>` — substitute the literal integer ids from `cafleet fleet create` (which returns the fleet id AND the root Director's `member_id`) and `cafleet member create`. The rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.

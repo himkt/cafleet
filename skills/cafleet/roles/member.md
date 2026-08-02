@@ -21,8 +21,6 @@ At startup — before you process your first task (the `ready` handshake in the 
 |------|------------------|------------------------------|
 | [`reference/prompt-routing.md`](../reference/prompt-routing.md) | route a Bash-denied command to the Director | the reconsider-then-route protocol and the dispatch shape — you stall, fabricate output, or prompt the operator needlessly |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## On spawn — send the ready signal (FIRST ACTION)
 
 Your very first Bash call sends a `ready` message to the Director (it matches the literal `ready` prefix to detect you are alive and dispatches your first task on that tick). Substitute the literal integers from your spawn prompt's `FLEET ID:` / `YOUR MEMBER ID:` / `DIRECTOR MEMBER ID:` lines:

@@ -15,8 +15,6 @@ At startup, identify your coding agent first — your spawn prompt's `CODING AGE
 | 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{bg_run}` / `{monitor_model}` / `{permission_flags}` (can't background the heartbeat), **or** guess a wrong/default value, **or** ignore a backend note |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + heartbeat mechanism you serve (Monitor Lifecycle, Idle Semantics, the 5-step facilitation loop) — you can't run the heartbeat or serve the Director correctly |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## On-wake command boundary
 
 Your synchronized-wake routine uses exactly three command families:

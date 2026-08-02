@@ -14,8 +14,6 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root the spawn-prompt audit files or fall back to `/tmp` |
 | 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised team |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
 | **Director** | Main agent | Bootstrap CAFleet fleet, spawn members, review all deliverables, demand revisions, run Slidev server lifecycle and `agent-browser close --all` safety net | Create slides/transcript, conduct research, modify report, run agent-browser browser-operation commands (except close --all) | [roles/director.md](roles/director.md) |
@@ -43,7 +41,7 @@ User
 
 Members cannot talk to the user directly — the Director always relays.
 
-> **Literal-integer-id flag rule** — every `cafleet ...` invocation carries the literal `fleet_id` / `member_id` integer ids as flags (per-subcommand, after the subcommand name), never shell variables; substitute the integer ids printed by `cafleet fleet create` / `cafleet member create` directly. See the `cafleet` skill for the full convention.
+> **Literal-integer-id flag rule** — every `cafleet ...` call carries the literal integer ids as per-subcommand flags; the convention is canonical in the `cafleet` skill § *Required Flags*.
 
 ## Director Process
 
@@ -95,9 +93,9 @@ cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --js
 
 `--coding-agent <backend>` — substitute the coding agent you are actually running on: your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity (e.g. Claude Code → `claude`).
 
-`cafleet doctor` confirms the Director is inside a tmux or herdr session (a hard requirement of `cafleet member create`). On non-zero exit, abort and surface the error to the user — do NOT attempt raw `tmux` probes as a workaround.
+This is the gating env-check per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*.
 
-`cafleet fleet create` atomically creates the fleet and registers a root Director bound to the current tmux pane. Capture `fleet_id` and `director.member_id` from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
+Capture `fleet_id` and `director.member_id` from the JSON response and substitute them into every subsequent `cafleet ...` call, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
 
 #### 1b. Spawn the monitoring member (first-in)
 
@@ -113,7 +111,7 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 - `roles/transcript.md`
 - `roles/visual-reviewer.md`
 
-> **Spawn mechanics**: path-by-reference is required because `cafleet member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The CLI runs `str.format` over the prompt, rendering the four `{fleet_id}` / `{director_member_id}` / `{member_id}` / `{coding_agent}` identity placeholders to literals at spawn — double any literal brace as `{{` / `}}` and leave no other stray single braces. **Two-step audit file**: write the rendered prompt to `${BASE}/.prompts/<role>-<UTC-compact>.md` before `cafleet member create --text-file <abs path>` — the pre-spawn file is both the CLI input and the permanent audit artifact. The placeholders-pre-substitution note and the `${BASE} == <unset>` guarded-skip + inline fallback are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files*.
+> **Spawn mechanics**: render each spawn prompt to `${BASE}/.prompts/<role>-<UTC-compact>.md` and spawn from that file by path — the two-step, the path-by-reference requirement, and the brace-doubling rule are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol*.
 
 #### 1d. Spawn Presentation + Transcript in parallel
 

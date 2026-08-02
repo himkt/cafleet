@@ -20,8 +20,6 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 |------|------------------|------------------------------|
 | [`../../reference/visualization.md`](../../reference/visualization.md) | render a chart / figure (the report has data better shown as a chart) | the Chart Type Selection and Color Rules — your figures pick the wrong chart type or off-palette colors |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## Core Rules
 
 - **Load skills first.** Skill loading: {skill_loader}. Follow the rules in each loaded skill exactly.

@@ -30,8 +30,6 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 |------|------|
 | [`reference/cli.md`](../reference/cli.md) § *Output flags* | you need `--full` / `--json` opt-back-in semantics |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## Model selection
 
 Choose the backend/model pair from [`reference/model-list.md`](../reference/model-list.md) for these spawns; every other spawn keeps the existing workflow behavior (omit `--model` so the binary uses its default, with the normal backend inheritance). Pick the backend first — the fleet's backend unless the user names one — then compare within that backend's table, which is ordered most → least capable (an opencode model keeps its `opencode/` prefix). Pass the pair as `--coding-agent` / `--model`:

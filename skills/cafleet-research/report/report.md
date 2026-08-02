@@ -14,8 +14,6 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root the spawn-prompt audit files and `${OUTPUT_DIR}` or fall back to `/tmp` |
 | 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised team |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
 | **Director** | Main agent | Bootstrap CAFleet fleet, spawn all members, relay Manager requests, review all deliverables, present to user | Write the report, decompose topics, conduct research | [roles/director.md](roles/director.md) |
@@ -49,7 +47,7 @@ User
 
 Members cannot talk to the user directly — the Director always relays. Members cannot talk to each other directly either — Manager requests are always mediated by the Director (Manager → Director → Scout/Researcher, and Scout/Researcher → Director → Manager).
 
-> **Literal-integer-id flag rule** — substitute the integer ids printed by `cafleet fleet create` and `cafleet member create` directly into every `cafleet ...` call (the harness matches Bash invocations as literal command strings). Never store IDs in shell variables. `--fleet-id` and the member-identity options (`--member-id`, `--from-member-id`, `--to-member-id`) are per-subcommand options (placed AFTER the subcommand name). See the `cafleet` skill for the full convention.
+> **Literal-integer-id flag rule** — every `cafleet ...` call carries the literal integer ids as per-subcommand flags; the convention is canonical in the `cafleet` skill § *Required Flags*.
 
 ## Process
 
@@ -66,11 +64,11 @@ Before creating the team, resolve the task-scoped base directory for this run.
 
 ### Step 0a: Environment Precheck (Director — MANDATORY)
 
-Run `cafleet doctor` to confirm the Director is inside a tmux or herdr session with valid pane identifiers (a hard requirement of `cafleet member create`). On non-zero exit, abort and surface the error to the user — do NOT attempt raw `tmux` probes as a workaround.
+Run the gating `cafleet doctor` env-check per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*.
 
 ### Step 0b: Bootstrap CAFleet Fleet (Director — MANDATORY)
 
-`cafleet fleet create` atomically creates the fleet and registers a root Director bound to the current tmux pane. Capture the `fleet_id` and `director.member_id` integer ids from the JSON response and substitute them as literal strings into every subsequent `cafleet ...` call (never shell variables — the harness matches Bash invocations as literal command strings).
+Capture the `fleet_id` and `director.member_id` integer ids from the JSON response and substitute them into every subsequent `cafleet ...` call, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
 
 ```bash
 cafleet fleet create --name "research-[topic-slug]" --coding-agent <backend> --json
@@ -116,7 +114,7 @@ The Director references each role definition by its **absolute path** in the spa
 
 Substitute these absolute paths into the spawn prompts below.
 
-> **Spawn mechanics**: path-by-reference is required because `cafleet member create` passes the prompt to `tmux split-window` as one positional arg and fails with `command too long` past a few KB (see the `cafleet` skill's `reference/director.md` § *Spawn prompt size limit*). The CLI runs `str.format` over the prompt, rendering the four `{fleet_id}` / `{director_member_id}` / `{member_id}` / `{coding_agent}` identity placeholders to literals at spawn — double any literal brace as `{{` / `}}` and leave no other stray single braces. **Two-step audit file**: write the rendered prompt to `${BASE}/.prompts/<role>-<UTC-compact>.md` before `cafleet member create --text-file <abs path>` — the pre-spawn file is both the CLI input and the permanent audit artifact. The placeholders-pre-substitution note and the `${BASE} == <unset>` guarded-skip + inline fallback are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files*.
+> **Spawn mechanics**: render each spawn prompt to `${BASE}/.prompts/<role>-<UTC-compact>.md` and spawn from that file by path — the two-step, the path-by-reference requirement, and the brace-doubling rule are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol*.
 
 #### 2c. Spawn the Manager
 

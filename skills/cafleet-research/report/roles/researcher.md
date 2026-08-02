@@ -14,8 +14,6 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root your `NN-research-*.md` output or fall back to `/tmp` |
 | 3 | the embedded web-researcher spec [`web-researcher.md`](web-researcher.md) | the research methodology (Discovery Phase, query formulation, fact verification, output format) you delegate every web-research turn to — you'd search ad hoc and return shallow, under-sourced findings |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 ## Your Accountability
 
 - Load the listed skills at startup. Skill loading: {skill_loader}. Delegate every web-research turn (Discovery Phase, follow-up queries, source synthesis) to the embedded **web-researcher** agent: read its canonical spec + dispatch recipe at [`web-researcher.md`](web-researcher.md) (this skill's `roles/` directory) and follow it. The spec owns the research methodology (Discovery Phase, query formulation, synthesis, output format); do NOT call `WebSearch` / `WebFetch` directly except for trivial single-page fact lookups it already returned URLs for.

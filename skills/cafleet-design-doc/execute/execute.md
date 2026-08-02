@@ -15,8 +15,6 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 | 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, the facilitation loop) — you spawn an unsupervised team |
 | 4 | [`../reference/coordination.md`](../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema — you coordinate in free-form bodies and findings get mis-routed |
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the documented default); a literal `{token}` in any command or message is a defect.
-
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
 | **Director** | Main agent | Register with CAFleet, spawn members via `cafleet member create`, validate doc, assign steps, review tests against design doc, review implementation code for quality and compliance, commit after each phase, escalation arbitration, orchestrate TDD cycle | Write code, write tests | [roles/director.md](roles/director.md) |
@@ -54,7 +52,7 @@ User
 
 ## Prerequisites
 
-- The Director MUST be running inside a tmux or herdr session (required by `cafleet member create`). Verify by running `cafleet doctor` before spawning anyone — it reports the resolved multiplexer backend and the pane's session/window/pane identifiers, and exits non-zero with a clear message when the environment is not ready. If `cafleet doctor` reports a problem, abort and surface its message to the user. Do NOT invoke `tmux display-message`, `printenv TMUX`, or any other raw tmux/env probe — `cafleet doctor` is the only supported environment check (see `skills/cafleet/SKILL.md` § *use cafleet primitives only*).
+- The Director MUST be running inside a tmux or herdr session and pass the gating `cafleet doctor` env-check before spawning anyone, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*.
 - `gh` must be authenticated for the Step 7 push / PR creation. Lack of auth is NOT fatal — the Director checks `gh auth status` at Step 7a and falls back to Step 8 local-finalize, skipping the PR. All other prerequisites (tmux, approved design doc, feature branch) remain unchanged.
 
 ## Process
@@ -159,7 +157,7 @@ cafleet fleet create --name "design-doc-execute-{slug}" --coding-agent <backend>
 
 `--coding-agent <backend>` — substitute the coding agent you are actually running on: your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity (e.g. Claude Code → `claude`).
 
-Capture `fleet_id` and `director.member_id` from the JSON response. Substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command. **Do not store them in shell variables** — `permissions.allow` matches command strings literally, so every command must carry the literal ids. Remember: `--fleet-id` and the member-identity options (`--member-id`, `--from-member-id`, `--to-member-id`) are per-subcommand options that go **after** the subcommand name.
+Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
 
 If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `member_id` instead of creating a new fleet — the root Director from `fleet create` is the team lead.
 
@@ -191,7 +189,7 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 
 Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below. The skeleton's identity lines carry the CLI's four `{fleet_id}` / `{director_member_id}` / `{member_id}` / `{coding_agent}` placeholders, rendered to literals by `cafleet member create` at spawn; the `[INSERT …]` markers (`[INSERT DESIGN DOC PATH]`, `[INSERT abs path to roles/<role>.md]`) are rendered by the Director first (leave no stray single braces other than the four identity placeholders; double any literal brace as `{{` / `}}`). All three roles load `cafleet` + `cafleet-design-doc` and take `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` as their only context line; each delta below gives the role's title, role-file, IMPORTANT lines (verbatim), and start cue.
 
-> **Spawn-prompt audit file (two-step pattern)**: render each spawn prompt and **write** it to `${BASE}/.prompts/<role>-<UTC-compact>.md` before invoking `cafleet member create --text-file <abs path>` — the pre-spawn file is both the CLI input and the permanent audit artifact. The `<UTC-compact>` format, the same-second collision rule, the identity-placeholders-pre-substitution note, and the `${BASE} == <unset>` guarded-skip + inline-fallback branch are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol* and its `reference/director.md` § *Member Create — Scratch and audit files*.
+> **Spawn-prompt audit file (two-step pattern)**: render each spawn prompt to `${BASE}/.prompts/<role>-<UTC-compact>.md` and spawn from that file, per the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol*.
 
 **Programmer spawn prompt** (skeleton + delta):
 

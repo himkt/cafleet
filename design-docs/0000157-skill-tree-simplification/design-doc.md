@@ -1,7 +1,7 @@
 # Skill Tree Simplification
 
 **Status**: Approved
-**Progress**: 24/34 tasks complete
+**Progress**: 28/34 tasks complete
 **Last Updated**: 2026-08-03
 
 ## Overview
@@ -200,10 +200,10 @@ The nonexistent-path invariant is written **before** the content fixes so its re
 
 ### Step 5: Shared team-bootstrap preamble (A)
 
-- [ ] A1: remove the trailing resolve sentence from all 27 files, confirming per file that Required-reading row #1 is present before removing; flag to the Director any file that has the sentence without the row rather than choosing silently <!-- completed: -->
-- [ ] A2: move the `cafleet doctor` prerequisites and the `fleet create` + never-shell-variables block into `supervision.md` § *Spawn Protocol*; replace each of the 5 sites with a one-clause pointer <!-- completed: -->
-- [ ] A2: move the spawn-prompt audit-file two-step and the spawn-mechanics / path-by-reference blockquote into `base-dir.md` § *No-bypass write protocol*; replace each site with a one-clause pointer <!-- completed: -->
-- [ ] Verify no `IMPORTANT:` line, hard role-constraint, or start cue was collapsed in any per-role delta (the lossless rule), and that every Required-reading table is byte-unchanged <!-- completed: -->
+- [x] A1: remove the trailing resolve sentence from all 27 files, confirming per file that Required-reading row #1 is present before removing; flag to the Director any file that has the sentence without the row rather than choosing silently <!-- completed: 2026-08-03T05:34 -->
+- [x] A2: move the `cafleet doctor` prerequisites and the `fleet create` + never-shell-variables block into `supervision.md` § *Spawn Protocol*; replace each of the 5 sites with a one-clause pointer <!-- completed: 2026-08-03T05:34 -->
+- [x] A2: move the spawn-prompt audit-file two-step and the spawn-mechanics / path-by-reference blockquote into `base-dir.md` § *No-bypass write protocol*; replace each site with a one-clause pointer <!-- completed: 2026-08-03T05:34 -->
+- [x] Verify no `IMPORTANT:` line, hard role-constraint, or start cue was collapsed in any per-role delta (the lossless rule), and that every Required-reading table is byte-unchanged <!-- completed: 2026-08-03T05:34 -->
 
 ### Step 6: Promote and verify
 
