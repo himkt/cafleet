@@ -1,7 +1,7 @@
 # Drop the root Director from the monitor watched set
 
 **Status**: Approved
-**Progress**: 15/35 tasks complete
+**Progress**: 18/35 tasks complete
 **Last Updated**: 2026-08-02
 
 ## Overview
@@ -332,19 +332,19 @@ the Director "used to be" watched.
 
 ### Step 6: WebUI expectations
 
-- [ ] `cafleet/tests/webui_routes.rs` — in
+- [x] `cafleet/tests/webui_routes.rs` — in
       `the_roster_wraps_members_and_projects_the_monitor_config`, assert the
       Director's `monitor` is `Value::Null` and move the full projection-shape
       assertion (`{"interval_seconds": 720, "last_ping_at": null, "enabled": true}`)
-      onto the ordinary member's row. <!-- completed: -->
-- [ ] `cafleet/tests/webui_routes.rs` — in
+      onto the ordinary member's row. <!-- completed: 2026-08-02T21:28 -->
+- [x] `cafleet/tests/webui_routes.rs` — in
       `member_monitor_get_returns_the_exact_projection_or_404`, add a case
       asserting `GET /api/members/{director_id}/monitor` returns `404` with
-      `{"detail":"Member not enrolled"}`. <!-- completed: -->
-- [ ] `cafleet/tests/webui_routes.rs` — in
+      `{"detail":"Member not enrolled"}`. <!-- completed: 2026-08-02T21:28 -->
+- [x] `cafleet/tests/webui_routes.rs` — in
       `the_monitor_endpoint_reports_and_masks_the_runtime`, change the expected
       `members` length to 1 and assert the Director's `member_id` is absent from
-      the rows. <!-- completed: -->
+      the rows. <!-- completed: 2026-08-02T21:28 -->
 
 ### Step 7: Verification
 
