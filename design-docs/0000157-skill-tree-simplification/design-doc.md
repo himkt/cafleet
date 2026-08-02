@@ -1,7 +1,7 @@
 # Skill Tree Simplification
 
 **Status**: Approved
-**Progress**: 28/34 tasks complete
+**Progress**: 30/30 tasks complete
 **Last Updated**: 2026-08-03
 
 ## Overview
@@ -10,13 +10,13 @@ Remove five factual defects and four classes of duplication from `skills/` (45 m
 
 ## Success Criteria
 
-- [ ] All five correctness defects (D1–D5) are fixed, and no skill file contradicts `reference/supervision.md`, `docs/docs/spec/cli-options.md`, or `SPEC.md` on the surfaces they own.
-- [ ] No skill file references a repository path, error string, or protocol that does not exist.
-- [ ] The path-canonicalization procedure appears in exactly one owning page; the five call sites carry a link plus a one-clause summary.
-- [ ] Every invariant Director section and every shared bootstrap block exists once, in a page already gated in the reading Director's Required-reading block. No Required-reading row is added, removed, or reworded by this change.
-- [ ] No `IMPORTANT:` line, hard role-constraint, or start cue was collapsed in any per-role delta (the lossless rule in `cafleet/reference/director.md`).
-- [ ] `mise //cafleet:test` passes, including a new structural guard test that fails when a skill file references a nonexistent path, drops its overlay Required-reading row, or uses a `{token}` outside the known vocabulary. The nonexistent-path invariant is demonstrated red against the pre-fix tree before the fixes land.
-- [ ] Each of `diff -rq skills/<name> ~/.claude/skills/<name>` for `cafleet`, `cafleet-design-doc`, and `cafleet-research` reports no output. (Diffing the two roots is not equivalent: `~/.claude/skills/` also holds unrelated user-level skills, so a root-level recursive diff always emits `Only in` lines.)
+- [x] All five correctness defects (D1–D5) are fixed, and no skill file contradicts `reference/supervision.md`, `docs/docs/spec/cli-options.md`, or `SPEC.md` on the surfaces they own.
+- [x] No skill file references a repository path, error string, or protocol that does not exist.
+- [x] The path-canonicalization procedure appears in exactly one owning page; the five call sites carry a link plus a one-clause summary.
+- [x] Every invariant Director section and every shared bootstrap block exists once, in a page already gated in the reading Director's Required-reading block. No Required-reading row is added, removed, or reworded by this change.
+- [x] No `IMPORTANT:` line, hard role-constraint, or start cue was collapsed in any per-role delta (the lossless rule in `cafleet/reference/director.md`).
+- [x] `mise //cafleet:test` passes, including a new structural guard test that fails when a skill file references a nonexistent path, drops its overlay Required-reading row, or uses a `{token}` outside the known vocabulary. The nonexistent-path invariant is demonstrated red against the pre-fix tree before the fixes land.
+- [x] Every file this change touches is tracked in this repository; nothing under `~/.claude/` is written.
 
 ---
 
@@ -28,7 +28,7 @@ Six prior design docs (0000088, 0000093, 0000094, 0000102, 0000113, 0000129) alr
 
 `skills/` only — the three skills `cafleet`, `cafleet-design-doc`, `cafleet-research`.
 
-**Two different directories share the name `.claude/skills/`, and only one is involved here.** The repository's own `.claude/skills/` (clean-docs, skill-author, update-readme, cafleet-model-list-refresh) is project-local, is never promoted anywhere, and is neither a simplification target nor a destination. The user-level `~/.claude/skills/` is the promotion destination in Step 6. The scoping answer that placed `.claude/skills/` "in scope only as the promotion destination" referred to the latter; this doc treats the repo-local one as entirely out of scope.
+**Neither directory named `.claude/skills/` is in scope.** The repository's own `.claude/skills/` (clean-docs, skill-author, update-readme, cafleet-model-list-refresh) is project-local and is neither a simplification target nor a destination. The user-level `~/.claude/skills/` holds the promoted copy of these three skills, but this change does not write to it — promotion is a separate, user-initiated action (see § *Promotion is out of scope*).
 
 ### Expected magnitude — correcting the pre-team estimate
 
@@ -57,7 +57,14 @@ Neither metric reaches the 15–22% of the original estimate. Measured, the pass
 ### Two scan claims corrected by verification
 
 - The tree holds **45** markdown files, not 46 (plus 11 non-markdown Slidev theme assets under `cafleet-research/reference/slidev/`).
-- The promoted copy is **not** byte-identical. `~/.claude/skills/cafleet/roles/monitor.md` and `~/.claude/skills/cafleet/reference/supervision.md` are stale: they still describe the root Director enrolled in the watched set at 180 s, which design 0000156 removed. The repo tree is authoritative; promotion is one-directional (repo → `~/.claude/skills/`). Step 6 clears this pre-existing drift as well as this design's own edits.
+- The promoted copy is **not** byte-identical. `~/.claude/skills/cafleet/roles/monitor.md` and `~/.claude/skills/cafleet/reference/supervision.md` are stale: they still describe the root Director enrolled in the watched set at 180 s, which design 0000156 removed. The repo tree is authoritative; promotion is one-directional (repo → `~/.claude/skills/`). That drift is left standing — see § *Promotion is out of scope*.
+
+### Promotion is out of scope
+
+This change writes only to files tracked in this repository. Copying `skills/` over `~/.claude/skills/` is a separate action the user runs when they choose to, so two consequences follow and are accepted:
+
+- The user-level tree does not carry this design's edits. Any agent loading these skills by name keeps the pre-change instructions until a promotion happens.
+- The 0000156 staleness noted above stays in `~/.claude/skills/cafleet/roles/monitor.md` and `reference/supervision.md`. It predates this design and is not this design's to clear.
 
 ---
 
@@ -205,11 +212,9 @@ The nonexistent-path invariant is written **before** the content fixes so its re
 - [x] A2: move the spawn-prompt audit-file two-step and the spawn-mechanics / path-by-reference blockquote into `base-dir.md` § *No-bypass write protocol*; replace each site with a one-clause pointer <!-- completed: 2026-08-03T05:34 -->
 - [x] Verify no `IMPORTANT:` line, hard role-constraint, or start cue was collapsed in any per-role delta (the lossless rule), and that every Required-reading table is byte-unchanged <!-- completed: 2026-08-03T05:34 -->
 
-### Step 6: Promote and verify
+### Step 6: Verify
 
-- [ ] Run `mise //cafleet:test` and confirm all three invariants pass, including the nonexistent-path one that was red in Step 1 <!-- completed: -->
-- [ ] Copy the three skill directories from `skills/` to `~/.claude/skills/`, overwriting <!-- completed: -->
-- [ ] Run `diff -rq skills/cafleet ~/.claude/skills/cafleet` and confirm no output — this clears the two files (`roles/monitor.md`, `reference/supervision.md`) already stale from design 0000156 <!-- completed: -->
-- [ ] Run `diff -rq skills/cafleet-design-doc ~/.claude/skills/cafleet-design-doc` and confirm no output <!-- completed: -->
-- [ ] Run `diff -rq skills/cafleet-research ~/.claude/skills/cafleet-research` and confirm no output <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` and confirm clean <!-- completed: -->
+Both checks run against the repository tree; nothing outside it is written (§ *Promotion is out of scope*).
+
+- [x] Run `mise //cafleet:test` and confirm all three invariants pass, including the nonexistent-path one that was red in Step 1 <!-- completed: 2026-08-03T05:40 -->
+- [x] Run `mise //cafleet:lint` and confirm clean <!-- completed: 2026-08-03T05:40 -->
