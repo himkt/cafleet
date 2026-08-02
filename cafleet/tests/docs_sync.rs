@@ -3,7 +3,7 @@
 //! member's two-wake in-context judgment, the `member ping`
 //! pending-placement skip, and the `monitor` group surface.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -308,4 +308,263 @@ fn the_readme_and_webui_api_stay_free_of_internal_monitor_state() {
     readme_absent.extend(REMOVED_VOCABULARY);
     assert_absent("README.md", &readme_absent);
     assert_absent("docs/docs/spec/webui-api.md", &REMOVED_VOCABULARY);
+}
+
+// ---------------------------------------------------------------------------
+// Structural guards over the `skills/` tree.
+//
+// These are static checks over the whole tree rather than per-page term
+// assertions: they fail when a skill file points at a path that does not
+// exist, drops the gated overlay read from its Required-reading block, or
+// introduces a `{token}` that no overlay defines.
+// ---------------------------------------------------------------------------
+
+fn skill_markdown_files() -> Vec<String> {
+    let mut files = Vec::new();
+    collect_markdown(&root().join("skills"), &mut files);
+    files.sort();
+    files
+}
+
+fn collect_markdown(dir: &Path, out: &mut Vec<String>) {
+    let entries = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("cannot read directory {}: {e}", dir.display()));
+    for entry in entries {
+        let path = entry.expect("a readable directory entry").path();
+        if path.is_dir() {
+            collect_markdown(&path, out);
+        } else if path.extension().is_some_and(|extension| extension == "md") {
+            let relative = path
+                .strip_prefix(root())
+                .expect("every skill file sits under the repo root");
+            out.push(relative.to_string_lossy().into_owned());
+        }
+    }
+}
+
+/// Prose lines paired with their 1-based line number, with fenced blocks
+/// dropped: those hold sample code (Python format strings, LaTeX, shell) whose
+/// braces and slashes are not documentation references.
+fn prose_lines(text: &str) -> Vec<(usize, String)> {
+    let mut kept = Vec::new();
+    let mut inside_fence = false;
+    for (index, line) in text.lines().enumerate() {
+        if line.trim_start().starts_with("```") {
+            inside_fence = !inside_fence;
+            continue;
+        }
+        if !inside_fence {
+            kept.push((index + 1, line.to_string()));
+        }
+    }
+    kept
+}
+
+fn inline_code_spans(text: &str) -> Vec<String> {
+    regex::Regex::new(r"`([^`\n]+)`")
+        .unwrap()
+        .captures_iter(text)
+        .map(|captures| captures[1].to_string())
+        .collect()
+}
+
+/// First path segments that name a real top-level directory of the repo.
+///
+/// `design-docs/` is deliberately absent: every `design-docs/...` mention in
+/// `skills/` is an illustrative user-supplied argument (`design-docs/0000060-foo`),
+/// not a reference to a file that must exist.
+const REPO_RELATIVE_PREFIXES: [&str; 5] = ["cafleet/", "skills/", "docs/", "admin/", "presets/"];
+
+fn path_candidates(span: &str) -> Vec<String> {
+    let trailing_locator = regex::Regex::new(r":\d+(-\d+)?$").unwrap();
+    span.split_whitespace()
+        .map(|raw| {
+            let token = raw.trim_start_matches(['(', '[', '{', '<', '"', '\'']);
+            let token = token.trim_end_matches([')', ']', '}', '"', '\'', ',', ';', '.', '!', '?']);
+            let token = token.split('#').next().unwrap_or(token);
+            trailing_locator.replace(token, "").into_owned()
+        })
+        .collect()
+}
+
+/// A candidate is checked only when it reads as a repo-relative path. URLs,
+/// globs, `<placeholder>` forms, and `${VAR}` interpolations are legitimate
+/// slash-bearing text that names no fixed file.
+fn looks_repo_relative(candidate: &str) -> bool {
+    REPO_RELATIVE_PREFIXES
+        .iter()
+        .any(|prefix| candidate.starts_with(prefix))
+        && !candidate.contains("://")
+        && !candidate.contains(['*', '<', '>', '$', '{', '}', '~', '|'])
+}
+
+/// Skill pages address each other by skill-relative path (`cafleet/SKILL.md`)
+/// and address the repo by repo-relative path (`docs/docs/spec/cli-options.md`),
+/// so a candidate resolving under either root is a live reference.
+fn resolves_somewhere(candidate: &str) -> bool {
+    root().join(candidate).exists() || root().join("skills").join(candidate).exists()
+}
+
+#[test]
+fn skill_files_reference_no_path_that_is_missing_from_disk() {
+    let mut dangling = Vec::new();
+    for relative_path in skill_markdown_files() {
+        for (line_number, line) in prose_lines(&read(&relative_path)) {
+            for span in inline_code_spans(&line) {
+                for candidate in path_candidates(&span) {
+                    if looks_repo_relative(&candidate) && !resolves_somewhere(&candidate) {
+                        dangling.push(format!("{relative_path}:{line_number} → {candidate}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        dangling.is_empty(),
+        "skill files reference repository paths that do not exist: {dangling:#?}"
+    );
+}
+
+/// The one role file that carries no Required-reading block: it is an agent
+/// spec pasted verbatim into a dispatched sub-agent's prompt, not an entry
+/// point for a spawned member.
+const ROLE_FILE_WITHOUT_REQUIRED_READING: &str =
+    "skills/cafleet-research/report/roles/web-researcher.md";
+
+#[test]
+fn every_role_file_gates_its_overlay_as_required_reading_row_one() {
+    assert!(
+        root().join(ROLE_FILE_WITHOUT_REQUIRED_READING).exists(),
+        "the exempt role file {ROLE_FILE_WITHOUT_REQUIRED_READING} moved — retarget the exemption"
+    );
+
+    let heading = regex::Regex::new(r"(?m)^#+[ \t]+Required[ -]reading").unwrap();
+    let mut offenders = Vec::new();
+    for relative_path in skill_markdown_files() {
+        let text = read(&relative_path);
+        // A role file must *have* the block: folding content out of one must
+        // never carry the gated overlay read away with it. Other skill pages
+        // are checked for content only, since not all of them gate reads.
+        let block_is_mandatory = relative_path.contains("/roles/")
+            && relative_path != ROLE_FILE_WITHOUT_REQUIRED_READING;
+        let Some(block) = heading.find(&text) else {
+            if block_is_mandatory {
+                offenders.push(format!(
+                    "{relative_path} → role file has no Required-reading block"
+                ));
+            }
+            continue;
+        };
+        match text[block.end()..]
+            .lines()
+            .find(|line| line.trim_start().starts_with("| 1 |"))
+        {
+            None => offenders.push(format!("{relative_path} → no row #1 in the block")),
+            Some(row) if !row.contains("overlay") => {
+                offenders.push(format!(
+                    "{relative_path} → row #1 does not name the overlay"
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "every role file must gate the reader's overlay as Required-reading row #1: {offenders:#?}"
+    );
+}
+
+/// The ten placeholders every backend overlay resolves.
+const OVERLAY_PLACEHOLDERS: [&str; 10] = [
+    "decision_surface",
+    "monitor_model",
+    "reviewer_model",
+    "permission_flags",
+    "bg_run",
+    "bg_stop",
+    "task_coord",
+    "pane_title",
+    "skill_loader",
+    "effort_levels",
+];
+
+/// The four identity placeholders `cafleet member create` substitutes at spawn.
+const FORMAT_PLACEHOLDERS: [&str; 4] = [
+    "fleet_id",
+    "member_id",
+    "director_member_id",
+    "coding_agent",
+];
+
+/// Brace tokens that are deliberately not overlay placeholders. Each has a
+/// documented home outside the overlay mechanism, so a token entering the tree
+/// without one still fails this check.
+const NON_OVERLAY_TOKENS: [&str; 7] = [
+    // Meta-references: prose describing the resolution rule itself.
+    "token",
+    "placeholder",
+    // Workflow-local path variables.
+    "slug",
+    "dir_path",
+    // web-researcher discovery-query examples.
+    "topic",
+    "current_year",
+    "current_month",
+];
+
+#[test]
+fn every_brace_token_in_skills_belongs_to_the_known_vocabulary() {
+    let token = regex::Regex::new(r"\{([A-Za-z_][A-Za-z0-9_]*)\}").unwrap();
+    let mut unknown = Vec::new();
+    for relative_path in skill_markdown_files() {
+        for (_, line) in prose_lines(&read(&relative_path)) {
+            for captures in token.captures_iter(&line) {
+                let occurrence = captures.get(0).expect("the whole match");
+                // `${VAR}` is shell interpolation and `@{upstream}` is git
+                // revision syntax — neither draws from the overlay vocabulary.
+                if matches!(
+                    line[..occurrence.start()].chars().next_back(),
+                    Some('$' | '@')
+                ) {
+                    continue;
+                }
+                let name = &captures[1];
+                let known = OVERLAY_PLACEHOLDERS.contains(&name)
+                    || FORMAT_PLACEHOLDERS.contains(&name)
+                    || NON_OVERLAY_TOKENS.contains(&name);
+                if !known {
+                    unknown.push(format!("{relative_path} → {{{name}}}"));
+                }
+            }
+        }
+    }
+    unknown.sort();
+    unknown.dedup();
+    assert!(
+        unknown.is_empty(),
+        "these tokens resolve to a literal brace at spawn — give each an overlay value \
+         or a documented home: {unknown:#?}"
+    );
+}
+
+#[test]
+fn every_backend_overlay_defines_the_full_placeholder_vocabulary() {
+    for overlay in [
+        "claude-overlay.md",
+        "codex-overlay.md",
+        "opencode-overlay.md",
+        "_template.md",
+    ] {
+        let relative_path = format!("skills/cafleet/reference/coding-agent/{overlay}");
+        let text = read(&relative_path);
+        let missing: Vec<&str> = OVERLAY_PLACEHOLDERS
+            .iter()
+            .filter(|placeholder| !text.contains(&format!("{{{placeholder}}}")))
+            .copied()
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "{relative_path} leaves placeholders undefined: {missing:?}"
+        );
+    }
 }

@@ -1,7 +1,7 @@
 # Skill Tree Simplification
 
 **Status**: Approved
-**Progress**: 0/34 tasks complete
+**Progress**: 4/34 tasks complete
 **Last Updated**: 2026-08-02
 
 ## Overview
@@ -151,7 +151,7 @@ Three invariants. Each is a static check over the repo tree, and each fails on a
 
 The path check must tolerate the legitimate non-path uses of slash-bearing text (URLs, glob patterns, `<placeholder>` forms). It asserts over paths that look repo-relative and resolve under the repo root.
 
-**Why the token invariant is a vocabulary check, not an "unresolved token" check.** Base files carrying `{skill_loader}` / `{monitor_model}` / `{decision_surface}` for the reader to resolve *is* the overlay mechanism `.claude/rules/coding-agent-overlay.md` mandates — 37 of the 45 files carry such a token deliberately, so a test forbidding them would fail on the tree's intended design. The defect worth catching statically is a token entering the vocabulary without a home: the check asserts every brace token in `skills/` is one of the ten overlay placeholders or one of the four `str.format` identity placeholders (`{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}`), and that each of the three overlays plus `_template.md` defines all ten. The emission-time self-check in `cafleet/SKILL.md` § *Resolve your overlay* — a token surviving into a rendered prompt or a sent message — is an agent-runtime concern with no artifact in the repo, so no static test can cover it.
+**Why the token invariant is a vocabulary check, not an "unresolved token" check.** Base files carrying `{skill_loader}` / `{monitor_model}` / `{decision_surface}` for the reader to resolve *is* the overlay mechanism `.claude/rules/coding-agent-overlay.md` mandates — 37 of the 45 files carry such a token deliberately, so a test forbidding them would fail on the tree's intended design. The defect worth catching statically is a token entering the vocabulary without a home: the check asserts every brace token in `skills/` is one of the ten overlay placeholders, one of the four `str.format` identity placeholders (`{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}`), or one of a small named set that has a documented home outside the overlay mechanism — `{token}` / `{placeholder}` (meta-references inside the resolution rule itself), `{slug}` / `{dir_path}` (workflow-local path variables), and `{topic}` / `{current_year}` / `{current_month}` (web-researcher discovery-query examples). It further asserts each of the three overlays plus `_template.md` defines all ten. Naming that third set explicitly is what keeps the invariant green on the current tree while a genuinely homeless token still fails. The emission-time self-check in `cafleet/SKILL.md` § *Resolve your overlay* — a token surviving into a rendered prompt or a sent message — is an agent-runtime concern with no artifact in the repo, so no static test can cover it.
 
 ---
 
@@ -164,10 +164,10 @@ The path check must tolerate the legitimate non-path uses of slash-bearing text 
 
 The nonexistent-path invariant is written **before** the content fixes so its red run is against the real pre-fix tree. Written after Step 2, D4's `main.py` would already be gone and the invariant could never fail, leaving it unproven. The other two are regression guards with no present-tree defect to fail on; they are expected to pass from the outset.
 
-- [ ] Add the nonexistent-path invariant to `cafleet/tests/docs_sync.rs`, tolerating URLs, globs, and `<placeholder>` forms <!-- completed: -->
-- [ ] Run `mise //cafleet:test` and confirm the nonexistent-path invariant **fails** on D4's `main.py` before any fix lands <!-- completed: -->
-- [ ] Add the overlay-row-#1 invariant across every role file; expect it to pass on the unmodified tree <!-- completed: -->
-- [ ] Add the token-vocabulary invariant (ten overlay placeholders + four `str.format` identity placeholders; every overlay defines all ten); expect it to pass on the unmodified tree <!-- completed: -->
+- [x] Add the nonexistent-path invariant to `cafleet/tests/docs_sync.rs`, tolerating URLs, globs, and `<placeholder>` forms <!-- completed: 2026-08-02T20:08 -->
+- [x] Run `mise //cafleet:test` and confirm the nonexistent-path invariant **fails** on D4's `main.py` before any fix lands <!-- completed: 2026-08-02T20:08 -->
+- [x] Add the overlay-row-#1 invariant across every role file; expect it to pass on the unmodified tree <!-- completed: 2026-08-02T20:08 -->
+- [x] Add the token-vocabulary invariant (ten overlay placeholders + four `str.format` identity placeholders; every overlay defines all ten); expect it to pass on the unmodified tree <!-- completed: 2026-08-02T20:08 -->
 
 ### Step 2: Correctness fixes (D1–D5)
 
