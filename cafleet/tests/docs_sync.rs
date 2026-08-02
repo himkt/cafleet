@@ -381,7 +381,10 @@ fn path_candidates(span: &str) -> Vec<String> {
         .map(|raw| {
             let token = raw.trim_start_matches(['(', '[', '{', '<', '"', '\'']);
             let token = token.trim_end_matches([')', ']', '}', '"', '\'', ',', ';', '.', '!', '?']);
-            let token = token.split('#').next().unwrap_or(token);
+            let token = token
+                .split('#')
+                .next()
+                .expect("split always yields at least one segment");
             trailing_locator.replace(token, "").into_owned()
         })
         .collect()
