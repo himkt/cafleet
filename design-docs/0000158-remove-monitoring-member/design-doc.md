@@ -1,6 +1,6 @@
 # Remove the monitoring member — one fleet-level tick to the Director
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 60/60 tasks complete
 **Last Updated**: 2026-08-03
 
@@ -608,3 +608,4 @@ not "fix" them.
 | 2026-08-03 | Review round 1: scoped the removal criterion to exclude `design-docs/` and `cafleet/migrations/`; adopted the repository's established "pre-ping capture gate" term; added `broker/messaging.rs`, `broker/test_support.rs`, `output/formatters.rs`, and `docs/docs/concepts/model-selection.md` to the change surface |
 | 2026-08-03 | Approved by the user |
 | 2026-08-03 | Execution: fixed the § S3 worked example's invalid `coding_agent=fable`; carved the two absence-enforcement surfaces out of the residue sweep; extended `REMOVED_VOCABULARY` with the hyphenated `monitoring-member` (10 → 17) after post-implementation review caught the hyphenated residue |
+| 2026-08-03 | Implementation complete: Reviewer approved after 3 rounds; PR #265 opened; Status → Complete |
