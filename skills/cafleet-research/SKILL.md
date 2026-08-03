@@ -27,7 +27,7 @@ Before routing into a workflow or consulting a reference page, Read your overlay
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../cafleet/reference/coding-agent/<name>-overlay.md`](../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{task_coord}` / `{decision_surface}` in the workflow you route into, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../cafleet/reference/coding-agent/<name>-overlay.md`](../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{bg_run}` / `{task_coord}` / `{decision_surface}` in the workflow you route into, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 
 **On-demand — consult directly (no team), only when the task needs it:**
 
@@ -42,7 +42,7 @@ Each workflow body (report / presentation) carries its own Required-reading bloc
 
 When the user's request matches a scenario below, invoke this skill and run the linked workflow as a full CAFleet team — proactively, the moment the request matches, without waiting for the user to say "use cafleet".
 
-**Routing into the report or presentation workflow means executing its entire orchestration.** The dedicated monitoring member is spawned first-in (`cafleet member create --role monitor`, gating the team behind its `ready: monitor live` handshake), then the role team, then the workflow body's review and revision rounds run through to approval. The linked workflow body is the authoritative procedure.
+**Routing into the report or presentation workflow means executing its entire orchestration.** The Director launches the monitor loop first (`cafleet monitor start` as a background task in its own pane, gating the team behind the startup-line confirmation), then spawns the role team, then the workflow body's review and revision rounds run through to approval. The linked workflow body is the authoritative procedure.
 
 | When the user wants to… | Invoke this skill and run |
 |:--|:--|

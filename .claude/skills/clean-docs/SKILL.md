@@ -35,7 +35,7 @@ Read your overlay and **resolve** it before your first action.
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../skills/cafleet/reference/coding-agent/<name>-overlay.md`](../../../skills/cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{monitor_model}` / `{reviewer_model}` / `{skill_loader}` / `{decision_surface}`, guess a wrong value, or ignore a backend note |
+| 1 | your overlay [`../../../skills/cafleet/reference/coding-agent/<name>-overlay.md`](../../../skills/cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{bg_run}` / `{reviewer_model}` / `{skill_loader}` / `{decision_surface}`, guess a wrong value, or ignore a backend note |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../skills/cafleet/reference/base-dir.md) | the task-scope BASE resolution, the no-bypass write protocol, and the `<unset>` contract — you mis-root run artifacts or fall back to `/tmp` |
 | 3 | the `cafleet-design-doc` skill's [`reference/coordination.md`](../../../skills/cafleet-design-doc/reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema and this skill's extensions (`scanner` role, per-workflow run pointer) — your status hops mis-route |
 
@@ -116,10 +116,10 @@ Per surface, the scope of what may change:
 
 ```
 User → /clean-docs (one workflow)
- └─ Director (main session — resolves BASE, bootstraps fleet, partitions slices,
-              merges partials, holds the apply behind review, verifies, commits
-              when asked, tears down monitor-first)
-     ├─ monitor    (first-in, --role monitor; heartbeat; gates the first ordinary spawn)
+ └─ Director (main session — resolves BASE, bootstraps fleet, launches the
+              monitor loop in its own pane, partitions slices, merges partials,
+              holds the apply behind review, verifies, commits when asked,
+              stops the loop first at teardown)
      ├─ scanner-1  (owns a disjoint file slice: scan → propose → apply after gate)
      ├─ scanner-N  (…)
      └─ reviewer   (the workflow's guard, --model {reviewer_model})
@@ -127,8 +127,7 @@ User → /clean-docs (one workflow)
 
 | Role | Responsibility |
 |---|---|
-| **Director** | Resolve task-scoped `${BASE}`; `cafleet fleet create`; spawn the monitor first and gate on `ready: monitor live`; partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply any edit a scanner's harness denies (verify the staged diff first); run verification; escalate observations to the user; tear down monitor-first. |
-| **monitor** | The mandatory dedicated monitoring member (canonical per-event escalation). Reuses the `cafleet` skill's `roles/monitor.md`; the Director never runs `cafleet monitor start`. |
+| **Director** | Resolve task-scoped `${BASE}`; `cafleet fleet create`; launch `cafleet monitor start` as a background task in its own pane ({bg_run}) and gate the first spawn on the startup-line confirmation; partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply any edit a scanner's harness denies (verify the staged diff first); run verification; escalate observations to the user; stop the monitor loop first at teardown. |
 | **scanner** (×N) | For its slice: run the workflow's scan mechanics, propose actions per the workflow's rubric, record observations separately, write its partial artifact under `${BASE}`. After approval is relayed: apply its own slice's approved rows exactly as written, re-verify its diff, route harness-denied writes to the Director. |
 | **reviewer** | Validate the merged artifact **before** any edit, per the workflow's guarantees and guardrails. After apply: run the workflow verification (parameter table below). |
 
@@ -158,9 +157,10 @@ extensions, since a run produces a run artifact, not a design document:
    `reference/base-dir.md`, convention
    `researches/clean-docs-<workflow>-<UTC-compact>/` (gitignored, one folder
    per run).
-2. **Bootstrap** — `cafleet doctor` (gating), `cafleet fleet create`; spawn the
-   monitor first (`--role monitor --model {monitor_model}`, members spawned
-   `{permission_flags}`), gate on `ready: monitor live`.
+2. **Bootstrap** — `cafleet doctor` (gating), `cafleet fleet create`; launch
+   `cafleet monitor start --fleet-id <fleet-id>` as a background task in your
+   own pane ({bg_run}; members spawned `{permission_flags}`), gate on the
+   `monitor loop started (…)` startup line.
 3. **Spawn workers** — scanners (one per disjoint slice) and the reviewer
    (`--model {reviewer_model}`), each from a rendered prompt at
    `${BASE}/.prompts/<role>-<UTC-compact>.md`.
@@ -181,7 +181,7 @@ extensions, since a run produces a run artifact, not a design document:
    (parameter table below).
 8. **Report + teardown** — the Director reports the applied set and the
    escalated observations, commits only when the user asks, and tears down
-   monitor-first (monitoring member → ordinary members → verify via
+   (stop the monitor loop's background task → delete members → verify via
    `member list` → `fleet delete`).
 
 ### Workflow parameter table
@@ -249,13 +249,10 @@ When you see cafleet message poll output with a message from the Director, act o
 <start cue: scanner — begin the scan of your slice; reviewer — wait for ready (<run pointer>)>
 ```
 
-The monitor's spawn prompt comes from the `cafleet` skill's `roles/monitor.md`
-canonical skeleton, not from this one.
-
 ## Backend-neutrality
 
 `SKILL.md`, the workflow bodies, and every `<workflow>/roles/*.md` are
-backend-neutral: they use `{monitor_model}` / `{reviewer_model}` /
+backend-neutral: they use `{bg_run}` / `{reviewer_model}` /
 `{skill_loader}` / `{decision_surface}` / `{permission_flags}` tokens resolved
 from `../../../skills/cafleet/reference/coding-agent/<name>-overlay.md`, and
 every member's spawn-prompt identity block carries a
@@ -287,6 +284,3 @@ use `--text-file`.
     roles/reviewer.md
     reference/rubric.md           # P3, P5 classes — canonical
 ```
-
-The monitoring member reuses the `cafleet` skill's canonical `roles/monitor.md`
-(no monitor role file lives here).

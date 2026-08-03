@@ -88,16 +88,11 @@ Never store these IDs in shell variables (`export FLEET=...`). The Claude Code h
 
 If the user is not inside a tmux session, `cafleet fleet create` exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing. Surface this and stop — do NOT try to start a tmux session yourself.
 
-### 2.3 Spawn the monitoring member first
+### 2.3 Launch the monitor loop first
 
 CAFleet members do not auto-poll. The broker delivers a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview` keystroke; that preview is the trigger that wakes the recipient. If the keystroke is missed (pane buffered, recipient mid-Bash, etc.), the message just sits in `INPUT_REQUIRED` until the recipient runs `cafleet message poll` themselves.
 
-Every CAFleet-orchestrated skill runs a dedicated **monitoring member** — it is a session-level requirement, not a per-skill choice. The Director NEVER runs `cafleet monitor start` itself. Instead, the **first** `cafleet member create` in the fleet is a dedicated monitoring member spawned with `--role monitor --model sonnet`; it runs `cafleet monitor start` as a background task in its own pane and reports `ready: monitor live`, which **gates the first ordinary `member create`** (first-in). The monitor loop wakes **only** the monitoring member; on each wake the monitoring member captures the due ordinary panes, confirms quiet members across two stall-check wakes, and messages the Director per event via `cafleet message send` (which persists an ACKable broker task **and** fires the hardened, `Esc`-safeguarded inline preview). The Director is never keystroked by the loop. The `cafleet` skill's `roles/monitor.md` documents the monitoring member's canonical spawn prompt and the first-in / first-out lifecycle (the heartbeat mechanism itself lives in `reference/supervision.md`); the heartbeat is identical on any backend (claude, codex, opencode).
-
-The monitoring member runs one of two escalation routines (both spawn the monitoring member; the difference is only *when* it messages the Director):
-
-- **Per-event escalation (canonical).** The monitoring member messages the Director only when it can name what needs attention (a member still unchanged after its ping, a ping delivery failure, a capture failure). Use this for skills whose Director makes forward progress from member replies — the per-event message surfaces real stalls without busy-waking the Director.
-- **Cadence escalation (extended).** For skills whose Director must wake on a cadence that is NOT driven by member replies — e.g. polling an external service (CI, a code-review bot) that never keystrokes the Director's pane — the monitoring member messages the Director on each wake, granting it a re-poll turn even when the inbox is empty.
+Every CAFleet-orchestrated skill runs the Director-hosted heartbeat — it is a session-level requirement, not a per-skill choice. Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, the Director launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane and confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the first `member create`.** Once per wake interval (default 600 s; `--interval` / `CAFLEET_MONITOR_WAKE_INTERVAL`, `0` disables the wake) the loop keystrokes one `Esc`-safeguarded fleet-level wake into the Director's own pane, naming every member with its pending-delivery count and closing with the resume clause. Each wake is the Director's cue to poll its inbox, ACK, dispatch queued work, health-check the named members, and then resume its own interrupted work. The loop never keystrokes a member pane. The heartbeat mechanism lives in the `cafleet` skill's `reference/supervision.md` and is identical on any backend (claude, codex, opencode).
 
 ### 2.4 Spawn members with `cafleet member create --text-file <abs path>`
 
@@ -135,11 +130,11 @@ The spawned member opens its role file with `Read` on its first turn. The role f
 
 When the work is done, the Director MUST tear down in this exact order:
 
-1. **Delete the monitoring member first.** `cafleet member delete` the monitoring member **first**, before any ordinary member — the pane kill terminates its `cafleet monitor start` loop with it (there is no `monitor stop` command; `member delete` IS the stop mechanism). Deleting it first keeps the heartbeat from nudging a tearing-down pane.
-2. **`cafleet member delete --member-id <id>`** for every remaining (ordinary) member. This sends the backend exit keystroke to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` per member.
+1. **Stop the monitor loop's background task first.** The loop's `SIGTERM` handler runs its ownership-checked runtime clear, nulling the process fields and preserving `tick_seconds` and `last_wake_at`. Stopping the heartbeat first keeps a wake from landing mid-teardown.
+2. **`cafleet member delete --member-id <id>`** for every member. This sends the backend exit keystroke to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` per member.
 3. **`cafleet fleet delete --fleet-id <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active member in the fleet (root Director + remaining members), and physically deletes every associated `member_placements` row. Messages are preserved. `fleet delete` makes any still-running loop self-terminate on its next tick, so step 1 is belt-and-suspenders.
 
-Order matters. Delete the monitoring member before the ordinary members so a tick cannot keystroke into a tearing-down pane. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
+Order matters. Stop the loop before deleting members so a wake cannot land mid-teardown. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
 
 ---
 
@@ -325,14 +320,14 @@ The `<message-id>` is the full id returned by `cafleet message poll --fleet-id <
 
 ## 6. Worked example — `summarize-pr`
 
-This is a tiny end-to-end CAFleet-orchestrated skill called `summarize-pr` (single Director + a mandatory monitoring member + one ordinary member named Summarizer). The example uses fake `<slug>`, `<fleet-id>`, etc. and is read-only — it is illustrative, not a template you copy. Read it to understand how all five sub-systems fit together; then write your own skill from scratch.
+This is a tiny end-to-end CAFleet-orchestrated skill called `summarize-pr` (single Director + one ordinary member named Summarizer). The example uses fake `<slug>`, `<fleet-id>`, etc. and is read-only — it is illustrative, not a template you copy. Read it to understand how all five sub-systems fit together; then write your own skill from scratch.
 
 ### Skill purpose
 
 The user invokes `/summarize-pr <pr-number>`. The Director:
 
 1. Fetches the PR diff via `gh pr diff <pr-number>`.
-2. Spawns the monitoring member first, then a Summarizer member to digest the diff, identify the top 3 risk areas, and write a 200-word summary to a file.
+2. Launches the monitor loop, then spawns a Summarizer member to digest the diff, identify the top 3 risk areas, and write a 200-word summary to a file.
 3. Reviews the summary, asks the user for approval, then tears down.
 
 ### Resolved task-relpath
@@ -358,19 +353,15 @@ Substitute `7` and `8` literally into every subsequent call the Director makes.
 
 ### Supervision model
 
-Like every CAFleet-orchestrated skill, `summarize-pr` spawns a dedicated monitoring member **first**, before the Summarizer (§ 2.3). It uses the canonical per-event escalation routine — the Director makes forward progress from the Summarizer's replies, and the monitoring member is the heartbeat backstop that surfaces a stall. The Director never runs `cafleet monitor start` itself.
+Like every CAFleet-orchestrated skill, `summarize-pr` launches the monitor loop **before** the Summarizer spawn (§ 2.3): the Director runs `cafleet monitor start --fleet-id 7` as a background task in its own pane and confirms the startup line in the task output. Each periodic wake lands in the Director's own pane and is the cue to poll, ACK, dispatch, and health-check the Summarizer — the heartbeat backstop that surfaces a stall even when the Summarizer never replies.
 
 ```bash
-# First member create: the monitoring member (canonical per-event escalation routine).
-cafleet member create --fleet-id 7 \
-  --name "monitor" --description "Monitoring member: owns the heartbeat" \
-  --role monitor --model sonnet \
-  --text-file /repo/researches/pr-1234/prompts/monitor-20260516T003300Z.md \
-  --json
-# → {"member_id": 10, ...}
+# Background task in the Director's own pane (the backend's background-run primitive):
+cafleet monitor start --fleet-id 7
+# task output → monitor loop started (fleet 7, tick 5s, pid 4821)
 ```
 
-Wait for the monitoring member's `ready: monitor live` handshake before spawning the Summarizer (first-in gate).
+Confirm the `monitor loop started (…)` line before spawning the Summarizer.
 
 ### Render the Summarizer spawn prompt
 
@@ -434,17 +425,17 @@ cafleet message send --fleet-id 7 --from-member-id 8 --to-member-id 11 \
 ### Teardown
 
 ```bash
-# Delete the monitoring member FIRST — its `cafleet monitor start` loop dies with the pane.
-cafleet member delete --fleet-id 7 --member-id 10
+# Stop the monitor loop's background task FIRST (the backend's stop primitive),
+# then delete the Summarizer, then the fleet.
 cafleet member delete --fleet-id 7 --member-id 11
 cafleet fleet delete --fleet-id 7
 ```
 
-Order matters: delete the monitoring member first (first-out; its `monitor start` loop dies with the pane), then delete the ordinary Summarizer, then delete the fleet (see § 2.5).
+Order matters: stop the monitor loop's background task first (its signal handler clears the runtime row), then delete the ordinary Summarizer, then delete the fleet (see § 2.5).
 
 ### What this example demonstrates
 
-- All five integration sub-systems fire (resolve BASE → bootstrap fleet → spawn the monitoring member first → spawn the ordinary member → tear down monitor-first).
+- All five integration sub-systems fire (resolve BASE → bootstrap fleet → launch the monitor loop → spawn the member → stop-the-loop-first teardown).
 - The audit file at `${BASE}/prompts/summarizer-<ts>.md` lives under the task folder, not the repo root.
 - The cafleet body uses the verb + pointer schema (`complete (doc)`, `ready (doc)`, `addressed (doc)`).
 - The substantive revision request rides as a `COMMENT(director)` marker in the document, not in the cafleet body.
@@ -458,7 +449,7 @@ These are the failures that have bitten earlier authors. Read them before writin
 
 ### 7.1 Forgetting to ack messages
 
-Symptom: every `cafleet message poll` returns the same message over and over, the Director's context fills with stale "ready" hops, and the monitor's health check flags the recipient as not-progressing.
+Symptom: every `cafleet message poll` returns the same message over and over, the Director's context fills with stale "ready" hops, and the Director's on-tick health check flags the recipient as not-progressing.
 
 Fix: every message you act on, ack it. Acking moves the task from `INPUT_REQUIRED` to `COMPLETED` and removes it from subsequent poll output.
 
@@ -496,13 +487,13 @@ Fix: never fall back to `/tmp` silently. The `<unset>` sentinel is a hard stop, 
 
 Symptom: orphan `claude` processes lingering in tmux panes after the skill completes. The user closes the panes manually. On the next `cafleet fleet create`, the panes are rebound and the orphan members re-emerge.
 
-Fix: tear down in this exact order — `cafleet member delete` the monitoring member first (its `monitor start` loop dies with the pane), then `cafleet member delete` for every ordinary member, then `cafleet fleet delete`. See § 2.5.
+Fix: tear down in this exact order — stop the monitor loop's background task first, then `cafleet member delete` for every member, then `cafleet fleet delete`. See § 2.5.
 
-### 7.8 Spawning ordinary members before the monitoring member is live
+### 7.8 Spawning members before the monitor loop is live
 
-Symptom: ordinary members are spawned before the monitoring member's `ready: monitor live` handshake, so the heartbeat backstop is not yet running when they begin work.
+Symptom: members are spawned before the monitor loop's `monitor loop started (…)` startup line is confirmed, so the heartbeat backstop is not yet running when they begin work.
 
-Fix: the **first** `cafleet member create` is the `--role monitor` monitoring member; wait for its `ready: monitor live` message before spawning any ordinary member. The Director never runs `cafleet monitor start` itself.
+Fix: launch `cafleet monitor start --fleet-id <fleet-id>` as a background task in the Director's own pane immediately after `cafleet fleet create`, and confirm the startup line in the task output before any `cafleet member create`.
 
 ### 7.9 Leaving stray single braces in the spawn prompt
 
@@ -514,12 +505,12 @@ Fix: the only single-brace tokens allowed in a spawn prompt are the four identit
 
 ## 8. Keep the base neutral; put backend deltas in the overlay
 
-CAFleet runs members on three coding-agent backends — `claude`, `codex`, `opencode`. When a skill hardcodes one backend's idioms — a specific monitor `--model`, the permission-mode flags, the `AskUserQuestion` decision surface, the harness `Task*` tools, the "load via the Skill tool" recipe — it drifts the moment a member runs on another backend, and forces every non-`claude` reader to mentally subtract the `claude`-only parts. Keep your skill backend-neutral and push the backend specifics into the overlay.
+CAFleet runs members on three coding-agent backends — `claude`, `codex`, `opencode`. When a skill hardcodes one backend's idioms — the permission-mode flags, the `AskUserQuestion` decision surface, the harness `Task*` tools, the background-task primitive, the "load via the Skill tool" recipe — it drifts the moment a member runs on another backend, and forces every non-`claude` reader to mentally subtract the `claude`-only parts. Keep your skill backend-neutral and push the backend specifics into the overlay.
 
 The split:
 
 - **Base — your `SKILL.md` and `roles/*.md`.** Write these so they read the same on any backend. State *what* to do in backend-agnostic terms; wherever behavior varies by backend, state the neutral behavior and point the agent at its overlay.
-- **Overlay — `skills/cafleet/reference/coding-agent/<name>-overlay.md`.** This is the single canonical home for every backend delta. Six deltas vary by backend: the decision surface (the `AskUserQuestion` analog or the plain-message fallback), the monitor model, the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, and the skill-loading recipe. Put each backend's concrete realization in its overlay; a new overlay starts from `reference/coding-agent/_template.md`.
+- **Overlay — `skills/cafleet/reference/coding-agent/<name>-overlay.md`.** This is the single canonical home for every backend delta. The deltas that vary by backend: the decision surface (the `AskUserQuestion` analog or the plain-message fallback), the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, the reasoning-effort levels, and the skill-loading recipe. Put each backend's concrete realization in its overlay; a new overlay starts from `reference/coding-agent/_template.md`.
 
 Wire it up:
 

@@ -1,7 +1,7 @@
 # Remove the monitoring member — one fleet-level tick to the Director
 
 **Status**: Approved
-**Progress**: 20/60 tasks complete
+**Progress**: 25/60 tasks complete
 **Last Updated**: 2026-08-03
 
 ## Overview
@@ -530,11 +530,11 @@ not "fix" them.
 
 ### Step 3: The workflow skills
 
-- [ ] Update `skills/cafleet-design-doc/`: `SKILL.md`, `create/create.md`, `create/roles/director.md`, `execute/execute.md`, `execute/roles/director.md`, `interview/interview.md` — replace the monitor-member spawn + `ready: monitor live` gate with the Director's `monitor start` launch; update each teardown block <!-- completed: -->
-- [ ] Update `skills/cafleet-research/`: `SKILL.md`, `report/report.md`, `report/roles/director.md`, `presentation/presentation.md`, `presentation/roles/director.md` — same substitution <!-- completed: -->
-- [ ] Update `.claude/skills/clean-docs/**` — the `monitor` member row in its team table and every spawn/teardown mention <!-- completed: -->
-- [ ] Update `.claude/skills/skill-author/SKILL.md` — §§ 2.3, 2.5, the worked `summarize-pr` example, and both troubleshooting entries <!-- completed: -->
-- [ ] Update `.claude/skills/cafleet-model-list-refresh/SKILL.md` — drop the monitor-model refresh obligation <!-- completed: -->
+- [x] Update `skills/cafleet-design-doc/`: `SKILL.md`, `create/create.md`, `create/roles/director.md`, `execute/execute.md`, `execute/roles/director.md`, `interview/interview.md` — replace the monitor-member spawn + `ready: monitor live` gate with the Director's `monitor start` launch; update each teardown block <!-- completed: 2026-08-03T12:58 -->
+- [x] Update `skills/cafleet-research/`: `SKILL.md`, `report/report.md`, `report/roles/director.md`, `presentation/presentation.md`, `presentation/roles/director.md` — same substitution <!-- completed: 2026-08-03T13:05 -->
+- [x] Update `.claude/skills/clean-docs/**` — the `monitor` member row in its team table and every spawn/teardown mention <!-- completed: 2026-08-03T12:43 -->
+- [x] Update `.claude/skills/skill-author/SKILL.md` — §§ 2.3, 2.5, the worked `summarize-pr` example, and both troubleshooting entries <!-- completed: 2026-08-03T12:43 -->
+- [x] Update `.claude/skills/cafleet-model-list-refresh/SKILL.md` — drop the monitor-model refresh obligation <!-- completed: 2026-08-03T12:43 -->
 
 ### Step 4: Project rules
 
