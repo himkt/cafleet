@@ -10,7 +10,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` / `{permission_flags}` (spawn the monitor with `--model {monitor_model}`), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{bg_run}` / `{decision_surface}` / `{permission_flags}` (launch the monitor loop with the wrong primitive), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema — you coordinate in free-form bodies and findings get mis-routed |
 
@@ -20,7 +20,7 @@ Your tokens: `<fleet-id>`, `<director-member-id>`, `<programmer-member-id>`, `<t
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet fleet and keep an active heartbeat via the monitoring member.** Load the `cafleet` skill and Read its `reference/supervision.md`. Create a CAFleet fleet via `cafleet fleet create --coding-agent <backend> --json` (must be run inside a tmux or herdr session; for `<backend>`, substitute the coding agent you are actually running on — your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity, e.g. Claude Code → `claude`) — this bootstraps the fleet, registers the root Director (you), and writes your placement row in one transaction. Capture `director.member_id` from the JSON response. You do **not** run `cafleet monitor start` yourself: the **first** `cafleet member create` is the dedicated monitoring member (`--role monitor --model {monitor_model}`), which launches the heartbeat in its own pane and reports `ready: monitor live`; that handshake gates the first ordinary member (first-in). Keep the monitoring member running until shutdown (first-out).
+- **Bootstrap the CAFleet fleet and keep an active heartbeat.** Load the `cafleet` skill and Read its `reference/supervision.md`. Create a CAFleet fleet via `cafleet fleet create --coding-agent <backend> --json` (must be run inside a tmux or herdr session; for `<backend>`, substitute the coding agent you are actually running on — your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity, e.g. Claude Code → `claude`) — this bootstraps the fleet, registers the root Director (you), and writes your placement row in one transaction. Capture `director.member_id` from the JSON response. Then launch `cafleet monitor start --fleet-id <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the `monitor loop started (…)` startup line in the task output; that confirmation gates the first `member create`. Keep the loop running until shutdown stops it.
 - **Validate the design document first.** Before spawning any teammates, read the document, check for COMMENT markers and FIXME(agent) markers. If COMMENTs exist, resolve them directly when they are clear: read each COMMENT marker, apply the requested changes to the document, and remove the markers before proceeding. If a COMMENT is ambiguous, conflicts with other parts of the design, or requires a product decision, ask the user for clarification via {decision_surface} before resolving it.
 - **Judge team composition and spawn needed members.** Before spawning, analyze the nature of implementation tasks. Only spawn roles that are actually needed:
   - Code implementation → Programmer + Tester (TDD)
@@ -101,7 +101,7 @@ Intent judgment and the Abort Flow follow the `cafleet` skill's `reference/super
 
 ## Progress Monitoring
 
-Your turns are granted by an inbound member reply or a monitoring-member escalation message; run the 2-stage health check (poll → monitor capture) on each. What counts as stalled, the nudge shape, and the supervision obligations (Authorization-Scope Guard, idle semantics) are canonical in the `cafleet` skill's `reference/supervision.md` § *Stall Response* and § *Idle Semantics*.
+Your turns are granted by an inbound member reply or the periodic monitor wake; run the 2-stage health check (poll → monitor capture) on each. What counts as stalled, the nudge shape, and the supervision obligations (Authorization-Scope Guard, idle semantics) are canonical in the `cafleet` skill's `reference/supervision.md` § *Stall Response* and § *Idle Semantics*.
 
 ### Skill-specific milestones
 
@@ -117,4 +117,4 @@ Your turns are granted by an inbound member reply or a monitoring-member escalat
 
 Shutdown runs as Step 8's tail — only AFTER Step 8's doc-complete commit (and the conditional `git push` when the branch is tracked on origin) has landed.
 
-Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol* (first-out). Deleting the monitoring member first terminates the heartbeat (the single Step 3b `monitor start`, run unchanged through Steps 3–8) with its pane.
+Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol*. Stopping the monitor loop's background task first ({bg_stop}) ends the heartbeat (the single Step 3b `monitor start`, run unchanged through Steps 3–8) before any pane is torn down.

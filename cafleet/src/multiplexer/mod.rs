@@ -99,62 +99,45 @@ pub fn sanitize_wake_field(value: &str) -> String {
         .replace('|', "│")
 }
 
-/// Build the byte-identical tmux/herdr pure-trigger wake payload. An
-/// unregistered coding agent — a member's or the Director's — aborts the wake.
-pub fn build_wake_payload(
-    due_members: &[Value],
-    director: &Value,
-) -> Result<String, MultiplexerError> {
-    for target in due_members {
-        let agent = target["coding_agent"].as_str().unwrap_or("");
+/// Build the byte-identical tmux/herdr pure-trigger wake payload (SPEC §6.5).
+/// A roster member with an unregistered coding agent aborts the wake.
+pub fn build_wake_payload(fleet_id: i64, members: &[Value]) -> Result<String, MultiplexerError> {
+    for member in members {
+        let agent = member["coding_agent"].as_str().unwrap_or("");
         if coding_agent(agent).is_none() {
             return Err(MultiplexerError::new(format!(
                 "member {} has invalid coding_agent '{agent}'",
-                target["member_id"]
+                member["member_id"]
             )));
         }
     }
-    let director_agent = director["coding_agent"].as_str().unwrap_or("");
-    if coding_agent(director_agent).is_none() {
-        return Err(MultiplexerError::new(format!(
-            "Director {} has invalid coding_agent '{director_agent}'",
-            director["member_id"]
-        )));
-    }
-
-    let noun = if due_members.len() == 1 {
-        "member"
+    let clause = if members.is_empty() {
+        "no members to health-check.".to_string()
     } else {
-        "members"
+        let noun = if members.len() == 1 {
+            "member"
+        } else {
+            "members"
+        };
+        let entries = members
+            .iter()
+            .map(|member| {
+                let name = member["name"].as_str().unwrap_or("");
+                let agent = member["coding_agent"].as_str().unwrap_or("");
+                format!(
+                    "{} ({}; coding_agent={agent}; unacked={})",
+                    member["member_id"],
+                    sanitize_wake_field(name),
+                    member["pending_count"]
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("health-check your {} {noun}: {entries}.", members.len())
     };
-    let entries = due_members
-        .iter()
-        .map(|target| {
-            let name = target["name"].as_str().unwrap_or("");
-            let agent = target["coding_agent"].as_str().unwrap_or("");
-            let reasons = target["wake_reasons"]
-                .as_array()
-                .map(|reasons| {
-                    reasons
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .collect::<Vec<_>>()
-                        .join(",")
-                })
-                .unwrap_or_default();
-            format!(
-                "member {} ({}; coding_agent={agent}) [{reasons}]",
-                target["member_id"],
-                sanitize_wake_field(name)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
     Ok(format!(
-        "[monitor] wake: {} {noun} due — {entries}. Director: {} \
-         (coding_agent={director_agent}). Follow your monitor role protocol.",
-        due_members.len(),
-        director["member_id"]
+        "[cafleet] tick: fleet {fleet_id} — {clause} Poll your inbox, ACK, dispatch. \
+         Resume your work if something was still running."
     ))
 }
 
@@ -177,8 +160,8 @@ pub trait Multiplexer {
     fn send_wake_trigger(
         &self,
         target_pane_id: &str,
-        due_members: &[Value],
-        director: &Value,
+        fleet_id: i64,
+        members: &[Value],
     ) -> Result<bool, MultiplexerError>;
     fn send_inline_preview(
         &self,
@@ -253,10 +236,10 @@ impl Multiplexer for AnyMultiplexer {
     fn send_wake_trigger(
         &self,
         target_pane_id: &str,
-        due_members: &[Value],
-        director: &Value,
+        fleet_id: i64,
+        members: &[Value],
     ) -> Result<bool, MultiplexerError> {
-        dispatch!(self, mux => mux.send_wake_trigger(target_pane_id, due_members, director))
+        dispatch!(self, mux => mux.send_wake_trigger(target_pane_id, fleet_id, members))
     }
 
     fn send_inline_preview(
@@ -352,17 +335,13 @@ mod tests {
 
     use crate::multiplexer::{build_wake_payload, resolve_multiplexer_name, sanitize_wake_field};
 
-    fn due(member_id: i64, name: &str, coding_agent: &str, reasons: &[&str]) -> Value {
+    fn member(member_id: i64, name: &str, coding_agent: &str, unacked: i64) -> Value {
         json!({
             "member_id": member_id,
             "name": name,
             "coding_agent": coding_agent,
-            "wake_reasons": reasons,
+            "pending_count": unacked,
         })
-    }
-
-    fn director(member_id: i64, coding_agent: &str) -> Value {
-        json!({"member_id": member_id, "coding_agent": coding_agent})
     }
 
     mod sanitize_wake_field_tests {
@@ -405,47 +384,54 @@ mod tests {
         use super::*;
 
         #[test]
-        fn single_member_uses_the_singular_noun() {
+        fn two_members_join_entries_with_comma_space() {
             let payload = build_wake_payload(
-                &[due(4, "worker", "codex", &["interval"])],
-                &director(1, "claude"),
+                3,
+                &[
+                    member(4, "drafter", "claude", 2),
+                    member(5, "reviewer", "codex", 0),
+                ],
             )
             .unwrap();
             assert_eq!(
                 payload,
-                "[monitor] wake: 1 member due — member 4 (worker; coding_agent=codex) \
-                 [interval]. Director: 1 (coding_agent=claude). \
-                 Follow your monitor role protocol."
+                "[cafleet] tick: fleet 3 — health-check your 2 members: \
+                 4 (drafter; coding_agent=claude; unacked=2), \
+                 5 (reviewer; coding_agent=codex; unacked=0). \
+                 Poll your inbox, ACK, dispatch. \
+                 Resume your work if something was still running."
             );
         }
 
         #[test]
-        fn multiple_members_join_entries_with_comma_space() {
-            let payload = build_wake_payload(
-                &[
-                    due(3, "helper", "claude", &["interval"]),
-                    due(4, "worker", "codex", &["interval", "unacked"]),
-                ],
-                &director(1, "claude"),
-            )
-            .unwrap();
+        fn a_single_member_uses_the_singular_noun() {
+            let payload = build_wake_payload(7, &[member(4, "worker", "opencode", 1)]).unwrap();
             assert_eq!(
                 payload,
-                "[monitor] wake: 2 members due — member 3 (helper; coding_agent=claude) \
-                 [interval], member 4 (worker; coding_agent=codex) [interval,unacked]. \
-                 Director: 1 (coding_agent=claude). Follow your monitor role protocol."
+                "[cafleet] tick: fleet 7 — health-check your 1 member: \
+                 4 (worker; coding_agent=opencode; unacked=1). \
+                 Poll your inbox, ACK, dispatch. \
+                 Resume your work if something was still running."
+            );
+        }
+
+        #[test]
+        fn an_empty_roster_uses_the_no_members_clause() {
+            let payload = build_wake_payload(7, &[]).unwrap();
+            assert_eq!(
+                payload,
+                "[cafleet] tick: fleet 7 — no members to health-check. \
+                 Poll your inbox, ACK, dispatch. \
+                 Resume your work if something was still running."
             );
         }
 
         #[test]
         fn member_names_are_sanitized_in_the_payload() {
-            let payload = build_wake_payload(
-                &[due(5, "e`vil$(x)|z\nq", "claude", &["interval"])],
-                &director(1, "claude"),
-            )
-            .unwrap();
+            let payload =
+                build_wake_payload(3, &[member(5, "e`vil$(x)|z\nq", "claude", 0)]).unwrap();
             assert!(
-                payload.contains("member 5 (eˋvil$﹙x)│z⏎q; coding_agent=claude)"),
+                payload.contains("5 (eˋvil$﹙x)│z⏎q; coding_agent=claude; unacked=0)"),
                 "got: {payload}"
             );
             assert!(!payload.contains('`'));
@@ -455,23 +441,11 @@ mod tests {
 
         #[test]
         fn an_unregistered_coding_agent_aborts_the_wake() {
-            let err = build_wake_payload(
-                &[due(4, "worker", "python", &["interval"])],
-                &director(1, "claude"),
-            )
-            .expect_err("an unknown member agent must abort");
+            let err = build_wake_payload(3, &[member(4, "worker", "python", 0)])
+                .expect_err("an unknown member agent must abort");
             assert!(
-                err.to_string().contains("invalid coding_agent"),
-                "got: {err}"
-            );
-
-            let err = build_wake_payload(
-                &[due(4, "worker", "codex", &["interval"])],
-                &director(1, "not-an-agent"),
-            )
-            .expect_err("an unknown Director agent must abort");
-            assert!(
-                err.to_string().contains("invalid coding_agent"),
+                err.to_string()
+                    .contains("member 4 has invalid coding_agent 'python'"),
                 "got: {err}"
             );
         }

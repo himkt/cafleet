@@ -10,9 +10,9 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>-overlay.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{task_coord}` / `{decision_surface}` (spawn the monitor with `--model {monitor_model}`), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>-overlay.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{bg_run}` / `{task_coord}` / `{decision_surface}` (launch the monitor loop with the wrong primitive), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root the spawn-prompt audit files and `${OUTPUT_DIR}` or fall back to `/tmp` |
-| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised team |
+| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the Director-hosted monitor launch, the startup-line gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised team |
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
@@ -27,7 +27,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 ## Prerequisites
 
-The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill (reading its `reference/supervision.md`) and embeds it into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the Director on demand — see Step 1.
+The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill (reading its `reference/supervision.md`) and embeds it into every member's spawn prompt. The Director launches the `cafleet monitor` loop as a background task in its own pane; the loop wakes it once per wake interval — see Step 1.
 
 ## Output
 
@@ -78,11 +78,9 @@ cafleet fleet create --name "research-[topic-slug]" --coding-agent <backend> --j
 
 Capture `fleet_id` and `director.member_id` from the response. Treat `fleet_id` as `[fleet-id]` and `director.member_id` as `[director-member-id]` for the rest of this skill.
 
-### Step 1: Supervision Model (Director — spawn the monitoring member first)
+### Step 1: Supervision Model (Director — launch the monitor loop first)
 
-Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms the loop's startup line in the task output, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
-
-See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the on-wake routine) and lifecycle. The monitoring member is deleted first in the Step 8 teardown (first-out).
+Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor start --fleet-id [fleet-id]` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Manager / Scout / Researcher spawns** — do not spawn a member until it has arrived. The background task is stopped first in the Step 8 teardown.
 
 On each active turn, check `${OUTPUT_DIR}` for these expected deliverables:
 
@@ -251,7 +249,7 @@ After user approval, offer to create a presentation via {decision_surface} (adap
 
 ### Step 8: Finalize & Clean Up (Director)
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol* (first-out): `cafleet member delete` the monitoring member first (the pane kill terminates its `monitor start` loop), then Researchers, any active Scout, and the Manager (each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id [fleet-id]`; `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.
+Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*: stop the monitor loop's background task first ({bg_stop}), then `cafleet member delete` the Researchers, any active Scout, and the Manager (each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id [fleet-id]`; `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.
 
 ## Spawnable Agents
 

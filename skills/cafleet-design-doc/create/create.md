@@ -10,9 +10,9 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>-overlay.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` / `{permission_flags}` (spawn the monitor with `--model {monitor_model}`), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>-overlay.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{bg_run}` / `{decision_surface}` / `{permission_flags}` (launch the monitor loop with the wrong primitive), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
-| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, the 5-step facilitation loop) — you spawn an unsupervised team |
+| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the Director-hosted monitor launch, the startup-line gate, Authorization-Scope Guard, the 5-step facilitation loop) — you spawn an unsupervised team |
 | 4 | [`../reference/coordination.md`](../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema (and the Step-2 clarification exemption) — you coordinate in free-form bodies and findings get lost / mis-routed |
 
 | Role | Identity | Does | Does NOT | Role definition |
@@ -91,11 +91,11 @@ Capture `fleet_id` and `director.member_id` from the JSON response and substitut
 
 If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `member_id` instead of creating a new fleet — the root Director from `fleet create` is the team lead.
 
-#### 1b. Spawn the monitoring member (first-in)
+#### 1b. Launch the monitor loop (before any member)
 
-The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms the loop's startup line in the task output, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn an ordinary member until `ready: monitor live` has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
+Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor start --fleet-id <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn a member until it has arrived.
 
-See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the on-wake routine) and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The heartbeat runs unchanged through the quality loop; the monitoring member is deleted first in Step 6's teardown (first-out), which terminates the loop with its pane.
+See the `cafleet` skill's `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The heartbeat runs unchanged through the quality loop; the background task is stopped first in Step 6's teardown.
 
 #### 1c. Locate role definitions (path-by-reference)
 
@@ -110,7 +110,7 @@ Substitute these absolute paths into the spawn prompts below.
 
 #### 1d. Spawn the Drafter
 
-**Gate**: do not spawn the Drafter until the monitoring member's `ready: monitor live` handshake (1b) has arrived.
+**Gate**: do not spawn the Drafter until the monitor loop's startup line (1b) has been confirmed.
 
 **Drafter spawn prompt** — render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below. The skeleton's identity lines carry the CLI's four `{fleet_id}` / `{director_member_id}` / `{member_id}` / `{coding_agent}` placeholders, rendered to literals by `cafleet member create` at spawn; the `[INSERT …]` markers (`[INSERT DOC PATH]`, `[INSERT USER'S ORIGINAL REQUEST]`, `[INSERT abs path to roles/drafter.md]`) are rendered by the Director first (leave no stray single braces other than the four identity placeholders; double any literal brace as `{{` / `}}`). Keep the prompt under ~2 KB (path-by-reference). Use the normal-mode column by default; the resume-mode column when Step 0 detected resume mode.
 
@@ -241,6 +241,6 @@ No round limit — loop continues until approved or aborted.
    ```
    Wait for the Drafter's `addressed (doc)` confirmation.
 
-2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): `cafleet member delete` the monitoring member first (the pane kill terminates its `monitor start` loop), then Drafter and Reviewer (each kills the pane immediately); `cafleet member list` to verify only the root Director's row remains; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
+2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*: stop the monitor loop's background task first ({bg_stop}), then `cafleet member delete` the Drafter and Reviewer (each kills the pane immediately); `cafleet member list` to verify only the root Director's row remains; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
 
 The fleet row is soft-deleted and `messages` rows are preserved so the message trail remains inspectable in the broker database.

@@ -233,6 +233,32 @@ fn member_create_unknown_fleet_is_a_usage_error() {
 }
 
 #[test]
+fn member_create_no_longer_parses_a_role_option() {
+    let cli = Cli::new();
+    cli.ready();
+    let output = cli.run(&[
+        "member",
+        "create",
+        "--fleet-id",
+        "1",
+        "--name",
+        "watch",
+        "--description",
+        "d",
+        "--role",
+        "monitor",
+        "--text",
+        "prompt",
+    ]);
+    assert_eq!(code(&output), 2);
+    assert!(
+        stderr(&output).contains("unexpected argument '--role'"),
+        "got: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn member_show_compact_full_and_not_found() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.with_fleet();

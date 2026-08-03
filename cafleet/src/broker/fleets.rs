@@ -54,7 +54,7 @@ pub fn create_fleet(
     backend: &str,
 ) -> Result<Value, CafleetError> {
     let now = format_utc(now_utc());
-    let card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[], None);
+    let card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[]);
     let tx = conn.transaction().map_err(db_err)?;
     tx.execute(
         "INSERT INTO fleets (name, created_at) VALUES (?1, ?2)",
@@ -150,8 +150,8 @@ pub fn get_fleet(conn: &Connection, fleet_id: i64) -> Result<Option<Value>, Cafl
 }
 
 /// Soft-delete + cascade: stamp `deleted_at`, deregister every active member
-/// (root Director included), drop their placement and monitor-config rows and
-/// the fleet's runtime row; messages are untouched. Idempotent.
+/// (root Director included), drop their placement rows and the fleet's
+/// runtime row; messages are untouched. Idempotent.
 pub fn delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value, CafleetError> {
     let fleet = fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
@@ -173,12 +173,6 @@ pub fn delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value, Cafle
         .map_err(db_err)?;
     tx.execute(
         "DELETE FROM member_placements WHERE member_id IN \
-         (SELECT member_id FROM members WHERE fleet_id=?1)",
-        [fleet_id],
-    )
-    .map_err(db_err)?;
-    tx.execute(
-        "DELETE FROM monitor_config WHERE member_id IN \
          (SELECT member_id FROM members WHERE fleet_id=?1)",
         [fleet_id],
     )
@@ -246,19 +240,6 @@ mod tests {
             r#"{{"fleet_id":{fleet_id},"name":"alpha","created_at":"{ts}","director":{{"member_id":{director_id},"name":"Director","description":"Root Director for this fleet","registered_at":"{ts}","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%0","coding_agent":"claude","created_at":"{ts}"}}}}}}"#
         );
         assert_eq!(format_json(&fleet), expected);
-    }
-
-    #[test]
-    fn create_fleet_leaves_the_director_unenrolled() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        assert!(
-            broker::get_monitor_config(&conn, fleet_id, director_id)
-                .unwrap()
-                .is_none(),
-            "the root Director is never enrolled"
-        );
     }
 
     #[test]
@@ -367,15 +348,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(placements, 0);
-
-        let configs: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM monitor_config WHERE member_id IN (?1, ?2)",
-                [director_id, member_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(configs, 0);
         assert!(
             broker::read_monitor_runtime(&conn, fleet_id)
                 .unwrap()

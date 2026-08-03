@@ -39,10 +39,6 @@ pub fn create_app(database_url: &str) -> Result<Router, CafleetError> {
         .route("/fleets", get(list_fleets))
         .route("/members", get(roster))
         .route("/monitor", get(monitor))
-        .route(
-            "/members/{member_id}/monitor",
-            get(member_monitor).patch(patch_monitor),
-        )
         .route("/members/{member_id}/inbox", get(inbox))
         .route("/members/{member_id}/sent", get(sent))
         .route("/timeline", get(timeline))
@@ -119,16 +115,6 @@ fn require_fleet(conn: &Connection, fleet_id: i64) -> Result<(), Box<Response>> 
     }
 }
 
-/// The monitor-config wire projection: `member_id` and `last_stall_check_at`
-/// dropped, key order pinned.
-fn monitor_projection(config: &Value) -> Value {
-    json!({
-        "interval_seconds": config["interval_seconds"],
-        "last_ping_at": config["last_ping_at"],
-        "enabled": config["enabled"],
-    })
-}
-
 /// The `FormattedMessage` projection: names resolved by one bulk lookup with
 /// direct keyed access — a missing id is a hard 500, never a silent fallback.
 fn formatted_messages(conn: &Connection, rows: &[Value]) -> Result<Vec<Value>, CafleetError> {
@@ -190,24 +176,10 @@ async fn roster(State(state): State<AppState>, headers: HeaderMap) -> Response {
         if let Err(response) = require_fleet(conn, fleet_id) {
             return *response;
         }
-        let rows = match broker::list_roster(conn, fleet_id, true) {
-            Ok(rows) => rows,
-            Err(error) => return broker_500(error),
-        };
-        let mut members = Vec::with_capacity(rows.len());
-        for row in rows {
-            let member_id = row["member_id"].as_i64().expect("roster rows carry the id");
-            let monitor = match broker::get_monitor_config(conn, fleet_id, member_id) {
-                Ok(config) => config
-                    .map(|c| monitor_projection(&c))
-                    .unwrap_or(Value::Null),
-                Err(error) => return broker_500(error),
-            };
-            let mut member = row;
-            member["monitor"] = monitor;
-            members.push(member);
+        match broker::list_roster(conn, fleet_id, true) {
+            Ok(members) => json_response(StatusCode::OK, &json!({"members": members})),
+            Err(error) => broker_500(error),
         }
-        json_response(StatusCode::OK, &json!({"members": members}))
     })
     .await
 }
@@ -232,90 +204,6 @@ async fn monitor(State(state): State<AppState>, headers: HeaderMap) -> Response 
         };
         payload["members"] = Value::Array(members);
         json_response(StatusCode::OK, &payload)
-    })
-    .await
-}
-
-async fn member_monitor(
-    State(state): State<AppState>,
-    Path(member_id): Path<i64>,
-    headers: HeaderMap,
-) -> Response {
-    let fleet_id = match fleet_header(&headers) {
-        Ok(fleet_id) => fleet_id,
-        Err(response) => return *response,
-    };
-    run_blocking(state, move |conn| {
-        if let Err(response) = require_fleet(conn, fleet_id) {
-            return *response;
-        }
-        match broker::get_monitor_config(conn, fleet_id, member_id) {
-            Ok(Some(config)) => json_response(StatusCode::OK, &monitor_projection(&config)),
-            Ok(None) => detail(StatusCode::NOT_FOUND, "Member not enrolled"),
-            Err(error) => broker_500(error),
-        }
-    })
-    .await
-}
-
-/// The optional-fields PATCH body; a `null` field counts as absent.
-fn parse_patch_body(body: &Bytes) -> Result<(Option<i64>, Option<bool>), Box<Response>> {
-    let invalid = |message: &str| Box::new(detail(StatusCode::UNPROCESSABLE_ENTITY, message));
-    let payload: Value =
-        serde_json::from_slice(body).map_err(|e| invalid(&format!("invalid JSON body: {e}")))?;
-    if !payload.is_object() {
-        return Err(invalid("the request body must be a JSON object"));
-    }
-    let interval_seconds = match payload.get("interval_seconds") {
-        None | Some(Value::Null) => None,
-        Some(value) => {
-            let interval = value
-                .as_i64()
-                .ok_or_else(|| invalid("interval_seconds must be an integer"))?;
-            if interval < 1 {
-                return Err(invalid("interval_seconds must be >= 1"));
-            }
-            Some(interval)
-        }
-    };
-    let enabled = match payload.get("enabled") {
-        None | Some(Value::Null) => None,
-        Some(Value::Bool(enabled)) => Some(*enabled),
-        Some(_) => return Err(invalid("enabled must be a boolean")),
-    };
-    Ok((interval_seconds, enabled))
-}
-
-async fn patch_monitor(
-    State(state): State<AppState>,
-    Path(member_id): Path<i64>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    let fleet_id = match fleet_header(&headers) {
-        Ok(fleet_id) => fleet_id,
-        Err(response) => return *response,
-    };
-    let (interval_seconds, enabled) = match parse_patch_body(&body) {
-        Ok(parsed) => parsed,
-        Err(response) => return *response,
-    };
-    run_blocking(state, move |conn| {
-        if let Err(response) = require_fleet(conn, fleet_id) {
-            return *response;
-        }
-        match broker::get_monitor_config(conn, fleet_id, member_id) {
-            Ok(Some(_)) => {}
-            Ok(None) => return detail(StatusCode::NOT_FOUND, "Member not enrolled"),
-            Err(error) => return broker_500(error),
-        }
-        // The pre-check passed; a deregistration between it and the update
-        // (TOCTOU) collapses to the same 404, never a 500.
-        match broker::update_monitor_config(conn, fleet_id, member_id, interval_seconds, enabled) {
-            Ok(config) => json_response(StatusCode::OK, &monitor_projection(&config)),
-            Err(CafleetError::App(_)) => detail(StatusCode::NOT_FOUND, "Member not enrolled"),
-            Err(error) => broker_500(error),
-        }
     })
     .await
 }

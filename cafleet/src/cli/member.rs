@@ -48,9 +48,6 @@ pub enum MemberCommand {
         /// Reasoning-effort level (claude, codex only).
         #[arg(long)]
         effort: Option<String>,
-        /// Member role.
-        #[arg(long, value_parser = ["member", "monitor"], default_value = "member")]
-        role: String,
         #[command(flatten)]
         body: BodyArgs,
         /// Switch the non-JSON output to the labeled block.
@@ -220,7 +217,6 @@ pub fn run(settings: &Settings, command: MemberCommand) -> Result<(), CafleetErr
             coding_agent,
             model,
             effort,
-            role,
             body,
             full,
             json,
@@ -232,7 +228,6 @@ pub fn run(settings: &Settings, command: MemberCommand) -> Result<(), CafleetErr
             coding_agent.as_deref(),
             model.as_deref(),
             effort.as_deref(),
-            &role,
             &body,
             full,
             json,
@@ -274,7 +269,6 @@ fn create(
     explicit_agent: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
-    role: &str,
     body: &BodyArgs,
     full: bool,
     json: bool,
@@ -316,7 +310,6 @@ fn create(
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
     // 5. Register the member with a pending placement.
-    let kind = (role == "monitor").then_some(crate::broker::MONITORING_MEMBER_KIND);
     let placement = NewPlacement {
         backend: mux.name().to_string(),
         mux_session: context.session.clone(),
@@ -331,7 +324,6 @@ fn create(
         description,
         &[],
         Some(&placement),
-        kind,
     )
     .map_err(|error| match error {
         CafleetError::App(_) | CafleetError::Usage(_) => error,

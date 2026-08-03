@@ -10,9 +10,9 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>-overlay.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` / `{permission_flags}` (spawn the monitor with `--model {monitor_model}`), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>-overlay.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{bg_run}` / `{decision_surface}` / `{permission_flags}` (launch the monitor loop with the wrong primitive), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
-| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, the facilitation loop) — you spawn an unsupervised team |
+| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the Director-hosted monitor launch, the startup-line gate, Authorization-Scope Guard, the facilitation loop) — you spawn an unsupervised team |
 | 4 | [`../reference/coordination.md`](../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema — you coordinate in free-form bodies and findings get mis-routed |
 
 | Role | Identity | Does | Does NOT | Role definition |
@@ -161,9 +161,9 @@ Capture `fleet_id` and `director.member_id` from the JSON response and substitut
 
 If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `member_id` instead of creating a new fleet — the root Director from `fleet create` is the team lead.
 
-#### 3b. Spawn the monitoring member (first-in)
+#### 3b. Launch the monitor loop (before any member)
 
-This team **keeps an active heartbeat**, so it adopts the monitoring-member model: the Director does **not** run `cafleet monitor start` itself. The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`; it launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane, confirms the loop's startup line in the task output, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the first ordinary `member create`** (first-in). The heartbeat runs **unchanged** through Steps 3–8; the monitoring member is deleted first in Step 8's cleanup (first-out), which terminates the loop with its pane. See the `cafleet` skill's `roles/monitor.md` for the canonical spawn prompt and lifecycle, and its `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
+This team **keeps an active heartbeat**: immediately after `cafleet fleet create` and **before** the first `cafleet member create`, the Director launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane ({bg_run}) and confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the first `member create`.** The heartbeat runs **unchanged** through Steps 3–8; the background task is stopped first in Step 8's cleanup. See the `cafleet` skill's `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -332,7 +332,7 @@ If the Verifier was spawned, assign verification:
 
 ### Step 5: Reviewer Review Loop (Director)
 
-After all TDD steps (and Phase D, if run) complete, the Director runs a fresh-context review loop before anything is presented to the user. **Run to completion / stop means stop**: the loop is uncapped and ends only on Reviewer approval or an explicit user halt/abort. When the user signals halt (explicit "stop", "wait", "pause", profanity / frustration, or repeated rejection of tool calls), the Director halts dispatch immediately, treats the monitoring member's escalation messages as notification-only, and waits for explicit re-authorization; an explicit abort triggers the Abort Flow (Step 6).
+After all TDD steps (and Phase D, if run) complete, the Director runs a fresh-context review loop before anything is presented to the user. **Run to completion / stop means stop**: the loop is uncapped and ends only on Reviewer approval or an explicit user halt/abort. When the user signals halt (explicit "stop", "wait", "pause", profanity / frustration, or repeated rejection of tool calls), the Director halts dispatch immediately, treats periodic monitor wakes as notification-only, and waits for explicit re-authorization; an explicit abort triggers the Abort Flow (Step 6).
 
 #### Success Criteria Verification (gate)
 
@@ -435,7 +435,7 @@ No round limit — the loop continues until the user approves or aborts.
 
 1. Update design document Status to "Aborted", add Changelog entry. Place a `COMMENT(director): aborting — finalize and stand by` marker near the top of the doc body (above the Overview section — `Status:` is bold metadata, not a heading, so it is not a valid `paragraph-` target). Notify any still-live members with a single `cafleet message send --fleet-id <fleet-id> ... --text "ready (doc)"` per member so they read the marker and stand by.
 2. Commit (separate commands): `git add <design-doc>` then `git commit -m "docs: mark design doc as aborted"`
-3. Follow Shutdown Protocol (Step 8: delete the monitoring member first, then the remaining members, and run `cafleet fleet delete --fleet-id <fleet-id>` to tear down the fleet and sweep the root Director).
+3. Follow Shutdown Protocol (Step 8: stop the monitor loop's background task first, then delete the members, and run `cafleet fleet delete --fleet-id <fleet-id>` to tear down the fleet and sweep the root Director).
 
 ### Step 7: Push & Create PR (Director)
 
@@ -477,5 +477,5 @@ Runs after Step 7 completes, or directly after Step 6 when Step 7 was skipped (g
 4. **Push decision** (separate Bash call): run `git rev-parse --abbrev-ref <branch-name>@{upstream}`.
    - Exit code 0 (branch is tracked on origin): `git push`. Covers both the "Step 7 fully succeeded" path and the "Step 7 partial-fail (push OK, PR create failed)" path.
    - Non-zero exit: skip the push. The docs commit stays local.
-5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (first-out): `cafleet member delete` the monitoring member first (the pane kill terminates the `monitor start` loop launched in Step 3b), then Programmer, Tester, Verifier, and Reviewer if spawned (each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
+5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*: stop the monitor loop's background task first ({bg_stop}; the loop launched in Step 3b), then `cafleet member delete` the Programmer, Tester, Verifier, and Reviewer if spawned (each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
 6. **Report to the user**: include the PR URL (if Step 7 created one), the Reviewer outcome (rounds to approval), and any skipped-step reasons.

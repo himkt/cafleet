@@ -99,12 +99,11 @@ mod tests {
         .unwrap()
     }
 
-    const APP_TABLES: [&str; 7] = [
+    const APP_TABLES: [&str; 6] = [
         "members",
         "fleets",
         "asset_installs",
         "member_placements",
-        "monitor_config",
         "monitor_runtime",
         "messages",
     ];
@@ -136,11 +135,11 @@ mod tests {
     }
 
     #[test]
-    fn migrate_reaches_head_version_2_and_is_idempotent() {
+    fn migrate_reaches_head_version_4_and_is_idempotent() {
         let dir = TempDir::new().unwrap();
         let mut conn = connect(&temp_db_url(&dir)).unwrap();
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 2);
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 2);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 4);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 4);
     }
 
     #[test]
@@ -175,12 +174,7 @@ mod tests {
                 "{table} must AUTOINCREMENT"
             );
         }
-        for table in [
-            "asset_installs",
-            "member_placements",
-            "monitor_config",
-            "monitor_runtime",
-        ] {
+        for table in ["asset_installs", "member_placements", "monitor_runtime"] {
             assert!(
                 !table_sql(&conn, table).contains("AUTOINCREMENT"),
                 "{table} must not AUTOINCREMENT"
@@ -219,14 +213,6 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let conn = migrated_conn(&dir);
         assert_eq!(
-            column_info(&conn, "monitor_config", "interval_seconds").1,
-            Some("60".to_string())
-        );
-        assert_eq!(
-            column_info(&conn, "monitor_config", "enabled").1,
-            Some("1".to_string())
-        );
-        assert_eq!(
             column_info(&conn, "monitor_runtime", "tick_seconds").1,
             Some("5".to_string())
         );
@@ -253,6 +239,7 @@ mod tests {
         assert_eq!(column_info(&conn, "fleets", "name").0, 0);
         assert_eq!(column_info(&conn, "members", "deregistered_at").0, 0);
         assert_eq!(column_info(&conn, "member_placements", "mux_pane_id").0, 0);
+        assert_eq!(column_info(&conn, "monitor_runtime", "last_wake_at").0, 0);
     }
 
     #[test]
@@ -272,10 +259,6 @@ mod tests {
             ("members".to_string(), "CASCADE".to_string())
         );
         assert_eq!(
-            fk_rule(&conn, "monitor_config", "member_id"),
-            ("members".to_string(), "CASCADE".to_string())
-        );
-        assert_eq!(
             fk_rule(&conn, "monitor_runtime", "fleet_id"),
             ("fleets".to_string(), "RESTRICT".to_string())
         );
@@ -285,8 +268,8 @@ mod tests {
         );
     }
 
-    // A CHECK constraint is a `CHECK` token (not part of an identifier such as
-    // `last_stall_check_at`) followed by an opening parenthesis.
+    // A CHECK constraint is a `CHECK` token on identifier boundaries (not a
+    // substring of a column name) followed by an opening parenthesis.
     fn has_check_constraint(sql: &str) -> bool {
         let upper = sql.to_uppercase();
         let bytes = upper.as_bytes();
@@ -342,14 +325,14 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        assert_eq!(versions, vec![1, 2]);
+        assert_eq!(versions, vec![1, 2, 3, 4]);
     }
 
     // The chain guard reads the refinery-embedded listing, not the filesystem:
     // `migration_chain()` returns the `(version, name)` pairs of the embedded
     // runner's migrations, sorted ascending.
     #[test]
-    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_2() {
+    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_4() {
         let chain = migration_chain();
         let versions: Vec<u32> = chain.iter().map(|(version, _)| *version).collect();
         let contiguous: Vec<u32> = (1..=versions.len() as u32).collect();
@@ -365,6 +348,6 @@ mod tests {
             chain.iter().all(|(_, name)| !name.is_empty()),
             "every migration carries a slug"
         );
-        assert_eq!(versions.last(), Some(&2), "expected head version is 2");
+        assert_eq!(versions.last(), Some(&4), "expected head version is 4");
     }
 }

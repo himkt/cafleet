@@ -1,9 +1,3 @@
-export interface MonitorConfig {
-  interval_seconds: number;
-  last_ping_at: string | null;
-  enabled: boolean;
-}
-
 export interface MonitorRuntime {
   running: boolean;
 }
@@ -14,8 +8,7 @@ export interface Member {
   description: string;
   status: "active" | "deregistered";
   registered_at: string;
-  kind: "director" | "monitor" | "member";
-  monitor: MonitorConfig | null;
+  kind: "director" | "member";
 }
 
 export interface TimelineMessage {

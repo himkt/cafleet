@@ -46,8 +46,7 @@ fn placed(pane: &str) -> NewPlacement {
     }
 }
 
-/// Fleet 1 with director 1 (`%0`), an enrolled worker (`%2`), and a
-/// monitoring member (`%3`).
+/// Fleet 1 with director 1 (`%0`) and two pane-bound workers (`%2`, `%3`).
 fn seeded_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
     let fleet =
         broker::create_fleet(conn, Some("web"), "main", "@1", "%0", "claude", "tmux").unwrap();
@@ -60,24 +59,22 @@ fn seeded_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
         "d",
         &[],
         Some(&placed("%2")),
-        None,
     )
     .unwrap()["member_id"]
         .as_i64()
         .unwrap();
-    let monitor_id = broker::register_member(
+    let helper_id = broker::register_member(
         conn,
         fleet_id,
-        "watch",
+        "helper",
         "d",
         &[],
         Some(&placed("%3")),
-        Some("monitoring-member"),
     )
     .unwrap()["member_id"]
         .as_i64()
         .unwrap();
-    (fleet_id, director_id, member_id, monitor_id)
+    (fleet_id, director_id, member_id, helper_id)
 }
 
 async fn call(
@@ -173,12 +170,12 @@ async fn the_fleet_header_dependency_resolves_in_the_pinned_order() {
 }
 
 #[tokio::test]
-async fn the_roster_wraps_members_and_projects_the_monitor_config() {
+async fn the_roster_wraps_members_with_the_two_value_kind_union() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
-    let (fleet_id, director_id, member_id, monitor_id) = seeded_fleet(&mut conn);
-    let holder_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, None)
-        .unwrap()["member_id"]
+    let (fleet_id, director_id, member_id, helper_id) = seeded_fleet(&mut conn);
+    let holder_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None).unwrap()
+        ["member_id"]
         .as_i64()
         .unwrap();
     broker::send_message(
@@ -211,7 +208,6 @@ async fn the_roster_wraps_members_and_projects_the_monitor_config() {
         "registered_at",
         "kind",
         "placement",
-        "monitor",
     ]
     .into();
     for member in members {
@@ -238,136 +234,14 @@ async fn the_roster_wraps_members_and_projects_the_monitor_config() {
         cafleet::time::parse_lenient(director["registered_at"].as_str().unwrap()).is_ok(),
         "the SPA sorts on registered_at"
     );
-    assert_eq!(
-        director["monitor"],
-        Value::Null,
-        "the root Director is unenrolled"
-    );
     let worker = by_id(member_id);
     assert_eq!(worker["kind"], "member");
-    assert_eq!(
-        worker["monitor"],
-        json!({"interval_seconds": 720, "last_ping_at": null, "enabled": true}),
-        "the projection drops member_id and last_stall_check_at"
-    );
-    let monitor = by_id(monitor_id);
-    assert_eq!(monitor["kind"], "monitor");
-    assert_eq!(monitor["monitor"], Value::Null, "the watcher is unenrolled");
+    let helper = by_id(helper_id);
+    assert_eq!(helper["kind"], "member");
     let holder = by_id(holder_id);
     assert_eq!(holder["status"], "deregistered");
     assert_eq!(holder["placement"], Value::Null);
-    assert_eq!(holder["monitor"], Value::Null);
-}
-
-#[tokio::test]
-async fn member_monitor_get_returns_the_exact_projection_or_404() {
-    let dir = TempDir::new().unwrap();
-    let (url, mut conn) = migrated(&dir);
-    let (_, director_id, member_id, monitor_id) = seeded_fleet(&mut conn);
-    let app = app(&url);
-
-    let (status, body) = call(
-        app.clone(),
-        "GET",
-        &format!("/api/members/{member_id}/monitor"),
-        Some("1"),
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        body, r#"{"interval_seconds":720,"last_ping_at":null,"enabled":true}"#,
-        "the projected config, key order pinned"
-    );
-
-    let (status, body) = call(
-        app.clone(),
-        "GET",
-        &format!("/api/members/{monitor_id}/monitor"),
-        Some("1"),
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    assert_eq!(body, r#"{"detail":"Member not enrolled"}"#);
-
-    let (status, body) = call(
-        app,
-        "GET",
-        &format!("/api/members/{director_id}/monitor"),
-        Some("1"),
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    assert_eq!(body, r#"{"detail":"Member not enrolled"}"#);
-}
-
-#[tokio::test]
-async fn patch_monitor_applies_partial_updates_and_validates_the_interval() {
-    let dir = TempDir::new().unwrap();
-    let (url, mut conn) = migrated(&dir);
-    let (_, _, member_id, monitor_id) = seeded_fleet(&mut conn);
-    let app = app(&url);
-    let path = format!("/api/members/{member_id}/monitor");
-
-    let (status, body) = call(
-        app.clone(),
-        "PATCH",
-        &path,
-        Some("1"),
-        Some(json!({"interval_seconds": 300})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let payload = parsed(&body);
-    assert_eq!(payload["interval_seconds"], 300);
-    assert_eq!(
-        payload["enabled"], true,
-        "the unspecified field is untouched"
-    );
-
-    let (status, body) = call(
-        app.clone(),
-        "PATCH",
-        &path,
-        Some("1"),
-        Some(json!({"enabled": false})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let payload = parsed(&body);
-    assert_eq!(payload["interval_seconds"], 300);
-    assert_eq!(payload["enabled"], false);
-
-    let (status, _) = call(app.clone(), "PATCH", &path, Some("1"), Some(json!({}))).await;
-    assert_eq!(status, StatusCode::OK, "a null/null patch is a valid no-op");
-
-    let (status, body) = call(
-        app.clone(),
-        "PATCH",
-        &path,
-        Some("1"),
-        Some(json!({"interval_seconds": 0})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    let payload = parsed(&body);
-    assert!(
-        payload["detail"].is_string(),
-        "every request-validation failure is 422 {{\"detail\": <string>}}, got: {body}"
-    );
-
-    let (status, body) = call(
-        app,
-        "PATCH",
-        &format!("/api/members/{monitor_id}/monitor"),
-        Some("1"),
-        Some(json!({"interval_seconds": 300})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    assert_eq!(body, r#"{"detail":"Member not enrolled"}"#);
+    assert_eq!(holder["kind"], "member");
 }
 
 #[tokio::test]
@@ -540,7 +414,17 @@ async fn post_send_handles_unicast_broadcast_and_the_error_surfaces() {
 async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
-    let (fleet_id, director_id, _, _) = seeded_fleet(&mut conn);
+    let (fleet_id, director_id, member_id, helper_id) = seeded_fleet(&mut conn);
+    broker::send_message(
+        &mut conn,
+        &NullNotifier,
+        200,
+        fleet_id,
+        director_id,
+        &member_id.to_string(),
+        "pending work",
+    )
+    .unwrap();
     let app = app(&url);
 
     let (status, body) = call(app.clone(), "GET", "/api/monitor", Some("1"), None).await;
@@ -549,17 +433,44 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     assert_eq!(payload["running"], false);
     assert_eq!(payload["pid"], Value::Null);
     assert_eq!(payload["tick_seconds"], Value::Null, "no row at all");
+    assert_eq!(payload["last_wake_at"], Value::Null);
+    assert_eq!(payload["last_wake_age_seconds"], Value::Null);
     let rows = payload["members"].as_array().unwrap();
-    assert_eq!(rows.len(), 1, "the watched set rides along");
+    assert_eq!(
+        rows.len(),
+        2,
+        "every non-Director active member rides along"
+    );
     assert!(
         !rows.iter().any(|row| row["member_id"] == director_id),
-        "the root Director is not in the watched set, got: {rows:?}"
+        "the root Director has no row, got: {rows:?}"
     );
+    let worker = rows.iter().find(|r| r["member_id"] == member_id).unwrap();
+    assert_eq!(
+        keys(worker),
+        [
+            "member_id",
+            "name",
+            "pending_count",
+            "oldest_pending_ts",
+            "oldest_pending_age_seconds",
+        ],
+        "the members element key order is pinned"
+    );
+    assert_eq!(worker["name"], "worker");
+    assert_eq!(worker["pending_count"], 1);
+    assert!(worker["oldest_pending_ts"].is_string());
+    assert!(worker["oldest_pending_age_seconds"].is_i64());
+    let helper = rows.iter().find(|r| r["member_id"] == helper_id).unwrap();
+    assert_eq!(helper["pending_count"], 0);
+    assert_eq!(helper["oldest_pending_ts"], Value::Null);
+    assert_eq!(helper["oldest_pending_age_seconds"], Value::Null);
 
     let now = cafleet::time::now_utc();
     let pid = i64::from(std::process::id());
     broker::claim_monitor_runtime(&mut conn, fleet_id, pid, 5, &cafleet::time::format_utc(now))
         .unwrap();
+    broker::record_monitor_wake(&mut conn, fleet_id, &cafleet::time::format_utc(now)).unwrap();
     let (status, body) = call(app.clone(), "GET", "/api/monitor", Some("1"), None).await;
     assert_eq!(status, StatusCode::OK);
     let payload = parsed(&body);
@@ -568,6 +479,12 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     assert_eq!(payload["tick_seconds"], 5);
     let age = payload["last_tick_age_seconds"].as_i64().unwrap();
     assert!((0..=5).contains(&age), "whole-second age, got {age}");
+    assert!(payload["last_wake_at"].is_string());
+    let wake_age = payload["last_wake_age_seconds"].as_i64().unwrap();
+    assert!(
+        (0..=5).contains(&wake_age),
+        "whole-second wake age, got {wake_age}"
+    );
 
     let stale = cafleet::time::format_utc(now - chrono::Duration::seconds(100));
     conn.execute(
@@ -587,6 +504,12 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     assert_eq!(payload["tick_seconds"], 5, "only tick_seconds survives");
     assert_eq!(payload["last_tick_at"], Value::Null);
     assert_eq!(payload["started_at"], Value::Null);
+    assert_eq!(
+        payload["last_wake_at"],
+        Value::Null,
+        "last_wake_at is masked with the stale row"
+    );
+    assert_eq!(payload["last_wake_age_seconds"], Value::Null);
 }
 
 #[tokio::test]

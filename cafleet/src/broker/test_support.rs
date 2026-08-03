@@ -23,8 +23,8 @@
 //! delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value>
 //! // members
 //! register_member(conn: &mut Connection, fleet_id: i64, name: &str,
-//!     description: &str, skills: &[Value], placement: Option<&NewPlacement>,
-//!     kind: Option<&str>) -> Result<Value>  // {member_id, name, registered_at}
+//!     description: &str, skills: &[Value], placement: Option<&NewPlacement>)
+//!     -> Result<Value>  // {member_id, name, registered_at}
 //! get_member(conn: &Connection, member_id: i64, fleet_id: i64) -> Result<Option<Value>>
 //! deregister_member(conn: &mut Connection, member_id: i64) -> Result<bool>
 //! update_placement_pane_id(conn: &mut Connection, member_id: i64, pane_id: &str)
@@ -50,17 +50,8 @@
 //! list_timeline(conn: &Connection, fleet_id: i64, limit: usize) -> Result<Vec<Value>>
 //! get_message(conn: &Connection, fleet_id: i64, message_id: i64) -> Result<Value> // {message}
 //! // monitor
-//! find_monitoring_member(conn: &Connection, fleet_id: i64) -> Result<Option<Value>>
-//! get_monitor_config(conn: &Connection, fleet_id: i64, member_id: i64) -> Result<Option<Value>>
-//! list_monitor_configs(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>>
-//! update_monitor_config(conn: &mut Connection, fleet_id: i64, member_id: i64,
-//!     interval_seconds: Option<i64>, enabled: Option<bool>) -> Result<Value>
-//! record_pings(conn: &mut Connection, member_ids: &[i64], when: &str) -> Result<()>
-//! record_monitor_dispatch(conn: &mut Connection, ping_member_ids: &[i64],
-//!     stall_check_member_ids: &[i64], when: &str) -> Result<()>
-//! reconcile_monitor_lifecycle(conn: &mut Connection, fleet_id: i64,
-//!     unavailable_member_ids: &[i64]) -> Result<()>
-//! list_monitor_targets(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>>
+//! record_monitor_wake(conn: &mut Connection, fleet_id: i64, when: &str) -> Result<()>
+//! list_fleet_wake_targets(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>>
 //! claim_monitor_runtime(conn: &mut Connection, fleet_id: i64, pid: i64,
 //!     tick_seconds: i64, when: &str) -> Result<bool>
 //! heartbeat_monitor_runtime(conn: &mut Connection, fleet_id: i64, pid: i64,
@@ -123,7 +114,6 @@ pub fn register(conn: &mut Connection, fleet_id: i64, name: &str, pane: Option<&
         "test member",
         &[],
         Some(&placement(pane)),
-        None,
     )
     .unwrap()["member_id"]
         .as_i64()

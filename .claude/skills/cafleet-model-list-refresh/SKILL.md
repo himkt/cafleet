@@ -59,10 +59,10 @@ is never used to price a model.
    and the most-to-least-capable row ordering are reviewed maintainer
    judgment, not provider benchmark claims; changing a class or the ordering
    requires reviewed policy approval in the same pull request. Every row
-   carries both prices from its approved source. Re-derive the *Monitor and
-   reviewer defaults* table from the refreshed backend tables, and mirror its
-   values into each backend overlay's `{monitor_model}` / `{reviewer_model}`
-   rows (`skills/cafleet/reference/coding-agent/<name>-overlay.md`).
+   carries both prices from its approved source. Re-derive the *Reviewer
+   defaults* table from the refreshed backend tables, and mirror its
+   values into each backend overlay's `{reviewer_model}`
+   row (`skills/cafleet/reference/coding-agent/<name>-overlay.md`).
 5. **Re-verify every `claude` row's context window on every refresh**, even
    when the prices are unchanged. Take each window from the Claude Code model
    configuration page's *Extended context* section and record it in the

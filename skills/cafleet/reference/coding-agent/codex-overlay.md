@@ -5,7 +5,6 @@ Substitute these into the base `{…}` placeholders.
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
-| `{monitor_model}` | `gpt-5.6-luna` |
 | `{reviewer_model}` | `gpt-5.6-sol` |
 | `{permission_flags}` | `--ask-for-approval never --sandbox workspace-write` |
 | `{bg_run}` | a backgrounded `!` shell command |
@@ -23,11 +22,11 @@ Every note names the base token/instruction it qualifies.
 |------|-----------|
 | No in-pane prompt — a fleet member sends its question to the Director, which answers as a plain operator message. Ask a concrete, answerable question, not free-form prose. | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions |
 | No harness task list — track sub-topic registrations, claims, and completions as cafleet messages. | `{task_coord}` — `cafleet-research/report/report.md` task coordination |
-| *Pane-state capture cues* (below) — the concrete codex-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitoring member's target-specific classification rubric — `cafleet/roles/monitor.md` § On each wake; the pane-state taxonomy in `docs/docs/concepts/monitoring.md`; the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response (both consumers apply the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — the concrete codex-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the Director's on-tick health check and pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (the Director applies the cues of the **target member's** backend overlay). |
 
 ## Pane-state capture cues
 
-The monitoring member classifies each target from its **content only** (never native `agent_status`) using that target's backend overlay:
+The Director classifies each target from its **content only** (never native `agent_status`) using that target's backend overlay:
 
 | State | codex capture cue |
 |---|---|
@@ -36,10 +35,10 @@ The monitoring member classifies each target from its **content only** (never na
 | `working` | Affirmative active-work evidence: the active-turn or `working` indicator, streaming model output, a running tool, or generation in progress. A truncated or ambiguous capture that may still be active is also `working`. |
 | `stall_candidate` | Quiet, non-finished content with no confirmation prompt, no empty at-rest composer, and no active-turn, tool, streaming, generation, or other work cue. |
 
-When a capture cannot separate `awaiting_user` from `finished`, classify `awaiting_user`. When it cannot separate active work from a quiet candidate, classify `working`. `stall_candidate` and `finished` are the two quiet families: the monitoring member itself confirms a member quiet when its captures on two consecutive stall-check wakes are byte-identical.
+When a capture cannot separate `awaiting_user` from `finished`, classify `awaiting_user`. When it cannot separate active work from a quiet candidate, classify `working`. `stall_candidate` and `finished` are the two quiet families: the Director confirms a member quiet when its captures on two consecutive wakes are byte-identical.
 
 ## Worked resolution
 
-The canonical monitor-spawn command, fully resolved for this backend:
+The canonical Director-side monitor launch, fully resolved for this backend:
 
-`cafleet member create --role monitor --model gpt-5.6-luna --text-file <rendered monitor prompt>` (members spawned `--ask-for-approval never --sandbox workspace-write`).
+Launch `cafleet monitor start --fleet-id <fleet-id> &` as a backgrounded `!` shell command, and confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in its output before the first `member create` (members spawned `--ask-for-approval never --sandbox workspace-write`).

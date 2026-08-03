@@ -145,17 +145,13 @@ export default function MessageInput({
 
   const popoverOpen = candidates.length > 0;
 
-  useEffect(() => {
-    if (!popoverOpen) {
-      setSelectedIndex(0);
-      return;
-    }
-    setSelectedIndex((prev) => {
-      if (prev < 0) return 0;
-      if (prev >= candidates.length) return Math.max(0, candidates.length - 1);
-      return prev;
-    });
-  }, [popoverOpen, candidates.length]);
+  // Adjusted during render, not in an effect: a closed popover re-arms the
+  // selection at 0; a shrunken candidate list clamps it into range.
+  if (!popoverOpen && selectedIndex !== 0) {
+    setSelectedIndex(0);
+  } else if (popoverOpen && selectedIndex >= candidates.length) {
+    setSelectedIndex(candidates.length - 1);
+  }
 
   useLayoutEffect(() => {
     const ta = textareaRef.current;

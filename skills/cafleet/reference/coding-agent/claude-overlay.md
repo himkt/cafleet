@@ -5,7 +5,6 @@ Substitute these into the base `{…}` placeholders.
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | the AskUserQuestion tool |
-| `{monitor_model}` | `haiku` |
 | `{reviewer_model}` | `fable` |
 | `{permission_flags}` | `--permission-mode dontAsk` |
 | `{bg_run}` | the Bash tool's `run_in_background: true` |
@@ -23,11 +22,11 @@ Every note names the base token/instruction it qualifies.
 |------|-----------|
 | `AskUserQuestion` takes ≤ 4 options/question; the built-in "Other" is the free-text path (don't add an explicit "Other"). Question shapes → form: choice among ≤ 4 labeled options; approve-or-revise (two options); continue-or-abort (two options); open-ended draft-comparison (2–4 full candidate bodies). | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions; `cafleet-design-doc/create/create.md` Step 2 question batch |
 | `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet`: register a sub-topic with `TaskCreate`, claim with `TaskUpdate` (owner + `in_progress`), complete with `TaskUpdate` (`completed`), check progress with `TaskList`. | `{task_coord}` — `cafleet-research/report/report.md` task coordination |
-| *Pane-state capture cues* (below) — the concrete claude-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitoring member's target-specific classification rubric — `cafleet/roles/monitor.md` § On each wake; the pane-state taxonomy in `docs/docs/concepts/monitoring.md`; the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response (both consumers apply the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — the concrete claude-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the Director's on-tick health check and pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (the Director applies the cues of the **target member's** backend overlay). |
 
 ## Pane-state capture cues
 
-The monitoring member classifies each target from its **content only** (never native `agent_status`) using that target's backend overlay:
+The Director classifies each target from its **content only** (never native `agent_status`) using that target's backend overlay:
 
 | State | claude capture cue |
 |---|---|
@@ -36,10 +35,10 @@ The monitoring member classifies each target from its **content only** (never na
 | `working` | Affirmative active-work evidence: a running spinner, `esc to interrupt`, streaming response, tool execution, or generation indicator. A truncated or ambiguous capture that might hide one of these cues is also `working`. |
 | `stall_candidate` | Quiet, non-finished transcript content with no question/approval box, no empty at-rest composer, and no spinner, tool, streaming, generation, or other active-work cue. |
 
-When a capture cannot separate `awaiting_user` from `finished`, classify `awaiting_user`. When it cannot separate active work from a quiet candidate, classify `working`. `stall_candidate` and `finished` are the two quiet families: the monitoring member itself confirms a member quiet when its captures on two consecutive stall-check wakes are byte-identical.
+When a capture cannot separate `awaiting_user` from `finished`, classify `awaiting_user`. When it cannot separate active work from a quiet candidate, classify `working`. `stall_candidate` and `finished` are the two quiet families: the Director confirms a member quiet when its captures on two consecutive wakes are byte-identical.
 
 ## Worked resolution
 
-The canonical monitor-spawn command, fully resolved for this backend:
+The canonical Director-side monitor launch, fully resolved for this backend:
 
-`cafleet member create --role monitor --model haiku --text-file <rendered monitor prompt>` (members spawned `--permission-mode dontAsk`).
+Launch `cafleet monitor start --fleet-id <fleet-id>` via the Bash tool with `run_in_background: true`, and confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in the task output before the first `member create` (members spawned `--permission-mode dontAsk`).

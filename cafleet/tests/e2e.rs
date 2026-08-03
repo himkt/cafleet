@@ -26,21 +26,6 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
 
     let worker_id = cli.create_member(1, "worker");
     let helper_id = cli.create_member(1, "helper");
-    let output = cli.run(&[
-        "member",
-        "create",
-        "--fleet-id",
-        "1",
-        "--name",
-        "watch",
-        "--description",
-        "the watcher",
-        "--role",
-        "monitor",
-        "--text",
-        "follow your monitor role protocol",
-    ]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
 
     let output = cli.run(&[
         "message",
@@ -111,74 +96,35 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
     let loop_stdout = text(&loop_output.stdout);
     assert!(
         loop_stdout.contains("monitor loop started (fleet 1, tick 1s, pid "),
-        "the ready-handshake startup line, got: {loop_stdout}"
+        "the startup confirmation line, got: {loop_stdout}"
     );
     assert!(
-        loop_stdout.contains(&format!("due member {helper_id} (helper) [")),
-        "got: {loop_stdout}"
-    );
-    assert!(
-        loop_stdout.contains(&format!("due member {worker_id} (worker) [")),
-        "got: {loop_stdout}"
-    );
-    assert!(
-        loop_stdout.contains("-> wake monitor"),
+        loop_stdout.contains("tick -> wake director 1 (2 members)"),
         "got: {loop_stdout}"
     );
 
     assert!(
+        cli.shim_calls().iter().any(|line| line.contains(&format!(
+            "[cafleet] tick: fleet 1 — health-check your 2 members: \
+             {worker_id} (worker; coding_agent=claude; unacked=0), \
+             {helper_id} (helper; coding_agent=claude; unacked=0). \
+             Poll your inbox, ACK, dispatch. \
+             Resume your work if something was still running."
+        ))),
+        "the wake keystroke reached the Director's pane, got: {:?}",
         cli.shim_calls()
-            .iter()
-            .any(|line| line.contains("[monitor] wake: 2 members due")),
-        "the wake keystroke reached the watcher's pane"
     );
 
     let conn = cli.sqlite();
-    for member_id in [worker_id, helper_id] {
-        let last_ping: Option<String> = conn
-            .query_row(
-                "SELECT last_ping_at FROM monitor_config WHERE member_id=?1",
-                [member_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(
-            last_ping.is_some(),
-            "the successful wake advanced member {member_id}'s last_ping_at"
-        );
-    }
-}
-
-#[test]
-fn monitor_start_without_a_watcher_warns_and_still_runs() {
-    let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-
-    let mut child = cli.spawn(&[
-        "monitor",
-        "start",
-        "--fleet-id",
-        &fleet_id.to_string(),
-        "--tick",
-        "1",
-    ]);
-    std::thread::sleep(Duration::from_millis(1500));
-    child.kill().unwrap();
-    let output = child.wait_with_output().unwrap();
-
+    let last_wake: Option<String> = conn
+        .query_row(
+            "SELECT last_wake_at FROM monitor_runtime WHERE fleet_id=1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert!(
-        text(&output.stderr).contains(&format!(
-            "Warning: fleet {fleet_id} has no monitoring member; the monitor heartbeat \
-             will wake no member. Spawn one first with 'cafleet member create --role monitor'."
-        )),
-        "the warn-but-run line goes to stderr, got: {}",
-        text(&output.stderr)
-    );
-    assert!(
-        text(&output.stdout).contains(&format!(
-            "monitor loop started (fleet {fleet_id}, tick 1s, pid "
-        )),
-        "got: {}",
-        text(&output.stdout)
+        last_wake.is_some(),
+        "the successful wake stamped the fleet's last_wake_at"
     );
 }

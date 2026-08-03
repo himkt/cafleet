@@ -1,7 +1,8 @@
 //! Docs-sync contracts: the repository documentation is the public contract
-//! for the monitor ping protocol — the pure-trigger wake, the monitoring
-//! member's two-wake in-context judgment, the `member ping`
-//! pending-placement skip, and the `monitor` group surface.
+//! for the Director-tick supervision protocol — the fleet-level `[cafleet]
+//! tick:` wake into the Director's pane, the resume clause on both injected
+//! triggers, the `member ping` pending-placement skip, and the `monitor`
+//! group surface.
 
 use std::path::{Path, PathBuf};
 
@@ -54,8 +55,9 @@ fn assert_absent(relative_path: &str, terms: &[&str]) {
     );
 }
 
-// Episode-machine vocabulary that must not survive on any contract page.
-const REMOVED_VOCABULARY: [&str; 10] = [
+// Episode-machine and monitoring-member vocabulary that must not survive on
+// any contract page.
+const REMOVED_VOCABULARY: [&str; 17] = [
     "nudge_claimed",
     "escalation_pending",
     "ping_failed",
@@ -66,27 +68,33 @@ const REMOVED_VOCABULARY: [&str; 10] = [
     "monitor_director_gate",
     "report-batch",
     "monitor stall",
+    "monitoring member",
+    "monitoring-member",
+    "--role monitor",
+    "ready: monitor live",
+    "monitor_config",
+    "CAFLEET_MONITOR_STALL_INTERVAL",
+    "stall-check",
 ];
 
 #[test]
-fn monitoring_concept_covers_the_judgment_protocol_and_pure_trigger_wake() {
+fn monitoring_concept_covers_the_director_tick_and_capture_taxonomy() {
     assert_terms(
         "docs/docs/concepts/monitoring.md",
         &[
             "awaiting_user",
-            "unknown",
             "finished",
             "working",
             "stall_candidate",
-            "quiet",
-            "byte-identical",
-            "stall-check",
-            "cafleet member ping",
-            "cafleet message send",
+            "pre-ping capture gate",
+            "[cafleet] tick:",
+            "health-check",
+            "Resume your work if something was still running",
+            "CAFLEET_MONITOR_WAKE_INTERVAL",
+            "--interval 0",
+            "Esc",
             "monitor loop started",
-            "wake trigger",
-            "pointer sentence",
-            "role protocol",
+            "member ping",
         ],
     );
     assert_absent("docs/docs/concepts/monitoring.md", &REMOVED_VOCABULARY);
@@ -101,23 +109,21 @@ fn spec_defines_the_ping_skip_and_monitor_group_contract() {
             "pending placement",
             "monitor capture",
             "monitor loop started",
-            "Follow your monitor role protocol",
+            "[cafleet] tick:",
+            "health-check",
+            "last_wake_at",
+            "CAFLEET_MONITOR_WAKE_INTERVAL",
+            "then resume your work",
         ],
     );
     assert_absent("SPEC.md", &REMOVED_VOCABULARY);
 }
 
 #[test]
-fn data_model_defines_the_trimmed_monitor_config() {
+fn data_model_defines_the_monitor_runtime() {
     assert_terms(
         "docs/docs/spec/data-model.md",
-        &[
-            "monitor_config",
-            "interval_seconds",
-            "last_ping_at",
-            "enabled",
-            "last_stall_check_at",
-        ],
+        &["monitor_runtime", "last_wake_at", "tick_seconds"],
     );
     let mut absent = vec!["last_stall_candidate_at", "last_stall_capture_sha256"];
     absent.extend(REMOVED_VOCABULARY);
@@ -134,6 +140,9 @@ fn cli_options_defines_the_ping_skip_and_moved_capture() {
             "skipped",
             "pending placement",
             "nothing to",
+            "--interval",
+            "CAFLEET_MONITOR_WAKE_INTERVAL",
+            "then resume your work",
         ],
     );
     let mut absent = vec!["member capture", "monitor status", "monitor config"];
@@ -146,38 +155,16 @@ fn multiplexer_backends_pins_the_pure_trigger_payload() {
     assert_terms(
         "docs/docs/spec/multiplexer-backends.md",
         &[
-            "[monitor] wake:",
+            "[cafleet] tick:",
             "coding_agent=",
-            "Follow your monitor role protocol",
+            "Resume your work if something was still running",
+            "cafleet message poll --fleet-id <fleet-id> --member-id <member-id> — then",
         ],
     );
     assert_absent(
         "docs/docs/spec/multiplexer-backends.md",
         &REMOVED_VOCABULARY,
     );
-}
-
-#[test]
-fn the_monitor_role_is_the_sole_normative_protocol_carrier() {
-    assert_terms(
-        "skills/cafleet/roles/monitor.md",
-        &[
-            "--lines 120",
-            "--no-ansi",
-            "--json",
-            "content_sha256",
-            "stall_candidate",
-            "finished",
-            "quiet",
-            "byte-identical",
-            "stall-check",
-            "cafleet member ping",
-            "cafleet message send",
-            "ready: monitor live",
-            "monitor loop started",
-        ],
-    );
-    assert_absent("skills/cafleet/roles/monitor.md", &REMOVED_VOCABULARY);
 }
 
 #[test]
@@ -200,12 +187,7 @@ fn every_backend_overlay_defines_the_capture_cues() {
     }
     assert_terms(
         "skills/cafleet/reference/coding-agent/_template.md",
-        &[
-            "working",
-            "stall_candidate",
-            "monitoring member",
-            "Note → applies at",
-        ],
+        &["working", "stall_candidate", "Note → applies at"],
     );
 }
 
@@ -214,12 +196,14 @@ fn the_supervision_contract_covers_quiet_members_and_plain_messages() {
     assert_terms(
         "skills/cafleet/reference/supervision.md",
         &[
-            "monitoring member",
-            "cafleet member ping",
+            "member ping",
             "quiet",
             "finished",
             "pre-ping",
             "monitor capture",
+            "monitor start",
+            "monitor loop started",
+            "health-check",
         ],
     );
     let mut absent = vec!["pre-nudge"];
@@ -234,9 +218,9 @@ fn the_director_and_member_roles_keep_the_ping_protocol() {
         &[
             "## Member Ping (manual inbox-poll)",
             "member ping",
-            "monitoring member",
             "pre-ping",
             "monitor capture",
+            "then resume your work",
         ],
     );
     let mut absent = vec!["(manual inbox-poll nudge)", "pre-nudge"];
@@ -245,27 +229,21 @@ fn the_director_and_member_roles_keep_the_ping_protocol() {
 
     assert_terms(
         "skills/cafleet/roles/member.md",
-        &[
-            "monitoring member",
-            "exception",
-            "member ping",
-            "member prompt",
-            "ordinary",
-        ],
+        &["member ping", "member prompt", "Director"],
     );
+    assert_absent("skills/cafleet/roles/member.md", &REMOVED_VOCABULARY);
 }
 
 #[test]
-fn the_cafleet_skill_and_bash_rule_document_the_fixed_ping_exception() {
+fn the_cafleet_skill_and_bash_rule_document_the_director_ping() {
     assert_terms(
         "skills/cafleet/SKILL.md",
         &[
-            "monitoring member",
-            "fixed",
+            "monitor start",
+            "monitor loop started",
             "member ping",
-            "exception",
-            "quiet",
             "message send",
+            "health-check",
         ],
     );
     assert_absent("skills/cafleet/SKILL.md", &REMOVED_VOCABULARY);
@@ -273,13 +251,11 @@ fn the_cafleet_skill_and_bash_rule_document_the_fixed_ping_exception() {
     assert_terms(
         ".claude/rules/bash-tool.md",
         &[
-            "monitoring member",
-            "fixed",
             "member ping",
-            "quiet period",
-            "byte-identical",
+            "member prompt",
             "Esc",
             "message poll",
+            "then resume your work",
         ],
     );
     let mut absent = vec!["action = ping"];
@@ -295,7 +271,6 @@ fn fixed_ping_surfaces_carry_no_nudge_vocabulary() {
         "skills/cafleet/reference/recovery.md",
         "skills/cafleet/reference/prompt-routing.md",
         "skills/cafleet/reference/director.md",
-        "skills/cafleet/roles/monitor.md",
         "docs/docs/concepts/overview.md",
     ] {
         assert_absent(relative_path, &["nudge"]);
@@ -477,10 +452,9 @@ fn every_role_file_gates_its_overlay_as_required_reading_row_one() {
     );
 }
 
-/// The ten placeholders every backend overlay resolves.
-const OVERLAY_PLACEHOLDERS: [&str; 10] = [
+/// The nine placeholders every backend overlay resolves.
+const OVERLAY_PLACEHOLDERS: [&str; 9] = [
     "decision_surface",
-    "monitor_model",
     "reviewer_model",
     "permission_flags",
     "bg_run",

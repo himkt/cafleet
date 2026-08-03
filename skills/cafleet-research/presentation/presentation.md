@@ -10,9 +10,9 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>-overlay.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{monitor_model}` / `{decision_surface}` / `{bg_run}` / `{bg_stop}` (spawn the monitor with `--model {monitor_model}` or can't background the Slidev server), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../cafleet/reference/coding-agent/<name>-overlay.md`](../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{decision_surface}` / `{bg_run}` / `{bg_stop}` (can't background the monitor loop or the Slidev server), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root the spawn-prompt audit files or fall back to `/tmp` |
-| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (monitor-first spawn, the `ready: monitor live` gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised team |
+| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the Director-hosted monitor launch, the startup-line gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised team |
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
@@ -23,7 +23,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 ## Prerequisites
 
-The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill (reading its `reference/supervision.md`) and embeds it into every member's spawn prompt. The fleet runs a dedicated monitoring member (the first `member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the Director on demand — see Step 1.
+The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill (reading its `reference/supervision.md`) and embeds it into every member's spawn prompt. The Director launches the `cafleet monitor` loop as a background task in its own pane; the loop wakes it once per wake interval — see Step 1.
 
 For autonomous Slidev generation, see `../reference/slidev.md` § Autonomous slide generation.
 
@@ -82,7 +82,7 @@ Step 5 (cleanup) is autonomous — no user prompt.
 
 ### Step 1: Bootstrap CAFleet Fleet & Spawn Presentation + Transcript (Director)
 
-Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The fleet runs a dedicated monitoring member (the **first** `cafleet member create`, `--role monitor --model {monitor_model}`) that owns the heartbeat and re-engages the Director via `cafleet message send`; the Director does **not** run `cafleet monitor` itself. Gate the Presentation/Transcript spawns on the monitoring member's `ready: monitor live` handshake (first-in) — see 1b.
+Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The Director launches the `cafleet monitor` loop as a background task in its own pane; the loop wakes it once per wake interval. Gate the Presentation/Transcript spawns on the loop's startup-line confirmation — see 1b.
 
 #### 1a. Environment precheck and fleet bootstrap
 
@@ -97,11 +97,9 @@ This is the gating env-check per the `cafleet` skill's `reference/supervision.md
 
 Capture `fleet_id` and `director.member_id` from the JSON response and substitute them into every subsequent `cafleet ...` call, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
 
-#### 1b. Spawn the monitoring member (first-in)
+#### 1b. Launch the monitor loop (before any member)
 
-The **first** `cafleet member create` in the fleet is the dedicated monitoring member, spawned with `--role monitor --model {monitor_model}`. It launches `cafleet monitor start --fleet-id [fleet-id]` as a background task in its own pane, confirms the loop's startup line in the task output, and reports `ready: monitor live` to the Director. **Receipt of that handshake gates the Presentation/Transcript spawns** (1d) — do not spawn an ordinary member until it has arrived (first-in). The Director does **not** run `cafleet monitor start` itself.
-
-See the `cafleet` skill's `roles/monitor.md` for the canonical monitoring-member spawn prompt (including the on-wake routine) and lifecycle. The monitoring member is deleted first in the Step 5 teardown (first-out). Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
+Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor start --fleet-id [fleet-id]` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Presentation/Transcript spawns** (1d) — do not spawn a member until it has arrived. The background task is stopped first in the Step 5 teardown. Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 
@@ -115,7 +113,7 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 
 #### 1d. Spawn Presentation + Transcript in parallel
 
-**Gate**: do not spawn Presentation or Transcript until the monitoring member's `ready: monitor live` handshake (1b) has arrived.
+**Gate**: do not spawn Presentation or Transcript until the monitor loop's startup line (1b) has been confirmed.
 
 Both work from `report.md` independently. After the slide deck is finalized (Step 3), the Director sends the final slide structure to the Transcript member for realignment.
 
@@ -284,7 +282,7 @@ No round limit — loop until approved.
 
 **Only enter after the user approves in Step 4.**
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol* (first-out): `cafleet member delete` the monitoring member first (the pane kill terminates its `monitor start` loop), then Presentation, Transcript, and any active VR batch — but **for an active VR batch, run the close handshake first**: the Director sends `CLOSE:` via `cafleet message send`, the VR runs `pnpm exec agent-browser --session vr-batch-<start> close` and replies `closed`, THEN delete it. Verify the roster is empty with `cafleet member list`.
+Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*: stop the monitor loop's background task first ({bg_stop}), then `cafleet member delete` Presentation, Transcript, and any active VR batch — but **for an active VR batch, run the close handshake first**: the Director sends `CLOSE:` via `cafleet message send`, the VR runs `pnpm exec agent-browser --session vr-batch-<start> close` and replies `closed`, THEN delete it. Verify the roster is empty with `cafleet member list`.
 
 Then the presentation-specific teardown:
 

@@ -59,6 +59,7 @@ Every `CAFLEET_`-prefixed variable cafleet reads:
 | `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Body truncation on `message {send,poll,ack,show}`, and the broker's inline-preview truncation | `--full` |
 | `CAFLEET_BROKER_HOST` | `broker_host` | `127.0.0.1` | The `cafleet server` bind address | `--host` |
 | `CAFLEET_BROKER_PORT` | `broker_port` | `8000` | The `cafleet server` bind port | `--port` |
+| `CAFLEET_MONITOR_WAKE_INTERVAL` | `monitor_wake_interval` | `600` | The `monitor start` Director wake interval in seconds; `0` disables the wake while the loop keeps heartbeating. A non-integer value fails loudly | `--interval` |
 
 A flag wins over its environment variable, and the environment variable wins
 over the hardcoded default. `member.description` truncation uses a separate
@@ -551,13 +552,9 @@ one root Director by construction, so no override flag exists.
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; when omitted, the member — every role — inherits the spawning Director's placement backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. |
 | `--model` | no | Model forwarded to the backend binary's own `--model` flag. The opencode backend additionally requires `<provider-id>/<model-id>`; per-backend formats and create-time validation are in [Model selection](coding-agent-backends.md#model-selection). |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary, validated per backend before any side effect. Accepted levels, forwarding forms, and rejection strings are in [Reasoning effort](coding-agent-backends.md#reasoning-effort). |
-| `--role` | no | `member` (default) or `monitor`. `monitor` spawns the fleet's single dedicated monitoring member; a second spawn is rejected. |
 | `--full` | no | Switches the non-JSON output to the 6-line labeled block. |
 | `--text` | no | Inline spawn prompt (backend-neutral template). Exactly one of `--text` / `--text-file`. |
 | `--text-file` | no | Path to a UTF-8 file whose contents are the spawn prompt (`-` = stdin). Inline prompts beyond a few KB exceed the multiplexer argv ceiling — use `--text-file` for long prompts. |
-
-The monitoring member's role and lifecycle are covered in
-[Monitoring](../concepts/monitoring.md#the-monitoring-member).
 
 #### Spawn command per backend
 
@@ -608,21 +605,21 @@ placementless target and `(pending — no pane)` for a pending placement.
 
 Registry read — no multiplexer requirement. In the `--full` block, the
 placement sub-block renders `placement:   none` when the member is
-placementless, and `None` fields render `-`. `kind` is one of `director`,
-`monitor`, or `member`.
+placementless, and `None` fields render `-`. `kind` is one of `director` or
+`member`.
 
 ### `member list` {#member-list}
 
 No flags beyond `--fleet-id` and the shared trailing [`--json`](#json-output)
 flag; no identity flag. Lists every **active** registry entry of the fleet —
-the root Director, the monitoring member, ordinary members, and placementless
-rows. An empty roster prints `0 members.`.
+the root Director, ordinary members, and placementless rows. An empty roster
+prints `0 members.`.
 
 | Field | Text column | Text rendering when absent | JSON key | JSON type |
 |---|---|---|---|---|
 | `member_id` | yes | — | `member_id` | integer |
 | `name` | yes | — | `name` | string |
-| `kind` | yes (`director` / `monitor` / `member`) | — | `kind` | string |
+| `kind` | yes (`director` / `member`) | — | `kind` | string |
 | `backend` | yes | `-` for a placementless row | — (inside `placement`) | — |
 | `pane_id` | yes | `-` placementless; `(pending)` before the pane id is patched | — (inside `placement`) | — |
 | `idle` | yes | `-` when the member has no message activity | `idle` | integer seconds or `null` |
@@ -682,7 +679,8 @@ Output shapes are in [Output shapes](#output-shapes).
 ### `member ping` {#member-ping}
 
 Re-pokes a member's inbox: keystrokes `Esc` → `cafleet message poll
---fleet-id <fleet-id> --member-id <member-id>` → `Enter` into the target's pane
+--fleet-id <fleet-id> --member-id <member-id> — then resume your work if
+something was still running.` → `Enter` into the target's pane
 (the leading `Esc` is the permission-prompt safeguard — see
 [Push notifications](multiplexer-backends.md#esc-safeguard)). The manual
 re-poke for a pane that missed the broker's automatic on-delivery
@@ -716,31 +714,29 @@ The monitor group is exactly the monitoring toolkit: the scheduler loop and
 its read primitive. Every monitor subcommand requires `--fleet-id` and runs
 behind the [stale-assets guard](#stale-assets-guard). The conceptual model is
 canonical on the [Monitoring](../concepts/monitoring.md) concepts page; there
-is no `monitor stop` — the loop terminates with the monitoring member's pane
-(`member delete`), and a still-running loop self-terminates on its next tick
-after `fleet delete`.
+is no `monitor stop` — the Director stops the background task hosting the
+loop, and a still-running loop self-terminates on its next tick after
+`fleet delete`.
 
 ### `monitor start`
 
-The one flag is `--tick` (optional): the scan-tick cadence in seconds
-(an integer ≥ 1, default **5**). The tick is the floor on interval
-precision — see
-[Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
+| Flag | Required | Notes |
+|---|---|---|
+| `--tick` | no | The scan-tick cadence in seconds (an integer ≥ 1, default **5**). The tick is the floor on interval precision — see [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision). |
+| `--interval` | no | The Director wake interval in seconds (an integer ≥ 0); `0` disables the wake while the loop keeps heartbeating. When omitted, falls back to `CAFLEET_MONITOR_WAKE_INTERVAL` (default **600**). |
 
-Runs the loop **in-process** (the monitoring member launches it as a
-background task in its own pane; the loop blocks the task and writes to its
-stdout — one `<iso-ts> due member <id> (<name>) [<reasons>] -> wake monitor`
-line per due member). On startup it runs the multiplexer precondition guard,
+Runs the loop **in-process** (the Director launches it as a background task
+in its own pane; the loop blocks the task and writes to its stdout — one
+`<iso-ts> tick -> wake director <director-member-id> (<N> members)` line per
+delivered wake). On startup it runs the multiplexer precondition guard,
 atomically claims the single-instance `monitor_runtime` row, installs
 `SIGTERM`/`SIGINT` handlers (a clean stop clears the row), and — immediately
 after the successful claim, before the first tick — prints the startup line
-that backs the monitoring member's `ready: monitor live` handshake:
+the Director confirms before its first `member create`:
 
 ```
 monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)
 ```
-
-If the fleet has no monitoring member, it warns on stderr and runs anyway.
 
 | Exit | Meaning |
 |---|---|
@@ -810,7 +806,6 @@ after the selected mode, and capture content is never stored in SQLite.
 | `member create` | `--coding-agent opencode --effort` with any value | `Error: opencode does not support reasoning effort.` | 2 | Fires before any side effect |
 | `member create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` | 2 | The just-registered member is rolled back |
 | `member create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 | The just-registered member is rolled back |
-| `member create` | `--role monitor` when the fleet already has an active monitoring member | `Error: fleet <id> already has an active monitoring member (member <existing-id>); only one is allowed.` | 1 | — |
 | `member create` | `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the member's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
 | `member create` | `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the member's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
 | `monitor start` | The fleet already has a live monitor | `Error: monitor already running for fleet <id>` | 1 | — |

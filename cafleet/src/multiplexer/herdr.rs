@@ -353,7 +353,10 @@ impl HerdrMultiplexer {
     }
 
     pub fn send_poll_trigger(&self, target_pane_id: &str, fleet_id: i64, member_id: i64) -> bool {
-        let payload = format!("cafleet message poll --fleet-id {fleet_id} --member-id {member_id}");
+        let payload = format!(
+            "cafleet message poll --fleet-id {fleet_id} --member-id {member_id} \
+             — then resume your work if something was still running."
+        );
         self.best_effort(|| {
             self.send_esc(target_pane_id)?;
             self.run(
@@ -364,16 +367,17 @@ impl HerdrMultiplexer {
         })
     }
 
-    /// No esc: the monitoring member's own pane is never on a permission
-    /// prompt.
+    /// Esc first: the wake targets the Director's own pane, which can be
+    /// parked on a permission prompt.
     pub fn send_wake_trigger(
         &self,
         target_pane_id: &str,
-        due_members: &[Value],
-        director: &Value,
+        fleet_id: i64,
+        members: &[Value],
     ) -> Result<bool, MultiplexerError> {
-        let payload = build_wake_payload(due_members, director)?;
+        let payload = build_wake_payload(fleet_id, members)?;
         Ok(self.best_effort(|| {
+            self.send_esc(target_pane_id)?;
             self.run(
                 &herdr_argv(&["herdr", "pane", "run", target_pane_id, &payload]),
                 Some(5),
@@ -889,7 +893,8 @@ mod tests {
                         "pane",
                         "run",
                         "w1:p2",
-                        "cafleet message poll --fleet-id 3 --member-id 14",
+                        "cafleet message poll --fleet-id 3 --member-id 14 — then resume \
+                         your work if something was still running.",
                     ],
                     Some(5),
                 ),
@@ -914,26 +919,26 @@ mod tests {
     }
 
     #[test]
-    fn send_wake_trigger_is_a_single_run_without_esc() {
+    fn send_wake_trigger_is_esc_then_run() {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let due = [json!({
+        let members = [json!({
             "member_id": 4,
             "name": "worker",
             "coding_agent": "codex",
-            "wake_reasons": ["interval"],
+            "pending_count": 0,
         })];
-        let director = json!({"member_id": 1, "coding_agent": "claude"});
-        assert!(mux.send_wake_trigger("w1:p9", &due, &director).unwrap());
+        assert!(mux.send_wake_trigger("w1:p9", 3, &members).unwrap());
 
-        let payload = build_wake_payload(&due, &director).unwrap();
+        let payload = build_wake_payload(3, &members).unwrap();
         assert_eq!(
             runner.events(),
-            vec![run_event(
-                &["herdr", "pane", "run", "w1:p9", &payload],
-                Some(5),
-            )],
-            "the payload is byte-identical to the tmux backend's"
+            vec![
+                run_event(&["herdr", "pane", "send-keys", "w1:p9", "esc"], Some(5)),
+                sleep_event(0.1),
+                run_event(&["herdr", "pane", "run", "w1:p9", &payload], Some(5)),
+            ],
+            "Esc-first, then one atomic run; the payload is byte-identical to tmux's"
         );
     }
 
