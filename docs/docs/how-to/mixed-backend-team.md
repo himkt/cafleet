@@ -27,10 +27,10 @@ backend, and confirm all three reply. Then tear the team down.
 Your agent loads the `cafleet` skill and follows its Director-only
 supervision protocol before spawning members.
 
-The supervision tick is supplied by the monitoring member's `cafleet monitor`
-loop and works the same on **any** backend (`claude`, `codex`, or `opencode`);
-the monitoring member is the first `cafleet member create` (`--role monitor`),
-and the Director never runs the monitor itself
+The supervision tick is supplied by the `cafleet monitor` loop the Director
+launches as a background task in its own pane, immediately after
+`cafleet fleet create` and before the first `cafleet member create`; it works
+the same on **any** backend (`claude`, `codex`, or `opencode`)
 ([Monitoring](../concepts/monitoring.md)).
 
 ## What to expect

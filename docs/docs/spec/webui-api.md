@@ -24,10 +24,8 @@ No server-side session cookies. The SPA stores the active fleet_id client-side v
 | Method | Path | Returns | X-Fleet-Id required |
 |---|---|---|---|
 | `GET` | `/api/fleets` | Non-soft-deleted fleets with member counts | no |
-| `GET` | `/api/members` | The fleet's roster, each row carrying its folded monitoring schedule | yes |
-| `GET` | `/api/monitor` | Liveness of the fleet's `cafleet monitor` process | yes |
-| `GET` | `/api/members/{member_id}/monitor` | One member's monitoring schedule | yes |
-| `PATCH` | `/api/members/{member_id}/monitor` | The updated monitoring schedule | yes |
+| `GET` | `/api/members` | The fleet's roster | yes |
+| `GET` | `/api/monitor` | Liveness of the fleet's `cafleet monitor` process plus per-member pending-delivery counts | yes |
 | `GET` | `/api/members/{member_id}/inbox` | Messages received by the member | yes |
 | `GET` | `/api/members/{member_id}/sent` | Messages sent by the member | yes |
 | `GET` | `/api/timeline` | The fleet's unified message timeline | yes |
@@ -69,18 +67,7 @@ Returns the selected fleet's roster via `list_roster(include_message_holders=Tru
       "status": "active",
       "registered_at": "2026-04-15T09:59:00+00:00",
       "kind": "director",
-      "placement": null,
-      "monitor": null
-    },
-    {
-      "member_id": 3,
-      "name": "monitor",
-      "description": "Monitoring member: owns the heartbeat",
-      "status": "active",
-      "registered_at": "2026-04-15T10:05:00+00:00",
-      "kind": "monitor",
-      "placement": {"backend": "tmux", "mux_session": "main", "mux_window_id": "@1", "mux_pane_id": "%12", "coding_agent": "claude", "created_at": "2026-04-15T10:05:00+00:00"},
-      "monitor": null
+      "placement": null
     },
     {
       "member_id": 4,
@@ -89,36 +76,28 @@ Returns the selected fleet's roster via `list_roster(include_message_holders=Tru
       "status": "active",
       "registered_at": "2026-04-15T10:06:00+00:00",
       "kind": "member",
-      "placement": {"backend": "tmux", "mux_session": "main", "mux_window_id": "@1", "mux_pane_id": "%13", "coding_agent": "claude", "created_at": "2026-04-15T10:06:00+00:00"},
-      "monitor": {"interval_seconds": 720, "last_ping_at": null, "enabled": true}
+      "placement": {"backend": "tmux", "mux_session": "main", "mux_window_id": "@1", "mux_pane_id": "%13", "coding_agent": "claude", "created_at": "2026-04-15T10:06:00+00:00"}
     }
   ]
 }
 ```
 
-**`monitor` field**: each member carries its folded monitoring schedule —
-`{"interval_seconds": int, "last_ping_at": str|null, "enabled": bool}` — or
-`null` when the member is not enrolled. Folding the schedule into the list lets
-the SPA render every member's schedule without an extra request per member.
-Which members are enrolled — the watched set — is defined in
-[Monitoring](../concepts/monitoring.md#the-watched-set).
-
-**`kind` values** — the unified 3-value vocabulary:
+**`kind` values** — the unified 2-value vocabulary:
 
 | Value | Meaning |
 |---|---|
 | `"director"` | The fleet's root Director (`member_id == fleets.director_member_id`). Exactly one per fleet. |
-| `"monitor"` | The fleet's dedicated monitoring member. Derived from `member_card_json.cafleet.kind == "monitoring-member"`. |
-| `"member"` | Any other (ordinary) member. |
+| `"member"` | Any other member. |
 
-The discriminator is derived at read time — the fleets join supplies "is this the root Director" and the stored member card supplies the special-kind marker; there is no dedicated column.
+The discriminator is derived at read time — the fleets join supplies "is this the root Director"; there is no dedicated column.
 
 ### GET /api/monitor — Fleet Monitor Runtime
 
 Returns the liveness of the fleet's `cafleet monitor` process, derived from the
-`monitor_runtime` heartbeat (true even when the process died silently). Lets the
-members page show a "monitor running / stopped" indicator so an inert schedule
-does not mislead. See [Monitoring](../concepts/monitoring.md).
+`monitor_runtime` heartbeat (true even when the process died silently), plus a
+`members` array with each member's pending-delivery counts. Lets the members
+page show a "monitor running / stopped" indicator. See
+[Monitoring](../concepts/monitoring.md).
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -131,12 +110,27 @@ does not mislead. See [Monitoring](../concepts/monitoring.md).
   "tick_seconds": 5,
   "last_tick_at": "2026-06-13T04:51:02+00:00",
   "last_tick_age_seconds": 2,
-  "started_at": "2026-06-13T04:50:00+00:00"
+  "started_at": "2026-06-13T04:50:00+00:00",
+  "last_wake_at": "2026-06-13T04:50:30+00:00",
+  "last_wake_age_seconds": 32,
+  "members": [
+    {
+      "member_id": 4,
+      "name": "drafter",
+      "pending_count": 2,
+      "oldest_pending_ts": "2026-08-03T09:00:00.000000+00:00",
+      "oldest_pending_age_seconds": 120
+    }
+  ]
 }
 ```
 
+Each `members` element carries the member's count of `input_required` unicast
+deliveries (`pending_count`) and the timestamp and age of the oldest one
+(`null` when there is none), ordered by `member_id` ascending.
+
 When no monitor is running — no runtime row, or a stale or cleared heartbeat —
-the response fields take these values:
+the runtime fields take these values:
 
 | Field | No runtime row has ever existed | Stale or cleared heartbeat row |
 |---|---|---|
@@ -145,62 +139,14 @@ the response fields take these values:
 | `started_at` | `null` | `null` |
 | `last_tick_at` | `null` | `null` |
 | `last_tick_age_seconds` | `null` | `null` |
+| `last_wake_at` | `null` | `null` |
+| `last_wake_age_seconds` | `null` | `null` |
 | `tick_seconds` | `null` | **preserved** — the cadence the monitor last ran at |
 
-Launching the loop is CLI-only (`cafleet monitor start`, run as a
-background task); there is no `POST`/`DELETE` counterpart here and no
-`monitor stop` command — the loop terminates with the monitoring member's
-pane (`member delete`), or self-terminates after `fleet delete`.
-
-### GET /api/members/{member_id}/monitor — Member Monitor Config
-
-Returns one member's monitoring schedule.
-
-**Request**: `X-Fleet-Id: <fleet_id>` header.
-
-**Response** (200 OK):
-
-```json
-{
-  "interval_seconds": 720,
-  "last_ping_at": null,
-  "enabled": true
-}
-```
-
-**Errors**: 404 (`detail: "Member not enrolled"`) when the member is not in the
-fleet, or is not one of the
-[enrolled member classes](../concepts/monitoring.md#the-watched-set) — in
-addition to the shared fleet-scoping errors in
-[Request Headers](#request-headers).
-
-The SPA reads the folded `monitor` field on `GET /api/members` instead of
-calling this endpoint per member — it exists for CLI/API parity.
-
-### PATCH /api/members/{member_id}/monitor — Edit Member Monitor Config
-
-Updates a member's interval and/or enabled flag and returns the new config.
-
-**Request**: `X-Fleet-Id: <fleet_id>` header.
-
-```json
-{
-  "interval_seconds": 30,
-  "enabled": false
-}
-```
-
-Both fields are optional; a present `interval_seconds` must be `>= 1`.
-
-**Response** (200 OK): the updated config, same shape as the `GET` above.
-
-**Errors** — in addition to the shared fleet-scoping errors in
-[Request Headers](#request-headers):
-
-| Status | `detail` | Trigger |
-|---|---|---|
-| 422 | A `detail` string — see [Error Format](#error-format) | An invalid body: `interval_seconds < 1`, or a wrong type |
-| 404 | `Member not enrolled` | The member is not in the fleet, or is not one of the [enrolled member classes](../concepts/monitoring.md#the-watched-set) |
+Launching the loop is CLI-only (`cafleet monitor start`, run by the Director
+as a background task in its own pane); there is no `POST`/`DELETE` counterpart
+here and no `monitor stop` command — the Director stops the background task,
+and a still-running loop self-terminates after `fleet delete`.
 
 ### GET /api/members/{member_id}/inbox — Inbox Messages
 

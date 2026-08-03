@@ -20,7 +20,7 @@ each other; members in different fleets are invisible to one another.
 | inline preview | the 2-line message preview the broker keystrokes into the recipient's pane | [Multiplexer backends](../spec/multiplexer-backends.md#push-notifications) |
 | poll / ack | how a recipient fetches and then confirms consumption of a message | [CLI options](../spec/cli-options.md) |
 | coding-agent backend | the binary in a member pane: `claude`, `codex`, or `opencode` | [Coding agents](coding-agents.md) |
-| monitor | a fleet-scoped loop that wakes the monitoring member whenever a watched member is due | [Monitoring](monitoring.md) |
+| monitor | a fleet-scoped loop the Director runs in its own pane; it wakes the Director once per wake interval to health-check its members | [Monitoring](monitoring.md) |
 
 ## CLI
 
@@ -33,14 +33,13 @@ command groups:
 | `doctor` | environment check: reports the resolved multiplexer, the calling pane, and what is installed | — |
 | `server` | serves the admin WebUI | — |
 | `fleet` | fleet lifecycle | `create`, `list`, `show`, `delete` |
-| `member` | member lifecycle + keystroke interaction | `create`, `delete`, `show`, `list`, `capture`, `prompt`, `ping` |
+| `member` | member lifecycle + keystroke interaction | `create`, `delete`, `show`, `list`, `prompt`, `ping` |
 | `message` | the message broker | `send`, `broadcast`, `poll`, `ack`, `show` |
-| `monitor` | the supervision scheduler | `start`, `status`, `config` |
+| `monitor` | the supervision scheduler | `start`, `capture` |
 
 `member` is the single home for the member lifecycle — spawn, teardown,
 introspection (`show`, `list`), and keystroke interaction (the `kind` column in
-list output distinguishes the root `director`, the `monitor`, and ordinary
-`member` rows). The canonical CLI surface — every
+list output distinguishes the root `director` from ordinary `member` rows). The canonical CLI surface — every
 subcommand, option, and option source — lives at
 [CLI options](../spec/cli-options.md).
 
@@ -56,11 +55,10 @@ per-member routes live at [WebUI API](../spec/webui-api.md).
 ## Monitoring
 
 A Director supervises its team on a periodic tick supplied by `cafleet monitor`
-— a per-fleet loop the fleet's dedicated monitoring member runs as a background
-task. The monitor owns only the scheduling;
-the monitoring member classifies each due member, pings a confirmed-quiet
-member once, and messages the Director when an event needs its attention; the
-Director owns the supervision actions.
+— a per-fleet loop the Director runs as a background task in its own pane. The
+monitor owns only the scheduling: once per wake interval it keystrokes a wake
+into the Director's pane naming every member and its pending-message count; the
+Director owns the health check and every supervision action.
 See [Monitoring](monitoring.md).
 
 ## Design-document orchestration

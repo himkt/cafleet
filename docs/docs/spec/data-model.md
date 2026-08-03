@@ -18,7 +18,6 @@ Minted ids are **never reused** and real ids are always `>= 1`.
 | `members` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `fleets.fleet_id` | `RESTRICT` | Soft-delete (`status='deregistered'` + `deregistered_at`) |
 | `messages` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `members.member_id`, via `owner_member_id` | `RESTRICT` | Not deleted |
 | `member_placements` | Reuses `members.member_id` | `members` | `CASCADE` | Hard-deleted on deregistration |
-| `monitor_config` | Reuses `members.member_id` | `members` | `CASCADE` | Hard-deleted alongside the placement on deregistration, and inside the `fleet delete` transaction |
 | `monitor_runtime` | Reuses `fleets.fleet_id` | `fleets` | `RESTRICT` | Removed inside the `fleet delete` transaction; "no monitor" is modeled as "no row" |
 | `asset_installs` | `coding_agent` (the agent name) | — | — | Upserted, one row per coding agent |
 
@@ -31,12 +30,9 @@ post-bootstrap NOT NULL invariant.
 
 ### `members`
 
-Active query paths filter `status='active'`. Special members are marked by a
-broker-owned `cafleet.kind` flag inside `member_card_json` rather than a
-column: `"monitoring-member"` marks the fleet's single monitoring member
-(which skips `monitor_config` enrollment and is located by this marker — see
-[Monitoring](../concepts/monitoring.md)). Callers cannot set `cafleet.kind`
-through any public path.
+Active query paths filter `status='active'`. A member's `kind` (`director` /
+`member`) is derived from the fleet's `director_member_id` back-reference at
+read time; no kind marker is stored in `member_card_json`.
 
 ### `messages`
 
@@ -55,20 +51,15 @@ ordinary member is a placed row other than the fleet's root Director
 (`member_id != fleets.director_member_id`). Placement rows have no historical
 value.
 
-### Monitor state tables
+### `monitor_runtime`
 
-`monitor_config` holds one row per **enrolled** member — exactly the four
-schedule columns: `interval_seconds`, `enabled`, `last_ping_at`, and
-`last_stall_check_at` (the nullable UTC ISO timestamp of the last successfully
-dispatched stall-check wake, kept durable so the stall-check cadence survives
-a monitor-loop restart). Disabling or losing a pane clears
-`last_stall_check_at`; soft deregistration explicitly deletes the config row.
-The monitoring member's own stall notes (quiet baselines, ping history) live
-in its conversation context, not in the database.
-
-`monitor_runtime` remains the one-row-per-fleet loop pid/heartbeat table. Which
-members are enrolled and the cadence semantics are defined in
-[Monitoring](../concepts/monitoring.md#the-watched-set).
+`monitor_runtime` is the one-row-per-fleet loop pid/heartbeat table: the
+single-instance claim (`pid`, `started_at`), the liveness heartbeat
+(`last_tick_at`, `tick_seconds`), and `last_wake_at` — the nullable UTC ISO
+timestamp of the last successfully delivered Director wake, kept durable
+across loop restarts so an immediate restart honors the remaining wake
+cadence. The cadence semantics are defined in
+[Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
 
 ### `asset_installs`
 
@@ -82,10 +73,10 @@ guard and the `cafleet doctor` report (see
 
 SQLite ignores FK declarations unless `PRAGMA foreign_keys=ON` is issued per
 connection; the connection opener applies it on every connection. FKs use
-`ON DELETE RESTRICT` except the `member_id` PK=FK of the two 1:1 child tables
-(`member_placements`, `monitor_config`), which uses `CASCADE` so a hard-deleted
-member cannot leave dangling rows. Normal delete paths are soft-deletes, so
-neither fires in practice.
+`ON DELETE RESTRICT` except the `member_id` PK=FK of the 1:1 child table
+(`member_placements`), which uses `CASCADE` so a hard-deleted member cannot
+leave dangling rows. Normal delete paths are soft-deletes, so neither fires
+in practice.
 
 ## Message Visibility Rules
 
