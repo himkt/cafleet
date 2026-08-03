@@ -52,12 +52,26 @@ fn seeded_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
         broker::create_fleet(conn, Some("web"), "main", "@1", "%0", "claude", "tmux").unwrap();
     let fleet_id = fleet["fleet_id"].as_i64().unwrap();
     let director_id = fleet["director"]["member_id"].as_i64().unwrap();
-    let member_id = broker::register_member(conn, fleet_id, "worker", "d", &[], Some(&placed("%2")))
-        .unwrap()["member_id"]
+    let member_id = broker::register_member(
+        conn,
+        fleet_id,
+        "worker",
+        "d",
+        &[],
+        Some(&placed("%2")),
+    )
+    .unwrap()["member_id"]
         .as_i64()
         .unwrap();
-    let helper_id = broker::register_member(conn, fleet_id, "helper", "d", &[], Some(&placed("%3")))
-        .unwrap()["member_id"]
+    let helper_id = broker::register_member(
+        conn,
+        fleet_id,
+        "helper",
+        "d",
+        &[],
+        Some(&placed("%3")),
+    )
+    .unwrap()["member_id"]
         .as_i64()
         .unwrap();
     (fleet_id, director_id, member_id, helper_id)
@@ -160,8 +174,8 @@ async fn the_roster_wraps_members_with_the_two_value_kind_union() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (fleet_id, director_id, member_id, helper_id) = seeded_fleet(&mut conn);
-    let holder_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None)
-        .unwrap()["member_id"]
+    let holder_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None).unwrap()
+        ["member_id"]
         .as_i64()
         .unwrap();
     broker::send_message(
@@ -422,7 +436,11 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     assert_eq!(payload["last_wake_at"], Value::Null);
     assert_eq!(payload["last_wake_age_seconds"], Value::Null);
     let rows = payload["members"].as_array().unwrap();
-    assert_eq!(rows.len(), 2, "every non-Director active member rides along");
+    assert_eq!(
+        rows.len(),
+        2,
+        "every non-Director active member rides along"
+    );
     assert!(
         !rows.iter().any(|row| row["member_id"] == director_id),
         "the root Director has no row, got: {rows:?}"

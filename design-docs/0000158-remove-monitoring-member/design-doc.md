@@ -25,17 +25,22 @@ lands mid-turn cannot strand the recipient.
       specified in § *Contract strings*, pinned in `SPEC.md` and in tests.
 - [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`,
       and `mise //admin:lint` pass.
-- [ ] Outside `design-docs/` and `cafleet/migrations/`, no repository file
-      mentions a monitoring member, `--role monitor`, `ready: monitor live`,
-      `monitor_config`, or `CAFLEET_MONITOR_STALL_INTERVAL`.
+- [ ] Outside `design-docs/`, `cafleet/migrations/`, and the two enforcement
+      surfaces below, no repository file mentions a monitoring member,
+      `--role monitor`, `ready: monitor live`, `monitor_config`, or
+      `CAFLEET_MONITOR_STALL_INTERVAL`.
 
-The two carve-outs are permanent, not temporary tolerances. `design-docs/` is
+The carve-outs are permanent, not temporary tolerances. `design-docs/` is
 committed in this project (`.claude/rules/git-workflow.md` override), so this
 document's own text always matches. The migration chain is immutable history:
 `V1__baseline.sql` creates `monitor_config`, `V2__drop_director_monitor_enrollment.sql`
 deletes rows from it, `V4` drops it, and `V3__strip_monitoring_member_kind.sql`
 carries `monitoring-member` in both its filename and its comment. Migrations
-are never rewritten to scrub a term.
+are never rewritten to scrub a term. The two enforcement surfaces carry the
+literals because policing absence requires naming the term: the
+`REMOVED_VOCABULARY` array in `cafleet/tests/docs_sync.rs`, and the
+`sqlite_master` query in `register_member_writes_no_monitor_config_row`
+(`cafleet/src/broker/members.rs`).
 
 ---
 
@@ -585,9 +590,11 @@ not "fix" them.
 - [ ] `cafleet/tests/cli_member.rs` per § S11 <!-- completed: -->
 - [ ] `cafleet/tests/webui_routes.rs` per § S11 <!-- completed: -->
 - [ ] `cafleet/tests/docs_sync.rs` per § S11 <!-- completed: -->
-- [ ] `rg -n "monitoring member|--role monitor|ready: monitor live|monitor_config|CAFLEET_MONITOR_STALL_INTERVAL|monitor_model" -g '!design-docs/**' -g '!cafleet/migrations/**'` returns no hit. Both exclusions are permanent, for the reasons given under Success Criteria — they are not a licence to leave residue anywhere else <!-- completed: -->
+- [ ] `rg -n "monitoring member|--role monitor|ready: monitor live|monitor_config|CAFLEET_MONITOR_STALL_INTERVAL|monitor_model" -g '!design-docs/**' -g '!cafleet/migrations/**' -g '!cafleet/tests/docs_sync.rs'` returns exactly one hit: the `sqlite_master` query in `register_member_writes_no_monitor_config_row` (`cafleet/src/broker/members.rs`). The exclusions are permanent, for the reasons given under Success Criteria — the two enforcement surfaces police absence and must name the terms; they are not a licence to leave residue anywhere else <!-- completed: -->
+
 - [x] `mise //admin:lint` and `mise //admin:build` pass <!-- completed: 2026-08-03T13:48 -->
 - [ ] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` pass <!-- completed: -->
+
 - [ ] `mise //cafleet:install`, then a manual smoke run: `cafleet fleet create`, `cafleet monitor start --interval 60` in the background, confirm one `Esc`-first wake lands in the Director's pane with the § S3b payload <!-- completed: -->
 
 ---
