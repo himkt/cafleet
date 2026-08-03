@@ -700,11 +700,10 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
   when` **only where the current pid equals the caller's pid**; returns `true`
   iff exactly one row matched. **Ownership-checked** — `false` when the slot was
   reclaimed; that `false` is the displaced monitor's self-terminate signal.
-- **`record_monitor_wake(fleet_id, pid, when)`** — update `last_wake_at =
-  when` **only where the current pid equals the caller's pid**; returns `true`
-  iff exactly one row matched. **Ownership-checked**, mirroring
-  `heartbeat_monitor_runtime`; called only after a successful Director wake
-  keystroke (§6.6).
+- **`record_monitor_wake(fleet_id, when)`** — update `last_wake_at = when`
+  for the fleet's runtime row: one unconditional `UPDATE` keyed on
+  `fleet_id` — no pid parameter, no ownership check, no return value beyond
+  success. Called only after a successful Director wake keystroke (§6.6).
 - **`clear_monitor_runtime(fleet_id, pid)`** — null the slot's `pid` /
   `started_at` / `last_tick_at` **only where the current pid equals the
   caller's pid**. **Ownership-checked** → a non-owner clear is a no-op, so a
@@ -1991,18 +1990,20 @@ One scan pass, steps in order:
    split-brain loser's exit.
 2. **Fleet liveness.** Fetch the fleet; absent **or** `deleted_at` set → return
    `STOP`.
-3. **Locate the Director's pane.** Read the fleet's `director_member_id` and
-   its placement's `pane_id` (the Director is pane-bound by construction).
-4. **Fetch pane liveness once.** Resolve the backend via `resolve_multiplexer()`
-   (§6.5); a single `list_pane_ids` call resolves the Director pane's
-   liveness this tick.
-5. **Compute due-ness.** `wake_interval_seconds == 0` → the wake is disabled;
-   skip to step 7 (a heartbeat-only tick). Else read the runtime row's
-   `last_wake_at` and call `wake_due(last_wake_at, wake_interval_seconds,
-   now)`.
-6. **Wake the Director iff due and its pane is alive.** If due **and** the
-   Director's `pane_id` is in the live set: fetch the wake roster via the
-   broker's `list_fleet_wake_targets(fleet_id)` (§6.2 — every active, non-Director
+3. **Wake-interval gate.** `wake_interval_seconds == 0` → return `CONTINUE`
+   (a heartbeat-only tick: no due-check, no Director resolution, no
+   multiplexer call).
+4. **Compute due-ness.** Read the runtime row's `last_wake_at` and call
+   `wake_due(last_wake_at, wake_interval_seconds, now)`. Not due → return
+   `CONTINUE` with no multiplexer call.
+5. **Resolve the Director's pane.** Read the fleet's `director_member_id` and
+   its placement's `mux_pane_id`. A Director with no pane → return `CONTINUE`
+   (nothing recorded — the fleet stays due).
+6. **Fetch pane liveness once.** A single `list_pane_ids` call against the
+   resolved backend (§6.5). The Director's pane absent from the live set →
+   return `CONTINUE` (nothing recorded — the fleet stays due).
+7. **Wake the Director.** Fetch the wake roster via the broker's
+   `list_fleet_wake_targets(fleet_id)` (§6.2 — every active, non-Director
    member with its `coding_agent` and `pending_count`), then call the
    multiplexer's wake trigger against the Director's own pane (the loop's
    **only** keystroke), passing `fleet_id` and the roster; it returns a
@@ -2016,8 +2017,7 @@ One scan pass, steps in order:
      `N` is the roster size (may be `0`).
    - If `woke` is false: do not record the wake and do not echo — the wake
      stays due, so the next tick retries (no wake-storm, no silent skip).
-   - Director pane not live, or the wake is not yet due: nothing is recorded.
-7. Return `CONTINUE`.
+8. Return `CONTINUE`.
 
 **Critical ordering invariant:** `record_monitor_wake` and the heartbeat echo
 are both gated behind `woke == true`. Preserve this gating exactly. The wake
