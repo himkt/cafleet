@@ -144,6 +144,7 @@ export default function Dashboard({
         </div>
         {detailMember !== null && (
           <MemberDetail
+            key={detailMember.member_id}
             member={detailMember}
             refreshKey={refreshKey}
             onClose={closeDetail}

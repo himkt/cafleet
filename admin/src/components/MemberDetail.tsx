@@ -106,16 +106,13 @@ export default function MemberDetail({
   const [sent, setSent] = useState<TimelineMessage[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    setInbox([]);
-    setSent([]);
-    setLoading(true);
-  }, [member.member_id]);
+  // The panel is keyed by member_id at its call site, so switching members
+  // remounts it with fresh empty/loading state — no reset effect needed.
 
   // Refetches ride Dashboard's refreshKey bumps (5 s poll / manual Refresh /
   // post-send) via useRefreshKeyLoad instead of a second polling loop; the
   // hook's in-flight guard absorbs bumps landing during a slow fetch, and its
-  // `load` dep triggers the reload when the member switches.
+  // mount-time run fetches the freshly keyed member.
   const load = useCallback(async () => {
     try {
       const [inboxData, sentData] = await Promise.all([

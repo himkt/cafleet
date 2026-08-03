@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { Member } from "./types";
 import { setFleetId, getMembers, listFleets } from "./api";
 import FleetPicker from "./components/FleetPicker";
@@ -28,8 +28,15 @@ export default function App() {
   const [route, setRoute] = useState<Route>(parseHash);
   const [members, setMembers] = useState<Member[]>([]);
   const [fleetName, setFleetName] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const loadedFleetIdRef = useRef<string | null>(null);
+  const [loadedFleetId, setLoadedFleetId] = useState<string | null>(null);
+
+  // Derived, never set in an effect: a dashboard route whose fleet has not
+  // loaded yet shows the skeleton, so stale members from a previous fleet can
+  // never render against the new fleet id.
+  const loading =
+    route.kind === "dashboard" && !!route.fleetId
+      ? loadedFleetId !== route.fleetId
+      : false;
 
   useEffect(() => {
     const onHashChange = () => setRoute(parseHash());
@@ -39,19 +46,7 @@ export default function App() {
 
   useEffect(() => {
     if (route.kind !== "dashboard" || !route.fleetId) {
-      loadedFleetIdRef.current = null;
-      setLoading(false);
       return;
-    }
-
-    // Entering a different fleet's dashboard: drop the previous fleet's
-    // state before any network await so it can never render against the new
-    // fleet id. Same-fleet route changes (e.g. opening the member detail
-    // panel) keep their data and skip the skeleton.
-    if (loadedFleetIdRef.current !== route.fleetId) {
-      setMembers([]);
-      setFleetName(null);
-      setLoading(true);
     }
 
     let cancelled = false;
@@ -72,14 +67,10 @@ export default function App() {
         const data = await getMembers();
         if (cancelled) return;
         setMembers(data.members);
-        loadedFleetIdRef.current = route.fleetId ?? null;
+        setLoadedFleetId(route.fleetId ?? null);
       } catch {
         if (!cancelled) {
           navigate("/fleets");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
         }
       }
     })();
@@ -96,7 +87,7 @@ export default function App() {
         const data = await getMembers();
         setMembers(data.members);
         setFleetName(name);
-        loadedFleetIdRef.current = String(sid);
+        setLoadedFleetId(String(sid));
         navigate(`/fleets/${sid}/members`);
       } catch {
         setFleetId(null);
@@ -108,6 +99,7 @@ export default function App() {
   const handleBack = useCallback(() => {
     setFleetId(null);
     setMembers([]);
+    setLoadedFleetId(null);
     navigate("/fleets");
   }, []);
 
