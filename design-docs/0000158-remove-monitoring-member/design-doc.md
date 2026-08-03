@@ -156,7 +156,7 @@ Grammar, fully specified:
 Worked example, two members:
 
 ```
-[cafleet] tick: fleet 3 — health-check your 2 members: 4 (drafter; coding_agent=claude; unacked=2), 5 (reviewer; coding_agent=fable; unacked=0). Poll your inbox, ACK, dispatch. Resume your work if something was still running.
+[cafleet] tick: fleet 3 — health-check your 2 members: 4 (drafter; coding_agent=claude; unacked=2), 5 (reviewer; coding_agent=codex; unacked=0). Poll your inbox, ACK, dispatch. Resume your work if something was still running.
 ```
 
 The Director descriptor is dropped from the payload — the Director is now the
@@ -550,6 +550,8 @@ not "fix" them.
 - [x] Apply and verify with `cafleet setup --skip claude --skip codex --skip opencode` <!-- completed: 2026-08-03T13:00 -->
 
 ### Step 6: Rust — broker and member registry
+
+COMMENT(director): approved — Steps 6–8 are one compile unit. Order: (1) the Tester lands the Step 7 rewritten colocated suites (monitor/mod.rs, multiplexer/{mod,tmux,herdr}.rs, config.rs, output/formatters.rs per § S11) in one test commit; (2) the Programmer then implements Steps 6+7+8 together and verifies with the full suite; (3) per-step checkbox updates still happen per file as tasks complete. Rationale: whole-crate compilation makes intermediate green states impossible; test-first is preserved by landing all affected suites before implementation.
 
 - [ ] `cafleet/src/broker/members.rs`: delete `MONITORING_MEMBER_KIND`, `MEMBER_PING_INTERVAL_SECONDS`, `enroll`, `active_monitoring_member_id`, both monitoring-member guards, and the `kind` parameter of `register_member` / `member_card`; narrow `derive_member_kind` to `is_director` <!-- completed: -->
 - [ ] `cafleet/src/broker/monitor.rs`: delete every `monitor_config` function and `find_monitoring_member`; add `record_monitor_wake` and `list_fleet_wake_targets`; extend `runtime_row` / `monitor_runtime_payload` for `last_wake_at` <!-- completed: -->

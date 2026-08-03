@@ -618,8 +618,8 @@ mod tests {
                 row(2, "analyst", "member", Value::Null, Value::Null),
                 row(
                     3,
-                    "watch",
-                    "monitor",
+                    "helper",
+                    "member",
                     placed("codex", Value::Null),
                     json!(60),
                 ),
@@ -644,7 +644,7 @@ mod tests {
                 "  ---------  -------------  --------  --------  -------  ----",
                 "  1          Director       director  claude    %1       59s",
                 "  2          analyst        member    -         -        -",
-                "  3          watch          monitor   codex     (pending)  1m",
+                "  3          helper         member    codex     (pending)  1m",
                 "  4          w2             member    opencode  %9       59m",
                 "  5          w3             member    claude    %10      1h",
             ]

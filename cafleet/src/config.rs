@@ -76,7 +76,7 @@ mod tests {
         assert_eq!(s.broker_port, 8000);
         assert_eq!(s.max_text_len, 200);
         assert_eq!(s.multiplexer, None);
-        assert_eq!(s.monitor_stall_interval, 240);
+        assert_eq!(s.monitor_wake_interval, 600);
     }
 
     #[test]
@@ -101,7 +101,7 @@ mod tests {
             "CAFLEET_BROKER_PORT" => Some("9001".to_string()),
             "CAFLEET_MAX_TEXT_LEN" => Some("50".to_string()),
             "CAFLEET_MULTIPLEXER" => Some("herdr".to_string()),
-            "CAFLEET_MONITOR_STALL_INTERVAL" => Some("600".to_string()),
+            "CAFLEET_MONITOR_WAKE_INTERVAL" => Some("900".to_string()),
             _ => None,
         })
         .unwrap();
@@ -110,7 +110,7 @@ mod tests {
         assert_eq!(s.broker_port, 9001);
         assert_eq!(s.max_text_len, 50);
         assert_eq!(s.multiplexer, Some("herdr".to_string()));
-        assert_eq!(s.monitor_stall_interval, 600);
+        assert_eq!(s.monitor_wake_interval, 900);
     }
 
     #[test]
@@ -163,21 +163,21 @@ mod tests {
     }
 
     #[test]
-    fn non_integer_monitor_stall_interval_fails_loudly() {
+    fn non_integer_monitor_wake_interval_fails_loudly() {
         let result = Settings::from_lookup(|name| match name {
-            "CAFLEET_MONITOR_STALL_INTERVAL" => Some("4m".to_string()),
+            "CAFLEET_MONITOR_WAKE_INTERVAL" => Some("10m".to_string()),
             _ => None,
         });
         assert!(result.is_err());
     }
 
     #[test]
-    fn zero_monitor_stall_interval_is_valid() {
+    fn zero_monitor_wake_interval_is_valid() {
         let s = Settings::from_lookup(|name| match name {
-            "CAFLEET_MONITOR_STALL_INTERVAL" => Some("0".to_string()),
+            "CAFLEET_MONITOR_WAKE_INTERVAL" => Some("0".to_string()),
             _ => None,
         })
         .unwrap();
-        assert_eq!(s.monitor_stall_interval, 0);
+        assert_eq!(s.monitor_wake_interval, 0);
     }
 }

@@ -494,7 +494,8 @@ mod tests {
                         "-t",
                         "%5",
                         "-l",
-                        "cafleet message poll --fleet-id 3 --member-id 14",
+                        "cafleet message poll --fleet-id 3 --member-id 14 — then resume \
+                         your work if something was still running.",
                     ],
                     Some(5),
                 ),
@@ -549,27 +550,28 @@ mod tests {
     }
 
     #[test]
-    fn send_wake_trigger_has_no_esc_and_types_the_shared_payload() {
+    fn send_wake_trigger_is_esc_first_and_types_the_shared_payload() {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let due = [json!({
+        let members = [json!({
             "member_id": 4,
             "name": "worker",
             "coding_agent": "codex",
-            "wake_reasons": ["interval"],
+            "pending_count": 0,
         })];
-        let director = json!({"member_id": 1, "coding_agent": "claude"});
-        assert!(mux.send_wake_trigger("%9", &due, &director).unwrap());
+        assert!(mux.send_wake_trigger("%9", 3, &members).unwrap());
 
-        let payload = build_wake_payload(&due, &director).unwrap();
+        let payload = build_wake_payload(3, &members).unwrap();
         assert_eq!(
             runner.events(),
             vec![
+                run_event(&["tmux", "send-keys", "-t", "%9", "Escape"], Some(5)),
+                sleep_event(0.1),
                 run_event(&["tmux", "send-keys", "-t", "%9", "-l", &payload], Some(5)),
                 sleep_event(1.0),
                 run_event(&["tmux", "send-keys", "-t", "%9", "Enter"], Some(5)),
             ],
-            "no leading Escape and no settle sleep on the wake path"
+            "the wake matches the established Esc-first keystroke norm"
         );
     }
 
@@ -577,14 +579,13 @@ mod tests {
     fn send_wake_trigger_aborts_on_an_invalid_agent_without_keystrokes() {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let due = [json!({
+        let members = [json!({
             "member_id": 4,
             "name": "worker",
             "coding_agent": "python",
-            "wake_reasons": ["interval"],
+            "pending_count": 0,
         })];
-        let director = json!({"member_id": 1, "coding_agent": "claude"});
-        assert!(mux.send_wake_trigger("%9", &due, &director).is_err());
+        assert!(mux.send_wake_trigger("%9", 3, &members).is_err());
         assert!(runner.events().is_empty());
     }
 
