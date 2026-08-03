@@ -57,7 +57,7 @@ fn assert_absent(relative_path: &str, terms: &[&str]) {
 
 // Episode-machine and monitoring-member vocabulary that must not survive on
 // any contract page.
-const REMOVED_VOCABULARY: [&str; 16] = [
+const REMOVED_VOCABULARY: [&str; 17] = [
     "nudge_claimed",
     "escalation_pending",
     "ping_failed",
@@ -69,6 +69,7 @@ const REMOVED_VOCABULARY: [&str; 16] = [
     "report-batch",
     "monitor stall",
     "monitoring member",
+    "monitoring-member",
     "--role monitor",
     "ready: monitor live",
     "monitor_config",

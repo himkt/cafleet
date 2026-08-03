@@ -60,6 +60,8 @@
 //! read_monitor_runtime(conn: &Connection, fleet_id: i64) -> Result<Option<Value>>
 //! monitor_is_live(conn: &Connection, fleet_id: i64, now: DateTime<Utc>) -> Result<bool>
 //! monitor_runtime_payload(conn: &Connection, fleet_id: i64, now: DateTime<Utc>) -> Result<Value>
+//! monitor_members_payload(conn: &Connection, fleet_id: i64, now: DateTime<Utc>)
+//!     -> Result<Vec<Value>>
 //! // asset_installs
 //! asset_installs_table_exists(conn: &Connection) -> bool
 //! list_asset_installs(conn: &Connection) -> Result<Vec<Value>>
