@@ -12,7 +12,11 @@ pub fn migration_chain() -> Vec<(u32, String)> {
     let mut chain: Vec<(u32, String)> = embedded::migrations::runner()
         .get_migrations()
         .iter()
-        .map(|migration| (migration.version(), migration.name().to_string()))
+        .map(|migration| {
+            let version = u32::try_from(migration.version())
+                .expect("embedded migration versions are positive");
+            (version, migration.name().to_string())
+        })
         .collect();
     chain.sort();
     chain
