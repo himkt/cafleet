@@ -292,7 +292,7 @@ mod tests {
     use crate::broker;
     use crate::broker::test_support as common;
     use crate::broker::test_support::{
-        FakeNotifier, MAX_TEXT_LEN, create_fleet, migrated_conn, placement, register,
+        FakeNotifier, MAX_TEXT_LEN, create_fleet, migrated_conn, register,
     };
     use crate::error::CafleetError;
     use crate::output::format_json;
@@ -558,16 +558,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let sender_id = register(&mut conn, fleet_id, "sender", Some("%2"));
-        broker::register_member(
-            &mut conn,
-            fleet_id,
-            "watch",
-            "d",
-            &[],
-            Some(&placement(Some("%3"))),
-            Some("monitoring-member"),
-        )
-        .unwrap();
+        register(&mut conn, fleet_id, "helper", Some("%3"));
         register(&mut conn, fleet_id, "pending", None);
         let notifier = FakeNotifier::succeeding();
 
@@ -583,7 +574,7 @@ mod tests {
         let envelope = &result[0];
         assert_eq!(
             envelope["recipients"], 3,
-            "director + monitoring member + pending peer; sender excluded"
+            "director + pane-bound peer + pending peer; sender excluded"
         );
         assert_eq!(
             envelope["delivered"], 2,

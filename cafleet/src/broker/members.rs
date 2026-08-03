@@ -514,7 +514,7 @@ mod tests {
     use crate::output::format_json;
 
     #[test]
-    fn register_member_returns_the_registration_summary_and_enrolls_at_720() {
+    fn register_member_returns_the_registration_summary() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
@@ -525,18 +525,27 @@ mod tests {
             "test member",
             &[],
             Some(&placement(Some("%2"))),
-            None,
         )
         .unwrap();
-        let member_id = result["member_id"].as_i64().unwrap();
+        assert!(result["member_id"].as_i64().is_some());
         assert_eq!(result["name"], "analyst");
         assert!(crate::time::parse_lenient(result["registered_at"].as_str().unwrap()).is_ok());
+    }
 
-        let config = broker::get_monitor_config(&conn, fleet_id, member_id)
-            .unwrap()
+    #[test]
+    fn register_member_writes_no_monitor_config_row() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        register(&mut conn, fleet_id, "analyst", Some("%2"));
+        let tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='monitor_config'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
-        assert_eq!(config["interval_seconds"], 720);
-        assert_eq!(config["enabled"], true);
+        assert_eq!(tables, 0, "registration performs no monitoring enrollment");
     }
 
     #[test]
@@ -551,7 +560,6 @@ mod tests {
             "test member",
             &[],
             Some(&placement(Some("%2"))),
-            None,
         )
         .unwrap();
         let member_id = result["member_id"].as_i64().unwrap();
@@ -579,7 +587,6 @@ mod tests {
             "d",
             &skills,
             Some(&placement(Some("%2"))),
-            None,
         )
         .unwrap()["member_id"]
             .as_i64()
@@ -591,11 +598,11 @@ mod tests {
     }
 
     #[test]
-    fn placementless_member_is_not_enrolled_and_has_null_placement() {
+    fn placementless_member_has_null_placement() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let member_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, None)
+        let member_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None)
             .unwrap()["member_id"]
             .as_i64()
             .unwrap();
@@ -603,19 +610,13 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(member["placement"], Value::Null);
-        assert!(
-            broker::get_monitor_config(&conn, fleet_id, member_id)
-                .unwrap()
-                .is_none(),
-            "only pane-bound members are enrolled"
-        );
     }
 
     #[test]
     fn register_member_unknown_fleet_is_a_usage_error() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let err = broker::register_member(&mut conn, 999, "x", "d", &[], None, None)
+        let err = broker::register_member(&mut conn, 999, "x", "d", &[], None)
             .expect_err("unknown fleet must error");
         assert!(matches!(err, CafleetError::Usage(_)));
         assert_eq!(err.message(), "Fleet '999' not found.");
@@ -627,128 +628,10 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         broker::delete_fleet(&mut conn, fleet_id).unwrap();
-        let err = broker::register_member(&mut conn, fleet_id, "x", "d", &[], None, None)
+        let err = broker::register_member(&mut conn, fleet_id, "x", "d", &[], None)
             .expect_err("deleted fleet must error");
         assert!(matches!(err, CafleetError::Usage(_)));
         assert_eq!(err.message(), format!("fleet {fleet_id} is deleted"));
-    }
-
-    #[test]
-    fn monitoring_member_requires_a_placement() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let err = broker::register_member(
-            &mut conn,
-            fleet_id,
-            "watch",
-            "d",
-            &[],
-            None,
-            Some("monitoring-member"),
-        )
-        .expect_err("a placementless monitoring member must be rejected");
-        assert!(matches!(err, CafleetError::App(_)));
-        assert_eq!(
-            err.message(),
-            "a monitoring member must be pane-bound; register it via \
-             'cafleet member create --role monitor' (placement required)."
-        );
-    }
-
-    #[test]
-    fn only_one_active_monitoring_member_per_fleet() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let first = broker::register_member(
-            &mut conn,
-            fleet_id,
-            "watch",
-            "d",
-            &[],
-            Some(&placement(Some("%3"))),
-            Some("monitoring-member"),
-        )
-        .unwrap()["member_id"]
-            .as_i64()
-            .unwrap();
-        let err = broker::register_member(
-            &mut conn,
-            fleet_id,
-            "watch2",
-            "d",
-            &[],
-            Some(&placement(Some("%4"))),
-            Some("monitoring-member"),
-        )
-        .expect_err("a second monitoring member must be rejected");
-        assert!(matches!(err, CafleetError::App(_)));
-        assert_eq!(
-            err.message(),
-            format!(
-                "fleet {fleet_id} already has an active monitoring member (member {first}); only one is allowed."
-            )
-        );
-    }
-
-    #[test]
-    fn monitoring_member_is_unenrolled_with_kind_monitor() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let monitor_id = broker::register_member(
-            &mut conn,
-            fleet_id,
-            "watch",
-            "d",
-            &[],
-            Some(&placement(Some("%3"))),
-            Some("monitoring-member"),
-        )
-        .unwrap()["member_id"]
-            .as_i64()
-            .unwrap();
-
-        let member = broker::get_member(&conn, monitor_id, fleet_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(member["kind"], "monitor");
-        assert!(
-            broker::get_monitor_config(&conn, fleet_id, monitor_id)
-                .unwrap()
-                .is_none(),
-            "the monitoring member is the unenrolled watcher"
-        );
-
-        let found = broker::find_monitoring_member(&conn, fleet_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(found["member_id"], monitor_id);
-        assert_eq!(found["name"], "watch");
-        assert_eq!(found["pane_id"], "%3");
-    }
-
-    #[test]
-    fn find_monitoring_member_treats_a_pending_pane_as_absent() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        broker::register_member(
-            &mut conn,
-            fleet_id,
-            "watch",
-            "d",
-            &[],
-            Some(&placement(None)),
-            Some("monitoring-member"),
-        )
-        .unwrap();
-        assert!(
-            broker::find_monitoring_member(&conn, fleet_id)
-                .unwrap()
-                .is_none()
-        );
     }
 
     #[test]
@@ -769,7 +652,6 @@ mod tests {
             "d",
             &[],
             Some(&placement(Some("%2"))),
-            None,
         )
         .expect_err("a placed registration under an inactive Director must fail loudly");
         assert!(matches!(err, CafleetError::App(_)));
@@ -778,7 +660,7 @@ mod tests {
             format!("fleet {fleet_id}'s root Director (member {director_id}) is not active.")
         );
 
-        broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, None)
+        broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None)
             .expect("a placementless registration skips the invariant guard");
     }
 
@@ -822,11 +704,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(placements, 0);
-        assert!(
-            broker::get_monitor_config(&conn, fleet_id, member_id)
-                .unwrap()
-                .is_none()
-        );
 
         assert!(!broker::deregister_member(&mut conn, member_id).unwrap());
     }
@@ -853,27 +730,6 @@ mod tests {
     }
 
     #[test]
-    fn non_object_card_kind_collapses_to_member() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        conn.execute(
-            r#"UPDATE members SET member_card_json='{"name":"worker","description":"d","skills":[],"cafleet":"weird"}' WHERE member_id=?1"#,
-            [member_id],
-        )
-        .unwrap();
-
-        let member = broker::get_member(&conn, member_id, fleet_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(member["kind"], "member");
-        let listed = broker::list_members(&conn, fleet_id).unwrap();
-        let row = listed.iter().find(|r| r["member_id"] == member_id).unwrap();
-        assert_eq!(row["kind"], "member");
-    }
-
-    #[test]
     fn update_placement_pane_id_patches_the_pending_pane() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
@@ -889,18 +745,11 @@ mod tests {
             .unwrap();
         assert_eq!(member["placement"]["mux_pane_id"], "%9");
 
-        let placementless = broker::register_member(
-            &mut conn,
-            fleet_id,
-            "ghost",
-            "d",
-            &[],
-            None,
-            None,
-        )
-        .unwrap()["member_id"]
-            .as_i64()
-            .unwrap();
+        let placementless =
+            broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None).unwrap()
+                ["member_id"]
+                .as_i64()
+                .unwrap();
         assert!(
             broker::update_placement_pane_id(&mut conn, placementless, "%1")
                 .unwrap()
@@ -945,7 +794,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let ghost_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, None)
+        let ghost_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None)
             .unwrap()["member_id"]
             .as_i64()
             .unwrap();

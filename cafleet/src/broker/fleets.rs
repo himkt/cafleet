@@ -249,19 +249,6 @@ mod tests {
     }
 
     #[test]
-    fn create_fleet_leaves_the_director_unenrolled() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        assert!(
-            broker::get_monitor_config(&conn, fleet_id, director_id)
-                .unwrap()
-                .is_none(),
-            "the root Director is never enrolled"
-        );
-    }
-
-    #[test]
     fn create_fleet_timestamps_are_canonical() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
@@ -367,15 +354,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(placements, 0);
-
-        let configs: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM monitor_config WHERE member_id IN (?1, ?2)",
-                [director_id, member_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(configs, 0);
         assert!(
             broker::read_monitor_runtime(&conn, fleet_id)
                 .unwrap()
