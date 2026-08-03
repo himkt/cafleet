@@ -24,6 +24,10 @@ pub enum MonitorCommand {
         #[arg(long, default_value_t = crate::monitor::DEFAULT_TICK_SECONDS,
               value_parser = clap::value_parser!(i64).range(1..))]
         tick: i64,
+        /// Director wake interval in seconds (0 disables the wake) [default:
+        /// CAFLEET_MONITOR_WAKE_INTERVAL, 600].
+        #[arg(long)]
+        interval: Option<u64>,
     },
     /// Capture the tail of a member's pane.
     Capture {
@@ -56,7 +60,11 @@ fn require_live_fleet(conn: &rusqlite::Connection, fleet_id: i64) -> Result<(), 
 
 pub fn run(settings: &Settings, command: MonitorCommand) -> Result<(), CafleetError> {
     match command {
-        MonitorCommand::Start { fleet, tick } => start(settings, fleet.fleet_id, tick),
+        MonitorCommand::Start {
+            fleet,
+            tick,
+            interval,
+        } => start(settings, fleet.fleet_id, tick, interval),
         MonitorCommand::Capture {
             fleet,
             member_id,
@@ -68,9 +76,14 @@ pub fn run(settings: &Settings, command: MonitorCommand) -> Result<(), CafleetEr
     }
 }
 
-/// Requires a live fleet, then the multiplexer; warns (but runs) without a
-/// monitoring member; blocks in the loop until stopped or displaced.
-fn start(settings: &Settings, fleet_id: Option<i64>, tick: i64) -> Result<(), CafleetError> {
+/// Requires a live fleet, then the multiplexer; blocks in the loop until
+/// stopped or displaced.
+fn start(
+    settings: &Settings,
+    fleet_id: Option<i64>,
+    tick: i64,
+    interval: Option<u64>,
+) -> Result<(), CafleetError> {
     let fleet_id = require_fleet_id(fleet_id)?;
     let mut conn = connect(settings)?;
     require_live_fleet(&conn, fleet_id)?;
@@ -78,12 +91,6 @@ fn start(settings: &Settings, fleet_id: Option<i64>, tick: i64) -> Result<(), Ca
         super::helpers::resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
-    if broker::find_monitoring_member(&conn, fleet_id)?.is_none() {
-        eprintln!(
-            "Warning: fleet {fleet_id} has no monitoring member; the monitor heartbeat \
-             will wake no member. Spawn one first with 'cafleet member create --role monitor'."
-        );
-    }
     let mut out = std::io::stdout();
     crate::monitor::run_monitor_loop(
         &mut conn,
@@ -91,7 +98,7 @@ fn start(settings: &Settings, fleet_id: Option<i64>, tick: i64) -> Result<(), Ca
         &mut out,
         fleet_id,
         tick,
-        settings.monitor_stall_interval,
+        interval.unwrap_or(settings.monitor_wake_interval),
     )
 }
 

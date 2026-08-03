@@ -7,7 +7,7 @@ pub struct Settings {
     pub broker_port: u16,
     pub max_text_len: usize,
     pub multiplexer: Option<String>,
-    pub monitor_stall_interval: u64,
+    pub monitor_wake_interval: u64,
 }
 
 impl Settings {
@@ -37,10 +37,10 @@ impl Settings {
                 "a non-negative integer",
             )?,
             multiplexer: lookup("CAFLEET_MULTIPLEXER"),
-            monitor_stall_interval: parse_numeric(
+            monitor_wake_interval: parse_numeric(
                 &lookup,
-                "CAFLEET_MONITOR_STALL_INTERVAL",
-                240,
+                "CAFLEET_MONITOR_WAKE_INTERVAL",
+                600,
                 "a non-negative integer",
             )?,
         })

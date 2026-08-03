@@ -213,18 +213,21 @@ impl TmuxMultiplexer {
     }
 
     pub fn send_poll_trigger(&self, target_pane_id: &str, fleet_id: i64, member_id: i64) -> bool {
-        let payload = format!("cafleet message poll --fleet-id {fleet_id} --member-id {member_id}");
+        let payload = format!(
+            "cafleet message poll --fleet-id {fleet_id} --member-id {member_id} \
+             — then resume your work if something was still running."
+        );
         self.best_effort_send(target_pane_id, &payload, true)
     }
 
     pub fn send_wake_trigger(
         &self,
         target_pane_id: &str,
-        due_members: &[Value],
-        director: &Value,
+        fleet_id: i64,
+        members: &[Value],
     ) -> Result<bool, MultiplexerError> {
-        let payload = build_wake_payload(due_members, director)?;
-        Ok(self.best_effort_send(target_pane_id, &payload, false))
+        let payload = build_wake_payload(fleet_id, members)?;
+        Ok(self.best_effort_send(target_pane_id, &payload, true))
     }
 
     pub fn send_inline_preview(

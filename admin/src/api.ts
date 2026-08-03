@@ -2,7 +2,6 @@ import type {
   MembersResponse,
   TimelineResponse,
   FleetListItem,
-  MonitorConfig,
   MonitorRuntime,
 } from "./types";
 
@@ -75,14 +74,4 @@ export async function sendMessage(
 
 export async function getMonitor(): Promise<MonitorRuntime> {
   return request<MonitorRuntime>("/monitor");
-}
-
-export async function updateMemberMonitor(
-  memberId: number,
-  patch: { interval_seconds?: number; enabled?: boolean },
-): Promise<MonitorConfig> {
-  return request<MonitorConfig>(`/members/${memberId}/monitor`, {
-    method: "PATCH",
-    body: JSON.stringify(patch),
-  });
 }

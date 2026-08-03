@@ -54,7 +54,7 @@ pub fn create_fleet(
     backend: &str,
 ) -> Result<Value, CafleetError> {
     let now = format_utc(now_utc());
-    let card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[], None);
+    let card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[]);
     let tx = conn.transaction().map_err(db_err)?;
     tx.execute(
         "INSERT INTO fleets (name, created_at) VALUES (?1, ?2)",
@@ -150,8 +150,8 @@ pub fn get_fleet(conn: &Connection, fleet_id: i64) -> Result<Option<Value>, Cafl
 }
 
 /// Soft-delete + cascade: stamp `deleted_at`, deregister every active member
-/// (root Director included), drop their placement and monitor-config rows and
-/// the fleet's runtime row; messages are untouched. Idempotent.
+/// (root Director included), drop their placement rows and the fleet's
+/// runtime row; messages are untouched. Idempotent.
 pub fn delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value, CafleetError> {
     let fleet = fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
@@ -173,12 +173,6 @@ pub fn delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value, Cafle
         .map_err(db_err)?;
     tx.execute(
         "DELETE FROM member_placements WHERE member_id IN \
-         (SELECT member_id FROM members WHERE fleet_id=?1)",
-        [fleet_id],
-    )
-    .map_err(db_err)?;
-    tx.execute(
-        "DELETE FROM monitor_config WHERE member_id IN \
          (SELECT member_id FROM members WHERE fleet_id=?1)",
         [fleet_id],
     )

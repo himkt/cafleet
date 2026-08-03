@@ -147,9 +147,6 @@ export default function Dashboard({
             member={detailMember}
             refreshKey={refreshKey}
             onClose={closeDetail}
-            onChanged={() => {
-              void trigger();
-            }}
           />
         )}
       </div>

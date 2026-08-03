@@ -1,74 +1,67 @@
-//! Monitor heartbeat loop (SPEC §6.6) — the pure `should_ping` due-check, the
+//! Monitor heartbeat loop (SPEC §6.6) — the pure `wake_due` check, the
 //! per-tick scan `monitor_tick` (ownership-checked heartbeat, fleet liveness,
-//! due-set + wake-reason computation, one synchronized wake, `woke`-gated
-//! ledger writes), and the foreground driver. The colocated tests pin the
-//! contract.
+//! the fleet-level Director wake, the `woke`-gated ledger write), and the
+//! foreground driver. The colocated tests pin the contract.
 //!
 //! Expected public API:
 //!
 //! ```text
 //! pub const DEFAULT_TICK_SECONDS: i64 = 5;
-//! // Policy tunables re-exported from their single broker home:
-//! pub use crate::broker::{MEMBER_PING_INTERVAL_SECONDS /* 720 */,
-//!     MONITOR_STALE_FACTOR /* 3 */, MONITOR_STALE_FLOOR_SECONDS /* 15 */};
+//! // Runtime-staleness tunables re-exported from their single broker home:
+//! pub use crate::broker::{MONITOR_STALE_FACTOR /* 3 */,
+//!     MONITOR_STALE_FLOOR_SECONDS /* 15 */};
 //!
 //! // What the tick consumes from the resolved backend.
 //! pub trait MonitorMux {
 //!     fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError>;
-//!     fn send_wake_trigger(&self, target_pane_id: &str, due_members: &[Value],
-//!         director: &Value) -> Result<bool, MultiplexerError>;
-//!     fn agent_status(&self, target_pane_id: &str)
-//!         -> Result<Option<String>, MultiplexerError>;
+//!     fn send_wake_trigger(&self, target_pane_id: &str, fleet_id: i64,
+//!         members: &[Value]) -> Result<bool, MultiplexerError>;
 //! }
 //!
 //! pub enum TickResult { Continue, Stop }
-//! #[derive(Default)]
-//! pub struct MonitorTickState { .. }  // the in-memory native-status map
 //!
-//! // Pure due-check over one scan row (a `list_monitor_targets` row with the
-//! // loop-injected `pane_alive` bool): enabled → placed+alive → interval.
-//! pub fn should_ping(target: &Value, now: DateTime<Utc>) -> bool;
+//! // Pure due-check for the fleet-level wake: a NULL or unparsable stamp is
+//! // immediately due.
+//! pub fn wake_due(last_wake_at: Option<&str>, wake_interval: u64,
+//!     now: DateTime<Utc>) -> bool;
 //!
 //! pub fn monitor_tick(conn: &mut Connection, mux: &dyn MonitorMux,
-//!     state: &mut MonitorTickState, out: &mut dyn std::io::Write,
-//!     fleet_id: i64, pid: i64, monitor_stall_interval: u64,
-//!     now: DateTime<Utc>) -> Result<TickResult, CafleetError>;
+//!     out: &mut dyn std::io::Write, fleet_id: i64, pid: i64,
+//!     wake_interval: u64, now: DateTime<Utc>)
+//!     -> Result<TickResult, CafleetError>;
 //!
 //! pub fn run_monitor_loop(conn: &mut Connection, mux: &dyn MonitorMux,
 //!     out: &mut dyn std::io::Write, fleet_id: i64, tick_seconds: i64,
-//!     monitor_stall_interval: u64) -> Result<(), CafleetError>;
+//!     wake_interval: u64) -> Result<(), CafleetError>;
 //! ```
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::broker;
-pub use crate::broker::{
-    MEMBER_PING_INTERVAL_SECONDS, MONITOR_STALE_FACTOR, MONITOR_STALE_FLOOR_SECONDS,
-};
+pub use crate::broker::{MONITOR_STALE_FACTOR, MONITOR_STALE_FLOOR_SECONDS};
 use crate::error::CafleetError;
 use crate::multiplexer::{Multiplexer, MultiplexerError};
 use crate::time::{format_utc, now_utc, parse_lenient};
 
 pub const DEFAULT_TICK_SECONDS: i64 = 5;
 
-/// What the tick consumes from the resolved backend: pane liveness, the
-/// single wake keystroke, and the optional native agent state.
+/// What the tick consumes from the resolved backend: pane liveness and the
+/// single Director-wake keystroke.
 pub trait MonitorMux {
     fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError>;
     fn send_wake_trigger(
         &self,
         target_pane_id: &str,
-        due_members: &[Value],
-        director: &Value,
+        fleet_id: i64,
+        members: &[Value],
     ) -> Result<bool, MultiplexerError>;
-    fn agent_status(&self, target_pane_id: &str) -> Result<Option<String>, MultiplexerError>;
 }
 
 impl<M: Multiplexer> MonitorMux for M {
@@ -79,14 +72,10 @@ impl<M: Multiplexer> MonitorMux for M {
     fn send_wake_trigger(
         &self,
         target_pane_id: &str,
-        due_members: &[Value],
-        director: &Value,
+        fleet_id: i64,
+        members: &[Value],
     ) -> Result<bool, MultiplexerError> {
-        Multiplexer::send_wake_trigger(self, target_pane_id, due_members, director)
-    }
-
-    fn agent_status(&self, target_pane_id: &str) -> Result<Option<String>, MultiplexerError> {
-        Multiplexer::agent_status(self, target_pane_id)
+        Multiplexer::send_wake_trigger(self, target_pane_id, fleet_id, members)
     }
 }
 
@@ -95,86 +84,33 @@ pub enum TickResult {
     Stop,
 }
 
-/// The in-memory native-status map: the last committed `agent_status` per
-/// member, backing the edge-triggered `status:done` episode.
-#[derive(Default)]
-pub struct MonitorTickState {
-    statuses: HashMap<i64, String>,
-}
-
 fn mux_err(error: MultiplexerError) -> CafleetError {
     CafleetError::App(error.to_string())
 }
 
-/// Pure due-check over one scan row (a `list_monitor_targets` row with the
-/// loop-injected `pane_alive` bool): enabled → placed + alive → interval.
-pub fn should_ping(target: &Value, now: DateTime<Utc>) -> bool {
-    if target["enabled"] != true {
-        return false;
-    }
-    if target["pane_id"].is_null() || target["pane_alive"] != true {
-        return false;
-    }
-    let Some(last_ping_at) = target["last_ping_at"].as_str() else {
+/// Pure due-check for the fleet-level wake: a `NULL` or unparsable
+/// `last_wake_at` is immediately due; otherwise due once the interval has
+/// elapsed.
+pub fn wake_due(last_wake_at: Option<&str>, wake_interval: u64, now: DateTime<Utc>) -> bool {
+    let Some(last_wake_at) = last_wake_at else {
         return true;
     };
-    let Ok(parsed) = parse_lenient(last_ping_at) else {
+    let Ok(parsed) = parse_lenient(last_wake_at) else {
         return true;
     };
-    let interval = target["interval_seconds"]
-        .as_i64()
-        .expect("scan rows carry interval_seconds");
-    (now - parsed).num_seconds() >= interval
-}
-
-/// Whether the durable stall-check cadence has elapsed for an available
-/// target (`0` disables the branch entirely).
-fn stall_check_due(target: &Value, monitor_stall_interval: u64, now: DateTime<Utc>) -> bool {
-    if monitor_stall_interval == 0 {
-        return false;
-    }
-    if target["enabled"] != true || target["pane_id"].is_null() || target["pane_alive"] != true {
-        return false;
-    }
-    let Some(last_stall_check_at) = target["last_stall_check_at"].as_str() else {
-        return true;
-    };
-    let Ok(parsed) = parse_lenient(last_stall_check_at) else {
-        return true;
-    };
-    (now - parsed).num_seconds() >= monitor_stall_interval as i64
-}
-
-/// Whether the target's oldest pending delivery has outlived its ping
-/// interval — the `unacked` annotation on an already-due row.
-fn unacked_overdue(target: &Value, now: DateTime<Utc>) -> bool {
-    if target["pending_count"].as_i64().unwrap_or(0) == 0 {
-        return false;
-    }
-    let Some(oldest) = target["oldest_pending_ts"].as_str() else {
-        return false;
-    };
-    let Ok(parsed) = parse_lenient(oldest) else {
-        return false;
-    };
-    let interval = target["interval_seconds"]
-        .as_i64()
-        .expect("scan rows carry interval_seconds");
-    (now - parsed).num_seconds() >= interval
+    (now - parsed).num_seconds() >= wake_interval as i64
 }
 
 /// One scan pass (SPEC §6.6): ownership-checked heartbeat → fleet liveness →
-/// pane reconciliation → due-set + wake-reason computation → one synchronized
-/// wake → `woke`-gated ledger writes and heartbeat echoes.
-#[allow(clippy::too_many_arguments)]
+/// wake-interval gate → Director-pane resolution → one fleet-level wake →
+/// the `woke`-gated ledger write and heartbeat echo.
 pub fn monitor_tick(
     conn: &mut Connection,
     mux: &dyn MonitorMux,
-    state: &mut MonitorTickState,
     out: &mut dyn Write,
     fleet_id: i64,
     pid: i64,
-    monitor_stall_interval: u64,
+    wake_interval: u64,
     now: DateTime<Utc>,
 ) -> Result<TickResult, CafleetError> {
     let iso = format_utc(now);
@@ -191,149 +127,45 @@ pub fn monitor_tick(
     }
     let fleet = fleet.expect("the live fleet row exists");
 
-    let live_panes = mux.list_pane_ids().map_err(mux_err)?;
-    let mut targets = broker::list_monitor_targets(conn, fleet_id)?;
-    let mut unavailable: Vec<i64> = Vec::new();
-    for target in &mut targets {
-        let alive = target["pane_id"]
-            .as_str()
-            .is_some_and(|pane| live_panes.contains(pane));
-        target["pane_alive"] = json!(alive);
-        if !alive {
-            unavailable.push(
-                target["member_id"]
-                    .as_i64()
-                    .expect("scan rows carry member_id"),
-            );
-        }
+    if wake_interval == 0 {
+        return Ok(TickResult::Continue);
     }
-    if !unavailable.is_empty() {
-        broker::reconcile_monitor_lifecycle(conn, fleet_id, &unavailable)?;
+    let runtime = broker::read_monitor_runtime(conn, fleet_id)?
+        .expect("the heartbeat just matched this fleet's runtime row");
+    if !wake_due(runtime["last_wake_at"].as_str(), wake_interval, now) {
+        return Ok(TickResult::Continue);
     }
 
-    let watcher = broker::find_monitoring_member(conn, fleet_id)?.filter(|watcher| {
-        watcher["pane_id"]
-            .as_str()
-            .is_some_and(|pane| live_panes.contains(pane))
-    });
-    let Some(watcher) = watcher else {
+    // A Director with no pane, or a pane absent from the live set, skips the
+    // wake without stamping — the fleet stays due for the next tick.
+    let director_id = fleet["director_member_id"]
+        .as_i64()
+        .expect("a live fleet records its Director");
+    let director = broker::get_member(conn, director_id, fleet_id)?;
+    let director_pane = director
+        .as_ref()
+        .and_then(|member| member["placement"]["mux_pane_id"].as_str());
+    let Some(director_pane) = director_pane else {
         return Ok(TickResult::Continue);
     };
-
-    // Native agent-status scan over the available targets; a transition INTO
-    // `done` flags a wake, `blocked` (and every other state) never does.
-    let mut status_reads: Vec<(i64, Option<String>)> = Vec::new();
-    let mut done_transitions: BTreeSet<i64> = BTreeSet::new();
-    for target in &targets {
-        if target["pane_alive"] != true {
-            continue;
-        }
-        let member_id = target["member_id"]
-            .as_i64()
-            .expect("scan rows carry member_id");
-        let pane = target["pane_id"]
-            .as_str()
-            .expect("an alive target has a pane");
-        let status = mux.agent_status(pane).map_err(mux_err)?;
-        if status.as_deref() == Some("done")
-            && state.statuses.get(&member_id).map(String::as_str) != Some("done")
-        {
-            done_transitions.insert(member_id);
-        }
-        status_reads.push((member_id, status));
+    let live_panes = mux.list_pane_ids().map_err(mux_err)?;
+    if !live_panes.contains(director_pane) {
+        return Ok(TickResult::Continue);
     }
 
-    let mut due: Vec<Value> = Vec::new();
-    let mut ping_ids: Vec<i64> = Vec::new();
-    let mut stall_ids: Vec<i64> = Vec::new();
-    for target in &targets {
-        let member_id = target["member_id"]
-            .as_i64()
-            .expect("scan rows carry member_id");
-        let mut reasons: Vec<&str> = Vec::new();
-        if should_ping(target, now) {
-            reasons.push("interval");
-        }
-        if stall_check_due(target, monitor_stall_interval, now) {
-            reasons.push("stall-check");
-        }
-        if done_transitions.contains(&member_id) {
-            reasons.push("status:done");
-        }
-        if reasons.is_empty() {
-            continue;
-        }
-        if unacked_overdue(target, now) {
-            reasons.push("unacked");
-        }
-        if reasons.contains(&"interval") {
-            ping_ids.push(member_id);
-        }
-        if reasons.contains(&"stall-check") {
-            stall_ids.push(member_id);
-        }
-        due.push(json!({
-            "member_id": member_id,
-            "name": target["name"],
-            "coding_agent": target["coding_agent"],
-            "wake_reasons": reasons,
-        }));
+    let roster = broker::list_fleet_wake_targets(conn, fleet_id)?;
+    let woke = mux
+        .send_wake_trigger(director_pane, fleet_id, &roster)
+        .map_err(mux_err)?;
+    if woke {
+        broker::record_monitor_wake(conn, fleet_id, &iso)?;
+        writeln!(
+            out,
+            "{iso} tick -> wake director {director_id} ({} members)",
+            roster.len()
+        )
+        .map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))?;
     }
-
-    let mut woke = true;
-    if !due.is_empty() {
-        let director_id = fleet["director_member_id"]
-            .as_i64()
-            .expect("a live fleet records its Director");
-        let director_agent = broker::get_member(conn, director_id, fleet_id)?
-            .expect("a live fleet's Director is registered")["placement"]["coding_agent"]
-            .as_str()
-            .expect("the root Director is pane-bound")
-            .to_string();
-        let director = json!({"member_id": director_id, "coding_agent": director_agent});
-        let watcher_pane = watcher["pane_id"].as_str().expect("the watcher has a pane");
-        woke = mux
-            .send_wake_trigger(watcher_pane, &due, &director)
-            .map_err(mux_err)?;
-        if woke {
-            broker::record_monitor_dispatch(conn, &ping_ids, &stall_ids, &iso)?;
-            for entry in &due {
-                let reasons = entry["wake_reasons"]
-                    .as_array()
-                    .expect("due entries carry wake_reasons")
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>()
-                    .join(",");
-                writeln!(
-                    out,
-                    "{iso} due member {} ({}) [{reasons}] -> wake monitor",
-                    entry["member_id"],
-                    entry["name"]
-                        .as_str()
-                        .expect("due entries carry the raw name"),
-                )
-                .map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))?;
-            }
-        }
-    }
-
-    // Commit the status reads; an unconsumed done episode (a failed wake)
-    // keeps its pre-transition value so it re-flags next tick.
-    for (member_id, status) in status_reads {
-        match status {
-            Some(status) => {
-                if status == "done" && done_transitions.contains(&member_id) && !woke {
-                    continue;
-                }
-                state.statuses.insert(member_id, status);
-            }
-            None => {
-                state.statuses.remove(&member_id);
-            }
-        }
-    }
-
     Ok(TickResult::Continue)
 }
 
@@ -360,7 +192,7 @@ pub fn run_monitor_loop(
     out: &mut dyn Write,
     fleet_id: i64,
     tick_seconds: i64,
-    monitor_stall_interval: u64,
+    wake_interval: u64,
 ) -> Result<(), CafleetError> {
     let pid = i64::from(std::process::id());
     let now = format_utc(now_utc());
@@ -383,21 +215,11 @@ pub fn run_monitor_loop(
     .map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))?;
     out.flush().ok();
 
-    let mut state = MonitorTickState::default();
     let outcome = loop {
         if stop.load(Ordering::Relaxed) {
             break Ok(());
         }
-        match monitor_tick(
-            conn,
-            mux,
-            &mut state,
-            out,
-            fleet_id,
-            pid,
-            monitor_stall_interval,
-            now_utc(),
-        ) {
+        match monitor_tick(conn, mux, out, fleet_id, pid, wake_interval, now_utc()) {
             Ok(TickResult::Continue) => {}
             Ok(TickResult::Stop) => break Ok(()),
             Err(error) => break Err(error),
@@ -470,11 +292,9 @@ mod tests {
             fleet_id: i64,
             members: &[Value],
         ) -> Result<bool, MultiplexerError> {
-            self.wakes.borrow_mut().push((
-                target_pane_id.to_string(),
-                fleet_id,
-                members.to_vec(),
-            ));
+            self.wakes
+                .borrow_mut()
+                .push((target_pane_id.to_string(), fleet_id, members.to_vec()));
             Ok(self.wake_ok.get())
         }
     }
@@ -541,10 +361,7 @@ mod tests {
                 "elapsed 599 < 600 → not yet due"
             );
             let old = format_utc(now - Duration::seconds(600));
-            assert!(
-                wake_due(Some(&old), 600, now),
-                "elapsed 600 >= 600 → due"
-            );
+            assert!(wake_due(Some(&old), 600, now), "elapsed 600 >= 600 → due");
         }
     }
 

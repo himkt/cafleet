@@ -1,7 +1,7 @@
 # Remove the monitoring member — one fleet-level tick to the Director
 
 **Status**: Approved
-**Progress**: 32/60 tasks complete
+**Progress**: 52/60 tasks complete
 **Last Updated**: 2026-08-03
 
 ## Overview
@@ -551,35 +551,33 @@ not "fix" them.
 
 ### Step 6: Rust — broker and member registry
 
-COMMENT(director): approved — Steps 6–8 are one compile unit. Order: (1) the Tester lands the Step 7 rewritten colocated suites (monitor/mod.rs, multiplexer/{mod,tmux,herdr}.rs, config.rs, output/formatters.rs per § S11) in one test commit; (2) the Programmer then implements Steps 6+7+8 together and verifies with the full suite; (3) per-step checkbox updates still happen per file as tasks complete. Rationale: whole-crate compilation makes intermediate green states impossible; test-first is preserved by landing all affected suites before implementation.
-
-- [ ] `cafleet/src/broker/members.rs`: delete `MONITORING_MEMBER_KIND`, `MEMBER_PING_INTERVAL_SECONDS`, `enroll`, `active_monitoring_member_id`, both monitoring-member guards, and the `kind` parameter of `register_member` / `member_card`; narrow `derive_member_kind` to `is_director` <!-- completed: -->
-- [ ] `cafleet/src/broker/monitor.rs`: delete every `monitor_config` function and `find_monitoring_member`; add `record_monitor_wake` and `list_fleet_wake_targets`; extend `runtime_row` / `monitor_runtime_payload` for `last_wake_at` <!-- completed: -->
-- [ ] `cafleet/src/broker/fleets.rs`: drop the `DELETE FROM monitor_config` statement from `delete_fleet` <!-- completed: -->
-- [ ] `cafleet/src/broker/messaging.rs`: drop the `kind` argument from the broadcast test's `register_member` call and reword its recipient-set assertion to an ordinary pane-bound member (§ S11) <!-- completed: -->
-- [ ] `cafleet/src/broker/test_support.rs`: rewrite the `// monitor` section of the module doc catalogue — delete the nine functions § S5 removes, add `record_monitor_wake` and `list_fleet_wake_targets` <!-- completed: -->
-- [ ] Update the colocated tests in `members.rs`, `monitor.rs`, and `fleets.rs` (§ S11) <!-- completed: -->
+- [x] `cafleet/src/broker/members.rs`: delete `MONITORING_MEMBER_KIND`, `MEMBER_PING_INTERVAL_SECONDS`, `enroll`, `active_monitoring_member_id`, both monitoring-member guards, and the `kind` parameter of `register_member` / `member_card`; narrow `derive_member_kind` to `is_director` <!-- completed: 2026-08-03T13:35 -->
+- [x] `cafleet/src/broker/monitor.rs`: delete every `monitor_config` function and `find_monitoring_member`; add `record_monitor_wake` and `list_fleet_wake_targets`; extend `runtime_row` / `monitor_runtime_payload` for `last_wake_at` <!-- completed: 2026-08-03T13:35 -->
+- [x] `cafleet/src/broker/fleets.rs`: drop the `DELETE FROM monitor_config` statement from `delete_fleet` <!-- completed: 2026-08-03T13:35 -->
+- [x] `cafleet/src/broker/messaging.rs`: drop the `kind` argument from the broadcast test's `register_member` call and reword its recipient-set assertion to an ordinary pane-bound member (§ S11) <!-- completed: 2026-08-03T13:35 -->
+- [x] `cafleet/src/broker/test_support.rs`: rewrite the `// monitor` section of the module doc catalogue — delete the nine functions § S5 removes, add `record_monitor_wake` and `list_fleet_wake_targets` <!-- completed: 2026-08-03T13:35 -->
+- [x] Update the colocated tests in `members.rs`, `monitor.rs`, and `fleets.rs` (§ S11) <!-- completed: 2026-08-03T13:35 -->
 - [ ] Bring each touched `cafleet/src/broker/*.rs` module `//!` header in line with the surviving surface (`monitor.rs`'s reads "Monitor schedule + runtime DB layer" and no longer describes a schedule) <!-- completed: -->
 
 
 ### Step 7: Rust — the tick, the multiplexer, the CLI, and config
 
-- [ ] `cafleet/src/multiplexer/mod.rs`: rewrite `build_wake_payload` to the § S3b grammar (drop the `director` argument, take `fleet_id`); update the `send_wake_trigger` trait signature; update `send_poll_trigger`'s payload to § S3a <!-- completed: -->
-- [ ] `cafleet/src/multiplexer/tmux.rs` and `herdr.rs`: `send_wake_trigger` becomes `Esc`-first; both `send_poll_trigger` implementations carry the new string <!-- completed: -->
-- [ ] `cafleet/src/monitor/mod.rs`: narrow `MonitorMux`; delete `should_ping`, `stall_check_due`, `unacked_overdue`, `MonitorTickState`, and the `agent_status` scan; add `wake_due`; rewrite `monitor_tick` and `run_monitor_loop` to § S7 <!-- completed: -->
-- [ ] `cafleet/src/config.rs`: `monitor_stall_interval` → `monitor_wake_interval`, env `CAFLEET_MONITOR_WAKE_INTERVAL`, default `600` <!-- completed: -->
-- [ ] `cafleet/src/cli/monitor.rs`: add `--interval`, delete the warning, thread the setting through <!-- completed: -->
-- [ ] `cafleet/src/cli/member.rs`: delete the `--role` flag and its `kind` derivation <!-- completed: -->
-- [ ] `cafleet/src/output/formatters.rs`: rewrite the `member list` roster test fixture and its expected output row, both of which pin `monitor` as a rendered `kind` value (§ S11) <!-- completed: -->
-- [ ] Update the colocated tests in all seven files (§ S11) <!-- completed: -->
+- [x] `cafleet/src/multiplexer/mod.rs`: rewrite `build_wake_payload` to the § S3b grammar (drop the `director` argument, take `fleet_id`); update the `send_wake_trigger` trait signature; update `send_poll_trigger`'s payload to § S3a <!-- completed: 2026-08-03T13:36 -->
+- [x] `cafleet/src/multiplexer/tmux.rs` and `herdr.rs`: `send_wake_trigger` becomes `Esc`-first; both `send_poll_trigger` implementations carry the new string <!-- completed: 2026-08-03T13:36 -->
+- [x] `cafleet/src/monitor/mod.rs`: narrow `MonitorMux`; delete `should_ping`, `stall_check_due`, `unacked_overdue`, `MonitorTickState`, and the `agent_status` scan; add `wake_due`; rewrite `monitor_tick` and `run_monitor_loop` to § S7 <!-- completed: 2026-08-03T13:36 -->
+- [x] `cafleet/src/config.rs`: `monitor_stall_interval` → `monitor_wake_interval`, env `CAFLEET_MONITOR_WAKE_INTERVAL`, default `600` <!-- completed: 2026-08-03T13:36 -->
+- [x] `cafleet/src/cli/monitor.rs`: add `--interval`, delete the warning, thread the setting through <!-- completed: 2026-08-03T13:36 -->
+- [x] `cafleet/src/cli/member.rs`: delete the `--role` flag and its `kind` derivation <!-- completed: 2026-08-03T13:36 -->
+- [x] `cafleet/src/output/formatters.rs`: rewrite the `member list` roster test fixture and its expected output row, both of which pin `monitor` as a rendered `kind` value (§ S11) <!-- completed: 2026-08-03T13:36 -->
+- [x] Update the colocated tests in all seven files (§ S11) <!-- completed: 2026-08-03T13:36 -->
 
 ### Step 8: HTTP API and admin WebUI
 
-- [ ] `cafleet/src/webui/mod.rs`: delete both `/api/members/{id}/monitor` routes and `monitor_projection`; drop the per-member `monitor` key from the roster; reshape `GET /api/monitor`'s `members` array and add the `last_wake_at` runtime keys <!-- completed: -->
-- [ ] `admin/src/types.ts`: delete `MonitorConfig`, narrow `kind`, drop the `monitor` field <!-- completed: -->
-- [ ] `admin/src/api.ts`: delete the two member-monitor calls <!-- completed: -->
-- [ ] `admin/src/components/MemberDetail.tsx`: remove the per-member schedule editor <!-- completed: -->
-- [ ] `admin/src/components/{AppHeader,Dashboard,Sidebar}.tsx`: adapt to the reshaped payloads; remove the `monitor` kind badge <!-- completed: -->
+- [x] `cafleet/src/webui/mod.rs`: delete both `/api/members/{id}/monitor` routes and `monitor_projection`; drop the per-member `monitor` key from the roster; reshape `GET /api/monitor`'s `members` array and add the `last_wake_at` runtime keys <!-- completed: 2026-08-03T13:37 -->
+- [x] `admin/src/types.ts`: delete `MonitorConfig`, narrow `kind`, drop the `monitor` field <!-- completed: 2026-08-03T13:37 -->
+- [x] `admin/src/api.ts`: delete the two member-monitor calls <!-- completed: 2026-08-03T13:37 -->
+- [x] `admin/src/components/MemberDetail.tsx`: remove the per-member schedule editor <!-- completed: 2026-08-03T13:37 -->
+- [x] `admin/src/components/{AppHeader,Dashboard,Sidebar}.tsx`: adapt to the reshaped payloads; remove the `monitor` kind badge <!-- completed: 2026-08-03T13:37 -->
 
 ### Step 9: Integration tests and verification
 

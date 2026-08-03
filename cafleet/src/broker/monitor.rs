@@ -1,11 +1,12 @@
-//! Monitor schedule + runtime DB layer (SPEC §6.2 *Monitor*). The colocated
-//! tests pin the contract; see [`super::test_support`] for the API.
+//! Monitor runtime DB layer (SPEC §6.2 *Monitor*) — the fleet-level wake
+//! roster + ledger and the single-instance runtime slot. The colocated tests
+//! pin the contract; see [`super::test_support`] for the API.
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
-use super::members::{MONITORING_MEMBER_KIND, db_err};
+use super::members::db_err;
 use crate::error::CafleetError;
 use crate::time::parse_lenient;
 
@@ -49,11 +50,12 @@ struct RuntimeRow {
     started_at: Option<String>,
     last_tick_at: Option<String>,
     tick_seconds: i64,
+    last_wake_at: Option<String>,
 }
 
 fn runtime_row(conn: &Connection, fleet_id: i64) -> Result<Option<RuntimeRow>, CafleetError> {
     conn.query_row(
-        "SELECT pid, started_at, last_tick_at, tick_seconds \
+        "SELECT pid, started_at, last_tick_at, tick_seconds, last_wake_at \
          FROM monitor_runtime WHERE fleet_id=?1",
         [fleet_id],
         |row| {
@@ -62,6 +64,7 @@ fn runtime_row(conn: &Connection, fleet_id: i64) -> Result<Option<RuntimeRow>, C
                 started_at: row.get(1)?,
                 last_tick_at: row.get(2)?,
                 tick_seconds: row.get(3)?,
+                last_wake_at: row.get(4)?,
             })
         },
     )
@@ -79,178 +82,36 @@ fn runtime_live(row: &RuntimeRow, now: DateTime<Utc>) -> bool {
     }
 }
 
-pub fn find_monitoring_member(
-    conn: &Connection,
-    fleet_id: i64,
-) -> Result<Option<Value>, CafleetError> {
-    conn.query_row(
-        "SELECT m.member_id, m.name, p.mux_pane_id \
-         FROM members m JOIN member_placements p ON p.member_id=m.member_id \
-         WHERE m.fleet_id=?1 AND m.status='active' \
-           AND json_extract(m.member_card_json, '$.cafleet.kind')=?2 \
-           AND p.mux_pane_id IS NOT NULL \
-         ORDER BY m.member_id LIMIT 1",
-        params![fleet_id, MONITORING_MEMBER_KIND],
-        |row| {
-            Ok(json!({
-                "member_id": row.get::<_, i64>(0)?,
-                "name": row.get::<_, String>(1)?,
-                "pane_id": row.get::<_, String>(2)?,
-            }))
-        },
-    )
-    .optional()
-    .map_err(db_err)
-}
-
-fn config_value(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    Ok(json!({
-        "member_id": row.get::<_, i64>(0)?,
-        "interval_seconds": row.get::<_, i64>(1)?,
-        "last_ping_at": row.get::<_, Option<String>>(2)?,
-        "enabled": row.get::<_, i64>(3)? != 0,
-        "last_stall_check_at": row.get::<_, Option<String>>(4)?,
-    }))
-}
-
-const CONFIG_SELECT: &str = "SELECT c.member_id, c.interval_seconds, c.last_ping_at, c.enabled, \
-     c.last_stall_check_at \
-     FROM monitor_config c JOIN members m ON m.member_id=c.member_id";
-
-pub fn get_monitor_config(
-    conn: &Connection,
-    fleet_id: i64,
-    member_id: i64,
-) -> Result<Option<Value>, CafleetError> {
-    conn.query_row(
-        &format!("{CONFIG_SELECT} WHERE c.member_id=?1 AND m.fleet_id=?2"),
-        params![member_id, fleet_id],
-        config_value,
-    )
-    .optional()
-    .map_err(db_err)
-}
-
-pub fn list_monitor_configs(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>, CafleetError> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "{CONFIG_SELECT} WHERE m.fleet_id=?1 ORDER BY c.member_id"
-        ))
-        .map_err(db_err)?;
-    let rows = stmt
-        .query_map([fleet_id], config_value)
-        .map_err(db_err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(db_err)?;
-    Ok(rows)
-}
-
-pub fn update_monitor_config(
+/// Stamp the fleet's durable wake ledger; called only after a delivered
+/// Director wake (the `woke`-gated write, SPEC §6.6).
+pub fn record_monitor_wake(
     conn: &mut Connection,
     fleet_id: i64,
-    member_id: i64,
-    interval_seconds: Option<i64>,
-    enabled: Option<bool>,
-) -> Result<Value, CafleetError> {
-    if get_monitor_config(conn, fleet_id, member_id)?.is_none() {
-        return Err(CafleetError::App(format!(
-            "member {member_id} is not enrolled in monitoring for fleet {fleet_id}."
-        )));
-    }
-    let tx = conn.transaction().map_err(db_err)?;
-    if let Some(interval_seconds) = interval_seconds {
-        tx.execute(
-            "UPDATE monitor_config SET interval_seconds=?1 WHERE member_id=?2",
-            params![interval_seconds, member_id],
-        )
-        .map_err(db_err)?;
-    }
-    if let Some(enabled) = enabled {
-        tx.execute(
-            "UPDATE monitor_config SET enabled=?1 WHERE member_id=?2",
-            params![i64::from(enabled), member_id],
-        )
-        .map_err(db_err)?;
-        if !enabled {
-            tx.execute(
-                "UPDATE monitor_config SET last_stall_check_at=NULL WHERE member_id=?1",
-                [member_id],
-            )
-            .map_err(db_err)?;
-        }
-    }
-    tx.commit().map_err(db_err)?;
-    Ok(get_monitor_config(conn, fleet_id, member_id)?.expect("the enrolled config row exists"))
-}
-
-pub fn record_pings(
-    conn: &mut Connection,
-    member_ids: &[i64],
     when: &str,
 ) -> Result<(), CafleetError> {
-    record_monitor_dispatch(conn, member_ids, &[], when)
-}
-
-/// Commit both dispatch cadences atomically: `last_ping_at` for pinged
-/// members, `last_stall_check_at` for stall-checked members.
-pub fn record_monitor_dispatch(
-    conn: &mut Connection,
-    ping_member_ids: &[i64],
-    stall_check_member_ids: &[i64],
-    when: &str,
-) -> Result<(), CafleetError> {
-    let tx = conn.transaction().map_err(db_err)?;
-    for member_id in ping_member_ids {
-        tx.execute(
-            "UPDATE monitor_config SET last_ping_at=?1 WHERE member_id=?2",
-            params![when, member_id],
-        )
-        .map_err(db_err)?;
-    }
-    for member_id in stall_check_member_ids {
-        tx.execute(
-            "UPDATE monitor_config SET last_stall_check_at=?1 WHERE member_id=?2",
-            params![when, member_id],
-        )
-        .map_err(db_err)?;
-    }
-    tx.commit().map_err(db_err)?;
+    conn.execute(
+        "UPDATE monitor_runtime SET last_wake_at=?1 WHERE fleet_id=?2",
+        params![when, fleet_id],
+    )
+    .map_err(db_err)?;
     Ok(())
 }
 
-/// Clear the stall-check stamp for the listed members of this fleet only
-/// (members that lost their pane or availability).
-pub fn reconcile_monitor_lifecycle(
-    conn: &mut Connection,
+/// The fleet-level wake roster: every active, non-Director member with a
+/// placement (a pending pane still makes the roster), ordered by `member_id`
+/// — the order the wake payload's entries render in.
+pub fn list_fleet_wake_targets(
+    conn: &Connection,
     fleet_id: i64,
-    unavailable_member_ids: &[i64],
-) -> Result<(), CafleetError> {
-    let tx = conn.transaction().map_err(db_err)?;
-    for member_id in unavailable_member_ids {
-        tx.execute(
-            "UPDATE monitor_config SET last_stall_check_at=NULL \
-             WHERE member_id=?1 AND member_id IN \
-                   (SELECT member_id FROM members WHERE fleet_id=?2)",
-            params![member_id, fleet_id],
-        )
-        .map_err(db_err)?;
-    }
-    tx.commit().map_err(db_err)?;
-    Ok(())
-}
-
-/// The per-tick scan rows: every enrolled active member of the fleet (the
-/// monitoring member is never enrolled, so never a target).
-pub fn list_monitor_targets(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>, CafleetError> {
+) -> Result<Vec<Value>, CafleetError> {
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT m.member_id, \
-                    m.name, p.mux_pane_id, p.coding_agent, \
-                    c.interval_seconds, c.last_ping_at, c.enabled, c.last_stall_check_at, \
-                    {PENDING_COUNT_SUBQUERY}, {OLDEST_PENDING_SUBQUERY} \
-             FROM monitor_config c JOIN members m ON m.member_id=c.member_id \
-             LEFT JOIN member_placements p ON p.member_id=m.member_id \
+            "SELECT m.member_id, m.name, p.coding_agent, {PENDING_COUNT_SUBQUERY} \
+             FROM members m JOIN member_placements p ON p.member_id=m.member_id \
              WHERE m.fleet_id=?1 AND m.status='active' \
+               AND NOT EXISTS(SELECT 1 FROM fleets f \
+                              WHERE f.fleet_id=m.fleet_id \
+                                AND f.director_member_id=m.member_id) \
              ORDER BY m.member_id"
         ))
         .map_err(db_err)?;
@@ -259,14 +120,8 @@ pub fn list_monitor_targets(conn: &Connection, fleet_id: i64) -> Result<Vec<Valu
             Ok(json!({
                 "member_id": row.get::<_, i64>(0)?,
                 "name": row.get::<_, String>(1)?,
-                "pane_id": row.get::<_, Option<String>>(2)?,
-                "coding_agent": row.get::<_, Option<String>>(3)?,
-                "interval_seconds": row.get::<_, i64>(4)?,
-                "last_ping_at": row.get::<_, Option<String>>(5)?,
-                "enabled": row.get::<_, i64>(6)? != 0,
-                "last_stall_check_at": row.get::<_, Option<String>>(7)?,
-                "pending_count": row.get::<_, i64>(8)?,
-                "oldest_pending_ts": row.get::<_, Option<String>>(9)?,
+                "coding_agent": row.get::<_, String>(2)?,
+                "pending_count": row.get::<_, i64>(3)?,
             }))
         })
         .map_err(db_err)?
@@ -373,6 +228,7 @@ pub fn read_monitor_runtime(
             "started_at": row.started_at,
             "last_tick_at": row.last_tick_at,
             "tick_seconds": row.tick_seconds,
+            "last_wake_at": row.last_wake_at,
         })
     }))
 }
@@ -405,26 +261,29 @@ pub fn monitor_runtime_payload(
             "last_tick_at": Value::Null,
             "last_tick_age_seconds": Value::Null,
             "started_at": Value::Null,
+            "last_wake_at": Value::Null,
+            "last_wake_age_seconds": Value::Null,
         }));
     }
     let row = row.expect("a running slot has a row");
-    let last_tick_age_seconds = row
-        .last_tick_at
-        .as_deref()
-        .and_then(|ts| parse_lenient(ts).ok())
-        .map(|parsed| (now - parsed).num_seconds());
+    let age = |ts: Option<&str>| -> Option<i64> {
+        let parsed = parse_lenient(ts?).ok()?;
+        Some((now - parsed).num_seconds())
+    };
     Ok(json!({
         "running": true,
         "pid": row.pid,
         "tick_seconds": row.tick_seconds,
         "last_tick_at": row.last_tick_at,
-        "last_tick_age_seconds": last_tick_age_seconds,
+        "last_tick_age_seconds": age(row.last_tick_at.as_deref()),
         "started_at": row.started_at,
+        "last_wake_at": row.last_wake_at,
+        "last_wake_age_seconds": age(row.last_wake_at.as_deref()),
     }))
 }
 
-/// The shared per-member monitor rows (SPEC §6.2), ages integer-truncated
-/// against the supplied `now`.
+/// The per-member rows of `GET /api/monitor` (SPEC §6.8): one dict per
+/// wake-roster member, ages integer-truncated against the supplied `now`.
 pub fn monitor_members_payload(
     conn: &Connection,
     fleet_id: i64,
@@ -437,10 +296,12 @@ pub fn monitor_members_payload(
     let mut stmt = conn
         .prepare(&format!(
             "SELECT m.member_id, m.name, \
-                    c.interval_seconds, c.enabled, c.last_ping_at, \
                     {PENDING_COUNT_SUBQUERY}, {OLDEST_PENDING_SUBQUERY} \
-             FROM monitor_config c JOIN members m ON m.member_id=c.member_id \
+             FROM members m JOIN member_placements p ON p.member_id=m.member_id \
              WHERE m.fleet_id=?1 AND m.status='active' \
+               AND NOT EXISTS(SELECT 1 FROM fleets f \
+                              WHERE f.fleet_id=m.fleet_id \
+                                AND f.director_member_id=m.member_id) \
              ORDER BY m.member_id"
         ))
         .map_err(db_err)?;
@@ -450,10 +311,7 @@ pub fn monitor_members_payload(
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(3)?,
             ))
         })
         .map_err(db_err)?
@@ -461,29 +319,15 @@ pub fn monitor_members_payload(
         .map_err(db_err)?;
     Ok(rows
         .into_iter()
-        .map(
-            |(
-                member_id,
-                name,
-                interval_seconds,
-                enabled,
-                last_ping_at,
-                pending_count,
-                oldest_pending_ts,
-            )| {
-                json!({
-                    "member_id": member_id,
-                    "name": name,
-                    "interval_seconds": interval_seconds,
-                    "enabled": enabled != 0,
-                    "last_ping_at": last_ping_at,
-                    "last_ping_age_seconds": age(last_ping_at.as_deref()),
-                    "pending_count": pending_count,
-                    "oldest_pending_ts": oldest_pending_ts,
-                    "oldest_pending_age_seconds": age(oldest_pending_ts.as_deref()),
-                })
-            },
-        )
+        .map(|(member_id, name, pending_count, oldest_pending_ts)| {
+            json!({
+                "member_id": member_id,
+                "name": name,
+                "pending_count": pending_count,
+                "oldest_pending_ts": oldest_pending_ts,
+                "oldest_pending_age_seconds": age(oldest_pending_ts.as_deref()),
+            })
+        })
         .collect())
 }
 
@@ -651,7 +495,11 @@ mod tests {
         assert_eq!(row["started_at"], when);
         assert_eq!(row["last_tick_at"], when);
         assert_eq!(row["tick_seconds"], 5);
-        assert_eq!(row["last_wake_at"], Value::Null, "a fresh slot has no stamp");
+        assert_eq!(
+            row["last_wake_at"],
+            Value::Null,
+            "a fresh slot has no stamp"
+        );
 
         let refused = broker::claim_monitor_runtime(
             &mut conn,
@@ -770,7 +618,10 @@ mod tests {
         assert_eq!(row["started_at"], Value::Null);
         assert_eq!(row["last_tick_at"], Value::Null);
         assert_eq!(row["tick_seconds"], 7);
-        assert_eq!(row["last_wake_at"], when, "the wake cadence survives a stop");
+        assert_eq!(
+            row["last_wake_at"], when,
+            "the wake cadence survives a stop"
+        );
     }
 
     #[test]

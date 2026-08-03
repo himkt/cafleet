@@ -30,22 +30,6 @@ function MemberRow({
     >
       <MemberAvatar member={member} size="sm" />
       <span className="min-w-0 flex-1 truncate">{member.name}</span>
-      {member.monitor !== null && (
-        <span
-          title={
-            member.monitor.enabled
-              ? `Monitoring every ${member.monitor.interval_seconds}s`
-              : "Monitoring disabled"
-          }
-          className={`shrink-0 rounded px-1 py-0.5 font-mono text-[10px] ${
-            member.monitor.enabled
-              ? "bg-surface-hover text-text-muted"
-              : "bg-surface-hover text-text-faint line-through"
-          }`}
-        >
-          {member.monitor.enabled ? `${member.monitor.interval_seconds}s` : "off"}
-        </span>
-      )}
       <span
         aria-hidden="true"
         className={`size-2 shrink-0 rounded-full ${
