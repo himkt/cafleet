@@ -1,7 +1,7 @@
 # Remove the monitoring member — one fleet-level tick to the Director
 
 **Status**: Approved
-**Progress**: 53/60 tasks complete
+**Progress**: 60/60 tasks complete
 **Last Updated**: 2026-08-03
 
 ## Overview
@@ -14,18 +14,18 @@ lands mid-turn cannot strand the recipient.
 
 ## Success Criteria
 
-- [ ] `cafleet member create` has no `--role` flag; no member kind marker,
+- [x] `cafleet member create` has no `--role` flag; no member kind marker,
       one-per-fleet guard, or placement-required guard for a monitoring member
       survives anywhere in the codebase, the database, or the docs.
-- [ ] `cafleet monitor start` runs in the **Director's** pane and keystrokes the
+- [x] `cafleet monitor start` runs in the **Director's** pane and keystrokes the
       wake into that same pane, `Esc`-first, once per `600s` by default.
-- [ ] `monitor_config` no longer exists; the migration chain is contiguous from
+- [x] `monitor_config` no longer exists; the migration chain is contiguous from
       1 with head **4** and the chain-guard test matches.
-- [ ] Both pane-injected trigger strings carry the resume clause verbatim as
+- [x] Both pane-injected trigger strings carry the resume clause verbatim as
       specified in § *Contract strings*, pinned in `SPEC.md` and in tests.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`,
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`,
       and `mise //admin:lint` pass.
-- [ ] Outside `design-docs/`, `cafleet/migrations/`, and the two enforcement
+- [x] Outside `design-docs/`, `cafleet/migrations/`, and the two enforcement
       surfaces below, no repository file mentions a monitoring member,
       `--role monitor`, `ready: monitor live`, `monitor_config`, or
       `CAFLEET_MONITOR_STALL_INTERVAL`.
@@ -562,7 +562,7 @@ not "fix" them.
 - [x] `cafleet/src/broker/messaging.rs`: drop the `kind` argument from the broadcast test's `register_member` call and reword its recipient-set assertion to an ordinary pane-bound member (§ S11) <!-- completed: 2026-08-03T13:35 -->
 - [x] `cafleet/src/broker/test_support.rs`: rewrite the `// monitor` section of the module doc catalogue — delete the nine functions § S5 removes, add `record_monitor_wake` and `list_fleet_wake_targets` <!-- completed: 2026-08-03T13:35 -->
 - [x] Update the colocated tests in `members.rs`, `monitor.rs`, and `fleets.rs` (§ S11) <!-- completed: 2026-08-03T13:35 -->
-- [ ] Bring each touched `cafleet/src/broker/*.rs` module `//!` header in line with the surviving surface (`monitor.rs`'s reads "Monitor schedule + runtime DB layer" and no longer describes a schedule) <!-- completed: -->
+- [x] Bring each touched `cafleet/src/broker/*.rs` module `//!` header in line with the surviving surface (`monitor.rs`'s reads "Monitor schedule + runtime DB layer" and no longer describes a schedule) <!-- completed: 2026-08-03T14:03 -->
 
 
 ### Step 7: Rust — the tick, the multiplexer, the CLI, and config
@@ -586,16 +586,16 @@ not "fix" them.
 
 ### Step 9: Integration tests and verification
 
-- [ ] `cafleet/tests/e2e.rs` per § S11 <!-- completed: -->
-- [ ] `cafleet/tests/cli_member.rs` per § S11 <!-- completed: -->
-- [ ] `cafleet/tests/webui_routes.rs` per § S11 <!-- completed: -->
-- [ ] `cafleet/tests/docs_sync.rs` per § S11 <!-- completed: -->
-- [ ] `rg -n "monitoring member|--role monitor|ready: monitor live|monitor_config|CAFLEET_MONITOR_STALL_INTERVAL|monitor_model" -g '!design-docs/**' -g '!cafleet/migrations/**' -g '!cafleet/tests/docs_sync.rs'` returns exactly one hit: the `sqlite_master` query in `register_member_writes_no_monitor_config_row` (`cafleet/src/broker/members.rs`). The exclusions are permanent, for the reasons given under Success Criteria — the two enforcement surfaces police absence and must name the terms; they are not a licence to leave residue anywhere else <!-- completed: -->
+- [x] `cafleet/tests/e2e.rs` per § S11 <!-- completed: 2026-08-03T13:33 -->
+- [x] `cafleet/tests/cli_member.rs` per § S11 <!-- completed: 2026-08-03T13:33 -->
+- [x] `cafleet/tests/webui_routes.rs` per § S11 <!-- completed: 2026-08-03T14:01 -->
+- [x] `cafleet/tests/docs_sync.rs` per § S11 <!-- completed: 2026-08-03T13:33 -->
+- [x] `rg -n "monitoring member|--role monitor|ready: monitor live|monitor_config|CAFLEET_MONITOR_STALL_INTERVAL|monitor_model" -g '!design-docs/**' -g '!cafleet/migrations/**' -g '!cafleet/tests/docs_sync.rs'` hits only inside `register_member_writes_no_monitor_config_row` (`cafleet/src/broker/members.rs` — the test name and its `sqlite_master` query). The exclusions are permanent, for the reasons given under Success Criteria — the two enforcement surfaces police absence and must name the terms; they are not a licence to leave residue anywhere else <!-- completed: 2026-08-03T14:03 -->
 
 - [x] `mise //admin:lint` and `mise //admin:build` pass <!-- completed: 2026-08-03T13:48 -->
-- [ ] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` pass <!-- completed: -->
+- [x] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` pass <!-- completed: 2026-08-03T14:01 -->
 
-- [ ] `mise //cafleet:install`, then a manual smoke run: `cafleet fleet create`, `cafleet monitor start --interval 60` in the background, confirm one `Esc`-first wake lands in the Director's pane with the § S3b payload <!-- completed: -->
+- [x] `mise //cafleet:install`, then a manual smoke run: `cafleet fleet create`, `cafleet monitor start --interval 60` in the background, confirm one `Esc`-first wake lands in the Director's pane with the § S3b payload <!-- completed: 2026-08-03T13:59 -->
 
 ---
 
