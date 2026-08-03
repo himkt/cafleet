@@ -11,9 +11,9 @@ axum = { version = "0.8", default-features = false, features = ["http1", "tokio"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 nix = { version = "0.31", features = ["signal"] }
-refinery = { version = "0.8", features = ["rusqlite"] }
+refinery = { version = "0.9", features = ["rusqlite"] }
 regex = "1"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 signal-hook = "0.3"
