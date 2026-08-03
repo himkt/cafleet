@@ -1,7 +1,7 @@
 # Remove the monitoring member — one fleet-level tick to the Director
 
 **Status**: Approved
-**Progress**: 25/60 tasks complete
+**Progress**: 28/60 tasks complete
 **Last Updated**: 2026-08-03
 
 ## Overview
@@ -538,9 +538,9 @@ not "fix" them.
 
 ### Step 4: Project rules
 
-- [ ] Update `.claude/rules/bash-tool.md`: delete the monitoring-member fixed-ping exception; keep the Director-side `member ping` / `member prompt --shell` protocol; update the quoted injection description ("injects `Esc` + `cafleet message poll --fleet-id <s> --member-id <m>` + Enter through `send_poll_trigger`") to the § S3a payload <!-- completed: -->
-- [ ] Sweep every other page that quotes the injected poll line verbatim and bring each to § S3a — `rg -n "message poll --fleet-id <" docs/ skills/ .claude/ SPEC.md` finds them <!-- completed: -->
-- [ ] Update `.claude/rules/coding-agent-overlay.md`: drop `{monitor_model}` from the model-policy paragraph and the overlay token list <!-- completed: -->
+- [x] Update `.claude/rules/bash-tool.md`: delete the monitoring-member fixed-ping exception; keep the Director-side `member ping` / `member prompt --shell` protocol; update the quoted injection description ("injects `Esc` + `cafleet message poll --fleet-id <s> --member-id <m>` + Enter through `send_poll_trigger`") to the § S3a payload <!-- completed: 2026-08-03T12:53 -->
+- [x] Sweep every other page that quotes the injected poll line verbatim and bring each to § S3a — `rg -n "message poll --fleet-id <" docs/ skills/ .claude/ SPEC.md` finds them <!-- completed: 2026-08-03T12:49 -->
+- [x] Update `.claude/rules/coding-agent-overlay.md`: drop `{monitor_model}` from the model-policy paragraph and the overlay token list <!-- completed: 2026-08-03T12:53 -->
 
 ### Step 5: Migrations
 

@@ -65,8 +65,9 @@ If you are the **Director** (not a member), this rule applies in reverse only wh
 
 For the **inbox-poll-only case**, the primitive is `cafleet member ping`.
 It carries no message — its action is fixed (it injects `Esc` +
-`cafleet message poll --fleet-id <s> --member-id <m>` + Enter through
-`send_poll_trigger`; the leading `Esc` is the prompt safeguard) — so it is
+`cafleet message poll --fleet-id <s> --member-id <m> — then resume your work
+if something was still running.` + Enter through `send_poll_trigger`; the
+leading `Esc` is the prompt safeguard) — so it is
 pre-approved in `permissions.allow` and fires without a per-call confirmation:
 
 ```bash
@@ -74,12 +75,7 @@ cafleet member ping --fleet-id <fleet-id> \
   --member-id <member-id>
 ```
 
-The Director normally owns this primitive. The sole member-side exception is
-the dedicated monitoring member: it may issue this fixed `member ping` at most once per quiet period, only for
-an ordinary member its own notes confirm quiet (byte-identical captures across
-two consecutive stall-check wakes). This does
-not authorize arbitrary text, `member prompt`, a Director target, self-target,
-or any other pane action; ordinary members remain prohibited.
+The Director owns this primitive; members never invoke it.
 
 For the **shell-dispatch fallback** (a member auto-routed a denied command and needs the Director to dispatch arbitrary shell on its behalf), the Director's primitive is `cafleet member prompt --shell`. This subcommand carries the operator-controlled text as a positional argument, so it remains under `permissions.ask` for per-call confirmation:
 
