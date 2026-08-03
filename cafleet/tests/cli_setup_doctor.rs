@@ -14,7 +14,7 @@ fn schema_only_setup_migrates_and_reports_the_head() {
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(
-        out.contains("applied migrations to head (2)."),
+        out.contains("applied migrations to head (4)."),
         "fresh DB reports the created-and-migrated line, got: {out}"
     );
     assert!(
@@ -27,7 +27,7 @@ fn schema_only_setup_migrates_and_reports_the_head() {
     ]);
     assert_eq!(code(&again), 0);
     assert!(
-        stdout(&again).contains("Already at head (2); nothing to do."),
+        stdout(&again).contains("Already at head (4); nothing to do."),
         "got: {}",
         stdout(&again)
     );

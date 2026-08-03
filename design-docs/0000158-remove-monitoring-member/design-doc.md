@@ -1,7 +1,7 @@
 # Remove the monitoring member — one fleet-level tick to the Director
 
 **Status**: Approved
-**Progress**: 28/60 tasks complete
+**Progress**: 32/60 tasks complete
 **Last Updated**: 2026-08-03
 
 ## Overview
@@ -544,10 +544,10 @@ not "fix" them.
 
 ### Step 5: Migrations
 
-- [ ] Add `cafleet/migrations/V3__strip_monitoring_member_kind.sql` (§ S6) <!-- completed: -->
-- [ ] Add `cafleet/migrations/V4__fleet_level_wake_schedule.sql` (§ S6) <!-- completed: -->
-- [ ] Update the chain guard in `cafleet/src/db/mod.rs`: `APP_TABLES`, head `4`, the refinery ledger vector, and the per-table DDL assertions (§ S11) <!-- completed: -->
-- [ ] Apply and verify with `cafleet setup --skip claude --skip codex --skip opencode` <!-- completed: -->
+- [x] Add `cafleet/migrations/V3__strip_monitoring_member_kind.sql` (§ S6) <!-- completed: 2026-08-03T13:00 -->
+- [x] Add `cafleet/migrations/V4__fleet_level_wake_schedule.sql` (§ S6) <!-- completed: 2026-08-03T13:00 -->
+- [x] Update the chain guard in `cafleet/src/db/mod.rs`: `APP_TABLES`, head `4`, the refinery ledger vector, and the per-table DDL assertions (§ S11) <!-- completed: 2026-08-03T13:00 -->
+- [x] Apply and verify with `cafleet setup --skip claude --skip codex --skip opencode` <!-- completed: 2026-08-03T13:00 -->
 
 ### Step 6: Rust — broker and member registry
 
