@@ -40,7 +40,7 @@ Environment variable controlling body truncation in the rendered envelope; defau
 
 ## Coding-agent backends
 
-Three backends — `claude`, `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent` (omitted → the member inherits the Director's backend). `--model <m>` pins the LLM, `--effort <level>` forwards a reasoning-effort level (claude: `low`–`max`; codex: `minimal`–`xhigh`; opencode: unsupported — any value exits 2), and `--role {member,monitor}` selects an ordinary vs the fleet's dedicated **monitoring member**; all three flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md) (and [`roles/monitor.md`](../roles/monitor.md) plus [`reference/supervision.md`](supervision.md) for the monitor). All three honor the leading-`!` input shortcut, so `member prompt --shell` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent/claude-overlay.md) / [`codex`](coding-agent/codex-overlay.md) / [`opencode`](coding-agent/opencode-overlay.md).
+Three backends — `claude`, `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent` (omitted → the member inherits the Director's backend). `--model <m>` pins the LLM and `--effort <level>` forwards a reasoning-effort level (claude: `low`–`max`; codex: `minimal`–`xhigh`; opencode: unsupported — any value exits 2); both flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md). All three honor the leading-`!` input shortcut, so `member prompt --shell` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent/claude-overlay.md) / [`codex`](coding-agent/codex-overlay.md) / [`opencode`](coding-agent/opencode-overlay.md).
 
 ## Show (Get Message)
 
@@ -81,14 +81,14 @@ For the row schema, the `"Broadcast sent to N recipients"` summary string, and `
 
 ## List Members
 
-`member list` returns every active registry entry of the fleet (root Director, monitoring member, ordinary members, placementless rows); `member show --member-id <target-member-id>` fetches one. Both are registry reads — no tmux required.
+`member list` returns every active registry entry of the fleet (root Director, ordinary members, placementless rows); `member show --member-id <target-member-id>` fetches one. Both are registry reads — no tmux required.
 
 ```bash
 cafleet member list --fleet-id <fleet-id>
 cafleet member show --fleet-id <fleet-id> --member-id <target-member-id>
 ```
 
-`member list` renders the `N members:` table with `member_id`, `name`, `kind` (`director` / `monitor` / `member`), `backend`, `pane_id`, and `idle` columns — `-` placement cells for placementless rows, `(pending)` for a placed row with no pane yet, and `idle` humanized (`Ns`/`Nm`/`Nh`, `-` when no message activity); `--json` adds the underlying `last_sent` / `last_recv` / `last_ack` timestamps per row. `member show` default output is the one-line row `<id> <name> <status>`; `--full` gives the labeled block (`description` truncated to 60 codepoints, `kind`, `skills`, placement sub-block) — text mode only. See § *Output flags* above.
+`member list` renders the `N members:` table with `member_id`, `name`, `kind` (`director` / `member`), `backend`, `pane_id`, and `idle` columns — `-` placement cells for placementless rows, `(pending)` for a placed row with no pane yet, and `idle` humanized (`Ns`/`Nm`/`Nh`, `-` when no message activity); `--json` adds the underlying `last_sent` / `last_recv` / `last_ack` timestamps per row. `member show` default output is the one-line row `<id> <name> <status>`; `--full` gives the labeled block (`description` truncated to 60 codepoints, `kind`, `skills`, placement sub-block) — text mode only. See § *Output flags* above.
 
 ## Doctor
 
@@ -105,11 +105,11 @@ cafleet doctor --json
 primitive:
 
 ```bash
-cafleet monitor start --fleet-id <fleet-id>          # the scheduler loop (launched by the monitoring member as a background task)
+cafleet monitor start --fleet-id <fleet-id>          # the scheduler loop (launched by the Director as a background task in its own pane)
 cafleet monitor capture --fleet-id <fleet-id> --member-id <target-member-id> --lines 120 --no-ansi --json
 ```
 
-`monitor start` prints `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` immediately after claiming the runtime row — the line behind the monitoring member's `ready: monitor live` handshake. `monitor capture` is the read-only pane capture (default `--lines 20`; `--json` adds `captured_at` and `content_sha256`) used by the Director's pre-ping capture gate and the monitoring member's wake routine; a pending-placement target is a hard error.
+`monitor start` takes `--interval N` (the Director wake interval in seconds; omitted → `CAFLEET_MONITOR_WAKE_INTERVAL`, default `600`; `0` disables the wake) and `--tick N` (scan cadence, default `5`). It prints `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` immediately after claiming the runtime row — the line the Director confirms before its first `member create`. `monitor capture` is the read-only pane capture (default `--lines 20`; `--json` adds `captured_at` and `content_sha256`) used by the Director's pre-ping capture gate; a pending-placement target is a hard error.
 
 `cafleet member ping` stays under `member` (a Director write primitive). Against a pending-placement member it skips the keystroke and exits 0 — the member polls its inbox on spawn — with the stable `skipped` JSON key on both success paths.
 

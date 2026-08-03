@@ -5,8 +5,8 @@ description: >-
   Use when an agent needs to register as a member, send/receive messages, poll
   inbox, acknowledge messages, or discover other members; or when a Director is
   about to spawn, monitor, health-check, or recover a stalled team of CAFleet
-  members (any `cafleet member create`), which requires the dedicated monitoring
-  member, the heartbeat, and the supervision governance.
+  members (any `cafleet member create`), which requires the Director-hosted
+  heartbeat and the supervision governance.
 ---
 
 # CAFleet — Message Broker CLI
@@ -21,7 +21,7 @@ Before your first action other than these Reads, Read every file in the **Load-b
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{monitor_model}` / `{permission_flags}`, **or** guess a wrong/default value (spawn the monitor on the wrong model), **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{bg_run}` / `{permission_flags}`, **or** guess a wrong/default value (launch the monitor loop with the wrong primitive), **or** ignore a backend note (codex has no harness task list) |
 | 2 | [`reference/base-dir.md`](reference/base-dir.md) — if you write any scratch / audit / figure file | the no-bypass write protocol and the `<unset>` contract — you mis-root every write or fall back to `/tmp` |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**
@@ -57,7 +57,6 @@ Used only when your overlay omits a token or your backend is unknown. Each defau
 | Token | Documented default (overlay silent / backend unknown) |
 |-------|-------------------------------------------------------|
 | `{decision_surface}` | a Director-relayed operator message (a member always routes to the Director) |
-| `{monitor_model}` | the spawning Director's own model (inherit the parent) — a safe floor, possibly cost-suboptimal |
 | `{reviewer_model}` | the spawning Director's own model (inherit the parent) — a safe floor, possibly intelligence-suboptimal |
 | `{permission_flags}` | describe the mode neutrally as "workspace-scoped auto-approval" — for prose uses only; spawn-flag construction never falls here |
 | `{bg_run}` | a backgrounded `!` shell command |
@@ -92,11 +91,9 @@ CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFL
 
 ## Team supervision
 
-When a Director spawns a team, the **FIRST** member created is the dedicated monitoring member (`cafleet member create --role monitor --model {monitor_model} --text-file <rendered monitor prompt>`). It owns the heartbeat and gates every ordinary `member create` behind its `ready: monitor live` handshake. The Director never runs `cafleet monitor start` itself.
+Before spawning a team, the Director launches the heartbeat itself: immediately after `cafleet fleet create` and before the first `cafleet member create`, it runs `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane ({bg_run}) and confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. That confirmation gates the first `member create`. The loop wakes the Director's own pane once per wake interval; each wake is the cue to poll, ACK, dispatch, health-check the members it names, and then resume any interrupted work.
 
 For the full governance + heartbeat mechanism (Core Principle, Communication Model, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, Stall Response, Cleanup, the 5-step facilitation loop, Monitor Lifecycle), Read [`reference/supervision.md`](reference/supervision.md).
-
-For the monitoring member's own role definition (startup, on-wake routine, teardown), Read [`roles/monitor.md`](roles/monitor.md).
 
 ## Placeholder convention
 
@@ -138,23 +135,3 @@ Moves a message from `input_required` to `completed`. `--message-id` required.
 ```bash
 cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --message-id <message-id>
 ```
-
-## Fixed monitoring-member ping exception
-
-Ordinary members never call `cafleet member ping`, `member prompt`, or any
-other pane-driving primitive. The dedicated monitoring member has one narrow
-exception: when its own conversation notes confirm an ordinary member quiet —
-a `stall_candidate` or `finished` capture byte-identical to the capture it
-recorded on the previous stall-check wake — it may invoke the existing fixed
-`member ping` at most once for that member's quiet period (idle and stalled
-members receive the same treatment). The command accepts no arbitrary body and
-injects only `Esc` plus the target's `cafleet message poll`; against a
-pending-placement member it skips the keystroke and succeeds.
-
-The monitoring member never pings the Director or itself, never acts on
-affirmative/ambiguous `working`, and never acts from `unacked` alone. Anything
-needing Director attention — a member still unchanged at the next stall-check
-wake after its ping, a ping delivery failure, a capture failure — travels as a
-plain per-event `cafleet message send` to the Director, said once per quiet
-period; the Director decides whether the member still owes work and ACKs the
-message normally. This exception does not broaden ordinary-member authority.

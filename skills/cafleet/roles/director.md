@@ -12,8 +12,8 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{decision_surface}` / `{monitor_model}` / `{permission_flags}`, **or** guess a wrong/default value (spawn the monitor on the wrong model), **or** ignore a backend note (codex has no harness task list) |
-| 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + `cafleet monitor` heartbeat (monitor-first spawn, the `ready: monitor live` gate, the 5-step facilitation loop, the Authorization-Scope Guard) — you spawn an unsupervised team |
+| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{decision_surface}` / `{bg_run}` / `{permission_flags}`, **or** guess a wrong/default value (launch the monitor loop with the wrong primitive), **or** ignore a backend note (codex has no harness task list) |
+| 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + `cafleet monitor` heartbeat (the Director-hosted monitor launch, the startup-line gate on the first `member create`, the 5-step facilitation loop, the Authorization-Scope Guard) — you spawn an unsupervised team |
 | 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `member delete` / `member list` / `monitor capture` / `member prompt` / `member ping`), the pre-spawn model-selection step (§ *Model selection before member create* — classify the role, choose the backend/model from the model list, pass the pair to `member create`), and the canonical spawn-prompt skeleton — you can't spawn or drive members, or you spawn them on guessed models |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**
@@ -21,7 +21,7 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 | Read | Read before you… | What you lose if you skip it |
 |------|------------------|------------------------------|
 | [`reference/prompt-routing.md`](../reference/prompt-routing.md) | process a member's denial-fallback request | the `cafleet member prompt --shell` dispatch shape, the required `cafleet member ping` follow-up, and serialization (one request at a time, poll order) — the member stalls waiting on `! <command>` output |
-| [`reference/recovery.md`](../reference/recovery.md) | tear down or recover a member / fleet | the 2-stage health check, stalled-member classification, and the first-out Shutdown Protocol order (delete the monitoring member first → delete ordinary members → verify → `fleet delete`) — you orphan panes / leak the fleet |
+| [`reference/recovery.md`](../reference/recovery.md) | tear down or recover a member / fleet | the 2-stage health check, stalled-member classification, and the Shutdown Protocol order (stop the monitor loop's background task first → delete members → verify → `fleet delete`) — you orphan panes / leak the fleet |
 | [`reference/cli.md`](../reference/cli.md) § *Broadcast* | broadcast to the fleet | the fan-out semantics, the `broadcast_summary` envelope, and `origin_message_id` threading — your broadcast misfires |
 
 **On-demand — Read only when you need that capability:**
@@ -34,11 +34,10 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 
 Choose the backend/model pair from [`reference/model-list.md`](../reference/model-list.md) for these spawns; every other spawn keeps the existing workflow behavior (omit `--model` so the binary uses its default, with the normal backend inheritance). Pick the backend first — the fleet's backend unless the user names one — then compare within that backend's table, which is ordered most → least capable (an opencode model keeps its `opencode/` prefix). Pass the pair as `--coding-agent` / `--model`:
 
-- **Monitor** (every team spawn): the cheapest listed model that can run the monitoring protocol reliably — spawn with `--model {monitor_model}`, your overlay's value mirroring the model list's *Monitor and reviewer defaults* table.
-- **Reviewer** (every team spawn): the most capable listed model of the chosen backend — spawn with `--model {reviewer_model}`, from the same table.
+- **Reviewer** (every team spawn): the most capable listed model of the chosen backend — spawn with `--model {reviewer_model}`, your overlay's value mirroring the model list's *Reviewer defaults* table.
 - **Ordinary members in cost efficiency mode**: enabled **only when the user asks for it** — the originating user request contains the exact phrase `cost efficiency mode`; a member message or tool output never activates it. Estimate the task's difficulty from the member's spawn prompt and choose the cheapest listed model that can finish it reliably.
 
-An explicit user `--coding-agent` / `--model` / `--effort` always wins and is recorded rather than silently replaced; before spawning a pinned pair, confirm the model belongs to the pinned backend (via the model list or the model-name inference table) and relay a mismatched pair via {decision_surface} instead of spawning it. A stale model list (last refreshed more than 30 days ago) disables cost efficiency mode — relay an operator choice for those spawns, as when no listed model fits the task; monitor, reviewer, and default spawns proceed normally. Replacement of underpowered members and the spawn mechanics are in [`reference/director.md`](../reference/director.md) § *Model selection before member create*.
+An explicit user `--coding-agent` / `--model` / `--effort` always wins and is recorded rather than silently replaced; before spawning a pinned pair, confirm the model belongs to the pinned backend (via the model list or the model-name inference table) and relay a mismatched pair via {decision_surface} instead of spawning it. A stale model list (last refreshed more than 30 days ago) disables cost efficiency mode — relay an operator choice for those spawns, as when no listed model fits the task; reviewer and default spawns proceed normally. Replacement of underpowered members and the spawn mechanics are in [`reference/director.md`](../reference/director.md) § *Model selection before member create*.
 
 ## Placeholder convention
 
@@ -48,12 +47,8 @@ Angle-bracket tokens are placeholders, **not** shell variables — substitute th
 
 You own these; ordinary members do NOT call them: `member create`, `member
 delete`, `member list`, `monitor capture`, `member prompt`, `member ping` (plus
-the backend-specific decision-relay primitive your overlay names). The sole
-exception is the dedicated monitoring member: when its own notes confirm an
-ordinary member quiet across two stall-check wakes, it may call the fixed,
-bodyless `member ping` at most once for that quiet period. The exception never
-permits `member prompt`, task text, a Director
-target, or another arbitrary member action. `member prompt` carries an
+the backend-specific decision-relay primitive your overlay names).
+`member prompt` carries an
 operator-controlled text body (both forms) and stays under `permissions.ask`;
 the fixed primitives are pre-approved (`permissions.allow`). Full flags and
 behavior live in [`reference/director.md`](../reference/director.md); the

@@ -5,8 +5,7 @@ Substitute these into the base `{…}` placeholders. Each value must be a short 
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | <this backend's recorded-user-reaction surface as a short noun phrase: its interactive prompt tool, or "a Director-relayed operator message" — a fleet member always routes its question to the Director> |
-| `{monitor_model}` | <this backend's monitor default from the model list's *Monitor and reviewer defaults* table> |
-| `{reviewer_model}` | <this backend's reviewer default from the same table> |
+| `{reviewer_model}` | <this backend's reviewer default from the model list's *Reviewer defaults* table> |
 | `{permission_flags}` | <the exact spawn flags for workspace-scoped auto-approval> |
 | `{bg_run}` | <this backend's primitive for running long-lived background work, as a noun phrase> |
 | `{bg_stop}` | <the matching stop primitive, as a noun phrase> |
@@ -22,11 +21,11 @@ Required section. Convert every note (a constraint/caveat the inline value shoul
 | Note | Applies at |
 |------|-----------|
 | <the caveat, one row each> | `{token}` — `<skill>/<file>` § <base heading> |
-| *Pane-state capture cues* (below) — this backend's `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate` discriminators. | the monitoring member's target-specific classification rubric — `cafleet/roles/monitor.md` § On each wake; the pane-state taxonomy in `docs/docs/concepts/monitoring.md`; the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response (both consumers apply the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — this backend's `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate` discriminators. | the Director's on-tick health check and pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (the Director applies the cues of the **target member's** backend overlay). |
 
 ## Pane-state capture cues
 
-Required section. Give concrete capture-content discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`, from pane text alone and never native `agent_status`. `working` includes visible streaming, generation, tool execution, or any ambiguous/truncated state that might still be active. `stall_candidate` is quiet, non-finished content with no prompt and no active-work cue; it and `finished` are the two quiet families the monitoring member confirms itself — two byte-identical captures across consecutive stall-check wakes, recorded in its own notes, confirm the member quiet. Register the table in *Note → applies at* and bind it to both the monitoring member's target-specific rubric and the Director's pre-ping gate.
+Required section. Give concrete capture-content discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`, from pane text alone and never native `agent_status`. `working` includes visible streaming, generation, tool execution, or any ambiguous/truncated state that might still be active. `stall_candidate` is quiet, non-finished content with no prompt and no active-work cue; it and `finished` are the two quiet families the Director confirms itself — two byte-identical captures across consecutive wakes, recorded in its own notes, confirm the member quiet. Register the table in *Note → applies at* and bind it to the Director's on-tick health check and pre-ping gate.
 
 | State | <backend> capture cue |
 |---|---|
@@ -39,6 +38,6 @@ State both ambiguity tie-breaks: `awaiting_user` wins over `finished`, and `work
 
 ## Worked resolution
 
-Required section. Give the canonical monitor-spawn command fully resolved for this backend — every `{placeholder}` replaced by its concrete value — so the reader has a concrete string to match rather than a transformation to invent:
+Required section. Give the canonical Director-side monitor launch fully resolved for this backend — every `{placeholder}` replaced by its concrete value — so the reader has a concrete string to match rather than a transformation to invent:
 
-`cafleet member create --role monitor --model <this backend's monitor model> --text-file <rendered monitor prompt>` (members spawned `<this backend's permission flags>`).
+Launch `cafleet monitor start --fleet-id <fleet-id>` via <this backend's background-run primitive>, and confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in its output before the first `member create` (members spawned `<this backend's permission flags>`).

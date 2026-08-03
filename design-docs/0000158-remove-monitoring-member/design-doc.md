@@ -1,7 +1,7 @@
 # Remove the monitoring member — one fleet-level tick to the Director
 
 **Status**: Approved
-**Progress**: 10/60 tasks complete
+**Progress**: 20/60 tasks complete
 **Last Updated**: 2026-08-03
 
 ## Overview
@@ -517,16 +517,16 @@ not "fix" them.
 
 ### Step 2: The `cafleet` skill
 
-- [ ] Delete `skills/cafleet/roles/monitor.md` <!-- completed: -->
-- [ ] Rewrite `skills/cafleet/reference/supervision.md`: § Monitor Lifecycle → Director-hosted loop; § Spawn Protocol loses the first-in gate and gains the startup-line confirmation; § Stall Response becomes the Director's own on-tick health check; § Cleanup Protocol takes the § S10 order <!-- completed: -->
-- [ ] Update `skills/cafleet/SKILL.md`: § Team supervision rewritten; § *Fixed monitoring-member ping exception* deleted; `{monitor_model}` row removed from the documented-defaults table; the `roles/monitor.md` pointer removed <!-- completed: -->
-- [ ] Update `skills/cafleet/roles/director.md` — Required-reading and the launch step <!-- completed: -->
-- [ ] Update `skills/cafleet/roles/member.md` — delete the monitoring-member exception paragraph <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/director.md`: delete the `--role` row from the `member create` flag table; keep § *Member Ping* with the new payload <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/recovery.md` § Shutdown Protocol to the § S10 order and the stale-row recovery note <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/cli.md`: `monitor start --interval`, the Director as launcher <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/model-list.md`: § *Monitor and reviewer defaults* → § *Reviewer defaults* <!-- completed: -->
-- [ ] Update all four `skills/cafleet/reference/coding-agent/*.md` on four surfaces each: drop the `{monitor_model}` row; retarget the *Pane-state capture cues* Note row (it cites the deleted `roles/monitor.md` § On each wake) to the Director's on-tick health check; retarget the *Pane-state capture cues* intro sentence and the `awaiting_user` / `stall_candidate` cue prose, all of which name the monitoring member as the classifier; and **replace § *Worked resolution*** — its entire content today is the canonical `cafleet member create --role monitor …` spawn command. Its replacement is that backend's fully resolved Director-side background launch of `cafleet monitor start --fleet-id <fleet-id>`, which keeps the section's purpose (one fully materialized command per backend) while the command it demonstrates changes <!-- completed: -->
+- [x] Delete `skills/cafleet/roles/monitor.md` <!-- completed: 2026-08-03T12:49 -->
+- [x] Rewrite `skills/cafleet/reference/supervision.md`: § Monitor Lifecycle → Director-hosted loop; § Spawn Protocol loses the first-in gate and gains the startup-line confirmation; § Stall Response becomes the Director's own on-tick health check; § Cleanup Protocol takes the § S10 order <!-- completed: 2026-08-03T12:24 -->
+- [x] Update `skills/cafleet/SKILL.md`: § Team supervision rewritten; § *Fixed monitoring-member ping exception* deleted; `{monitor_model}` row removed from the documented-defaults table; the `roles/monitor.md` pointer removed <!-- completed: 2026-08-03T12:27 -->
+- [x] Update `skills/cafleet/roles/director.md` — Required-reading and the launch step <!-- completed: 2026-08-03T12:30 -->
+- [x] Update `skills/cafleet/roles/member.md` — delete the monitoring-member exception paragraph <!-- completed: 2026-08-03T12:30 -->
+- [x] Update `skills/cafleet/reference/director.md`: delete the `--role` row from the `member create` flag table; keep § *Member Ping* with the new payload <!-- completed: 2026-08-03T12:34 -->
+- [x] Update `skills/cafleet/reference/recovery.md` § Shutdown Protocol to the § S10 order and the stale-row recovery note <!-- completed: 2026-08-03T12:36 -->
+- [x] Update `skills/cafleet/reference/cli.md`: `monitor start --interval`, the Director as launcher <!-- completed: 2026-08-03T12:38 -->
+- [x] Update `skills/cafleet/reference/model-list.md`: § *Monitor and reviewer defaults* → § *Reviewer defaults* <!-- completed: 2026-08-03T12:40 -->
+- [x] Update all four `skills/cafleet/reference/coding-agent/*.md` on four surfaces each: drop the `{monitor_model}` row; retarget the *Pane-state capture cues* Note row (it cites the deleted `roles/monitor.md` § On each wake) to the Director's on-tick health check; retarget the *Pane-state capture cues* intro sentence and the `awaiting_user` / `stall_candidate` cue prose, all of which name the monitoring member as the classifier; and **replace § *Worked resolution*** — its entire content today is the canonical `cafleet member create --role monitor …` spawn command. Its replacement is that backend's fully resolved Director-side background launch of `cafleet monitor start --fleet-id <fleet-id>`, which keeps the section's purpose (one fully materialized command per backend) while the command it demonstrates changes <!-- completed: 2026-08-03T12:46 -->
 
 ### Step 3: The workflow skills
 
