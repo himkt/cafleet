@@ -1,7 +1,7 @@
 # Remove the monitoring member — one fleet-level tick to the Director
 
 **Status**: Approved
-**Progress**: 52/60 tasks complete
+**Progress**: 53/60 tasks complete
 **Last Updated**: 2026-08-03
 
 ## Overview
@@ -586,7 +586,7 @@ not "fix" them.
 - [ ] `cafleet/tests/webui_routes.rs` per § S11 <!-- completed: -->
 - [ ] `cafleet/tests/docs_sync.rs` per § S11 <!-- completed: -->
 - [ ] `rg -n "monitoring member|--role monitor|ready: monitor live|monitor_config|CAFLEET_MONITOR_STALL_INTERVAL|monitor_model" -g '!design-docs/**' -g '!cafleet/migrations/**'` returns no hit. Both exclusions are permanent, for the reasons given under Success Criteria — they are not a licence to leave residue anywhere else <!-- completed: -->
-- [ ] `mise //admin:lint` and `mise //admin:build` pass <!-- completed: -->
+- [x] `mise //admin:lint` and `mise //admin:build` pass <!-- completed: 2026-08-03T13:48 -->
 - [ ] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` pass <!-- completed: -->
 - [ ] `mise //cafleet:install`, then a manual smoke run: `cafleet fleet create`, `cafleet monitor start --interval 60` in the background, confirm one `Esc`-first wake lands in the Director's pane with the § S3b payload <!-- completed: -->
 
