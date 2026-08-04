@@ -352,7 +352,7 @@ impl HerdrMultiplexer {
         )
     }
 
-    pub fn send_poll_trigger(&self, target_pane_id: &str, _fleet_id: i64, member_id: i64) -> bool {
+    pub fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
         let payload = format!(
             "cafleet message poll {member_id} \
              — then resume your work if something was still running."

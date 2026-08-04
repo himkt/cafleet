@@ -55,38 +55,14 @@ pub(crate) fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value
     }))
 }
 
-/// The recipient (`owner_member_id`) of a message row — the derivation behind
-/// the positional `MESSAGE_ID` subject on `message ack` (SPEC §6.3).
-pub fn message_owner(conn: &Connection, message_id: i64) -> Result<Option<i64>, CafleetError> {
-    conn.query_row(
-        "SELECT owner_member_id FROM messages WHERE message_id=?1",
-        [message_id],
-        |row| row.get(0),
-    )
-    .optional()
-    .map_err(db_err)
-}
-
-fn require_active_sender(
-    conn: &Connection,
-    fleet_id: i64,
-    member_id: i64,
-) -> Result<(), CafleetError> {
-    let active: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM members \
-             WHERE member_id=?1 AND fleet_id=?2 AND status='active')",
-            params![member_id, fleet_id],
-            |row| row.get(0),
-        )
-        .map_err(db_err)?;
-    if active {
-        Ok(())
-    } else {
-        Err(CafleetError::Value(format!(
-            "Sender member not found or not active in fleet: {member_id}"
-        )))
-    }
+/// The sender's fleet, derived from the sender row (SPEC §6.2): no
+/// caller-supplied fleet exists.
+fn sender_fleet(conn: &Connection, from_member_id: i64) -> Result<i64, CafleetError> {
+    super::members::active_member_fleet(conn, from_member_id)?.ok_or_else(|| {
+        CafleetError::Value(format!(
+            "Sender member not found or not active: {from_member_id}"
+        ))
+    })
 }
 
 fn pane_of(conn: &Connection, member_id: i64) -> Result<Option<String>, CafleetError> {
@@ -102,19 +78,18 @@ fn pane_of(conn: &Connection, member_id: i64) -> Result<Option<String>, CafleetE
 }
 
 fn preview_text(text: &str, max_text_len: usize) -> String {
-    truncate_text(Some(text), false, max_text_len).expect("Some input yields Some")
+    truncate_text(Some(text), max_text_len).expect("Some input yields Some")
 }
 
 pub fn send_message(
     conn: &mut Connection,
     notifier: &dyn InlinePreviewSender,
     max_text_len: usize,
-    fleet_id: i64,
-    member_id: i64,
+    from_member_id: i64,
     to: &str,
     text: &str,
 ) -> Result<Value, CafleetError> {
-    require_active_sender(conn, fleet_id, member_id)?;
+    let fleet_id = sender_fleet(conn, from_member_id)?;
     let to_id: i64 = to
         .parse()
         .map_err(|_| CafleetError::Value(format!("Invalid destination format: {to}")))?;
@@ -138,7 +113,7 @@ pub fn send_message(
     }
     if recipient_fleet != fleet_id {
         return Err(CafleetError::Value(format!(
-            "Destination member not in fleet: {to_id}"
+            "members {from_member_id} and {to_id} are not in the same fleet."
         )));
     }
 
@@ -147,19 +122,19 @@ pub fn send_message(
         "INSERT INTO messages (owner_member_id, from_member_id, to_member_id, type, \
          created_at, status_state, status_timestamp, origin_message_id, text) \
          VALUES (?1, ?2, ?3, 'unicast', ?4, 'input_required', ?4, NULL, ?5)",
-        params![to_id, member_id, to_id, now, text],
+        params![to_id, from_member_id, to_id, now, text],
     )
     .map_err(db_err)?;
     let message_id = conn.last_insert_rowid();
 
     let mut notification_sent = false;
-    if to_id != member_id
+    if to_id != from_member_id
         && let Some(pane) = pane_of(conn, to_id)?
     {
         notification_sent = notifier.send_inline_preview(
             &pane,
             message_id,
-            member_id,
+            from_member_id,
             &now,
             &preview_text(text, max_text_len),
         );
@@ -172,11 +147,10 @@ pub fn broadcast_message(
     conn: &mut Connection,
     notifier: &dyn InlinePreviewSender,
     max_text_len: usize,
-    fleet_id: i64,
-    member_id: i64,
+    from_member_id: i64,
     text: &str,
 ) -> Result<Vec<Value>, CafleetError> {
-    require_active_sender(conn, fleet_id, member_id)?;
+    let fleet_id = sender_fleet(conn, from_member_id)?;
     let mut stmt = conn
         .prepare(
             "SELECT m.member_id, p.mux_pane_id \
@@ -186,7 +160,7 @@ pub fn broadcast_message(
         )
         .map_err(db_err)?;
     let recipients: Vec<(i64, Option<String>)> = stmt
-        .query_map(params![fleet_id, member_id], |row| {
+        .query_map(params![fleet_id, from_member_id], |row| {
             Ok((row.get(0)?, row.get(1)?))
         })
         .map_err(db_err)?
@@ -201,7 +175,7 @@ pub fn broadcast_message(
         "INSERT INTO messages (owner_member_id, from_member_id, to_member_id, type, \
          created_at, status_state, status_timestamp, origin_message_id, text) \
          VALUES (?1, ?1, NULL, 'broadcast_summary', ?2, 'completed', ?2, NULL, ?3)",
-        params![member_id, now, summary_text],
+        params![from_member_id, now, summary_text],
     )
     .map_err(db_err)?;
     let summary_id = tx.last_insert_rowid();
@@ -216,7 +190,7 @@ pub fn broadcast_message(
             "INSERT INTO messages (owner_member_id, from_member_id, to_member_id, type, \
              created_at, status_state, status_timestamp, origin_message_id, text) \
              VALUES (?1, ?2, ?1, 'unicast', ?3, 'input_required', ?3, ?4, ?5)",
-            params![recipient_id, member_id, now, summary_id, text],
+            params![recipient_id, from_member_id, now, summary_id, text],
         )
         .map_err(db_err)?;
         deliveries.push((tx.last_insert_rowid(), pane));
@@ -227,7 +201,7 @@ pub fn broadcast_message(
     let mut delivered = 0i64;
     for (delivery_id, pane) in &deliveries {
         if let Some(pane) = pane
-            && notifier.send_inline_preview(pane, *delivery_id, member_id, &now, &preview)
+            && notifier.send_inline_preview(pane, *delivery_id, from_member_id, &now, &preview)
         {
             delivered += 1;
         }
@@ -241,6 +215,9 @@ pub fn broadcast_message(
 }
 
 pub fn poll_messages(conn: &Connection, member_id: i64) -> Result<Vec<Value>, CafleetError> {
+    if super::members::active_member_fleet(conn, member_id)?.is_none() {
+        return Err(CafleetError::Value(format!("Member {member_id} not found")));
+    }
     let mut stmt = conn
         .prepare(
             "SELECT message_id, owner_member_id, from_member_id, to_member_id, type, \
@@ -258,29 +235,20 @@ pub fn poll_messages(conn: &Connection, member_id: i64) -> Result<Vec<Value>, Ca
     Ok(rows)
 }
 
-pub fn ack_message(
-    conn: &mut Connection,
-    member_id: i64,
-    message_id: i64,
-) -> Result<Value, CafleetError> {
-    let row: Option<(i64, String)> = conn
+pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<Value, CafleetError> {
+    let row: Option<String> = conn
         .query_row(
-            "SELECT owner_member_id, status_state FROM messages WHERE message_id=?1",
+            "SELECT status_state FROM messages WHERE message_id=?1",
             [message_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .optional()
         .map_err(db_err)?;
-    let Some((owner, status)) = row else {
+    let Some(status) = row else {
         return Err(CafleetError::Value(format!(
             "Message {message_id} not found"
         )));
     };
-    if owner != member_id {
-        return Err(CafleetError::Permission(
-            "Only the recipient can ACK a message".to_string(),
-        ));
-    }
     if status != "input_required" {
         return Err(CafleetError::Value(format!(
             "Cannot ACK message in state {status}"

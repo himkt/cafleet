@@ -2,7 +2,7 @@
 //! visibility rule (SPEC §6.2 *Queries*). The colocated tests pin the
 //! contract; see [`super::test_support`] for the API.
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 
 use super::members::db_err;
@@ -73,42 +73,11 @@ pub fn list_timeline(
     )
 }
 
-/// The fleet a message belongs to (via its owning member's row) — the
-/// derivation behind the positional `MESSAGE_ID` subject on `message show`
-/// (SPEC §6.3).
-pub fn message_fleet(conn: &Connection, message_id: i64) -> Result<Option<i64>, CafleetError> {
-    conn.query_row(
-        "SELECT m.fleet_id FROM messages g JOIN members m ON m.member_id=g.owner_member_id \
-         WHERE g.message_id=?1",
-        [message_id],
-        |row| row.get(0),
-    )
-    .optional()
-    .map_err(db_err)
-}
-
-/// Fetch one message within the fleet; a missing row and an out-of-fleet row
-/// hide identically as not-found.
-pub fn get_message(
-    conn: &Connection,
-    fleet_id: i64,
-    message_id: i64,
-) -> Result<Value, CafleetError> {
-    let owner_fleet: Option<i64> = conn
-        .query_row(
-            "SELECT m.fleet_id FROM messages g JOIN members m ON m.member_id=g.owner_member_id \
-             WHERE g.message_id=?1",
-            [message_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(db_err)?;
-    if owner_fleet != Some(fleet_id) {
-        return Err(CafleetError::Value(format!(
-            "Message {message_id} not found"
-        )));
-    }
-    let message = message_row(conn, message_id)?.expect("the fleet-gated message exists");
+/// Fetch one message by id — the fleet is derived from the message row;
+/// existence is the only guard (SPEC §6.2).
+pub fn get_message(conn: &Connection, message_id: i64) -> Result<Value, CafleetError> {
+    let message = message_row(conn, message_id)?
+        .ok_or_else(|| CafleetError::Value(format!("Message {message_id} not found")))?;
     Ok(json!({"message": message}))
 }
 

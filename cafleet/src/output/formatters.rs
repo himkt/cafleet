@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::output::render::{format_json, is_truthy, render_message, truncate_text};
+use crate::output::render::render_message;
 
 /// Render a scalar JSON value the way it appears in text output: strings
 /// bare (no quotes), everything else in its JSON form.
@@ -11,47 +11,33 @@ fn scalar(value: &Value) -> String {
     }
 }
 
-/// Compact: `[<id> | from:<from> | <ts>[ | kind:<kind>][ | origin:<id>]]` +
-/// the body line (omitted when empty). Verbose: the labeled block.
-pub fn format_message(message: &Value, full: bool) -> String {
+/// `[<id> | from:<from> | <ts>[ | kind:<kind>][ | origin:<id>]]` + the body
+/// line (omitted when empty) — the only text form; the full envelope is
+/// `--json` (SPEC §6.4).
+pub fn format_message(message: &Value) -> String {
     let message = match message.get("message") {
         Some(inner) if inner.is_object() => inner,
         _ => message,
     };
-    if !full {
-        let rendered = render_message(message, false);
-        let mut line1 = format!(
-            "[{} | from:{} | {}",
-            scalar(&rendered["id"]),
-            scalar(&rendered["from"]),
-            scalar(&rendered["ts"]),
-        );
-        if let Some(kind) = rendered.get("kind") {
-            line1.push_str(&format!(" | kind:{}", scalar(kind)));
-        }
-        if let Some(origin) = rendered.get("origin") {
-            line1.push_str(&format!(" | origin:{}", scalar(origin)));
-        }
-        line1.push(']');
-        let body = rendered.get("text").map(scalar).unwrap_or_default();
-        if body.is_empty() {
-            return line1;
-        }
-        return format!("{line1}\n{body}");
+    let rendered = render_message(message);
+    let mut line1 = format!(
+        "[{} | from:{} | {}",
+        scalar(&rendered["id"]),
+        scalar(&rendered["from"]),
+        scalar(&rendered["ts"]),
+    );
+    if let Some(kind) = rendered.get("kind") {
+        line1.push_str(&format!(" | kind:{}", scalar(kind)));
     }
-    let mut lines = vec![
-        format!("  id:    {}", scalar(&message["message_id"])),
-        format!("  state: {}", scalar(&message["status_state"])),
-        format!("  from:  {}", scalar(&message["from_member_id"])),
-    ];
-    if !message["to_member_id"].is_null() {
-        lines.push(format!("  to:    {}", scalar(&message["to_member_id"])));
+    if let Some(origin) = rendered.get("origin") {
+        line1.push_str(&format!(" | origin:{}", scalar(origin)));
     }
-    lines.push(format!("  type:  {}", scalar(&message["type"])));
-    if is_truthy(&message["text"]) {
-        lines.push(format!("  text:  {}", scalar(&message["text"])));
+    line1.push(']');
+    let body = rendered.get("text").map(scalar).unwrap_or_default();
+    if body.is_empty() {
+        return line1;
     }
-    lines.join("\n")
+    format!("{line1}\n{body}")
 }
 
 /// Join formatted items with a single blank line between them; items are not
@@ -67,128 +53,41 @@ pub fn format_indexed_list(
     items.iter().map(formatter).collect::<Vec<_>>().join("\n\n")
 }
 
-/// Compact: `<id> <name> <status>`. Verbose: the labeled block with the
-/// 60-codepoint description truncation and the placement sub-block.
-pub fn format_member_detail(member: &Value, full: bool) -> String {
-    if !full {
-        return format!(
-            "{} {} {}",
-            scalar(&member["member_id"]),
-            scalar(&member["name"]),
-            scalar(&member["status"]),
-        );
-    }
-    let description = truncate_text(member["description"].as_str(), false, 60)
-        .expect("member dict carries 'description'");
-    let skills = &member["skills"];
-    let skills_cell = if is_truthy(skills) {
-        format_json(skills)
-    } else {
-        "-".to_string()
-    };
-    let mut lines = vec![
-        format!("  member_id:   {}", scalar(&member["member_id"])),
-        format!("  name:        {}", scalar(&member["name"])),
-        format!("  description: {description}"),
-        format!("  status:      {}", scalar(&member["status"])),
-        format!("  kind:        {}", scalar(&member["kind"])),
-        format!("  skills:      {skills_cell}"),
-    ];
-    let placement = &member["placement"];
-    if placement.is_null() {
-        lines.push("  placement:   none".to_string());
-    } else {
-        lines.push("  placement:".to_string());
-        lines.push(format!(
-            "    backend:    {}",
-            scalar(&placement["coding_agent"])
-        ));
-        lines.push(format!(
-            "    session:    {}",
-            scalar(&placement["mux_session"])
-        ));
-        lines.push(format!(
-            "    window_id:  {}",
-            scalar(&placement["mux_window_id"])
-        ));
-        lines.push(format!(
-            "    pane_id:    {}",
-            dash_if_null(&placement["mux_pane_id"])
-        ));
-        lines.push(format!(
-            "    created_at: {}",
-            scalar(&placement["created_at"])
-        ));
-    }
-    lines.join("\n")
+/// `<id> <name> <status>` — the only text form; the detailed view is the
+/// broker `get_member` dict, emitted by `--json` (SPEC §6.4).
+pub fn format_member_detail(member: &Value) -> String {
+    format!(
+        "{} {} {}",
+        scalar(&member["member_id"]),
+        scalar(&member["name"]),
+        scalar(&member["status"]),
+    )
 }
 
-fn dash_if_null(value: &Value) -> String {
-    if value.is_null() {
-        "-".to_string()
-    } else {
-        scalar(value)
-    }
-}
-
-/// Compact: `<fleet_id> director=<id>`. Verbose: the 6-line block.
-pub fn format_fleet_create(data: &Value, full: bool) -> String {
-    let director = &data["director"];
-    if !full {
-        return format!(
-            "{} director={}",
-            scalar(&data["fleet_id"]),
-            scalar(&director["member_id"]),
-        );
-    }
-    let placement = &director["placement"];
-    let name = if data["name"].is_null() {
-        String::new()
-    } else {
-        scalar(&data["name"])
-    };
-    [
+/// `<fleet_id> director=<id>` — the only text form (SPEC §6.4).
+pub fn format_fleet_create(data: &Value) -> String {
+    format!(
+        "{} director={}",
         scalar(&data["fleet_id"]),
-        scalar(&director["member_id"]),
-        format!("name:             {name}"),
-        format!("created_at:       {}", scalar(&data["created_at"])),
-        format!("director_name:    {}", scalar(&director["name"])),
-        format!(
-            "pane:             {}:{}:{}",
-            scalar(&placement["mux_session"]),
-            scalar(&placement["mux_window_id"]),
-            scalar(&placement["mux_pane_id"]),
-        ),
-    ]
-    .join("\n")
+        scalar(&data["director"]["member_id"]),
+    )
 }
 
-/// Compact: `<id> <name> backend=<coding_agent> pane=<pane_id>`. Verbose:
-/// the 6-line `Member registered and spawned.` block.
-pub fn format_member(data: &Value, full: bool) -> String {
+/// `<id> <name> backend=<coding_agent> pane=<pane_id>` — the only text form
+/// (SPEC §6.4).
+pub fn format_member(data: &Value) -> String {
     let placement = &data["placement"];
-    if !full {
-        let pane = if placement["mux_pane_id"].is_null() {
-            "(pending)".to_string()
-        } else {
-            scalar(&placement["mux_pane_id"])
-        };
-        return format!(
-            "{} {} backend={} pane={pane}",
-            scalar(&data["member_id"]),
-            scalar(&data["name"]),
-            scalar(&placement["coding_agent"]),
-        );
-    }
-    [
-        "Member registered and spawned.".to_string(),
-        format!("  member_id: {}", scalar(&data["member_id"])),
-        format!("  name:      {}", scalar(&data["name"])),
-        format!("  backend:   {}", scalar(&placement["coding_agent"])),
-        format!("  pane_id:   {}", dash_if_null(&placement["mux_pane_id"])),
-        format!("  window_id: {}", scalar(&placement["mux_window_id"])),
-    ]
-    .join("\n")
+    let pane = if placement["mux_pane_id"].is_null() {
+        "(pending)".to_string()
+    } else {
+        scalar(&placement["mux_pane_id"])
+    };
+    format!(
+        "{} {} backend={} pane={pane}",
+        scalar(&data["member_id"]),
+        scalar(&data["name"]),
+        scalar(&placement["coding_agent"]),
+    )
 }
 
 fn format_idle(value: &Value) -> String {

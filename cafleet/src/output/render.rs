@@ -40,11 +40,11 @@ pub fn format_json(data: &Value) -> String {
 }
 
 /// Truncate `value` to `limit` codepoints + the `…` suffix. Callers pass the
-/// effective limit (`settings.max_text_len`, or an explicit literal such as
-/// the member-description 60). `full` returns the value unchanged.
-pub fn truncate_text(value: Option<&str>, full: bool, limit: usize) -> Option<String> {
+/// effective limit (`settings.max_text_len`). Truncation runs only on text
+/// emit sites — `--json` output is never truncated (SPEC §6.4).
+pub fn truncate_text(value: Option<&str>, limit: usize) -> Option<String> {
     let value = value?;
-    if full || value.chars().count() <= limit {
+    if value.chars().count() <= limit {
         return Some(value.to_string());
     }
     let mut truncated: String = value.chars().take(limit).collect();
@@ -54,10 +54,7 @@ pub fn truncate_text(value: Option<&str>, full: bool, limit: usize) -> Option<St
 
 /// In-place body truncation over a broker result: unwraps `{"message": …}`
 /// envelopes, walks lists, and leaves non-message items untouched.
-pub fn truncate_message_text(result: &mut Value, full: bool, max_text_len: usize) {
-    if full {
-        return;
-    }
+pub fn truncate_message_text(result: &mut Value, max_text_len: usize) {
     match result {
         Value::Array(items) => {
             for item in items {
@@ -81,7 +78,7 @@ fn truncate_item(item: &mut Value, limit: usize) {
         obj
     };
     let truncated = match target.get("text") {
-        Some(Value::String(text)) => truncate_text(Some(text), false, limit),
+        Some(Value::String(text)) => truncate_text(Some(text), limit),
         _ => None,
     };
     if let Some(text) = truncated {
@@ -90,11 +87,8 @@ fn truncate_item(item: &mut Value, limit: usize) {
 }
 
 /// Project a typed-column message to the compact rendered shape
-/// `{id, from, ts, text[, kind][, origin]}`; `full` returns it unchanged.
-pub fn render_message(message: &Value, full: bool) -> Value {
-    if full {
-        return message.clone();
-    }
+/// `{id, from, ts, text[, kind][, origin]}`.
+pub fn render_message(message: &Value) -> Value {
     let field = |name: &str| -> Value {
         message
             .get(name)
@@ -126,37 +120,6 @@ pub(crate) fn is_truthy(value: &Value) -> bool {
         Value::Array(a) => !a.is_empty(),
         Value::Object(o) => !o.is_empty(),
     }
-}
-
-/// Apply [`render_message`] to every message dict in a broker result
-/// structure without mutating the input.
-pub fn render_messages_in_result(result: &Value, full: bool) -> Value {
-    if full {
-        return result.clone();
-    }
-    match result {
-        Value::Array(items) => Value::Array(items.iter().map(render_item).collect()),
-        other => render_item(other),
-    }
-}
-
-fn render_item(item: &Value) -> Value {
-    let Some(obj) = item.as_object() else {
-        return item.clone();
-    };
-    if let Some(inner) = obj.get("message")
-        && inner
-            .as_object()
-            .is_some_and(|m| m.contains_key("message_id"))
-    {
-        let mut new = obj.clone();
-        new.insert("message".to_string(), render_message(inner, false));
-        return Value::Object(new);
-    }
-    if obj.contains_key("message_id") {
-        return render_message(item, false);
-    }
-    item.clone()
 }
 
 #[cfg(test)]

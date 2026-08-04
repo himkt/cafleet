@@ -81,11 +81,11 @@ is the complete, untruncated machine form.
 | `fleet list` | `FLEET_ID`, `DIRECTOR`, `NAME`, `MEMBERS`, `CREATED_AT` columns, one row per fleet | Output as JSON |
 | `fleet show` | The fleet row, adding a `deleted_at:` line | Always includes `deleted_at`, null when active |
 | `fleet delete` | `Deleted fleet <fleet_id>. Deregistered N members.` | `{"deregistered_count": <n>}` |
-| `message send` | `Message sent.` plus the compact rendered envelope | The rendered envelope, untruncated |
-| `message broadcast` | `broadcast id=<message_id> recipients=<N> delivered=<k>` | Carries both `recipients` and `delivered`, with the untruncated `broadcast_summary` envelope |
-| `message poll` | The compact rendered envelopes; `No messages found.` on an empty inbox | The rendered envelopes, untruncated |
-| `message ack` | `Message acknowledged.` plus the compact rendered envelope | The rendered envelope, untruncated |
-| `message show` | The compact rendered envelope alone | The rendered envelope, untruncated |
+| `message send` | `Message sent.` plus the compact rendered envelope | `{"message": <typed-column envelope>, "notification_sent": <bool>}`, untruncated |
+| `message broadcast` | `broadcast id=<message_id> recipients=<N> delivered=<k>` | `[{"message": <summary envelope>, "recipients": <N>, "delivered": <k>}]`, untruncated |
+| `message poll` | The compact rendered envelopes; `No messages found.` on an empty inbox | The typed-column envelopes, untruncated |
+| `message ack` | `Message acknowledged.` plus the compact rendered envelope | `{"message": <typed-column envelope>}`, untruncated |
+| `message show` | The compact rendered envelope alone | `{"message": <typed-column envelope>}`, untruncated |
 | `member create` | The compact line `<member_id> <name> backend=<coding_agent> pane=<pane_id>` | The member dict with its `placement` |
 | `member delete` | A `Member deleted.` header plus `member_id:` / `pane_id:` lines, pane status `<pane_id> (killed)` | `{member_id, pane_status}` |
 | `member show` | The compact one-line row `<member_id> <name> <status>` | The broker `get_member` dict — the detailed view (`kind`, `skills`, `placement`) |

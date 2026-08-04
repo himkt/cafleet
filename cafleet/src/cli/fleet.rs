@@ -87,7 +87,7 @@ fn create(
         coding_agent,
         mux.name(),
     )?;
-    emit(json, &fleet, || format_fleet_create(&fleet, false));
+    emit(json, &fleet, || format_fleet_create(&fleet));
     Ok(())
 }
 

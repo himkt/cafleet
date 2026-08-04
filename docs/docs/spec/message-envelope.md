@@ -8,24 +8,24 @@ Every message is a flat row of typed columns in `messages` — there is no JSON 
 
 ## Rendered shape
 
-The broker's read paths return the persisted columns as a flat dict (the typed-column dict), and the CLI projects that dict into a compact rendered envelope — the rendered envelope omits the columns whose values are constant or recoverable from context. Text mode truncates the body; `--json` carries the complete, untruncated body.
+The broker's read paths return the persisted columns as a flat dict (the typed-column dict). `--json` emits that typed-column envelope verbatim — every persisted column, the body complete and untruncated. Text mode projects the dict into a compact rendered line and truncates the body.
 
-### Rendered envelope
+### Text-mode projection
 
-Field decisions:
+The compact text rendering omits the columns whose values are constant or recoverable from context:
 
-| Field | Text mode | JSON key |
-|---|---|---|
-| `message_id` | the bracketed `[<id>` segment on line 1 | `id` |
-| `from_member_id` | the <code>&#124; from:&lt;n&gt;</code> segment on line 1 | `from` |
-| `to_member_id` | omitted (the recipient's own poll already establishes `to == self`) | omitted |
-| `owner_member_id` | omitted (always equals `to_member_id` for delivery rows; equals broadcaster for summary rows) | omitted |
-| `status_timestamp` | the bare `<ts>` segment on line 1 | `ts` |
-| `text` | the body line, truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…`, omitted when the body is empty | `text`, untruncated |
-| `type` | the <code>&#124; kind:&lt;kind&gt;</code> segment when `!= "unicast"` | `kind` when `"broadcast_summary"` |
-| `created_at` | omitted | omitted |
-| `status_state` | omitted (unconditional) | omitted |
-| `origin_message_id` | the <code>&#124; origin:&lt;id&gt;</code> segment when non-NULL | `origin` when non-NULL |
+| Field | Text mode |
+|---|---|
+| `message_id` | the bracketed `[<id>` segment on line 1 |
+| `from_member_id` | the <code>&#124; from:&lt;n&gt;</code> segment on line 1 |
+| `to_member_id` | omitted (the recipient's own poll already establishes `to == self`) |
+| `owner_member_id` | omitted (always equals `to_member_id` for delivery rows; equals broadcaster for summary rows) |
+| `status_timestamp` | the bare `<ts>` segment on line 1 |
+| `text` | the body line, truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…`, omitted when the body is empty |
+| `type` | the <code>&#124; kind:&lt;kind&gt;</code> segment when `!= "unicast"` |
+| `created_at` | omitted |
+| `status_state` | omitted (unconditional) |
+| `origin_message_id` | the <code>&#124; origin:&lt;id&gt;</code> segment when non-NULL |
 
 ### JSON output
 
@@ -33,17 +33,19 @@ CLI JSON output is governed by the `--json` flag — the single output switch:
 
 | Mode | Output |
 |---|---|
-| `--json` | Compact single-line JSON — no whitespace; non-ASCII (e.g. a `…` inside a body) is emitted as UTF-8, not escaped. The body is complete and untruncated. |
-| (text mode) | Two lines per message in the rendered shape, the body truncated. |
+| `--json` | Compact single-line JSON — no whitespace; non-ASCII (e.g. a `…` inside a body) is emitted as UTF-8, not escaped. The complete typed-column envelope, the body untruncated. |
+| (text mode) | Two lines per message in the compact rendered shape, the body truncated. |
+
+`message send`, `ack`, and `show` wrap the row as `{"message": {…}}` (`send` adds a sibling `notification_sent`); `poll` returns a bare array of rows; `broadcast` returns `[{"message": <summary row>, "recipients": N, "delivered": k}]`.
 
 #### Example
 
-A poll result with one unicast delivery (id `42`, from `7`, body `"build OK"`).
+A poll result with one unicast delivery (id `42`, from `7`, to `3`, body `"build OK"`).
 
-**`cafleet message poll <my-member-id> --json`**:
+**`cafleet message poll 3 --json`**:
 
 ```json
-[{"id":42,"from":7,"ts":"2026-05-05T05:42:11.123456+00:00","text":"build OK"}]
+[{"message_id":42,"owner_member_id":3,"from_member_id":7,"to_member_id":3,"type":"unicast","created_at":"2026-05-05T05:42:11.123456+00:00","status_state":"input_required","status_timestamp":"2026-05-05T05:42:11.123456+00:00","origin_message_id":null,"text":"build OK"}]
 ```
 
 A broadcast summary row carries `kind: "broadcast_summary"` and `origin: <id>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"`. The `message broadcast` response always contains exactly this single summary message plus the wrapper-level `recipients` (the real recipient count `N`) and `delivered` (the count of best-effort inline previews that landed) fields — there is no per-recipient envelope list (see [Output shapes](cli-options.md#output-shapes) for the cross-subcommand summary).

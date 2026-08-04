@@ -387,7 +387,7 @@ fn create(
         "registered_at": registered["registered_at"],
         "placement": placement_view,
     });
-    emit(json, &result, || format_member(&result, false));
+    emit(json, &result, || format_member(&result));
     Ok(())
 }
 
@@ -439,7 +439,7 @@ fn delete(settings: &Settings, member_id: i64, json: bool) -> Result<(), Cafleet
 fn show(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetError> {
     let conn = connect(settings)?;
     let member = load_member(&conn, member_id, true)?;
-    emit(json, &member, || format_member_detail(&member, false));
+    emit(json, &member, || format_member_detail(&member));
     Ok(())
 }
 
@@ -496,8 +496,6 @@ fn ping(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetEr
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
     let conn = connect(settings)?;
-    let fleet_id = broker::active_member_fleet(&conn, member_id)?
-        .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
     let member = load_member(&conn, member_id, false)?;
     let name = member["name"].as_str().expect("members carry a name");
     let pane = member["placement"]["mux_pane_id"].as_str();
@@ -514,7 +512,7 @@ fn ping(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetEr
         return Ok(());
     };
 
-    if !mux.send_poll_trigger(pane_id, fleet_id, member_id) {
+    if !mux.send_poll_trigger(pane_id, member_id) {
         return Err(CafleetError::App(format!(
             "send failed: tmux send-keys did not deliver the poll-trigger keystroke \
              to pane {pane_id}."

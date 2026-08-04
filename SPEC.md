@@ -885,9 +885,9 @@ broker derives the fleet and recipient from the subject row (§6.2) — no
 fleet-gate runs CLI-side. Per invocation, in order:
 
 1. **Handler call.**
-2. **Emit branch** — if the subcommand's `--json` flag was passed, render the
-   **untruncated** result through message-list rendering and emit compact
-   JSON; else route the result through message truncation (§6.4,
+2. **Emit branch** — if the subcommand's `--json` flag was passed, emit the
+   broker result as compact JSON — the complete, untruncated typed-column
+   envelopes; else route the result through message truncation (§6.4,
    `max_text_len`) and call the text renderer.
 3. **Exception wrap** — re-raise an application/usage error unchanged; wrap any
    other exception as an application error (exit 1) carrying its message.
@@ -1404,9 +1404,9 @@ absent glyph below and the compact-JSON rules apply to every path.
 
 #### Two-layer architecture
 
-- **Render layer** — projects raw broker results into slim "wire" shapes,
-  truncates oversized text by codepoint count, walks/transforms nested
-  structures without mutating originals, serializes to compact JSON, and strips
+- **Render layer** — projects a typed-column message into the slim text-mode
+  "wire" shape, truncates oversized text by codepoint count, serializes to
+  compact JSON, and strips
   ANSI from captured pane buffers.
 - **Formatter layer** — consumes those shapes (or the raw dicts) and produces
   exact multi-line, column-aligned, ANSI-free terminal strings.
@@ -1417,10 +1417,11 @@ call formatters.
 
 **Render functions:** `strip_ansi(text)`; `format_json(data)`;
 `truncate_text(value, limit)`; `truncate_message_text(result)`
-(in-place); `render_message(message)` → `{id, from, ts, text, kind?, origin?}`;
-`render_messages_in_result(result)` (non-mutating, unwraps `{message: …}`
-envelopes and flat message dicts). Truncation runs only on the CLI's text
-branch (§6.3); the JSON branch renders the untruncated result.
+(in-place); `render_message(message)` → `{id, from, ts, text, kind?, origin?}`
+(the text-mode projection consumed by `format_message`). Truncation and the
+compact projection run only on the CLI's text
+branch (§6.3); the JSON branch emits the broker result verbatim — the
+complete typed-column envelopes.
 
 **Formatter functions:** `format_message`; `format_indexed_list`
 (joins formatted items with one blank line between, `empty_msg` when empty —
@@ -1476,10 +1477,9 @@ the **last** `\r` (CR-redraw defrag: a TUI redraw `prefix\rNEW` keeps only
 
 #### Mutation contract
 
-`truncate_message_text` **mutates its input in place** and returns the same object.
-`render_messages_in_result` is **non-mutating** (it
-builds new structures, shallow-copying any envelope). Preserve the distinction; in
-a language with no aliasing concern, preserve the *observable* result.
+`truncate_message_text` **mutates its input in place** and returns the same
+object; `render_message` is **non-mutating** (it builds a new structure). In a
+language with no aliasing concern, preserve the *observable* result.
 
 #### Field access / optionality
 
@@ -1493,8 +1493,7 @@ Every field is read with required access unless marked optional; required access
   `type` (req; `"unicast"` suppresses `kind`), `origin_message_id`
   (optional; `origin` key only when **truthy**). Envelope: a message may be wrapped
   `{message: {…}}`; `format_message`
-  unwraps when the inner value is a dict; the render walker unwraps when it is a
-  dict containing `message_id`.
+  unwraps when the inner value is a dict.
 - **Member detail** (`format_member_detail`): `member_id` (req), `name` (req),
   `status` (req). The detailed view (description, kind, skills, placement) is
   the broker `get_member` dict, emitted by `--json` (§6.3).
