@@ -1,7 +1,7 @@
 # Batch Capture — `cafleet monitor scan`
 
 **Status**: Approved
-**Progress**: 11/12 tasks complete
+**Progress**: 12/12 tasks complete
 **Last Updated**: 2026-08-04
 
 ## Overview
@@ -168,7 +168,7 @@ Loop cadence and flags, the `monitor_runtime` schema and wake ledger, `member ca
 
 ### Step 6: Verification
 
-- [ ] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` all green <!-- completed: -->
+- [x] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` all green <!-- completed: 2026-08-04T12:55 -->
 
 ---
 
