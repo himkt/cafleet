@@ -8,7 +8,7 @@ config_roots = [
 
 [tools]
 "aqua:pnpm/pnpm" = "11.17.0"
-"core:node" = "26.5.0"
+"core:node" = "26.5.1"
 "core:rust" = { version = "1.97.1", components = ["clippy", "rustfmt"] }
 "core:zig" = "0.15.2"
 
