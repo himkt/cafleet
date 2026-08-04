@@ -55,6 +55,18 @@ pub(crate) fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value
     }))
 }
 
+/// The recipient (`owner_member_id`) of a message row — the derivation behind
+/// the positional `MESSAGE_ID` subject on `message ack` (SPEC §6.3).
+pub fn message_owner(conn: &Connection, message_id: i64) -> Result<Option<i64>, CafleetError> {
+    conn.query_row(
+        "SELECT owner_member_id FROM messages WHERE message_id=?1",
+        [message_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(db_err)
+}
+
 fn require_active_sender(
     conn: &Connection,
     fleet_id: i64,

@@ -212,9 +212,9 @@ impl TmuxMultiplexer {
         self.send_literal_then_enter(target_pane_id, "/exit", None, ignore_missing, false)
     }
 
-    pub fn send_poll_trigger(&self, target_pane_id: &str, fleet_id: i64, member_id: i64) -> bool {
+    pub fn send_poll_trigger(&self, target_pane_id: &str, _fleet_id: i64, member_id: i64) -> bool {
         let payload = format!(
-            "cafleet message poll --fleet-id {fleet_id} --member-id {member_id} \
+            "cafleet message poll {member_id} \
              — then resume your work if something was still running."
         );
         self.best_effort_send(target_pane_id, &payload, true)
@@ -497,7 +497,7 @@ mod tests {
                         "-t",
                         "%5",
                         "-l",
-                        "cafleet message poll --fleet-id 3 --member-id 14 — then resume \
+                        "cafleet message poll 14 — then resume \
                          your work if something was still running.",
                     ],
                     Some(5),

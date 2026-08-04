@@ -73,6 +73,20 @@ pub fn list_timeline(
     )
 }
 
+/// The fleet a message belongs to (via its owning member's row) — the
+/// derivation behind the positional `MESSAGE_ID` subject on `message show`
+/// (SPEC §6.3).
+pub fn message_fleet(conn: &Connection, message_id: i64) -> Result<Option<i64>, CafleetError> {
+    conn.query_row(
+        "SELECT m.fleet_id FROM messages g JOIN members m ON m.member_id=g.owner_member_id \
+         WHERE g.message_id=?1",
+        [message_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(db_err)
+}
+
 /// Fetch one message within the fleet; a missing row and an out-of-fleet row
 /// hide identically as not-found.
 pub fn get_message(

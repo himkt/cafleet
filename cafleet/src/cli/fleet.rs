@@ -3,8 +3,7 @@
 use clap::Subcommand;
 use serde_json::Value;
 
-use super::FleetIdArg;
-use super::helpers::{connect, emit, require_fleet_id, resolve_mux};
+use super::helpers::{connect, emit, resolve_mux};
 use crate::broker;
 use crate::config::Settings;
 use crate::error::CafleetError;
@@ -21,9 +20,6 @@ pub enum FleetCommand {
         /// The backend the Director is actually running on.
         #[arg(long = "coding-agent", value_parser = ["claude", "codex", "opencode"])]
         coding_agent: String,
-        /// Switch the non-JSON output to the labeled block.
-        #[arg(long)]
-        full: bool,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -36,16 +32,21 @@ pub enum FleetCommand {
     },
     /// Show one fleet (soft-deleted included).
     Show {
-        #[command(flatten)]
-        fleet: FleetIdArg,
+        /// The fleet to show.
+        #[arg(value_name = "FLEET_ID")]
+        fleet_id: i64,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
     /// Soft-delete a fleet and deregister its members.
     Delete {
-        #[command(flatten)]
-        fleet: FleetIdArg,
+        /// The fleet to delete.
+        #[arg(value_name = "FLEET_ID")]
+        fleet_id: i64,
+        /// Output in JSON format.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -54,12 +55,11 @@ pub fn run(settings: &Settings, command: FleetCommand) -> Result<(), CafleetErro
         FleetCommand::Create {
             name,
             coding_agent,
-            full,
             json,
-        } => create(settings, &name, &coding_agent, full, json),
+        } => create(settings, &name, &coding_agent, json),
         FleetCommand::List { json } => list(settings, json),
-        FleetCommand::Show { fleet, json } => show(settings, fleet.fleet_id, json),
-        FleetCommand::Delete { fleet } => delete(settings, fleet.fleet_id),
+        FleetCommand::Show { fleet_id, json } => show(settings, fleet_id, json),
+        FleetCommand::Delete { fleet_id, json } => delete(settings, fleet_id, json),
     }
 }
 
@@ -67,7 +67,6 @@ fn create(
     settings: &Settings,
     name: &str,
     coding_agent: &str,
-    full: bool,
     json: bool,
 ) -> Result<(), CafleetError> {
     let inside_session = || {
@@ -88,7 +87,7 @@ fn create(
         coding_agent,
         mux.name(),
     )?;
-    emit(json, &fleet, || format_fleet_create(&fleet, full));
+    emit(json, &fleet, || format_fleet_create(&fleet, false));
     Ok(())
 }
 
@@ -123,8 +122,7 @@ fn list(settings: &Settings, json: bool) -> Result<(), CafleetError> {
     Ok(())
 }
 
-fn show(settings: &Settings, fleet_id: Option<i64>, json: bool) -> Result<(), CafleetError> {
-    let fleet_id = require_fleet_id(fleet_id)?;
+fn show(settings: &Settings, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
     let conn = connect(settings)?;
     let fleet = broker::get_fleet(&conn, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
@@ -146,13 +144,14 @@ fn show(settings: &Settings, fleet_id: Option<i64>, json: bool) -> Result<(), Ca
     Ok(())
 }
 
-fn delete(settings: &Settings, fleet_id: Option<i64>) -> Result<(), CafleetError> {
-    let fleet_id = require_fleet_id(fleet_id)?;
+fn delete(settings: &Settings, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
     let mut conn = connect(settings)?;
     let result = broker::delete_fleet(&mut conn, fleet_id)?;
-    println!(
-        "Deleted fleet {fleet_id}. Deregistered {} members.",
-        result["deregistered_count"]
-    );
+    emit(json, &result, || {
+        format!(
+            "Deleted fleet {fleet_id}. Deregistered {} members.",
+            result["deregistered_count"]
+        )
+    });
     Ok(())
 }

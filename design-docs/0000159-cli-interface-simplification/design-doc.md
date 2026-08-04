@@ -1,7 +1,7 @@
 # CLI Interface Simplification
 
 **Status**: Approved
-**Progress**: 12/23 tasks complete
+**Progress**: 17/23 tasks complete
 **Last Updated**: 2026-08-04
 
 ## Overview
@@ -157,11 +157,11 @@ Documentation first, then skills, then code, per the project's documentation-fir
 
 ### Step 5: CLI argument surface
 
-- [ ] Delete `FleetIdArg` / `require_fleet_id`; convert `fleet show` / `fleet delete` to positional `FLEET_ID`; add `--json` to `fleet delete`; drop `--full` from `fleet create` <!-- completed: -->
-- [ ] Convert the member group: positional `MEMBER_ID` on show/delete/prompt/ping, positional `FLEET_ID` on list, `(PROMPT | --file PATH)` on create; drop `--full` / `--quiet` <!-- completed: -->
-- [ ] Move `monitor capture` to `member capture MEMBER_ID [--lines N] [--ansi] [--json]`; delete `--no-ansi`; flatten `monitor` to `cafleet monitor FLEET_ID [--tick N] [--interval N]` <!-- completed: -->
-- [ ] Convert the message group: positional `MESSAGE_ID` / `MEMBER_ID` subjects, `(TEXT | --file PATH)` bodies, keep `--from-member-id` / `--to-member-id`; drop `--full` / `--quiet` <!-- completed: -->
-- [ ] Replace `resolve_text_body` with the positional-vs-`--file` resolver, preserving the empty-body, UTF-8, and stdin (`-`) rules and error strings <!-- completed: -->
+- [x] Delete `FleetIdArg` / `require_fleet_id`; convert `fleet show` / `fleet delete` to positional `FLEET_ID`; add `--json` to `fleet delete`; drop `--full` from `fleet create` <!-- completed: 2026-08-04T09:57 -->
+- [x] Convert the member group: positional `MEMBER_ID` on show/delete/prompt/ping, positional `FLEET_ID` on list, `(PROMPT | --file PATH)` on create; drop `--full` / `--quiet` <!-- completed: 2026-08-04T09:58 -->
+- [x] Move `monitor capture` to `member capture MEMBER_ID [--lines N] [--ansi] [--json]`; delete `--no-ansi`; flatten `monitor` to `cafleet monitor FLEET_ID [--tick N] [--interval N]` <!-- completed: 2026-08-04T09:58 -->
+- [x] Convert the message group: positional `MESSAGE_ID` / `MEMBER_ID` subjects, `(TEXT | --file PATH)` bodies, keep `--from-member-id` / `--to-member-id`; drop `--full` / `--quiet` <!-- completed: 2026-08-04T09:59 -->
+- [x] Replace `resolve_text_body` with the positional-vs-`--file` resolver, preserving the empty-body, UTF-8, and stdin (`-`) rules and error strings <!-- completed: 2026-08-04T09:59 -->
 
 ### Step 6: Broker and output semantics
 

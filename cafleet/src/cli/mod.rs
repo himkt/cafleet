@@ -13,7 +13,7 @@ mod server;
 mod setup;
 mod system;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 
 use crate::config::Settings;
 use crate::error::CafleetError;
@@ -50,18 +50,8 @@ enum Command {
     /// Message broker.
     #[command(subcommand)]
     Message(message::MessageCommand),
-    /// Supervision scheduler.
-    #[command(subcommand)]
-    Monitor(monitor::MonitorCommand),
-}
-
-/// The shared required-`--fleet-id` surface: declared optional at the parser,
-/// enforced post-parse by [`helpers::require_fleet_id`].
-#[derive(Args)]
-pub(crate) struct FleetIdArg {
-    /// Fleet ID (integer); required for this subcommand.
-    #[arg(long = "fleet-id", value_name = "INT")]
-    fleet_id: Option<i64>,
+    /// Run the per-fleet scheduler loop in-process.
+    Monitor(monitor::MonitorArgs),
 }
 
 /// Parse the argv and run the selected command. clap's own parse errors exit

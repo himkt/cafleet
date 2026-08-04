@@ -204,6 +204,18 @@ pub fn get_member(
     ))
 }
 
+/// The fleet id of an active member row — the derivation behind every
+/// positional `MEMBER_ID` subject (SPEC §6.3 *Positional subject ids*).
+pub fn active_member_fleet(conn: &Connection, member_id: i64) -> Result<Option<i64>, CafleetError> {
+    conn.query_row(
+        "SELECT fleet_id FROM members WHERE member_id=?1 AND status='active'",
+        [member_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(db_err)
+}
+
 pub fn deregister_member(conn: &mut Connection, member_id: i64) -> Result<bool, CafleetError> {
     let is_root: bool = conn
         .query_row(
