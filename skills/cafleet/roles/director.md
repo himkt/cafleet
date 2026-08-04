@@ -14,7 +14,7 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 |---|------|------------------------------|
 | 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{decision_surface}` / `{bg_run}` / `{permission_flags}`, **or** guess a wrong/default value (launch the monitor loop with the wrong primitive), **or** ignore a backend note (codex has no harness task list) |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + `cafleet monitor` heartbeat (the Director-hosted monitor launch, the startup-line gate on the first `member create`, the 5-step facilitation loop, the Authorization-Scope Guard) — you spawn an unsupervised team |
-| 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `member delete` / `member list` / `monitor capture` / `member prompt` / `member ping`), the pre-spawn model-selection step (§ *Model selection before member create* — classify the role, choose the backend/model from the model list, pass the pair to `member create`), and the canonical spawn-prompt skeleton — you can't spawn or drive members, or you spawn them on guessed models |
+| 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `member delete` / `member list` / `member capture` / `member prompt` / `member ping`), the pre-spawn model-selection step (§ *Model selection before member create* — classify the role, choose the backend/model from the model list, pass the pair to `member create`), and the canonical spawn-prompt skeleton — you can't spawn or drive members, or you spawn them on guessed models |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**
 
@@ -28,7 +28,7 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 
 | Read | When |
 |------|------|
-| [`reference/cli.md`](../reference/cli.md) § *Output flags* | you need `--full` / `--json` opt-back-in semantics |
+| [`reference/cli.md`](../reference/cli.md) § *Output switch* | you need the `--json` untruncated-output semantics |
 
 ## Model selection
 
@@ -46,7 +46,7 @@ Angle-bracket tokens are placeholders, **not** shell variables — substitute th
 ## Director-only primitives
 
 You own these; ordinary members do NOT call them: `member create`, `member
-delete`, `member list`, `monitor capture`, `member prompt`, `member ping` (plus
+delete`, `member list`, `member capture`, `member prompt`, `member ping` (plus
 the backend-specific decision-relay primitive your overlay names).
 `member prompt` carries an
 operator-controlled text body (both forms) and stays under `permissions.ask`;

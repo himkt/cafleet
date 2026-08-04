@@ -41,4 +41,4 @@ When a capture cannot separate `awaiting_user` from `finished`, classify `awaiti
 
 The canonical Director-side monitor launch, fully resolved for this backend:
 
-Launch `cafleet monitor start --fleet-id <fleet-id>` via the Bash tool with `run_in_background: true`, and confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in the task output before the first `member create` (members spawned `--permission-mode dontAsk`).
+Launch `cafleet monitor <fleet-id>` via the Bash tool with `run_in_background: true`, and confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in the task output before the first `member create` (members spawned `--permission-mode dontAsk`).

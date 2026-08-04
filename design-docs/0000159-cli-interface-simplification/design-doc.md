@@ -1,7 +1,7 @@
 # CLI Interface Simplification
 
 **Status**: Approved
-**Progress**: 7/23 tasks complete
+**Progress**: 9/23 tasks complete
 **Last Updated**: 2026-08-04
 
 ## Overview
@@ -146,8 +146,8 @@ Documentation first, then skills, then code, per the project's documentation-fir
 
 ### Step 3: cafleet skill
 
-- [ ] Update `skills/cafleet/SKILL.md` (send/poll/ack examples, required-flags section — fleet-scoping prose becomes subject-id prose) <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/*` (cli.md, director.md, supervision.md, prompt-routing.md, recovery.md, base-dir.md, coding-agent overlays) and `skills/cafleet/roles/*` for every quoted command <!-- completed: -->
+- [x] Update `skills/cafleet/SKILL.md` (send/poll/ack examples, required-flags section — fleet-scoping prose becomes subject-id prose) <!-- completed: 2026-08-04T09:12 -->
+- [x] Update `skills/cafleet/reference/*` (cli.md, director.md, supervision.md, prompt-routing.md, recovery.md, base-dir.md, coding-agent overlays) and `skills/cafleet/roles/*` for every quoted command <!-- completed: 2026-08-04T09:20 -->
 
 ### Step 4: Other skills and project rules
 

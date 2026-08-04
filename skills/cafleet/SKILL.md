@@ -36,9 +36,9 @@ Before your first action other than these Reads, Read every file in the **Load-b
 
 | Read | When |
 |------|------|
-| [`reference/cli.md`](reference/cli.md) | you need a CLI subcommand beyond send/poll/ack — global options, output flags (`--full` / `--json` opt-back-in semantics, `CAFLEET_MAX_TEXT_LEN`), coding-agent backends, `message show` / `broadcast`, `member show` / `member list`, `doctor`, `fleet delete`, the typical workflow |
+| [`reference/cli.md`](reference/cli.md) | you need a CLI subcommand beyond send/poll/ack — global options, the `--json` output switch (`CAFLEET_MAX_TEXT_LEN` text truncation), coding-agent backends, `message show` / `broadcast`, `member show` / `member list`, `doctor`, `fleet delete`, the typical workflow |
 
-Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`member create` / `member delete` / `member list` / `monitor capture` / `member prompt` / `member ping`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
+Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`member create` / `member delete` / `member list` / `member capture` / `member prompt` / `member ping`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
 
 Exhaustive per-subcommand flags, exit codes, and error strings live in [`docs/docs/spec/cli-options.md`](../../docs/docs/spec/cli-options.md).
 
@@ -66,32 +66,34 @@ Used only when your overlay omits a token or your backend is unknown. Each defau
 | `{skill_loader}` | reading the skill's `SKILL.md` + your overlay by absolute path |
 | `{effort_levels}` | unsupported — omit `--effort` |
 
-## Required Flags
+## Required ids
 
-Every `cafleet` invocation that touches members or messages is **fleet-scoped** — it carries `--fleet-id` — and most additionally carry a member-identity flag with exactly one meaning per spelling:
+Every `cafleet` invocation that touches members or messages names its **subject** as a positional integer id placed immediately after the subcommand name; ids that describe a relationship stay as flags:
 
-- `--fleet-id <int>` — per-subcommand (placed **after** the subcommand name), required on every `member *` / `message *` / `monitor *` subcommand plus `fleet show` / `fleet delete`. There is **no environment default**; a missing value exits 1 with the shared callback error naming `cafleet fleet create`. Rejected with `No such option` on `setup` / `fleet create` / `fleet list` / `server` / `doctor`.
-- `--member-id <int>` — **the member in question**: the requester on `message poll` / `ack` / `show`, and the target on `member delete` / `show` / `prompt` / `ping` and `monitor capture`.
-- `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient** on `message send`; `message broadcast` takes the sender only. (`member create` takes **no** identity flag — the Director is auto-resolved from the fleet row; `member list`, `monitor start`, and the `fleet *` commands take none either.)
+- Positional `MEMBER_ID` — **the member in question**: the requester on `message poll`, and the target on `member delete` / `show` / `prompt` / `ping` / `capture`. The fleet is derived from the member row.
+- Positional `MESSAGE_ID` — the message on `message ack` / `message show`; recipient and fleet are derived from the message row.
+- Positional `FLEET_ID` — the fleet on `fleet show` / `fleet delete` / `member list` / `monitor`.
+- `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient** on `message send`; `message broadcast` takes the sender only. The fleet is derived from the sender row.
+- `--fleet-id <int>` — only on `member create`: the fleet the new member joins (the subject of the command is the member being created; the Director is auto-resolved from the fleet row).
 
-In the Director's own commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet member create` — never your own exported shell variables. `permissions.allow` matches Bash invocations as fixed strings, so an ad-hoc `export FLEET_ID=…; --fleet-id $FLEET_ID` breaks the match and forces prompts. See [`cli-options.md`](../../docs/docs/spec/cli-options.md#fleet-id) for the rationale and [`permissions.allow` coverage](../../docs/docs/spec/cli-options.md#permissionsallow-coverage) for the pattern set.
+In the Director's own commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet member create` — never your own exported shell variables. `permissions.allow` matches Bash invocations as fixed strings, so an ad-hoc `export MEMBER_ID=…; cafleet message poll $MEMBER_ID` breaks the match and forces prompts. See [`cli-options.md`](../../docs/docs/spec/cli-options.md#positional-subject-ids) for the rationale and [`permissions.allow` coverage](../../docs/docs/spec/cli-options.md#permissionsallow-coverage) for the pattern set.
 
 ### Spawned-member identity via `str.format` substitution
 
-`cafleet member create` runs `str.format` over the resolved spawn prompt (supplied via exactly one of `--text` / `--text-file`), rendering exactly four placeholders to literals at spawn time:
+`cafleet member create` runs `str.format` over the resolved spawn prompt (supplied as exactly one of the positional `PROMPT` or `--file <path>`), rendering exactly four placeholders to literals at spawn time:
 
 - `{fleet_id}` — the member's fleet id.
 - `{member_id}` — the member's **own** newly-allocated id (the CLI allocates it during the spawn and substitutes it itself — the Director never needs to know it).
 - `{director_member_id}` — the member's Director id.
 - `{coding_agent}` — the resolved backend name (`claude` / `codex` / `opencode`).
 
-An author writes the spawn prompt with those brace placeholders; after spawn the member reads its identity as literal labeled lines (e.g. `FLEET ID: 24`, `YOUR MEMBER ID: 88`). **Any literal brace in prompt text must be doubled** (`{{` / `}}`) to survive `.format()`; an unknown placeholder fails with `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` and a malformed brace expression with `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` — both exit 2. No identity environment variable is injected into the pane — the member takes the literal ids from its prompt and passes them explicitly: a poll is `cafleet message poll --fleet-id 24 --member-id 88`; a self-attributed send is `cafleet message send --fleet-id 24 --from-member-id 88 --to-member-id <director-member-id> --text "..."`.
+An author writes the spawn prompt with those brace placeholders; after spawn the member reads its identity as literal labeled lines (e.g. `FLEET ID: 24`, `YOUR MEMBER ID: 88`). **Any literal brace in prompt text must be doubled** (`{{` / `}}`) to survive `.format()`; an unknown placeholder fails with `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` and a malformed brace expression with `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` — both exit 2. No identity environment variable is injected into the pane — the member takes the literal ids from its prompt and passes them explicitly: a poll is `cafleet message poll 88`; a self-attributed send is `cafleet message send --from-member-id 88 --to-member-id <director-member-id> "..."`.
 
 CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT`, `CAFLEET_MAX_TEXT_LEN`) are catalogued in [`reference/cli.md`](reference/cli.md) § Environment variables.
 
 ## Team supervision
 
-Before spawning a team, the Director launches the heartbeat itself: immediately after `cafleet fleet create` and before the first `cafleet member create`, it runs `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane ({bg_run}) and confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. That confirmation gates the first `member create`. The loop wakes the Director's own pane once per wake interval; each wake is the cue to poll, ACK, dispatch, health-check the members it names, and then resume any interrupted work.
+Before spawning a team, the Director launches the heartbeat itself: immediately after `cafleet fleet create` and before the first `cafleet member create`, it runs `cafleet monitor <fleet-id>` as a background task in its own pane ({bg_run}) and confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. That confirmation gates the first `member create`. The loop wakes the Director's own pane once per wake interval; each wake is the cue to poll, ACK, dispatch, health-check the members it names, and then resume any interrupted work.
 
 For the full governance + heartbeat mechanism (Core Principle, Communication Model, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, Stall Response, Cleanup, the 5-step facilitation loop, Monitor Lifecycle), Read [`reference/supervision.md`](reference/supervision.md).
 
@@ -105,7 +107,7 @@ In every example, substitute the literal integer ids printed by `cafleet fleet c
 - `<target-member-id>` — the recipient of a unicast message
 - `<message-id>` — the message id printed by `message poll` / `message send`
 
-Every id input (`--fleet-id`, `--member-id`, `--from-member-id`, `--to-member-id`, `--message-id`) is a DB-assigned integer (typically 1–4 digits), passed in full — no prefix resolution. A non-integer fails with the parser's invalid-integer error (exit 2).
+Every id input (the positional `FLEET_ID` / `MEMBER_ID` / `MESSAGE_ID` subjects, `--from-member-id`, `--to-member-id`, `member create`'s `--fleet-id`) is a DB-assigned integer (typically 1–4 digits), passed in full — no prefix resolution. A non-integer fails with the parser's invalid-value error (exit 2).
 
 ## Soliciting user reactions
 
@@ -114,24 +116,24 @@ When you need a recorded user reaction — **approve**, **choose among options**
 ## Send (Unicast)
 
 ```bash
-cafleet message send --fleet-id <fleet-id> --from-member-id <my-member-id> \
-  --to-member-id <target-member-id> --text "Did the API schema change?"
+cafleet message send --from-member-id <my-member-id> \
+  --to-member-id <target-member-id> "Did the API schema change?"
 ```
 
-`--to-member-id` (recipient id) is required, plus exactly one of `--text` (inline body) or `--text-file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`); the delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview by default. `--full` per [`reference/cli.md`](reference/cli.md) § *Output flags*. After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast`), caught on the next manual `message poll` or a Director `cafleet member ping` if missed; full mechanics in [`multiplexer-backends.md`](../../docs/docs/spec/multiplexer-backends.md#push-notifications).
+`--to-member-id` (recipient id) is required, plus exactly one of the positional `TEXT` (inline body) or `--file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`); the delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview and text output; `--json` carries the complete untruncated body per [`reference/cli.md`](reference/cli.md) § *Output switch*. After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast`), caught on the next manual `message poll` or a Director `cafleet member ping` if missed; full mechanics in [`multiplexer-backends.md`](../../docs/docs/spec/multiplexer-backends.md#push-notifications).
 
 ## Poll (Check Inbox)
 
-Returns only un-acked (`input_required`) deliveries addressed to this member, newest first; ACKing one drops it from `poll` output. `--full` emits the untruncated typed-column envelope. Poll is an on-demand inbox check — run it on wake or when you have a reason to check now, never on a self-scheduled `sleep`-timer loop; the broker re-opens your turn when work arrives.
+Returns only un-acked (`input_required`) deliveries addressed to this member, newest first; ACKing one drops it from `poll` output. `--json` emits the untruncated envelopes. Poll is an on-demand inbox check — run it on wake or when you have a reason to check now, never on a self-scheduled `sleep`-timer loop; the broker re-opens your turn when work arrives.
 
 ```bash
-cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id> [--full]
+cafleet message poll <my-member-id> [--json]
 ```
 
 ## Acknowledge (ACK)
 
-Moves a message from `input_required` to `completed`. `--message-id` required.
+Moves a message from `input_required` to `completed`. The positional `MESSAGE_ID` names the delivery; recipient and fleet are derived from the message row.
 
 ```bash
-cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --message-id <message-id>
+cafleet message ack <message-id>
 ```

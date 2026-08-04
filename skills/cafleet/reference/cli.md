@@ -1,42 +1,35 @@
 # CAFleet CLI — Fuller Command Catalog
 
-Read this file for the broker CLI surface beyond the core identity / poll / send / ack lifecycle in [`SKILL.md`](../SKILL.md): environment variables, global options, output flags, coding-agent backends, cancel / show / broadcast / roster introspection / doctor / the monitor group / fleet delete, the typical workflow, the message lifecycle, and error handling. Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-options.md`](../../../docs/docs/spec/cli-options.md).
+Read this file for the broker CLI surface beyond the core identity / poll / send / ack lifecycle in [`SKILL.md`](../SKILL.md): environment variables, global options, the output switch, coding-agent backends, cancel / show / broadcast / roster introspection / doctor / the monitor command / fleet delete, the typical workflow, the message lifecycle, and error handling. Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-options.md`](../../../docs/docs/spec/cli-options.md).
 
 ## Environment variables
 
-CLI env vars (all `CAFLEET_`-prefixed): `CAFLEET_DATABASE_URL` (SQLite URL; default `~/.local/share/cafleet/cafleet_v5.db`, use an absolute path when overriding — `~` is not expanded), `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` (`cafleet server` defaults `127.0.0.1` / `8000`), `CAFLEET_MAX_TEXT_LEN` (body-truncation limit, default `200` — see § *Output flags* below).
+CLI env vars (all `CAFLEET_`-prefixed): `CAFLEET_DATABASE_URL` (SQLite URL; default `~/.local/share/cafleet/cafleet_v5.db`, use an absolute path when overriding — `~` is not expanded), `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` (`cafleet server` defaults `127.0.0.1` / `8000`), `CAFLEET_MAX_TEXT_LEN` (text-mode body-truncation limit, default `200` — see § *Output switch* below).
 
 ## Global Options
 
-`--version` is the only top-level option (precedes the subcommand name); `--json`, `--member-id`, and `--fleet-id` are per-subcommand options (after the subcommand name — write `--json` trailing, after all other flags). Putting one in the wrong position fails with `No such option`.
+`--version` is the only top-level option (precedes the subcommand name); `--json` is per-subcommand (after the subcommand name — write it trailing, after all other arguments). The subject id is a positional argument placed immediately after the subcommand name. Putting an option in the wrong position fails with the parser's unknown-argument error.
 
 ```bash
-cafleet member list --fleet-id <fleet-id> --json
-cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id> --json
+cafleet member list <fleet-id> --json
+cafleet message poll <my-member-id> --json
 ```
 
-`cafleet --version` prints `cafleet <version>` and exits 0 without `--fleet-id`.
+`cafleet --version` prints `cafleet <version>` and exits 0.
 
-## Output flags — `--full` / `--json`
+## Output switch — `--json`
 
-`--full` and `--json` are cafleet's two **independent, composable** output-control flags over its compact default output. `--full` opts back into untruncated, every-field output — it bypasses the truncation caps. `--json` switches the encoding to structured JSON but is **still truncated** unless combined with `--full` (`--full --json` gives untruncated JSON). A separate `--quiet` flag — on `message send`, `message ack`, and `member ping` — prints only the bare `message_id` (the target member id for `ping`) for shell capture.
-
-### `--full` (cross-subcommand escape hatch)
-
-`--full` is the global "give me every field cafleet has, untruncated, unfiltered" escape hatch over a single flag covering four overloaded surfaces: `message {send,poll,ack,cancel,show}` → untruncated `text` + the full typed-column envelope; `message broadcast` → the single `broadcast_summary` message rendered verbose (never per-recipient rows or a `recipient_ids` list); `member show` → the labeled block (`kind`, `skills`, placement sub-block) in **text mode only** (JSON is the unprojected broker dict regardless of `--full`); `member create` → the 6-line `Member registered and spawned.` block. Per-surface detail: [`cli-options.md`](../../../docs/docs/spec/cli-options.md#output-shapes).
-
-### `--json` (per-subcommand, machine-parseable)
-
-`--json` switches CLI output from text to JSON: compact single-line encoding (no whitespace; non-ASCII like the `…` suffix emitted as UTF-8), cheap to pipe into `jq` from a Director loop:
+`--json` is cafleet's single output-control flag. Text output (the default) is the compact human/pane form — message bodies truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…`. `--json` switches to compact single-line JSON (no whitespace; non-ASCII emitted as UTF-8) and is always the **complete, untruncated machine form** — full envelopes, full bodies — cheap to pipe into `jq` from a Director loop:
 
 ```bash
-cafleet message poll --fleet-id <fleet-id> --member-id <m> --json
-cafleet message poll --fleet-id <fleet-id> --member-id <m> --full --json
+cafleet message poll <my-member-id> --json
 ```
+
+The detailed member view (`kind`, `skills`, the placement sub-dict) is likewise `--json`-only — text `member show` is the compact one-line row. Per-surface shapes: [`cli-options.md`](../../../docs/docs/spec/cli-options.md#output-shapes).
 
 ### `CAFLEET_MAX_TEXT_LEN`
 
-Environment variable controlling body truncation in the rendered envelope; default `200` codepoints, suffix the single codepoint `…` (U+2026). Separate hard-coded caps apply to `member.description` (`60`) and metadata strings (`80`); `--full` bypasses all three. See [`cli-options.md`](../../../docs/docs/spec/cli-options.md#message-body-truncation).
+Environment variable controlling body truncation in text-mode rendered envelopes and inline previews; default `200` codepoints, suffix the single codepoint `…` (U+2026). `--json` output is never truncated. See [`cli-options.md`](../../../docs/docs/spec/cli-options.md#message-body-truncation).
 
 ## Coding-agent backends
 
@@ -44,10 +37,10 @@ Three backends — `claude`, `codex`, `opencode` — chosen per member at `membe
 
 ## Show (Get Message)
 
-Fetch one message by id. `--message-id` required; `--full` for the untruncated envelope.
+Fetch one message by id — the positional `MESSAGE_ID` is the only required argument (the fleet is derived from the message row); `--json` for the untruncated envelope.
 
 ```bash
-cafleet message show --fleet-id <fleet-id> --member-id <my-member-id> --message-id <message-id>
+cafleet message show <message-id>
 ```
 
 ## Broadcast — `cafleet message broadcast`
@@ -55,15 +48,15 @@ cafleet message show --fleet-id <fleet-id> --member-id <my-member-id> --message-
 Send a message to every active recipient in the fleet (except the sender). Returns a single `broadcast_summary` envelope to the caller.
 
 ```bash
-cafleet message broadcast --fleet-id <fleet-id> --from-member-id <my-member-id> \
-  --text "Build failed on main branch"
+cafleet message broadcast --from-member-id <my-member-id> \
+  "Build failed on main branch"
 ```
 
-| Flag | Required | Notes |
+| Argument | Required | Notes |
 |---|---|---|
-| `--text <body>` | exactly one of `--text` / `--text-file` | Inline message body fanned out to every active recipient (except the sender). |
-| `--text-file <path>` | exactly one of `--text` / `--text-file` | Same body read from a UTF-8 file (or `-` for stdin); use it for long or multi-line bodies that would hit the shell's `ARG_MAX`. |
-| `--full` | no | Renders the single `broadcast_summary` message in full; never adds per-recipient rows or a `recipient_ids` list. See § *Output flags* above. |
+| `--from-member-id <int>` | yes | The broadcaster; the fleet is derived from the sender row. |
+| positional `TEXT` | exactly one of `TEXT` / `--file` | Inline message body fanned out to every active recipient (except the sender). |
+| `--file <path>` | exactly one of `TEXT` / `--file` | Same body read from a UTF-8 file (or `-` for stdin); use it for long or multi-line bodies that would hit the shell's `ARG_MAX`. |
 
 The broker writes one delivery row per recipient (each visible via that recipient's `cafleet message poll`) plus one `broadcast_summary` row addressed back to the broadcaster, and returns only that summary message plus two top-level fields: `recipients` (the real recipient count `N`) and `delivered` (how many recipient panes the inline-preview keystroke reached — see [`reference/recovery.md`](recovery.md) for the miss-handling chain). The two diverge when any preview fails to land. Default echo is one line:
 
@@ -74,59 +67,59 @@ broadcast id=<id> recipients=<N> delivered=<k>
 Recipients ack their own delivery row exactly like a unicast message; the summary row is a sender-side artifact and is not acked by recipients:
 
 ```bash
-cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --message-id <message-id>
+cafleet message ack <message-id>
 ```
 
 For the row schema, the `"Broadcast sent to N recipients"` summary string, and `origin_message_id` grouping/threading, see [`docs/docs/spec/data-model.md`](../../../docs/docs/spec/data-model.md#broadcast-grouping) and [`docs/docs/spec/message-envelope.md`](../../../docs/docs/spec/message-envelope.md).
 
 ## List Members
 
-`member list` returns every active registry entry of the fleet (root Director, ordinary members, placementless rows); `member show --member-id <target-member-id>` fetches one. Both are registry reads — no tmux required.
+`member list` returns every active registry entry of the fleet (root Director, ordinary members, placementless rows); `member show` fetches one by its positional `MEMBER_ID`. Both are registry reads — no tmux required.
 
 ```bash
-cafleet member list --fleet-id <fleet-id>
-cafleet member show --fleet-id <fleet-id> --member-id <target-member-id>
+cafleet member list <fleet-id>
+cafleet member show <target-member-id>
 ```
 
-`member list` renders the `N members:` table with `member_id`, `name`, `kind` (`director` / `member`), `backend`, `pane_id`, and `idle` columns — `-` placement cells for placementless rows, `(pending)` for a placed row with no pane yet, and `idle` humanized (`Ns`/`Nm`/`Nh`, `-` when no message activity); `--json` adds the underlying `last_sent` / `last_recv` / `last_ack` timestamps per row. `member show` default output is the one-line row `<id> <name> <status>`; `--full` gives the labeled block (`description` truncated to 60 codepoints, `kind`, `skills`, placement sub-block) — text mode only. See § *Output flags* above.
+`member list` renders the `N members:` table with `member_id`, `name`, `kind` (`director` / `member`), `backend`, `pane_id`, and `idle` columns — `-` placement cells for placementless rows, `(pending)` for a placed row with no pane yet, and `idle` humanized (`Ns`/`Nm`/`Nh`, `-` when no message activity); `--json` adds the underlying `last_sent` / `last_recv` / `last_ack` timestamps per row. `member show` text output is the one-line row `<id> <name> <status>`; the detailed view (`kind`, `skills`, placement sub-dict) is `--json`. See § *Output switch* above.
 
 ## Doctor
 
-Print the resolved multiplexer backend and the calling pane's session/window/pane identifiers for diagnosing placement without raw multiplexer commands. Does NOT require `--fleet-id`; requires a supported multiplexer to be detected (tmux or herdr).
+Print the resolved multiplexer backend and the calling pane's session/window/pane identifiers for diagnosing placement without raw multiplexer commands. Takes no id; requires a supported multiplexer to be detected (tmux or herdr).
 
 ```bash
 cafleet doctor
 cafleet doctor --json
 ```
 
-## Monitor group
+## Monitor
 
-`cafleet monitor` is exactly the monitoring toolkit — the loop and its read
-primitive:
+`cafleet monitor` is the supervision scheduler — a single command with a positional fleet id:
 
 ```bash
-cafleet monitor start --fleet-id <fleet-id>          # the scheduler loop (launched by the Director as a background task in its own pane)
-cafleet monitor capture --fleet-id <fleet-id> --member-id <target-member-id> --lines 120 --no-ansi --json
+cafleet monitor <fleet-id>          # the scheduler loop (launched by the Director as a background task in its own pane)
 ```
 
-`monitor start` takes `--interval N` (the Director wake interval in seconds; omitted → `CAFLEET_MONITOR_WAKE_INTERVAL`, default `600`; `0` disables the wake) and `--tick N` (scan cadence, default `5`). It prints `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` immediately after claiming the runtime row — the line the Director confirms before its first `member create`. `monitor capture` is the read-only pane capture (default `--lines 20`; `--json` adds `captured_at` and `content_sha256`) used by the Director's pre-ping capture gate; a pending-placement target is a hard error.
+It takes `--interval N` (the Director wake interval in seconds; omitted → `CAFLEET_MONITOR_WAKE_INTERVAL`, default `600`; `0` disables the wake) and `--tick N` (scan cadence, default `5`). It prints `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` immediately after claiming the runtime row — the line the Director confirms before its first `member create`.
 
-`cafleet member ping` stays under `member` (a Director write primitive). Against a pending-placement member it skips the keystroke and exits 0 — the member polls its inbox on spawn — with the stable `skipped` JSON key on both success paths.
+The read-only pane capture is `cafleet member capture <target-member-id>` (default `--lines 20`; `--json` adds `captured_at` and `content_sha256`; `--ansi` preserves escapes), used by the Director's pre-ping capture gate; a pending-placement target is a hard error.
+
+`cafleet member ping` is a Director write primitive. Against a pending-placement member it skips the keystroke and exits 0 — the member polls its inbox on spawn — with the stable `skipped` JSON key on both success paths.
 
 ## Deregister
 
 `cafleet member delete` is the single teardown for any member: it closes the pane when one exists and soft-deletes the registration; a placementless or pending-placement target is a pure registry soft-delete (no tmux required).
 
 ```bash
-cafleet member delete --fleet-id <fleet-id> --member-id <target-member-id>
+cafleet member delete <target-member-id>
 ```
 
-The root Director cannot be deregistered (exit 1 — see [`cli-options.md`](../../../docs/docs/spec/cli-options.md#error-messages)). Use `cafleet fleet delete --fleet-id <fleet-id>` for fleet teardown.
+The root Director cannot be deregistered (exit 1 — see [`cli-options.md`](../../../docs/docs/spec/cli-options.md#error-messages)). Use `cafleet fleet delete <fleet-id>` for fleet teardown.
 
 ## Fleet Delete
 
 ```bash
-cafleet fleet delete --fleet-id <fleet-id>
+cafleet fleet delete <fleet-id>
 # → Deleted fleet <fleet-id>. Deregistered N members.
 ```
 
@@ -152,4 +145,4 @@ A `messages` row moves through two states: **input_required** (delivered, awaiti
 
 ## Error Handling
 
-Errors print to stderr and exit non-zero; `cafleet <cmd> … --json` emits them machine-parseably. The most common: missing `--fleet-id` (`Error: --fleet-id <int> is required for this subcommand. Create a fleet with 'cafleet fleet create' and pass its id.`, exit 1), missing `--member-id` (`Error: Missing option '--member-id'.`, exit 2), and `member *` commands outside a supported multiplexer session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/docs/spec/cli-options.md#error-messages).
+Errors print to stderr and exit non-zero; `cafleet <cmd> … --json` emits them machine-parseably. The most common: a missing positional subject id (the parser's missing-required-argument error, exit 2), an unknown member on `message poll` (`Error: Member <member-id> not found`, exit 1), and `member *` pane commands outside a supported multiplexer session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/docs/spec/cli-options.md#error-messages).
