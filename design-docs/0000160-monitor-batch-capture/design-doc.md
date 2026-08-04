@@ -1,7 +1,7 @@
 # Batch Capture — `cafleet monitor scan`
 
 **Status**: Approved
-**Progress**: 3/12 tasks complete
+**Progress**: 5/12 tasks complete
 **Last Updated**: 2026-08-04
 
 ## Overview
@@ -148,8 +148,8 @@ Loop cadence and flags, the `monitor_runtime` schema and wake ledger, `member ca
 
 ### Step 2: SPEC.md
 
-- [ ] Update the CLI surface (§6.3): the `monitor` two-form spec, scan flags, roster rules, text/JSON output shapes with pinned key order, exit codes, and the capture-never-stored note <!-- completed: -->
-- [ ] Update the wake-payload text everywhere SPEC pins it (`build_wake_payload`, the §6.5/§6.6 payload grammar and examples) <!-- completed: -->
+- [x] Update the CLI surface (§6.3): the `monitor` two-form spec, scan flags, roster rules, text/JSON output shapes with pinned key order, exit codes, and the capture-never-stored note <!-- completed: 2026-08-04T12:30 -->
+- [x] Update the wake-payload text everywhere SPEC pins it (`build_wake_payload`, the §6.5/§6.6 payload grammar and examples) <!-- completed: 2026-08-04T12:30 -->
 
 ### Step 3: Skills
 

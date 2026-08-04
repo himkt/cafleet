@@ -774,7 +774,8 @@ HTTP status). The exit-code policy is
 ### 6.3 CLI
 
 **Scope:** the entire `cafleet` command tree (16 subcommands across 3 groups +
-4 top-level commands — §1, §10), the shared argument rules, and the `member
+4 top-level commands, `monitor` two-form — §1, §10), the shared argument
+rules, and the `member
 create` spawn orchestration + rollback ladder. Orchestration glue only — it
 wires broker/multiplexer/output/coding-agent. The command/option checklist is
 §10; this section gives the per-command semantics. Exit codes are §7.2;
@@ -805,8 +806,9 @@ The id a command acts on — its **subject** — is a **required positional
 argument**; ids that describe a relationship rather than the subject stay as
 flags. The positional subjects:
 
-- `FLEET_ID` — on `fleet show`, `fleet delete`, `member list`, and `monitor`
-  (the fleet is the subject of the listing / the supervision loop).
+- `FLEET_ID` — on `fleet show`, `fleet delete`, `member list`, and both
+  `monitor` forms (the fleet is the subject of the listing / the supervision
+  loop / the batch scan).
 - `MEMBER_ID` — on `member show` / `delete` / `prompt` / `ping` / `capture`
   (the target) and `message poll` (the requester).
 - `MESSAGE_ID` — on `message ack` and `message show`.
@@ -841,7 +843,8 @@ error (exit 2).
   per-subcommand flag, canonically written **trailing**, after all other
   arguments. On every `message` subcommand; `member create` / `delete` /
   `show` / `list` / `prompt` / `ping` / `capture`; `fleet create` / `list` /
-  `show` / `delete`; and `doctor`. Emits compact single-line JSON instead of
+  `show` / `delete`; `monitor scan`; and `doctor`. Emits compact single-line
+  JSON instead of
   text. JSON is always the **complete, untruncated machine form** — full
   envelopes, full message bodies; text output is always the human/pane form,
   truncated per §6.4. `--json` is the **only** output switch in the tree.
@@ -1228,8 +1231,16 @@ stored.
 
 #### `monitor`
 
-A single top-level command — `cafleet monitor FLEET_ID [--tick N]
-[--interval N]` — with the positional `FLEET_ID` subject. A
+A two-form top-level command: the bare positional form runs the supervision
+loop; the `scan` subcommand is a one-shot batch capture. The loop positionals
+and the subcommand are mutually exclusive (args-conflict-with-subcommands
+parsing): `cafleet monitor <FLEET_ID>` parses the loop form whenever no
+subcommand is given, and `cafleet monitor scan <FLEET_ID>` dispatches the
+subcommand (`FLEET_ID` is an integer and `scan` is not, so the two forms
+cannot collide).
+
+**The loop form** — `cafleet monitor FLEET_ID [--tick N] [--interval N]` —
+with the positional `FLEET_ID` subject. A
 `_require_live_fleet` guard fetches the fleet; missing or soft-deleted
 → application error `fleet <fleet_id> not found`.
 `--tick` (integer ≥1, default 5, shown in help) and `--interval`
@@ -1242,6 +1253,68 @@ after `cafleet fleet create` and before the first `cafleet member create`.
 Immediately after the successful runtime claim, before the first tick, the
 loop prints the startup line the Director confirms before spawning any
 member: `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)`.
+
+##### `monitor scan`
+
+`cafleet monitor scan FLEET_ID [--lines N] [--ansi] [--json]` — capture the
+Director's pane plus every active member's pane once, print, exit. No loop
+runs, no `monitor_runtime` row is claimed, and the command performs no DB
+writes; capture content is never stored in SQLite. Options: `--lines`
+(integer ≥1, default **20**, shown in help — trailing lines captured per
+pane), `--ansi` (boolean, default `false` — preserve ANSI escapes in every
+captured content; stripping is the default, as in `member capture`), plus the
+shared `--json`.
+
+Guards, in order (the same as the loop form): require a live fleet (missing
+or soft-deleted → application error `fleet <fleet_id> not found`), then
+resolve the multiplexer (`ensure_available` failure → exit 1).
+
+**Roster.** The Director's row first, then every other active member owning a
+placement row, ascending by `member_id`. A member with no placement row (not
+spawned via `member create`) is excluded, mirroring the wake roster's join; a
+placement row with a `NULL` pane (pending placement) stays in the roster as
+an annotated entry. A fleet with no members scans the Director's pane only.
+
+**Per-entry capture**, in roster order: a `NULL` pane → annotated entry
+`pane not available (pending placement)`; a `capture_pane` error (dead pane,
+backend failure — including the Director's own pane) → annotated entry
+`capture failed: <error>`; success → content (ANSI-stripped unless `--ansi`),
+`captured_at` stamped from local UTC at that entry's read boundary, and
+`content_sha256 = sha256(content.encode("utf-8"))` over the exact emitted
+content (mode-exact, as in `member capture`). The scan always completes: an
+annotated entry never aborts the remaining captures, and a scan whose every
+entry is annotated still exits 0.
+
+**Text mode** — one section per roster entry, separated by one blank line.
+`<name>` is the raw DB value (stdout is not a keystroke path, so no
+sanitization). `kind` is `director` or `member`:
+
+```
+=== <member-id> (<name>; kind=<kind>; coding_agent=<coding_agent>; pane=<pane-id>; captured_at=<ts>) ===
+<content>
+```
+
+An annotated entry drops `captured_at` from the header and carries the
+annotation as its body; the pane token is `—` when no pane exists, and a
+failed capture keeps its real pane id:
+
+```
+=== <member-id> (<name>; kind=<kind>; coding_agent=<coding_agent>; pane=—) ===
+pane not available (pending placement)
+```
+
+**JSON mode** — a top-level array, same order, one object per entry mirroring
+`member capture`'s keys plus `name` / `kind` / `coding_agent` / `error`, in
+this pinned key order: `member_id`, `name`, `kind`, `coding_agent`,
+`pane_id`, `lines`, `content`, `captured_at`, `content_sha256`, `error`. On a
+successful entry `error` is `null`. On an annotated entry `content`,
+`captured_at`, and `content_sha256` are `null`; `error` carries the exact
+annotation string from text mode; `pane_id` is `null` for a pending placement
+and the real pane id for a failed capture. `lines` always echoes the
+requested depth.
+
+Exit codes: `0` completed scan (annotated entries included), `1` unknown or
+soft-deleted fleet or multiplexer unreachable, `2` usage errors.
 
 #### `server`
 
@@ -1331,8 +1404,8 @@ An install failure aborts the loop; rows recorded before the failure remain.
 
 Every fleet-scoped surface — the `fleet`, `member`, and `message` groups (at
 the top of the group callback, before any subcommand body runs) and the
-`monitor` command (before its command body) — validates the recorded assets
-installs:
+`monitor` command (both forms, before the command body) — validates the
+recorded assets installs:
 
 1. If the DB file, the `asset_installs` table, or all rows are missing, exit 1
    with:
@@ -1658,12 +1731,15 @@ Director's `MultiplexerContext` and passes it directly.
   else:
 
   ```
-  [cafleet] tick: fleet <fleet_id> — health-check your <N> members: <entries>. Poll your inbox, ACK, dispatch. Resume your work if something was still running.
+  [cafleet] tick: fleet <fleet_id> — health-check your <N> members: <entries>. Scan panes with 'cafleet monitor scan <fleet_id>', poll your inbox, ACK, dispatch. Resume your work if something was still running.
   ```
 
   `N == 1` uses the singular noun (`health-check your 1 member: …`); `N == 0`
   drops the `<entries>` segment and the clause reads `no members to
-  health-check.`. The wake fires whenever the interval has elapsed and the
+  health-check.`, followed by the same scan-poll and resume sentences — the
+  scan clause is unconditional. The scan instruction uses single quotes (no
+  backtick, keeping the payload free of shell-sensitive characters). The wake
+  fires whenever the interval has elapsed and the
   Director's pane is alive — **including when the fleet has no other
   members**. The wake keystroke is literal-then-Enter with `timeout=5`s and
   **Esc-first=YES** (a wake landing on a pending permission prompt clears it
@@ -2698,7 +2774,8 @@ connection is closed when the command finishes (success or failure).
 ## 10. CLI command checklist
 
 The full command surface — **16 subcommands across 3 groups + 4 top-level
-commands**.
+commands**, one of which (`monitor`) is two-form: the bare loop plus its
+`scan` subcommand.
 Each must be reproduced with identical positional/option names, types,
 defaults, required-ness, output shapes, and exit codes. Per-command
 argument semantics are in §6.3.
@@ -2712,7 +2789,8 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 - [ ] `cafleet setup` (`--skip AGENT` repeatable choice; no positional arguments; runs the db half then the assets half for the fixed target list claude/codex/opencode minus the skipped agents)
 - [ ] `cafleet doctor` (`--json`; emits tmux block + assets-install report)
 - [ ] `cafleet server` (`--host`=settings.broker_host, `--port`=settings.broker_port)
-- [ ] `cafleet monitor FLEET_ID` (`--tick`≥1=5, `--interval`≥0=`CAFLEET_MONITOR_WAKE_INTERVAL` (default 600); prints the startup line after a successful runtime claim)
+- [ ] `cafleet monitor FLEET_ID` (the loop form; `--tick`≥1=5, `--interval`≥0=`CAFLEET_MONITOR_WAKE_INTERVAL` (default 600); prints the startup line after a successful runtime claim)
+- [ ] `cafleet monitor scan FLEET_ID` (`--lines`≥1=**20**, `--ansi`, `--json`; one-shot batch capture — Director first, then members ascending; annotated entries still exit 0)
 
 **`fleet`:**
 
