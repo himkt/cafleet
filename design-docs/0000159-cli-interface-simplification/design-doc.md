@@ -1,6 +1,6 @@
 # CLI Interface Simplification
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 23/23 tasks complete
 **Last Updated**: 2026-08-04
 
@@ -186,3 +186,4 @@ Documentation first, then skills, then code, per the project's documentation-fir
 | 2026-08-04 | Review round 1: enumerated the send/broadcast error-string set, specified the `--full` verbose-block fate, dropped the live-fleet guard on the moved `member capture`, corrected the preset surface to no-content-change, scoped the WebUI/HTTP API surface, widened the SPEC sweep |
 | 2026-08-04 | User feedback: clarified that `--skip` retains its per-agent assets-skip purpose; `--schema-only` skips the assets half entirely rather than superseding `--skip` |
 | 2026-08-04 | User feedback: dropped `--schema-only` — `setup` is untouched by this design; the documented schema-only invocation remains the triple-skip form |
+| 2026-08-04 | **Status: Complete.** All 23 tasks and 7 success criteria done: docs-first Steps 1–4, TDD Steps 5–7 (one test-defect arbitration on the poll-trigger payload; dead `Permission` variant deleted), Phase D E2E 75/75 against the release binary, Reviewer approved on round 1, all four mise gates green. PR #270. |
