@@ -10,12 +10,12 @@ Add `cafleet monitor scan`, a one-shot command that captures the Director's own 
 
 ## Success Criteria
 
-- [ ] `cafleet monitor scan <FLEET_ID>` prints one section per pane — Director first, then members ascending by `member_id` — in a single invocation; `--json` emits the pinned array shape.
-- [ ] A pending placement or a failed pane capture renders an annotated entry and the scan still completes with exit 0.
-- [ ] The loop form `cafleet monitor <FLEET_ID> [--tick N] [--interval N]` parses and behaves exactly as before.
-- [ ] The wake payload carries the scan instruction, byte-identical on tmux and herdr.
-- [ ] The supervision protocol documents one fresh scan per facilitation turn as satisfying the pre-ping capture gate for all members; `cafleet member capture` remains the targeted deeper-investigation primitive.
-- [ ] `docs/`, `SPEC.md`, and the affected `skills/` pages are updated with zero drift; `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
+- [x] `cafleet monitor scan <FLEET_ID>` prints one section per pane — Director first, then members ascending by `member_id` — in a single invocation; `--json` emits the pinned array shape.
+- [x] A pending placement or a failed pane capture renders an annotated entry and the scan still completes with exit 0.
+- [x] The loop form `cafleet monitor <FLEET_ID> [--tick N] [--interval N]` parses and behaves exactly as before.
+- [x] The wake payload carries the scan instruction, byte-identical on tmux and herdr.
+- [x] The supervision protocol documents one fresh scan per facilitation turn as satisfying the pre-ping capture gate for all members; `cafleet member capture` remains the targeted deeper-investigation primitive.
+- [x] `docs/`, `SPEC.md`, and the affected `skills/` pages are updated with zero drift; `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //cafleet:typecheck` pass.
 
 ---
 
