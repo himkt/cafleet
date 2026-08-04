@@ -1,6 +1,6 @@
 # Batch Capture — `cafleet monitor scan`
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 12/12 tasks complete
 **Last Updated**: 2026-08-04
 
@@ -178,3 +178,4 @@ Loop cadence and flags, the `monitor_runtime` schema and wake ledger, `member ca
 |------|---------|
 | 2026-08-04 | Initial draft |
 | 2026-08-04 | Review round 1: pinned the `Option<i64>` clap field change, the normative wake-payload block (scan clause folded into the poll sentence), the 20-line gate depth everywhere with the new Stage-2 note text, the `Bash(cafleet monitor *)` permission-coverage outcome, and the `e2e.rs` payload assertion; dropped the unresolvable decision letter codes |
+| 2026-08-04 | Implementation complete: 12/12 tasks, Phase D E2E 6/6 criteria, Reviewer approved round 1, PR #272 opened; status → Complete |
