@@ -177,7 +177,6 @@ impl Cli {
             name,
             "--description",
             "test member",
-            "--text",
             "wait for the Director",
         ]);
         assert!(

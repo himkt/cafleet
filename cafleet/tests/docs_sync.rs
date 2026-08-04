@@ -1,8 +1,8 @@
 //! Docs-sync contracts: the repository documentation is the public contract
 //! for the Director-tick supervision protocol — the fleet-level `[cafleet]
 //! tick:` wake into the Director's pane, the resume clause on both injected
-//! triggers, the `member ping` pending-placement skip, and the `monitor`
-//! group surface.
+//! triggers, the `member ping` pending-placement skip, the `member capture`
+//! pane read, and the flattened `monitor` command.
 
 use std::path::{Path, PathBuf};
 
@@ -77,6 +77,19 @@ const REMOVED_VOCABULARY: [&str; 17] = [
     "stall-check",
 ];
 
+// The pre-simplification CLI surface: command forms and flags deleted by the
+// CLI interface simplification must not survive on any contract page.
+const OLD_CLI_SURFACE: [&str; 8] = [
+    "monitor capture",
+    "monitor start",
+    "--full",
+    "--quiet",
+    "--text-file",
+    "--no-ansi",
+    "--member-id",
+    "--message-id",
+];
+
 #[test]
 fn monitoring_concept_covers_the_director_tick_and_capture_taxonomy() {
     assert_terms(
@@ -97,17 +110,19 @@ fn monitoring_concept_covers_the_director_tick_and_capture_taxonomy() {
             "member ping",
         ],
     );
-    assert_absent("docs/docs/concepts/monitoring.md", &REMOVED_VOCABULARY);
+    let mut absent = OLD_CLI_SURFACE.to_vec();
+    absent.extend(REMOVED_VOCABULARY);
+    assert_absent("docs/docs/concepts/monitoring.md", &absent);
 }
 
 #[test]
-fn spec_defines_the_ping_skip_and_monitor_group_contract() {
+fn spec_defines_the_ping_skip_and_flattened_monitor_contract() {
     assert_terms(
         "SPEC.md",
         &[
             "skipped",
             "pending placement",
-            "monitor capture",
+            "member capture",
             "monitor loop started",
             "[cafleet] tick:",
             "health-check",
@@ -116,7 +131,9 @@ fn spec_defines_the_ping_skip_and_monitor_group_contract() {
             "then resume your work",
         ],
     );
-    assert_absent("SPEC.md", &REMOVED_VOCABULARY);
+    let mut absent = OLD_CLI_SURFACE.to_vec();
+    absent.extend(REMOVED_VOCABULARY);
+    assert_absent("SPEC.md", &absent);
 }
 
 #[test]
@@ -135,7 +152,7 @@ fn cli_options_defines_the_ping_skip_and_moved_capture() {
     assert_terms(
         "docs/docs/spec/cli-options.md",
         &[
-            "monitor capture",
+            "member capture",
             "ping skipped",
             "skipped",
             "pending placement",
@@ -145,7 +162,8 @@ fn cli_options_defines_the_ping_skip_and_moved_capture() {
             "then resume your work",
         ],
     );
-    let mut absent = vec!["member capture", "monitor status", "monitor config"];
+    let mut absent = vec!["monitor status", "monitor config"];
+    absent.extend(OLD_CLI_SURFACE);
     absent.extend(REMOVED_VOCABULARY);
     assert_absent("docs/docs/spec/cli-options.md", &absent);
 }
@@ -158,13 +176,12 @@ fn multiplexer_backends_pins_the_pure_trigger_payload() {
             "[cafleet] tick:",
             "coding_agent=",
             "Resume your work if something was still running",
-            "cafleet message poll --fleet-id <fleet-id> --member-id <member-id> — then",
+            "cafleet message poll <member-id> — then",
         ],
     );
-    assert_absent(
-        "docs/docs/spec/multiplexer-backends.md",
-        &REMOVED_VOCABULARY,
-    );
+    let mut absent = OLD_CLI_SURFACE.to_vec();
+    absent.extend(REMOVED_VOCABULARY);
+    assert_absent("docs/docs/spec/multiplexer-backends.md", &absent);
 }
 
 #[test]
@@ -200,13 +217,14 @@ fn the_supervision_contract_covers_quiet_members_and_plain_messages() {
             "quiet",
             "finished",
             "pre-ping",
-            "monitor capture",
-            "monitor start",
+            "member capture",
+            "cafleet monitor",
             "monitor loop started",
             "health-check",
         ],
     );
     let mut absent = vec!["pre-nudge"];
+    absent.extend(OLD_CLI_SURFACE);
     absent.extend(REMOVED_VOCABULARY);
     assert_absent("skills/cafleet/reference/supervision.md", &absent);
 }
@@ -219,11 +237,12 @@ fn the_director_and_member_roles_keep_the_ping_protocol() {
             "## Member Ping (manual inbox-poll)",
             "member ping",
             "pre-ping",
-            "monitor capture",
+            "member capture",
             "then resume your work",
         ],
     );
     let mut absent = vec!["(manual inbox-poll nudge)", "pre-nudge"];
+    absent.extend(OLD_CLI_SURFACE);
     absent.extend(REMOVED_VOCABULARY);
     assert_absent("skills/cafleet/reference/director.md", &absent);
 
@@ -231,7 +250,9 @@ fn the_director_and_member_roles_keep_the_ping_protocol() {
         "skills/cafleet/roles/member.md",
         &["member ping", "member prompt", "Director"],
     );
-    assert_absent("skills/cafleet/roles/member.md", &REMOVED_VOCABULARY);
+    let mut absent = OLD_CLI_SURFACE.to_vec();
+    absent.extend(REMOVED_VOCABULARY);
+    assert_absent("skills/cafleet/roles/member.md", &absent);
 }
 
 #[test]
@@ -239,14 +260,16 @@ fn the_cafleet_skill_and_bash_rule_document_the_director_ping() {
     assert_terms(
         "skills/cafleet/SKILL.md",
         &[
-            "monitor start",
+            "cafleet monitor",
             "monitor loop started",
             "member ping",
             "message send",
             "health-check",
         ],
     );
-    assert_absent("skills/cafleet/SKILL.md", &REMOVED_VOCABULARY);
+    let mut skill_absent = OLD_CLI_SURFACE.to_vec();
+    skill_absent.extend(REMOVED_VOCABULARY);
+    assert_absent("skills/cafleet/SKILL.md", &skill_absent);
 
     assert_terms(
         ".claude/rules/bash-tool.md",
@@ -259,6 +282,7 @@ fn the_cafleet_skill_and_bash_rule_document_the_director_ping() {
         ],
     );
     let mut absent = vec!["action = ping"];
+    absent.extend(OLD_CLI_SURFACE);
     absent.extend(REMOVED_VOCABULARY);
     assert_absent(".claude/rules/bash-tool.md", &absent);
 }
