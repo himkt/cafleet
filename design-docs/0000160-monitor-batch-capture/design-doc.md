@@ -1,7 +1,7 @@
 # Batch Capture — `cafleet monitor scan`
 
 **Status**: Approved
-**Progress**: 9/12 tasks complete
+**Progress**: 11/12 tasks complete
 **Last Updated**: 2026-08-04
 
 ## Overview
@@ -163,8 +163,8 @@ Loop cadence and flags, the `monitor_runtime` schema and wake ledger, `member ca
 
 ### Step 5: `cafleet monitor scan` (code)
 
-- [ ] `cafleet/src/cli/monitor.rs`: restructure `MonitorArgs` with `args_conflicts_with_subcommands` + `subcommand_negates_reqs`, turning the loop's `fleet_id` positional into `Option<i64>` (the `Scan` variant carries its own `FLEET_ID` positional; the loop dispatch unwraps); implement the scan handler (live-fleet guard, mux resolution, roster, per-entry capture with annotations, text/JSON emit) <!-- completed: -->
-- [ ] Tests: loop-form parse/behavior regression; scan text sections and ordering (Director first); scan JSON key set and key order; annotated entries (pending placement, failed capture) with exit 0; unknown fleet error <!-- completed: -->
+- [x] `cafleet/src/cli/monitor.rs`: restructure `MonitorArgs` with `args_conflicts_with_subcommands` + `subcommand_negates_reqs`, turning the loop's `fleet_id` positional into `Option<i64>` (the `Scan` variant carries its own `FLEET_ID` positional; the loop dispatch unwraps); implement the scan handler (live-fleet guard, mux resolution, roster, per-entry capture with annotations, text/JSON emit) <!-- completed: 2026-08-04T12:52 -->
+- [x] Tests: loop-form parse/behavior regression; scan text sections and ordering (Director first); scan JSON key set and key order; annotated entries (pending placement, failed capture) with exit 0; unknown fleet error <!-- completed: 2026-08-04T12:52 -->
 
 ### Step 6: Verification
 
