@@ -136,7 +136,8 @@ pub fn build_wake_payload(fleet_id: i64, members: &[Value]) -> Result<String, Mu
         format!("health-check your {} {noun}: {entries}.", members.len())
     };
     Ok(format!(
-        "[cafleet] tick: fleet {fleet_id} — {clause} Poll your inbox, ACK, dispatch. \
+        "[cafleet] tick: fleet {fleet_id} — {clause} Scan panes with \
+         'cafleet monitor scan {fleet_id}', poll your inbox, ACK, dispatch. \
          Resume your work if something was still running."
     ))
 }

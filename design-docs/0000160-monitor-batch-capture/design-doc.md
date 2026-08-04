@@ -1,7 +1,7 @@
 # Batch Capture — `cafleet monitor scan`
 
 **Status**: Approved
-**Progress**: 8/12 tasks complete
+**Progress**: 9/12 tasks complete
 **Last Updated**: 2026-08-04
 
 ## Overview
@@ -159,7 +159,7 @@ Loop cadence and flags, the `monitor_runtime` schema and wake ledger, `member ca
 
 ### Step 4: Wake payload (code)
 
-- [ ] `cafleet/src/multiplexer/mod.rs`: add the scan clause to the poll sentence in `build_wake_payload` (both the roster and `N == 0` forms); update the colocated payload tests and the verbatim payload assertion in `cafleet/tests/e2e.rs` (the tmux/herdr colocated tests compare against `build_wake_payload` output and need no edit) <!-- completed: -->
+- [x] `cafleet/src/multiplexer/mod.rs`: add the scan clause to the poll sentence in `build_wake_payload` (both the roster and `N == 0` forms); update the colocated payload tests and the verbatim payload assertion in `cafleet/tests/e2e.rs` (the tmux/herdr colocated tests compare against `build_wake_payload` output and need no edit) <!-- completed: 2026-08-04T12:39 -->
 
 ### Step 5: `cafleet monitor scan` (code)
 
