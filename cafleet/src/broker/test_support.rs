@@ -2,9 +2,8 @@
 //!
 //! Expected public API pinned by the submodule test suites (all result shapes
 //! are `serde_json::Value` dicts with insertion-order keys; errors are
-//! `crate::error::CafleetError`, which gains `Value(String)` and
-//! `Permission(String)` variants — translated by callers: CLI → exit 1,
-//! WebUI → HTTP status):
+//! `crate::error::CafleetError` `Value(String)` — translated by callers:
+//! CLI → exit 1, WebUI → HTTP status):
 //!
 //! ```text
 //! pub struct NewPlacement { pub backend: String, pub mux_session: String,
@@ -36,19 +35,18 @@
 //!     -> Result<Vec<Value>>
 //! // messaging
 //! send_message(conn: &mut Connection, notifier: &dyn InlinePreviewSender,
-//!     max_text_len: usize, fleet_id: i64, member_id: i64, to: &str, text: &str)
+//!     max_text_len: usize, from_member_id: i64, to: &str, text: &str)
 //!     -> Result<Value>  // {message, notification_sent}
 //! broadcast_message(conn: &mut Connection, notifier: &dyn InlinePreviewSender,
-//!     max_text_len: usize, fleet_id: i64, member_id: i64, text: &str)
+//!     max_text_len: usize, from_member_id: i64, text: &str)
 //!     -> Result<Vec<Value>>  // [{message, recipients, delivered}]
 //! poll_messages(conn: &Connection, member_id: i64) -> Result<Vec<Value>>
-//! ack_message(conn: &mut Connection, member_id: i64, message_id: i64)
-//!     -> Result<Value>  // {message}
+//! ack_message(conn: &mut Connection, message_id: i64) -> Result<Value>  // {message}
 //! // queries
 //! list_inbox(conn: &Connection, member_id: i64) -> Result<Vec<Value>>
 //! list_sent(conn: &Connection, member_id: i64) -> Result<Vec<Value>>
 //! list_timeline(conn: &Connection, fleet_id: i64, limit: usize) -> Result<Vec<Value>>
-//! get_message(conn: &Connection, fleet_id: i64, message_id: i64) -> Result<Value> // {message}
+//! get_message(conn: &Connection, message_id: i64) -> Result<Value> // {message}
 //! // monitor
 //! record_monitor_wake(conn: &mut Connection, fleet_id: i64, when: &str) -> Result<()>
 //! list_fleet_wake_targets(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>>
@@ -172,19 +170,9 @@ impl InlinePreviewSender for FakeNotifier {
 pub fn send(
     conn: &mut Connection,
     notifier: &FakeNotifier,
-    fleet_id: i64,
     from: i64,
     to: i64,
     text: &str,
 ) -> Value {
-    broker::send_message(
-        conn,
-        notifier,
-        MAX_TEXT_LEN,
-        fleet_id,
-        from,
-        &to.to_string(),
-        text,
-    )
-    .unwrap()
+    broker::send_message(conn, notifier, MAX_TEXT_LEN, from, &to.to_string(), text).unwrap()
 }

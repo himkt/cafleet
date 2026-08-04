@@ -881,7 +881,7 @@ mod tests {
     fn send_poll_trigger_is_esc_then_run() {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        assert!(mux.send_poll_trigger("w1:p2", 3, 14));
+        assert!(mux.send_poll_trigger("w1:p2", 14));
         assert_eq!(
             runner.events(),
             vec![
@@ -907,7 +907,7 @@ mod tests {
     fn send_poll_trigger_is_best_effort() {
         let runner = FakeRunner::without_binaries();
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        assert!(!mux.send_poll_trigger("w1:p2", 3, 14));
+        assert!(!mux.send_poll_trigger("w1:p2", 14));
         assert!(runner.events().is_empty());
 
         let runner = FakeRunner::with_binary("herdr");
@@ -915,7 +915,7 @@ mod tests {
             stderr: "boom".to_string(),
         }));
         let mux = HerdrMultiplexer::new(runner, herdr_env());
-        assert!(!mux.send_poll_trigger("w1:p2", 3, 14));
+        assert!(!mux.send_poll_trigger("w1:p2", 14));
     }
 
     #[test]

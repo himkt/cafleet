@@ -182,7 +182,6 @@ async fn the_roster_wraps_members_with_the_two_value_kind_union() {
         &mut conn,
         &NullNotifier,
         200,
-        fleet_id,
         director_id,
         &holder_id.to_string(),
         "audit trail",
@@ -248,12 +247,11 @@ async fn the_roster_wraps_members_with_the_two_value_kind_union() {
 async fn inbox_and_sent_carry_the_formatted_message_wire_shape() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
-    let (fleet_id, director_id, member_id, _) = seeded_fleet(&mut conn);
+    let (_, director_id, member_id, _) = seeded_fleet(&mut conn);
     broker::send_message(
         &mut conn,
         &NullNotifier,
         200,
-        fleet_id,
         director_id,
         &member_id.to_string(),
         "hello wire",
@@ -316,13 +314,12 @@ async fn inbox_and_sent_carry_the_formatted_message_wire_shape() {
 async fn the_timeline_is_hard_capped_at_200() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
-    let (fleet_id, director_id, member_id, _) = seeded_fleet(&mut conn);
+    let (_, director_id, member_id, _) = seeded_fleet(&mut conn);
     for i in 0..201 {
         broker::send_message(
             &mut conn,
             &NullNotifier,
             200,
-            fleet_id,
             director_id,
             &member_id.to_string(),
             &format!("message {i}"),
@@ -419,7 +416,6 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
         &mut conn,
         &NullNotifier,
         200,
-        fleet_id,
         director_id,
         &member_id.to_string(),
         "pending work",

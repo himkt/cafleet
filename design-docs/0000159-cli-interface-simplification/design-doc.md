@@ -1,7 +1,7 @@
 # CLI Interface Simplification
 
 **Status**: Approved
-**Progress**: 21/23 tasks complete
+**Progress**: 23/23 tasks complete
 **Last Updated**: 2026-08-04
 
 ## Overview
@@ -172,10 +172,9 @@ Documentation first, then skills, then code, per the project's documentation-fir
 
 ### Step 7: Tests and verification
 
-- [ ] Update the CLI and broker test suites to the new argument shapes and semantics (ack unconditional, poll existence error, cross-fleet send error, JSON-untruncated contract, capture split) <!-- completed: -->
+- [x] Update the CLI and broker test suites to the new argument shapes and semantics (ack unconditional, poll existence error, cross-fleet send error, JSON-untruncated contract, capture split) <!-- completed: 2026-08-04T10:23 -->
 
-COMMENT(programmer): Step 6 landed the design-final broker/output/multiplexer signatures, so the colocated `#[cfg(test)]` suites no longer compile until this step rewrites them (the 70 integration tests all pass; `cargo check` is clean). The affected modules and the new shapes: `broker/messaging.rs` tests + the `broker/test_support.rs` fixture (`send_message(conn, notifier, max_text_len, from_member_id, to, text)`, `broadcast_message(conn, notifier, max_text_len, from_member_id, text)`, `ack_message(conn, message_id)` with the recipient check deleted, sender error `Sender member not found or not active: {from}`, cross-fleet error `members {from} and {to} are not in the same fleet.`, `poll_messages` unknown-member error `Member {member_id} not found`); `broker/queries.rs` tests (`get_message(conn, message_id)` — existence only, no fleet gate); `broker/members.rs` + `broker/monitor.rs` tests (3-arg `ack_message` call sites); `output/render.rs` tests (`truncate_text(value, limit)`, `truncate_message_text(result, limit)`, `render_message(message)` — no `full` args; `render_messages_in_result` is deleted, its test module goes); `output/formatters.rs` tests (`format_message` / `format_member_detail` / `format_fleet_create` / `format_member` take one argument; the verbose layouts are deleted); `multiplexer/tmux.rs` + `multiplexer/herdr.rs` tests and the `multiplexer/test_support.rs` doc comment (`send_poll_trigger(target_pane_id, member_id)` — 2 args); `error.rs` tests (`missing_fleet_id` is deleted).
-- [ ] Run `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` and fix fallout <!-- completed: -->
+- [x] Run `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` and fix fallout <!-- completed: 2026-08-04T10:38 -->
 
 ---
 

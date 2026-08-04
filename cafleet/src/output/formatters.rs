@@ -177,7 +177,7 @@ mod tests {
         #[test]
         fn compact_renders_the_bracket_line_plus_body() {
             assert_eq!(
-                format_message(&unicast(5, 2, 3, "hello"), false),
+                format_message(&unicast(5, 2, 3, "hello")),
                 format!("[5 | from:2 | {TS}]\nhello")
             );
         }
@@ -185,7 +185,7 @@ mod tests {
         #[test]
         fn compact_omits_the_body_line_when_text_is_empty() {
             assert_eq!(
-                format_message(&unicast(5, 2, 3, ""), false),
+                format_message(&unicast(5, 2, 3, "")),
                 format!("[5 | from:2 | {TS}]")
             );
         }
@@ -193,7 +193,7 @@ mod tests {
         #[test]
         fn compact_appends_kind_and_origin_segments() {
             assert_eq!(
-                format_message(&broadcast_summary(6, 2, 2), false),
+                format_message(&broadcast_summary(6, 2, 2)),
                 format!(
                     "[6 | from:2 | {TS} | kind:broadcast_summary | origin:6]\nBroadcast sent to 2 recipients"
                 )
@@ -204,49 +204,9 @@ mod tests {
         fn compact_unwraps_a_message_envelope() {
             let envelope = json!({"message": unicast(5, 2, 3, "hello"), "notification_sent": true});
             assert_eq!(
-                format_message(&envelope, false),
+                format_message(&envelope),
                 format!("[5 | from:2 | {TS}]\nhello")
             );
-        }
-
-        #[test]
-        fn verbose_renders_the_labeled_block() {
-            let expected = [
-                "  id:    5",
-                "  state: input_required",
-                "  from:  2",
-                "  to:    3",
-                "  type:  unicast",
-                "  text:  hello",
-            ]
-            .join("\n");
-            assert_eq!(format_message(&unicast(5, 2, 3, "hello"), true), expected);
-        }
-
-        #[test]
-        fn verbose_omits_to_when_null_and_keeps_type_always() {
-            let expected = [
-                "  id:    6",
-                "  state: completed",
-                "  from:  2",
-                "  type:  broadcast_summary",
-                "  text:  Broadcast sent to 3 recipients",
-            ]
-            .join("\n");
-            assert_eq!(format_message(&broadcast_summary(6, 2, 3), true), expected);
-        }
-
-        #[test]
-        fn verbose_omits_the_text_line_when_text_is_empty() {
-            let expected = [
-                "  id:    5",
-                "  state: input_required",
-                "  from:  2",
-                "  to:    3",
-                "  type:  unicast",
-            ]
-            .join("\n");
-            assert_eq!(format_message(&unicast(5, 2, 3, ""), true), expected);
         }
     }
 
@@ -266,7 +226,7 @@ mod tests {
         fn items_are_joined_with_one_blank_line_and_not_numbered() {
             let items = vec![unicast(1, 2, 3, "a"), unicast(2, 2, 3, "b")];
             assert_eq!(
-                format_indexed_list(&items, |m| format_message(m, false), "empty"),
+                format_indexed_list(&items, format_message, "empty"),
                 format!("[1 | from:2 | {TS}]\na\n\n[2 | from:2 | {TS}]\nb")
             );
         }
@@ -291,51 +251,13 @@ mod tests {
         #[test]
         fn compact_is_id_name_status() {
             assert_eq!(
-                format_member_detail(&member(json!([]), Value::Null), false),
+                format_member_detail(&member(json!([]), Value::Null)),
                 "7 analyst active"
             );
         }
 
         #[test]
-        fn verbose_renders_the_labeled_block_with_dash_skills_and_none_placement() {
-            let expected = [
-                "  member_id:   7",
-                "  name:        analyst",
-                "  description: Does analysis",
-                "  status:      active",
-                "  kind:        member",
-                "  skills:      -",
-                "  placement:   none",
-            ]
-            .join("\n");
-            assert_eq!(
-                format_member_detail(&member(json!([]), Value::Null), true),
-                expected
-            );
-        }
-
-        #[test]
-        fn verbose_renders_skills_as_a_compact_json_array() {
-            let out = format_member_detail(&member(json!(["python", "sql"]), Value::Null), true);
-            assert!(out.contains("  skills:      [\"python\",\"sql\"]"));
-        }
-
-        #[test]
-        fn verbose_truncates_the_description_to_60_codepoints() {
-            let mut m = member(json!([]), Value::Null);
-            m["description"] = json!("d".repeat(61));
-            let out = format_member_detail(&m, true);
-            let expected_line = format!("  description: {}…", "d".repeat(60));
-            assert!(out.contains(&expected_line), "got: {out}");
-            let mut m = member(json!([]), Value::Null);
-            m["description"] = json!("d".repeat(60));
-            let out = format_member_detail(&m, true);
-            assert!(out.contains(&format!("  description: {}", "d".repeat(60))));
-            assert!(!out.contains('…'));
-        }
-
-        #[test]
-        fn verbose_renders_the_placement_block_with_dash_for_null_pane() {
+        fn compact_ignores_skills_and_placement() {
             let placement = json!({
                 "coding_agent": "claude",
                 "mux_session": "main",
@@ -344,17 +266,11 @@ mod tests {
                 "backend": "tmux",
                 "created_at": TS,
             });
-            let expected_tail = [
-                "  placement:",
-                "    backend:    claude",
-                "    session:    main",
-                "    window_id:  @1",
-                "    pane_id:    -",
-                &format!("    created_at: {TS}"),
-            ]
-            .join("\n");
-            let out = format_member_detail(&member(json!([]), placement), true);
-            assert!(out.ends_with(&expected_tail), "got: {out}");
+            assert_eq!(
+                format_member_detail(&member(json!(["python", "sql"]), placement)),
+                "7 analyst active",
+                "the detailed view is --json only"
+            );
         }
     }
 
@@ -381,32 +297,18 @@ mod tests {
         #[test]
         fn compact_is_fleet_id_and_director() {
             assert_eq!(
-                format_fleet_create(&fleet_create_result(json!("alpha")), false),
+                format_fleet_create(&fleet_create_result(json!("alpha"))),
                 "3 director=1"
             );
         }
 
         #[test]
-        fn verbose_renders_the_six_line_block() {
-            let expected = [
-                "3",
-                "1",
-                "name:             alpha",
-                &format!("created_at:       {TS}"),
-                "director_name:    Director",
-                "pane:             main:@1:%1",
-            ]
-            .join("\n");
+        fn compact_ignores_the_name_and_placement() {
             assert_eq!(
-                format_fleet_create(&fleet_create_result(json!("alpha")), true),
-                expected
+                format_fleet_create(&fleet_create_result(Value::Null)),
+                "3 director=1",
+                "the detailed view is --json only"
             );
-        }
-
-        #[test]
-        fn verbose_renders_a_null_name_as_empty() {
-            let out = format_fleet_create(&fleet_create_result(Value::Null), true);
-            assert!(out.contains("name:             \n"), "got: {out}");
         }
     }
 
@@ -428,7 +330,7 @@ mod tests {
         #[test]
         fn compact_is_id_name_backend_pane() {
             assert_eq!(
-                format_member(&member_create_result(json!("%5")), false),
+                format_member(&member_create_result(json!("%5"))),
                 "9 worker backend=claude pane=%5"
             );
         }
@@ -436,25 +338,8 @@ mod tests {
         #[test]
         fn compact_renders_pending_for_a_null_pane() {
             assert_eq!(
-                format_member(&member_create_result(Value::Null), false),
+                format_member(&member_create_result(Value::Null)),
                 "9 worker backend=claude pane=(pending)"
-            );
-        }
-
-        #[test]
-        fn verbose_renders_the_six_line_block() {
-            let expected = [
-                "Member registered and spawned.",
-                "  member_id: 9",
-                "  name:      worker",
-                "  backend:   claude",
-                "  pane_id:   %5",
-                "  window_id: @2",
-            ]
-            .join("\n");
-            assert_eq!(
-                format_member(&member_create_result(json!("%5")), true),
-                expected
             );
         }
     }

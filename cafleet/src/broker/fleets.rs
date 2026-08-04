@@ -323,7 +323,7 @@ mod tests {
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let notifier = FakeNotifier::succeeding();
-        common::send(&mut conn, &notifier, fleet_id, director_id, member_id, "hi");
+        common::send(&mut conn, &notifier, director_id, member_id, "hi");
         let now = crate::time::format_utc(chrono::Utc::now());
         assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, &now).unwrap());
 

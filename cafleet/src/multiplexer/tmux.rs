@@ -484,7 +484,7 @@ mod tests {
     fn send_poll_trigger_keystrokes_esc_payload_enter_with_the_two_delays() {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        assert!(mux.send_poll_trigger("%5", 3, 14));
+        assert!(mux.send_poll_trigger("%5", 14));
         assert_eq!(
             runner.events(),
             vec![
@@ -512,7 +512,7 @@ mod tests {
     fn send_poll_trigger_is_best_effort() {
         let runner = FakeRunner::without_binaries();
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        assert!(!mux.send_poll_trigger("%5", 3, 14), "tmux missing → false");
+        assert!(!mux.send_poll_trigger("%5", 14), "tmux missing → false");
         assert!(runner.events().is_empty(), "no keystroke is attempted");
 
         let runner = FakeRunner::with_binary("tmux");
@@ -520,7 +520,7 @@ mod tests {
             stderr: "boom".to_string(),
         }));
         let mux = TmuxMultiplexer::new(runner, tmux_env());
-        assert!(!mux.send_poll_trigger("%5", 3, 14), "any error → false");
+        assert!(!mux.send_poll_trigger("%5", 14), "any error → false");
     }
 
     #[test]

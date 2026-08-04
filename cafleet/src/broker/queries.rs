@@ -100,27 +100,12 @@ mod tests {
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let notifier = FakeNotifier::succeeding();
 
-        let first = common::send(
-            &mut conn,
-            &notifier,
-            fleet_id,
-            director_id,
-            member_id,
-            "one",
-        );
-        let second = common::send(
-            &mut conn,
-            &notifier,
-            fleet_id,
-            director_id,
-            member_id,
-            "two",
-        );
+        let first = common::send(&mut conn, &notifier, director_id, member_id, "one");
+        let second = common::send(&mut conn, &notifier, director_id, member_id, "two");
         let first_id = first["message"]["message_id"].as_i64().unwrap();
         let second_id = second["message"]["message_id"].as_i64().unwrap();
-        broker::ack_message(&mut conn, member_id, first_id).unwrap();
-        broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, fleet_id, member_id, "x")
-            .unwrap();
+        broker::ack_message(&mut conn, first_id).unwrap();
+        broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, member_id, "x").unwrap();
 
         let inbox = broker::list_inbox(&conn, member_id).unwrap();
         assert_eq!(
@@ -142,15 +127,8 @@ mod tests {
         register(&mut conn, fleet_id, "a", Some("%2"));
         register(&mut conn, fleet_id, "b", Some("%3"));
         let notifier = FakeNotifier::succeeding();
-        broker::broadcast_message(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            fleet_id,
-            director_id,
-            "fanout",
-        )
-        .unwrap();
+        broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "fanout")
+            .unwrap();
 
         let sent = broker::list_sent(&conn, director_id).unwrap();
         assert_eq!(sent.len(), 2, "one delivery per peer; summary excluded");
@@ -168,10 +146,10 @@ mod tests {
         let member_b = register(&mut conn, fleet_b, "stranger", Some("%5"));
         let notifier = FakeNotifier::succeeding();
 
-        common::send(&mut conn, &notifier, fleet_a, director_a, member_a, "one");
-        let second = common::send(&mut conn, &notifier, fleet_a, director_a, member_a, "two");
-        let third = common::send(&mut conn, &notifier, fleet_a, member_a, director_a, "three");
-        let foreign = common::send(&mut conn, &notifier, fleet_b, director_b, member_b, "other");
+        common::send(&mut conn, &notifier, director_a, member_a, "one");
+        let second = common::send(&mut conn, &notifier, director_a, member_a, "two");
+        let third = common::send(&mut conn, &notifier, member_a, director_a, "three");
+        let foreign = common::send(&mut conn, &notifier, director_b, member_b, "other");
 
         let timeline = broker::list_timeline(&conn, fleet_a, 2).unwrap();
         assert_eq!(timeline.len(), 2, "capped at the supplied limit");
@@ -197,33 +175,23 @@ mod tests {
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let notifier = FakeNotifier::succeeding();
-        let sent = common::send(&mut conn, &notifier, fleet_id, director_id, member_id, "hi");
+        let sent = common::send(&mut conn, &notifier, director_id, member_id, "hi");
         let message_id = sent["message"]["message_id"].as_i64().unwrap();
 
-        let result = broker::get_message(&conn, fleet_id, message_id).unwrap();
+        let result = broker::get_message(&conn, message_id).unwrap();
         assert_eq!(result["message"]["message_id"], message_id);
         assert_eq!(result["message"]["text"], "hi");
     }
 
     #[test]
-    fn get_message_hides_missing_and_out_of_fleet_rows_identically() {
+    fn get_message_missing_is_the_existence_error() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet_a, director_a) = create_fleet(&mut conn, "alpha");
-        let member_a = register(&mut conn, fleet_a, "worker", Some("%2"));
-        let (fleet_b, _) = create_fleet(&mut conn, "beta");
-        let notifier = FakeNotifier::succeeding();
-        let sent = common::send(&mut conn, &notifier, fleet_a, director_a, member_a, "hi");
-        let message_id = sent["message"]["message_id"].as_i64().unwrap();
+        let _ = create_fleet(&mut conn, "alpha");
 
-        let err = broker::get_message(&conn, fleet_a, 999).expect_err("missing message");
+        let err = broker::get_message(&conn, 999).expect_err("missing message");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Message 999 not found");
-
-        let err = broker::get_message(&conn, fleet_b, message_id)
-            .expect_err("the out-of-fleet gate hides as not-found");
-        assert!(matches!(err, CafleetError::Value(_)));
-        assert_eq!(err.message(), format!("Message {message_id} not found"));
     }
 
     #[test]
@@ -233,18 +201,12 @@ mod tests {
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         register(&mut conn, fleet_id, "worker", Some("%2"));
         let notifier = FakeNotifier::succeeding();
-        let result = broker::broadcast_message(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            fleet_id,
-            director_id,
-            "fanout",
-        )
-        .unwrap();
+        let result =
+            broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "fanout")
+                .unwrap();
         let summary_id = result[0]["message"]["message_id"].as_i64().unwrap();
 
-        let fetched = broker::get_message(&conn, fleet_id, summary_id).unwrap();
+        let fetched = broker::get_message(&conn, summary_id).unwrap();
         assert_eq!(fetched["message"]["type"], "broadcast_summary");
         assert_eq!(
             fetched["message"]["to_member_id"],

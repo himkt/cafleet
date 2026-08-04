@@ -38,7 +38,7 @@
 //! split_window(&self, reference: &MultiplexerContext, env: &[(String, String)],
 //!     command: &[String]) -> Result<String, MultiplexerError>
 //! send_exit(&self, target_pane_id: &str, ignore_missing: bool) -> Result<(), MultiplexerError>
-//! send_poll_trigger(&self, target_pane_id: &str, fleet_id: i64, member_id: i64) -> bool
+//! send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool
 //! send_wake_trigger(&self, target_pane_id: &str, due_members: &[Value],
 //!     director: &Value) -> Result<bool, MultiplexerError>  // Ok(false) = keystroke lost
 //! send_inline_preview(&self, target_pane_id: &str, message_id: i64, sender_id: i64,
