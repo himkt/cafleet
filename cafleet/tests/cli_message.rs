@@ -229,6 +229,212 @@ fn file_surfaces_are_application_errors() {
 }
 
 #[test]
+fn send_rejects_a_cross_fleet_pair() {
+    let cli = Cli::new();
+    let (_, director_id, _member_id) = fleet_with_member(&cli);
+    let output = cli.run(&[
+        "fleet",
+        "create",
+        "--name",
+        "beta",
+        "--coding-agent",
+        "claude",
+    ]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let stranger_id: i64 = stdout(&output)
+        .trim()
+        .split("director=")
+        .nth(1)
+        .expect("the compact fleet-create line names the director")
+        .parse()
+        .expect("the director id is an integer");
+
+    let output = cli.run(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &stranger_id.to_string(),
+        "hi",
+    ]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains(&format!(
+            "Error: members {director_id} and {stranger_id} are not in the same fleet."
+        )),
+        "got: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn send_and_broadcast_reject_an_unknown_sender() {
+    let cli = Cli::new();
+    let (_, _, member_id) = fleet_with_member(&cli);
+
+    let output = cli.run(&[
+        "message",
+        "send",
+        "--from-member-id",
+        "999",
+        "--to-member-id",
+        &member_id.to_string(),
+        "hi",
+    ]);
+    assert_eq!(code(&output), 1, "the sender check precedes the recipient");
+    assert!(
+        stderr(&output).contains("Error: Sender member not found or not active: 999"),
+        "got: {}",
+        stderr(&output)
+    );
+
+    let output = cli.run(&["message", "broadcast", "--from-member-id", "999", "hi"]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains("Error: Sender member not found or not active: 999"),
+        "got: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn send_rejects_a_missing_destination() {
+    let cli = Cli::new();
+    let (_, director_id, _) = fleet_with_member(&cli);
+    let output = cli.run(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        "999",
+        "hi",
+    ]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains("Error: Destination member not found: 999"),
+        "got: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn ack_guards_are_existence_and_state_only() {
+    let cli = Cli::new();
+    let (_, director_id, member_id) = fleet_with_member(&cli);
+
+    let output = cli.run(&["message", "ack", "999"]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains("Error: Message 999 not found"),
+        "got: {}",
+        stderr(&output)
+    );
+
+    cli.run(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &member_id.to_string(),
+        "task",
+    ]);
+    let message_id: i64 = cli
+        .sqlite()
+        .query_row(
+            "SELECT message_id FROM messages WHERE type='unicast'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    let output = cli.run(&["message", "ack", &message_id.to_string()]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+
+    let output = cli.run(&["message", "ack", &message_id.to_string()]);
+    assert_eq!(code(&output), 1, "input_required is the only ackable state");
+    assert!(
+        stderr(&output).contains("Error: Cannot ACK message in state completed"),
+        "got: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn show_of_an_unknown_message_is_the_existence_error() {
+    let cli = Cli::new();
+    let _ = fleet_with_member(&cli);
+    let output = cli.run(&["message", "show", "999"]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains("Error: Message 999 not found"),
+        "got: {}",
+        stderr(&output)
+    );
+}
+
+/// Success criterion: `--json` output carries complete, untruncated message
+/// bodies on every message subcommand; text output stays truncated to
+/// `CAFLEET_MAX_TEXT_LEN`.
+#[test]
+fn json_is_untruncated_on_every_message_subcommand() {
+    let cli = Cli::new();
+    let (_, director_id, member_id) = fleet_with_member(&cli);
+    let long_text = "a".repeat(250);
+
+    let output = cli.run(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &member_id.to_string(),
+        &long_text,
+        "--json",
+    ]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(
+        payload["message"]["text"], long_text,
+        "send --json is complete"
+    );
+    let message_id = payload["message"]["message_id"]
+        .as_i64()
+        .expect("the send envelope names the message id");
+
+    let output = cli.run(&["message", "poll", &member_id.to_string(), "--json"]);
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(payload[0]["text"], long_text, "poll --json is complete");
+
+    let output = cli.run(&["message", "poll", &member_id.to_string()]);
+    let out = stdout(&output);
+    assert!(
+        out.contains(&format!("{}…", "a".repeat(200))),
+        "poll text truncates at max_text_len (200), got: {out}"
+    );
+    assert!(
+        !out.contains(&long_text),
+        "poll text never carries the full body"
+    );
+
+    let output = cli.run(&["message", "show", &message_id.to_string(), "--json"]);
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(
+        payload["message"]["text"], long_text,
+        "show --json is complete"
+    );
+
+    let output = cli.run(&["message", "ack", &message_id.to_string(), "--json"]);
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(
+        payload["message"]["text"], long_text,
+        "ack --json is complete"
+    );
+}
+
+#[test]
 fn broadcast_prints_the_recipients_and_delivered_counts() {
     let cli = Cli::new();
     let (_, director_id, _member_id) = fleet_with_member(&cli);
