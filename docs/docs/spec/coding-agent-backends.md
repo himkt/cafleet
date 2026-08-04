@@ -111,7 +111,8 @@ Codex applies the strictest decision when more than one rule matches
 (`forbidden` > `prompt` > `allow`): `cafleet member prompt` matches both rules,
 so its `prompt` wins and each invocation keeps requiring approval, while every
 other subcommand matches only the broad `["cafleet"]` allow — for every fleet,
-since `--fleet-id` is a trailing flag past the matched prefix.
+since every id rides past the matched prefix as a positional or trailing
+argument.
 
 The file is **owned by `cafleet setup`**: it is overwritten on every install,
 so operator customizations belong in a separate rules file under

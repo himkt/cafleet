@@ -69,7 +69,7 @@ Spawn one member per backend:
 ```bash
 cafleet member create --fleet-id 1 \
   --name "alice" --description "claude member" \
-  --coding-agent claude --text "You are alice. Wait for instructions."
+  --coding-agent claude "You are alice. Wait for instructions."
 ```
 
 ```
@@ -79,7 +79,7 @@ cafleet member create --fleet-id 1 \
 ```bash
 cafleet member create --fleet-id 1 \
   --name "bob" --description "codex member" \
-  --coding-agent codex --text "You are bob. Wait for instructions."
+  --coding-agent codex "You are bob. Wait for instructions."
 ```
 
 ```
@@ -89,7 +89,7 @@ cafleet member create --fleet-id 1 \
 ```bash
 cafleet member create --fleet-id 1 \
   --name "carol" --description "opencode member" \
-  --coding-agent opencode --text "You are carol. Wait for instructions."
+  --coding-agent opencode "You are carol. Wait for instructions."
 ```
 
 ```
@@ -101,7 +101,7 @@ List the panes — only the `claude` pane titles itself with the member name
 so use the `pane_id` column to locate `bob` and `carol`:
 
 ```bash
-cafleet member list --fleet-id 1
+cafleet member list 1
 ```
 
 ```
@@ -119,7 +119,7 @@ the envelope and the 2-line inline preview are identical for every backend
 ([Push notifications](../spec/multiplexer-backends.md#push-notifications)):
 
 ```bash
-cafleet message send --fleet-id 1 --from-member-id 2 --to-member-id 3 --text "alice: report status"
+cafleet message send --from-member-id 2 --to-member-id 3 "alice: report status"
 ```
 
 ```
@@ -132,7 +132,7 @@ Tear down — repeat `member delete` for members `4` and `5`, then delete the
 fleet:
 
 ```bash
-cafleet member delete --fleet-id 1 --member-id 3
+cafleet member delete 3
 ```
 
 ```
@@ -142,7 +142,7 @@ Member deleted.
 ```
 
 ```bash
-cafleet fleet delete --fleet-id 1
+cafleet fleet delete 1
 ```
 
 ```

@@ -24,7 +24,7 @@ each other; members in different fleets are invisible to one another.
 
 ## CLI
 
-The `cafleet` CLI has seven entry points — three top-level commands and four
+The `cafleet` CLI has seven entry points — four top-level commands and three
 command groups:
 
 | Entry point | Scope | Subcommands |
@@ -32,10 +32,10 @@ command groups:
 | `setup` | one-time onboarding: brings the database to the current schema and installs the coding-agent assets | — |
 | `doctor` | environment check: reports the resolved multiplexer, the calling pane, and what is installed | — |
 | `server` | serves the admin WebUI | — |
+| `monitor` | the supervision scheduler, run as `cafleet monitor FLEET_ID` | — |
 | `fleet` | fleet lifecycle | `create`, `list`, `show`, `delete` |
-| `member` | member lifecycle + keystroke interaction | `create`, `delete`, `show`, `list`, `prompt`, `ping` |
+| `member` | member lifecycle + keystroke interaction | `create`, `delete`, `show`, `list`, `prompt`, `ping`, `capture` |
 | `message` | the message broker | `send`, `broadcast`, `poll`, `ack`, `show` |
-| `monitor` | the supervision scheduler | `start`, `capture` |
 
 `member` is the single home for the member lifecycle — spawn, teardown,
 introspection (`show`, `list`), and keystroke interaction (the `kind` column in

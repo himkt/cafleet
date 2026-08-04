@@ -1,7 +1,7 @@
 # CLI Interface Simplification
 
 **Status**: Approved
-**Progress**: 3/23 tasks complete
+**Progress**: 7/23 tasks complete
 **Last Updated**: 2026-08-04
 
 ## Overview
@@ -139,10 +139,10 @@ Documentation first, then skills, then code, per the project's documentation-fir
 
 ### Step 2: Docs pages
 
-- [ ] Rewrite `docs/docs/spec/cli-options.md` to the new per-subcommand flag/positional surface, exit codes, and error strings <!-- completed: -->
-- [ ] Update `docs/docs/spec/message-envelope.md` (truncation/`--json` contract) and `docs/docs/spec/multiplexer-backends.md` (the injected poll-trigger command string) <!-- completed: -->
-- [ ] Sweep the remaining `docs/` pages (concepts, permission-preset docs) for quoted command forms and update them <!-- completed: -->
-- [ ] Run the `/update-readme` skill to sync `README.md` and confirm the SPEC surfaces are consistent <!-- completed: -->
+- [x] Rewrite `docs/docs/spec/cli-options.md` to the new per-subcommand flag/positional surface, exit codes, and error strings <!-- completed: 2026-08-04T08:52 -->
+- [x] Update `docs/docs/spec/message-envelope.md` (truncation/`--json` contract) and `docs/docs/spec/multiplexer-backends.md` (the injected poll-trigger command string) <!-- completed: 2026-08-04T08:54 -->
+- [x] Sweep the remaining `docs/` pages (concepts, permission-preset docs) for quoted command forms and update them <!-- completed: 2026-08-04T08:58 -->
+- [x] Run the `/update-readme` skill to sync `README.md` and confirm the SPEC surfaces are consistent <!-- completed: 2026-08-04T09:03 -->
 
 ### Step 3: cafleet skill
 

@@ -68,7 +68,7 @@ that need one.
 ```
 
 The `Bash(cafleet *)` pattern is the single allow-everything entry that the
-literal `--fleet-id <int>` / `--member-id <int>` flag convention enables —
+literal integer-id convention enables —
 one pattern covers every subcommand for every fleet. `cafleet member prompt *`
 is moved to the `ask` list because it keystrokes arbitrary text or shell
 commands into a member's pane; the operator should confirm each invocation.
@@ -153,7 +153,7 @@ omitted, the backend binary uses its own default model:
 cafleet member create --fleet-id 1 \
   --name "demo-member" \
   --description "Demo member" \
-  --text "You are demo-member. Reply hello when polled."
+  "You are demo-member. Reply hello when polled."
 ```
 
 ```
@@ -164,7 +164,7 @@ cafleet member create --fleet-id 1 \
 cafleet member create --fleet-id 1 \
   --name "reviewer" \
   --description "Reviewer member" \
-  --text "You are reviewer. Reply hello when polled."
+  "You are reviewer. Reply hello when polled."
 ```
 
 ```
@@ -175,7 +175,7 @@ List the fleet's roster — the new members' ids (`3` and `4`) appear
 alongside the Director:
 
 ```bash
-cafleet member list --fleet-id 1
+cafleet member list 1
 ```
 
 ```
@@ -191,7 +191,7 @@ Send a message between the members — `demo-member` (`3`) messages
 `reviewer` (`4`):
 
 ```bash
-cafleet message send --fleet-id 1 --from-member-id 3 --to-member-id 4 --text "hi"
+cafleet message send --from-member-id 3 --to-member-id 4 "hi"
 ```
 
 ```
@@ -208,9 +208,9 @@ once it has consumed the message.
 When you are done, tear the fleet down:
 
 ```bash
-cafleet member delete --fleet-id 1 --member-id 3
-cafleet member delete --fleet-id 1 --member-id 4
-cafleet fleet delete --fleet-id 1
+cafleet member delete 3
+cafleet member delete 4
+cafleet fleet delete 1
 ```
 
 ```
