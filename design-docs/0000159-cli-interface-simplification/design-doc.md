@@ -10,13 +10,13 @@ Simplify the `cafleet` CLI by replacing the per-command flag sets with three uni
 
 ## Success Criteria
 
-- [ ] `cafleet <group> --help` output matches the target command tree exactly for every group and subcommand.
-- [ ] `--full`, `--quiet`, `--no-ansi`, `--text`, and `--text-file` are rejected everywhere with clap's standard unknown-argument error.
-- [ ] `--json` output carries complete, untruncated message bodies on every message subcommand; text output stays truncated to `CAFLEET_MAX_TEXT_LEN`.
-- [ ] `message ack` / `message show` / `message poll` succeed with only the subject id; `message send` rejects a cross-fleet pair with `members A and B are not in the same fleet.`
-- [ ] `monitor` is a single command (`cafleet monitor FLEET_ID`); pane capture lives at `cafleet member capture MEMBER_ID`.
-- [ ] SPEC.md, `docs/docs/spec/cli-options.md`, `docs/docs/spec/message-envelope.md`, every skill, and every project rule quote only the new command forms.
-- [ ] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass.
+- [x] `cafleet <group> --help` output matches the target command tree exactly for every group and subcommand.
+- [x] `--full`, `--quiet`, `--no-ansi`, `--text`, and `--text-file` are rejected everywhere with clap's standard unknown-argument error.
+- [x] `--json` output carries complete, untruncated message bodies on every message subcommand; text output stays truncated to `CAFLEET_MAX_TEXT_LEN`.
+- [x] `message ack` / `message show` / `message poll` succeed with only the subject id; `message send` rejects a cross-fleet pair with `members A and B are not in the same fleet.`
+- [x] `monitor` is a single command (`cafleet monitor FLEET_ID`); pane capture lives at `cafleet member capture MEMBER_ID`.
+- [x] SPEC.md, `docs/docs/spec/cli-options.md`, `docs/docs/spec/message-envelope.md`, every skill, and every project rule quote only the new command forms.
+- [x] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //cafleet:test` pass.
 
 ---
 
