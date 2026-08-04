@@ -18,6 +18,7 @@ fleet the new member joins) and the two-party pair `--from-member-id`
 | `doctor` | Print the resolved multiplexer backend + the calling pane's identifiers + the assets-install report | — | — | [doctor](#cafleet-doctor) |
 | `server` | Start the admin WebUI server | — | — | [server](#cafleet-server) |
 | `monitor` | Run the per-fleet scheduler loop in-process (launch as a background task) | `FLEET_ID` | — | [monitor](#cafleet-monitor) |
+| `monitor scan` | Capture the Director's pane and every active member's pane once | `FLEET_ID` | — | [monitor scan](#cafleet-monitor-scan) |
 | `fleet create` | Create a fleet with its root Director | — | — | [fleet create](#fleet-create) |
 | `fleet list` | List non-deleted fleets | — | — | [fleet list](#fleet-list) |
 | `fleet show` | Show one fleet (soft-deleted included) | `FLEET_ID` | — | [fleet show](#fleet-show) |
@@ -93,10 +94,11 @@ is the complete, untruncated machine form.
 | `member prompt` | `Sent prompt '<text>' to member <name> (<pane_id>).`, or `Sent shell prompt '<text>' …` with `--shell` | `{member_id, pane_id, text, shell}` |
 | `member ping` | `Pinged member <name> (<pane_id>) — poll keystroke dispatched.`, or the pending-placement skip line — see [member ping](#member-ping) | `{member_id, pane_id, skipped}` — `skipped` present on both success paths |
 | `member capture` | The captured content alone | `{member_id, pane_id, lines, content, captured_at, content_sha256}` in that key order |
+| `monitor scan` | One `===`-header section per roster entry, separated by one blank line — see [monitor scan](#cafleet-monitor-scan) | A top-level array, one object per entry in the pinned key order |
 | `doctor` | The `multiplexer:` and `assets:` blocks | Output as JSON |
 
-`setup`, `server`, and `monitor` are absent by design — they stream
-progress or run a loop rather than emitting a one-shot payload — so the
+`setup`, `server`, and the `monitor` loop form are absent by design — they
+stream progress or run a loop rather than emitting a one-shot payload — so the
 [Subcommand summary](#subcommand-summary) legitimately carries three more rows
 than this table.
 
@@ -140,6 +142,7 @@ Subcommands accepting `--json`, one row per subcommand:
 | `member prompt` | `member` |
 | `member ping` | `member` |
 | `member capture` | `member` |
+| `monitor scan` | `monitor` |
 
 All other subcommands reject `--json` with the parser's unknown-argument
 error (exit 2) — including the root group itself, so a
@@ -149,7 +152,7 @@ pre-subcommand `cafleet --json <grp> <cmd>` does not parse.
 
 The id a command acts on rides as a required positional integer immediately
 after the subcommand name: `FLEET_ID` on `fleet show` / `fleet delete` /
-`member list` / `monitor`, `MEMBER_ID` on `member show` / `delete` / `prompt`
+`member list` / both `monitor` forms, `MEMBER_ID` on `member show` / `delete` / `prompt`
 / `ping` / `capture` and `message poll`, `MESSAGE_ID` on `message ack` /
 `show`. Everything else is derived from the subject row: a member id is
 globally unique, so the member row names its fleet; a message row names its
@@ -184,7 +187,9 @@ allow-listed subcommand:
 
 - **One pattern per subcommand**, matching the subcommand prefix —
   `Bash(cafleet <grp> <cmd> *)`. The positional subject id and trailing flags
-  such as [`--json`](#json-output) are covered by the same pattern.
+  such as [`--json`](#json-output) are covered by the same pattern. Both
+  `monitor` forms ride the single `Bash(cafleet monitor *)` pattern —
+  `cafleet monitor scan` needs no pattern of its own.
 - **`member prompt` is excluded** so it stays under `permissions.ask` — its
   positional text body is operator-controlled, in both the plain and the
   `--shell` form.
@@ -731,9 +736,19 @@ after the selected mode, and capture content is never stored in SQLite.
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 
-`cafleet monitor FLEET_ID [--tick N] [--interval N]` — a single top-level
-command with the positional `FLEET_ID` subject. It runs
-behind the [stale-assets guard](#stale-assets-guard). The conceptual model is
+`cafleet monitor` is a two-form command. The bare positional form runs the
+supervision loop; the `scan` subcommand is a one-shot batch capture. Both
+forms run behind the [stale-assets guard](#stale-assets-guard).
+
+| Form | Behavior |
+|---|---|
+| `cafleet monitor FLEET_ID [--tick N] [--interval N]` | The in-process scheduler loop. |
+| `cafleet monitor scan FLEET_ID [--lines N] [--ansi] [--json]` | Capture the Director's pane + every active member's pane once, print, exit. No loop, no `monitor_runtime` claim, no DB writes. |
+
+### The loop form
+
+`cafleet monitor FLEET_ID [--tick N] [--interval N]` takes the positional
+`FLEET_ID` subject. The conceptual model is
 canonical on the [Monitoring](../concepts/monitoring.md) concepts page; there
 is no stop subcommand — the Director stops the background task hosting the
 loop, and a still-running loop self-terminates on its next tick after
@@ -762,6 +777,89 @@ monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)
 | `0` | Clean exit |
 | `1` | A monitor is already running for the fleet |
 | `1` | Unknown fleet |
+| `1` | Multiplexer unreachable |
+| `2` | Usage errors |
+
+### `cafleet monitor scan` {#cafleet-monitor-scan}
+
+`cafleet monitor scan FLEET_ID [--lines N] [--ansi] [--json]` — a one-shot
+batch capture of the whole fleet: the Director's pane plus every active
+member's pane, captured back-to-back and printed in a single invocation.
+No loop runs, no `monitor_runtime` row is claimed, the command performs no
+DB writes, and capture content is never stored in SQLite.
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--lines` | no | Trailing lines captured per pane (an integer ≥ 1, default **20**). |
+| `--ansi` | no | Preserve ANSI escapes in every captured content. The default strips ANSI escapes, as in [`member capture`](#member-capture). |
+| `--json` | no | Emit the JSON array instead of the text sections. |
+
+**Roster.** The scan requires a live fleet (a soft-deleted or unknown fleet
+errors — see [Error Messages](#error-messages)) and a resolvable
+multiplexer — the same guards as the loop form. The roster is the Director's
+row first, then every other active member owning a placement row, ascending
+by `member_id`. A member with no placement row (not spawned via
+`cafleet member create`) is excluded, mirroring the wake roster's join; a
+placement row with a `NULL` pane (pending placement) stays in the roster as
+an annotated entry. A fleet with no members scans the Director's pane only.
+
+**Per-entry capture.** For each roster entry, in order:
+
+| Condition | Entry outcome |
+|---|---|
+| The pane id is `NULL` (pending placement) | Annotated entry: `pane not available (pending placement)`. |
+| The pane capture errors (dead pane, backend failure — including the Director's own pane) | Annotated entry: `capture failed: <error>`. |
+| The capture succeeds | Content (ANSI-stripped unless `--ansi`), `captured_at` stamped from local UTC at that entry's read boundary, `content_sha256` over the emitted content. |
+
+The scan always completes: an annotated entry never aborts the remaining
+captures, and a scan whose every entry is annotated still exits 0.
+
+**Text mode** — one section per roster entry, separated by one blank line.
+`<name>` is the raw DB value (stdout is not a keystroke path, so no
+sanitization). `kind` is `director` or `member`, making the Director row
+self-identifying beyond its first position.
+
+```text
+=== <member-id> (<name>; kind=<kind>; coding_agent=<coding_agent>; pane=<pane-id>; captured_at=<ts>) ===
+<content>
+```
+
+An annotated entry (the pane token is `—` when no pane exists; a failed
+capture keeps its real pane id):
+
+```text
+=== <member-id> (<name>; kind=<kind>; coding_agent=<coding_agent>; pane=—) ===
+pane not available (pending placement)
+```
+
+**JSON mode** — a top-level array, same order, one object per entry
+mirroring [`member capture`](#member-capture)'s keys plus `name` / `kind` /
+`coding_agent` / `error`, in this pinned key order:
+
+```json
+{
+  "member_id": 4,
+  "name": "drafter",
+  "kind": "member",
+  "coding_agent": "claude",
+  "pane_id": "%2",
+  "lines": 20,
+  "content": "…",
+  "captured_at": "2026-08-04T11:20:00.000000+00:00",
+  "content_sha256": "…",
+  "error": null
+}
+```
+
+On an annotated entry `content`, `captured_at`, and `content_sha256` are
+`null`; `error` carries the exact annotation string from text mode;
+`pane_id` is `null` for a pending placement and the real pane id for a
+failed capture. `lines` always echoes the requested depth.
+
+| Exit | Meaning |
+|---|---|
+| `0` | Completed scan (annotated entries included) |
+| `1` | Unknown or soft-deleted fleet |
 | `1` | Multiplexer unreachable |
 | `2` | Usage errors |
 
@@ -811,5 +909,5 @@ monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)
 | `member create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 | The just-registered member is rolled back |
 | `member create` | `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the member's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
 | `member create` | `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the member's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
-| `monitor` | The fleet already has a live monitor | `Error: monitor already running for fleet <id>` | 1 | — |
-| `monitor` | An unknown or soft-deleted fleet | `Error: fleet <id> not found` | 1 | — |
+| `monitor` (loop form) | The fleet already has a live monitor | `Error: monitor already running for fleet <id>` | 1 | — |
+| `monitor` / `monitor scan` | An unknown or soft-deleted fleet | `Error: fleet <id> not found` | 1 | — |

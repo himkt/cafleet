@@ -102,7 +102,7 @@ backend name fails the wake closed. tmux and herdr emit the payload
 byte-identically:
 
 ```text
-[cafleet] tick: fleet <fleet-id> — health-check your <N> members: <entries>. Poll your inbox, ACK, dispatch. Resume your work if something was still running.
+[cafleet] tick: fleet <fleet-id> — health-check your <N> members: <entries>. Scan panes with 'cafleet monitor scan <fleet-id>', poll your inbox, ACK, dispatch. Resume your work if something was still running.
 ```
 
 With `N == 1` the noun is singular (`health-check your 1 member: …`); with
@@ -112,7 +112,7 @@ With `N == 1` the noun is singular (`health-check your 1 member: …`); with
 Example:
 
 ```text
-[cafleet] tick: fleet 3 — health-check your 2 members: 4 (drafter; coding_agent=claude; unacked=2), 5 (reviewer; coding_agent=codex; unacked=0). Poll your inbox, ACK, dispatch. Resume your work if something was still running.
+[cafleet] tick: fleet 3 — health-check your 2 members: 4 (drafter; coding_agent=claude; unacked=2), 5 (reviewer; coding_agent=codex; unacked=0). Scan panes with 'cafleet monitor scan 3', poll your inbox, ACK, dispatch. Resume your work if something was still running.
 ```
 
 `cafleet member ping` is a Director-only manual primitive, unchanged on both

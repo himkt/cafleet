@@ -24,23 +24,40 @@ The loop's only keystroke is a **wake trigger** into the Director's own pane —
 a pure trigger, not a protocol payload. It opens `[cafleet] tick:`, names every
 active non-Director member as
 `<member-id> (<name>; coding_agent=<agent>; unacked=<pending-count>)` in
-ascending member-id order, tells the Director to poll its inbox, ACK, and
-dispatch, and closes with the resume clause:
-`Resume your work if something was still running.` A fleet with no other
-members receives the `no members to health-check.` form. The tmux and herdr
-payloads are byte-identical; the exact grammar is pinned in
+ascending member-id order, tells the Director to scan panes with
+`cafleet monitor scan`, poll its inbox, ACK, and dispatch, and closes with the
+resume clause: `Resume your work if something was still running.` A fleet with
+no other members receives the `no members to health-check.` form, still
+carrying the scan instruction. The tmux and herdr payloads are byte-identical;
+the exact grammar is pinned in
 [Multiplexer backends](../spec/multiplexer-backends.md). The loop never
 keystrokes any member pane — `cafleet member ping` stays a manual Director
 primitive.
 
+The scan the payload instructs is the **facilitation snapshot**:
+`cafleet monitor scan <fleet-id>` is a one-shot, read-only command that
+captures the Director's own pane and every active member's pane in a single
+invocation — Director first, then members in ascending member-id order — so
+the Director reads one synchronized fleet snapshot instead of one pane at a
+time. A pending placement or a failed pane capture renders an annotated entry
+and the scan still completes; the command performs no DB writes and stores no
+capture content. The heartbeat/facilitation split is unchanged: the scan is a
+facilitation primitive the Director runs on wake, not part of the loop.
+`cafleet member capture` remains the targeted deeper-investigation primitive
+for a single pane.
+
 The Director's re-engagement is itself **capture-gated**: before the Director
 fires a re-engagement keystroke at a member (`cafleet member ping`, a
-non-exempt `cafleet message send`, or a `cafleet message broadcast`), it takes
-a fresh read-only `cafleet member capture` of the target and classifies the
-content as `awaiting_user`, `finished`, `working`, or `stall_candidate` using
-the capture cues of the target's backend overlay, firing only on `finished` or
-a confirmed stall — a pane classified `awaiting_user` or `working` has its
-round skipped and the entire send deferred to a later facilitation tick. The
+non-exempt `cafleet message send`, or a `cafleet message broadcast`), it reads
+a fresh capture of the target's pane and classifies the content as
+`awaiting_user`, `finished`, `working`, or `stall_candidate` using the capture
+cues of the target's backend overlay, firing only on `finished` or a confirmed
+stall — a pane classified `awaiting_user` or `working` has its round skipped
+and the entire send deferred to a later facilitation tick. One fresh
+`cafleet monitor scan` satisfies the gate for every member for that
+facilitation turn; once the Director keystrokes a pane, that pane's snapshot
+is stale, and a further re-engagement of the same member within the turn needs
+a fresh capture — a single-member `cafleet member capture` or a new scan. The
 full pre-ping capture gate is part of the cafleet skill's supervision
 protocol, which the Director follows on each on-tick health check and whenever
 it re-engages a member.
@@ -120,4 +137,6 @@ goes stale and the process probe reports no such process — so a fresh
 removes the row unconditionally. No manual cleanup step exists or is needed.
 
 See [Data model](../spec/data-model.md) for the backing table and
-[CLI options](../spec/cli-options.md#cafleet-monitor) for the command surface.
+[CLI options](../spec/cli-options.md#cafleet-monitor) for the command surface
+of both the loop and the one-shot
+[`monitor scan`](../spec/cli-options.md#cafleet-monitor-scan).
