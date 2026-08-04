@@ -15,12 +15,12 @@ refinery = { version = "0.9", features = ["rusqlite"] }
 regex = "1"
 rusqlite = { version = "0.39", features = ["bundled"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-sha2 = "0.10"
+sha2 = "0.11"
 signal-hook = "0.3"
 tokio = { version = "1", default-features = false, features = ["net", "rt-multi-thread"] }
 
 [dev-dependencies]
-sha2 = "0.10"
+sha2 = "0.11"
 tempfile = "3"
 tokio = { version = "1", default-features = false, features = ["macros"] }
 tower = { version = "0.5", features = ["util"] }
