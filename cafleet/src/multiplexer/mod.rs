@@ -398,7 +398,8 @@ mod tests {
                 "[cafleet] tick: fleet 3 — health-check your 2 members: \
                  4 (drafter; coding_agent=claude; unacked=2), \
                  5 (reviewer; coding_agent=codex; unacked=0). \
-                 Poll your inbox, ACK, dispatch. \
+                 Scan panes with 'cafleet monitor scan 3', \
+                 poll your inbox, ACK, dispatch. \
                  Resume your work if something was still running."
             );
         }
@@ -410,7 +411,8 @@ mod tests {
                 payload,
                 "[cafleet] tick: fleet 7 — health-check your 1 member: \
                  4 (worker; coding_agent=opencode; unacked=1). \
-                 Poll your inbox, ACK, dispatch. \
+                 Scan panes with 'cafleet monitor scan 7', \
+                 poll your inbox, ACK, dispatch. \
                  Resume your work if something was still running."
             );
         }
@@ -421,7 +423,8 @@ mod tests {
             assert_eq!(
                 payload,
                 "[cafleet] tick: fleet 7 — no members to health-check. \
-                 Poll your inbox, ACK, dispatch. \
+                 Scan panes with 'cafleet monitor scan 7', \
+                 poll your inbox, ACK, dispatch. \
                  Resume your work if something was still running."
             );
         }
