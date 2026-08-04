@@ -93,7 +93,7 @@ CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFL
 
 ## Team supervision
 
-Before spawning a team, the Director launches the heartbeat itself: immediately after `cafleet fleet create` and before the first `cafleet member create`, it runs `cafleet monitor <fleet-id>` as a background task in its own pane ({bg_run}) and confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. That confirmation gates the first `member create`. The loop wakes the Director's own pane once per wake interval; each wake is the cue to poll, ACK, dispatch, health-check the members it names, and then resume any interrupted work.
+Before spawning a team, the Director launches the heartbeat itself: immediately after `cafleet fleet create` and before the first `cafleet member create`, it runs `cafleet monitor <fleet-id>` as a background task in its own pane ({bg_run}) and confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. That confirmation gates the first `member create`. The loop wakes the Director's own pane once per wake interval; each wake is the cue to scan the fleet's panes (`cafleet monitor scan <fleet-id>`), poll, ACK, dispatch, health-check the members it names, and then resume any interrupted work.
 
 For the full governance + heartbeat mechanism (Core Principle, Communication Model, Idle Semantics, Authorization-Scope Guard, Spawn Protocol, Stall Response, Cleanup, the 5-step facilitation loop, Monitor Lifecycle), Read [`reference/supervision.md`](reference/supervision.md).
 

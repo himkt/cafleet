@@ -88,7 +88,8 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
             "[cafleet] tick: fleet 1 — health-check your 2 members: \
              {worker_id} (worker; coding_agent=claude; unacked=0), \
              {helper_id} (helper; coding_agent=claude; unacked=0). \
-             Poll your inbox, ACK, dispatch. \
+             Scan panes with 'cafleet monitor scan 1', \
+             poll your inbox, ACK, dispatch. \
              Resume your work if something was still running."
         ))),
         "the wake keystroke reached the Director's pane, got: {:?}",

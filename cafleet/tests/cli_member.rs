@@ -640,3 +640,321 @@ fn monitor_no_longer_parses_a_capture_subcommand() {
         stderr(&output)
     );
 }
+
+#[test]
+fn monitor_loop_form_still_parses_the_positional_and_flags() {
+    let cli = Cli::new();
+    cli.ready();
+
+    let output = cli.run(&["monitor", "999", "--tick", "1", "--interval", "5"]);
+    assert_eq!(
+        code(&output),
+        1,
+        "the loop form parses and reaches the live-fleet guard"
+    );
+    assert!(
+        stderr(&output).contains("Error: fleet 999 not found"),
+        "got: {}",
+        stderr(&output)
+    );
+
+    let bare = cli.run(&["monitor"]);
+    assert_eq!(code(&bare), 2, "a fleet id or a subcommand is required");
+
+    let leaked = cli.run(&["monitor", "1", "--lines", "20"]);
+    assert_eq!(
+        code(&leaked),
+        2,
+        "scan flags do not parse on the loop form: {}",
+        stderr(&leaked)
+    );
+
+    let no_fleet = cli.run(&["monitor", "scan"]);
+    assert_eq!(
+        code(&no_fleet),
+        2,
+        "the scan form carries its own FLEET_ID positional: {}",
+        stderr(&no_fleet)
+    );
+}
+
+#[test]
+fn monitor_scan_prints_director_first_then_members_ascending() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_fleet();
+    let alpha_id = cli.create_member(fleet_id, "alpha");
+    let beta_id = cli.create_member(fleet_id, "beta");
+
+    let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let out = stdout(&output);
+    assert!(
+        out.starts_with(
+            "=== 1 (Director; kind=director; coding_agent=claude; pane=%0; captured_at="
+        ),
+        "the Director's section leads, got: {out}"
+    );
+
+    let alpha_header =
+        format!("=== {alpha_id} (alpha; kind=member; coding_agent=claude; pane=%7; captured_at=");
+    let beta_header =
+        format!("=== {beta_id} (beta; kind=member; coding_agent=claude; pane=%7; captured_at=");
+    assert!(out.contains(&alpha_header), "got: {out}");
+    assert!(out.contains(&beta_header), "got: {out}");
+    assert!(
+        out.find(&alpha_header).unwrap() < out.find(&beta_header).unwrap(),
+        "members ascend by member_id: {out}"
+    );
+    assert!(
+        out.contains(&format!("line1\nline2\n\n{alpha_header}")),
+        "one blank line separates sections, got: {out}"
+    );
+
+    let with_ansi = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--ansi"]);
+    assert_eq!(code(&with_ansi), 0, "--ansi is accepted");
+}
+
+#[test]
+fn monitor_scan_json_pins_the_key_order() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_fleet();
+    let member_id = cli.create_member(fleet_id, "worker");
+
+    let output = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--json"]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    let entries = payload.as_array().expect("a top-level array");
+    assert_eq!(entries.len(), 2, "the Director plus one member");
+
+    for entry in entries {
+        let keys: Vec<&str> = entry
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "member_id",
+                "name",
+                "kind",
+                "coding_agent",
+                "pane_id",
+                "lines",
+                "content",
+                "captured_at",
+                "content_sha256",
+                "error",
+            ],
+            "the scan key order is pinned"
+        );
+    }
+
+    let director = &entries[0];
+    assert_eq!(director["member_id"], 1);
+    assert_eq!(director["name"], "Director");
+    assert_eq!(director["kind"], "director");
+    assert_eq!(director["coding_agent"], "claude");
+    assert_eq!(director["pane_id"], "%0");
+    assert_eq!(director["lines"], 20);
+    assert_eq!(director["error"], serde_json::Value::Null);
+    assert!(
+        director["captured_at"].as_str().is_some(),
+        "captured_at is stamped on a successful capture"
+    );
+
+    let content = director["content"].as_str().unwrap();
+    assert!(
+        content.contains("line1"),
+        "the shim's canned buffer, got: {content}"
+    );
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(content.as_bytes());
+    let expected: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(
+        director["content_sha256"], expected,
+        "mode-exact hash of the emitted content"
+    );
+
+    let member = &entries[1];
+    assert_eq!(member["member_id"], member_id);
+    assert_eq!(member["kind"], "member");
+    assert_eq!(member["pane_id"], "%7");
+}
+
+#[test]
+fn monitor_scan_annotates_a_pending_placement_and_exits_zero() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_fleet();
+    let member_id = cli.create_member(fleet_id, "worker");
+    cli.sqlite()
+        .execute(
+            "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=?1",
+            [member_id],
+        )
+        .unwrap();
+
+    let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
+    assert_eq!(
+        code(&output),
+        0,
+        "an annotated entry never aborts the scan: {}",
+        stderr(&output)
+    );
+    assert!(
+        stdout(&output).contains(&format!(
+            "=== {member_id} (worker; kind=member; coding_agent=claude; pane=—) ===\n\
+             pane not available (pending placement)"
+        )),
+        "got: {}",
+        stdout(&output)
+    );
+
+    let output = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--json"]);
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    let entry = payload
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["member_id"] == member_id)
+        .expect("the pending-placement member stays in the roster");
+    assert_eq!(entry["pane_id"], serde_json::Value::Null);
+    assert_eq!(entry["lines"], 20, "lines echoes the requested depth");
+    assert_eq!(entry["content"], serde_json::Value::Null);
+    assert_eq!(entry["captured_at"], serde_json::Value::Null);
+    assert_eq!(entry["content_sha256"], serde_json::Value::Null);
+    assert_eq!(entry["error"], "pane not available (pending placement)");
+}
+
+#[test]
+fn monitor_scan_annotates_failed_captures_and_exits_zero() {
+    let mut cli = Cli::new();
+    let (fleet_id, _) = cli.with_fleet();
+    cli.create_member(fleet_id, "worker");
+    cli.fail_subcommand = Some("capture-pane".to_string());
+
+    let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
+    assert_eq!(
+        code(&output),
+        0,
+        "a scan whose every entry is annotated still exits 0: {}",
+        stderr(&output)
+    );
+    let out = stdout(&output);
+    assert!(
+        out.contains(
+            "=== 1 (Director; kind=director; coding_agent=claude; pane=%0) ===\ncapture failed: "
+        ),
+        "a failed capture keeps its real pane id, got: {out}"
+    );
+    assert!(
+        out.contains("forced failure"),
+        "the backend error rides the annotation, got: {out}"
+    );
+
+    let output = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--json"]);
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    let entries = payload.as_array().unwrap();
+    assert_eq!(entries[0]["pane_id"], "%0", "the real pane id is kept");
+    for entry in entries {
+        assert_eq!(entry["content"], serde_json::Value::Null);
+        assert_eq!(entry["captured_at"], serde_json::Value::Null);
+        assert_eq!(entry["content_sha256"], serde_json::Value::Null);
+        assert!(
+            entry["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("capture failed: "),
+            "got: {}",
+            entry["error"]
+        );
+    }
+}
+
+#[test]
+fn monitor_scan_excludes_a_member_without_a_placement_row() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_fleet();
+    let member_id = cli.create_member(fleet_id, "worker");
+    cli.sqlite()
+        .execute(
+            "DELETE FROM member_placements WHERE member_id=?1",
+            [member_id],
+        )
+        .unwrap();
+
+    let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert!(
+        !stdout(&output).contains(&format!("=== {member_id} ")),
+        "a placementless member is excluded, got: {}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn monitor_scan_of_a_memberless_fleet_captures_the_director_only() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_fleet();
+
+    let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let out = stdout(&output);
+    assert!(
+        out.starts_with("=== 1 (Director; kind=director;"),
+        "got: {out}"
+    );
+    assert_eq!(
+        out.matches("=== 1 (").count(),
+        1,
+        "exactly one section, got: {out}"
+    );
+    assert!(
+        !out[3..].contains("\n=== "),
+        "no member sections follow, got: {out}"
+    );
+}
+
+#[test]
+fn monitor_scan_rejects_an_unknown_or_deleted_fleet() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_fleet();
+
+    let output = cli.run(&["monitor", "scan", "999"]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains("Error: fleet 999 not found"),
+        "got: {}",
+        stderr(&output)
+    );
+
+    let deleted = cli.run(&["fleet", "delete", &fleet_id.to_string()]);
+    assert_eq!(code(&deleted), 0, "stderr: {}", stderr(&deleted));
+    let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
+    assert_eq!(code(&output), 1, "a soft-deleted fleet is not scannable");
+    assert!(
+        stderr(&output).contains(&format!("Error: fleet {fleet_id} not found")),
+        "got: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn monitor_scan_honors_the_lines_flag() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_fleet();
+
+    let output = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--lines", "5"]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert!(
+        cli.shim_calls()
+            .iter()
+            .any(|line| line.contains("capture-pane -p -t %0 -S -1005")),
+        "the requested depth rides the A8 over-fetch: {:?}",
+        cli.shim_calls()
+    );
+
+    let zero = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--lines", "0"]);
+    assert_eq!(code(&zero), 2, "lines must be >= 1: {}", stderr(&zero));
+}

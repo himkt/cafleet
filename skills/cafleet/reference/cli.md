@@ -94,15 +94,18 @@ cafleet doctor --json
 
 ## Monitor
 
-`cafleet monitor` is the supervision scheduler — a single command with a positional fleet id:
+`cafleet monitor` is the supervision scheduler — a two-form command with a positional fleet id:
 
 ```bash
 cafleet monitor <fleet-id>          # the scheduler loop (launched by the Director as a background task in its own pane)
+cafleet monitor scan <fleet-id>     # one-shot batch capture: the Director's pane + every active member's pane, print, exit
 ```
 
-It takes `--interval N` (the Director wake interval in seconds; omitted → `CAFLEET_MONITOR_WAKE_INTERVAL`, default `600`; `0` disables the wake) and `--tick N` (scan cadence, default `5`). It prints `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` immediately after claiming the runtime row — the line the Director confirms before its first `member create`.
+The loop form takes `--interval N` (the Director wake interval in seconds; omitted → `CAFLEET_MONITOR_WAKE_INTERVAL`, default `600`; `0` disables the wake) and `--tick N` (scan cadence, default `5`). It prints `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` immediately after claiming the runtime row — the line the Director confirms before its first `member create`.
 
-The read-only pane capture is `cafleet member capture <target-member-id>` (default `--lines 20`; `--json` adds `captured_at` and `content_sha256`; `--ansi` preserves escapes), used by the Director's pre-ping capture gate; a pending-placement target is a hard error.
+`cafleet monitor scan` is the fleet-wide read: one section per pane — Director first, then members ascending by member id — with `--lines N` (per-pane depth, default `20`), `--ansi`, and `--json` (a top-level array). A pending placement or a failed capture renders an annotated entry and the scan still completes with exit 0; the command performs no DB writes. One fresh scan satisfies the Director's pre-ping capture gate for every member for that facilitation turn.
+
+`cafleet member capture <target-member-id>` is the targeted deeper-investigation primitive — a single pane, read-only (default `--lines 20`; `--json` adds `captured_at` and `content_sha256`; `--ansi` preserves escapes); a fresh one at default depth or deeper also satisfies the gate for that one member. A pending-placement target is a hard error.
 
 `cafleet member ping` is a Director write primitive. Against a pending-placement member it skips the keystroke and exits 0 — the member polls its inbox on spawn — with the stable `skipped` JSON key on both success paths.
 

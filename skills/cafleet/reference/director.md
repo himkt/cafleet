@@ -1,6 +1,6 @@
 # tmux-backed member commands (`cafleet member *`)
 
-Reference page for the Director-only lifecycle and pane-interaction commands — `member create`, `member delete`, `member list`, `member capture`, `member prompt`, `member ping`. All run inside a tmux or herdr session (`member list` and `member show` are registry reads with no multiplexer requirement). `member create` takes **no identity flag** — the CLI auto-resolves the spawning Director from `fleets.director_member_id`, and `--fleet-id` names the fleet the new member joins; every other lifecycle verb identifies its **target** by the positional `MEMBER_ID` (the fleet is derived from the member row).
+Reference page for the Director-only lifecycle and pane-interaction commands — `member create`, `member delete`, `member list`, `monitor scan`, `member capture`, `member prompt`, `member ping`. All run inside a tmux or herdr session (`member list` and `member show` are registry reads with no multiplexer requirement). `member create` takes **no identity flag** — the CLI auto-resolves the spawning Director from `fleets.director_member_id`, and `--fleet-id` names the fleet the new member joins; every other lifecycle verb identifies its **target** by the positional `MEMBER_ID` (the fleet is derived from the member row).
 
 Members do NOT need to read this file. Member-side flows (poll / send / ack / receive shell-dispatch from the Director) live in `skills/cafleet/SKILL.md` (core) and `skills/cafleet/reference/prompt-routing.md`.
 
@@ -152,9 +152,17 @@ cafleet member list <fleet-id>
 
 One output shape: every **active** registry entry of the fleet (the root Director, ordinary members, placementless rows), one row each with `member_id`, `name`, `kind` (`director` / `member`), `backend`, `pane_id` (a pending placement renders `(pending)`; placementless rows render `-` placement cells), and `idle` — the humanized wall-time since the member's most recent message activity (`Ns`/`Nm`/`Nh`, `-` when none). `--json` adds the underlying `last_sent` / `last_recv` / `last_ack` timestamps (output shape in [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-list)). Use the `idle` column for routine supervision ticks instead of capturing every member every tick — capture is reserved for the cases the idle column flags.
 
+## Fleet Scan
+
+Capture the Director's own pane and every active member's pane in one invocation (read-only): one section per pane, Director first, then members ascending by member id. `--lines` defaults `20` per pane; `--ansi` preserves escapes; `--json` emits a top-level array. A pending placement or a failed capture renders an annotated entry and the scan still completes with exit 0; no DB writes. This is the fleet-wide read primitive: one fresh scan satisfies the pre-ping capture gate for every member for that facilitation turn ([`reference/supervision.md`](supervision.md) § *The pre-ping capture gate*), and the periodic wake payload instructs you to run it.
+
+```bash
+cafleet monitor scan <fleet-id>
+```
+
 ## Member Capture
 
-Capture the last N lines of a member's pane buffer (read-only). `--lines` defaults `20`; ANSI escapes are stripped and carriage returns de-fragmented by default (`--ansi` preserves escapes). Output is the raw buffer in text mode, `{member_id, pane_id, lines, content, captured_at, content_sha256}` in JSON. This is the read primitive behind the pre-ping capture gate ([`reference/supervision.md`](supervision.md) § *The pre-ping capture gate*).
+Capture the last N lines of a member's pane buffer (read-only). `--lines` defaults `20`; ANSI escapes are stripped and carriage returns de-fragmented by default (`--ansi` preserves escapes). Output is the raw buffer in text mode, `{member_id, pane_id, lines, content, captured_at, content_sha256}` in JSON. This is the targeted deeper-investigation primitive — scan for all, capture when one member needs a closer look; a fresh capture at default depth or deeper satisfies the pre-ping capture gate for that one member ([`reference/supervision.md`](supervision.md) § *The pre-ping capture gate*).
 
 ```bash
 cafleet member capture <member-id>
