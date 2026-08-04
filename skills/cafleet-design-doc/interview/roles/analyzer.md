@@ -85,4 +85,4 @@ Rules:
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete --fleet-id <fleet-id> --member-id <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you.
+The Director terminates you via `cafleet member delete <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you.

@@ -1,7 +1,7 @@
 # CLI Interface Simplification
 
 **Status**: Approved
-**Progress**: 9/23 tasks complete
+**Progress**: 12/23 tasks complete
 **Last Updated**: 2026-08-04
 
 ## Overview
@@ -151,9 +151,9 @@ Documentation first, then skills, then code, per the project's documentation-fir
 
 ### Step 4: Other skills and project rules
 
-- [ ] Update `skills/cafleet-design-doc/**` and `skills/cafleet-research/**` (role files, workflow bodies, coordination examples) for every quoted command <!-- completed: -->
-- [ ] Update the remaining skills (`skills/clean-docs/**`, `skills/skill-author/**`, others quoting `cafleet` commands) <!-- completed: -->
-- [ ] Update `.claude/rules/*` (bash-tool.md, commands.md, database-migrations.md) for every quoted command <!-- completed: -->
+- [x] Update `skills/cafleet-design-doc/**` and `skills/cafleet-research/**` (role files, workflow bodies, coordination examples) for every quoted command <!-- completed: 2026-08-04T09:35 -->
+- [x] Update the remaining skills (`skills/clean-docs/**`, `skills/skill-author/**`, others quoting `cafleet` commands) <!-- completed: 2026-08-04T09:16 -->
+- [x] Update `.claude/rules/*` (bash-tool.md, commands.md, database-migrations.md) for every quoted command <!-- completed: 2026-08-04T09:16 -->
 
 ### Step 5: CLI argument surface
 

@@ -47,7 +47,7 @@ User
 
 Members cannot talk to the user directly — the Director always relays. Members cannot talk to each other directly either — Manager requests are always mediated by the Director (Manager → Director → Scout/Researcher, and Scout/Researcher → Director → Manager).
 
-> **Literal-integer-id flag rule** — every `cafleet ...` call carries the literal integer ids as per-subcommand flags; the convention is canonical in the `cafleet` skill § *Required Flags*.
+> **Literal-integer-id rule** — every `cafleet ...` call carries the literal integer ids as positional subjects or id flags; the convention is canonical in the `cafleet` skill § *Required ids*.
 
 ## Process
 
@@ -80,7 +80,7 @@ Capture `fleet_id` and `director.member_id` from the response. Treat `fleet_id` 
 
 ### Step 1: Supervision Model (Director — launch the monitor loop first)
 
-Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor start --fleet-id [fleet-id]` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Manager / Scout / Researcher spawns** — do not spawn a member until it has arrived. The background task is stopped first in the Step 8 teardown.
+Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor [fleet-id]` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Manager / Scout / Researcher spawns** — do not spawn a member until it has arrived. The background task is stopped first in the Step 8 teardown.
 
 On each active turn, check `${OUTPUT_DIR}` for these expected deliverables:
 
@@ -92,7 +92,7 @@ Readiness/stall rules (apply per the `cafleet` skill's `reference/supervision.md
 
 - After Scouts/Researchers have been spawned and tasks have been assigned, expect at least one `00-scout-*.md` or `NN-research-*.md` file to appear after the first round of replies.
 - Do not consider the workflow ready for Step 5 until `report.md` exists.
-- If a member has an assignment still in progress but their deliverable file is missing past the expected milestone, run the 2-stage health-check from the `cafleet` skill's `reference/supervision.md`: `cafleet message poll` → `cafleet monitor capture --lines 200` → directed `cafleet message send` → user escalation.
+- If a member has an assignment still in progress but their deliverable file is missing past the expected milestone, run the 2-stage health-check from the `cafleet` skill's `reference/supervision.md`: `cafleet message poll` → `cafleet member capture --lines 200` → directed `cafleet message send` → user escalation.
 
 ### Step 2: Spawn Manager (Director)
 
@@ -126,16 +126,16 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | role-file + ROLE-DEF suffix | `roles/manager.md`; suffix `— accountability, communication protocol, task discipline, file-aggregation rules, pre-compilation verification, revision loop, and shutdown.` |
 | cafleet-load purpose | `for the broker primitives, literal-integer-id flag convention, and bash-via-Director routing` (no extra skills) |
 | CONTEXT LINES | `CURRENT DATE: [INSERT today's date]` / `USER REQUEST: [INSERT user's original request in full]` / `OUTPUT DIRECTORY: [INSERT OUTPUT DIRECTORY]` / `LANGUAGE: [INSERT user's language preference if specified]` |
-| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `[message-id]` and `cafleet message ack … --message-id [message-id]`, then act); plus `You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.` and `The team coordinates sub-topic assignments via {task_coord}.` |
+| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `[message-id]` and `cafleet message ack [message-id]`, then act); plus `You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.` and `The team coordinates sub-topic assignments via {task_coord}.` |
 | start cue (verbatim) | `To request Scouts or Researchers, send the Director a cafleet message specifying: role (Scout or Researcher), scope, search angles, and output file path. The Director will spawn them via cafleet member create and relay their completion reports back to you.` + `Your first compiled report will be reviewed critically by the Director. Aim for highest quality on the first attempt.` |
 
-Render the prompt to `${BASE}/.prompts/manager-<UTC-compact>.md` per the 2b two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
+Render the prompt to `${BASE}/.prompts/manager-<UTC-compact>.md` per the 2b two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--file`:
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \
      --name "manager" \
      --description "Compiles the research report" \
-     --text-file ${BASE}/.prompts/manager-<UTC-compact>.md \
+     --file ${BASE}/.prompts/manager-<UTC-compact>.md \
      --json
    ```
 
@@ -155,16 +155,16 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | role-file + ROLE-DEF suffix | `roles/scout.md`; suffix `— landscape-mapping focus, communication protocol, output format, and shutdown.` |
 | cafleet-load purpose | `for the broker primitives and bash-via-Director routing` (no extra skills) |
 | CONTEXT LINES | `CURRENT DATE: [INSERT today's date]` / `YOUR ASSIGNMENT: [landscape scope and what areas to map]` / `OUTPUT FILE: [INSERT <resolved-path>/00-scout-<topic>.md]` |
-| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `[message-id]` and `cafleet message ack … --message-id [message-id]`, then act) |
+| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `[message-id]` and `cafleet message ack [message-id]`, then act) |
 | start cue (verbatim) | `Write findings to the output file, then send the Director a completion summary. The Director will relay your findings to the Manager.` |
 
-Render the prompt to `${BASE}/.prompts/<scout-name>-<UTC-compact>.md` per the 2b two-step audit-file pattern (use `scout` for a single Scout, `scout-1`/`scout-2`/… for multiple; `<scout-name>` is the lowercased `--name`), then spawn with `--text-file`:
+Render the prompt to `${BASE}/.prompts/<scout-name>-<UTC-compact>.md` per the 2b two-step audit-file pattern (use `scout` for a single Scout, `scout-1`/`scout-2`/… for multiple; `<scout-name>` is the lowercased `--name`), then spawn with `--file`:
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \
      --name "scout-<NN>" \
      --description "Landscape scout" \
-     --text-file ${BASE}/.prompts/scout-<NN>-<UTC-compact>.md \
+     --file ${BASE}/.prompts/scout-<NN>-<UTC-compact>.md \
      --json
    ```
 
@@ -210,13 +210,13 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form; plus `On start, claim your assignment via {task_coord}.` and `Report completion via {task_coord} when done.` |
 | start cue (verbatim) | `Write findings to the output file, then send the Director a completion summary. The Director will relay findings and any follow-up questions between you and the Manager.` |
 
-Render the prompt to `${BASE}/.prompts/researcher-<NN>-<UTC-compact>.md` per the 2b two-step audit-file pattern, then spawn with `--text-file`:
+Render the prompt to `${BASE}/.prompts/researcher-<NN>-<UTC-compact>.md` per the 2b two-step audit-file pattern, then spawn with `--file`:
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \
      --name "researcher-NN" \
      --description "Researcher for sub-topic <slug>" \
-     --text-file ${BASE}/.prompts/researcher-NN-<UTC-compact>.md \
+     --file ${BASE}/.prompts/researcher-NN-<UTC-compact>.md \
      --json
    ```
 
@@ -229,12 +229,12 @@ When the Manager delivers the compiled `report.md`:
 1. The Director reads `${OUTPUT_DIR}/report.md` and reviews it critically against the checklist in [roles/director.md](roles/director.md).
 2. The Director sends tagged feedback to the Manager:
    ```bash
-   cafleet message send --fleet-id [fleet-id] --from-member-id [director-member-id] \
+   cafleet message send --from-member-id [director-member-id] \
      --to-member-id [manager-member-id] \
-     --text "review feedback round <N>: [FACTUAL ERROR] ... / [GAP] ... / ..."
+     "review feedback round <N>: [FACTUAL ERROR] ... / [GAP] ... / ..."
    ```
 3. The Manager revises the report (requesting additional Researchers from the Director as needed) and sends a completion message back via `cafleet message send`.
-4. Each polled inbound message MUST be `ack`ed via `cafleet message ack --fleet-id [fleet-id] --member-id [director-member-id] --message-id [message-id]` after acting on it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle.
+4. Each polled inbound message MUST be `ack`ed via `cafleet message ack [message-id]` after acting on it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle.
 5. Repeat until the Director judges quality is sufficient. Aim for 2–3 rounds maximum.
 
 If the Manager asks the Director a question that is really a user decision (e.g. language choice, scope trade-off), the Director MUST relay via {decision_surface} and pass the user's verbatim answer back via `cafleet message send`. Never decide on the user's behalf.
@@ -249,7 +249,7 @@ After user approval, offer to create a presentation via {decision_surface} (adap
 
 ### Step 8: Finalize & Clean Up (Director)
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*: stop the monitor loop's background task first ({bg_stop}), then `cafleet member delete` the Researchers, any active Scout, and the Manager (each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id [fleet-id]`; `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.
+Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*: stop the monitor loop's background task first ({bg_stop}), then `cafleet member delete` the Researchers, any active Scout, and the Manager (each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete [fleet-id]`; `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.
 
 ## Spawnable Agents
 

@@ -79,7 +79,7 @@ When CWD has no `.git` ancestor (typical when CWD is `$HOME` or under a coding a
 The Director creates the fleet inside a tmux pane:
 
 ```bash
-cafleet fleet create --name "<fleet-name>" --json
+cafleet fleet create --name "<fleet-name>" --coding-agent <backend> --json
 ```
 
 The CLI atomically (1) creates a `fleets` row and (2) registers a root Director bound to the current tmux pane. Capture both `fleet_id` and `director.member_id` from the JSON response and substitute them as **literal id strings** into every subsequent `cafleet ...` call.
@@ -92,9 +92,9 @@ If the user is not inside a tmux session, `cafleet fleet create` exits 1 with `E
 
 CAFleet members do not auto-poll. The broker delivers a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview` keystroke; that preview is the trigger that wakes the recipient. If the keystroke is missed (pane buffered, recipient mid-Bash, etc.), the message just sits in `INPUT_REQUIRED` until the recipient runs `cafleet message poll` themselves.
 
-Every CAFleet-orchestrated skill runs the Director-hosted heartbeat — it is a session-level requirement, not a per-skill choice. Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, the Director launches `cafleet monitor start --fleet-id <fleet-id>` as a background task in its own pane and confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the first `member create`.** Once per wake interval (default 600 s; `--interval` / `CAFLEET_MONITOR_WAKE_INTERVAL`, `0` disables the wake) the loop keystrokes one `Esc`-safeguarded fleet-level wake into the Director's own pane, naming every member with its pending-delivery count and closing with the resume clause. Each wake is the Director's cue to poll its inbox, ACK, dispatch queued work, health-check the named members, and then resume its own interrupted work. The loop never keystrokes a member pane. The heartbeat mechanism lives in the `cafleet` skill's `reference/supervision.md` and is identical on any backend (claude, codex, opencode).
+Every CAFleet-orchestrated skill runs the Director-hosted heartbeat — it is a session-level requirement, not a per-skill choice. Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, the Director launches `cafleet monitor <fleet-id>` as a background task in its own pane and confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the first `member create`.** Once per wake interval (default 600 s; `--interval` / `CAFLEET_MONITOR_WAKE_INTERVAL`, `0` disables the wake) the loop keystrokes one `Esc`-safeguarded fleet-level wake into the Director's own pane, naming every member with its pending-delivery count and closing with the resume clause. Each wake is the Director's cue to poll its inbox, ACK, dispatch queued work, health-check the named members, and then resume its own interrupted work. The loop never keystrokes a member pane. The heartbeat mechanism lives in the `cafleet` skill's `reference/supervision.md` and is identical on any backend (claude, codex, opencode).
 
-### 2.4 Spawn members with `cafleet member create --text-file <abs path>`
+### 2.4 Spawn members with `cafleet member create --file <abs path>`
 
 For each member you spawn, follow the **two-step render-to-file pattern**:
 
@@ -102,19 +102,19 @@ For each member you spawn, follow the **two-step render-to-file pattern**:
 
 2. **Write the rendered text** to `${BASE}/prompts/<role>-<UTC-compact>.md` where `<UTC-compact>` is `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")` (Python). Create `${BASE}/prompts/` on first write via `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`. On same-second collisions, append `_2`, `_3`, … to the filename until it is unique — never overwrite. **The pre-spawn file IS the audit artifact.** There is no second post-spawn re-render; the file is both the CLI input and the permanent record of what was spawned, carrying the four `{...}` identity placeholders pre-substitution (which is expected).
 
-3. **Spawn with `--text-file`** pointing at the absolute path of the rendered file (the acting Director is auto-resolved from the fleet row — no identity flag):
+3. **Spawn with `--file`** pointing at the absolute path of the rendered file (the acting Director is auto-resolved from the fleet row — no identity flag):
 
    ```bash
    cafleet member create --fleet-id <fleet-id> \
      --name "<member-name>" \
      --description "<one-sentence purpose>" \
-     --text-file ${BASE}/prompts/<role>-<UTC-compact>.md \
+     --file ${BASE}/prompts/<role>-<UTC-compact>.md \
      --json
    ```
 
    Capture the printed `member_id` from the JSON response and substitute it for the member's id in every subsequent `cafleet ...` call **the Director** makes that targets it. (The member itself learns its own id from the literal `YOUR MEMBER ID:` line the CLI rendered into its prompt — § 3.2.)
 
-Use `--text-file` for every spawn — § 3.4 explains the `command too long` cliff; inline `--text` is the documented fallback only for the `${BASE} == <unset>` case (§ 3.5, § 4).
+Use `--file` for every spawn — § 3.4 explains the `command too long` cliff; the inline positional `PROMPT` is the documented fallback only for the `${BASE} == <unset>` case (§ 3.5, § 4).
 
 #### Path-by-reference for role files
 
@@ -131,8 +131,8 @@ The spawned member opens its role file with `Read` on its first turn. The role f
 When the work is done, the Director MUST tear down in this exact order:
 
 1. **Stop the monitor loop's background task first.** The loop's `SIGTERM` handler runs its ownership-checked runtime clear, nulling the process fields and preserving `tick_seconds` and `last_wake_at`. Stopping the heartbeat first keeps a wake from landing mid-teardown.
-2. **`cafleet member delete --member-id <id>`** for every member. This sends the backend exit keystroke to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` per member.
-3. **`cafleet fleet delete --fleet-id <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active member in the fleet (root Director + remaining members), and physically deletes every associated `member_placements` row. Messages are preserved. `fleet delete` makes any still-running loop self-terminate on its next tick, so step 1 is belt-and-suspenders.
+2. **`cafleet member delete <id>`** for every member. This sends the backend exit keystroke to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` per member.
+3. **`cafleet fleet delete <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active member in the fleet (root Director + remaining members), and physically deletes every associated `member_placements` row. Messages are preserved. `fleet delete` makes any still-running loop self-terminate on its next tick, so step 1 is belt-and-suspenders.
 
 Order matters. Stop the loop before deleting members so a wake cannot land mid-teardown. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
 
@@ -189,8 +189,8 @@ An unknown placeholder raises a `UsageError` listing the four supported names; a
 
 This substitution is the **sole** identity-delivery mechanism — no identity environment variable is injected into the pane (the only forwarded env var is `CAFLEET_DATABASE_URL`). The member takes the literal integers from its prompt's identity lines and passes them explicitly:
 
-- a poll is `cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id>`;
-- a self-attributed send is `cafleet message send --fleet-id <fleet-id> --from-member-id <my-member-id> --to-member-id <director-member-id> --text "..."`.
+- a poll is `cafleet message poll <my-member-id>`;
+- a self-attributed send is `cafleet message send --from-member-id <my-member-id> --to-member-id <director-member-id> "..."`.
 
 A Director may *also* embed the literal `fleet_id` and `director_member_id` (which it knows at render time) directly instead of the placeholders; the member's own id always comes from the CLI-rendered `{member_id}`. The `cafleet` skill documents the convention for spawned members.
 
@@ -200,11 +200,11 @@ A Director may *also* embed the literal `fleet_id` and `director_member_id` (whi
 
 A common mistake is to leave a literal `[INSERT abs path to roles/<role>.md]` in the rendered file because the Director forgot to compute the absolute path. The member then opens a file that does not exist on its first turn. Spot-check the rendered files in `${BASE}/prompts/` before continuing.
 
-### 3.4 The `command too long` cliff and `--text-file`
+### 3.4 The `command too long` cliff and `--file`
 
 `tmux split-window` accepts the spawn prompt as a single positional argument. Linux's `ARG_MAX` (the `execve()` argument-list size limit) and tmux's own command parser combine to fail with `command too long` once the shell-quoted prompt grows past a few KB. Even with role content not inlined, a prompt with multiple `[INSERT …]` substitutions + the identity block + role-specific assignment text often exceeds the limit.
 
-`--text-file <abs path>` sidesteps this. cafleet reads the file inside its own process and writes the text to the new pane through a separate path that is not size-limited. **Use `--text-file` for every spawn.** The inline `--text` form is the documented fallback only for the `${BASE} == <unset>` case where the file write is impossible.
+`--file <abs path>` sidesteps this. cafleet reads the file inside its own process and writes the text to the new pane through a separate path that is not size-limited. **Use `--file` for every spawn.** The inline positional `PROMPT` is the documented fallback only for the `${BASE} == <unset>` case where the file write is impossible.
 
 ### 3.5 The `${BASE} == <unset>` skip semantics
 
@@ -212,7 +212,7 @@ When the base-dir resolution yields the `unset` outcome (absolute-path argument 
 
 - **Skip the audit-file write.** Do not try to write `<unset>/prompts/<role>-<UTC-compact>.md` — that is a literal path with a `<` in it, which most filesystems reject. The guard is `if BASE != "<unset>"`.
 - **Omit the `BASE:` line from the spawn prompt.** The spawn prompt does NOT include the literal string `BASE: <unset>` — the line is dropped entirely. The member's existence-check naturally treats audit-file features as disabled.
-- **Fall back to inline `--text`** for the `cafleet member create` call (the file-write path is gone, so the only way to get the prompt to cafleet is inline). Be aware that this risks the `command too long` failure mode for prompts above the tmux limit; surface that as a hard error to the user, not as a silent retry.
+- **Fall back to the inline positional `PROMPT`** for the `cafleet member create` call (the file-write path is gone, so the only way to get the prompt to cafleet is inline). Be aware that this risks the `command too long` failure mode for prompts above the tmux limit; surface that as a hard error to the user, not as a silent retry.
 - **Loud-error on unguarded BASE-derivation.** If a code path under `${BASE} == <unset>` reaches an unguarded `Path(BASE) / …` computation, abort with the standardized error: `Error: BASE is <unset>; refusing to fall back to /tmp`.
 
 The member, after spawn, emits a single CAFleet message back to the Director as a parens-free anchorless status:
@@ -311,10 +311,10 @@ The phrasing deliberately omits parentheses so a parser does not misinterpret it
 After acting on a polled message, the recipient MUST `cafleet message ack` it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle, polluting the recipient's context with stale work.
 
 ```bash
-cafleet message ack --fleet-id <fleet-id> --member-id <my-member-id> --message-id <message-id>
+cafleet message ack <message-id>
 ```
 
-The `<message-id>` is the full id returned by `cafleet message poll --fleet-id <fleet-id> --member-id <my-member-id> --full --json`. The default text-mode poll output truncates the body; pass `--full` when you need the untruncated envelope.
+The `<message-id>` is the full id returned by `cafleet message poll <my-member-id> --json`. The default text-mode poll output truncates the body; pass `--json` when you need the untruncated envelope.
 
 ---
 
@@ -345,7 +345,7 @@ The skill's task convention is `researches/pr-<pr-number>` (PR summaries are res
 ### Fleet bootstrap
 
 ```bash
-cafleet fleet create --name "summarize-pr-1234" --json
+cafleet fleet create --name "summarize-pr-1234" --coding-agent claude --json
 # → {"fleet_id": 7, "director": {"member_id": 8}}
 ```
 
@@ -353,11 +353,11 @@ Substitute `7` and `8` literally into every subsequent call the Director makes.
 
 ### Supervision model
 
-Like every CAFleet-orchestrated skill, `summarize-pr` launches the monitor loop **before** the Summarizer spawn (§ 2.3): the Director runs `cafleet monitor start --fleet-id 7` as a background task in its own pane and confirms the startup line in the task output. Each periodic wake lands in the Director's own pane and is the cue to poll, ACK, dispatch, and health-check the Summarizer — the heartbeat backstop that surfaces a stall even when the Summarizer never replies.
+Like every CAFleet-orchestrated skill, `summarize-pr` launches the monitor loop **before** the Summarizer spawn (§ 2.3): the Director runs `cafleet monitor 7` as a background task in its own pane and confirms the startup line in the task output. Each periodic wake lands in the Director's own pane and is the cue to poll, ACK, dispatch, and health-check the Summarizer — the heartbeat backstop that surfaces a stall even when the Summarizer never replies.
 
 ```bash
 # Background task in the Director's own pane (the backend's background-run primitive):
-cafleet monitor start --fleet-id 7
+cafleet monitor 7
 # task output → monitor loop started (fleet 7, tick 5s, pid 4821)
 ```
 
@@ -397,7 +397,7 @@ The Director writes this rendered text to `/repo/researches/pr-1234/prompts/summ
 cafleet member create --fleet-id 7 \
   --name "summarizer" \
   --description "Digests a PR diff into a 200-word risk summary" \
-  --text-file /repo/researches/pr-1234/prompts/summarizer-20260516T003344Z.md \
+  --file /repo/researches/pr-1234/prompts/summarizer-20260516T003344Z.md \
   --json
 # → {"member_id": 11, ...}
 ```
@@ -409,15 +409,15 @@ Capture `11` as the Summarizer's id for the rest of the run (the Summarizer itse
 The Summarizer reads the diff, writes the summary, and sends (from inside its pane, using the literal ids from its prompt):
 
 ```bash
-cafleet message send --fleet-id 7 --from-member-id 11 --to-member-id 8 \
-  --text "complete (doc) — summary 198 words, 3 risk areas"
+cafleet message send --from-member-id 11 --to-member-id 8 \
+  "complete (doc) — summary 198 words, 3 risk areas"
 ```
 
 The Director polls, acks, reads `${BASE}/summary.md`, presents it to the user via the `{decision_surface}` prompt. If the user approves, the Director tears down. If the user requests revisions, the Director sends:
 
 ```bash
-cafleet message send --fleet-id 7 --from-member-id 8 --to-member-id 11 \
-  --text "ready (doc)"
+cafleet message send --from-member-id 8 --to-member-id 11 \
+  "ready (doc)"
 ```
 
 (with a `COMMENT(director): <revision request>` marker at the top of `summary.md`) and waits for `addressed (doc)`.
@@ -427,8 +427,8 @@ cafleet message send --fleet-id 7 --from-member-id 8 --to-member-id 11 \
 ```bash
 # Stop the monitor loop's background task FIRST (the backend's stop primitive),
 # then delete the Summarizer, then the fleet.
-cafleet member delete --fleet-id 7 --member-id 11
-cafleet fleet delete --fleet-id 7
+cafleet member delete 11
+cafleet fleet delete 7
 ```
 
 Order matters: stop the monitor loop's background task first (its signal handler clears the runtime row), then delete the ordinary Summarizer, then delete the fleet (see § 2.5).
@@ -457,13 +457,13 @@ Fix: every message you act on, ack it. Acking moves the task from `INPUT_REQUIRE
 
 Symptom: `cafleet member create` exits non-zero with `Error: tmux split-window failed: command too long`, the member registration is rolled back, no member pane appears.
 
-Fix: use `--text-file` (always) and reference the role file by absolute path inside the spawn prompt, not by inlining the content.
+Fix: use `--file` (always) and reference the role file by absolute path inside the spawn prompt, not by inlining the content.
 
 ### 7.3 Shell-variable-substituting the Director's own literal ids
 
 Symptom: every `cafleet ...` call the Director makes triggers a permission prompt that interrupts the agent loop. The user complains that the skill is "asking me about every single command."
 
-Fix: in the **Director's own** commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet member create` directly. The Claude Code harness's `permissions.allow` matches Bash invocations as literal command strings; an exported shell variable you reference yourself (`export FLEET_ID=…; --fleet-id $FLEET_ID`) breaks the literal match. Never `export` IDs and reference them via `$VAR`.
+Fix: in the **Director's own** commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet member create` directly. The Claude Code harness's `permissions.allow` matches Bash invocations as literal command strings; an exported shell variable you reference yourself (`export MEMBER_ID=…; cafleet member show $MEMBER_ID`) breaks the literal match. Never `export` IDs and reference them via `$VAR`.
 
 ### 7.4 Writing audit files under the repo root
 
@@ -493,7 +493,7 @@ Fix: tear down in this exact order — stop the monitor loop's background task f
 
 Symptom: members are spawned before the monitor loop's `monitor loop started (…)` startup line is confirmed, so the heartbeat backstop is not yet running when they begin work.
 
-Fix: launch `cafleet monitor start --fleet-id <fleet-id>` as a background task in the Director's own pane immediately after `cafleet fleet create`, and confirm the startup line in the task output before any `cafleet member create`.
+Fix: launch `cafleet monitor <fleet-id>` as a background task in the Director's own pane immediately after `cafleet fleet create`, and confirm the startup line in the task output before any `cafleet member create`.
 
 ### 7.9 Leaving stray single braces in the spawn prompt
 
