@@ -1,7 +1,7 @@
 # Batch Capture — `cafleet monitor scan`
 
 **Status**: Approved
-**Progress**: 5/12 tasks complete
+**Progress**: 8/12 tasks complete
 **Last Updated**: 2026-08-04
 
 ## Overview
@@ -153,9 +153,9 @@ Loop cadence and flags, the `monitor_runtime` schema and wake ledger, `member ca
 
 ### Step 3: Skills
 
-- [ ] `skills/cafleet/reference/supervision.md`: make the fresh scan the normative gate capture (one scan per facilitation turn covers all members; gate depth 20 everywhere per § Supervision-gate semantics, retiring the `--lines 120` rule; per-target freshness caveat after any keystroke); update health-check step 4(c) and the Quick Reference table; replace the Stage-2 "doubles as the gate capture" note with the freshness-only form pinned in § Supervision-gate semantics <!-- completed: -->
-- [ ] `skills/cafleet/reference/cli.md`: document `monitor scan` in the monitor paragraph and reposition `member capture` as the targeted deeper-investigation primitive <!-- completed: -->
-- [ ] `skills/cafleet/reference/director.md`: add the batch scan as the fleet-wide read primitive alongside the `member capture` section <!-- completed: -->
+- [x] `skills/cafleet/reference/supervision.md`: make the fresh scan the normative gate capture (one scan per facilitation turn covers all members; gate depth 20 everywhere per § Supervision-gate semantics, retiring the `--lines 120` rule; per-target freshness caveat after any keystroke); update health-check step 4(c) and the Quick Reference table; replace the Stage-2 "doubles as the gate capture" note with the freshness-only form pinned in § Supervision-gate semantics <!-- completed: 2026-08-04T12:33 -->
+- [x] `skills/cafleet/reference/cli.md`: document `monitor scan` in the monitor paragraph and reposition `member capture` as the targeted deeper-investigation primitive <!-- completed: 2026-08-04T12:33 -->
+- [x] `skills/cafleet/reference/director.md`: add the batch scan as the fleet-wide read primitive alongside the `member capture` section <!-- completed: 2026-08-04T12:33 -->
 
 ### Step 4: Wake payload (code)
 
