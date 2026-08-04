@@ -16,7 +16,7 @@ regex = "1"
 rusqlite = { version = "0.39", features = ["bundled"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.11"
-signal-hook = "0.3"
+signal-hook = "0.4"
 tokio = { version = "1", default-features = false, features = ["net", "rt-multi-thread"] }
 
 [dev-dependencies]
