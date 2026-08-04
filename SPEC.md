@@ -204,7 +204,7 @@ Edges (who depends on whom):
 2. **CLI ↔ multiplexer ↔ coding-agent member-create.** `cafleet member create`
    (§6.3) sequences: resolve backend → `validate_model` → `validate_effort` →
    resolve the prompt
-   body via the shared `--text` / `--text-file` reader → `ensure_available`
+   body via the shared positional-`PROMPT` / `--file` reader → `ensure_available`
    → broker `register_member` (placement with `mux_pane_id` unset) → substitute
    `{fleet_id}` / `{member_id}` / `{director_member_id}` / `{coding_agent}`
    placeholders (§6.3) → `build_spawn_argv` (§6.7) →
@@ -357,9 +357,9 @@ card value. The single `is_root` SQL flag produces `kind` directly, shared by
 
 A `broadcast_summary` row has no single recipient, so `to_member_id` is
 **nullable** and `broadcast_message` writes **`NULL`** on the summary row. A
-`unicast` message always carries a real recipient id. `get_message` (§6.2) and
-`format_message` (§6.4, verbose mode) test `to_member_id IS NULL` / `is None` to
-decide whether to surface the `to:` endpoint, rather than a truthiness check.
+`unicast` message always carries a real recipient id. Consumers that branch on
+the recipient — e.g. the WebUI's name resolution over message endpoints
+(§6.8) — test `to_member_id IS NULL` / `is None`, never a truthiness check.
 Model `to_member_id` as an **optional/nullable integer**; there is no `0`
 sentinel.
 
@@ -594,21 +594,25 @@ How the broker surfaces the kind (the single `is_root` SQL flag shared by
 
 #### Messaging
 
-- **`send_message(fleet_id, member_id, to, text)`** — one unicast message + best-
+- **`send_message(from_member_id, to, text)`** — one unicast message + best-
   effort notify, one write_session. Coerce `to` to int; on failure → value error
-  `Invalid destination format: {to}`. If the sender is not active in the fleet →
-  value error `Sender member not found or not active in fleet: {member_id}`. Find
+  `Invalid destination format: {to}`. If the sender is not an active member →
+  value error `Sender member not found or not active: {from_member_id}`. The
+  sender's fleet is **derived from the sender row** — no caller-supplied fleet
+  exists. Find
   the destination among active members; absent → value error `Destination member
-  not found: {to_id}`; in a different fleet → value error `Destination member not
-  in fleet: {to_id}`. Build the unicast message (`owner_member_id = to_id`,
-  `from_member_id = member_id`, `to_member_id = to_id`, `type = "unicast"`,
+  not found: {to_id}`; in a different fleet than the sender → value error
+  `members {from_member_id} and {to_id} are not in the same
+  fleet.`. Build the unicast message (`owner_member_id = to_id`,
+  `from_member_id = from_member_id`, `to_member_id = to_id`, `type = "unicast"`,
   `status_state = "input_required"`, `origin_message_id = null`), insert, then
   `notification_sent = _try_notify_recipient(...)`. The persisted row holds the
   **full untruncated text**. Returns `{message, notification_sent}`.
-- **`broadcast_message(fleet_id, member_id, text)`** — fan out one unicast
+- **`broadcast_message(from_member_id, text)`** — fan out one unicast
   delivery per active peer plus one `broadcast_summary` owned by the
-  sender. Sender not active → value error `Sender member not found or not active
-  in fleet: {member_id}`. Recipients = active members in the fleet, **excluding
+  sender. Sender not active → value error `Sender member not found or not
+  active: {from_member_id}`. The fleet is **derived from the sender row**.
+  Recipients = active members in that fleet, **excluding
   the sender** (the Director **is** included); let `N` = the count of these
   recipients. Build the
   summary (`owner_member_id = member_id`, `from_member_id = member_id`, **`to_member_id =
@@ -631,13 +635,16 @@ How the broker surfaces the kind (the single `is_root` SQL flag shared by
   inline-preview keystroke, returning its boolean. Truncation is broker-side.
   The notification never rolls back the insert; the boolean flows only into
   `notification_sent` (unicast) or the broadcast `delivered` count.
-- **`poll_messages(member_id)`** — un-acked deliveries: `owner_member_id = member_id` AND
+- **`poll_messages(member_id)`** — un-acked deliveries for an existing member.
+  If the member is not an active registry row → value error
+  `Member {member_id} not found`. Then: `owner_member_id = member_id` AND
   `status_state = "input_required"`, `broadcast_summary` excluded, ordered
   `status_timestamp DESC`.
-- **`ack_message(member_id, message_id)`** — transitions a message in one
-  write_session. Load; absent → value error `Message {message_id} not found`.
-  If the caller is not the recipient (`owner_member_id`) → permission error
-  `Only the recipient can ACK a message`. If `status_state` is not
+- **`ack_message(message_id)`** — transitions a message in one
+  write_session; the recipient and fleet are **derived from the message row**
+  — existence and state are the only guards. Load; absent → value error
+  `Message {message_id} not found`.
+  If `status_state` is not
   `input_required` → value error `Cannot ACK message in state {status_state}`.
   Set `status_state = "completed"` and `status_timestamp = now`.
   `input_required` is the only state a message may transition from.
@@ -651,13 +658,9 @@ How the broker surfaces the kind (the single `is_root` SQL flag shared by
 - **`list_timeline(fleet_id, limit=200)`** — messages joined to their **sender's**
   member row, filtered to the sender's `fleet_id`, `broadcast_summary` excluded,
   ordered `status_timestamp DESC`, capped at `limit`.
-- **`get_message(fleet_id, message_id)`** — fleet-gated. Load; absent → value error
-  `Message {message_id} not found`. Build the endpoint set `[from_member_id]`,
-  appending `to_member_id` only when it is **non-null** (so a `broadcast_summary`
-  row's `NULL` recipient is dropped). If no endpoint member belongs to `fleet_id`
-  → value error `Message
-  {message_id} not found` (**same message** — the out-of-fleet gate is hidden as
-  not-found).
+- **`get_message(message_id)`** — single-message lookup; the fleet is
+  **derived from the message row** — existence is the only guard. Load;
+  absent → value error `Message {message_id} not found`.
 
 #### Monitor — wake targets
 
@@ -713,7 +716,7 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
 - **`read_monitor_runtime(fleet_id)`** — `{fleet_id, pid, started_at,
   last_tick_at, tick_seconds, last_wake_at}` or None.
 - **`monitor_is_live(fleet_id, now)`** — `false` if no row, else `_is_live`. An
-  advisory pre-check for `monitor start`; the atomic claim is authoritative.
+  advisory pre-check for `cafleet monitor`; the atomic claim is authoritative.
 - **`monitor_runtime_payload(fleet_id, now)`** — the runtime-liveness dict
   consumed by the WebUI `GET /api/monitor`: `{running, pid,
   tick_seconds, last_tick_at, last_tick_age_seconds, started_at, last_wake_at,
@@ -746,9 +749,9 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
 
 #### Contract error strings → exception class → exit code
 
-Usage-class → exit 2; application-class → exit 1; value/permission errors are
+Usage-class → exit 2; application-class → exit 1; value errors are
 raised by messaging/queries and translated by the caller (CLI → exit 1, WebUI →
-HTTP status); permission errors gate authorization. The exit-code policy is
+HTTP status). The exit-code policy is
 §7.2; the strings below are the broker's contract.
 
 | Function | Class | Message |
@@ -759,24 +762,24 @@ HTTP status); permission errors gate authorization. The exit-code policy is
 | `deregister_member` | application | `cannot deregister the root Director; use 'cafleet fleet delete' instead` |
 | `delete_fleet` | application | `fleet '{fleet_id}' not found.` |
 | `send_message` | value | `Invalid destination format: {to}` |
-| `send_message` | value | `Sender member not found or not active in fleet: {member_id}` |
+| `send_message` | value | `Sender member not found or not active: {from_member_id}` |
 | `send_message` | value | `Destination member not found: {to_id}` |
-| `send_message` | value | `Destination member not in fleet: {to_id}` |
-| `broadcast_message` | value | `Sender member not found or not active in fleet: {member_id}` |
+| `send_message` | value | `members {from_member_id} and {to_id} are not in the same fleet.` |
+| `broadcast_message` | value | `Sender member not found or not active: {from_member_id}` |
+| `poll_messages` | value | `Member {member_id} not found` |
 | `ack_message` | value | `Message {message_id} not found` |
 | `ack_message` | value | `Cannot ACK message in state {status_state}` |
-| `ack_message` | permission | `Only the recipient can ACK a message` |
-| `get_message` | value | `Message {message_id} not found` (missing and out-of-fleet) |
+| `get_message` | value | `Message {message_id} not found` |
 
 ### 6.3 CLI
 
-**Scope:** the entire `cafleet` command tree (17 commands across 4 groups + 3
-top-level commands — §1, §10), the shared option guards, and the `member create`
-spawn orchestration + rollback ladder. Orchestration glue only — it wires
-broker/multiplexer/output/coding-agent. The command/option checklist is §10; this
-section gives the per-command semantics. Exit codes are §7.2; application errors
-(exit 1) and usage errors (exit 2) are printed as `Error: <message>` to stderr
-(usage errors additionally print a usage line).
+**Scope:** the entire `cafleet` command tree (16 subcommands across 3 groups +
+4 top-level commands — §1, §10), the shared argument rules, and the `member
+create` spawn orchestration + rollback ladder. Orchestration glue only — it
+wires broker/multiplexer/output/coding-agent. The command/option checklist is
+§10; this section gives the per-command semantics. Exit codes are §7.2;
+application errors (exit 1) and usage errors (exit 2) are printed as `Error:
+<message>` to stderr (usage errors additionally print a usage line).
 
 Framework-generated parse errors — usage banners, missing-required-argument,
 invalid-value / invalid-integer, unknown-argument, and unexpected-argument
@@ -791,109 +794,102 @@ The top-level command is `cafleet`, group help `CAFleet — CLI for the message
 broker and member registry.`. One option lives before any subcommand:
 
 - `--version` — prints `cafleet <version>` and exits 0, short-circuiting before
-  subcommand dispatch, so it **bypasses** the `--fleet-id` requirement.
+  subcommand dispatch, so no subcommand argument validation runs.
 
 Any other pre-subcommand option — including `--json` — is the parser's
 unknown-argument usage error (clap's native rendering, exit 2).
 
-#### The `--fleet-id` required option
+#### Positional subject ids
 
-`--fleet-id` is a **required integer option** on every subcommand that operates
-within a fleet, enforced by a shared option callback (declared optional at the
-parser, `expose_value=False`, storing the value on the shared context object):
-a missing `--fleet-id` is an **application error (exit 1)** `--fleet-id <int> is
-required for this subcommand. Create a fleet with 'cafleet fleet create' and
-pass its id.`; a non-integer value is a parse-time usage error (exit 2). Help
-text: `Fleet ID (integer); required for this subcommand.`. There is **no
-environment default** — the guard never defaults to an arbitrary fleet, and a
-spawned member reads its fleet id from the `FLEET ID:` line the CLI rendered
-into its spawn prompt (the placeholder substitution below).
+The id a command acts on — its **subject** — is a **required positional
+argument**; ids that describe a relationship rather than the subject stay as
+flags. The positional subjects:
 
-Subcommands taking `--fleet-id`: all of `member *`, `message *`,
-`monitor *`, plus `fleet show` and `fleet delete`. Commands that do not operate
-within a single existing fleet — `setup`, `doctor`, `server`, `fleet create`,
-`fleet list` — do not declare it and reject `--fleet-id` with the parser's
-unknown-option error (exit 2).
+- `FLEET_ID` — on `fleet show`, `fleet delete`, `member list`, and `monitor`
+  (the fleet is the subject of the listing / the supervision loop).
+- `MEMBER_ID` — on `member show` / `delete` / `prompt` / `ping` / `capture`
+  (the target) and `message poll` (the requester).
+- `MESSAGE_ID` — on `message ack` and `message show`.
 
-#### Shared flags & the identity options
+Every positional subject is an integer: a non-integer value is clap's native
+invalid-value usage error, a missing subject its native
+missing-required-argument error (both exit 2). There is **no environment
+default** — a spawned member reads its ids from the literal `FLEET ID:` /
+`YOUR MEMBER ID:` / `DIRECTOR MEMBER ID:` lines the CLI rendered into its
+spawn prompt (the placeholder substitution below). The fleet is never restated
+where it is derivable: member ids are globally unique, so the member row names
+its fleet, and every message row names its recipient and (via its endpoints)
+its fleet (§6.2).
 
-- `--full` — boolean, default `false`. On `member show`, `member create`,
-  `fleet create`, and every `message` subcommand.
-- `--json` — boolean, default `false`, dest `json_output`, help `Output in
-  JSON format.`; a shared per-subcommand flag (declaration `json_flag` in
-  `cli/_helpers.py`), canonically written **trailing**, after all other flags.
-  On every `message` subcommand; `member create` / `delete` / `show` / `list` /
-  `prompt` / `ping`; `monitor capture`;
-  `fleet create` / `list` / `show`; and `doctor`. Emits compact single-line
-  JSON instead of text; composes with `--full` (truncation is applied to the
-  result before the json-vs-text fork); `--quiet` is a text-only shortcut,
-  ignored in the JSON branch.
-- `--member-id` — required integer naming **the member in question**, one
-  meaning everywhere: the requester on `message poll` / `ack` /
-  `show`, and the target on `member delete` / `show` / `prompt` / `ping` and
-  `monitor capture`. Help text: `Member ID (the
-  member in question)`. Shared declaration `member_id_option` in
-  `cli/_helpers.py`.
-- `--from-member-id` / `--to-member-id` — required integers naming both parties
-  of a two-party command: `--from-member-id` is the sender on `message send`
-  and `message broadcast`; `--to-member-id` is the
-  recipient on `message send`. Help texts:
-  `Sender's member ID` / `Recipient member ID`. Shared declarations
-  `from_member_id_option` / `to_member_id_option` in `cli/_helpers.py`.
+The **relationship flags** — ids that label a role rather than name the
+subject:
 
-#### Shared `--text` / `--text-file` body input {#text-body-input}
+- `--fleet-id` — **only** on `member create` (integer, required): the fleet
+  the new member joins; the subject of the command is the member being
+  created.
+- `--from-member-id` / `--to-member-id` — required integers naming both
+  parties of a two-party command: `--from-member-id` is the sender on `message
+  send` and `message broadcast`; `--to-member-id` is the recipient on `message
+  send`. Help texts: `Sender's member ID` / `Recipient member ID`.
 
-`message send`, `message broadcast`, and `member create`
-resolve their text body through **one shared reader** taking the `--text`
-(string) and `--text-file` (string path) pair. Both options are declared with
-**no** parser-level `required`; the reader enforces exactly-one-of. Resolution,
-in order:
+Every other subcommand rejects `--fleet-id` with the parser's unknown-option
+error (exit 2).
 
-- Neither given → usage error (exit 2) `Provide exactly one of --text or
-  --text-file.`.
-- Both given → usage error (exit 2) `--text and --text-file are mutually
-  exclusive.`.
-- `--text <s>` → the body is `s` verbatim; empty or whitespace-only → usage
-  error (exit 2) `text may not be empty.`.
-- `--text-file -` → the whole body is read from stdin (read to EOF, decoded
+#### The shared `--json` flag
+
+- `--json` — boolean, default `false`, help `Output in JSON format.`; a shared
+  per-subcommand flag, canonically written **trailing**, after all other
+  arguments. On every `message` subcommand; `member create` / `delete` /
+  `show` / `list` / `prompt` / `ping` / `capture`; `fleet create` / `list` /
+  `show` / `delete`; and `doctor`. Emits compact single-line JSON instead of
+  text. JSON is always the **complete, untruncated machine form** — full
+  envelopes, full message bodies; text output is always the human/pane form,
+  truncated per §6.4. `--json` is the **only** output switch in the tree.
+
+#### Shared positional-`TEXT` / `--file` body input {#text-body-input}
+
+`message send`, `message broadcast`, and `member create` take their text body
+as a **positional argument** (`TEXT`; named `PROMPT` on `member create`) with
+`--file PATH` as the alternative, resolved through **one shared reader**.
+Exactly one of the positional and `--file` must be supplied, enforced as a
+clap-native required argument group (the positional and `--file` conflict;
+supplying neither or both is clap's native rendering, exit 2 — the contract is
+the exit code and the offending arguments, not the exact text). Resolution:
+
+- Positional `<s>` → the body is `s` verbatim; empty or whitespace-only →
+  usage error (exit 2) `text may not be empty.`.
+- `--file -` → the whole body is read from stdin (read to EOF, decoded
   UTF-8); empty or whitespace-only stdin → application error (exit 1)
-  `--text-file -: stdin is empty.`.
-- `--text-file <path>` → the file is read as **raw bytes and decoded UTF-8 with
+  `--file -: stdin is empty.`.
+- `--file <path>` → the file is read as **raw bytes and decoded UTF-8 with
   no universal-newline translation** (CRLF/CR survive byte-for-byte); an
   absolute path is used as-is, a relative path resolves against CWD. Error
-  surfaces (all application errors, exit 1, keyed on `--text-file`, riding the
+  surfaces (all application errors, exit 1, keyed on `--file`, riding the
   read-bytes exception surface with **no** `is_file()` pre-check so a permission
-  failure lands correctly): missing / non-regular file → `--text-file <path>:
-  file does not exist or is not a regular file.`; unreadable → `--text-file
-  <path>: file is not readable.`; invalid UTF-8 → `--text-file <path>: file is
-  not valid UTF-8.`; empty or whitespace-only file → `--text-file <path>: file
+  failure lands correctly): missing / non-regular file → `--file <path>:
+  file does not exist or is not a regular file.`; unreadable → `--file
+  <path>: file is not readable.`; invalid UTF-8 → `--file <path>: file is
+  not valid UTF-8.`; empty or whitespace-only file → `--file <path>: file
   is empty.`.
 
 The body is returned **verbatim** (no stripping). Empty-body rejection is
 **uniform** across all three commands and across inline / file / stdin. Long or
-multi-line bodies use `--text-file` (or `-` stdin) to bypass the shell's
+multi-line bodies use `--file` (or `-` stdin) to bypass the shell's
 `ARG_MAX` limit.
 
 #### Shared `message` handler sequence
 
-Every `message` leaf handler (which returns a
-broker result) follows one shared sequence, configured per command by a
-**required** text renderer and one switch, `requires_member_fleet`. Per
-invocation, in order:
+Every `message` leaf handler (which returns a broker result) follows one
+shared sequence, configured per command by a **required** text renderer. The
+broker derives the fleet and recipient from the subject row (§6.2) — no
+fleet-gate runs CLI-side. Per invocation, in order:
 
-1. **Fleet read** — read `fleet_id` from context (the required `--fleet-id`
-   option populated it).
-2. **Fleet-gate** (only when `requires_member_fleet`) — read the acting member
-   id; if absent, a programmer-error application error; if the broker reports
-   the member is not in the fleet → application error (exit 1)
-   `member <member_id> is not in fleet <fleet_id>.`. **Runs before the handler
-   body.**
-3. **Handler call.**
-4. **Render** — route the result through message truncation + message-list rendering
-   (with `full`).
-5. **Emit branch** — if the subcommand's `--json` flag was passed, emit compact
-   JSON; else call the text renderer with `full`.
-6. **Exception wrap** — re-raise an application/usage error unchanged; wrap any
+1. **Handler call.**
+2. **Emit branch** — if the subcommand's `--json` flag was passed, render the
+   **untruncated** result through message-list rendering and emit compact
+   JSON; else route the result through message truncation (§6.4,
+   `max_text_len`) and call the text renderer.
+3. **Exception wrap** — re-raise an application/usage error unchanged; wrap any
    other exception as an application error (exit 1) carrying its message.
 
 #### `doctor`
@@ -950,19 +946,16 @@ the stale-assets guard — it reports instead of blocking.
 
 #### `fleet` group
 
-Does **not** follow the shared `message` handler sequence. `fleet create`,
-`fleet list`, and
-`fleet show` take the shared `--json` flag and emit JSON when it is set.
-
-`fleet create` and `fleet list` do **not** take `--fleet-id`; `fleet show` and
-`fleet delete` take the **required `--fleet-id` option** like every other
-fleet-scoped command (§6.3 `--fleet-id`).
+Does **not** follow the shared `message` handler sequence. All four `fleet`
+subcommands take the shared `--json` flag and emit JSON when it is set.
+`fleet show` and `fleet delete` take the positional `FLEET_ID` subject (§6.3
+*Positional subject ids*).
 
 - **create** — `--name` (string, **required**; no `--name` → clap's native
   missing-required-argument error naming `--name`, exit 2), `--coding-agent`
   (choice over the coding-agent names, **required**; omitted → clap's native
   missing-required-argument error naming `--coding-agent`, exit 2), `--json`
-  (shared), `--full` (documented).
+  (shared).
   Requires a supported multiplexer: on a `MultiplexerError`
   → application error `cafleet fleet create must be run inside a tmux or herdr
   session` (exit 1, no DB writes).
@@ -970,30 +963,35 @@ fleet-scoped command (§6.3 `--fleet-id`).
   one formatted row per fleet (five columns: FLEET_ID / DIRECTOR / NAME / MEMBERS
   left-padded 40 / 40 / 20 / 8, then a trailing unpadded CREATED_AT; nullable
   cells fall back to empty strings).
-- **show** — `--fleet-id` (integer, required) + the shared `--json`. Not found →
+- **show** — positional `FLEET_ID` + the shared `--json`. Not found →
   application error `fleet '<fleet_id>' not found.`. Text: `fleet_id`, `name`,
   `created_at`, plus a `deleted_at:` line when soft-deleted (soft-deleted rows
   are returned intentionally).
-- **delete** — `--fleet-id` (integer, required). Prints `Deleted
-  fleet <fleet_id>. Deregistered <n> members.`; idempotent (an already-deleted
+- **delete** — positional `FLEET_ID` + the shared `--json`. Text: `Deleted
+  fleet <fleet_id>. Deregistered <n> members.`; JSON: the broker result
+  `{"deregistered_count": <n>}`. Idempotent (an already-deleted
   fleet reports 0 members).
 
 #### `message` group
 
-All five follow the shared handler sequence above. Common: the acting member id —
-`--from-member-id` (integer, required — the sender) on `send` / `broadcast`,
-`--member-id` (integer, required) on `poll` / `ack` / `show`;
-`--message-id` (integer, required) on `ack`/`show`; `--full` (documented)
-on all; `--quiet` (documented boolean, default `false` — success output is the
-bare `message_id`) on `send` and `ack`.
+All five follow the shared handler sequence above and take the shared
+`--json` flag. Subjects and relationship flags: positional `MEMBER_ID` (the
+requester) on `poll`; positional `MESSAGE_ID` on `ack` / `show`;
+`--from-member-id` (integer, required — the sender) on `send` / `broadcast`;
+`--to-member-id` (integer, required — the recipient) on `send`. The broker
+derives everything else from those rows (§6.2): the fleet from the sender row
+on `send` / `broadcast`, the recipient and fleet from the message row on
+`ack` / `show`.
 
-- **send** — also `--to-member-id` (integer, required — the recipient) and the
-  shared `--text` / `--text-file` body pair (exactly one required; §6.3
-  [text-body input](#text-body-input)). Fleet-gated; truncates message text.
-  Prints `Message sent.\n` + the formatted message.
-- **broadcast** — also the shared `--text` / `--text-file` body pair (exactly
-  one required; §6.3 [text-body input](#text-body-input)). **Not** fleet-gated; the
-  result is a list; `--full` → the formatted first message envelope; else `broadcast
+- **send** — `--from-member-id`, `--to-member-id`, and the shared body input
+  (positional `TEXT` or `--file PATH`; §6.3
+  [text-body input](#text-body-input)). A sender/recipient pair from
+  different fleets → the broker's cross-fleet error (§6.2)
+  `members <from> and <to> are not in the same fleet.` (exit 1). Text:
+  `Message sent.\n` + the formatted message.
+- **broadcast** — `--from-member-id` and the shared body input (positional
+  `TEXT` or `--file PATH`; §6.3 [text-body input](#text-body-input)). The
+  result is a list; text is `broadcast
   id=<message_id> recipients=<N> delivered=<k>`, where `<N>` is the result's
   `recipients` (the real recipient count, matching `Broadcast sent to {N}
   recipients`) and `<k>` is the result's `delivered` (the count of best-effort
@@ -1001,20 +999,26 @@ bare `message_id`) on `send` and `ack`.
   they are reported as **separate fields**, not conflated (the broker computes
   both, §6.2). In JSON mode the result object carries both `recipients` and
   `delivered`.
-- **poll** — fleet-gated; indexed message list; empty `No messages found.`.
-- **ack** — fleet-gated; prefix `Message acknowledged.\n` + the formatted message.
-- **show** — fetches the message within the fleet; text is the formatted message.
+- **poll** — positional `MEMBER_ID`; an unknown or inactive requester → the
+  broker's existence error `Member <member_id> not found` (exit 1); indexed
+  message list; empty `No messages found.`.
+- **ack** — positional `MESSAGE_ID`; existence + `input_required` state are
+  the only guards (§6.2). Text: `Message acknowledged.\n` + the formatted
+  message.
+- **show** — positional `MESSAGE_ID`; existence is the only guard. Text is
+  the formatted message.
 
 #### `member` group — shared resolution helpers
 
 These helpers back the `member` subcommands. The target member is named by
-`--member-id` (§1).
+the positional `MEMBER_ID` subject (§6.3 *Positional subject ids*); the fleet
+is derived from the member row.
 
 - **Require-pane** — given a placement and an action label
   (`capture`/`prompt`), no pane id → application error `member
   <member_id> has no pane yet (pending placement) — nothing to <action>.`.
   `member ping` does not use it — a pending placement takes ping's skip path.
-- **Load-authorized-member** — fetch the member within the fleet: not found →
+- **Load-member** — fetch the member by id: not found →
   `Member <member_id> not found`; other fetch failure → `failed to fetch member:
   <error>`; absent placement → application error ``member <member_id> has no
   placement row; it was not spawned via `cafleet member create`.``, unless the
@@ -1037,14 +1041,17 @@ These helpers back the `member` subcommands. The target member is named by
 
 The one genuinely distinct lifecycle op: register **and** spawn a pane. It
 takes **no identity flag** — the acting Director is auto-resolved from the
-fleet row. Options: `--name` (string, required), `--description` (string,
+fleet row. Arguments: `--fleet-id` (integer, required — the fleet the new
+member joins, §6.3 *Positional subject ids*), `--name` (string, required),
+`--description` (string,
 required), `--coding-agent` (choice, optional — omitted → inherit the
 Director's placement backend; the help default text reads `inherits the
 Director's backend`),
 `--model` (string, optional), `--effort` (string, optional — reasoning-effort
 level, validated per backend; help text `Reasoning-effort level (claude, codex
-only).`), the shared `--text` / `--text-file` body pair
-(exactly one required; §6.3 [text-body input](#text-body-input)), and `--full`.
+only).`), the shared body input (positional `PROMPT` or `--file PATH`,
+exactly one; §6.3 [text-body input](#text-body-input)), and the shared
+`--json`.
 Every spawned member is an ordinary member; the
 member `kind` union is `"director" | "member"` (§5.4), with `director`
 reserved for the fleet's single root Director bootstrapped by `fleet create`.
@@ -1061,10 +1068,11 @@ Sequence:
 2. **Model and effort validation** — validate `--model`, then `--effort`
    (`validate_model` then `validate_effort`); a failure → usage error (exit 2)
    with the backend's message, **before any registration or tmux side effect**.
-3. **Resolve the body** — via the shared `--text` / `--text-file` reader (§6.3
-   [text-body input](#text-body-input)): exactly-one-required, `-` stdin, abs /
-   CWD-relative path, UTF-8, uniform empty-body rejection. A mutual-exclusivity
-   or empty-inline error is a usage error (exit 2); a file / stdin surface is an
+3. **Resolve the body** — via the shared positional-`PROMPT` / `--file` reader
+   (§6.3 [text-body input](#text-body-input)): exactly-one enforced at parse
+   time (clap-native, exit 2), `-` stdin, abs /
+   CWD-relative path, UTF-8, uniform empty-body rejection. An empty inline
+   body is a usage error (exit 2); a file / stdin surface is an
    application error (exit 1). Resolved **before any registration or tmux side
    effect**; substitution (step 6) is deferred until the new member id exists.
 4. **Preconditions** — ensure tmux available, the backend binary on PATH, and
@@ -1093,16 +1101,17 @@ Sequence:
    `placement update failed: <error>`. If the placement row vanished: same
    best-effort `/exit`, then rollback-register, reason `placement row vanished
    before pane-id patch`.
-10. **Emit** — attach the placement view; emit JSON or the spawned-member text
-    formatter (`format_member`, §6.4, honoring `--full`).
+10. **Emit** — attach the placement view; emit JSON (the complete result) or
+    the compact spawned-member text formatter (`format_member`, §6.4).
 
 The ladder contract: any post-register failure deregisters the member so no
 orphan row survives; the best-effort cleanup never masks the original error.
 
 #### `member delete`
 
-The pane-teardown + registry-soft-delete op. Options: `--member-id`
-(integer, required — the **target**). The tmux precondition fires only on the
+The pane-teardown + registry-soft-delete op. Arguments: positional
+`MEMBER_ID` (the **target**) + the shared `--json`. The tmux precondition
+fires only on the
 pane-teardown path (live pane id) — a placementless or pending-placement
 delete is a pure registry operation and succeeds outside tmux.
 
@@ -1110,7 +1119,7 @@ delete is a pure registry operation and succeeds outside tmux.
    target is the fleet's Director → application error (exit 1) `cannot deregister
    the root Director; use 'cafleet fleet delete' instead` (the same string and
    exit code the broker's `deregister_member` guard raises, §6.2).
-2. Load the authorized member **tolerating a missing placement**; re-fetch
+2. Load the member **tolerating a missing placement**; re-fetch
    the canonical id and read the pane id (absent when placementless or
    pending).
 3. **No placement row** — registry soft-delete via the broker (a failure →
@@ -1132,19 +1141,19 @@ JSON: `{member_id, pane_status}`.
 
 #### `member show`
 
-Registry read — no tmux requirement and no requester gate. Options:
-`--member-id` (integer, required — the **target**; any active in-fleet
+Registry read — no tmux requirement and no requester gate. Arguments:
+positional `MEMBER_ID` (the **target**; any active
 registry entry, placed or placementless, the root Director
-included), `--full` (documented; affects **text mode only**). Load the target
-tolerating a missing placement: cross-fleet / unknown / inactive → application
+included) + the shared `--json`. Load the target
+tolerating a missing placement: unknown / inactive → application
 error `Member <member_id> not found`. JSON emits the broker `get_member` dict
-unchanged (§6.2) regardless of `--full`; text renders via `format_member_detail`
-(§6.4) — compact `<member_id> <name> <status>` by default, the labeled verbose
-block (`kind`, `skills`, placement sub-block) with `--full`.
+unchanged (§6.2) — the detailed view; text renders via `format_member_detail`
+(§6.4) — the compact `<member_id> <name> <status>` line.
 
 #### `member list`
 
-No options beyond the required `--fleet-id` and the shared `--json` flag; no
+Arguments: positional `FLEET_ID` (the fleet is the subject of the listing) +
+the shared `--json`; no
 identity flag. Lists every **active registry entry** of the fleet via
 `list_members` (§6.2) — the root Director, ordinary members, and placementless
 rows. Empty case `0 members.`; else the header is
@@ -1158,8 +1167,10 @@ when placementless — `last_sent`, `last_recv`, `last_ack`, `idle`).
 
 #### `member prompt`
 
-Options: `--member-id` (integer, required), `--shell` (boolean flag, default
-`false`), **positional** `text` (string, required). A newline/CR → usage error
+Arguments: positional `MEMBER_ID` (first), **positional** `TEXT` (string,
+required, second), `--shell` (boolean flag, default
+`false`), and the shared `--json`. `TEXT` has no `--file` alternative — its
+body is a one-line keystroke by contract. A newline/CR → usage error
 `text may not contain newlines.`; empty after trim → usage error `text may not
 be empty.`; then trim. Ensure tmux, load the member, require a pane (`prompt`).
 Dispatch via the multiplexer's `send_prompt` (§6.5): the plain form delivers
@@ -1175,18 +1186,18 @@ sufficient).
 
 #### `member ping`
 
-Re-pokes a member's inbox. Options: `--member-id` (integer, required — the
-**target**), `--quiet` (boolean, default `false` — success output is the
-bare member id). Ensure tmux and load the target (a missing placement row is
+Re-pokes a member's inbox. Arguments: positional `MEMBER_ID` (the
+**target**) + the shared `--json`.
+Ensure tmux and load the target (a missing placement row is
 still the hard error of the shared loader). A **pending placement** (a
 placement row with no pane id) takes the **skip path**: no keystroke is sent
 and the command exits 0 — text `Member <name> has no pane yet (pending
 placement) — ping skipped; it will poll its inbox on spawn.`, JSON
-`{"member_id": <id>, "pane_id": null, "skipped": true}`, `--quiet` the bare
-member id. With a pane, inject the inbox-poll keystroke via the multiplexer's
+`{"member_id": <id>, "pane_id": null, "skipped": true}`. With a pane, inject
+the inbox-poll keystroke via the multiplexer's
 `send_poll_trigger`, which is **best-effort** (§6.5) — it returns a boolean and
 never raises. The keystroked payload carries a resume clause: `cafleet message
-poll --fleet-id <fleet_id> --member-id <member_id> — then resume your work if
+poll <member_id> — then resume your work if
 something was still running.`. A returned `false` (non-delivery) → application
 error `send failed: tmux send-keys did not deliver the poll-trigger keystroke
 to pane <pane_id>.`. Because `send_poll_trigger` swallows its own `TmuxError`
@@ -1195,35 +1206,42 @@ message above. JSON: `{member_id, pane_id, skipped}` — the `skipped` key is
 present on **both** success paths (`false` on a dispatched ping); text: `Pinged
 member <name> (<pane_id>) — poll keystroke dispatched.`.
 
-#### `monitor` group
+#### `member capture`
 
-A shared `_require_live_fleet` guard fetches the fleet; missing or soft-deleted
+Pane read. Arguments: positional `MEMBER_ID` (the **target**), `--lines`
+(integer, default
+**20**, shown in help), `--ansi` (boolean, default `false` — preserve ANSI
+escapes; stripping is the default), plus the shared `--json`. Ensure tmux,
+load the member (the shared
+`member`-group loader), require a pane (`capture`) — the same guards as the
+rest of the `member` group. Capture the last N lines
+(a tmux error → application error `capture failed: <error>`). When `--ansi`
+is not set, strip ANSI. JSON begins `{member_id, pane_id, lines, content,
+...}`; text emits the content **only**, with no trailing newline, **preserving
+ANSI even on a non-TTY sink** when `--ansi` is set. JSON adds `captured_at`,
+stamped from local UTC at the capture read boundary, and
+`content_sha256 = sha256(content.encode("utf-8"))`, in key order after
+`content`. The hash is mode-exact: no-ANSI hashes the stripped,
+carriage-return-defragmented emitted string; ANSI hashes the preserving
+emitted string. Text output stays byte-identical. Capture content is not
+stored.
+
+#### `monitor`
+
+A single top-level command — `cafleet monitor FLEET_ID [--tick N]
+[--interval N]` — with the positional `FLEET_ID` subject. A
+`_require_live_fleet` guard fetches the fleet; missing or soft-deleted
 → application error `fleet <fleet_id> not found`.
-
-- **start** — `--tick` (integer ≥1, default 5, shown in help) and `--interval`
-  (integer ≥0, optional; when omitted, falls back to
-  `CAFLEET_MONITOR_WAKE_INTERVAL` §7.1, default 600). `--interval 0` disables
-  the Director wake while the loop keeps heartbeating every tick. Requires a
-  live fleet, then tmux. Runs the monitor loop in-process (blocking),
-  launched by the Director as a background task in its own pane immediately
-  after `cafleet fleet create` and before the first `cafleet member create`.
-  Immediately after the successful runtime claim, before the first tick, the
-  loop prints the startup line the Director confirms before spawning any
-  member: `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)`.
-- **capture** — `--member-id` (integer, required), `--lines` (integer, default
-  **20**, shown in help), `--ansi` / `--no-ansi` (boolean pair, default
-  `false`), plus the shared `--json`. Ensure tmux, load the member (the shared
-  `member`-group loader), require a pane (`capture`). Capture the last N lines
-  (a tmux error → application error `capture failed: <error>`). When `--ansi`
-  is not set, strip ANSI. JSON begins `{member_id, pane_id, lines, content,
-  ...}`; text emits the content with no trailing newline, **preserving ANSI
-  even on a non-TTY sink** when `--ansi` is set. JSON adds `captured_at`,
-  stamped from local UTC at the capture read boundary, and
-  `content_sha256 = sha256(content.encode("utf-8"))`, in key order after
-  `content`. The hash is mode-exact: no-ANSI hashes the stripped,
-  carriage-return-defragmented emitted string; ANSI hashes the preserving
-  emitted string. Text output stays byte-identical. Capture content is not
-  stored.
+`--tick` (integer ≥1, default 5, shown in help) and `--interval`
+(integer ≥0, optional; when omitted, falls back to
+`CAFLEET_MONITOR_WAKE_INTERVAL` §7.1, default 600). `--interval 0` disables
+the Director wake while the loop keeps heartbeating every tick. Requires a
+live fleet, then tmux. Runs the monitor loop in-process (blocking),
+launched by the Director as a background task in its own pane immediately
+after `cafleet fleet create` and before the first `cafleet member create`.
+Immediately after the successful runtime claim, before the first tick, the
+loop prints the startup line the Director confirms before spawning any
+member: `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)`.
 
 #### `server`
 
@@ -1238,8 +1256,7 @@ errors propagate unwrapped.
 and schema-management entry point. Command help: `Migrate the database schema
 and install the coding-agent assets (skills and presets).` It takes no
 positional arguments — `cafleet setup <word>` fails with clap's native
-unexpected-argument error — and does not accept
-`--fleet-id`.
+unexpected-argument error.
 
 | Flag | Required | Notes |
 |---|---|---|
@@ -1312,9 +1329,10 @@ An install failure aborts the loop; rows recorded before the failure remain.
 
 #### Stale-assets guard
 
-Every fleet-scoped command group — `fleet`, `member`, `message`, and `monitor`
-— validates the recorded assets installs at the top of its group callback,
-before any subcommand body runs:
+Every fleet-scoped surface — the `fleet`, `member`, and `message` groups (at
+the top of the group callback, before any subcommand body runs) and the
+`monitor` command (before its command body) — validates the recorded assets
+installs:
 
 1. If the DB file, the `asset_installs` table, or all rows are missing, exit 1
    with:
@@ -1343,12 +1361,13 @@ always print help, even under a missing or stale install.
 
 #### Spawn-prompt resolution (used by `member create`)
 
-The spawn prompt is supplied through the shared `--text` / `--text-file` body
-input (§6.3 [text-body input](#text-body-input)): exactly one is required, `-`
-reads stdin, a relative `--text-file` path resolves against CWD, decoded UTF-8
-with no newline translation. There is **no** built-in default template and **no**
-positional prompt argument — a bare `member create` with neither flag is the
-shared usage error `Provide exactly one of --text or --text-file.` (exit 2).
+The spawn prompt is supplied through the shared body input (positional
+`PROMPT` or `--file PATH`, §6.3 [text-body input](#text-body-input)): exactly
+one is required, `-`
+reads stdin, a relative `--file` path resolves against CWD, decoded UTF-8
+with no newline translation. There is **no** built-in default template — a
+bare `member create` with neither the positional nor `--file` is clap's
+native missing-required-argument-group error (exit 2).
 
 **Placeholder substitution.** After the body is resolved, `member create` runs
 `str.format` over it, substituting `{fleet_id}`, `{member_id}` (the spawned
@@ -1374,10 +1393,11 @@ Two consumers depend on these exact shapes: the CLI (which prints them) and the
 WebUI (which reuses the JSON serialization but bypasses truncation). This module
 sets no exit codes. (`doctor` output is produced by the CLI, §6.3, not here.)
 
-The text-vs-JSON selection is the CLI's: `--full` and `--json` are **documented**
-flags (Q5 hidden-flag cleanup). Every JSON-capable subcommand takes the one
-shared per-subcommand `--json` flag (§6.3): the `message` group branches on it
-inside the shared handler sequence, while the `member`, `monitor`, `fleet`, and
+The text-vs-JSON selection is the CLI's: every JSON-capable subcommand takes
+the one shared per-subcommand `--json` flag (§6.3) — the single output
+switch. Text output is the human/pane form, always truncated; JSON is the
+complete, untruncated machine form. The `message` group branches on the flag
+inside the shared handler sequence, while the `member`, `fleet`, and
 `doctor`
 handlers branch on it per-handler with their own emit sites (§7.3). The single
 absent glyph below and the compact-JSON rules apply to every path.
@@ -1396,10 +1416,11 @@ The split is load-bearing: formatters call render functions internally (e.g.
 call formatters.
 
 **Render functions:** `strip_ansi(text)`; `format_json(data)`;
-`truncate_text(value, full, limit)`; `truncate_message_text(result, full)`
-(in-place); `render_message(message, full)` → `{id, from, ts, text, kind?, origin?}`;
-`render_messages_in_result(result, full)` (non-mutating, unwraps `{message: …}`
-envelopes and flat message dicts).
+`truncate_text(value, limit)`; `truncate_message_text(result)`
+(in-place); `render_message(message)` → `{id, from, ts, text, kind?, origin?}`;
+`render_messages_in_result(result)` (non-mutating, unwraps `{message: …}`
+envelopes and flat message dicts). Truncation runs only on the CLI's text
+branch (§6.3); the JSON branch renders the untruncated result.
 
 **Formatter functions:** `format_message`; `format_indexed_list`
 (joins formatted items with one blank line between, `empty_msg` when empty —
@@ -1412,14 +1433,12 @@ an idle-seconds humanizer.
 - Truncation counts and slices **by Unicode codepoint**, never by byte. A value
   longer than the effective limit returns its first `limit` codepoints plus a
   one-codepoint `…` (U+2026) suffix — so the result is `limit + 1` codepoints.
-- `truncate_text` passes the value through unchanged when `full` is set, the
-  value is null, or its codepoint length is `<= limit`. Null returns null.
+- `truncate_text` passes the value through unchanged when the
+  value is null or its codepoint length is `<= limit`. Null returns null.
 - The effective limit is `truncate_text`'s explicit `limit` argument when given,
   else `max_text_len` (default `200`, from config) — the **only** config
   dependency. `truncate_message_text` takes no `limit` and always uses
   `max_text_len`.
-- The **member-description limit is a hardcoded literal `60`**, independent of
-  `max_text_len`; `format_member_detail` verbose applies it.
 
 #### Compact-JSON rules
 
@@ -1469,28 +1488,21 @@ Every field is read with required access unless marked optional; required access
 `origin_message_id` mean empty string and `0` are also suppressed, not just null.
 
 - **Message** (`render_message` / `format_message` / `truncate_message_text`): `message_id`
-  (req), `from_member_id` (req), `status_timestamp` (req, compact),
-  `text` (req key for compact, optional for verbose; guarded by truthiness),
-  `type` (req; `"unicast"` suppresses `kind`), `status_state` (req, verbose),
-  `to_member_id` (optional, nullable; verbose `to:` line only when **non-null** —
-  a `broadcast_summary` row's `NULL` recipient is skipped), `origin_message_id`
+  (req), `from_member_id` (req), `status_timestamp` (req),
+  `text` (req key; guarded by truthiness),
+  `type` (req; `"unicast"` suppresses `kind`), `origin_message_id`
   (optional; `origin` key only when **truthy**). Envelope: a message may be wrapped
   `{message: {…}}`; `format_message`
   unwraps when the inner value is a dict; the render walker unwraps when it is a
   dict containing `message_id`.
 - **Member detail** (`format_member_detail`): `member_id` (req), `name` (req),
-  `description` (req, truncated to 60), `status` (req), `kind` (req, verbose),
-  `skills` (req, verbose; a compact JSON array, `-` when empty), `placement`
-  (optional; verbose renders the placement sub-block when present,
-  `placement:   none` otherwise, with `-` for a null field inside it).
+  `status` (req). The detailed view (description, kind, skills, placement) is
+  the broker `get_member` dict, emitted by `--json` (§6.3).
 - **Fleet-create** (`format_fleet_create`): `fleet_id` (req), `director` (req
-  nested) → `member_id` (req), `name`/`placement` (req, verbose);
-  `director.placement` (verbose) → `mux_session`/`mux_window_id`/`mux_pane_id`
-  (req); `name` (req key, verbose, empty string
-  when falsy); `created_at` (req, verbose).
+  nested) → `member_id` (req).
 - **Member-create** (`format_member`): `member_id` (req), `name` (req),
   `placement` (req) → `coding_agent` (req), `mux_pane_id` (req key; `(pending)`
-  when falsy in compact), `mux_window_id` (req, verbose).
+  when falsy).
 - **Member-list row**: `member_id`, `name`, `kind`, `placement` (optional,
   null for a placementless row; when present → `{coding_agent, mux_pane_id (→
   "(pending)")}` feed the `backend` / `pane_id` cells, `-` cells when null),
@@ -1502,11 +1514,11 @@ Every field is read with required access unless marked optional; required access
   WebUI, not by a formatter. The monitor runtime/member payloads (§6.2) are
   likewise serialized directly by the WebUI (§6.8), not by a formatter.
 
-The `(pending)` fallback for `mux_pane_id` appears in the compact member render
-and both list rows, but **not** in the verbose `format_member` block.
+The `(pending)` fallback for `mux_pane_id` appears in the member render
+and both list rows.
 
-The `backend:` display label (in `format_member_detail`'s verbose placement block, the
-`format_member` renders, and the roster/list column headers) maps to the
+The `backend` display label (in the
+`format_member` render and the roster/list column headers) maps to the
 placement's **`coding_agent`** value (`claude`/`codex`/`opencode`) — it names the
 coding-agent backend, a distinct axis from the placement's `backend` column
 (the multiplexer, `tmux`/`herdr`). The placement projection carries the new
@@ -1515,49 +1527,19 @@ surfaces the resolved multiplexer backend (§6.3).
 
 #### Exact text layouts
 
-`format_message` — **compact** line 1 by concatenation: `[<id> | from:<from> |
+`format_message` — line 1 by concatenation: `[<id> | from:<from> |
 <ts>]`, with ` | kind:<kind>` inserted before `]` when a `kind` is present and
 ` | origin:<origin>` inserted (after kind) when an `origin` is present; if the
-rendered `text` is truthy a second line holds the body. **Verbose** — aligned
-lines: `  id:    <message_id>`, `  state: <status_state>`, `  from:  <from_member_id>`,
-then `  to:    <to_member_id>` **only when `to_member_id` is non-null**, then `  type:
- <type>` **always**, then `  text:  <text>` **only when `text` is truthy**.
+rendered `text` is truthy a second line holds the body. This compact form is
+the **only** text form; the full envelope is `--json` (§6.3).
 
-`format_member_detail` — **compact**: `<member_id> <name> <status>` (single spaces, no
-labels). **Verbose** (description truncated to 60): `  member_id:    <member_id>`,
-`  name:        <name>`, `  description: <description>`, `  status:      <status>`,
-`  kind:        <kind>`, `  skills:      <skills>` (a compact JSON array, `-`
-when empty), then the placement block — `  placement:   none` when no placement
-row exists, else `  placement:` followed by the indented
-`    backend:` / `    session:` / `    window_id:` /
-`    pane_id:` / `    created_at:` lines, each null field rendering `-`.
+`format_member_detail` — `<member_id> <name> <status>` (single spaces, no
+labels). The detailed view is `--json` (the broker `get_member` dict, §6.3).
 
-`format_fleet_create` — **compact**: `<fleet_id> director=<director.member_id>`.
-**Verbose** — 6 lines; first two are bare
-stringified values with no key prefix; `pane` joins the three placement fields
-with `:`:
+`format_fleet_create` — `<fleet_id> director=<director.member_id>`.
 
-```
-<fleet_id>
-<director.member_id>
-name:             <name or "">
-created_at:       <created_at>
-director_name:    <director.name>
-pane:             <mux_session>:<mux_window_id>:<mux_pane_id>
-```
-
-`format_member` — **compact** (`pane` = `mux_pane_id` or `(pending)`):
-`<member_id> <name> backend=<coding_agent> pane=<pane>`. **Verbose** — 6 lines
-(verbose `pane_id` is the raw `mux_pane_id`, no `(pending)`):
-
-```
-Member registered and spawned.
-  member_id: <member_id>
-  name:      <name>
-  backend:   <coding_agent>
-  pane_id:   <mux_pane_id>
-  window_id: <mux_window_id>
-```
+`format_member` — `<member_id> <name> backend=<coding_agent> pane=<pane>`
+(`pane` = `mux_pane_id` or `(pending)`).
 
 `format_member_list` — empty → `0 members.`; else a header `<count> member<s>:`
 (trailing `s` only when `count > 1`; `1 member:` exactly), a column header and
@@ -1578,11 +1560,8 @@ the humanized `idle` with no padding (last column). `member_id` is stringified.
   else `<n // 3600>h` (integer floor division).
 
 Both absent-cell helpers above use the single ASCII `-` glyph (§6.4 *The
-single absent glyph*). The conditional fields `kind`, `origin`, and the verbose
-`text:` line are gated on truthiness — omitted, never emitted empty. The verbose
-`to:` line is instead gated on **non-null** (`to_member_id is not None`): a
-broadcast-summary row's NULL recipient omits it; a unicast's real id always
-shows.
+single absent glyph*). The conditional fields `kind`, `origin`, and the body
+line are gated on truthiness — omitted, never emitted empty.
 
 ### 6.5 Multiplexer (tmux + herdr)
 
@@ -1657,9 +1636,9 @@ Director's `MultiplexerContext` and passes it directly.
 - **`send_exit(*, target_pane_id, ignore_missing=False)`** — keystrokes `/exit`
   + Enter via the literal-then-Enter core, **no Esc-first**; tolerates a missing
   pane when `ignore_missing`.
-- **`send_poll_trigger(*, target_pane_id, fleet_id, member_id) -> bool`** —
-  best-effort. tmux missing → `false`; payload `cafleet message poll --fleet-id
-  <fleet_id> --member-id <member_id> — then resume your work if something was
+- **`send_poll_trigger(*, target_pane_id, member_id) -> bool`** —
+  best-effort. tmux missing → `false`; payload `cafleet message poll
+  <member_id> — then resume your work if something was
   still running.`; literal-then-Enter, `timeout=5`s,
   **Esc-first=YES**, any error → `false`. Used only by `member ping`.
 - **`send_wake_trigger(*, target_pane_id, fleet_id, members) -> bool`** —
@@ -1885,7 +1864,7 @@ Each method's herdr realization:
   <id> "/exit"`.
 - **`send_poll_trigger(...) -> bool`** — best-effort. `herdr pane send-keys <id>
   esc` (the Esc safeguard, with the same short settle delay), then `herdr pane
-  run <id> "cafleet message poll --fleet-id <fleet_id> --member-id <member_id>
+  run <id> "cafleet message poll <member_id>
   — then resume your work if something was still running."`.
 - **`send_wake_trigger(...) -> bool`** — best-effort. `herdr pane send-keys <id>
   esc` (the Esc safeguard — the target is the Director's own pane, which can be
@@ -2466,7 +2445,7 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
   `resolve_multiplexer()` (§6.5). `None` (unset) means auto-detect from
   `HERDR_ENV` / `TMUX` — a legitimate default, not a fallback for a missing value.
   A set value must name a registry key (`tmux`/`herdr`) or resolution raises.
-- **`monitor_wake_interval`** is the `monitor start` Director wake interval in
+- **`monitor_wake_interval`** is the `cafleet monitor` Director wake interval in
   seconds, overridden per-invocation by `--interval` (§6.3). `0` disables the
   wake while the loop keeps heartbeating every tick. Dispatch cadence is
   persisted in `monitor_runtime.last_wake_at` (§6.2), durable across loop
@@ -2497,8 +2476,8 @@ printer that writes `Error: <message>` to stderr.
 | Error class | Exit | Meaning | Mapping |
 |---|---|---|---|
 | usage error | **2** | argument/parse/usage mistakes: missing required option; unknown option; invalid integer; integer-range violations; mutually-exclusive-option violations; the spawn-prompt placeholder errors; explicit usage errors | a usage-class error; prints `Error: <msg>` (+ usage line). Parser-native parse errors already exit 2. |
-| application error | **1** | application/runtime errors: runtime conflicts (one-monitor rule, not-enrolled, not-found-on-delete), the root-Director-deregistration guard, the spawn rollback ladder, and the missing-`--fleet-id` callback error | an app-class error; prints `Error: <msg>`. |
-| value-error / permission-error (broker/messaging/queries) | translated by caller | callable from CLI **and** WebUI; CLI wraps to exit 1, WebUI maps to HTTP status | distinct error variants; permission-error gates authorization (recipient-acks). |
+| application error | **1** | application/runtime errors: runtime conflicts (one-monitor rule, not-enrolled, not-found-on-delete), the root-Director-deregistration guard, and the spawn rollback ladder | an app-class error; prints `Error: <msg>`. |
+| value-error (broker/messaging/queries) | translated by caller | callable from CLI **and** WebUI; CLI wraps to exit 1, WebUI maps to HTTP status | distinct error variants. |
 | HTTP error | — | serialized `{"detail": <string>}` | HTTP error responses with the same status + body. |
 
 The root-Director-deregistration guard raises a single **application error
@@ -2506,10 +2485,12 @@ The root-Director-deregistration guard raises a single **application error
 
 **Fail-fast points (never silently fall back):**
 
-- `--fleet-id` is a required option enforced by its shared callback (missing →
-  exit 1, §6.3); it has **no environment default** and **must not** default to
-  an arbitrary fleet.
-- The `message` fleet-gate runs **before** the handler body.
+- Positional subject ids have **no environment default** (§6.3) and **must
+  not** default to an arbitrary fleet, member, or message; a spawned member
+  reads its ids from its spawn prompt.
+- The broker derives fleet and recipient from the subject row (§6.2); an
+  unknown subject fails loudly (`Member {member_id} not found` / `Message
+  {message_id} not found`), never silently proceeds.
 - `doctor` reads the resolved backend's presence env var (`TMUX` / `HERDR_ENV`)
   via `os.environ.get(presence_var, "")`; an empty value is legitimate under an
   explicit `CAFLEET_MULTIPLEXER` override, so the fail-fast lives upstream in
@@ -2542,8 +2523,9 @@ distinct forms with **two different provenances**:
 ### 7.3 Output / JSON / truncation
 
 Output formatting is specified in §6.4. The cross-cutting choices: the CLI selects
-text-vs-JSON (the shared per-subcommand `--json` flag, §6.3) and full-vs-compact
-(documented `--full`); the WebUI bypasses `truncate_*`
+text-vs-JSON with the shared per-subcommand `--json` flag (§6.3) — text is
+always the truncated human form, JSON always the complete untruncated machine
+form; the WebUI bypasses `truncate_*`
 (raw broker results) but its JSON serialization still preserves key order and raw
 UTF-8 (no ASCII escaping).
 
@@ -2716,13 +2698,14 @@ connection is closed when the command finishes (success or failure).
 
 ## 10. CLI command checklist
 
-The full command surface — **17 commands across 4 groups + 3 top-level commands**.
-Each must be reproduced with identical option names, types, defaults,
-required-ness, documented-vs-hidden status, output shapes, and exit codes. Every
-interaction flag is now **documented** (there are no hidden flags). Per-command
-option semantics are in §6.3.
+The full command surface — **16 subcommands across 3 groups + 4 top-level
+commands**.
+Each must be reproduced with identical positional/option names, types,
+defaults, required-ness, output shapes, and exit codes. Per-command
+argument semantics are in §6.3.
 
-**Global:** `--version` (`cafleet <version>`, exit 0, bypasses `--fleet-id`).
+**Global:** `--version` (`cafleet <version>`, exit 0, short-circuits before
+subcommand dispatch).
 The shared trailing `--json` flag (§6.3) is listed per row below.
 
 **Top-level:**
@@ -2730,42 +2713,37 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 - [ ] `cafleet setup` (`--skip AGENT` repeatable choice; no positional arguments; runs the db half then the assets half for the fixed target list claude/codex/opencode minus the skipped agents)
 - [ ] `cafleet doctor` (`--json`; emits tmux block + assets-install report)
 - [ ] `cafleet server` (`--host`=settings.broker_host, `--port`=settings.broker_port)
+- [ ] `cafleet monitor FLEET_ID` (`--tick`≥1=5, `--interval`≥0=`CAFLEET_MONITOR_WAKE_INTERVAL` (default 600); prints the startup line after a successful runtime claim)
 
 **`fleet`:**
 
-- [ ] `cafleet fleet create` (`--name`, `--coding-agent` required, `--json`, `--full`)
+- [ ] `cafleet fleet create` (`--name`, `--coding-agent` required, `--json`)
 - [ ] `cafleet fleet list` (`--json`)
-- [ ] `cafleet fleet show` (`--fleet-id`, `--json`)
-- [ ] `cafleet fleet delete` (`--fleet-id`)
+- [ ] `cafleet fleet show FLEET_ID` (`--json`)
+- [ ] `cafleet fleet delete FLEET_ID` (`--json`)
 
 **`member`:**
 
-- [ ] `cafleet member create` (no identity flag — Director auto-resolved; `--name`, `--description`, `--coding-agent`, `--model`, `--effort`, `--text` / `--text-file` xor-required, `--full`, `--json`)
-- [ ] `cafleet member delete` (`--member-id` target, `--json`; pane path kills immediately and always exits 0; placementless target → registry soft-delete, exit 0)
-- [ ] `cafleet member show` (`--member-id` target, `--full`, `--json`)
-- [ ] `cafleet member list` (`--json`)
-- [ ] `cafleet member prompt` (`--member-id`, `--shell`, positional `text`, `--json`)
-- [ ] `cafleet member ping` (`--member-id`, `--quiet`, `--json`; pending placement skips the keystroke and exits 0, `skipped` key on both JSON paths)
+- [ ] `cafleet member create` (no identity flag — Director auto-resolved; `--fleet-id` required, `--name`, `--description`, `--coding-agent`, `--model`, `--effort`, positional `PROMPT` / `--file PATH` xor-required, `--json`)
+- [ ] `cafleet member delete MEMBER_ID` (`--json`; pane path kills immediately and always exits 0; placementless target → registry soft-delete, exit 0)
+- [ ] `cafleet member show MEMBER_ID` (`--json`)
+- [ ] `cafleet member list FLEET_ID` (`--json`)
+- [ ] `cafleet member prompt MEMBER_ID TEXT` (`--shell`, `--json`)
+- [ ] `cafleet member ping MEMBER_ID` (`--json`; pending placement skips the keystroke and exits 0, `skipped` key on both JSON paths)
+- [ ] `cafleet member capture MEMBER_ID` (`--lines`=**20**, `--ansi`, `--json`)
 
 **`message`:**
 
-- [ ] `cafleet message send` (`--from-member-id` sender, `--to-member-id` recipient, `--text` / `--text-file` xor-required, `--full`, `--json`)
-- [ ] `cafleet message broadcast` (`--from-member-id`, `--text` / `--text-file` xor-required, `--full`, `--json`)
-- [ ] `cafleet message poll` (`--member-id`, `--full`, `--json`)
-- [ ] `cafleet message ack` (`--member-id`, `--message-id`, `--full`, `--json`)
-- [ ] `cafleet message show` (`--member-id`, `--message-id`, `--full`, `--json`)
+- [ ] `cafleet message send` (`--from-member-id` sender, `--to-member-id` recipient, positional `TEXT` / `--file PATH` xor-required, `--json`)
+- [ ] `cafleet message broadcast` (`--from-member-id`, positional `TEXT` / `--file PATH` xor-required, `--json`)
+- [ ] `cafleet message poll MEMBER_ID` (`--json`)
+- [ ] `cafleet message ack MESSAGE_ID` (`--json`)
+- [ ] `cafleet message show MESSAGE_ID` (`--json`)
 
-**`monitor`:**
-
-- [ ] `cafleet monitor start` (`--tick`≥1=5, `--interval`≥0=`CAFLEET_MONITOR_WAKE_INTERVAL` (default 600); prints the startup line after a successful runtime claim)
-- [ ] `cafleet monitor capture` (`--member-id`, `--lines`=**20**, `--ansi`/`--no-ansi`, `--json`)
-
-Every `member *`, `message *`, and `monitor *` command, plus `fleet
-show` and `fleet delete`, takes the **required `--fleet-id` option** (integer);
-a missing `--fleet-id` is the shared callback's application error (exit 1,
-§6.3). It is omitted from the per-command rows above to avoid repetition.
-`setup`, `doctor`, `server`, `fleet create`, and `fleet list`
-do **not** take `--fleet-id`.
+The subject of each command rides as its positional id (§6.3 *Positional
+subject ids*); the only id flags are `member create`'s `--fleet-id` and the
+`message send` / `broadcast` sender/recipient pair. `setup`, `doctor`, and
+`server` take no id at all.
 
 ---
 
@@ -2789,8 +2767,11 @@ failure, and an exception's exact internal-repr fragment.
 The decisions that shape this surface (full rationale in the design doc):
 
 - **`member` is the single member-lifecycle surface.** `member` owns member registration, teardown, introspection (`show`, `list`), and keystroke interaction (`create`/`delete`/`show`/`list`/`capture`/`prompt`/`ping`). There is no separate `agent` group.
-- **`--fleet-id` is a required option with no environment default** (§6.3); a
-  missing value is the shared callback's exit-1 error.
+- **The subject id is positional; relationship ids are flags** (§6.3): the
+  fleet and recipient are derived from the subject row (§6.2) rather than
+  restated, with **no environment default** for any id.
+- **`--json` is the single output switch** (§6.3/§6.4): text is always the
+  truncated human form, JSON always the complete untruncated machine form.
 - **One error/exit model** (§7.2): usage → exit 2, application/runtime → exit 1.
 - **Migration-managed schema** (§8): an embedded chain of numbered SQL
   migrations with the applied versions recorded in `refinery_schema_history`;
@@ -2802,7 +2783,8 @@ The decisions that shape this surface (full rationale in the design doc):
   installing a new release binary, the first fleet-scoped command errors with
   the stale-assets message and instructs the operator to run `cafleet setup`
   to reinstall.
-- **Stale-assets guard** (§6.3): every fleet-scoped group callback validates
+- **Stale-assets guard** (§6.3): every fleet-scoped surface (the `fleet` /
+  `member` / `message` group callbacks and the `monitor` command) validates
   recorded `asset_installs` versions against the runtime CLI version before any
   subcommand body runs; missing/stale → hard error (exit 1); exempt: `setup`,
   `doctor`, `server`.
