@@ -41,7 +41,7 @@ User
 
 Members cannot talk to the user directly — the Director always relays.
 
-> **Literal-integer-id flag rule** — every `cafleet ...` call carries the literal integer ids as per-subcommand flags; the convention is canonical in the `cafleet` skill § *Required Flags*.
+> **Literal-integer-id rule** — every `cafleet ...` call carries the literal integer ids as positional subjects or id flags; the convention is canonical in the `cafleet` skill § *Required ids*.
 
 ## Director Process
 
@@ -99,7 +99,7 @@ Capture `fleet_id` and `director.member_id` from the JSON response and substitut
 
 #### 1b. Launch the monitor loop (before any member)
 
-Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor start --fleet-id [fleet-id]` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Presentation/Transcript spawns** (1d) — do not spawn a member until it has arrived. The background task is stopped first in the Step 5 teardown. Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
+Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor [fleet-id]` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Presentation/Transcript spawns** (1d) — do not spawn a member until it has arrived. The background task is stopped first in the Step 5 teardown. Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 
@@ -127,16 +127,16 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | role-file | `roles/presentation.md` |
 | cafleet-load purpose + EXTRA SKILL LOADS | `for the broker primitives and bash-via-Director routing`; additionally Read the `../reference/slidev.md` page (Slidev authoring layouts + rules) + `../reference/visualization.md` (if the report includes data that would render better as a chart) |
 | CONTEXT LINES | `TASK: Create a Slidev presentation from the approved research report.` / `REPORT: [INSERT <folder>/report.md]` / `RESEARCHER FILES: [INSERT <folder>/[0-9][0-9]-research-*.md]` / `LANGUAGE: [INSERT language detected from report.md]` / `FIGURE BASE: [INSERT <folder>]` (substitute literally for the FIGURE_BASE / BASE placeholders in `../reference/visualization.md`) / `OUTPUT: [INSERT <folder>/slide.md]` |
-| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `<message-id>` and `cafleet message ack … --message-id <message-id>`, then act) |
+| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `<message-id>` and `cafleet message ack <message-id>`, then act) |
 | start cue (verbatim) | `When complete, send the file path to the Director via cafleet message send.` |
 
-Render the prompt to `${BASE}/.prompts/presentation-<UTC-compact>.md` per the 1c two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
+Render the prompt to `${BASE}/.prompts/presentation-<UTC-compact>.md` per the 1c two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--file`:
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \
      --name "presentation" \
      --description "Authors slide.md" \
-     --text-file ${BASE}/.prompts/presentation-<UTC-compact>.md \
+     --file ${BASE}/.prompts/presentation-<UTC-compact>.md \
      --json
    ```
 
@@ -155,13 +155,13 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form |
 | start cue (verbatim) | `When complete, send the file path to the Director via cafleet message send.` |
 
-Render the prompt to `${BASE}/.prompts/transcript-<UTC-compact>.md` per the 1c two-step audit-file pattern, then spawn with `--text-file`:
+Render the prompt to `${BASE}/.prompts/transcript-<UTC-compact>.md` per the 1c two-step audit-file pattern, then spawn with `--file`:
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \
      --name "transcript" \
      --description "Authors transcript.md" \
-     --text-file ${BASE}/.prompts/transcript-<UTC-compact>.md \
+     --file ${BASE}/.prompts/transcript-<UTC-compact>.md \
      --json
    ```
 
@@ -172,16 +172,16 @@ Render the prompt to `${BASE}/.prompts/transcript-<UTC-compact>.md` per the 1c t
 Read the output files (`${FOLDER}/slide.md`, `${FOLDER}/transcript.md`) and review using the tag criteria in [roles/director.md](roles/director.md). Send tagged feedback via `cafleet message send`; members revise and reply. See [roles/director.md](roles/director.md) for revision approach and iteration limits.
 
 ```bash
-cafleet message send --fleet-id [fleet-id] --from-member-id [director-member-id] \
+cafleet message send --from-member-id [director-member-id] \
   --to-member-id [presentation-member-id] \
-  --text "slide revisions: [SLIDE STRUCTURE] ... / [VISUAL] ... / ..."
+  "slide revisions: [SLIDE STRUCTURE] ... / [VISUAL] ... / ..."
 
-cafleet message send --fleet-id [fleet-id] --from-member-id [director-member-id] \
+cafleet message send --from-member-id [director-member-id] \
   --to-member-id [transcript-member-id] \
-  --text "transcript revisions: [FLOW] ... / [TIMING] ... / ..."
+  "transcript revisions: [FLOW] ... / [TIMING] ... / ..."
 ```
 
-Each polled inbound message MUST be `ack`ed via `cafleet message ack --fleet-id [fleet-id] --member-id [director-member-id] --message-id <message-id>` after acting on it.
+Each polled inbound message MUST be `ack`ed via `cafleet message ack <message-id>` after acting on it.
 
 Once the slide deck is finalized, send the finalized slide structure to the Transcript member for 1:1 realignment.
 
@@ -222,19 +222,19 @@ while start <= total_slides:
         wait for report from VR for round <vr_round> via cafleet message poll arrival
         if no issues: break
         if vr_round >= 3: break                # max 2 re-check rounds reached; remaining issues escalate to user in Step 4
-        cafleet message send --fleet-id [fleet-id] --from-member-id [director-member-id] \
-            --to-member-id [presentation-member-id] --text "<tagged issues>"   # fix
+        cafleet message send --from-member-id [director-member-id] \
+            --to-member-id [presentation-member-id] "<tagged issues>"   # fix
         vr_round += 1
-        cafleet message send --fleet-id [fleet-id] --from-member-id [director-member-id] \
-            --to-member-id [vr-batch-member-id] --text "ROUND: <vr_round>\nRe-check slides: <list>"
+        cafleet message send --from-member-id [director-member-id] \
+            --to-member-id [vr-batch-member-id] "ROUND: <vr_round>\nRe-check slides: <list>"
         # VR writes the next capture to `vr<start>-r<vr_round>-p<slide_number>.png` and
         # the next persisted report to `vr<start>-r<vr_round>.md`, preserving prior rounds
 
     # Explicit close handshake before deregister: the VR cannot reliably run extra commands after the exit keystroke.
-    cafleet message send --fleet-id [fleet-id] --from-member-id [director-member-id] \
-        --to-member-id [vr-batch-member-id] --text "CLOSE: run `pnpm exec agent-browser --session vr-batch-<start> close`, then reply 'closed'."
+    cafleet message send --from-member-id [director-member-id] \
+        --to-member-id [vr-batch-member-id] "CLOSE: run `pnpm exec agent-browser --session vr-batch-<start> close`, then reply 'closed'."
     wait for the VR's "closed" confirmation via cafleet message poll
-    cafleet member delete --fleet-id [fleet-id] --member-id [vr-batch-member-id]
+    cafleet member delete [vr-batch-member-id]
     start = end + 1
 ```
 
@@ -251,13 +251,13 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form |
 | start cue (verbatim) | `When complete, persist the report to <folder>/.screenshots/vr<start>-r<round>.md and send it to the Director via cafleet message send.` |
 
-Render the prompt to `${BASE}/.prompts/vr-batch-<start>-<UTC-compact>.md` per the 1c two-step audit-file pattern (`<start>` matches the batch's first-slide index used in `--name`; each VR batch gets its own timestamped file — no overwriting), then spawn with `--text-file`:
+Render the prompt to `${BASE}/.prompts/vr-batch-<start>-<UTC-compact>.md` per the 1c two-step audit-file pattern (`<start>` matches the batch's first-slide index used in `--name`; each VR batch gets its own timestamped file — no overwriting), then spawn with `--file`:
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \
      --name "vr-batch-<start>" \
      --description "Visual Reviewer for slides <start>..<end>" \
-     --text-file ${BASE}/.prompts/vr-batch-<start>-<UTC-compact>.md \
+     --file ${BASE}/.prompts/vr-batch-<start>-<UTC-compact>.md \
      --json
    ```
 
@@ -291,4 +291,4 @@ Then the presentation-specific teardown:
    pnpm exec agent-browser close --all
    ```
 2. **Stop the Slidev dev server** via {bg_stop} (using the handle recorded in Step 3, Server Startup substep 2) — never the broad `pkill -f slidev`, which matches too widely and leaks stdout until the process is stopped through its recorded handle.
-3. `cafleet fleet delete --fleet-id [fleet-id]`; `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.
+3. `cafleet fleet delete [fleet-id]`; `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.

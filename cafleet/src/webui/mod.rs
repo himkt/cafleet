@@ -333,14 +333,8 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
         let notifier = CliNotifier::new(&settings);
         let message = match recipient {
             SendRecipient::Broadcast => {
-                match broker::broadcast_message(
-                    conn,
-                    &notifier,
-                    settings.max_text_len,
-                    fleet_id,
-                    from,
-                    &text,
-                ) {
+                match broker::broadcast_message(conn, &notifier, settings.max_text_len, from, &text)
+                {
                     Ok(result) => result[0]["message"].clone(),
                     Err(error) => return broker_500(error),
                 }
@@ -355,7 +349,6 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
                     conn,
                     &notifier,
                     settings.max_text_len,
-                    fleet_id,
                     from,
                     &to.to_string(),
                     &text,

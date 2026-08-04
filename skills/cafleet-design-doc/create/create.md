@@ -93,7 +93,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 1b. Launch the monitor loop (before any member)
 
-Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor start --fleet-id <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn a member until it has arrived.
+Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn a member until it has arrived.
 
 See the `cafleet` skill's `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The heartbeat runs unchanged through the quality loop; the background task is stopped first in Step 6's teardown.
 
@@ -122,13 +122,13 @@ Substitute these absolute paths into the spawn prompts below.
 | CONTEXT LINES | `OUTPUT PATH: [INSERT DOC PATH]` + a blank line + `The user's request: [INSERT USER'S ORIGINAL REQUEST]` | `DESIGN DOCUMENT: [INSERT DOC PATH]` |
 | IMPORTANT / start cue (verbatim) | `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.` / `Send your questions to the Director who will relay them to the user.` / `Start by reading the target codebase for context, then send your clarifying questions.` / `Do NOT create any design document file until you have received answers.` | `This is a RESUME run. The document contains COMMENT markers from a previous interview. Follow the Resume Mode instructions in your role definition.` / `Do NOT ask clarifying questions — the COMMENTs contain the needed information.` / `Start by reading the design document.` |
 
-Render the prompt to `${BASE}/.prompts/drafter-<UTC-compact>.md` per the Step 1c two-step audit-file pattern (both normal and resume modes — the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
+Render the prompt to `${BASE}/.prompts/drafter-<UTC-compact>.md` per the Step 1c two-step audit-file pattern (both normal and resume modes — the four identity placeholders are rendered by the CLI at spawn), then spawn with `--file`:
 
    ```bash
    cafleet member create --fleet-id <fleet-id> \
      --name "Drafter" \
      --description "Writes and revises the design document" \
-     --text-file ${BASE}/.prompts/drafter-<UTC-compact>.md \
+     --file ${BASE}/.prompts/drafter-<UTC-compact>.md \
      --json
    ```
 
@@ -146,13 +146,13 @@ Render the prompt to `${BASE}/.prompts/drafter-<UTC-compact>.md` per the Step 1c
 | CONTEXT LINES | `DESIGN DOCUMENT: [INSERT DOC PATH]` |
 | start cue (verbatim) | `Wait for the Director to assign a document for review (cafleet body: ready (doc)). When you receive that message, the doc pointer refers to the DESIGN DOCUMENT path above — read that file and provide specific, actionable feedback per the role definition.` |
 
-Render the prompt to `${BASE}/.prompts/reviewer-<UTC-compact>.md` per the Step 1c two-step audit-file pattern, then spawn with `--text-file`:
+Render the prompt to `${BASE}/.prompts/reviewer-<UTC-compact>.md` per the Step 1c two-step audit-file pattern, then spawn with `--file`:
 
    ```bash
    cafleet member create --fleet-id <fleet-id> \
      --name "Reviewer" \
      --description "Critically reviews drafts for rule compliance and quality" \
-     --text-file ${BASE}/.prompts/reviewer-<UTC-compact>.md \
+     --file ${BASE}/.prompts/reviewer-<UTC-compact>.md \
      --json
    ```
 
@@ -161,7 +161,7 @@ Render the prompt to `${BASE}/.prompts/reviewer-<UTC-compact>.md` per the Step 1
 #### 1f. Verify members are live
 
 ```bash
-cafleet member list --fleet-id <fleet-id>
+cafleet member list <fleet-id>
 ```
 
 Both members must show `status: active` with a non-null `pane_id`. If either is missing or pending, retry the spawn before proceeding.
@@ -172,18 +172,18 @@ Both members must show `status: active` with a non-null `pane_id`. If either is 
 
 > **Clarification Exemption** ([Coordination Protocol above](#coordination-protocol)): Director-to-Drafter messages in this step ride as free-form multi-line cafleet bodies — the design doc does not yet exist. From Step 3 onward every message falls back under the schema.
 
-1. Wait for the Drafter's clarifying questions. The broker's inline-preview keystroke on the Drafter's `message send`, and your own periodic `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id>`, will surface the Drafter's message once it arrives.
-2. `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --message-id <message-id>` each received message after reading it.
+1. Wait for the Drafter's clarifying questions. The broker's inline-preview keystroke on the Drafter's `message send`, and your own periodic `cafleet message poll <director-member-id>`, will surface the Drafter's message once it arrives.
+2. `cafleet message ack <message-id>` each received message after reading it.
 3. Relay the questions to the user via {decision_surface}. If {decision_surface} caps how many questions it shows at once (your overlay states the cap) and the number exceeds it, split them into multiple sequential calls to relay all questions without omission.
 4. Relay the user's answers back to the Drafter (free-form, per the Clarification Exemption above):
    ```bash
-   cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
-     --to-member-id <drafter-member-id> --text "User answers: ..."
+   cafleet message send --from-member-id <director-member-id> \
+     --to-member-id <drafter-member-id> "User answers: ..."
    ```
 5. **Gate check**: If the Drafter produces a draft without prior questions, reject it and instruct them to ask first (also free-form, per the Clarification Exemption):
    ```bash
-   cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
-     --to-member-id <drafter-member-id> --text "Stop — you must send clarifying questions before drafting. Discard the draft and send questions first."
+   cafleet message send --from-member-id <director-member-id> \
+     --to-member-id <drafter-member-id> "Stop — you must send clarifying questions before drafting. Discard the draft and send questions first."
    ```
    A focused confirmation round counts as valid clarification.
 
@@ -193,14 +193,14 @@ Enter this step after the Drafter reports `complete (doc)`, **or immediately** w
 
 1. **Route to Reviewer**. The Reviewer reads `${DOC_PATH}` directly; no path needs to be embedded in the cafleet body.
    ```bash
-   cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
-     --to-member-id <reviewer-member-id> --text "ready (doc)"
+   cafleet message send --from-member-id <director-member-id> \
+     --to-member-id <reviewer-member-id> "ready (doc)"
    ```
-2. **Wait** for the Reviewer's response via `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id>`. Round-1 fresh review arrives as `complete (doc) — N issues`; approval arrives as `approved (doc)`. Each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design doc — the Director does NOT relay the finding text in cafleet.
+2. **Wait** for the Reviewer's response via `cafleet message poll <director-member-id>`. Round-1 fresh review arrives as `complete (doc) — N issues`; approval arrives as `approved (doc)`. Each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design doc — the Director does NOT relay the finding text in cafleet.
 3. **On feedback**: Route the Drafter to address the markers in-doc:
    ```bash
-   cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
-     --to-member-id <drafter-member-id> --text "ready (doc)"
+   cafleet message send --from-member-id <director-member-id> \
+     --to-member-id <drafter-member-id> "ready (doc)"
    ```
 4. Wait for the Drafter's `addressed (doc)` reply (revisions resolve the `COMMENT(reviewer)` markers), then loop back to step 1 (re-route to Reviewer with `ready (doc)`).
 5. Repeat until the Reviewer explicitly signals `approved (doc)`.
@@ -224,8 +224,8 @@ Process the user's selection per [roles/director.md](roles/director.md) § User 
 
 - **"Scan for COMMENT markers"**: scan immediately with Grep — the selection itself is the signal, do NOT wait for the user to confirm they are done editing. If markers are found, route the Drafter with `ready (doc)`:
   ```bash
-  cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
-    --to-member-id <drafter-member-id> --text "ready (doc)"
+  cafleet message send --from-member-id <director-member-id> \
+    --to-member-id <drafter-member-id> "ready (doc)"
   ```
   After the Drafter replies `addressed (doc)` and removes the markers, verify with Grep that no `COMMENT(` markers remain, then re-enter the quality loop (Step 3) and re-present (Step 4). If no markers are found, follow the role file's no-markers step (explain the marker convention, show the file path, re-prompt with the same three-option pattern).
 - **Free-text response**: judge abort vs non-abort intent per the role file (LLM reasoning, not keyword matching). Abort intent → the Abort Flow (Shutdown Protocol, Step 6, without Drafter finalization); non-abort → explain the COMMENT-marker channel and re-prompt.
@@ -236,11 +236,11 @@ No round limit — loop continues until approved or aborted.
 
 1. Instruct the Drafter to finalize. The Drafter's role definition spells out the finalize checklist (set Status to Approved, refresh Last Updated, bump the Progress header field if present, verify implementation steps are actionable); the cafleet body is just the verb + pointer poke:
    ```bash
-   cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
-     --to-member-id <drafter-member-id> --text "ready (doc)"
+   cafleet message send --from-member-id <director-member-id> \
+     --to-member-id <drafter-member-id> "ready (doc)"
    ```
    Wait for the Drafter's `addressed (doc)` confirmation.
 
-2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*: stop the monitor loop's background task first ({bg_stop}), then `cafleet member delete` the Drafter and Reviewer (each kills the pane immediately); `cafleet member list` to verify only the root Director's row remains; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
+2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*: stop the monitor loop's background task first ({bg_stop}), then `cafleet member delete` the Drafter and Reviewer (each kills the pane immediately); `cafleet member list` to verify only the root Director's row remains; `cafleet fleet delete <fleet-id>`; `cafleet fleet list` to confirm.
 
 The fleet row is soft-deleted and `messages` rows are preserved so the message trail remains inspectable in the broker database.

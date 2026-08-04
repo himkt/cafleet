@@ -1,6 +1,6 @@
-//! Shared CLI plumbing: the stale-assets guard, the required-`--fleet-id`
-//! check, the `--text` / `--text-file` body reader, multiplexer resolution,
-//! and the JSON-vs-text emit fork.
+//! Shared CLI plumbing: the stale-assets guard, the positional-`TEXT` /
+//! `--file` body reader, multiplexer resolution, and the JSON-vs-text emit
+//! fork.
 
 use std::rc::Rc;
 
@@ -10,16 +10,12 @@ use serde_json::Value;
 use super::system::{SystemRunner, read_stdin};
 use crate::broker::{InlinePreviewSender, asset_installs_table_exists, list_asset_installs};
 use crate::config::Settings;
-use crate::error::{CafleetError, missing_fleet_id};
+use crate::error::CafleetError;
 use crate::multiplexer::{AnyMultiplexer, Multiplexer, MultiplexerError, resolve_multiplexer};
 use crate::output::format_json;
 
 pub fn connect(settings: &Settings) -> Result<Connection, CafleetError> {
     crate::db::connect(&settings.database_url)
-}
-
-pub fn require_fleet_id(fleet_id: Option<i64>) -> Result<i64, CafleetError> {
-    fleet_id.ok_or_else(missing_fleet_id)
 }
 
 /// The stale-assets guard (SPEC §6.3): validates the recorded installs before
@@ -65,20 +61,12 @@ fn is_blank(text: &str) -> bool {
         .all(|c| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
 }
 
-/// The shared `--text` / `--text-file` body reader (SPEC §6.3 *text-body
-/// input*): exactly-one-of, `-` = stdin, raw-bytes UTF-8 decode with no
-/// newline translation, uniform empty-body rejection.
-pub fn resolve_text_body(
-    text: Option<&str>,
-    text_file: Option<&str>,
-) -> Result<String, CafleetError> {
-    match (text, text_file) {
-        (None, None) => Err(CafleetError::Usage(
-            "Provide exactly one of --text or --text-file.".to_string(),
-        )),
-        (Some(_), Some(_)) => Err(CafleetError::Usage(
-            "--text and --text-file are mutually exclusive.".to_string(),
-        )),
+/// The shared positional-`TEXT` / `--file` body reader (SPEC §6.3 *text-body
+/// input*): `-` = stdin, raw-bytes UTF-8 decode with no newline translation,
+/// uniform empty-body rejection. Exactly one source is present — clap's
+/// required argument group enforces it at parse time.
+pub fn resolve_body(inline: Option<&str>, file: Option<&str>) -> Result<String, CafleetError> {
+    match (inline, file) {
         (Some(text), None) => {
             if is_blank(text) {
                 Err(CafleetError::Usage("text may not be empty.".to_string()))
@@ -87,15 +75,11 @@ pub fn resolve_text_body(
             }
         }
         (None, Some("-")) => {
-            let bytes =
-                read_stdin().map_err(|e| CafleetError::App(format!("--text-file -: {e}")))?;
-            let body = String::from_utf8(bytes).map_err(|_| {
-                CafleetError::App("--text-file -: file is not valid UTF-8.".to_string())
-            })?;
+            let bytes = read_stdin().map_err(|e| CafleetError::App(format!("--file -: {e}")))?;
+            let body = String::from_utf8(bytes)
+                .map_err(|_| CafleetError::App("--file -: file is not valid UTF-8.".to_string()))?;
             if is_blank(&body) {
-                Err(CafleetError::App(
-                    "--text-file -: stdin is empty.".to_string(),
-                ))
+                Err(CafleetError::App("--file -: stdin is empty.".to_string()))
             } else {
                 Ok(body)
             }
@@ -104,22 +88,23 @@ pub fn resolve_text_body(
             let bytes = std::fs::read(path).map_err(|e| {
                 let message = match e.kind() {
                     std::io::ErrorKind::NotFound | std::io::ErrorKind::IsADirectory => {
-                        format!("--text-file {path}: file does not exist or is not a regular file.")
+                        format!("--file {path}: file does not exist or is not a regular file.")
                     }
-                    _ => format!("--text-file {path}: file is not readable."),
+                    _ => format!("--file {path}: file is not readable."),
                 };
                 CafleetError::App(message)
             })?;
             let body = String::from_utf8(bytes).map_err(|_| {
-                CafleetError::App(format!("--text-file {path}: file is not valid UTF-8."))
+                CafleetError::App(format!("--file {path}: file is not valid UTF-8."))
             })?;
             if is_blank(&body) {
-                Err(CafleetError::App(format!(
-                    "--text-file {path}: file is empty."
-                )))
+                Err(CafleetError::App(format!("--file {path}: file is empty.")))
             } else {
                 Ok(body)
             }
+        }
+        (Some(_), Some(_)) | (None, None) => {
+            unreachable!("clap's required argument group supplies exactly one body source")
         }
     }
 }

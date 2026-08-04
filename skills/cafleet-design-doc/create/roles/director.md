@@ -20,19 +20,19 @@ Your tokens: `<fleet-id>`, `<director-member-id>`, `<drafter-member-id>`, `<revi
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet fleet and launch the monitor loop first.** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and governance policy. Create a CAFleet fleet via `cafleet fleet create --coding-agent <backend> --json` (must be run inside a tmux or herdr session; for `<backend>`, substitute the coding agent you are actually running on — your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity, e.g. Claude Code → `claude`) — this bootstraps the fleet, registers the root Director (you), and writes your placement row in one transaction. Capture `director.member_id` from the JSON response. Then launch `cafleet monitor start --fleet-id <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the `monitor loop started (…)` startup line in the task output; gate the Drafter/Reviewer spawns on that confirmation. The loop wakes you once per wake interval to health-check your members and resume interrupted work.
+- **Bootstrap the CAFleet fleet and launch the monitor loop first.** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and governance policy. Create a CAFleet fleet via `cafleet fleet create --coding-agent <backend> --json` (must be run inside a tmux or herdr session; for `<backend>`, substitute the coding agent you are actually running on — your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity, e.g. Claude Code → `claude`) — this bootstraps the fleet, registers the root Director (you), and writes your placement row in one transaction. Capture `director.member_id` from the JSON response. Then launch `cafleet monitor <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the `monitor loop started (…)` startup line in the task output; gate the Drafter/Reviewer spawns on that confirmation. The loop wakes you once per wake interval to health-check your members and resume interrupted work.
 - **Enforce the clarification gate.** The Drafter MUST ask clarifying questions before drafting. If the Drafter sends a draft without having asked questions first, reject it via `cafleet message send` and instruct the Drafter to ask questions first.
 - **Relay communication faithfully.** Members cannot communicate with the user directly. You relay the Drafter's questions to the user via {decision_surface}, and relay the user's answers back to the Drafter via `cafleet message send`.
 - **Orchestrate the internal quality loop.** After the Drafter produces a draft, route it to the Reviewer via `cafleet message send`. If the Reviewer has feedback, route it back to the Drafter for refinement via `cafleet message send`, then back to the Reviewer. Repeat until the Reviewer explicitly signals satisfaction. Do NOT present the draft to the user until the Reviewer has approved it.
 - **Present the polished draft to the user.** Only after the Reviewer is satisfied, present the draft to the user for approval via {decision_surface}.
 - **Drive user feedback iterations.** Process the user's feedback selection and route revisions through the quality loop before re-presenting.
-- **Clean up when done.** Delete each member via `cafleet member delete`, and tear down the fleet via `cafleet fleet delete --fleet-id <fleet-id>` after the user approves (or aborts). The root Director cannot be deleted with `cafleet member delete` — `fleet delete` is the only supported teardown path and performs the Director + member-sweep atomically.
+- **Clean up when done.** Delete each member via `cafleet member delete`, and tear down the fleet via `cafleet fleet delete <fleet-id>` after the user approves (or aborts). The root Director cannot be deleted with `cafleet member delete` — `fleet delete` is the only supported teardown path and performs the Director + member-sweep atomically.
 
 ## Idle Semantics & Stall Response
 
-Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet monitor capture` fallback → the decision-relay three-beat for a paused decision-prompt frame, per your overlay) follow the `cafleet` skill's `reference/supervision.md` § Idle Semantics and § Stall Response. Two skill-specific rungs are NOT in those skills and stay here:
+Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet member capture` fallback → the decision-relay three-beat for a paused decision-prompt frame, per your overlay) follow the `cafleet` skill's `reference/supervision.md` § Idle Semantics and § Stall Response. Two skill-specific rungs are NOT in those skills and stay here:
 
-- **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet monitor capture --member-id <member-id> --lines 200`, then escalate — in that order.
+- **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet member capture <member-id> --lines 200`, then escalate — in that order.
 - **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via {decision_surface} with concrete options (re-spawn / redistribute / drop scope). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
 
 ## Communication Protocol
@@ -43,10 +43,10 @@ All Director-to-member messages use the CAFleet message broker. The Director sto
 
 **Sending a task to a member:**
 ```bash
-cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> \
-  --to-member-id <member-id> --text "<instruction>"
+cafleet message send --from-member-id <director-member-id> \
+  --to-member-id <member-id> "<instruction>"
 ```
-A push notification keystrokes the message into the member's pane (see the `cafleet` skill § Send). Poll your inbox with `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id> --json`, ACK each message with `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --message-id <message-id>`, and inspect a stalled member with `cafleet monitor capture --member-id <member-id> --lines 200` — full flag detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
+A push notification keystrokes the message into the member's pane (see the `cafleet` skill § Send). Poll your inbox with `cafleet message poll <director-member-id> --json`, ACK each message with `cafleet message ack <message-id>`, and inspect a stalled member with `cafleet member capture <member-id> --lines 200` — full argument detail in the `cafleet` skill (poll/ack core, capture `reference/director.md`).
 
 ## User Interaction Rules
 
@@ -64,16 +64,16 @@ Intent judgment and the Abort Flow follow the `cafleet` skill's `reference/super
 
 ## Progress Monitoring
 
-Your turns are granted by members' replies (broker inline previews) and your own periodic polling; run the 2-stage health check (poll → monitor capture) on each. What counts as stalled, the nudge shape, and the supervision obligations (Authorization-Scope Guard, idle semantics) are canonical in the `cafleet` skill's `reference/supervision.md` § *Stall Response* and § *Idle Semantics*.
+Your turns are granted by members' replies (broker inline previews) and your own periodic polling; run the 2-stage health check (poll → member capture) on each. What counts as stalled, the nudge shape, and the supervision obligations (Authorization-Scope Guard, idle semantics) are canonical in the `cafleet` skill's `reference/supervision.md` § *Stall Response* and § *Idle Semantics*.
 
 ### Skill-specific milestones
 
 | Phase | Expected event | Stall indicator | Director action |
 |:--|:--|:--|:--|
-| Clarification | Drafter sends clarifying questions via `cafleet message send` | Drafter goes idle without sending questions or a draft | Free-form nudge (Clarification Exemption — design doc does not yet exist): `cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> --to-member-id <drafter-member-id> --text "Please send your clarifying questions so I can relay them to the user."` |
-| Drafting | Drafter writes the design document | Drafter goes idle after receiving user answers without producing a draft | Free-form nudge (still pre-doc, Clarification Exemption window): `cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> --to-member-id <drafter-member-id> --text "You have received the user's answers. Please proceed with writing the design document."` |
-| Review | Reviewer sends review feedback via `cafleet message send` | Reviewer goes idle without sending feedback | `cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> --to-member-id <reviewer-member-id> --text "ready (doc)"` (re-sent `ready (doc)` is interpreted contextually as a stall-nudge per [../../reference/coordination.md](../../reference/coordination.md) — same target, same expected action) |
-| Revision | Drafter revises based on feedback | Drafter goes idle without sending revised draft | `cafleet message send --fleet-id <fleet-id> --from-member-id <director-member-id> --to-member-id <drafter-member-id> --text "ready (doc)"` (re-sent stall-nudge — Drafter resolves the standing `COMMENT(reviewer)` markers in the doc) |
+| Clarification | Drafter sends clarifying questions via `cafleet message send` | Drafter goes idle without sending questions or a draft | Free-form nudge (Clarification Exemption — design doc does not yet exist): `cafleet message send --from-member-id <director-member-id> --to-member-id <drafter-member-id> "Please send your clarifying questions so I can relay them to the user."` |
+| Drafting | Drafter writes the design document | Drafter goes idle after receiving user answers without producing a draft | Free-form nudge (still pre-doc, Clarification Exemption window): `cafleet message send --from-member-id <director-member-id> --to-member-id <drafter-member-id> "You have received the user's answers. Please proceed with writing the design document."` |
+| Review | Reviewer sends review feedback via `cafleet message send` | Reviewer goes idle without sending feedback | `cafleet message send --from-member-id <director-member-id> --to-member-id <reviewer-member-id> "ready (doc)"` (re-sent `ready (doc)` is interpreted contextually as a stall-nudge per [../../reference/coordination.md](../../reference/coordination.md) — same target, same expected action) |
+| Revision | Drafter revises based on feedback | Drafter goes idle without sending revised draft | `cafleet message send --from-member-id <director-member-id> --to-member-id <drafter-member-id> "ready (doc)"` (re-sent stall-nudge — Drafter resolves the standing `COMMENT(reviewer)` markers in the doc) |
 
 ## Shutdown Protocol
 

@@ -156,7 +156,7 @@ pub trait Multiplexer {
     ) -> Result<String, MultiplexerError>;
     fn send_exit(&self, target_pane_id: &str, ignore_missing: bool)
     -> Result<(), MultiplexerError>;
-    fn send_poll_trigger(&self, target_pane_id: &str, fleet_id: i64, member_id: i64) -> bool;
+    fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool;
     fn send_wake_trigger(
         &self,
         target_pane_id: &str,
@@ -229,8 +229,8 @@ impl Multiplexer for AnyMultiplexer {
         dispatch!(self, mux => mux.send_exit(target_pane_id, ignore_missing))
     }
 
-    fn send_poll_trigger(&self, target_pane_id: &str, fleet_id: i64, member_id: i64) -> bool {
-        dispatch!(self, mux => mux.send_poll_trigger(target_pane_id, fleet_id, member_id))
+    fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
+        dispatch!(self, mux => mux.send_poll_trigger(target_pane_id, member_id))
     }
 
     fn send_wake_trigger(

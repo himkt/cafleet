@@ -7,12 +7,14 @@ partitions for tidiness, not security boundaries.
 
 ## Isolation rules
 
-Every operation that reads or writes member / message data enforces fleet
-boundaries; registration additionally requires a valid, non-soft-deleted
+The fleet boundary is derived from the subject rows themselves — a member row
+names its fleet, so nothing needs to restate it; registration requires a
+valid, non-soft-deleted
 `fleet_id`. A cross-fleet request produces a **distinct** error:
-`send_message` raises `Destination member not in fleet: {to_id}` when the target
-exists in another fleet, versus `Destination member not found: {to_id}` when it
-does not exist at all.
+`send_message` raises `members {from} and {to} are not in the same fleet.`
+when sender and recipient
+exist in different fleets, versus `Destination member not found: {to_id}`
+when the recipient does not exist at all.
 
 ## Lifecycle
 

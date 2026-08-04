@@ -204,6 +204,18 @@ pub fn get_member(
     ))
 }
 
+/// The fleet id of an active member row — the derivation behind every
+/// positional `MEMBER_ID` subject (SPEC §6.3 *Positional subject ids*).
+pub fn active_member_fleet(conn: &Connection, member_id: i64) -> Result<Option<i64>, CafleetError> {
+    conn.query_row(
+        "SELECT fleet_id FROM members WHERE member_id=?1 AND status='active'",
+        [member_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(db_err)
+}
+
 pub fn deregister_member(conn: &mut Connection, member_id: i64) -> Result<bool, CafleetError> {
     let is_root: bool = conn
         .query_row(
@@ -726,7 +738,7 @@ mod tests {
             .unwrap();
 
         let notifier = FakeNotifier::succeeding();
-        let sent = common::send(&mut conn, &notifier, fleet_id, director_id, member_id, "hi");
+        let sent = common::send(&mut conn, &notifier, director_id, member_id, "hi");
         let message_id = sent["message"]["message_id"].as_i64().unwrap();
 
         let rows = broker::list_members(&conn, fleet_id).unwrap();
@@ -751,7 +763,7 @@ mod tests {
         assert_eq!(ghost["last_recv"], Value::Null);
         assert_eq!(ghost["idle"], Value::Null);
 
-        broker::ack_message(&mut conn, member_id, message_id).unwrap();
+        broker::ack_message(&mut conn, message_id).unwrap();
         let rows = broker::list_members(&conn, fleet_id).unwrap();
         let worker = rows.iter().find(|r| r["member_id"] == member_id).unwrap();
         assert!(worker["last_ack"].is_string());
@@ -776,7 +788,7 @@ mod tests {
         let holder_id = register(&mut conn, fleet_id, "holder", Some("%2"));
         let silent_id = register(&mut conn, fleet_id, "silent", Some("%3"));
         let notifier = FakeNotifier::succeeding();
-        common::send(&mut conn, &notifier, fleet_id, director_id, holder_id, "hi");
+        common::send(&mut conn, &notifier, director_id, holder_id, "hi");
         broker::deregister_member(&mut conn, holder_id).unwrap();
         broker::deregister_member(&mut conn, silent_id).unwrap();
 

@@ -36,7 +36,7 @@ primitive.
 The Director's re-engagement is itself **capture-gated**: before the Director
 fires a re-engagement keystroke at a member (`cafleet member ping`, a
 non-exempt `cafleet message send`, or a `cafleet message broadcast`), it takes
-a fresh read-only `cafleet monitor capture` of the target and classifies the
+a fresh read-only `cafleet member capture` of the target and classifies the
 content as `awaiting_user`, `finished`, `working`, or `stall_candidate` using
 the capture cues of the target's backend overlay, firing only on `finished` or
 a confirmed stall — a pane classified `awaiting_user` or `working` has its
@@ -49,8 +49,8 @@ it re-engages a member.
 
 | Knob | Default | Set by |
 |---|---|---|
-| Director wake interval | `600s` | `CAFLEET_MONITOR_WAKE_INTERVAL` / `monitor start --interval N` |
-| Scan tick | `5s` | `monitor start --tick N` (per run) |
+| Director wake interval | `600s` | `CAFLEET_MONITOR_WAKE_INTERVAL` / `cafleet monitor FLEET_ID --interval N` |
+| Scan tick | `5s` | `cafleet monitor FLEET_ID --tick N` (per run) |
 
 The monitor scans once per **tick** and the wake fires at the first tick
 boundary on which the wake interval has elapsed, so the tick is the floor on
@@ -87,7 +87,7 @@ duration.
 
 Exactly one monitor may run per fleet. The `monitor_runtime` DB row is the
 single authority for both the single-instance claim (one SQLite write
-transaction, so two concurrent `monitor start` calls cannot both win) and
+transaction, so two concurrent `cafleet monitor` calls cannot both win) and
 liveness: the running loop rewrites `last_tick_at` every tick, so a monitor
 that died silently reads as stale. Both the per-tick heartbeat and the on-exit
 clear are ownership-checked — a displaced monitor's next heartbeat matches
@@ -97,7 +97,7 @@ zero rows and it self-terminates.
 
 **Launch.** Immediately after `cafleet fleet create` and before the first
 `cafleet member create`, the Director launches
-`cafleet monitor start --fleet-id <fleet-id>` as a background task in its own
+`cafleet monitor <fleet-id>` as a background task in its own
 pane and confirms the startup line the loop prints immediately after claiming
 the runtime row — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid
 <pid>)` — before spawning any member. A loop task that exits instead
@@ -108,7 +108,7 @@ spawning.
 signal handler runs its ownership-checked runtime clear), deletes each member
 with `cafleet member delete`, verifies with `cafleet member list` that only
 the root Director's row remains, runs
-`cafleet fleet delete --fleet-id <fleet-id>`, and confirms with
+`cafleet fleet delete <fleet-id>`, and confirms with
 `cafleet fleet list`. `fleet delete` alone also ends a still-running loop —
 its next tick sees the soft-deleted fleet and self-terminates.
 
@@ -116,7 +116,7 @@ its next tick sees the soft-deleted fleet and self-terminates.
 process dies with the pane and a stale `monitor_runtime` row survives with a
 non-null `pid`. That row reads as dead on both liveness axes — the heartbeat
 goes stale and the process probe reports no such process — so a fresh
-`cafleet monitor start` reclaims it and succeeds. `cafleet fleet delete`
+`cafleet monitor` run reclaims it and succeeds. `cafleet fleet delete`
 removes the row unconditionally. No manual cleanup step exists or is needed.
 
 See [Data model](../spec/data-model.md) for the backing table and

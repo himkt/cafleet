@@ -109,7 +109,7 @@ Capture `fleet_id` and `director.member_id` from the JSON response and substitut
 
 #### 2b. Launch the monitor loop (before the Analyzer)
 
-BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Then launch `cafleet monitor start --fleet-id <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived. The background task is stopped first in the 2f teardown.
+BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Then launch `cafleet monitor <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived. The background task is stopped first in the 2f teardown.
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
@@ -131,13 +131,13 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | CONTEXT LINES | `DESIGN DOCUMENT: [INSERT doc_path]` + `ALREADY-REVIEWED SECTIONS: [INSERT JSON array from interview-progress, or "none" on fresh start]` |
 | start cue (verbatim) | `Read the design document, generate a numbered question list per the role definition, send it to the Director via cafleet message send, then idle pending shutdown.` |
 
-Render the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` per the 2c audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--text-file`:
+Render the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` per the 2c audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--file`:
 
    ```bash
    cafleet member create --fleet-id <fleet-id> \
      --name "Analyzer" \
      --description "Reads the design doc and generates a numbered question list" \
-     --text-file ${BASE}/.prompts/analyzer-<UTC-compact>.md \
+     --file ${BASE}/.prompts/analyzer-<UTC-compact>.md \
      --json
    ```
 
@@ -145,13 +145,13 @@ Render the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` per the 2c aud
 
 #### 2e. Wait for the Analyzer's question list
 
-Poll `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id> --full` until the Analyzer's reply arrives. **The `--full` flag is required**: `cafleet message poll` truncates each message body to 200 codepoints + `…` by default, which would silently mangle the Analyzer's numbered question list. Acknowledge with `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --message-id <message-id>`.
+Poll `cafleet message poll <director-member-id> --json` until the Analyzer's reply arrives. **The `--json` flag is required**: text-mode `cafleet message poll` truncates each message body to 200 codepoints + `…`, which would silently mangle the Analyzer's numbered question list — `--json` carries the complete body. Acknowledge with `cafleet message ack <message-id>`.
 
-The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and wait again with `cafleet message poll --full`. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
+The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and wait again with `cafleet message poll <director-member-id> --json`. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
 
 #### 2f. Tear down the monitor loop and the Analyzer
 
-The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping it alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received: stop the monitor loop's background task first ({bg_stop}), then `cafleet member delete` the Analyzer (kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete --fleet-id <fleet-id>`; `cafleet fleet list` to confirm.
+The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping it alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received: stop the monitor loop's background task first ({bg_stop}), then `cafleet member delete` the Analyzer (kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete <fleet-id>`; `cafleet fleet list` to confirm.
 
 #### 2g. Persist the question list to `question.md`
 

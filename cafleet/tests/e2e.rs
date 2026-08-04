@@ -1,4 +1,4 @@
-//! Step 9 end-to-end binary tests (design § Success Criteria): fleet create →
+//! End-to-end binary tests (design § Success Criteria): fleet create →
 //! member create (tmux shim) → message send/poll/ack → one monitor tick, all
 //! against a fresh temp DB.
 
@@ -30,59 +30,39 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
     let output = cli.run(&[
         "message",
         "send",
-        "--fleet-id",
-        "1",
         "--from-member-id",
         "1",
         "--to-member-id",
         &worker_id.to_string(),
-        "--text",
         "e2e task",
-        "--quiet",
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    let message_id: i64 = stdout(&output).trim().parse().unwrap();
+    let message_id: i64 = cli
+        .sqlite()
+        .query_row(
+            "SELECT message_id FROM messages WHERE type='unicast'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
 
-    let output = cli.run(&[
-        "message",
-        "poll",
-        "--fleet-id",
-        "1",
-        "--member-id",
-        &worker_id.to_string(),
-    ]);
+    let output = cli.run(&["message", "poll", &worker_id.to_string()]);
     assert!(
         stdout(&output).contains("e2e task"),
         "got: {}",
         stdout(&output)
     );
 
-    let output = cli.run(&[
-        "message",
-        "ack",
-        "--fleet-id",
-        "1",
-        "--member-id",
-        &worker_id.to_string(),
-        "--message-id",
-        &message_id.to_string(),
-    ]);
+    let output = cli.run(&["message", "ack", &message_id.to_string()]);
     assert!(stdout(&output).starts_with("Message acknowledged.\n"));
 
-    let output = cli.run(&[
-        "message",
-        "poll",
-        "--fleet-id",
-        "1",
-        "--member-id",
-        &worker_id.to_string(),
-    ]);
+    let output = cli.run(&["message", "poll", &worker_id.to_string()]);
     assert!(stdout(&output).contains("No messages found."));
 
-    let mut child = cli.spawn(&["monitor", "start", "--fleet-id", "1", "--tick", "1"]);
+    let mut child = cli.spawn(&["monitor", "1", "--tick", "1"]);
     std::thread::sleep(Duration::from_secs(1));
 
-    let second = cli.run(&["monitor", "start", "--fleet-id", "1", "--tick", "1"]);
+    let second = cli.run(&["monitor", "1", "--tick", "1"]);
     assert_eq!(code(&second), 1, "the atomic claim refuses a second loop");
     assert!(
         stderr(&second).contains("Error: monitor already running for fleet 1"),

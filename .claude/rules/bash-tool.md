@@ -18,7 +18,7 @@ Any of the following signals means you are a member subject to this rule:
 
 1. **Run it.** Use the Bash tool directly. Permission prompts auto-resolve. No prefix, no routing.
 2. **Process the output** as your next-turn context.
-3. **Reply to the Director** via `cafleet message send --fleet-id <s> --from-member-id <my-id> --to-member-id <director-id> --text "..."` if a reply is expected.
+3. **Reply to the Director** via `cafleet message send --from-member-id <my-id> --to-member-id <director-id> "..."` if a reply is expected.
 
 You take a single action — invoke Bash — instead of the previous "send a CAFleet message and wait" routing.
 
@@ -42,9 +42,9 @@ You take a single action — invoke Bash — instead of the previous "send a CAF
 The operator has already asked you to run the command. The Director is your fallback when your harness can't run it. Take the single action:
 
 ```bash
-cafleet message send --fleet-id <fleet-id> --from-member-id <my-member-id> \
+cafleet message send --from-member-id <my-member-id> \
   --to-member-id <director-member-id> \
-  --text "Please run \`<command>\` for me — my Bash tool denied it (<denial reason if known>)."
+  "Please run \`<command>\` for me — my Bash tool denied it (<denial reason if known>)."
 ```
 
 Then **wait** for the `! <command>` output to land in your pane. The Director will dispatch the command via `cafleet member prompt --shell "<command>"`, which keystrokes `! <command>` + Enter into your pane via Claude Code's `!` shortcut. The captured stdout/stderr lands in your next-turn context.
@@ -65,14 +65,13 @@ If you are the **Director** (not a member), this rule applies in reverse only wh
 
 For the **inbox-poll-only case**, the primitive is `cafleet member ping`.
 It carries no message — its action is fixed (it injects `Esc` +
-`cafleet message poll --fleet-id <s> --member-id <m> — then resume your work
+`cafleet message poll <m> — then resume your work
 if something was still running.` + Enter through `send_poll_trigger`; the
 leading `Esc` is the prompt safeguard) — so it is
 pre-approved in `permissions.allow` and fires without a per-call confirmation:
 
 ```bash
-cafleet member ping --fleet-id <fleet-id> \
-  --member-id <member-id>
+cafleet member ping <member-id>
 ```
 
 The Director owns this primitive; members never invoke it.
@@ -80,11 +79,9 @@ The Director owns this primitive; members never invoke it.
 For the **shell-dispatch fallback** (a member auto-routed a denied command and needs the Director to dispatch arbitrary shell on its behalf), the Director's primitive is `cafleet member prompt --shell`. This subcommand carries the operator-controlled text as a positional argument, so it remains under `permissions.ask` for per-call confirmation:
 
 ```bash
-cafleet member prompt --fleet-id <fleet-id> \
-  --member-id <member-id> \
-  --shell "<command>"
+cafleet member prompt <member-id> --shell "<command>"
 ```
 
 Follow every successful shell dispatch with `cafleet member ping` against the same member — the bang output only stages in the pane; the ping advances the member's turn to consume it. The plain form (no `--shell`) keystrokes `TEXT` Esc-safeguarded as a submitted user turn — for slash commands and other magic commands a broker message body cannot trigger — and needs no ping.
 
-See the cafleet skill's `reference/prompt-routing.md` (§ Routing Bash via the Director) for the full shell-dispatch protocol, serialization rules (`prompt --shell → ping → ack → next`), and the cross-fleet boundary (a `--member-id` outside `--fleet-id` returns "not found"; there is no caller-auth check — any member in the fleet is a valid target).
+See the cafleet skill's `reference/prompt-routing.md` (§ Routing Bash via the Director) for the full shell-dispatch protocol, serialization rules (`prompt --shell → ping → ack → next`), and the lookup boundary (an unknown or inactive `MEMBER_ID` returns "not found"; there is no caller-auth check — any active member is a valid target).

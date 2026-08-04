@@ -143,9 +143,9 @@ the runtime fields take these values:
 | `last_wake_age_seconds` | `null` | `null` |
 | `tick_seconds` | `null` | **preserved** — the cadence the monitor last ran at |
 
-Launching the loop is CLI-only (`cafleet monitor start`, run by the Director
+Launching the loop is CLI-only (`cafleet monitor`, run by the Director
 as a background task in its own pane); there is no `POST`/`DELETE` counterpart
-here and no `monitor stop` command — the Director stops the background task,
+here and no CLI stop command — the Director stops the background task,
 and a still-running loop self-terminates after `fleet delete`.
 
 ### GET /api/members/{member_id}/inbox — Inbox Messages

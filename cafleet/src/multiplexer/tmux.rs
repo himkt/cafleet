@@ -212,9 +212,9 @@ impl TmuxMultiplexer {
         self.send_literal_then_enter(target_pane_id, "/exit", None, ignore_missing, false)
     }
 
-    pub fn send_poll_trigger(&self, target_pane_id: &str, fleet_id: i64, member_id: i64) -> bool {
+    pub fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
         let payload = format!(
-            "cafleet message poll --fleet-id {fleet_id} --member-id {member_id} \
+            "cafleet message poll {member_id} \
              — then resume your work if something was still running."
         );
         self.best_effort_send(target_pane_id, &payload, true)
@@ -484,7 +484,7 @@ mod tests {
     fn send_poll_trigger_keystrokes_esc_payload_enter_with_the_two_delays() {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        assert!(mux.send_poll_trigger("%5", 3, 14));
+        assert!(mux.send_poll_trigger("%5", 14));
         assert_eq!(
             runner.events(),
             vec![
@@ -497,7 +497,7 @@ mod tests {
                         "-t",
                         "%5",
                         "-l",
-                        "cafleet message poll --fleet-id 3 --member-id 14 — then resume \
+                        "cafleet message poll 14 — then resume \
                          your work if something was still running.",
                     ],
                     Some(5),
@@ -512,7 +512,7 @@ mod tests {
     fn send_poll_trigger_is_best_effort() {
         let runner = FakeRunner::without_binaries();
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        assert!(!mux.send_poll_trigger("%5", 3, 14), "tmux missing → false");
+        assert!(!mux.send_poll_trigger("%5", 14), "tmux missing → false");
         assert!(runner.events().is_empty(), "no keystroke is attempted");
 
         let runner = FakeRunner::with_binary("tmux");
@@ -520,7 +520,7 @@ mod tests {
             stderr: "boom".to_string(),
         }));
         let mux = TmuxMultiplexer::new(runner, tmux_env());
-        assert!(!mux.send_poll_trigger("%5", 3, 14), "any error → false");
+        assert!(!mux.send_poll_trigger("%5", 14), "any error → false");
     }
 
     #[test]

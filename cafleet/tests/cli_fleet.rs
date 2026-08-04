@@ -1,4 +1,5 @@
-//! Step 6 CLI contract tests: the `fleet` group (SPEC §6.3 *fleet group*).
+//! CLI contract tests: the `fleet` group (SPEC §6.3 *fleet group*) —
+//! positional `FLEET_ID` subjects on `show` / `delete`, the shared `--json`.
 
 mod common;
 
@@ -42,27 +43,7 @@ fn fleet_create_reports_the_compact_line_and_backfills_the_director() {
 }
 
 #[test]
-fn fleet_create_full_and_json_forms() {
-    let cli = Cli::new();
-    cli.ready();
-    let output = cli.run(&[
-        "fleet",
-        "create",
-        "--name",
-        "alpha",
-        "--coding-agent",
-        "claude",
-        "--full",
-    ]);
-    assert_eq!(code(&output), 0);
-    let out = stdout(&output);
-    assert!(
-        out.starts_with("1\n1\nname:             alpha\ncreated_at:       "),
-        "got: {out}"
-    );
-    assert!(out.contains("director_name:    Director"), "got: {out}");
-    assert!(out.contains("pane:             main:@1:%0"), "got: {out}");
-
+fn fleet_create_json_is_the_only_detailed_form() {
     let cli = Cli::new();
     cli.ready();
     let output = cli.run(&[
@@ -136,16 +117,16 @@ fn fleet_list_reports_empty_then_the_created_fleet() {
 }
 
 #[test]
-fn fleet_show_renders_the_row_and_hides_nothing_soft_deleted() {
+fn fleet_show_takes_the_positional_subject_and_returns_soft_deleted_rows() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.with_fleet();
-    let output = cli.run(&["fleet", "show", "--fleet-id", &fleet_id.to_string()]);
-    assert_eq!(code(&output), 0);
+    let output = cli.run(&["fleet", "show", &fleet_id.to_string()]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(out.contains("testfleet"), "got: {out}");
 
-    cli.run(&["fleet", "delete", "--fleet-id", &fleet_id.to_string()]);
-    let output = cli.run(&["fleet", "show", "--fleet-id", &fleet_id.to_string()]);
+    cli.run(&["fleet", "delete", &fleet_id.to_string()]);
+    let output = cli.run(&["fleet", "show", &fleet_id.to_string()]);
     assert_eq!(
         code(&output),
         0,
@@ -162,7 +143,7 @@ fn fleet_show_renders_the_row_and_hides_nothing_soft_deleted() {
 fn fleet_show_missing_is_the_pinned_application_error() {
     let cli = Cli::new();
     cli.ready();
-    let output = cli.run(&["fleet", "show", "--fleet-id", "999"]);
+    let output = cli.run(&["fleet", "show", "999"]);
     assert_eq!(code(&output), 1);
     assert!(
         stderr(&output).contains("Error: fleet '999' not found."),
@@ -172,10 +153,26 @@ fn fleet_show_missing_is_the_pinned_application_error() {
 }
 
 #[test]
+fn fleet_show_subject_parse_errors_exit_2() {
+    let cli = Cli::new();
+    cli.ready();
+    assert_eq!(
+        code(&cli.run(&["fleet", "show"])),
+        2,
+        "the positional FLEET_ID is required"
+    );
+    assert_eq!(
+        code(&cli.run(&["fleet", "show", "abc"])),
+        2,
+        "a non-integer subject is clap's invalid-value error"
+    );
+}
+
+#[test]
 fn fleet_delete_reports_the_count_and_is_idempotent() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.with_fleet();
-    let output = cli.run(&["fleet", "delete", "--fleet-id", &fleet_id.to_string()]);
+    let output = cli.run(&["fleet", "delete", &fleet_id.to_string()]);
     assert_eq!(code(&output), 0);
     assert!(
         stdout(&output).contains("Deleted fleet 1. Deregistered 1 members."),
@@ -183,11 +180,21 @@ fn fleet_delete_reports_the_count_and_is_idempotent() {
         stdout(&output)
     );
 
-    let again = cli.run(&["fleet", "delete", "--fleet-id", &fleet_id.to_string()]);
+    let again = cli.run(&["fleet", "delete", &fleet_id.to_string()]);
     assert_eq!(code(&again), 0);
     assert!(
         stdout(&again).contains("Deleted fleet 1. Deregistered 0 members."),
         "got: {}",
         stdout(&again)
     );
+}
+
+#[test]
+fn fleet_delete_json_reports_the_deregistered_count() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_fleet();
+    let output = cli.run(&["fleet", "delete", &fleet_id.to_string(), "--json"]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(payload["deregistered_count"], 1);
 }

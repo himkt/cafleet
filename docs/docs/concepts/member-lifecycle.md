@@ -46,8 +46,9 @@ error.
 
 ## Spawn-prompt input modes
 
-The spawn prompt is supplied inline via `--text "<prompt>"` or from a file via
-`--text-file <path>` (an absolute or CWD-relative UTF-8 path; `-` reads the
+The spawn prompt is supplied inline as the positional `PROMPT` argument or
+from a file via
+`--file <path>` (an absolute or CWD-relative UTF-8 path; `-` reads the
 whole prompt from stdin); literal braces in prompt text must be doubled (`{{`,
 `}}`) — see [CLI options](../spec/cli-options.md) `member create`.
 
@@ -61,11 +62,13 @@ The lifecycle ops and keystroke interaction all live in the `member` group:
 | Teardown | `member delete` |
 | Introspection | `member show`, `member list` |
 | Keystroke interaction | `member prompt`, `member ping` |
+| Pane read | `member capture` |
 
 `member create` takes no identity flag — the CLI resolves the
 Director from `fleets.director_member_id`; every other lifecycle verb targets
-its member by `--member-id`, scoped to the per-subcommand `--fleet-id`. Each
-subcommand's purpose and identity flag are in
+its member by the positional `MEMBER_ID` subject (the fleet is derived from
+the member row). Each
+subcommand's purpose and argument surface are in
 [CLI options § Subcommand summary](../spec/cli-options.md#subcommand-summary),
 which also carries every flag and the shared resolution rules.
 

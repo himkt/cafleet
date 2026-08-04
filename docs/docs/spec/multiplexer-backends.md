@@ -117,7 +117,7 @@ Example:
 
 `cafleet member ping` is a Director-only manual primitive, unchanged on both
 backends: `Esc`, then the literal payload
-`cafleet message poll --fleet-id <fleet-id> --member-id <member-id> — then
+`cafleet message poll <member-id> — then
 resume your work if something was still running.`, then `Enter` (a
 pending-placement target skips the keystroke and succeeds). It cannot carry
 arbitrary text.
@@ -201,7 +201,7 @@ in the [backend matrix](#backend-matrix).
 
 The recipient pane is resolved from `member_placements` by `member_id` alone,
 so Member → Director notifications work automatically. The recipient acks via
-`cafleet message ack --message-id <message_id>` once it has consumed the message.
+`cafleet message ack <message_id>` once it has consumed the message.
 Body truncation in the preview (`…` at `CAFLEET_MAX_TEXT_LEN` codepoints) is
 documented in [CLI options](cli-options.md#message-body-truncation).
 

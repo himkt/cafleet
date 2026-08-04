@@ -352,9 +352,9 @@ impl HerdrMultiplexer {
         )
     }
 
-    pub fn send_poll_trigger(&self, target_pane_id: &str, fleet_id: i64, member_id: i64) -> bool {
+    pub fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
         let payload = format!(
-            "cafleet message poll --fleet-id {fleet_id} --member-id {member_id} \
+            "cafleet message poll {member_id} \
              — then resume your work if something was still running."
         );
         self.best_effort(|| {
@@ -881,7 +881,7 @@ mod tests {
     fn send_poll_trigger_is_esc_then_run() {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        assert!(mux.send_poll_trigger("w1:p2", 3, 14));
+        assert!(mux.send_poll_trigger("w1:p2", 14));
         assert_eq!(
             runner.events(),
             vec![
@@ -893,7 +893,7 @@ mod tests {
                         "pane",
                         "run",
                         "w1:p2",
-                        "cafleet message poll --fleet-id 3 --member-id 14 — then resume \
+                        "cafleet message poll 14 — then resume \
                          your work if something was still running.",
                     ],
                     Some(5),
@@ -907,7 +907,7 @@ mod tests {
     fn send_poll_trigger_is_best_effort() {
         let runner = FakeRunner::without_binaries();
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        assert!(!mux.send_poll_trigger("w1:p2", 3, 14));
+        assert!(!mux.send_poll_trigger("w1:p2", 14));
         assert!(runner.events().is_empty());
 
         let runner = FakeRunner::with_binary("herdr");
@@ -915,7 +915,7 @@ mod tests {
             stderr: "boom".to_string(),
         }));
         let mux = HerdrMultiplexer::new(runner, herdr_env());
-        assert!(!mux.send_poll_trigger("w1:p2", 3, 14));
+        assert!(!mux.send_poll_trigger("w1:p2", 14));
     }
 
     #[test]

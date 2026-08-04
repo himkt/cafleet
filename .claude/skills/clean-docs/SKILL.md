@@ -127,7 +127,7 @@ User → /clean-docs (one workflow)
 
 | Role | Responsibility |
 |---|---|
-| **Director** | Resolve task-scoped `${BASE}`; `cafleet fleet create`; launch `cafleet monitor start` as a background task in its own pane ({bg_run}) and gate the first spawn on the startup-line confirmation; partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply any edit a scanner's harness denies (verify the staged diff first); run verification; escalate observations to the user; stop the monitor loop first at teardown. |
+| **Director** | Resolve task-scoped `${BASE}`; `cafleet fleet create`; launch `cafleet monitor` as a background task in its own pane ({bg_run}) and gate the first spawn on the startup-line confirmation; partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply any edit a scanner's harness denies (verify the staged diff first); run verification; escalate observations to the user; stop the monitor loop first at teardown. |
 | **scanner** (×N) | For its slice: run the workflow's scan mechanics, propose actions per the workflow's rubric, record observations separately, write its partial artifact under `${BASE}`. After approval is relayed: apply its own slice's approved rows exactly as written, re-verify its diff, route harness-denied writes to the Director. |
 | **reviewer** | Validate the merged artifact **before** any edit, per the workflow's guarantees and guardrails. After apply: run the workflow verification (parameter table below). |
 
@@ -158,7 +158,7 @@ extensions, since a run produces a run artifact, not a design document:
    `researches/clean-docs-<workflow>-<UTC-compact>/` (gitignored, one folder
    per run).
 2. **Bootstrap** — `cafleet doctor` (gating), `cafleet fleet create`; launch
-   `cafleet monitor start --fleet-id <fleet-id>` as a background task in your
+   `cafleet monitor <fleet-id>` as a background task in your
    own pane ({bg_run}; members spawned `{permission_flags}`), gate on the
    `monitor loop started (…)` startup line.
 3. **Spawn workers** — scanners (one per disjoint slice) and the reviewer
@@ -242,7 +242,7 @@ IMPORTANT: If blocked, send a message to the Director immediately instead of ass
 IMPORTANT: Do NOT edit any repository file until the Director relays the reviewer's approved (<run pointer>). The scan phase is read + propose only.
 IMPORTANT: Do NOT commit code or run git write operations — the Director handles all git.
 
-On spawn, as your first Bash call, send the ready signal: cafleet message send --fleet-id {fleet_id} --from-member-id {member_id} --to-member-id {director_member_id} --text "ready"
+On spawn, as your first Bash call, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
 
 When you see cafleet message poll output with a message from the Director, act on those instructions.
 
@@ -258,7 +258,7 @@ from `../../../skills/cafleet/reference/coding-agent/<name>-overlay.md`, and
 every member's spawn-prompt identity block carries a
 `CODING AGENT: {coding_agent}` line so the member resolves its overlay. Role
 files are referenced by absolute path in spawn prompts (never inlined); spawns
-use `--text-file`.
+use `--file`.
 
 ## Skill file layout
 

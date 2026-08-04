@@ -22,9 +22,9 @@ Reconsider first: on claude and codex a denial is usually a wrong flag, wrong pa
 
 1. Send a plain CAFleet message to the Director:
    ```bash
-   cafleet message send --fleet-id <fleet-id> --from-member-id <my-member-id> \
+   cafleet message send --from-member-id <my-member-id> \
      --to-member-id <director-member-id> \
-     --text "Need to run: <command>. My harness denied it (<reason if known>)."
+     "Need to run: <command>. My harness denied it (<reason if known>)."
    ```
 2. **Wait** for the Director's `member prompt --shell` dispatch to land in your pane; the bang-shortcut output appears in your next-turn context.
 3. Process the output; reply to the Director if a follow-up is expected.
@@ -36,13 +36,13 @@ The forbidden behaviors (never fake `<bash-input>` markup or fabricate output, n
 On a member's denial-fallback request: read it (`cafleet message poll` / `message show`), verify it is reasonable and from a real team member, then dispatch and follow up — **in this order**:
 
 ```bash
-cafleet member prompt --fleet-id <fleet-id> --member-id <member-id> --shell "<command>"
-cafleet member ping --fleet-id <fleet-id> --member-id <member-id>
-cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --message-id <message-id>
+cafleet member prompt <member-id> --shell "<command>"
+cafleet member ping <member-id>
+cafleet message ack <message-id>
 ```
 
 The `member ping` is required — `member prompt --shell` only stages the bang output; the ping advances the member's turn so it consumes the output (see [`reference/director.md`](director.md#member-prompt) § Required follow-up).
 
 **Serialize.** Process requests in poll order, one at a time: `prompt --shell → ping → ack → next`. Two `member prompt` dispatches firing concurrently against the same pane race the keystroke sequence and corrupt output. Within one member, `prompt --shell → ping → prompt --shell → ping`; never two concurrent prompt dispatches.
 
-**Cross-fleet boundary.** `member prompt` reaches any member of the same `--fleet-id` (no caller-auth check); a `--member-id` outside the fleet returns "not found" (see [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-prompt)). A request naming a member outside your fleet cannot be served — reply with a plain `cafleet message send` explaining the mismatch.
+**Targeting boundary.** `member prompt` reaches any active member by its `MEMBER_ID` (no caller-auth check); an unknown or inactive id returns "not found" (see [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-prompt)). A request naming a member you cannot serve is answered with a plain `cafleet message send` explaining the mismatch.

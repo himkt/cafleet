@@ -80,14 +80,14 @@ in practice.
 
 ## Message Visibility Rules
 
-Read access is **fleet-scoped**; per-member identity is enforced only on state
-transitions:
+Read access is **by id** — the subject row carries its own fleet and
+recipient, so existence (plus, for ACK, message state) is the enforcement:
 
 | Operation | Enforcement |
 |---|---|
-| `message poll` | Returns the `input_required` deliveries whose `owner_member_id` equals `--member-id`; any in-fleet caller can poll any in-fleet inbox by id. |
-| `message show` | Returns the message iff at least one endpoint belongs to `--fleet-id`; cross-fleet lookups return "not found". |
-| `message ack` | Recipient-only — the caller must equal the message's `owner_member_id`. |
+| `message poll` | Returns the `input_required` deliveries whose `owner_member_id` equals the positional `MEMBER_ID`; the member must exist, and any caller can poll any inbox by id. |
+| `message show` | Returns the message iff the `MESSAGE_ID` exists; unknown ids return "not found". |
+| `message ack` | Transitions the message iff it exists and is in the `input_required` state; the recipient is derived from the message row. |
 
 ## Broadcast Grouping
 

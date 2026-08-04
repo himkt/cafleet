@@ -14,11 +14,11 @@ CAFleet members spawned via `cafleet member create` do not act autonomously. The
 
 Supervision happens over the CAFleet message broker: the Director `cafleet message send`s a member → the broker keystrokes a 2-line inline preview into the member's pane (it processes the preview as a fresh user-turn; the full body is fetched via `cafleet message poll`) → the member acts and replies via `cafleet message send` → the broker keystrokes that reply into the Director's pane, which the Director ACKs (`cafleet message ack`). The inline-preview mechanics are canonical in [`SKILL.md`](../SKILL.md) § Send and [`multiplexer-backends.md`](../../../docs/docs/spec/multiplexer-backends.md#push-notifications).
 
-**Long or multi-line bodies.** `message send` / `message broadcast` accept a `--text-file <path>` (or `--text-file -` for stdin) alternative to inline `--text`. A long or multi-line body MUST be passed via `--text-file`, never inline `--text`, so it never lands on the command line and hits the shell's `ARG_MAX` limit. Short one-line bodies stay fine inline with `--text`.
+**Long or multi-line bodies.** `message send` / `message broadcast` accept a `--file <path>` (or `--file -` for stdin) alternative to the inline positional `TEXT`. A long or multi-line body MUST be passed via `--file`, never inline, so it never lands on the command line and hits the shell's `ARG_MAX` limit. Short one-line bodies stay fine as the inline positional.
 
 **Facilitation cue (load-bearing).** The monitor loop wakes **you** directly: once per wake interval it keystrokes the `[cafleet] tick:` payload into your own pane (see § The monitor heartbeat). **Treat each wake — and each inbound broker auto-fire — as the cue to run the entire 5-step facilitation loop** (poll → ACK → dispatch → health-check → escalate), NOT to read the inbox and stop. Then honor the wake's closing clause: resume your own work if something was still running when the keystroke landed.
 
-The Director never polls a member's pane via raw `tmux`. Inspection is via `cafleet monitor capture`; write is via `cafleet member prompt` / `cafleet member ping`. See [`SKILL.md`](../SKILL.md) and [`reference/cli.md`](cli.md) for the canonical command surface.
+The Director never polls a member's pane via raw `tmux`. Inspection is via `cafleet member capture`; write is via `cafleet member prompt` / `cafleet member ping`. See [`SKILL.md`](../SKILL.md) and [`reference/cli.md`](cli.md) for the canonical command surface.
 
 The Director's plain output is **not visible to members** — the only Director→member channel is `cafleet message send` (and the Director-only keystroke primitives above for special cases).
 
@@ -26,11 +26,11 @@ The Director's plain output is **not visible to members** — the only Director�
 
 CAFleet members do not act autonomously. The Director drives the team — and the Director needs a way to wake itself up periodically to check inboxes, dispatch queued work, and detect stalls. That heartbeat is supplied by **`cafleet monitor`**, a per-fleet `scan → wake → sleep` loop that **you launch as a background task in your own pane** ({bg_run}) immediately after `cafleet fleet create`. Because it is just a backgrounded command, the heartbeat is **backend-agnostic** — a root Director on `claude`, `codex`, or `opencode` gets the identical tick.
 
-The wake is **unconditional and fleet-level**: once per wake interval (default **600 s**; `monitor start --interval N` / `CAFLEET_MONITOR_WAKE_INTERVAL`, `0` disables the wake while the loop keeps heartbeating) the loop keystrokes one `Esc`-first payload into the Director's own pane — including when the fleet has no other members yet. There is no per-member schedule and no per-member due computation.
+The wake is **unconditional and fleet-level**: once per wake interval (default **600 s**; `cafleet monitor <fleet-id> --interval N` / `CAFLEET_MONITOR_WAKE_INTERVAL`, `0` disables the wake while the loop keeps heartbeating) the loop keystrokes one `Esc`-first payload into the Director's own pane — including when the fleet has no other members yet. There is no per-member schedule and no per-member due computation.
 
 The byte-identical tmux/herdr wake is a **pure trigger**: it names every active member as `<member-id> (<name>; coding_agent=<agent>; unacked=<pending-count>)`, tells you to poll your inbox, ACK, and dispatch, and closes with the resume clause — `Resume your work if something was still running.` — the remedy for a keystroke that lands mid-turn. The loop never keystrokes a member's pane; `cafleet member ping` stays a Director-only manual primitive.
 
-See [`SKILL.md`](../SKILL.md) and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring) for the full command surface and policy. **You — the Director — run `cafleet monitor start`** (see § Monitor Lifecycle).
+See [`SKILL.md`](../SKILL.md) and the [Monitoring concepts page](https://himkt.github.io/cafleet/concepts/monitoring) for the full command surface and policy. **You — the Director — run `cafleet monitor <fleet-id>`** (see § Monitor Lifecycle).
 
 The periodic wake plus the broker auto-fire on every member `cafleet message send` are the two Director re-engagement channels.
 
@@ -64,7 +64,7 @@ overlay; mixed fleets make this target-specific. The gate capture depth is
 normative:
 
 ```bash
-cafleet monitor capture --fleet-id <fleet-id> --member-id <target-member-id> --lines 120
+cafleet member capture <target-member-id> --lines 120
 ```
 
 | Capture classifies | Director action |
@@ -105,18 +105,18 @@ If a queued action requires a *new* decision the user has not yet made (choosing
 
 ## Spawn Protocol
 
-**Launch the heartbeat first.** Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor start --fleet-id <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the startup line the loop prints immediately after claiming the runtime row — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. That confirmation is the gate on the first `member create`. A loop task that exits instead (runtime-claim conflict, dead fleet) is a failed start — resolve it before spawning anyone.
+**Launch the heartbeat first.** Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the startup line the loop prints immediately after claiming the runtime row — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. That confirmation is the gate on the first `member create`. A loop task that exits instead (runtime-claim conflict, dead fleet) is a failed start — resolve it before spawning anyone.
 
-**Fleet bootstrap.** `cafleet fleet create --coding-agent <backend> --json` atomically creates the fleet, registers the root Director bound to the current pane, and writes its placement row in one transaction. Capture `fleet_id` and `director.member_id` from the JSON response and carry them as literal integers on every later call; the literal-id rule and the per-subcommand flag placement are canonical in [`SKILL.md`](../SKILL.md) § *Required Flags*.
+**Fleet bootstrap.** `cafleet fleet create --coding-agent <backend> --json` atomically creates the fleet, registers the root Director bound to the current pane, and writes its placement row in one transaction. Capture `fleet_id` and `director.member_id` from the JSON response and carry them as literal integers on every later call; the literal-id rule and the positional-subject placement are canonical in [`SKILL.md`](../SKILL.md) § *Required ids*.
 
 Every time you spawn a member:
 
 1. **Verify env, then ensure supervision is running**:
    - **Pre-spawn env-check (gating)**: run `cafleet doctor`. It reports the resolved multiplexer backend and the pane's session/window/pane identifiers. If it exits non-zero or fails to resolve a multiplexer backend, ABORT the spawn and surface the error — `cafleet member create` requires the Director inside a tmux or herdr pane. This is the canonical pane-identity probe; do NOT use raw `tmux display-message` / `TMUX` expansion or any other backend-specific env probe. Backend-binary availability is NOT a separate step — `member create` does its own `PATH` check and errors if the binary is missing (see [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-create)); do NOT pre-probe with `<backend> --version` / `which`.
    - **Monitor loop live before any member** — the `monitor loop started` startup line confirmed in your background task's output (§ above). A loop that has since exited is re-launched before spawning.
-2. **Spawn the member** via `cafleet member create --fleet-id <fleet-id> --name <name> --description <desc> --text-file <abs path to ${BASE}/.prompts/<role>-<UTC-compact>.md>` (the Director is auto-resolved from the fleet row). The pre-spawn file IS both the CLI input and the permanent audit artifact; the audit-file convention (with the `${BASE} == <unset>` guarded-skip + inline fallback), the `--model` flag, and the model-name→backend inference are canonical in [`reference/director.md`](director.md) § Member Create.
-3. **Include the ready-signal directive in the spawn prompt.** Every spawn prompt MUST instruct the member, as its first Bash call, to send `cafleet message send … --text "ready"` (canonical wording in [`roles/member.md`](../roles/member.md) § *On spawn — send the ready signal*). It is the ONLY signal that the coding agent inside the pane has actually booted; a prompt missing it is a defect — fix and re-spawn.
-4. **Verify the member is placed** by checking that `cafleet member list --fleet-id <fleet-id>` shows the new member with a non-null `pane_id`. This confirms the pane was created. Liveness of the coding agent inside the pane is confirmed asynchronously when the ready signal arrives — NOT by `member list`.
+2. **Spawn the member** via `cafleet member create --fleet-id <fleet-id> --name <name> --description <desc> --file <abs path to ${BASE}/.prompts/<role>-<UTC-compact>.md>` (the Director is auto-resolved from the fleet row). The pre-spawn file IS both the CLI input and the permanent audit artifact; the audit-file convention (with the `${BASE} == <unset>` guarded-skip + inline fallback), the `--model` flag, and the model-name→backend inference are canonical in [`reference/director.md`](director.md) § Member Create.
+3. **Include the ready-signal directive in the spawn prompt.** Every spawn prompt MUST instruct the member, as its first Bash call, to send `cafleet message send … "ready"` (canonical wording in [`roles/member.md`](../roles/member.md) § *On spawn — send the ready signal*). It is the ONLY signal that the coding agent inside the pane has actually booted; a prompt missing it is a defect — fix and re-spawn.
+4. **Verify the member is placed** by checking that `cafleet member list <fleet-id>` shows the new member with a non-null `pane_id`. This confirms the pane was created. Liveness of the coding agent inside the pane is confirmed asynchronously when the ready signal arrives — NOT by `member list`.
 5. **End the active turn after spawn-and-verify.** The ready signal arrives via broker auto-fire (member's `cafleet message send` → 2-line inline preview keystroked into your pane via `tmux.send_inline_preview`), with the periodic wake as the backstop when a member goes quiet without reporting. You process it — ACK, dispatch first task — in your next active turn. See § *Asynchronous Wait Rule* below.
 
 Never spawn members before the startup-line confirmation. Keep the loop alive until all work is fully complete and the team is being shut down.
@@ -130,17 +130,17 @@ The active turn consumes inputs that have already arrived and dispatches what is
 | Just spawned a member; ready signal not yet arrived | End the turn. Auto-fire delivers the ready signal as it lands; the periodic wake is the backstop. |
 | Just dispatched to a member; reply not yet arrived | End the turn. Same wake-up channels surface the reply. |
 | Waiting on multiple members' replies before next step | End the turn. React to each arrival as its own wake-up, not all-at-once. |
-| User asks "what's the status?" while members are working | Report the asynchronous truth (e.g. "Alice is processing X; her completion will surface in my next turn"). For a live snapshot, use `cafleet monitor capture`. |
+| User asks "what's the status?" while members are working | Report the asynchronous truth (e.g. "Alice is processing X; her completion will surface in my next turn"). For a live snapshot, use `cafleet member capture`. |
 | Turn finished dispatching and ACKing | End the turn. The next wake-up reopens the turn when there is something to act on. |
 
 ## Team-facilitation instructions
 
 On every supervision tick — whether fired by the periodic monitor wake, by inbound work arriving via the broker's inline-preview keystroke, or executed inline within an active turn — the Director runs these five steps in order. The goal is to **facilitate the team in completing tasks**, not merely to detect stalls.
 
-1. **Poll inbox.** `cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id>` returns only the un-acked (`input_required`) deliveries; ACKing each one (step 2) consumes it — the poll semantics are canonical at § Stall Response → Stage 1.
-2. **ACK every message** that requires no further action: `cafleet message ack --fleet-id <fleet-id> --member-id <director-member-id> --message-id <message-id>`. Unacknowledged messages accumulate in the Director's inbox and obscure new arrivals.
+1. **Poll inbox.** `cafleet message poll <director-member-id>` returns only the un-acked (`input_required`) deliveries; ACKing each one (step 2) consumes it — the poll semantics are canonical at § Stall Response → Stage 1.
+2. **ACK every message** that requires no further action: `cafleet message ack <message-id>`. Unacknowledged messages accumulate in the Director's inbox and obscure new arrivals.
 3. **Dispatch queued work.** If a member is idle and inputs are available (review comments to route, the next implementation step in a design doc, reviewer feedback waiting at the Drafter, a teammate reply waiting to be acted on), send the instruction immediately via `cafleet message send`. **Do not wait for a fresh "go" from the user** — the user's original authorization persists across ticks; see § Authorization-Scope Guard.
-4. **Run the health-check sequence** for any member that has not reported recent progress — cheapest, least-intrusive check first: (a) `cafleet member list` (enumerate members + pane status); (b) `cafleet message poll` (progress reports / help requests); (c) for a member silent since the last check, a fresh `cafleet monitor capture --lines 120` classified per § Idle Semantics → *The pre-ping capture gate* (a decision-prompt frame → see Stall Response for the decision-relay escape hatch); (d) `cafleet message send` a specific instruction — (c) is the gating precondition: (d) fires only for a member whose (c) capture classified `finished` or `stalled`; on `awaiting_user` or `working`, skip the round and defer the send; (e) once all members report completion, tell the user "All deliverables are ready for review."
+4. **Run the health-check sequence** for any member that has not reported recent progress — cheapest, least-intrusive check first: (a) `cafleet member list` (enumerate members + pane status); (b) `cafleet message poll` (progress reports / help requests); (c) for a member silent since the last check, a fresh `cafleet member capture --lines 120` classified per § Idle Semantics → *The pre-ping capture gate* (a decision-prompt frame → see Stall Response for the decision-relay escape hatch); (d) `cafleet message send` a specific instruction — (c) is the gating precondition: (d) fires only for a member whose (c) capture classified `finished` or `stalled`; on `awaiting_user` or `working`, skip the round and defer the send; (e) once all members report completion, tell the user "All deliverables are ready for review."
 5. **Escalate** to the user via {decision_surface} whenever a queued action requires a *new* user decision (option choice, risky/remote-visible operation, ambiguous teammate question); for the stall path (two fired sends with no progress) see § Stall Response → Escalation. Do **not** emit passive-hold messages like `Skipping. Holding for go.` — the tick is a health check, not a permission renewal.
 
 After the five steps, honor the wake's resume clause: if the keystroke landed while your own task was mid-flight, pick that task back up before ending the turn.
@@ -153,7 +153,7 @@ The workflow's spawned members run in workspace-scoped auto-approval mode ({perm
 
 | Phase | Action |
 |---|---|
-| Launch (before any member) | Immediately after `cafleet fleet create`, launch `cafleet monitor start --fleet-id <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. That confirmation gates the first `cafleet member create`. |
+| Launch (before any member) | Immediately after `cafleet fleet create`, launch `cafleet monitor <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. That confirmation gates the first `cafleet member create`. |
 | Run work | One `Esc`-first wake lands in your pane per wake interval (default 600 s), naming every member and its `unacked` count; each wake (or inbound work via inline preview) is the cue to run the 5-step facilitation loop above. |
 | User review | Keep the loop's background task running during the review cycle — revisions and re-reviews still count as in-progress work. |
 | Teardown | Stop the background task FIRST ({bg_stop}) — the loop's signal handler runs its ownership-checked runtime clear — then delete members. The full ordering is § *Cleanup Protocol*. |
@@ -171,19 +171,18 @@ The wake payload's per-member `unacked` counts and your own captures across wake
 ### Stage 1 — Message-based check (`cafleet message poll`)
 
 ```bash
-cafleet message poll --fleet-id <fleet-id> --member-id <director-member-id>
+cafleet message poll <director-member-id>
 ```
 
 `cafleet message poll` returns only the un-acked (`input_required`) deliveries addressed to the Director, newest first. ACKing a delivery consumes it, so a later poll surfaces only what has arrived since the last ACK — there is no last-tick timestamp to track. If the member has sent a progress report or help request via `cafleet message send`, you can act on it immediately without interrupting the member's work. This is non-intrusive and preferred.
 
-### Stage 2 — Terminal capture fallback (`cafleet monitor capture`)
+### Stage 2 — Terminal capture fallback (`cafleet member capture`)
 
 ```bash
-cafleet monitor capture --fleet-id <fleet-id> \
-  --member-id <member-id>
+cafleet member capture <member-id>
 ```
 
-The `cafleet monitor capture` default is `--lines 20`; bump `--lines` to show more of a stalled member's buffer.
+The `cafleet member capture` default is `--lines 20`; bump `--lines` to show more of a stalled member's buffer.
 
 If `cafleet message poll` shows no recent messages from the member, fall back to capturing the terminal buffer. This is non-intrusive (read-only inspection that works even when the member is mid-task) and replaces raw `tmux capture-pane`.
 
@@ -195,9 +194,9 @@ A Stage-2 capture doubles as the gate capture only when it was taken at `--lines
 
 ### Escalation
 
-If a member is still unresponsive after 2 **fired** re-engagement sends via `cafleet message send` AND `cafleet monitor capture` shows no forward progress in the terminal buffer, escalate to the user via {decision_surface} (per [`SKILL.md`](../SKILL.md) § *Soliciting user reactions*) with concrete options (e.g. re-send the instruction once more / re-spawn the member / drop its task). Only sends that actually fired count toward the threshold: a round the gate skipped never advances the count. A member that remains `awaiting_user` or `working` across many rounds is not "unresponsive" — it is parked on the user or making progress; keep skipping.
+If a member is still unresponsive after 2 **fired** re-engagement sends via `cafleet message send` AND `cafleet member capture` shows no forward progress in the terminal buffer, escalate to the user via {decision_surface} (per [`SKILL.md`](../SKILL.md) § *Soliciting user reactions*) with concrete options (e.g. re-send the instruction once more / re-spawn the member / drop its task). Only sends that actually fired count toward the threshold: a round the gate skipped never advances the count. A member that remains `awaiting_user` or `working` across many rounds is not "unresponsive" — it is parked on the user or making progress; keep skipping.
 
-The unblock primitives and their ordering — non-intrusive `cafleet message poll` → read-only `cafleet monitor capture` → authoritative `cafleet message send` → `cafleet member ping` (missed auto-fire / required post-shell-dispatch follow-up) → `cafleet member prompt --shell "<cmd>"` (shell dispatch) → `cafleet member delete` (last resort, kills the pane immediately, never raw `tmux kill-pane`) → escalate to the user via {decision_surface} — are documented in [`reference/director.md`](director.md), [`reference/recovery.md`](recovery.md), [`reference/prompt-routing.md`](prompt-routing.md), and the § Quick Reference table below.
+The unblock primitives and their ordering — non-intrusive `cafleet message poll` → read-only `cafleet member capture` → authoritative `cafleet message send` → `cafleet member ping` (missed auto-fire / required post-shell-dispatch follow-up) → `cafleet member prompt --shell "<cmd>"` (shell dispatch) → `cafleet member delete` (last resort, kills the pane immediately, never raw `tmux kill-pane`) → escalate to the user via {decision_surface} — are documented in [`reference/director.md`](director.md), [`reference/recovery.md`](recovery.md), [`reference/prompt-routing.md`](prompt-routing.md), and the § Quick Reference table below.
 
 ## User Delegation Protocol
 
@@ -216,7 +215,7 @@ When the user supplies free-form text instead of a listed option, use LLM reason
 - **Abort intent** (the user wants to stop or cancel the process)
 - **Non-abort intent** (the user is providing verbal feedback or asking a question)
 
-On **abort intent**, run the Abort Flow: tear down the team per § *Cleanup Protocol*, ending in `cafleet fleet delete --fleet-id <fleet-id>`, which soft-deletes the fleet and sweeps the root Director in one transaction.
+On **abort intent**, run the Abort Flow: tear down the team per § *Cleanup Protocol*, ending in `cafleet fleet delete <fleet-id>`, which soft-deletes the fleet and sweeps the root Director in one transaction.
 
 On **non-abort intent**, explain that feedback belongs in `COMMENT(` markers at the workflow's own feedback target, then re-prompt with the same option pattern. Each workflow names that target in its Director role file.
 
@@ -229,7 +228,7 @@ On **non-abort intent**, explain that feedback belongs in `COMMENT(` markers at 
 
 ## Cleanup Protocol
 
-Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol, in order: stop the monitor loop's background task FIRST ({bg_stop}; the loop's signal handler runs its ownership-checked runtime clear, nulling the process fields and preserving `tick_seconds` and `last_wake_at`) → `cafleet member delete` each member (each kills the pane immediately) → `cafleet member list` verification that only the root Director's row remains → `cafleet fleet delete --fleet-id <fleet-id>` → `cafleet fleet list` sanity check.
+Cleanup follows [`reference/recovery.md`](recovery.md) § Shutdown Protocol, in order: stop the monitor loop's background task FIRST ({bg_stop}; the loop's signal handler runs its ownership-checked runtime clear, nulling the process fields and preserving `tick_seconds` and `last_wake_at`) → `cafleet member delete` each member (each kills the pane immediately) → `cafleet member list` verification that only the root Director's row remains → `cafleet fleet delete <fleet-id>` → `cafleet fleet list` sanity check.
 
 A workflow that carries extra teardown — a precondition on when shutdown may begin, a roster-specific delete order, or non-CAFleet resources to release — runs those steps around this sequence and names them in its own Director role file.
 
@@ -238,13 +237,13 @@ A workflow that carries extra teardown — a precondition on when shutdown may b
 | Action | Primitive | Notes |
 |---|---|---|
 | Verify Director pane env | `cafleet doctor` | Pre-spawn precondition; gating. Aborts the spawn protocol when no supported multiplexer (tmux or herdr) resolves. Replaces raw `tmux display-message` and `TMUX` env-var expansion. |
-| Start the supervision tick | {bg_run} `cafleet monitor start --fleet-id <s>` in your own pane, immediately after `fleet create` | Confirm the `monitor loop started (…)` startup line in the task output before the first `member create`. |
-| Spawn member | `cafleet member create --fleet-id <s> --name <n> --description <d> --text-file <abs path to ${BASE}/.prompts/<role>-<UTC-compact>.md>` | Pre-spawn file IS the audit artifact (see [`reference/director.md`](director.md) § *Member Create — Scratch and audit files*). Verify with `cafleet member list`. Inline `--text "<prompt>"` is still permitted for trivial one-line spawns. |
-| Message member | `cafleet message send --fleet-id <s> --from-member-id <director> --to-member-id <member> --text "..."` | Broker keystrokes an inline preview into the member's pane. Gated: fresh capture must classify finished/stalled (§ Idle Semantics → *The pre-ping capture gate*; reply-soliciting replies exempt) |
-| ACK reply | `cafleet message ack --fleet-id <s> --member-id <director> --message-id <message>` | Unacknowledged messages accumulate; ACK every reply you act on |
-| Inspect stalled member | `cafleet monitor capture --fleet-id <s> --member-id <member>` | Replaces raw `tmux capture-pane` |
-| Manual inbox-poll | `cafleet member ping --fleet-id <s> --member-id <member>` | Pre-approved; for missed auto-fires and post-`exec` chains. Gated: fresh capture must classify finished/stalled (§ Idle Semantics → *The pre-ping capture gate*) |
-| Shell-dispatch on member's behalf | `cafleet member prompt --fleet-id <s> --member-id <member> --shell "<cmd>"` | Per [`reference/prompt-routing.md`](prompt-routing.md); follow with `member ping` |
+| Start the supervision tick | {bg_run} `cafleet monitor <s>` in your own pane, immediately after `fleet create` | Confirm the `monitor loop started (…)` startup line in the task output before the first `member create`. |
+| Spawn member | `cafleet member create --fleet-id <s> --name <n> --description <d> --file <abs path to ${BASE}/.prompts/<role>-<UTC-compact>.md>` | Pre-spawn file IS the audit artifact (see [`reference/director.md`](director.md) § *Member Create — Scratch and audit files*). Verify with `cafleet member list`. An inline positional `"<prompt>"` is still permitted for trivial one-line spawns. |
+| Message member | `cafleet message send --from-member-id <director> --to-member-id <member> "..."` | Broker keystrokes an inline preview into the member's pane. Gated: fresh capture must classify finished/stalled (§ Idle Semantics → *The pre-ping capture gate*; reply-soliciting replies exempt) |
+| ACK reply | `cafleet message ack <message>` | Unacknowledged messages accumulate; ACK every reply you act on |
+| Inspect stalled member | `cafleet member capture <member>` | Replaces raw `tmux capture-pane` |
+| Manual inbox-poll | `cafleet member ping <member>` | Pre-approved; for missed auto-fires and post-`exec` chains. Gated: fresh capture must classify finished/stalled (§ Idle Semantics → *The pre-ping capture gate*) |
+| Shell-dispatch on member's behalf | `cafleet member prompt <member> --shell "<cmd>"` | Per [`reference/prompt-routing.md`](prompt-routing.md); follow with `member ping` |
 | Answer a member's relayed question | {decision_surface} → `cafleet message send` | Ask the user via {decision_surface} first, then relay the answer back to the member as a message; never decide silently |
 | Relay user input | {decision_surface} → `cafleet message send` | Pass-through; never substitute judgment |
 | Shut down team | [`reference/recovery.md`](recovery.md) § Shutdown Protocol | Stop the monitor loop's background task first ({bg_stop}) → `member delete` each member → `fleet delete` |

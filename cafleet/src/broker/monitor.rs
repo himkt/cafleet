@@ -453,28 +453,14 @@ mod tests {
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let notifier = FakeNotifier::succeeding();
-        let first = common::send(
-            &mut conn,
-            &notifier,
-            fleet_id,
-            director_id,
-            member_id,
-            "one",
-        );
-        common::send(
-            &mut conn,
-            &notifier,
-            fleet_id,
-            director_id,
-            member_id,
-            "two",
-        );
+        let first = common::send(&mut conn, &notifier, director_id, member_id, "one");
+        common::send(&mut conn, &notifier, director_id, member_id, "two");
         let first_id = first["message"]["message_id"].as_i64().unwrap();
 
         let targets = broker::list_fleet_wake_targets(&conn, fleet_id).unwrap();
         assert_eq!(targets[0]["pending_count"], 2);
 
-        broker::ack_message(&mut conn, member_id, first_id).unwrap();
+        broker::ack_message(&mut conn, first_id).unwrap();
         let targets = broker::list_fleet_wake_targets(&conn, fleet_id).unwrap();
         assert_eq!(targets[0]["pending_count"], 1);
     }

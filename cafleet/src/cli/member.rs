@@ -1,38 +1,42 @@
 //! The `member` group (SPEC §6.3 *member group*): the shared resolution
 //! helpers, the `member create` spawn orchestration + rollback ladder,
-//! delete, show/list, prompt, and ping.
+//! delete, show/list, prompt, ping, and capture.
 
 use clap::{Args, Subcommand};
 use rusqlite::Connection;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
-use super::FleetIdArg;
-use super::helpers::{connect, emit, require_fleet_id, resolve_mux, resolve_text_body};
+use super::helpers::{connect, emit, resolve_body, resolve_mux};
 use super::system::SystemProbe;
 use crate::broker::{self, NewPlacement};
 use crate::coding_agent::coding_agent;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::multiplexer::{AnyMultiplexer, Multiplexer};
-use crate::output::{format_member, format_member_detail, format_member_list};
+use crate::multiplexer::Multiplexer;
+use crate::output::{format_member, format_member_detail, format_member_list, strip_ansi};
 use crate::spawn_prompt::substitute_spawn_placeholders;
+use crate::time::{format_utc, now_utc};
 
 #[derive(Args)]
-pub(crate) struct BodyArgs {
-    /// Inline spawn prompt (backend-neutral template).
-    #[arg(long)]
-    text: Option<String>,
+#[group(required = true, multiple = false)]
+pub(crate) struct PromptArgs {
+    /// Inline spawn prompt (backend-neutral template). Exactly one of
+    /// PROMPT / --file.
+    #[arg(value_name = "PROMPT")]
+    prompt: Option<String>,
     /// UTF-8 file whose contents are the spawn prompt (`-` = stdin).
-    #[arg(long = "text-file", value_name = "PATH")]
-    text_file: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    file: Option<String>,
 }
 
 #[derive(Subcommand)]
 pub enum MemberCommand {
     /// Register a member and spawn its coding-agent pane.
     Create {
-        #[command(flatten)]
-        fleet: FleetIdArg,
+        /// The fleet the new member joins.
+        #[arg(long = "fleet-id", value_name = "INT")]
+        fleet_id: i64,
         /// Display name.
         #[arg(long)]
         name: String,
@@ -49,20 +53,15 @@ pub enum MemberCommand {
         #[arg(long)]
         effort: Option<String>,
         #[command(flatten)]
-        body: BodyArgs,
-        /// Switch the non-JSON output to the labeled block.
-        #[arg(long)]
-        full: bool,
+        body: PromptArgs,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
     /// Tear down a member's pane (when one exists) and deregister it.
     Delete {
-        #[command(flatten)]
-        fleet: FleetIdArg,
-        /// Member ID (the member in question).
-        #[arg(long = "member-id")]
+        /// The member to delete.
+        #[arg(value_name = "MEMBER_ID")]
         member_id: i64,
         /// Output in JSON format.
         #[arg(long)]
@@ -70,22 +69,18 @@ pub enum MemberCommand {
     },
     /// Show one member's detail.
     Show {
-        #[command(flatten)]
-        fleet: FleetIdArg,
-        /// Member ID (the member in question).
-        #[arg(long = "member-id")]
+        /// The member to show.
+        #[arg(value_name = "MEMBER_ID")]
         member_id: i64,
-        /// Switch the text output to the labeled verbose block.
-        #[arg(long)]
-        full: bool,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
     /// List every active registry entry of the fleet.
     List {
-        #[command(flatten)]
-        fleet: FleetIdArg,
+        /// The fleet whose roster is listed.
+        #[arg(value_name = "FLEET_ID")]
+        fleet_id: i64,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -93,30 +88,39 @@ pub enum MemberCommand {
     /// Keystroke a prompt (or, with --shell, a shell command) into a
     /// member's pane.
     Prompt {
-        #[command(flatten)]
-        fleet: FleetIdArg,
-        /// Member ID (the member in question).
-        #[arg(long = "member-id")]
+        /// The target member.
+        #[arg(value_name = "MEMBER_ID")]
         member_id: i64,
+        /// Single line of text to dispatch.
+        #[arg(value_name = "TEXT")]
+        text: String,
         /// Dispatch `! <text>` via the coding agent's shell shortcut.
         #[arg(long)]
         shell: bool,
-        /// Single line of text to dispatch.
-        text: String,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
     /// Inject an inbox-poll keystroke into a member's pane.
     Ping {
-        #[command(flatten)]
-        fleet: FleetIdArg,
-        /// Member ID (the member in question).
-        #[arg(long = "member-id")]
+        /// The target member.
+        #[arg(value_name = "MEMBER_ID")]
         member_id: i64,
-        /// Print only the bare member id.
+        /// Output in JSON format.
         #[arg(long)]
-        quiet: bool,
+        json: bool,
+    },
+    /// Capture the tail of a member's pane.
+    Capture {
+        /// The target member.
+        #[arg(value_name = "MEMBER_ID")]
+        member_id: i64,
+        /// Number of trailing lines to capture.
+        #[arg(long, default_value_t = 20)]
+        lines: i64,
+        /// Emit the raw capture, ANSI escapes preserved.
+        #[arg(long)]
+        ansi: bool,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -134,14 +138,15 @@ fn require_pane(member: &Value, member_id: i64, action: &str) -> Result<String, 
         })
 }
 
-/// Fetch the member within the fleet, optionally tolerating a missing
-/// placement row (SPEC §6.3 *Load-authorized-member*).
-fn load_authorized_member(
+/// Fetch the member by id — the fleet is derived from the member row —
+/// optionally tolerating a missing placement row (SPEC §6.3 *Load-member*).
+fn load_member(
     conn: &Connection,
-    fleet_id: i64,
     member_id: i64,
     tolerate_missing_placement: bool,
 ) -> Result<Value, CafleetError> {
+    let fleet_id = broker::active_member_fleet(conn, member_id)?
+        .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
     let member = broker::get_member(conn, member_id, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
     if member["placement"].is_null() && !tolerate_missing_placement {
@@ -211,69 +216,56 @@ fn resolve_coding_agent(
 pub fn run(settings: &Settings, command: MemberCommand) -> Result<(), CafleetError> {
     match command {
         MemberCommand::Create {
-            fleet,
+            fleet_id,
             name,
             description,
             coding_agent,
             model,
             effort,
             body,
-            full,
             json,
         } => create(
             settings,
-            fleet.fleet_id,
+            fleet_id,
             &name,
             &description,
             coding_agent.as_deref(),
             model.as_deref(),
             effort.as_deref(),
             &body,
-            full,
             json,
         ),
-        MemberCommand::Delete {
-            fleet,
-            member_id,
-            json,
-        } => delete(settings, fleet.fleet_id, member_id, json),
-        MemberCommand::Show {
-            fleet,
-            member_id,
-            full,
-            json,
-        } => show(settings, fleet.fleet_id, member_id, full, json),
-        MemberCommand::List { fleet, json } => list(settings, fleet.fleet_id, json),
+        MemberCommand::Delete { member_id, json } => delete(settings, member_id, json),
+        MemberCommand::Show { member_id, json } => show(settings, member_id, json),
+        MemberCommand::List { fleet_id, json } => list(settings, fleet_id, json),
         MemberCommand::Prompt {
-            fleet,
             member_id,
-            shell,
             text,
+            shell,
             json,
-        } => prompt(settings, fleet.fleet_id, member_id, shell, &text, json),
-        MemberCommand::Ping {
-            fleet,
+        } => prompt(settings, member_id, shell, &text, json),
+        MemberCommand::Ping { member_id, json } => ping(settings, member_id, json),
+        MemberCommand::Capture {
             member_id,
-            quiet,
+            lines,
+            ansi,
             json,
-        } => ping(settings, fleet.fleet_id, member_id, quiet, json),
+        } => capture(settings, member_id, lines, ansi, json),
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 fn create(
     settings: &Settings,
-    fleet_id: Option<i64>,
+    fleet_id: i64,
     name: &str,
     description: &str,
     explicit_agent: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
-    body: &BodyArgs,
-    full: bool,
+    body: &PromptArgs,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let fleet_id = require_fleet_id(fleet_id)?;
     let mut conn = connect(settings)?;
 
     // 1. Auto-resolve the Director from the fleet row, first thing.
@@ -298,7 +290,7 @@ fn create(
 
     // 3. Resolve the body before any side effect; substitution is deferred
     //    until the new member id exists.
-    let prompt_body = resolve_text_body(body.text.as_deref(), body.text_file.as_deref())?;
+    let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref())?;
 
     // 4. Preconditions.
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
@@ -395,20 +387,16 @@ fn create(
         "registered_at": registered["registered_at"],
         "placement": placement_view,
     });
-    emit(json, &result, || format_member(&result, full));
+    emit(json, &result, || format_member(&result));
     Ok(())
 }
 
-fn delete(
-    settings: &Settings,
-    fleet_id: Option<i64>,
-    member_id: i64,
-    json: bool,
-) -> Result<(), CafleetError> {
-    let fleet_id = require_fleet_id(fleet_id)?;
+fn delete(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetError> {
     let mut conn = connect(settings)?;
 
     // Root-Director guard, before any pane mutation.
+    let fleet_id = broker::active_member_fleet(&conn, member_id)?
+        .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
     let fleet = broker::get_fleet(&conn, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
     if fleet["director_member_id"].as_i64() == Some(member_id) {
@@ -417,7 +405,7 @@ fn delete(
         ));
     }
 
-    let member = load_authorized_member(&conn, fleet_id, member_id, true)?;
+    let member = load_member(&conn, member_id, true)?;
     let pane = member["placement"]["mux_pane_id"]
         .as_str()
         .map(str::to_string);
@@ -448,22 +436,14 @@ fn delete(
     Ok(())
 }
 
-fn show(
-    settings: &Settings,
-    fleet_id: Option<i64>,
-    member_id: i64,
-    full: bool,
-    json: bool,
-) -> Result<(), CafleetError> {
-    let fleet_id = require_fleet_id(fleet_id)?;
+fn show(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetError> {
     let conn = connect(settings)?;
-    let member = load_authorized_member(&conn, fleet_id, member_id, true)?;
-    emit(json, &member, || format_member_detail(&member, full));
+    let member = load_member(&conn, member_id, true)?;
+    emit(json, &member, || format_member_detail(&member));
     Ok(())
 }
 
-fn list(settings: &Settings, fleet_id: Option<i64>, json: bool) -> Result<(), CafleetError> {
-    let fleet_id = require_fleet_id(fleet_id)?;
+fn list(settings: &Settings, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
     let conn = connect(settings)?;
     let members = broker::list_members(&conn, fleet_id)?;
     emit(json, &Value::Array(members.clone()), || {
@@ -474,13 +454,11 @@ fn list(settings: &Settings, fleet_id: Option<i64>, json: bool) -> Result<(), Ca
 
 fn prompt(
     settings: &Settings,
-    fleet_id: Option<i64>,
     member_id: i64,
     shell: bool,
     text: &str,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let fleet_id = require_fleet_id(fleet_id)?;
     if text.contains('\n') || text.contains('\r') {
         return Err(CafleetError::Usage(
             "text may not contain newlines.".to_string(),
@@ -494,7 +472,7 @@ fn prompt(
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
     let conn = connect(settings)?;
-    let member = load_authorized_member(&conn, fleet_id, member_id, false)?;
+    let member = load_member(&conn, member_id, false)?;
     let pane_id = require_pane(&member, member_id, "prompt")?;
     mux.send_prompt(&pane_id, trimmed, shell)
         .map_err(|e| CafleetError::App(format!("send failed: {e}")))?;
@@ -513,28 +491,17 @@ fn prompt(
     Ok(())
 }
 
-fn ping(
-    settings: &Settings,
-    fleet_id: Option<i64>,
-    member_id: i64,
-    quiet: bool,
-    json: bool,
-) -> Result<(), CafleetError> {
-    let fleet_id = require_fleet_id(fleet_id)?;
+fn ping(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetError> {
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
     let conn = connect(settings)?;
-    let member = load_authorized_member(&conn, fleet_id, member_id, false)?;
+    let member = load_member(&conn, member_id, false)?;
     let name = member["name"].as_str().expect("members carry a name");
     let pane = member["placement"]["mux_pane_id"].as_str();
 
     let Some(pane_id) = pane else {
         // The pending-placement skip path: no keystroke, exit 0.
-        if quiet && !json {
-            println!("{member_id}");
-            return Ok(());
-        }
         let result = json!({"member_id": member_id, "pane_id": Value::Null, "skipped": true});
         emit(json, &result, || {
             format!(
@@ -545,16 +512,11 @@ fn ping(
         return Ok(());
     };
 
-    let fleet_of_member = fleet_id;
-    if !mux.send_poll_trigger(pane_id, fleet_of_member, member_id) {
+    if !mux.send_poll_trigger(pane_id, member_id) {
         return Err(CafleetError::App(format!(
             "send failed: tmux send-keys did not deliver the poll-trigger keystroke \
              to pane {pane_id}."
         )));
-    }
-    if quiet && !json {
-        println!("{member_id}");
-        return Ok(());
     }
     let result = json!({"member_id": member_id, "pane_id": pane_id, "skipped": false});
     emit(json, &result, || {
@@ -563,18 +525,38 @@ fn ping(
     Ok(())
 }
 
-/// Shared with `monitor capture`: the member-group loader + pane requirement.
-pub(crate) fn load_member_with_pane(
+fn capture(
     settings: &Settings,
-    fleet_id: i64,
     member_id: i64,
-    action: &str,
-) -> Result<(AnyMultiplexer, String), CafleetError> {
+    lines: i64,
+    ansi: bool,
+    json: bool,
+) -> Result<(), CafleetError> {
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
     let conn = connect(settings)?;
-    let member = load_authorized_member(&conn, fleet_id, member_id, false)?;
-    let pane_id = require_pane(&member, member_id, action)?;
-    Ok((mux, pane_id))
+    let member = load_member(&conn, member_id, false)?;
+    let pane_id = require_pane(&member, member_id, "capture")?;
+    let raw = mux
+        .capture_pane(&pane_id, lines)
+        .map_err(|e| CafleetError::App(format!("capture failed: {e}")))?;
+    let content = if ansi { raw } else { strip_ansi(&raw) };
+    let captured_at = format_utc(now_utc());
+    let digest = Sha256::digest(content.as_bytes());
+    let content_sha256: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    let payload = json!({
+        "member_id": member_id,
+        "pane_id": pane_id,
+        "lines": lines,
+        "content": content,
+        "captured_at": captured_at,
+        "content_sha256": content_sha256,
+    });
+    if json {
+        emit(true, &payload, String::new);
+    } else {
+        print!("{content}");
+    }
+    Ok(())
 }

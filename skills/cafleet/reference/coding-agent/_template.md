@@ -40,4 +40,4 @@ State both ambiguity tie-breaks: `awaiting_user` wins over `finished`, and `work
 
 Required section. Give the canonical Director-side monitor launch fully resolved for this backend — every `{placeholder}` replaced by its concrete value — so the reader has a concrete string to match rather than a transformation to invent:
 
-Launch `cafleet monitor start --fleet-id <fleet-id>` via <this backend's background-run primitive>, and confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in its output before the first `member create` (members spawned `<this backend's permission flags>`).
+Launch `cafleet monitor <fleet-id>` via <this backend's background-run primitive>, and confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in its output before the first `member create` (members spawned `<this backend's permission flags>`).

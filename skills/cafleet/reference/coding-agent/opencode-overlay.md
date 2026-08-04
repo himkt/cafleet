@@ -41,4 +41,4 @@ When a capture cannot separate `awaiting_user` from `finished`, classify `awaiti
 
 The canonical Director-side monitor launch, fully resolved for this backend:
 
-Launch `cafleet monitor start --fleet-id <fleet-id> &` as a backgrounded `!` shell command, and confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in its output before the first `member create` (members spawned `--agent cafleet`).
+Launch `cafleet monitor <fleet-id> &` as a backgrounded `!` shell command, and confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in its output before the first `member create` (members spawned `--agent cafleet`).
