@@ -4,6 +4,7 @@
     "config:recommended"
   ],
   "minimumReleaseAge": "7 days",
+  "reviewers": ["himkt"],
   "packageRules": [
     {
       "matchManagers": ["mise"],
