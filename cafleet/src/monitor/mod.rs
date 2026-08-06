@@ -561,7 +561,11 @@ mod tests {
                 600,
                 now + Duration::seconds(1200),
             );
-            assert_eq!(mux.wake_count(), 2, "600 since the first wake → second wake");
+            assert_eq!(
+                mux.wake_count(),
+                2,
+                "600 since the first wake → second wake"
+            );
         }
 
         #[test]

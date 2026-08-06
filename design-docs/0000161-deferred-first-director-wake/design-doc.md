@@ -1,7 +1,7 @@
 # Deferred First Director Wake
 
 **Status**: Approved
-**Progress**: 7/12 tasks complete
+**Progress**: 12/12 tasks complete
 **Last Updated**: 2026-08-06
 
 ## Overview
@@ -10,11 +10,11 @@ Defer the monitor's first fleet-level Director wake: when `monitor_runtime.last_
 
 ## Success Criteria
 
-- [ ] A freshly claimed monitor (`last_wake_at` `NULL`) fires its first wake only once `wake_interval` has elapsed since `started_at`, not on the first tick.
-- [ ] `last_wake_at` remains the `woke`-gated delivery ledger: it is never written at claim time and only records delivered wakes (its `GET /api/monitor` exposure is unchanged).
-- [ ] An unparsable `last_wake_at` remains immediately due; a `NULL` `last_wake_at` paired with a `NULL` or unparsable `started_at` is also immediately due (corrupt state, no panic).
-- [ ] A present `last_wake_at` always wins as the baseline — the cadence-survives-restart behavior is unchanged.
-- [ ] SPEC.md §6.6 (and the §10 monitor test-plan line), the docs monitoring concepts page, and the colocated tests all reflect the new contract; `mise //cafleet:test` and `mise //cafleet:lint` pass.
+- [x] A freshly claimed monitor (`last_wake_at` `NULL`) fires its first wake only once `wake_interval` has elapsed since `started_at`, not on the first tick.
+- [x] `last_wake_at` remains the `woke`-gated delivery ledger: it is never written at claim time and only records delivered wakes (its `GET /api/monitor` exposure is unchanged).
+- [x] An unparsable `last_wake_at` remains immediately due; a `NULL` `last_wake_at` paired with a `NULL` or unparsable `started_at` is also immediately due (corrupt state, no panic).
+- [x] A present `last_wake_at` always wins as the baseline — the cadence-survives-restart behavior is unchanged.
+- [x] SPEC.md §6.6 (and the §10 monitor test-plan line), the docs monitoring concepts page, and the colocated tests all reflect the new contract; `mise //cafleet:test` and `mise //cafleet:lint` pass.
 
 ---
 
@@ -136,11 +136,11 @@ The doc row for `last_wake_at` in SPEC §6.2 and `docs/docs/spec/data-model.md` 
 
 ### Step 4: Tests and verification
 
-- [ ] Rework `wake_due_tests`: corrupt-state test, `started_at`-baseline test, `last_wake_at`-precedence test, extended-signature gating test <!-- completed: -->
-- [ ] Rework the five `monitor_tick_tests` that assumed first-tick due-ness; pin the deferred first wake in `the_wake_interval_gates_the_next_wake` <!-- completed: -->
-- [ ] Confirm the broker-layer tests still pass unchanged <!-- completed: -->
-- [ ] `mise //cafleet:test` passes <!-- completed: -->
-- [ ] `mise //cafleet:lint` passes <!-- completed: -->
+- [x] Rework `wake_due_tests`: corrupt-state test, `started_at`-baseline test, `last_wake_at`-precedence test, extended-signature gating test <!-- completed: 2026-08-06T12:36 -->
+- [x] Rework the five `monitor_tick_tests` that assumed first-tick due-ness; pin the deferred first wake in `the_wake_interval_gates_the_next_wake` <!-- completed: 2026-08-06T12:36 -->
+- [x] Confirm the broker-layer tests still pass unchanged <!-- completed: 2026-08-06T12:36 -->
+- [x] `mise //cafleet:test` passes <!-- completed: 2026-08-06T12:36 -->
+- [x] `mise //cafleet:lint` passes <!-- completed: 2026-08-06T12:36 -->
 
 ---
 
