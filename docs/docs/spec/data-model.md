@@ -60,7 +60,7 @@ timestamp of the last successfully delivered Director wake, kept durable
 across loop restarts so an immediate restart honors the remaining wake
 cadence — and `wake_interval_seconds`, the nullable live mirror of the
 running loop's Director wake interval: stamped with the startup-resolved
-value at every monitor start (claim and reclaim), re-read by the loop on
+value at every `cafleet monitor` start (claim and reclaim), re-read by the loop on
 every tick, overwritten by `PATCH /api/monitor`, and preserved across a
 loop stop like `tick_seconds`. It is `NULL` only in rows that predate the
 column and have not been re-claimed since — a running loop's row is always

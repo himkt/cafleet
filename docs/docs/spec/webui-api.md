@@ -155,7 +155,7 @@ and a still-running loop self-terminates after `fleet delete`.
 
 Updates the fleet's Director wake interval. The running loop re-reads the
 stored value on every tick, so the edit changes the cadence within one scan
-tick; the next monitor start re-stamps the interval from the CLI/env
+tick; the next `cafleet monitor` start re-stamps the interval from the CLI/env
 resolution. See
 [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
 

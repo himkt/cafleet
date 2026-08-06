@@ -2497,8 +2497,8 @@ same `{"detail": <string>}` shape (a single human-readable string).
   `monitor has never run for this fleet`. The body parse precedes the fleet
   check, matching `POST /api/messages/send`. Success → `200`
   `{wake_interval_seconds: <the stored value>}`. The running loop obeys the
-  new value within one tick (§6.6); the next monitor start re-stamps the
-  column from the CLI/env resolution.
+  new value within one tick (§6.6); the next `cafleet monitor` start re-stamps
+  the column from the CLI/env resolution.
 - **`GET /api/members/{member_id}/inbox`** — fleet-scoped. Member not in fleet →
   `404`, detail `Member not found`; else `{"messages": [ <FormattedMessage>, …
   ]}` over the member's inbox.
@@ -2589,7 +2589,8 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
   non-negative 64-bit integer; anything else fails loudly at startup with
   `CAFLEET_MONITOR_WAKE_INTERVAL must be a non-negative integer (got '<raw>')`.
   The startup-resolved value is stamped into
-  `monitor_runtime.wake_interval_seconds` at each monitor start (§6.6);
+  `monitor_runtime.wake_interval_seconds` at each `cafleet monitor` start
+  (§6.6);
   dispatch cadence is
   persisted in `monitor_runtime.last_wake_at` (§6.2), durable across loop
   restarts.

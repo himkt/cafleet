@@ -79,11 +79,11 @@ later wake is measured from the last delivered wake.
 the loop keeps claiming the runtime slot and heartbeating every tick.
 
 The resolved interval is stamped per fleet into the `monitor_runtime` row at
-each monitor start and re-read on every tick, so a running loop's cadence is
-editable from the admin WebUI's interval editor: an edit takes effect within
-one tick and lasts until the next monitor start re-stamps the interval from
-the CLI/env resolution. Saving `0` disables the wake exactly as `--interval 0`
-does, while the loop keeps heartbeating.
+each `cafleet monitor` start and re-read on every tick, so a running loop's
+cadence is editable from the admin WebUI's interval editor: an edit takes
+effect within one tick and lasts until the next `cafleet monitor` start
+re-stamps the interval from the CLI/env resolution. Saving `0` disables the
+wake exactly as `--interval 0` does, while the loop keeps heartbeating.
 
 The wake is unconditional: it fires whenever the interval has elapsed and the
 Director's pane is alive, **including when the fleet has no other members**.

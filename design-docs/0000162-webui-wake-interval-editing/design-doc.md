@@ -1,7 +1,7 @@
 # Restore WebUI editing of the Director wake interval
 
 **Status**: Approved
-**Progress**: 6/22 tasks complete
+**Progress**: 8/22 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -270,14 +270,14 @@ non-negative integer.
 
 ### Step 2: Migration
 
-- [ ] Add `cafleet/migrations/V5__monitor_wake_interval.sql` with the § *S1*
-      DDL. <!-- completed: -->
-- [ ] Bump every head-4 assertion in `cafleet/src/db/mod.rs` to head 5 —
+- [x] Add `cafleet/migrations/V5__monitor_wake_interval.sql` with the § *S1*
+      DDL. <!-- completed: 2026-08-07T06:02 -->
+- [x] Bump every head-4 assertion in `cafleet/src/db/mod.rs` to head 5 —
       `migrate_reaches_head_version_4_and_is_idempotent` (renamed),
       `refinery_ledger_records_the_baseline` (`vec![1, 2, 3, 4]` → `..5`),
       and `migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_4`
       (renamed) — and the `applied migrations to head (4).` assertion in
-      `cafleet/tests/cli_setup_doctor.rs`. <!-- completed: -->
+      `cafleet/tests/cli_setup_doctor.rs`. <!-- completed: 2026-08-07T06:02 -->
 
 ### Step 3: Broker layer
 
