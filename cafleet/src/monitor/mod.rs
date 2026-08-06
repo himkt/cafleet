@@ -322,7 +322,9 @@ mod tests {
     }
 
     fn claim(conn: &mut rusqlite::Connection, fleet_id: i64, pid: i64, now: DateTime<Utc>) {
-        assert!(broker::claim_monitor_runtime(conn, fleet_id, pid, 5, &format_utc(now)).unwrap());
+        assert!(
+            broker::claim_monitor_runtime(conn, fleet_id, pid, 5, 600, &format_utc(now)).unwrap()
+        );
     }
 
     fn tick(

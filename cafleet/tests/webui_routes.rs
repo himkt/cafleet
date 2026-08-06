@@ -464,8 +464,15 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
 
     let now = cafleet::time::now_utc();
     let pid = i64::from(std::process::id());
-    broker::claim_monitor_runtime(&mut conn, fleet_id, pid, 5, &cafleet::time::format_utc(now))
-        .unwrap();
+    broker::claim_monitor_runtime(
+        &mut conn,
+        fleet_id,
+        pid,
+        5,
+        600,
+        &cafleet::time::format_utc(now),
+    )
+    .unwrap();
     broker::record_monitor_wake(&mut conn, fleet_id, &cafleet::time::format_utc(now)).unwrap();
     let (status, body) = call(app.clone(), "GET", "/api/monitor", Some("1"), None).await;
     assert_eq!(status, StatusCode::OK);

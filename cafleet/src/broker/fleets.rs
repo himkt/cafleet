@@ -325,7 +325,7 @@ mod tests {
         let notifier = FakeNotifier::succeeding();
         common::send(&mut conn, &notifier, director_id, member_id, "hi");
         let now = crate::time::format_utc(chrono::Utc::now());
-        assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, &now).unwrap());
+        assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, 600, &now).unwrap());
 
         let result = broker::delete_fleet(&mut conn, fleet_id).unwrap();
         assert_eq!(result["deregistered_count"], 2);
