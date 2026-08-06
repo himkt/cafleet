@@ -1,6 +1,6 @@
 # Deferred First Director Wake
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 12/12 tasks complete
 **Last Updated**: 2026-08-06
 
@@ -150,3 +150,4 @@ The doc row for `last_wake_at` in SPEC §6.2 and `docs/docs/spec/data-model.md` 
 |------|---------|
 | 2026-08-06 | Initial draft |
 | 2026-08-06 | Reviewer fixes (§10 test-plan attribution, `///` contract-comment task); approved |
+| 2026-08-06 | Implemented (E2E first-wake window added to § Test changes during execution); Reviewer approved; PR #279; complete |
