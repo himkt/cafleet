@@ -16,23 +16,23 @@ the current architecture.
 
 ## Success Criteria
 
-- [ ] `monitor_runtime` has a nullable `wake_interval_seconds` column; the
+- [x] `monitor_runtime` has a nullable `wake_interval_seconds` column; the
       migration chain is contiguous from 1 with head **5** and the chain-guard
       test matches.
-- [ ] Every `cafleet monitor` start stamps its startup-resolved interval
+- [x] Every `cafleet monitor` start stamps its startup-resolved interval
       (`--interval` > `CAFLEET_MONITOR_WAKE_INTERVAL` > 600) into the column;
       each tick gates the wake on the column's current value, so an external
       update changes the running loop's cadence within one tick without a
       restart (pinned by a `monitor_tick` test).
-- [ ] `PATCH /api/monitor` updates the column under the `X-Fleet-Id` header
+- [x] `PATCH /api/monitor` updates the column under the `X-Fleet-Id` header
       with the exact 200/400/404/422 contract in § *S3*, pinned by
       `webui_routes` tests.
-- [ ] `GET /api/monitor` includes `wake_interval_seconds` in both the running
+- [x] `GET /api/monitor` includes `wake_interval_seconds` in both the running
       and not-running payload shapes.
-- [ ] The WebUI header monitor indicator opens a popover with the interval
+- [x] The WebUI header monitor indicator opens a popover with the interval
       editor; the editor saves via `PATCH /api/monitor` and is disabled when
       the monitor is not running.
-- [ ] `docs/`, `SPEC.md`, and the skill references are drift-free for the new
+- [x] `docs/`, `SPEC.md`, and the skill references are drift-free for the new
       surfaces; `mise //cafleet:test`, `mise //cafleet:lint`,
       `mise //cafleet:typecheck`, and `mise //admin:lint` pass.
 
