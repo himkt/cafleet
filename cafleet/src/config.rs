@@ -164,11 +164,42 @@ mod tests {
 
     #[test]
     fn non_integer_monitor_wake_interval_fails_loudly() {
-        let result = Settings::from_lookup(|name| match name {
+        let err = Settings::from_lookup(|name| match name {
             "CAFLEET_MONITOR_WAKE_INTERVAL" => Some("10m".to_string()),
             _ => None,
-        });
-        assert!(result.is_err());
+        })
+        .unwrap_err();
+        assert_eq!(
+            err.message(),
+            "CAFLEET_MONITOR_WAKE_INTERVAL must be a non-negative integer (got '10m')"
+        );
+    }
+
+    #[test]
+    fn negative_monitor_wake_interval_fails_loudly() {
+        let err = Settings::from_lookup(|name| match name {
+            "CAFLEET_MONITOR_WAKE_INTERVAL" => Some("-1".to_string()),
+            _ => None,
+        })
+        .unwrap_err();
+        assert_eq!(
+            err.message(),
+            "CAFLEET_MONITOR_WAKE_INTERVAL must be a non-negative integer (got '-1')"
+        );
+    }
+
+    #[test]
+    fn above_i64_max_monitor_wake_interval_fails_loudly() {
+        let err = Settings::from_lookup(|name| match name {
+            "CAFLEET_MONITOR_WAKE_INTERVAL" => Some("9223372036854775808".to_string()),
+            _ => None,
+        })
+        .unwrap_err();
+        assert_eq!(
+            err.message(),
+            "CAFLEET_MONITOR_WAKE_INTERVAL must be a non-negative integer \
+             (got '9223372036854775808')"
+        );
     }
 
     #[test]
