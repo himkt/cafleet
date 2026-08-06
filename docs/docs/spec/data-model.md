@@ -55,10 +55,16 @@ value.
 
 `monitor_runtime` is the one-row-per-fleet loop pid/heartbeat table: the
 single-instance claim (`pid`, `started_at`), the liveness heartbeat
-(`last_tick_at`, `tick_seconds`), and `last_wake_at` — the nullable UTC ISO
+(`last_tick_at`, `tick_seconds`), `last_wake_at` — the nullable UTC ISO
 timestamp of the last successfully delivered Director wake, kept durable
 across loop restarts so an immediate restart honors the remaining wake
-cadence. The cadence semantics are defined in
+cadence — and `wake_interval_seconds`, the nullable live mirror of the
+running loop's Director wake interval: stamped with the startup-resolved
+value at every monitor start (claim and reclaim), re-read by the loop on
+every tick, overwritten by `PATCH /api/monitor`, and preserved across a
+loop stop like `tick_seconds`. It is `NULL` only in rows that predate the
+column and have not been re-claimed since — a running loop's row is always
+stamped. The cadence semantics are defined in
 [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
 
 ### `asset_installs`

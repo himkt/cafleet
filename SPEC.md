@@ -319,6 +319,7 @@ The unified shapes:
 | `last_tick_at` | optional string | |
 | `tick_seconds` | integer | DDL default 5 |
 | `last_wake_at` | optional string | nullable; the UTC ISO timestamp of the last successfully delivered Director wake, durable across loop restarts; preserved by the runtime clear |
+| `wake_interval_seconds` | optional integer | nullable; the live mirror of the running loop's Director wake interval — stamped at every claim/reclaim, re-read per tick, overwritten by `PATCH /api/monitor`, preserved by the runtime clear; `NULL` only in rows that predate the column and were never re-claimed |
 
 **AssetInstalls** (`coding_agent` TEXT PK, not autoincrement, not FK-linked)
 
@@ -448,7 +449,9 @@ not a no-op. Both must run on every connection the reimplementation opens.
   explicitly): `monitor_runtime.tick_seconds` → `5`.
   `member_placements.coding_agent` carries no DDL default — every writer
   passes an explicit value. `monitor_runtime.last_wake_at` carries no DDL
-  default (nullable, unset until the first successful wake).
+  default (nullable, unset until the first successful wake), and
+  `monitor_runtime.wake_interval_seconds` likewise carries no DDL default
+  (nullable; stamped by every claim).
 - **No-FK message columns.** `messages.from_member_id`, `messages.to_member_id`, and
   `messages.origin_message_id` are plain integer columns with **no** FK constraint;
   only `messages.owner_member_id` is FK-constrained (ON DELETE RESTRICT).
@@ -692,13 +695,17 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
   (`kill(pid, 0)`): no-such-process → `false`, permission-denied (owned by
   another user) → `true`, success → `true`. Heartbeat freshness is
   authoritative; the process probe corroborates.
-- **`claim_monitor_runtime(fleet_id, pid, tick_seconds, when)`** — atomically
+- **`claim_monitor_runtime(fleet_id, pid, tick_seconds, wake_interval_seconds,
+  when)`** — atomically
   claim the slot (the SQLite write lock serializes concurrent claims). No row →
   insert (with `last_wake_at` null) and return `true`; row exists and **live**
   → return `false`; row exists but **stale** → overwrite `pid` / `started_at` /
-  `tick_seconds` and return `true` (reclaim) — **`last_wake_at` is left
+  `tick_seconds` / `wake_interval_seconds` and return `true` (reclaim) —
+  **`last_wake_at` is left
   untouched by a reclaim**, so an immediately-restarted loop honors the
   remaining wake cadence instead of firing an instant wake.
+  `wake_interval_seconds` is stamped in both the insert and the reclaim
+  overwrite, exactly like `tick_seconds`.
 - **`heartbeat_monitor_runtime(fleet_id, pid, when)`** — update `last_tick_at =
   when` **only where the current pid equals the caller's pid**; returns `true`
   iff exactly one row matched. **Ownership-checked** — `false` when the slot was
@@ -707,22 +714,33 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
   for the fleet's runtime row: one unconditional `UPDATE` keyed on
   `fleet_id` — no pid parameter, no ownership check, no return value beyond
   success. Called only after a successful Director wake keystroke (§6.6).
+- **`set_monitor_wake_interval(fleet_id, wake_interval_seconds)`** — one
+  ownership-free `UPDATE monitor_runtime SET wake_interval_seconds = ?1 WHERE
+  fleet_id = ?2`, returning `true` iff exactly one row changed. `false` ⇔ no
+  row — the fleet's monitor has never run (rows are removed only by `fleet
+  delete`, so "no row" is exactly "never run"). Consumed by the WebUI
+  `PATCH /api/monitor` (§6.8); the running loop obeys the new value within
+  one tick (§6.6).
 - **`clear_monitor_runtime(fleet_id, pid)`** — null the slot's `pid` /
   `started_at` / `last_tick_at` **only where the current pid equals the
   caller's pid**. **Ownership-checked** → a non-owner clear is a no-op, so a
-  self-terminating loser never wipes the winner's row. **`last_wake_at` is
-  preserved** (never nulled by a clear) — the wake cadence survives a clean
-  stop/restart cycle.
+  self-terminating loser never wipes the winner's row. **`last_wake_at` and
+  `wake_interval_seconds` are preserved** (never nulled by a clear) — the
+  wake cadence survives a clean stop/restart cycle.
 - **`read_monitor_runtime(fleet_id)`** — `{fleet_id, pid, started_at,
-  last_tick_at, tick_seconds, last_wake_at}` or None.
+  last_tick_at, tick_seconds, wake_interval_seconds, last_wake_at}` or None.
 - **`monitor_is_live(fleet_id, now)`** — `false` if no row, else `_is_live`. An
   advisory pre-check for `cafleet monitor`; the atomic claim is authoritative.
 - **`monitor_runtime_payload(fleet_id, now)`** — the runtime-liveness dict
   consumed by the WebUI `GET /api/monitor`: `{running, pid,
-  tick_seconds, last_tick_at, last_tick_age_seconds, started_at, last_wake_at,
+  tick_seconds, wake_interval_seconds, last_tick_at, last_tick_age_seconds,
+  started_at, last_wake_at,
   last_wake_age_seconds}`, with the process fields — including `last_wake_at` /
   `last_wake_age_seconds` — null when the monitor is not live (no row, or a
   stale/cleared heartbeat), matching the `last_tick_at` masking rule.
+  `wake_interval_seconds` follows the `tick_seconds` preservation rule
+  instead: the row's value when a row exists (even stale or cleared; `null`
+  when the row predates the column and was never re-stamped), else `null`.
 - **`monitor_members_payload(fleet_id, now)`** — the per-member rows consumed
   by the WebUI `GET /api/monitor`: one dict per `list_fleet_wake_targets` row —
   `{member_id, name, pending_count, oldest_pending_ts,
@@ -1244,9 +1262,14 @@ with the positional `FLEET_ID` subject. A
 `_require_live_fleet` guard fetches the fleet; missing or soft-deleted
 → application error `fleet <fleet_id> not found`.
 `--tick` (integer ≥1, default 5, shown in help) and `--interval`
-(integer ≥0, optional; when omitted, falls back to
+(a non-negative 64-bit integer, parser-enforced `0..=i64::MAX` — a negative
+or above-`i64::MAX` value fails the parser's standard invalid-value error,
+exit 2; optional; when omitted, falls back to
 `CAFLEET_MONITOR_WAKE_INTERVAL` §7.1, default 600). `--interval 0` disables
-the Director wake while the loop keeps heartbeating every tick. Requires a
+the Director wake while the loop keeps heartbeating every tick. The
+startup-resolved interval is stamped into the fleet's `monitor_runtime` row
+by the claim and re-read on every tick (§6.6), so a `PATCH /api/monitor`
+edit (§6.8) changes a running loop's cadence within one tick. Requires a
 live fleet, then tmux. Runs the monitor loop in-process (blocking),
 launched by the Director as a background task in its own pane immediately
 after `cafleet fleet create` and before the first `cafleet member create`.
@@ -2013,18 +2036,21 @@ of `AgentStateAware` native status.
 #### Public surface
 
 - **`wake_due(last_wake_at, started_at, wake_interval_seconds, now) -> bool`**
-  — pure due-check for the fleet-level wake; no DB/multiplexer access. A
+  — pure due-check for the fleet-level wake; no DB/multiplexer access. The
+  interval parameter is a non-negative 64-bit integer. A
   present `last_wake_at` always wins as the baseline: parsable → due iff
   `now − last_wake_at`, in whole seconds, is `>= wake_interval_seconds`;
   unparsable → immediately due. A `NULL` `last_wake_at` falls back to
   `started_at` as the baseline: parsable → due iff `now − started_at`, in
   whole seconds, is `>= wake_interval_seconds`; `NULL` or unparsable →
   immediately due.
-- **`monitor_tick(fleet_id, now, wake_interval_seconds) -> CONTINUE | STOP`** —
-  one scan pass.
+- **`monitor_tick(fleet_id, now) -> CONTINUE | STOP`** —
+  one scan pass. Takes no interval parameter — each pass re-reads
+  `wake_interval_seconds` from the fleet's runtime row.
 - **`run_monitor_loop(fleet_id, tick_seconds, wake_interval_seconds)`** —
   foreground driver: claim slot → install signal handlers → `tick → sleep`
-  until signalled → clear slot on exit.
+  until signalled → clear slot on exit. `wake_interval_seconds` is used only
+  to stamp the claim; the ticks read the stored value.
 - **`CONTINUE` / `STOP`** — tick-result markers distinguishing "keep looping"
   from "self-terminate".
 - **`DEFAULT_TICK_SECONDS = 5`** — default scan cadence (seconds).
@@ -2038,7 +2064,7 @@ The stop flag, the sleep helper, the signal handler, and the marker type are
 implementation-private; only the functions, the markers, and the constants
 above are public.
 
-#### `monitor_tick(fleet_id, now, wake_interval_seconds)`
+#### `monitor_tick(fleet_id, now)`
 
 One scan pass, steps in order:
 
@@ -2048,20 +2074,23 @@ One scan pass, steps in order:
    split-brain loser's exit.
 2. **Fleet liveness.** Fetch the fleet; absent **or** `deleted_at` set → return
    `STOP`.
-3. **Wake-interval gate.** `wake_interval_seconds == 0` → return `CONTINUE`
+3. **Read the runtime row.** The heartbeat just matched, so the row exists;
+   take its `wake_interval_seconds` — the owning loop stamped the value at
+   claim, so `NULL` here is corrupt state and fails loudly.
+4. **Wake-interval gate.** `wake_interval_seconds == 0` → return `CONTINUE`
    (a heartbeat-only tick: no due-check, no Director resolution, no
-   multiplexer call).
-4. **Compute due-ness.** Read the runtime row's `last_wake_at` and
-   `started_at` and call
-   `wake_due(last_wake_at, started_at, wake_interval_seconds, now)`. Not due →
+   multiplexer call). Evaluated per tick against the value just read.
+5. **Compute due-ness.** Call
+   `wake_due(last_wake_at, started_at, wake_interval_seconds, now)` on the
+   row's values. Not due →
    return `CONTINUE` with no multiplexer call.
-5. **Resolve the Director's pane.** Read the fleet's `director_member_id` and
+6. **Resolve the Director's pane.** Read the fleet's `director_member_id` and
    its placement's `mux_pane_id`. A Director with no pane → return `CONTINUE`
    (nothing recorded — the fleet stays due).
-6. **Fetch pane liveness once.** A single `list_pane_ids` call against the
+7. **Fetch pane liveness once.** A single `list_pane_ids` call against the
    resolved backend (§6.5). The Director's pane absent from the live set →
    return `CONTINUE` (nothing recorded — the fleet stays due).
-7. **Wake the Director.** Fetch the wake roster via the broker's
+8. **Wake the Director.** Fetch the wake roster via the broker's
    `list_fleet_wake_targets(fleet_id)` (§6.2 — every active, non-Director
    member with its `coding_agent` and `pending_count`), then call the
    multiplexer's wake trigger against the Director's own pane (the loop's
@@ -2076,13 +2105,19 @@ One scan pass, steps in order:
      `N` is the roster size (may be `0`).
    - If `woke` is false: do not record the wake and do not echo — the wake
      stays due, so the next tick retries (no wake-storm, no silent skip).
-8. Return `CONTINUE`.
+9. Return `CONTINUE`.
 
 **Critical ordering invariant:** `record_monitor_wake` and the heartbeat echo
 are both gated behind `woke == true`. Preserve this gating exactly. The wake
 fires **even when the fleet has no other members** (`N == 0`) — the Director
 is itself a supervision target and a fleet with no members yet is a transient
 bootstrap state, not a steady state.
+
+The per-tick re-read is what makes the interval externally editable: an
+`UPDATE` to `wake_interval_seconds` (the WebUI `PATCH /api/monitor`, §6.8)
+changes the running loop's cadence on its next tick — within `tick_seconds` —
+with no restart, gated against the existing `last_wake_at` / `started_at`
+baseline.
 
 #### `run_monitor_loop(fleet_id, tick_seconds, wake_interval_seconds)`
 
@@ -2091,7 +2126,9 @@ artifact (no PID file); identity throughout is the OS process id.
 
 1. Reset the shared stop flag to false. Capture `pid = this-pid`.
 2. **Claim the slot** via the broker's atomic claim `(fleet_id, pid,
-   tick_seconds, now-as-ISO)`. On refusal (returns false) → application error
+   tick_seconds, wake_interval_seconds, now-as-ISO)` — the driver's only use
+   of its `wake_interval_seconds` parameter. On refusal (returns false) →
+   application error
    (exit 1) `monitor already running for fleet {fleet_id}`. There is no silent
    fallback. A reclaim leaves `last_wake_at` untouched (§6.2), so the wake
    cadence survives a crash/restart cycle; it re-stamps `started_at`, so a
@@ -2102,8 +2139,8 @@ artifact (no PID file); identity throughout is the OS process id.
    first `cafleet member create`.
 3. **Install signal handlers** for SIGTERM and SIGINT; each flips the shared stop
    flag to true (the handler is minimal — just a flag flip).
-4. **Loop** while the stop flag is false: if `monitor_tick(fleet_id, now,
-   wake_interval_seconds)` (each pass stamps `now` fresh as tz-aware UTC)
+4. **Loop** while the stop flag is false: if `monitor_tick(fleet_id, now)`
+   (each pass stamps `now` fresh as tz-aware UTC)
    returns `STOP` → break; else call `interruptible_sleep(tick_seconds)`.
 5. **Cleanup (always, in a finally block):** the broker's ownership-checked clear
    `(fleet_id, pid)` — nulls the slot's `pid` / `started_at` / `last_tick_at`
@@ -2416,7 +2453,7 @@ array**; every other list endpoint wraps in an object (member rows under
 `{"detail": <string>}`; a request-validation failure returns `422` with the
 same `{"detail": <string>}` shape (a single human-readable string).
 
-#### The 7 routes
+#### The 8 routes
 
 - **`GET /api/fleets`** — unscoped (no `X-Fleet-Id`). Returns the broker fleet
   list **directly as a bare array**.
@@ -2426,15 +2463,19 @@ same `{"detail": <string>}` shape (a single human-readable string).
   two-value `kind` (§5.4). Response `{"members": [ <member dict>, … ]}`. Roster
   rows carry no `monitor` key.
 - **`GET /api/monitor`** — fleet-scoped. Returns the flat runtime keys
-  `{running, pid, tick_seconds, last_tick_at, last_tick_age_seconds,
+  `{running, pid, tick_seconds, wake_interval_seconds, last_tick_at,
+  last_tick_age_seconds,
   started_at, last_wake_at, last_wake_age_seconds}` plus a top-level `members`
   key. Read the runtime row and
   the live-check (current UTC). If absent **or** not live: `running=false`,
-  `pid=null`, `tick_seconds` = the row's value when a row exists else `null`,
+  `pid=null`, `tick_seconds` and `wake_interval_seconds` = the row's values
+  when a row exists else `null` (`wake_interval_seconds` is also `null` when
+  the row predates the column and was never re-stamped),
   `last_tick_at`/`last_tick_age_seconds`/`started_at`/`last_wake_at`/
   `last_wake_age_seconds` all `null` — **a stale row
   never leaks a lingering pid or start time**. When live: `running=true` with the
-  live `pid`, `tick_seconds`, `last_tick_at`, `started_at`, `last_wake_at`, and
+  live `pid`, `tick_seconds`, `wake_interval_seconds` (a stamped row is
+  non-null), `last_tick_at`, `started_at`, `last_wake_at`, and
   computed `last_tick_age_seconds` / `last_wake_age_seconds` (each null when
   its source timestamp is null; else whole-seconds
   now − parsed timestamp, **integer-truncated**). `members` carries the
@@ -2444,6 +2485,20 @@ same `{"detail": <string>}` shape (a single human-readable string).
   `now` as the runtime fields; the flat runtime keys are unchanged by this
   addition. There is no `GET`/`PATCH` per-member monitor endpoint — supervision
   cadence has no per-member configuration surface.
+- **`PATCH /api/monitor`** — fleet-scoped. Body `{wake_interval_seconds: int}`:
+  a JSON integer in `0..=i64::MAX`, validated as an exact 64-bit integer plus
+  `>= 0` — floats, stringified integers, negatives, and numbers above
+  `i64::MAX` are rejected, not coerced. Resolution order: header errors, then
+  body validation — an unparsable body → `422`, detail
+  `invalid JSON body: <parse error>`; a missing or invalid field → `422`,
+  detail `wake_interval_seconds must be a non-negative integer` — then the
+  fleet check (`404`, `Fleet not found`), then the row update via
+  `set_monitor_wake_interval` (§6.2): no row → `404`, detail
+  `monitor has never run for this fleet`. The body parse precedes the fleet
+  check, matching `POST /api/messages/send`. Success → `200`
+  `{wake_interval_seconds: <the stored value>}`. The running loop obeys the
+  new value within one tick (§6.6); the next monitor start re-stamps the
+  column from the CLI/env resolution.
 - **`GET /api/members/{member_id}/inbox`** — fleet-scoped. Member not in fleet →
   `404`, detail `Member not found`; else `{"messages": [ <FormattedMessage>, …
   ]}` over the member's inbox.
@@ -2498,7 +2553,8 @@ truncation scope — is specified in §7.1.
 3. **Stale monitor never leaks process fields** — when not live, `pid` /
    `started_at` / `last_tick_at` / `last_tick_age_seconds` / `last_wake_at` /
    `last_wake_age_seconds` are all `null` even if
-   a stale row exists; only `tick_seconds` survives from a stale row.
+   a stale row exists; only `tick_seconds` and `wake_interval_seconds`
+   survive from a stale row.
 4. **Field renames are wire contract** — `status_state → status`, `text → body`.
 5. **`list_fleets` returns a bare array**; every other list wraps in
    `{"members"|"messages": [...]}`.
@@ -2521,7 +2577,7 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 | `broker_port` | `CAFLEET_BROKER_PORT` | integer (16-bit port) | `8000` |
 | `max_text_len` | `CAFLEET_MAX_TEXT_LEN` | non-negative integer | `200` |
 | `multiplexer` | `CAFLEET_MULTIPLEXER` | optional string | `None` (auto-detect) |
-| `monitor_wake_interval` | `CAFLEET_MONITOR_WAKE_INTERVAL` | non-negative integer | `600` |
+| `monitor_wake_interval` | `CAFLEET_MONITOR_WAKE_INTERVAL` | non-negative 64-bit integer | `600` |
 
 - **`multiplexer`** is the explicit backend override consumed by
   `resolve_multiplexer()` (§6.5). `None` (unset) means auto-detect from
@@ -2529,7 +2585,12 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
   A set value must name a registry key (`tmux`/`herdr`) or resolution raises.
 - **`monitor_wake_interval`** is the `cafleet monitor` Director wake interval in
   seconds, overridden per-invocation by `--interval` (§6.3). `0` disables the
-  wake while the loop keeps heartbeating every tick. Dispatch cadence is
+  wake while the loop keeps heartbeating every tick. The value is a
+  non-negative 64-bit integer; anything else fails loudly at startup with
+  `CAFLEET_MONITOR_WAKE_INTERVAL must be a non-negative integer (got '<raw>')`.
+  The startup-resolved value is stamped into
+  `monitor_runtime.wake_interval_seconds` at each monitor start (§6.6);
+  dispatch cadence is
   persisted in `monitor_runtime.last_wake_at` (§6.2), durable across loop
   restarts.
 - **Default DB URL** expands `~` to `$HOME` **only for the factory default**; a
@@ -2664,7 +2725,7 @@ defaults, FK rules, AUTOINCREMENT, and the create-order quirk are in §6.1.
 - `idx_messages_owner_member_status_ts` on `messages(owner_member_id, status_timestamp)`
 - `idx_messages_from_member_status_ts` on `messages(from_member_id, status_timestamp)`
 
-**The migration chain.** Head is **`V4`**, contiguous from 1 with exactly one
+**The migration chain.** Head is **`V5`**, contiguous from 1 with exactly one
 baseline:
 
 1. `V1__baseline.sql` — the baseline, creating the schema in this order:
@@ -2700,7 +2761,10 @@ baseline:
 4. `V4__fleet_level_wake_schedule.sql` — drops the per-member monitor
    schedule table (supervision cadence lives solely on `monitor_runtime`) and
    runs `ALTER TABLE monitor_runtime ADD COLUMN last_wake_at TEXT` (nullable,
-   no DDL default). Head `monitor_runtime` schema:
+   no DDL default).
+5. `V5__monitor_wake_interval.sql` — runs
+   `ALTER TABLE monitor_runtime ADD COLUMN wake_interval_seconds INTEGER`
+   (nullable, no DDL default). Head `monitor_runtime` schema:
    ```sql
    CREATE TABLE monitor_runtime (
        fleet_id INTEGER NOT NULL PRIMARY KEY REFERENCES fleets (fleet_id) ON DELETE RESTRICT,
@@ -2708,7 +2772,8 @@ baseline:
        started_at TEXT,
        last_tick_at TEXT,
        tick_seconds INTEGER NOT NULL DEFAULT 5,
-       last_wake_at TEXT
+       last_wake_at TEXT,
+       wake_interval_seconds INTEGER
    );
    ```
 
@@ -2734,7 +2799,7 @@ automatically.`; (5) already at head (recorded version == head) → print
 pending migrations to head and print `Created <db_file> and applied migrations
 to head (<N>).` when no version was recorded before the run (a fresh or
 table-less DB), else `Upgraded from <M> to <N>.`. `<M>` / `<N>` are the
-integer migration versions (the head is `4`). The driver's
+integer migration versions (the head is `5`). The driver's
 connection is closed when the command finishes (success or failure).
 
 ---

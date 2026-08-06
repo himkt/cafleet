@@ -1,8 +1,8 @@
 # Restore WebUI editing of the Director wake interval
 
 **Status**: Approved
-**Progress**: 0/22 tasks complete
-**Last Updated**: 2026-08-06
+**Progress**: 6/22 tasks complete
+**Last Updated**: 2026-08-07
 
 ## Overview
 
@@ -241,32 +241,32 @@ non-negative integer.
 
 ### Step 1: Documentation first
 
-- [ ] Update `docs/docs/concepts/monitoring.md` § cadence: the interval is
+- [x] Update `docs/docs/concepts/monitoring.md` § cadence: the interval is
       stamped per fleet at each monitor start, re-read per tick, and editable
       from the admin WebUI (effective within one tick; re-stamped at the next
-      start). <!-- completed: -->
-- [ ] Update `docs/docs/spec/webui-api.md`: add `PATCH /api/monitor` to the
+      start). <!-- completed: 2026-08-07T05:55 -->
+- [x] Update `docs/docs/spec/webui-api.md`: add `PATCH /api/monitor` to the
       route table and as a section with the § *S3* contract verbatim; add
       `wake_interval_seconds` to the `GET /api/monitor` example and the
-      not-running field table. <!-- completed: -->
-- [ ] Update `docs/docs/spec/data-model.md` § `monitor_runtime`: the
+      not-running field table. <!-- completed: 2026-08-07T05:55 -->
+- [x] Update `docs/docs/spec/data-model.md` § `monitor_runtime`: the
       `wake_interval_seconds` column and its stamp/re-read/preserve
-      lifecycle. <!-- completed: -->
-- [ ] Update `docs/docs/spec/cli-options.md` (monitor loop form): the resolved
+      lifecycle. <!-- completed: 2026-08-07T05:55 -->
+- [x] Update `docs/docs/spec/cli-options.md` (monitor loop form): the resolved
       interval is stamped into `monitor_runtime` at each start.
-      <!-- completed: -->
-- [ ] Update `SPEC.md`: §6.2 (`claim_monitor_runtime` /
+      <!-- completed: 2026-08-07T05:55 -->
+- [x] Update `SPEC.md`: §6.2 (`claim_monitor_runtime` /
       `set_monitor_wake_interval` / payload keys and the schema DDL), §6.3
       (`--interval` stamping and the `i64` domain), §6.6 (per-tick re-read
       order, the dropped `monitor_tick` parameter, and `wake_due`'s `i64`
       interval), §6.8 (`PATCH /api/monitor`, the GET payload addition, and
       the route-catalog title bump "The 7 routes" → 8), §7.1
       (`monitor_wake_interval` domain), and the head version in the migration
-      inventory. <!-- completed: -->
-- [ ] Verify `skills/cafleet/reference/cli.md` and
+      inventory. <!-- completed: 2026-08-07T05:55 -->
+- [x] Verify `skills/cafleet/reference/cli.md` and
       `reference/supervision.md` stay accurate (their `--interval`/env/0
       statements are unchanged by this design); edit only if a statement
-      drifts. <!-- completed: -->
+      drifts. <!-- completed: 2026-08-07T05:55 -->
 
 ### Step 2: Migration
 
