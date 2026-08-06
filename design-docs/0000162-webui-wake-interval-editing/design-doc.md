@@ -1,7 +1,7 @@
 # Restore WebUI editing of the Director wake interval
 
 **Status**: Approved
-**Progress**: 15/22 tasks complete
+**Progress**: 17/22 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -314,14 +314,16 @@ non-negative integer.
 
 ### Step 5: HTTP endpoint
 
-- [ ] Add the `PATCH /api/monitor` handler in `cafleet/src/webui/mod.rs` with
+- [x] Add the `PATCH /api/monitor` handler in `cafleet/src/webui/mod.rs` with
       the § *S3* resolution order, validation, and error strings; register the
       route and correct the module doc's route count to 8 (it reads "the 9
-      `/api` routes" today while 7 are registered). <!-- completed: -->
-- [ ] `webui_routes` tests: 200 round-trip (PATCH then GET reflects the
+      `/api` routes" today while 7 are registered).
+      <!-- completed: 2026-08-07T06:24 -->
+- [x] `webui_routes` tests: 200 round-trip (PATCH then GET reflects the
       value), both 400s, fleet 404, both 422s (including
       float/string/negative/above-`i64::MAX` rejection and the
-      422-before-fleet-404 ordering), and the no-row 404. <!-- completed: -->
+      422-before-fleet-404 ordering), and the no-row 404.
+      <!-- completed: 2026-08-07T06:24 -->
 
 ### Step 6: Admin WebUI
 
