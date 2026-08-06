@@ -1,4 +1,7 @@
-import { RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { LoaderCircle, RefreshCw } from "lucide-react";
+import type { MonitorRuntime } from "../types";
+import { patchMonitor } from "../api";
 import ThemeToggle from "./ThemeToggle";
 
 function BrandMark() {
@@ -14,25 +17,154 @@ function BrandMark() {
   );
 }
 
-function MonitorIndicator({ running }: { running: boolean | null }) {
-  if (running === null) return null;
-  return (
-    <span
-      className="flex items-center gap-1.5 text-xs text-text-muted"
-      title={
-        running
-          ? "cafleet monitor is running for this fleet"
-          : "No cafleet monitor running — start it with 'cafleet --fleet-id <id> monitor start'"
+function parseInterval(draft: string): number | null {
+  const trimmed = draft.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const value = Number(trimmed);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+function MonitorIndicator({
+  monitor,
+  onSaved,
+}: {
+  monitor: MonitorRuntime | null;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: MouseEvent) => {
+      const container = containerRef.current;
+      if (container && !container.contains(e.target as Node)) {
+        setOpen(false);
       }
-    >
-      <span
-        aria-hidden="true"
-        className={`size-2 rounded-full ${
-          running ? "bg-success" : "bg-text-faint"
-        }`}
-      />
-      Monitor {running ? "running" : "stopped"}
-    </span>
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  if (monitor === null) return null;
+  const running = monitor.running;
+  const parsed = parseInterval(draft);
+
+  const toggleOpen = () => {
+    if (!open) {
+      setDraft(
+        monitor.wake_interval_seconds === null
+          ? ""
+          : String(monitor.wake_interval_seconds),
+      );
+      setError(null);
+    }
+    setOpen((wasOpen) => !wasOpen);
+  };
+
+  const save = async () => {
+    if (!running || parsed === null) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await patchMonitor(parsed);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+      return;
+    } finally {
+      setSaving(false);
+    }
+    setOpen(false);
+    onSaved();
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={toggleOpen}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className="flex items-center gap-1.5 rounded text-xs text-text-muted hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+        title={
+          running
+            ? "cafleet monitor is running for this fleet"
+            : "No cafleet monitor running — start it with 'cafleet monitor <fleet-id>'"
+        }
+      >
+        <span
+          aria-hidden="true"
+          className={`size-2 rounded-full ${
+            running ? "bg-success" : "bg-text-faint"
+          }`}
+        />
+        Monitor {running ? "running" : "stopped"}
+      </button>
+      {open && (
+        <div
+          role="dialog"
+          aria-label="Director wake interval"
+          className="absolute right-0 top-full z-10 mt-1 w-72 rounded-lg border border-border bg-surface-raised p-3 shadow-lg"
+        >
+          <label className="block text-xs font-medium">
+            Director wake interval (seconds)
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                setError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void save();
+              }}
+              disabled={!running || saving}
+              className="mt-1.5 w-full rounded-lg border border-border bg-surface px-2 py-1.5 font-mono text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 disabled:opacity-50"
+            />
+          </label>
+          {running && parsed === 0 && (
+            <p className="mt-1.5 text-[11px] text-text-muted">
+              0 disables the Director wake while the loop keeps running.
+            </p>
+          )}
+          {!running && (
+            <p className="mt-1.5 text-[11px] text-text-muted">
+              Monitor not running — the interval is re-stamped from the
+              CLI/env when the monitor starts, so there is nothing durable
+              to edit.
+            </p>
+          )}
+          {error && <p className="mt-1.5 text-xs text-danger">{error}</p>}
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={!running || saving || parsed === null}
+            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent px-2 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving && (
+              <LoaderCircle
+                size={12}
+                className="motion-safe:animate-spin"
+                aria-hidden="true"
+              />
+            )}
+            Save
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -66,8 +198,10 @@ interface AppHeaderProps {
   fleetName?: string;
   onBack?: () => void;
   sendingAsDirector?: boolean;
-  /** Monitor liveness for the fleet; `null` until the first fetch resolves. */
-  monitorRunning?: boolean | null;
+  /** The polled monitor payload; `null` until the first fetch resolves. */
+  monitor?: MonitorRuntime | null;
+  /** The dashboard refresh trigger, fired after a successful interval save. */
+  onMonitorSaved?: () => void;
 }
 
 export default function AppHeader({
@@ -76,7 +210,8 @@ export default function AppHeader({
   fleetName,
   onBack,
   sendingAsDirector = false,
-  monitorRunning = null,
+  monitor = null,
+  onMonitorSaved = () => {},
 }: AppHeaderProps) {
   return (
     <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface-raised px-4 py-2">
@@ -112,7 +247,7 @@ export default function AppHeader({
             Sending as <span className="font-medium text-text">Director</span>
           </span>
         )}
-        <MonitorIndicator running={monitorRunning} />
+        <MonitorIndicator monitor={monitor} onSaved={onMonitorSaved} />
         <LiveIndicator isPolling={isPolling} />
         <button
           type="button"

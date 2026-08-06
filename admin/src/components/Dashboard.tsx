@@ -95,7 +95,10 @@ export default function Dashboard({
         fleetName={fleetName ?? String(fleetId)}
         onBack={onBack}
         sendingAsDirector={senderId !== null}
-        monitorRunning={monitor === null ? null : monitor.running}
+        monitor={monitor}
+        onMonitorSaved={() => {
+          void trigger();
+        }}
       />
 
       <div className="flex flex-1 min-h-0">

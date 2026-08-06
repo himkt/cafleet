@@ -1,7 +1,7 @@
 # Restore WebUI editing of the Director wake interval
 
 **Status**: Approved
-**Progress**: 17/22 tasks complete
+**Progress**: 20/22 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -209,7 +209,7 @@ the trigger for a popover carrying the interval editor.
 
 | Element | Behavior |
 |---|---|
-| Trigger | The existing indicator dot, now a button; the tooltip text stays. |
+| Trigger | The existing indicator dot, now a button; the tooltip text stays, except the stopped-state tooltip's launch command reads `cafleet monitor <fleet-id>` (the prior text cited a CLI form that no longer exists). |
 | Interval input | Numeric input in seconds (integer ≥ 0), seeded from `wake_interval_seconds` in the polled `GET /api/monitor` payload. |
 | Zero hint | Inline hint at value `0`: the Director wake is disabled while the loop keeps running. |
 | Save | Calls `PATCH /api/monitor`, surfaces a `detail` error inline on failure, and triggers the dashboard's existing refresh on success. |
@@ -327,13 +327,13 @@ non-negative integer.
 
 ### Step 6: Admin WebUI
 
-- [ ] Extend `MonitorRuntime` in `admin/src/types.ts` and add `patchMonitor`
-      to `admin/src/api.ts`. <!-- completed: -->
-- [ ] Turn the `AppHeader` monitor indicator into the popover editor per
+- [x] Extend `MonitorRuntime` in `admin/src/types.ts` and add `patchMonitor`
+      to `admin/src/api.ts`. <!-- completed: 2026-08-07T06:29 -->
+- [x] Turn the `AppHeader` monitor indicator into the popover editor per
       § *S4* (input, zero hint, save with inline error, disabled not-running
-      state). <!-- completed: -->
-- [ ] Wire `Dashboard` to pass the monitor payload and refresh trigger into
-      `AppHeader`. <!-- completed: -->
+      state). <!-- completed: 2026-08-07T06:29 -->
+- [x] Wire `Dashboard` to pass the monitor payload and refresh trigger into
+      `AppHeader`. <!-- completed: 2026-08-07T06:29 -->
 
 ### Step 7: Verification
 
