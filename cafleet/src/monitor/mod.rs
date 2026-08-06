@@ -24,16 +24,20 @@
 //! // wins as the baseline (unparsable → immediately due); a NULL last_wake_at
 //! // falls back to started_at (NULL or unparsable → immediately due).
 //! pub fn wake_due(last_wake_at: Option<&str>, started_at: Option<&str>,
-//!     wake_interval: u64, now: DateTime<Utc>) -> bool;
+//!     wake_interval: i64, now: DateTime<Utc>) -> bool;
 //!
+//! // No interval parameter: each pass re-reads wake_interval_seconds from
+//! // the fleet's runtime row, so an external update changes the cadence
+//! // within one tick.
 //! pub fn monitor_tick(conn: &mut Connection, mux: &dyn MonitorMux,
 //!     out: &mut dyn std::io::Write, fleet_id: i64, pid: i64,
-//!     wake_interval: u64, now: DateTime<Utc>)
-//!     -> Result<TickResult, CafleetError>;
+//!     now: DateTime<Utc>) -> Result<TickResult, CafleetError>;
 //!
+//! // wake_interval is used only to stamp the claim; the ticks read the
+//! // stored value.
 //! pub fn run_monitor_loop(conn: &mut Connection, mux: &dyn MonitorMux,
 //!     out: &mut dyn std::io::Write, fleet_id: i64, tick_seconds: i64,
-//!     wake_interval: u64) -> Result<(), CafleetError>;
+//!     wake_interval: i64) -> Result<(), CafleetError>;
 //! ```
 
 use std::collections::BTreeSet;
@@ -97,7 +101,7 @@ fn mux_err(error: MultiplexerError) -> CafleetError {
 pub fn wake_due(
     last_wake_at: Option<&str>,
     started_at: Option<&str>,
-    wake_interval: u64,
+    wake_interval: i64,
     now: DateTime<Utc>,
 ) -> bool {
     let Some(baseline) = last_wake_at.or(started_at) else {
@@ -106,19 +110,19 @@ pub fn wake_due(
     let Ok(parsed) = parse_lenient(baseline) else {
         return true;
     };
-    (now - parsed).num_seconds() >= wake_interval as i64
+    (now - parsed).num_seconds() >= wake_interval
 }
 
 /// One scan pass (SPEC §6.6): ownership-checked heartbeat → fleet liveness →
-/// wake-interval gate → Director-pane resolution → one fleet-level wake →
-/// the `woke`-gated ledger write and heartbeat echo.
+/// runtime-row read (the per-tick interval re-read) → wake-interval gate →
+/// Director-pane resolution → one fleet-level wake → the `woke`-gated ledger
+/// write and heartbeat echo.
 pub fn monitor_tick(
     conn: &mut Connection,
     mux: &dyn MonitorMux,
     out: &mut dyn Write,
     fleet_id: i64,
     pid: i64,
-    wake_interval: u64,
     now: DateTime<Utc>,
 ) -> Result<TickResult, CafleetError> {
     let iso = format_utc(now);
@@ -135,11 +139,14 @@ pub fn monitor_tick(
     }
     let fleet = fleet.expect("the live fleet row exists");
 
+    let runtime = broker::read_monitor_runtime(conn, fleet_id)?
+        .expect("the heartbeat just matched this fleet's runtime row");
+    let wake_interval = runtime["wake_interval_seconds"]
+        .as_i64()
+        .expect("the owning loop stamped the interval at claim");
     if wake_interval == 0 {
         return Ok(TickResult::Continue);
     }
-    let runtime = broker::read_monitor_runtime(conn, fleet_id)?
-        .expect("the heartbeat just matched this fleet's runtime row");
     if !wake_due(
         runtime["last_wake_at"].as_str(),
         runtime["started_at"].as_str(),
@@ -205,13 +212,11 @@ pub fn run_monitor_loop(
     out: &mut dyn Write,
     fleet_id: i64,
     tick_seconds: i64,
-    wake_interval: u64,
+    wake_interval: i64,
 ) -> Result<(), CafleetError> {
     let pid = i64::from(std::process::id());
     let now = format_utc(now_utc());
-    let stamped_interval = i64::try_from(wake_interval)
-        .expect("the CLI/config boundary keeps the interval within i64");
-    if !broker::claim_monitor_runtime(conn, fleet_id, pid, tick_seconds, stamped_interval, &now)? {
+    if !broker::claim_monitor_runtime(conn, fleet_id, pid, tick_seconds, wake_interval, &now)? {
         return Err(CafleetError::App(format!(
             "monitor already running for fleet {fleet_id}"
         )));
@@ -234,7 +239,7 @@ pub fn run_monitor_loop(
         if stop.load(Ordering::Relaxed) {
             break Ok(());
         }
-        match monitor_tick(conn, mux, out, fleet_id, pid, wake_interval, now_utc()) {
+        match monitor_tick(conn, mux, out, fleet_id, pid, now_utc()) {
             Ok(TickResult::Continue) => {}
             Ok(TickResult::Stop) => break Ok(()),
             Err(error) => break Err(error),

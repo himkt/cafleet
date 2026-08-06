@@ -1,7 +1,7 @@
 # Restore WebUI editing of the Director wake interval
 
 **Status**: Approved
-**Progress**: 12/22 tasks complete
+**Progress**: 15/22 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -297,19 +297,20 @@ non-negative integer.
 
 ### Step 4: Monitor loop
 
-- [ ] Rework `monitor_tick` to the § *S2* order (drop the parameter, read the
+- [x] Rework `monitor_tick` to the § *S2* order (drop the parameter, read the
       row before the interval gate, `expect` the stamped value); update
       `run_monitor_loop` to pass the startup interval only to the claim, and
-      `wake_due` to take `i64`. <!-- completed: -->
-- [ ] Apply the § *S2* value domain at the CLI/config boundaries: `--interval`
+      `wake_due` to take `i64`. <!-- completed: 2026-08-07T06:19 -->
+- [x] Apply the § *S2* value domain at the CLI/config boundaries: `--interval`
       switches to `clap::value_parser!(i64).range(0..)` in
       `cafleet/src/cli/monitor.rs`, and `Settings.monitor_wake_interval`
       becomes `i64` with an explicit non-negative check preserving the
-      existing error string; update the config tests. <!-- completed: -->
-- [ ] Monitor tests: a mid-run column update changes the cadence on the next
+      existing error string; update the config tests.
+      <!-- completed: 2026-08-07T06:19 -->
+- [x] Monitor tests: a mid-run column update changes the cadence on the next
       tick (shrink-to-due, set-0-disables, raise-re-enables), and the
       first-wake boundary follows an edit made before the first wake.
-      <!-- completed: -->
+      <!-- completed: 2026-08-07T06:19 -->
 
 ### Step 5: HTTP endpoint
 

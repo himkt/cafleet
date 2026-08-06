@@ -28,8 +28,8 @@ pub struct MonitorArgs {
     tick: i64,
     /// Director wake interval in seconds (0 disables the wake) [default:
     /// CAFLEET_MONITOR_WAKE_INTERVAL, 600].
-    #[arg(long)]
-    interval: Option<u64>,
+    #[arg(long, value_parser = clap::value_parser!(i64).range(0..))]
+    interval: Option<i64>,
 }
 
 #[derive(Subcommand)]
@@ -85,7 +85,7 @@ fn run_loop(
     settings: &Settings,
     fleet_id: i64,
     tick: i64,
-    interval: Option<u64>,
+    interval: Option<i64>,
 ) -> Result<(), CafleetError> {
     let mut conn = connect(settings)?;
     require_live_fleet(&conn, fleet_id)?;
