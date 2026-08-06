@@ -71,18 +71,23 @@ it re-engages a member.
 
 The monitor scans once per **tick** and the wake fires at the first tick
 boundary on which the wake interval has elapsed, so the tick is the floor on
-interval precision. `CAFLEET_MONITOR_WAKE_INTERVAL=0` (or `--interval 0`)
-disables the wake while the loop keeps claiming the runtime slot and
-heartbeating every tick.
+interval precision. The first wake is measured from the moment the monitor
+started: it fires only once the interval has elapsed since launch, so a
+freshly created fleet gets its Director's spawning window undisturbed. Every
+later wake is measured from the last delivered wake.
+`CAFLEET_MONITOR_WAKE_INTERVAL=0` (or `--interval 0`) disables the wake while
+the loop keeps claiming the runtime slot and heartbeating every tick.
 
 The wake is unconditional: it fires whenever the interval has elapsed and the
 Director's pane is alive, **including when the fleet has no other members**.
 The Director is itself a supervision target — the resume clause is the remedy
 for a stalled Director — and a fleet with no members is a transient bootstrap
 state, not a steady state (the Director stops the loop at teardown). The last
-wake timestamp is durable across loop restarts, so an immediate restart honors
-the remaining wake cadence rather than firing instantly. A failed wake commits
-nothing and retries on the next tick.
+wake timestamp is durable across loop restarts, so a fleet that has already
+been woken keeps its remaining wake cadence across an immediate restart rather
+than being woken instantly; a fleet that has never been woken restarts its
+first-wake timer from the new launch. A failed wake commits nothing and
+retries on the next tick.
 
 ## Keystroke safety
 
