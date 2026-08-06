@@ -1,6 +1,6 @@
 # Restore WebUI editing of the Director wake interval
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 22/22 tasks complete
 **Last Updated**: 2026-08-07
 
@@ -342,3 +342,12 @@ non-negative integer.
       <!-- completed: 2026-08-07T06:35 -->
 - [x] `mise //cafleet:test` — full suite green.
       <!-- completed: 2026-08-07T06:35 -->
+
+---
+
+## Changelog
+
+- 2026-08-07: Implementation complete — all 22 tasks and 6 success criteria
+  verified (unit/contract suites, isolated live E2E of the API matrix, and
+  browser checks of the popover editor); Reviewer approved in one round;
+  PR #281 opened. Status: Approved → Complete.
