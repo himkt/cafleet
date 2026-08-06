@@ -209,7 +209,9 @@ pub fn run_monitor_loop(
 ) -> Result<(), CafleetError> {
     let pid = i64::from(std::process::id());
     let now = format_utc(now_utc());
-    if !broker::claim_monitor_runtime(conn, fleet_id, pid, tick_seconds, &now)? {
+    let stamped_interval = i64::try_from(wake_interval)
+        .expect("the CLI/config boundary keeps the interval within i64");
+    if !broker::claim_monitor_runtime(conn, fleet_id, pid, tick_seconds, stamped_interval, &now)? {
         return Err(CafleetError::App(format!(
             "monitor already running for fleet {fleet_id}"
         )));

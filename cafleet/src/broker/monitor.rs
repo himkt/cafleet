@@ -50,12 +50,13 @@ struct RuntimeRow {
     started_at: Option<String>,
     last_tick_at: Option<String>,
     tick_seconds: i64,
+    wake_interval_seconds: Option<i64>,
     last_wake_at: Option<String>,
 }
 
 fn runtime_row(conn: &Connection, fleet_id: i64) -> Result<Option<RuntimeRow>, CafleetError> {
     conn.query_row(
-        "SELECT pid, started_at, last_tick_at, tick_seconds, last_wake_at \
+        "SELECT pid, started_at, last_tick_at, tick_seconds, wake_interval_seconds, last_wake_at \
          FROM monitor_runtime WHERE fleet_id=?1",
         [fleet_id],
         |row| {
@@ -64,7 +65,8 @@ fn runtime_row(conn: &Connection, fleet_id: i64) -> Result<Option<RuntimeRow>, C
                 started_at: row.get(1)?,
                 last_tick_at: row.get(2)?,
                 tick_seconds: row.get(3)?,
-                last_wake_at: row.get(4)?,
+                wake_interval_seconds: row.get(4)?,
+                last_wake_at: row.get(5)?,
             })
         },
     )
@@ -137,6 +139,7 @@ pub fn claim_monitor_runtime(
     fleet_id: i64,
     pid: i64,
     tick_seconds: i64,
+    wake_interval: i64,
     when: &str,
 ) -> Result<bool, CafleetError> {
     let now = parse_lenient(when)?;
@@ -158,9 +161,10 @@ pub fn claim_monitor_runtime(
     match existing {
         None => {
             tx.execute(
-                "INSERT INTO monitor_runtime (fleet_id, pid, started_at, last_tick_at, tick_seconds) \
-                 VALUES (?1, ?2, ?3, ?3, ?4)",
-                params![fleet_id, pid, when, tick_seconds],
+                "INSERT INTO monitor_runtime \
+                 (fleet_id, pid, started_at, last_tick_at, tick_seconds, wake_interval_seconds) \
+                 VALUES (?1, ?2, ?3, ?3, ?4, ?5)",
+                params![fleet_id, pid, when, tick_seconds, wake_interval],
             )
             .map_err(db_err)?;
         }
@@ -173,15 +177,32 @@ pub fn claim_monitor_runtime(
             }
             tx.execute(
                 "UPDATE monitor_runtime \
-                 SET pid=?1, started_at=?2, last_tick_at=?2, tick_seconds=?3 \
-                 WHERE fleet_id=?4",
-                params![pid, when, tick_seconds, fleet_id],
+                 SET pid=?1, started_at=?2, last_tick_at=?2, tick_seconds=?3, \
+                     wake_interval_seconds=?4 \
+                 WHERE fleet_id=?5",
+                params![pid, when, tick_seconds, wake_interval, fleet_id],
             )
             .map_err(db_err)?;
         }
     }
     tx.commit().map_err(db_err)?;
     Ok(true)
+}
+
+/// Ownership-free interval update (the WebUI `PATCH /api/monitor` write):
+/// `false` ⇔ no row, i.e. the fleet's monitor has never run.
+pub fn set_monitor_wake_interval(
+    conn: &mut Connection,
+    fleet_id: i64,
+    wake_interval: i64,
+) -> Result<bool, CafleetError> {
+    let changed = conn
+        .execute(
+            "UPDATE monitor_runtime SET wake_interval_seconds=?1 WHERE fleet_id=?2",
+            params![wake_interval, fleet_id],
+        )
+        .map_err(db_err)?;
+    Ok(changed == 1)
 }
 
 /// Ownership-checked heartbeat: a non-owner's tick matches zero rows and
@@ -201,8 +222,9 @@ pub fn heartbeat_monitor_runtime(
     Ok(changed == 1)
 }
 
-/// Ownership-checked clear: nulls the process fields, preserves
-/// `tick_seconds`; a non-owner's clear is a no-op.
+/// Ownership-checked clear: nulls the process fields, preserves the durable
+/// fields (`tick_seconds`, `wake_interval_seconds`, `last_wake_at`); a
+/// non-owner's clear is a no-op.
 pub fn clear_monitor_runtime(
     conn: &mut Connection,
     fleet_id: i64,
@@ -228,6 +250,7 @@ pub fn read_monitor_runtime(
             "started_at": row.started_at,
             "last_tick_at": row.last_tick_at,
             "tick_seconds": row.tick_seconds,
+            "wake_interval_seconds": row.wake_interval_seconds,
             "last_wake_at": row.last_wake_at,
         })
     }))
@@ -249,15 +272,20 @@ pub fn monitor_runtime_payload(
     now: DateTime<Utc>,
 ) -> Result<Value, CafleetError> {
     let row = runtime_row(conn, fleet_id)?;
-    let (running, tick_seconds) = match &row {
-        None => (false, Value::Null),
-        Some(row) => (runtime_live(row, now), json!(row.tick_seconds)),
+    let (running, tick_seconds, wake_interval_seconds) = match &row {
+        None => (false, Value::Null, Value::Null),
+        Some(row) => (
+            runtime_live(row, now),
+            json!(row.tick_seconds),
+            json!(row.wake_interval_seconds),
+        ),
     };
     if !running {
         return Ok(json!({
             "running": false,
             "pid": Value::Null,
             "tick_seconds": tick_seconds,
+            "wake_interval_seconds": wake_interval_seconds,
             "last_tick_at": Value::Null,
             "last_tick_age_seconds": Value::Null,
             "started_at": Value::Null,
@@ -274,6 +302,7 @@ pub fn monitor_runtime_payload(
         "running": true,
         "pid": row.pid,
         "tick_seconds": row.tick_seconds,
+        "wake_interval_seconds": row.wake_interval_seconds,
         "last_tick_at": row.last_tick_at,
         "last_tick_age_seconds": age(row.last_tick_at.as_deref()),
         "started_at": row.started_at,

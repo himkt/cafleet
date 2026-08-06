@@ -1,7 +1,7 @@
 # Restore WebUI editing of the Director wake interval
 
 **Status**: Approved
-**Progress**: 8/22 tasks complete
+**Progress**: 12/22 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -281,17 +281,19 @@ non-negative integer.
 
 ### Step 3: Broker layer
 
-- [ ] Extend `claim_monitor_runtime` with the `wake_interval` parameter,
-      stamped in both the INSERT and the reclaim UPDATE. <!-- completed: -->
-- [ ] Carry `wake_interval_seconds` through `RuntimeRow`,
+- [x] Extend `claim_monitor_runtime` with the `wake_interval` parameter,
+      stamped in both the INSERT and the reclaim UPDATE.
+      <!-- completed: 2026-08-07T06:11 -->
+- [x] Carry `wake_interval_seconds` through `RuntimeRow`,
       `read_monitor_runtime`, and `monitor_runtime_payload` (both shapes, key
       after `tick_seconds`); keep `clear_monitor_runtime` preserving it.
-      <!-- completed: -->
-- [ ] Add `set_monitor_wake_interval` returning `changed == 1`.
-      <!-- completed: -->
-- [ ] Colocated broker tests: stamp on claim and reclaim, preservation across
+      <!-- completed: 2026-08-07T06:11 -->
+- [x] Add `set_monitor_wake_interval` returning `changed == 1`.
+      <!-- completed: 2026-08-07T06:11 -->
+- [x] Colocated broker tests: stamp on claim and reclaim, preservation across
       clear, the payload key in running/stale/no-row shapes, and the
-      `set_monitor_wake_interval` true/false split. <!-- completed: -->
+      `set_monitor_wake_interval` true/false split.
+      <!-- completed: 2026-08-07T06:11 -->
 
 ### Step 4: Monitor loop
 
