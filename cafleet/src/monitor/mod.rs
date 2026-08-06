@@ -20,10 +20,11 @@
 //!
 //! pub enum TickResult { Continue, Stop }
 //!
-//! // Pure due-check for the fleet-level wake: a NULL or unparsable stamp is
-//! // immediately due.
-//! pub fn wake_due(last_wake_at: Option<&str>, wake_interval: u64,
-//!     now: DateTime<Utc>) -> bool;
+//! // Pure due-check for the fleet-level wake: a present last_wake_at always
+//! // wins as the baseline (unparsable → immediately due); a NULL last_wake_at
+//! // falls back to started_at (NULL or unparsable → immediately due).
+//! pub fn wake_due(last_wake_at: Option<&str>, started_at: Option<&str>,
+//!     wake_interval: u64, now: DateTime<Utc>) -> bool;
 //!
 //! pub fn monitor_tick(conn: &mut Connection, mux: &dyn MonitorMux,
 //!     out: &mut dyn std::io::Write, fleet_id: i64, pid: i64,
@@ -88,14 +89,21 @@ fn mux_err(error: MultiplexerError) -> CafleetError {
     CafleetError::App(error.to_string())
 }
 
-/// Pure due-check for the fleet-level wake: a `NULL` or unparsable
-/// `last_wake_at` is immediately due; otherwise due once the interval has
-/// elapsed.
-pub fn wake_due(last_wake_at: Option<&str>, wake_interval: u64, now: DateTime<Utc>) -> bool {
-    let Some(last_wake_at) = last_wake_at else {
+/// Pure due-check for the fleet-level wake. A present `last_wake_at` always
+/// wins as the baseline, even over a fresher post-reclaim `started_at`
+/// (unparsable → immediately due); a `NULL` `last_wake_at` falls back to
+/// `started_at` (`NULL` or unparsable → immediately due, corrupt state);
+/// otherwise due once the interval has elapsed since the baseline.
+pub fn wake_due(
+    last_wake_at: Option<&str>,
+    started_at: Option<&str>,
+    wake_interval: u64,
+    now: DateTime<Utc>,
+) -> bool {
+    let Some(baseline) = last_wake_at.or(started_at) else {
         return true;
     };
-    let Ok(parsed) = parse_lenient(last_wake_at) else {
+    let Ok(parsed) = parse_lenient(baseline) else {
         return true;
     };
     (now - parsed).num_seconds() >= wake_interval as i64
@@ -132,7 +140,12 @@ pub fn monitor_tick(
     }
     let runtime = broker::read_monitor_runtime(conn, fleet_id)?
         .expect("the heartbeat just matched this fleet's runtime row");
-    if !wake_due(runtime["last_wake_at"].as_str(), wake_interval, now) {
+    if !wake_due(
+        runtime["last_wake_at"].as_str(),
+        runtime["started_at"].as_str(),
+        wake_interval,
+        now,
+    ) {
         return Ok(TickResult::Continue);
     }
 

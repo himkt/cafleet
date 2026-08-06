@@ -1,7 +1,7 @@
 # Deferred First Director Wake
 
 **Status**: Approved
-**Progress**: 5/12 tasks complete
+**Progress**: 7/12 tasks complete
 **Last Updated**: 2026-08-06
 
 ## Overview
@@ -107,6 +107,8 @@ The doc row for `last_wake_at` in SPEC §6.2 and `docs/docs/spec/data-model.md` 
 | `a_fleet_with_no_members_still_wakes_the_director` | Tick at `now + 600s`; assertions follow. |
 | `a_zero_interval_heartbeats_without_waking` | Unchanged (the interval gate precedes the due-check). |
 
+`cafleet/tests/e2e.rs` — `end_to_end_lifecycle_with_one_monitor_tick` asserted the old first-tick wake (default 600 s interval, ~3 s observation window). It now spawns the monitor with `--interval 1` alongside `--tick 1`, so the deferred first wake fires at `started_at + 1s`, within the existing sleep window; all its assertions are otherwise unchanged.
+
 `cafleet/src/broker/monitor.rs` tests (`last_wake_at_survives_a_reclaim`, `claim_inserts_a_fresh_slot_and_refuses_a_live_one`, `clear_is_ownership_checked_and_preserves_tick_seconds_and_last_wake_at`) already pin the unchanged broker semantics and need no edits.
 
 ---
@@ -129,8 +131,8 @@ The doc row for `last_wake_at` in SPEC §6.2 and `docs/docs/spec/data-model.md` 
 
 ### Step 3: Code
 
-- [ ] Extend `wake_due` in `cafleet/src/monitor/mod.rs` with the `started_at` parameter and the baseline policy, restating the new policy in both the module-header API sketch and `wake_due`'s own `///` contract comment <!-- completed: -->
-- [ ] Update the `monitor_tick` call site to pass `runtime["started_at"].as_str()` <!-- completed: -->
+- [x] Extend `wake_due` in `cafleet/src/monitor/mod.rs` with the `started_at` parameter and the baseline policy, restating the new policy in both the module-header API sketch and `wake_due`'s own `///` contract comment <!-- completed: 2026-08-06T12:28 -->
+- [x] Update the `monitor_tick` call site to pass `runtime["started_at"].as_str()` <!-- completed: 2026-08-06T12:28 -->
 
 ### Step 4: Tests and verification
 
