@@ -241,7 +241,10 @@ async fn patch_monitor(State(state): State<AppState>, headers: HeaderMap, body: 
                 StatusCode::OK,
                 &json!({"wake_interval_seconds": wake_interval}),
             ),
-            Ok(false) => detail(StatusCode::NOT_FOUND, "monitor has never run for this fleet"),
+            Ok(false) => detail(
+                StatusCode::NOT_FOUND,
+                "monitor has never run for this fleet",
+            ),
             Err(error) => broker_500(error),
         }
     })

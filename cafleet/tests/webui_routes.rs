@@ -529,7 +529,14 @@ async fn patch_monitor_updates_the_wake_interval_with_the_pinned_error_contract(
     let app = app(&url);
     let valid = json!({"wake_interval_seconds": 300});
 
-    let (status, body) = call(app.clone(), "PATCH", "/api/monitor", None, Some(valid.clone())).await;
+    let (status, body) = call(
+        app.clone(),
+        "PATCH",
+        "/api/monitor",
+        None,
+        Some(valid.clone()),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body, r#"{"detail":"X-Fleet-Id header required"}"#);
 
@@ -572,14 +579,11 @@ async fn patch_monitor_updates_the_wake_interval_with_the_pinned_error_contract(
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let detail = parsed(&String::from_utf8(bytes.to_vec()).unwrap())["detail"]
+    let detail = parsed(core::str::from_utf8(&bytes).unwrap())["detail"]
         .as_str()
         .unwrap()
         .to_string();
-    assert!(
-        detail.starts_with("invalid JSON body: "),
-        "got: {detail}"
-    );
+    assert!(detail.starts_with("invalid JSON body: "), "got: {detail}");
 
     // Rejected, not coerced: missing, float, stringified, negative, and
     // above-i64::MAX — all 422 before the unknown-fleet 404.
@@ -600,8 +604,7 @@ async fn patch_monitor_updates_the_wake_interval_with_the_pinned_error_contract(
         .await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "for {bad}");
         assert_eq!(
-            body,
-            r#"{"detail":"wake_interval_seconds must be a non-negative integer"}"#,
+            body, r#"{"detail":"wake_interval_seconds must be a non-negative integer"}"#,
             "for {bad}"
         );
     }
@@ -653,7 +656,8 @@ async fn patch_monitor_updates_the_wake_interval_with_the_pinned_error_contract(
     let (status, body) = call(app.clone(), "GET", "/api/monitor", Some("1"), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        parsed(&body)["wake_interval_seconds"], 300,
+        parsed(&body)["wake_interval_seconds"],
+        300,
         "GET reflects the PATCHed value"
     );
 
@@ -666,7 +670,10 @@ async fn patch_monitor_updates_the_wake_interval_with_the_pinned_error_contract(
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body, r#"{"wake_interval_seconds":0}"#, "0 disables the wake");
+    assert_eq!(
+        body, r#"{"wake_interval_seconds":0}"#,
+        "0 disables the wake"
+    );
 
     let (status, body) = call(
         app,

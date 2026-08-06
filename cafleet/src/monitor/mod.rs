@@ -638,7 +638,11 @@ mod tests {
                 own_pid(),
                 now + Duration::seconds(900),
             );
-            assert_eq!(mux.wake_count(), 1, "300 < 600 since the baseline → not due");
+            assert_eq!(
+                mux.wake_count(),
+                1,
+                "300 < 600 since the baseline → not due"
+            );
 
             set_interval(&mut conn, fleet_id, 200);
             let (_, _) = tick(
@@ -677,7 +681,11 @@ mod tests {
             let at = now + Duration::seconds(800);
             let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), at);
             assert!(matches!(result, TickResult::Continue));
-            assert_eq!(mux.wake_count(), 1, "0 disables the wake from the next tick");
+            assert_eq!(
+                mux.wake_count(),
+                1,
+                "0 disables the wake from the next tick"
+            );
             assert!(echo.is_empty());
             let row = broker::read_monitor_runtime(&conn, fleet_id)
                 .unwrap()
