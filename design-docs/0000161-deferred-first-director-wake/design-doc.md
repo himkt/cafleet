@@ -1,7 +1,7 @@
 # Deferred First Director Wake
 
 **Status**: Approved
-**Progress**: 1/12 tasks complete
+**Progress**: 5/12 tasks complete
 **Last Updated**: 2026-08-06
 
 ## Overview
@@ -122,10 +122,10 @@ The doc row for `last_wake_at` in SPEC §6.2 and `docs/docs/spec/data-model.md` 
 
 ### Step 2: SPEC.md
 
-- [ ] Update §6.6 *Public surface*: the four-parameter `wake_due` signature and the full baseline policy <!-- completed: -->
-- [ ] Update §6.6 `monitor_tick` step 4 to read and pass both stamps <!-- completed: -->
-- [ ] Extend §6.6 `run_monitor_loop` step 2 with the reclaim first-wake trade-off <!-- completed: -->
-- [ ] Reword the §10 test-plan *Monitor* line: the `wake_due` clause carries interval gating / `last_wake_at` precedence / `started_at` baseline / corrupt stamps; zero-interval moves to the `monitor_tick` clause <!-- completed: -->
+- [x] Update §6.6 *Public surface*: the four-parameter `wake_due` signature and the full baseline policy <!-- completed: 2026-08-06T12:24 -->
+- [x] Update §6.6 `monitor_tick` step 4 to read and pass both stamps <!-- completed: 2026-08-06T12:24 -->
+- [x] Extend §6.6 `run_monitor_loop` step 2 with the reclaim first-wake trade-off <!-- completed: 2026-08-06T12:24 -->
+- [x] Reword the §10 test-plan *Monitor* line: the `wake_due` clause carries interval gating / `last_wake_at` precedence / `started_at` baseline / corrupt stamps; zero-interval moves to the `monitor_tick` clause <!-- completed: 2026-08-06T12:24 -->
 
 ### Step 3: Code
 
