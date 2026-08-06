@@ -139,11 +139,11 @@ mod tests {
     }
 
     #[test]
-    fn migrate_reaches_head_version_4_and_is_idempotent() {
+    fn migrate_reaches_head_version_5_and_is_idempotent() {
         let dir = TempDir::new().unwrap();
         let mut conn = connect(&temp_db_url(&dir)).unwrap();
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 4);
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 4);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 5);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 5);
     }
 
     #[test]
@@ -244,6 +244,10 @@ mod tests {
         assert_eq!(column_info(&conn, "members", "deregistered_at").0, 0);
         assert_eq!(column_info(&conn, "member_placements", "mux_pane_id").0, 0);
         assert_eq!(column_info(&conn, "monitor_runtime", "last_wake_at").0, 0);
+        assert_eq!(
+            column_info(&conn, "monitor_runtime", "wake_interval_seconds").0,
+            0
+        );
     }
 
     #[test]
@@ -329,14 +333,14 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5]);
     }
 
     // The chain guard reads the refinery-embedded listing, not the filesystem:
     // `migration_chain()` returns the `(version, name)` pairs of the embedded
     // runner's migrations, sorted ascending.
     #[test]
-    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_4() {
+    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_5() {
         let chain = migration_chain();
         let versions: Vec<u32> = chain.iter().map(|(version, _)| *version).collect();
         let contiguous: Vec<u32> = (1..=versions.len() as u32).collect();
@@ -352,6 +356,6 @@ mod tests {
             chain.iter().all(|(_, name)| !name.is_empty()),
             "every migration carries a slug"
         );
-        assert_eq!(versions.last(), Some(&4), "expected head version is 4");
+        assert_eq!(versions.last(), Some(&5), "expected head version is 5");
     }
 }
