@@ -59,7 +59,7 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
     let output = cli.run(&["message", "poll", &worker_id.to_string()]);
     assert!(stdout(&output).contains("No messages found."));
 
-    let mut child = cli.spawn(&["monitor", "1", "--tick", "1"]);
+    let mut child = cli.spawn(&["monitor", "1", "--tick", "1", "--interval", "1"]);
     std::thread::sleep(Duration::from_secs(1));
 
     let second = cli.run(&["monitor", "1", "--tick", "1"]);

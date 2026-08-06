@@ -20,10 +20,11 @@
 //!
 //! pub enum TickResult { Continue, Stop }
 //!
-//! // Pure due-check for the fleet-level wake: a NULL or unparsable stamp is
-//! // immediately due.
-//! pub fn wake_due(last_wake_at: Option<&str>, wake_interval: u64,
-//!     now: DateTime<Utc>) -> bool;
+//! // Pure due-check for the fleet-level wake: a present last_wake_at always
+//! // wins as the baseline (unparsable → immediately due); a NULL last_wake_at
+//! // falls back to started_at (NULL or unparsable → immediately due).
+//! pub fn wake_due(last_wake_at: Option<&str>, started_at: Option<&str>,
+//!     wake_interval: u64, now: DateTime<Utc>) -> bool;
 //!
 //! pub fn monitor_tick(conn: &mut Connection, mux: &dyn MonitorMux,
 //!     out: &mut dyn std::io::Write, fleet_id: i64, pid: i64,
@@ -88,14 +89,21 @@ fn mux_err(error: MultiplexerError) -> CafleetError {
     CafleetError::App(error.to_string())
 }
 
-/// Pure due-check for the fleet-level wake: a `NULL` or unparsable
-/// `last_wake_at` is immediately due; otherwise due once the interval has
-/// elapsed.
-pub fn wake_due(last_wake_at: Option<&str>, wake_interval: u64, now: DateTime<Utc>) -> bool {
-    let Some(last_wake_at) = last_wake_at else {
+/// Pure due-check for the fleet-level wake. A present `last_wake_at` always
+/// wins as the baseline, even over a fresher post-reclaim `started_at`
+/// (unparsable → immediately due); a `NULL` `last_wake_at` falls back to
+/// `started_at` (`NULL` or unparsable → immediately due, corrupt state);
+/// otherwise due once the interval has elapsed since the baseline.
+pub fn wake_due(
+    last_wake_at: Option<&str>,
+    started_at: Option<&str>,
+    wake_interval: u64,
+    now: DateTime<Utc>,
+) -> bool {
+    let Some(baseline) = last_wake_at.or(started_at) else {
         return true;
     };
-    let Ok(parsed) = parse_lenient(last_wake_at) else {
+    let Ok(parsed) = parse_lenient(baseline) else {
         return true;
     };
     (now - parsed).num_seconds() >= wake_interval as i64
@@ -132,7 +140,12 @@ pub fn monitor_tick(
     }
     let runtime = broker::read_monitor_runtime(conn, fleet_id)?
         .expect("the heartbeat just matched this fleet's runtime row");
-    if !wake_due(runtime["last_wake_at"].as_str(), wake_interval, now) {
+    if !wake_due(
+        runtime["last_wake_at"].as_str(),
+        runtime["started_at"].as_str(),
+        wake_interval,
+        now,
+    ) {
         return Ok(TickResult::Continue);
     }
 
@@ -348,20 +361,68 @@ mod tests {
 
         #[test]
         fn a_missing_or_unparsable_stamp_is_immediately_due() {
-            assert!(wake_due(None, 600, base_now()));
-            assert!(wake_due(Some("not-a-timestamp"), 600, base_now()));
+            let now = base_now();
+            let fresh = format_utc(now);
+            assert!(
+                wake_due(Some("not-a-timestamp"), Some(&fresh), 600, now),
+                "an unparsable last_wake_at is due regardless of started_at"
+            );
+            assert!(wake_due(Some("not-a-timestamp"), None, 600, now));
+            assert!(
+                wake_due(None, None, 600, now),
+                "no stamp at all → immediately due"
+            );
+            assert!(
+                wake_due(None, Some("not-a-timestamp"), 600, now),
+                "a NULL last_wake_at with a corrupt started_at → immediately due"
+            );
+        }
+
+        #[test]
+        fn a_null_last_wake_defers_to_the_started_at_baseline() {
+            let now = base_now();
+            let recent = format_utc(now - Duration::seconds(599));
+            assert!(
+                !wake_due(None, Some(&recent), 600, now),
+                "elapsed 599 < 600 since started_at → not yet due"
+            );
+            let old = format_utc(now - Duration::seconds(600));
+            assert!(
+                wake_due(None, Some(&old), 600, now),
+                "elapsed 600 >= 600 since started_at → due"
+            );
+        }
+
+        #[test]
+        fn a_present_last_wake_wins_over_a_fresher_started_at() {
+            let now = base_now();
+            let started = format_utc(now - Duration::seconds(1));
+            let old_wake = format_utc(now - Duration::seconds(600));
+            assert!(
+                wake_due(Some(&old_wake), Some(&started), 600, now),
+                "post-reclaim: the old last_wake_at drives due-ness, not the fresh started_at"
+            );
+            let recent_wake = format_utc(now - Duration::seconds(599));
+            assert!(
+                !wake_due(Some(&recent_wake), Some(&started), 600, now),
+                "elapsed 599 < 600 since last_wake_at → not due"
+            );
         }
 
         #[test]
         fn the_interval_gates_a_stamped_fleet() {
             let now = base_now();
+            let started = format_utc(now - Duration::seconds(1_000));
             let recent = format_utc(now - Duration::seconds(599));
             assert!(
-                !wake_due(Some(&recent), 600, now),
+                !wake_due(Some(&recent), Some(&started), 600, now),
                 "elapsed 599 < 600 → not yet due"
             );
             let old = format_utc(now - Duration::seconds(600));
-            assert!(wake_due(Some(&old), 600, now), "elapsed 600 >= 600 → due");
+            assert!(
+                wake_due(Some(&old), Some(&started), 600, now),
+                "elapsed 600 >= 600 → due"
+            );
         }
     }
 
@@ -413,7 +474,8 @@ mod tests {
             claim(&mut conn, fleet_id, own_pid(), now);
             let mux = FakeMux::with_live_panes(&["%0", "%2", "%4"]);
 
-            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), 600, now);
+            let due_at = now + Duration::seconds(600);
+            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), 600, due_at);
             assert!(matches!(result, TickResult::Continue));
 
             let wakes = mux.wakes.borrow();
@@ -430,7 +492,7 @@ mod tests {
             );
             drop(wakes);
 
-            let iso = format_utc(now);
+            let iso = format_utc(due_at);
             assert_eq!(
                 echo,
                 format!("{iso} tick -> wake director {director_id} (2 members)\n")
@@ -447,8 +509,13 @@ mod tests {
             claim(&mut conn, fleet_id, own_pid(), now);
             let mux = FakeMux::with_live_panes(&["%0", "%2", "%4"]);
 
-            let (_, _) = tick(&mut conn, &mux, fleet_id, own_pid(), 600, now);
-            assert_eq!(mux.wake_count(), 1, "a NULL stamp is immediately due");
+            let (_, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), 600, now);
+            assert_eq!(
+                mux.wake_count(),
+                0,
+                "the first wake is deferred past the claim tick"
+            );
+            assert!(echo.is_empty());
 
             let (_, echo) = tick(
                 &mut conn,
@@ -458,7 +525,7 @@ mod tests {
                 600,
                 now + Duration::seconds(599),
             );
-            assert_eq!(mux.wake_count(), 1, "599 < 600 → not due");
+            assert_eq!(mux.wake_count(), 0, "599 < 600 since started_at → not due");
             assert!(echo.is_empty());
 
             let (_, _) = tick(
@@ -469,7 +536,36 @@ mod tests {
                 600,
                 now + Duration::seconds(600),
             );
-            assert_eq!(mux.wake_count(), 2, "600 >= 600 → due again");
+            assert_eq!(
+                mux.wake_count(),
+                1,
+                "600 >= 600 since started_at → first wake"
+            );
+
+            let (_, echo) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                600,
+                now + Duration::seconds(1199),
+            );
+            assert_eq!(mux.wake_count(), 1, "599 since the first wake → not due");
+            assert!(echo.is_empty());
+
+            let (_, _) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                600,
+                now + Duration::seconds(1200),
+            );
+            assert_eq!(
+                mux.wake_count(),
+                2,
+                "600 since the first wake → second wake"
+            );
         }
 
         #[test]
@@ -507,7 +603,14 @@ mod tests {
             claim(&mut conn, fleet_id, own_pid(), now);
             let mux = FakeMux::with_live_panes(&["%2", "%4"]);
 
-            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), 600, now);
+            let (result, echo) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                600,
+                now + Duration::seconds(600),
+            );
             assert!(matches!(result, TickResult::Continue));
             assert_eq!(mux.wake_count(), 0, "no live Director pane → no wake");
             assert!(echo.is_empty());
@@ -528,7 +631,14 @@ mod tests {
             let mux = FakeMux::with_live_panes(&["%0", "%2", "%4"]);
             mux.wake_ok.set(false);
 
-            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), 600, now);
+            let (result, echo) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                600,
+                now + Duration::seconds(600),
+            );
             assert!(matches!(result, TickResult::Continue));
             assert_eq!(mux.wake_count(), 1);
             assert!(echo.is_empty(), "no echo on a failed wake");
@@ -541,13 +651,13 @@ mod tests {
                 fleet_id,
                 own_pid(),
                 600,
-                now + Duration::seconds(5),
+                now + Duration::seconds(605),
             );
             assert_eq!(mux.wake_count(), 2, "the unstamped fleet stays due");
             assert!(!echo.is_empty());
             assert_eq!(
                 last_wake_at(&conn, fleet_id),
-                format_utc(now + Duration::seconds(5)).as_str()
+                format_utc(now + Duration::seconds(605)).as_str()
             );
         }
 
@@ -560,7 +670,8 @@ mod tests {
             claim(&mut conn, fleet_id, own_pid(), now);
             let mux = FakeMux::with_live_panes(&["%0"]);
 
-            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), 600, now);
+            let due_at = now + Duration::seconds(600);
+            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), 600, due_at);
             assert!(matches!(result, TickResult::Continue));
 
             let wakes = mux.wakes.borrow();
@@ -570,7 +681,7 @@ mod tests {
             assert!(members.is_empty(), "the N == 0 roster is empty");
             drop(wakes);
 
-            let iso = format_utc(now);
+            let iso = format_utc(due_at);
             assert_eq!(
                 echo,
                 format!("{iso} tick -> wake director {director_id} (0 members)\n")

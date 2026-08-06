@@ -2012,10 +2012,14 @@ of `AgentStateAware` native status.
 
 #### Public surface
 
-- **`wake_due(last_wake_at, wake_interval_seconds, now) -> bool`** — pure
-  due-check for the fleet-level wake; no DB/multiplexer access. A `NULL` or
-  unparsable `last_wake_at` is immediately due; otherwise due iff
-  `now − last_wake_at`, in whole seconds, is `>= wake_interval_seconds`.
+- **`wake_due(last_wake_at, started_at, wake_interval_seconds, now) -> bool`**
+  — pure due-check for the fleet-level wake; no DB/multiplexer access. A
+  present `last_wake_at` always wins as the baseline: parsable → due iff
+  `now − last_wake_at`, in whole seconds, is `>= wake_interval_seconds`;
+  unparsable → immediately due. A `NULL` `last_wake_at` falls back to
+  `started_at` as the baseline: parsable → due iff `now − started_at`, in
+  whole seconds, is `>= wake_interval_seconds`; `NULL` or unparsable →
+  immediately due.
 - **`monitor_tick(fleet_id, now, wake_interval_seconds) -> CONTINUE | STOP`** —
   one scan pass.
 - **`run_monitor_loop(fleet_id, tick_seconds, wake_interval_seconds)`** —
@@ -2047,9 +2051,10 @@ One scan pass, steps in order:
 3. **Wake-interval gate.** `wake_interval_seconds == 0` → return `CONTINUE`
    (a heartbeat-only tick: no due-check, no Director resolution, no
    multiplexer call).
-4. **Compute due-ness.** Read the runtime row's `last_wake_at` and call
-   `wake_due(last_wake_at, wake_interval_seconds, now)`. Not due → return
-   `CONTINUE` with no multiplexer call.
+4. **Compute due-ness.** Read the runtime row's `last_wake_at` and
+   `started_at` and call
+   `wake_due(last_wake_at, started_at, wake_interval_seconds, now)`. Not due →
+   return `CONTINUE` with no multiplexer call.
 5. **Resolve the Director's pane.** Read the fleet's `director_member_id` and
    its placement's `mux_pane_id`. A Director with no pane → return `CONTINUE`
    (nothing recorded — the fleet stays due).
@@ -2089,7 +2094,9 @@ artifact (no PID file); identity throughout is the OS process id.
    tick_seconds, now-as-ISO)`. On refusal (returns false) → application error
    (exit 1) `monitor already running for fleet {fleet_id}`. There is no silent
    fallback. A reclaim leaves `last_wake_at` untouched (§6.2), so the wake
-   cadence survives a crash/restart cycle. On success, print the startup line
+   cadence survives a crash/restart cycle; it re-stamps `started_at`, so a
+   fleet that never received its first wake waits a fresh full
+   `wake_interval_seconds` from the restart. On success, print the startup line
    `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` to
    stdout before the first tick — the line the Director confirms before its
    first `cafleet member create`.
@@ -2747,10 +2754,11 @@ connection is closed when the command finishes (success or failure).
   - *Coding-agent* — assert each `build_spawn_argv` argv, the opencode model
     validation, and each backend's `ensure_available` preconditions (PATH
     check; opencode's preset-existence check) against a temp HOME.
-  - *Monitor* — `wake_due` is pure (table-test interval/`last_wake_at`/
-    `started_at`/zero-interval states); `monitor_tick` against a fake
-    broker+multiplexer asserting the `woke`-gated `record_monitor_wake` and
-    the `STOP` paths.
+  - *Monitor* — `wake_due` is pure (table-test interval gating,
+    `last_wake_at` precedence, the `started_at` baseline, and corrupt
+    stamps); `monitor_tick` against a fake broker+multiplexer asserting the
+    zero-interval heartbeat-only tick, the `woke`-gated `record_monitor_wake`,
+    and the `STOP` paths.
   - *Config* — env-var parsing, the default-URL home expansion, and loud failure
     on non-integer port/len.
 - **Integration:**
