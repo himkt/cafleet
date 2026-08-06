@@ -1,7 +1,7 @@
 # Restore WebUI editing of the Director wake interval
 
 **Status**: Approved
-**Progress**: 20/22 tasks complete
+**Progress**: 22/22 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -337,6 +337,8 @@ non-negative integer.
 
 ### Step 7: Verification
 
-- [ ] `mise //cafleet:format`, `mise //cafleet:lint`,
-      `mise //cafleet:typecheck`, `mise //admin:lint`. <!-- completed: -->
-- [ ] `mise //cafleet:test` — full suite green. <!-- completed: -->
+- [x] `mise //cafleet:format`, `mise //cafleet:lint`,
+      `mise //cafleet:typecheck`, `mise //admin:lint`.
+      <!-- completed: 2026-08-07T06:35 -->
+- [x] `mise //cafleet:test` — full suite green.
+      <!-- completed: 2026-08-07T06:35 -->
