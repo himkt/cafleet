@@ -1,6 +1,6 @@
 # Unified Coding-Agent Overlay File
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 17/17 tasks complete
 **Last Updated**: 2026-08-07
 
@@ -190,3 +190,5 @@ The unknown-token walker elsewhere in `docs_sync.rs` scans skill files by direct
 | Date | Changes |
 |------|---------|
 | 2026-08-07 | Initial draft |
+| 2026-08-07 | Create-Reviewer round 1: sweep patterns scoped to deleted artifacts; role-file and link-site counts corrected |
+| 2026-08-07 | Executed: all 17 tasks applied and verified; execute-Reviewer approved round 1; PR #285; status → Complete |
