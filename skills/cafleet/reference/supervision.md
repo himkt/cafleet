@@ -24,7 +24,7 @@ The Director's plain output is **not visible to members** — the only Director�
 
 ## The monitor heartbeat
 
-CAFleet members do not act autonomously. The Director drives the team — and the Director needs a way to wake itself up periodically to check inboxes, dispatch queued work, and detect stalls. That heartbeat is supplied by **`cafleet monitor`**, a per-fleet `scan → wake → sleep` loop that **you launch as a background task in your own pane** ({bg_run}) immediately after `cafleet fleet create`. Because it is just a backgrounded command, the heartbeat is **backend-agnostic** — a root Director on `claude`, `codex`, or `opencode` gets the identical tick.
+CAFleet members do not act autonomously. The Director drives the team — and the Director needs a way to wake itself up periodically to check inboxes, dispatch queued work, and detect stalls. That heartbeat is supplied by **`cafleet monitor`**, a per-fleet `scan → wake → sleep` loop the Director hosts in its own pane (the launch procedure is § *Spawn Protocol*). Because it is just a backgrounded command, the heartbeat is **backend-agnostic** — a root Director on `claude`, `codex`, or `opencode` gets the identical tick.
 
 The wake is **unconditional and fleet-level**: once per wake interval (default **600 s**; `cafleet monitor <fleet-id> --interval N` / `CAFLEET_MONITOR_WAKE_INTERVAL`, `0` disables the wake while the loop keeps heartbeating) the loop keystrokes one `Esc`-first payload into the Director's own pane — including when the fleet has no other members yet. There is no per-member schedule and no per-member due computation.
 
@@ -122,7 +122,7 @@ Every time you spawn a member:
 
 1. **Verify env, then ensure supervision is running**:
    - **Pre-spawn env-check (gating)**: run `cafleet doctor`. It reports the resolved multiplexer backend and the pane's session/window/pane identifiers. If it exits non-zero or fails to resolve a multiplexer backend, ABORT the spawn and surface the error — `cafleet member create` requires the Director inside a tmux or herdr pane. This is the canonical pane-identity probe; do NOT use raw `tmux display-message` / `TMUX` expansion or any other backend-specific env probe. Backend-binary availability is NOT a separate step — `member create` does its own `PATH` check and errors if the binary is missing (see [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-create)); do NOT pre-probe with `<backend> --version` / `which`.
-   - **Monitor loop live before any member** — the `monitor loop started` startup line confirmed in your background task's output (§ above). A loop that has since exited is re-launched before spawning.
+   - **Monitor loop live before any member** — startup line confirmed per *Launch the heartbeat first* (§ above); a loop that has since exited is re-launched before spawning.
 2. **Spawn the member** via `cafleet member create --fleet-id <fleet-id> --name <name> --description <desc> --file <abs path to ${BASE}/.prompts/<role>-<UTC-compact>.md>` (the Director is auto-resolved from the fleet row). The pre-spawn file IS both the CLI input and the permanent audit artifact; the audit-file convention (with the `${BASE} == <unset>` guarded-skip + inline fallback), the `--model` flag, and the model-name→backend inference are canonical in [`reference/director.md`](director.md) § Member Create.
 3. **Include the ready-signal directive in the spawn prompt.** Every spawn prompt MUST instruct the member, as its first Bash call, to send `cafleet message send … "ready"` (canonical wording in [`roles/member.md`](../roles/member.md) § *On spawn — send the ready signal*). It is the ONLY signal that the coding agent inside the pane has actually booted; a prompt missing it is a defect — fix and re-spawn.
 4. **Verify the member is placed** by checking that `cafleet member list <fleet-id>` shows the new member with a non-null `pane_id`. This confirms the pane was created. Liveness of the coding agent inside the pane is confirmed asynchronously when the ready signal arrives — NOT by `member list`.
@@ -162,7 +162,7 @@ The workflow's spawned members run in workspace-scoped auto-approval mode ({perm
 
 | Phase | Action |
 |---|---|
-| Launch (before any member) | Immediately after `cafleet fleet create`, launch `cafleet monitor <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. That confirmation gates the first `cafleet member create`. |
+| Launch (before any member) | Launch the heartbeat and confirm its startup line per § *Spawn Protocol* → *Launch the heartbeat first*; that confirmation gates the first `cafleet member create`. |
 | Run work | One `Esc`-first wake lands in your pane per wake interval (default 600 s), naming every member and its `unacked` count; each wake (or inbound work via inline preview) is the cue to run the 5-step facilitation loop above. |
 | User review | Keep the loop's background task running during the review cycle — revisions and re-reviews still count as in-progress work. |
 | Teardown | Stop the background task FIRST ({bg_stop}) — the loop's signal handler runs its ownership-checked runtime clear — then delete members. The full ordering is § *Cleanup Protocol*. |

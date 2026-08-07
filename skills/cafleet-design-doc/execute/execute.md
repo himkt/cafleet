@@ -148,14 +148,12 @@ Load the `cafleet` skill; its `reference/supervision.md` governance is § Requir
 
 #### 3a. Establish a CAFleet fleet and capture the root Director's `member_id`
 
-`cafleet fleet create` (which must be run inside a tmux or herdr session) atomically creates the fleet and registers a root Director bound to the current multiplexer pane. Use `--json` so both IDs are machine-parseable:
+`cafleet fleet create` atomically creates the fleet and registers a root Director bound to the current multiplexer pane. Use `--json` so both IDs are machine-parseable:
 
 ```bash
 cafleet fleet create --name "design-doc-execute-{slug}" --coding-agent <backend> --json
 # → { "fleet_id": <int>, "director": { "member_id": <int>, "name": "Director", "placement": {...} } }
 ```
-
-`--coding-agent <backend>` — substitute the coding agent you are actually running on: your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity (e.g. Claude Code → `claude`).
 
 Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
 
@@ -163,7 +161,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 3b. Launch the monitor loop (before any member)
 
-This team **keeps an active heartbeat**: immediately after `cafleet fleet create` and **before** the first `cafleet member create`, the Director launches `cafleet monitor <fleet-id>` as a background task in its own pane ({bg_run}) and confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the first `member create`.** The heartbeat runs **unchanged** through Steps 3–8; the background task is stopped first in Step 8's cleanup. See the `cafleet` skill's `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
+This team **keeps an active heartbeat**: the Director launches the monitor heartbeat per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*. **The startup-line confirmation gates the first `member create`.** The heartbeat runs **unchanged** through Steps 3–8; the background task is stopped first in Step 8's cleanup. See `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -435,7 +433,7 @@ No round limit — the loop continues until the user approves or aborts.
 
 1. Update design document Status to "Aborted", add Changelog entry. Place a `COMMENT(director): aborting — finalize and stand by` marker near the top of the doc body (above the Overview section — `Status:` is bold metadata, not a heading, so it is not a valid `paragraph-` target). Notify any still-live members with a single `cafleet message send ... "ready (doc)"` per member so they read the marker and stand by.
 2. Commit (separate commands): `git add <design-doc>` then `git commit -m "docs: mark design doc as aborted"`
-3. Follow Shutdown Protocol (Step 8: stop the monitor loop's background task first, then delete the members, and run `cafleet fleet delete <fleet-id>` to tear down the fleet and sweep the root Director).
+3. Follow Shutdown Protocol (Step 8: the canonical teardown per the `cafleet` skill § *Shutdown Protocol*).
 
 ### Step 7: Push & Create PR (Director)
 
@@ -477,5 +475,5 @@ Runs after Step 7 completes, or directly after Step 6 when Step 7 was skipped (g
 4. **Push decision** (separate Bash call): run `git rev-parse --abbrev-ref <branch-name>@{upstream}`.
    - Exit code 0 (branch is tracked on origin): `git push`. Covers both the "Step 7 fully succeeded" path and the "Step 7 partial-fail (push OK, PR create failed)" path.
    - Non-zero exit: skip the push. The docs commit stays local.
-5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*: stop the monitor loop's background task first ({bg_stop}; the loop launched in Step 3b), then `cafleet member delete` the Programmer, Tester, Verifier, and Reviewer if spawned (each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete <fleet-id>`; `cafleet fleet list` to confirm.
+5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*. Workflow delta: delete the Programmer, Tester, Verifier, and Reviewer if spawned.
 6. **Report to the user**: include the PR URL (if Step 7 created one), the Reviewer outcome (rounds to approval), and any skipped-step reasons.

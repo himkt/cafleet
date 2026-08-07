@@ -74,13 +74,11 @@ Capture the `fleet_id` and `director.member_id` integer ids from the JSON respon
 cafleet fleet create --name "research-[topic-slug]" --coding-agent <backend> --json
 ```
 
-`--coding-agent <backend>` — substitute the coding agent you are actually running on: your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity (e.g. Claude Code → `claude`).
-
 Capture `fleet_id` and `director.member_id` from the response. Treat `fleet_id` as `[fleet-id]` and `director.member_id` as `[director-member-id]` for the rest of this skill.
 
 ### Step 1: Supervision Model (Director — launch the monitor loop first)
 
-Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor [fleet-id]` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Manager / Scout / Researcher spawns** — do not spawn a member until it has arrived. The background task is stopped first in the Step 8 teardown.
+Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. Launch the monitor heartbeat per its § *Spawn Protocol*. **The startup-line confirmation gates the Manager / Scout / Researcher spawns** — do not spawn a member until it has arrived. The background task is stopped first in the Step 8 teardown.
 
 On each active turn, check `${OUTPUT_DIR}` for these expected deliverables:
 
@@ -249,7 +247,7 @@ After user approval, offer to create a presentation via {decision_surface} (adap
 
 ### Step 8: Finalize & Clean Up (Director)
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*: stop the monitor loop's background task first ({bg_stop}), then `cafleet member delete` the Researchers, any active Scout, and the Manager (each kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete [fleet-id]`; `cafleet fleet list` to confirm. Never use raw `tmux kill-pane` / `tmux send-keys`.
+Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*. Workflow delta: delete order Researchers → any active Scout → Manager.
 
 ## Spawnable Agents
 

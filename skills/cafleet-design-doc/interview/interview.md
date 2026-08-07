@@ -103,13 +103,11 @@ In resume mode where Step 2 IS run, parse the JSON array from the existing `inte
 cafleet fleet create --name "design-doc-interview-{slug}" --coding-agent <backend> --json
 ```
 
-`--coding-agent <backend>` — substitute the coding agent you are actually running on: your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity (e.g. Claude Code → `claude`).
-
 Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
 
 #### 2b. Launch the monitor loop (before the Analyzer)
 
-BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Then launch `cafleet monitor <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived. The background task is stopped first in the 2f teardown.
+BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Launch the monitor heartbeat per its § *Spawn Protocol*. **The startup-line confirmation gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived. The background task is stopped first in the 2f teardown.
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
@@ -151,7 +149,7 @@ The reply must be a flat numbered list following the format specified in [roles/
 
 #### 2f. Tear down the monitor loop and the Analyzer
 
-The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping it alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* immediately after the question list is received: stop the monitor loop's background task first ({bg_stop}), then `cafleet member delete` the Analyzer (kills the pane immediately); `cafleet member list` to verify the roster is empty; `cafleet fleet delete <fleet-id>`; `cafleet fleet list` to confirm.
+The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping it alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*. Workflow delta: teardown fires immediately after the question list is acked; delete the Analyzer.
 
 #### 2g. Persist the question list to `question.md`
 

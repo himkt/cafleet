@@ -1,7 +1,7 @@
 # Skill Boilerplate Dedup
 
 **Status**: Approved
-**Progress**: 10/65 tasks complete
+**Progress**: 17/65 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -247,13 +247,13 @@ Executed in Step 9 with `rg` under `skills/`. Each phrase is a verbatim fragment
 
 ### Step 3: Orchestration dedup — B2, B3, B4, B11
 
-- [ ] B2: in the 5 workflow bodies (`create.md` 1b, `interview.md` 2b, `execute.md` 3b, `report.md` Step 1, `presentation.md` 1b), replace the monitor-launch restatement with a pointer to `supervision.md` § *Spawn Protocol* plus the workflow delta: which spawns the startup-line confirmation gates and which step stops the loop. `presentation.md` keeps its deliverables/roster note. <!-- completed: -->
-- [ ] B2: shrink the Bootstrap accountability bullet in the 4 consumer Director role files (`create/roles/director.md`, `execute/roles/director.md`, `report/roles/director.md`, `presentation/roles/director.md`) to obligation + pointer, keeping the "Load the `cafleet` skill and Read its `reference/supervision.md`" clause. <!-- completed: -->
-- [ ] B2/CF-F7: inside `supervision.md`, keep § Spawn Protocol as the canonical launch statement and the Quick Reference row; reduce the § heartbeat intro, the spawn-step-1 line, and the Lifecycle Launch row to pointer clauses (`monitor loop started` remains present in the file). <!-- completed: -->
-- [ ] B3: delete the `--coding-agent` substitution paragraph at the 5 workflow-body sites and the 4 Director role embeds, leaving the existing "per `supervision.md` § *Spawn Protocol* → *Fleet bootstrap*" citation to cover both id capture and backend substitution; point `cli.md` § Typical Workflow at the owner. <!-- completed: -->
-- [ ] B4: replace the 5 workflow-body teardown enumerations with the pointer + delta form ("Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*. Workflow delta: …") — deltas: create = delete Drafter + Reviewer; interview = teardown after question-list ack, delete Analyzer; execute = delete Programmer, Tester, Verifier, Reviewer if spawned; report = delete order Researchers → Scouts → Manager; presentation = VR close-handshake + agent-browser/Slidev release steps kept verbatim. <!-- completed: -->
-- [ ] B11: keep one Prerequisites sentence per workflow body; drop the tmux/herdr parentheticals inside fleet-create blocks and Director bullets. <!-- completed: -->
-- [ ] Run `mise //cafleet:test` (supervision.md term pins are the sensitive ones here). <!-- completed: -->
+- [x] B2: in the 5 workflow bodies (`create.md` 1b, `interview.md` 2b, `execute.md` 3b, `report.md` Step 1, `presentation.md` 1b), replace the monitor-launch restatement with a pointer to `supervision.md` § *Spawn Protocol* plus the workflow delta: which spawns the startup-line confirmation gates and which step stops the loop. `presentation.md` keeps its deliverables/roster note. <!-- completed: 2026-08-07T09:52 -->
+- [x] B2: shrink the Bootstrap accountability bullet in the 4 consumer Director role files (`create/roles/director.md`, `execute/roles/director.md`, `report/roles/director.md`, `presentation/roles/director.md`) to obligation + pointer, keeping the "Load the `cafleet` skill and Read its `reference/supervision.md`" clause. <!-- completed: 2026-08-07T09:54 -->
+- [x] B2/CF-F7: inside `supervision.md`, keep § Spawn Protocol as the canonical launch statement and the Quick Reference row; reduce the § heartbeat intro, the spawn-step-1 line, and the Lifecycle Launch row to pointer clauses (`monitor loop started` remains present in the file). <!-- completed: 2026-08-07T09:55 -->
+- [x] B3: delete the `--coding-agent` substitution paragraph at the 5 workflow-body sites and the 4 Director role embeds, leaving the existing "per `supervision.md` § *Spawn Protocol* → *Fleet bootstrap*" citation to cover both id capture and backend substitution; point `cli.md` § Typical Workflow at the owner. <!-- completed: 2026-08-07T09:56 -->
+- [x] B4: replace the 5 workflow-body teardown enumerations with the pointer + delta form ("Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*. Workflow delta: …") — deltas: create = delete Drafter + Reviewer; interview = teardown after question-list ack, delete Analyzer; execute = delete Programmer, Tester, Verifier, Reviewer if spawned; report = delete order Researchers → Scouts → Manager; presentation = VR close-handshake + agent-browser/Slidev release steps kept verbatim. <!-- completed: 2026-08-07T09:57 -->
+- [x] B11: keep one Prerequisites sentence per workflow body; drop the tmux/herdr parentheticals inside fleet-create blocks and Director bullets. <!-- completed: 2026-08-07T09:58 -->
+- [x] Run `mise //cafleet:test` (supervision.md term pins are the sensitive ones here). <!-- completed: 2026-08-07T10:00 -->
 
 ### Step 4: Member-frame dedup — B5, B6, B9
 

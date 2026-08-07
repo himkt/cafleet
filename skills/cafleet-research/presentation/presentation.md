@@ -91,15 +91,13 @@ cafleet doctor
 cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --json
 ```
 
-`--coding-agent <backend>` — substitute the coding agent you are actually running on: your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity (e.g. Claude Code → `claude`).
-
 This is the gating env-check per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*.
 
 Capture `fleet_id` and `director.member_id` from the JSON response and substitute them into every subsequent `cafleet ...` call, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
 
 #### 1b. Launch the monitor loop (before any member)
 
-Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor [fleet-id]` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Presentation/Transcript spawns** (1d) — do not spawn a member until it has arrived. The background task is stopped first in the Step 5 teardown. Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
+Launch the monitor heartbeat per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*. **The startup-line confirmation gates the Presentation/Transcript spawns** (1d) — do not spawn a member until it has arrived. The background task is stopped first in the Step 5 teardown. Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 
@@ -282,7 +280,7 @@ No round limit — loop until approved.
 
 **Only enter after the user approves in Step 4.**
 
-Follow the Shutdown Protocol in the `cafleet` skill § *Shutdown Protocol*: stop the monitor loop's background task first ({bg_stop}), then `cafleet member delete` Presentation, Transcript, and any active VR batch — but **for an active VR batch, run the close handshake first**: the Director sends `CLOSE:` via `cafleet message send`, the VR runs `pnpm exec agent-browser --session vr-batch-<start> close` and replies `closed`, THEN delete it. Verify the roster is empty with `cafleet member list`.
+Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*. Workflow delta: delete Presentation, Transcript, and any active VR batch — but **for an active VR batch, run the close handshake first**: the Director sends `CLOSE:` via `cafleet message send`, the VR runs `pnpm exec agent-browser --session vr-batch-<start> close` and replies `closed`, THEN delete it.
 
 Then the presentation-specific teardown:
 

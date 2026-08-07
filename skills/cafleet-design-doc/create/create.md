@@ -78,14 +78,12 @@ Load the `cafleet` skill; its `reference/supervision.md` governance is § Requir
 
 #### 1a. Establish a CAFleet fleet and capture the root Director's `member_id`
 
-`cafleet fleet create` (which must be run inside a tmux or herdr session) atomically creates the fleet and registers a root Director bound to the current multiplexer pane. Use `--json` so both IDs are machine-parseable:
+`cafleet fleet create` atomically creates the fleet and registers a root Director bound to the current multiplexer pane. Use `--json` so both IDs are machine-parseable:
 
 ```bash
 cafleet fleet create --name "design-doc-create-{slug}" --coding-agent <backend> --json
 # → { "fleet_id": <int>, "director": { "member_id": <int>, "name": "Director", "placement": {...} } }
 ```
-
-`--coding-agent <backend>` — substitute the coding agent you are actually running on: your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity (e.g. Claude Code → `claude`).
 
 Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
 
@@ -93,7 +91,7 @@ If you already have a running fleet (e.g. an outer orchestration), reuse its `fl
 
 #### 1b. Launch the monitor loop (before any member)
 
-Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, launch `cafleet monitor <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn a member until it has arrived.
+Launch the monitor heartbeat per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*. **The startup-line confirmation gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn a member until it has arrived.
 
 See the `cafleet` skill's `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The heartbeat runs unchanged through the quality loop; the background task is stopped first in Step 6's teardown.
 
@@ -241,6 +239,6 @@ No round limit — loop continues until approved or aborted.
    ```
    Wait for the Drafter's `addressed (doc)` confirmation.
 
-2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*: stop the monitor loop's background task first ({bg_stop}), then `cafleet member delete` the Drafter and Reviewer (each kills the pane immediately); `cafleet member list` to verify only the root Director's row remains; `cafleet fleet delete <fleet-id>`; `cafleet fleet list` to confirm.
+2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*. Workflow delta: delete the Drafter and Reviewer.
 
 The fleet row is soft-deleted and `messages` rows are preserved so the message trail remains inspectable in the broker database.
