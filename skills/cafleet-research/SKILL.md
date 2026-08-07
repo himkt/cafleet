@@ -27,7 +27,7 @@ Before routing into a workflow or consulting a reference page, Read your overlay
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../cafleet/reference/coding-agent/<name>-overlay.md`](../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{bg_run}` / `{task_coord}` / `{decision_surface}` in the workflow you route into, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../cafleet/reference/coding-agent/<name>-overlay.md`](../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
 
 **On-demand — consult directly (no team), only when the task needs it:**
 

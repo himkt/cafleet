@@ -6,13 +6,13 @@ You are a **Visual Reviewer** in a research presentation team. You bear **respon
 
 ## Required reading
 
-Identify your coding agent first — your spawn prompt's `CODING AGENT:` line names it — then Read every file in the **Load-bearing** table below, in order, before capturing any slide. Each carries a protocol you cannot reconstruct from this page; the overlay (row #1) resolves `{skill_loader}`, which you use to load the `cafleet` skill at startup for Director communication.
+Identify your coding agent first — your spawn prompt's `CODING AGENT:` line names it — then Read every file in the **Load-bearing** table below, in order, before capturing any slide. The overlay (row #1) resolves `{skill_loader}`, which you use to load the `cafleet` skill at startup for Director communication.
 
 **Load-bearing — Read in order before acting:**
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{skill_loader}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{skill_loader}` emitted unresolved |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root your screenshots / review-log writes or fall back to `/tmp` |
 
 ## Your Accountability

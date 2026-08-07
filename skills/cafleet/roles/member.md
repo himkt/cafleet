@@ -6,13 +6,13 @@ This file is your role anchor. The cafleet CLI surface you call (poll / send / a
 
 ## Required reading
 
-At startup — before you process your first task (the `ready` handshake in the next section excepted) — Read every file in the **Load-bearing** table below, in order. Each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it.
+At startup — before you process your first task (the `ready` handshake in the next section excepted) — Read every file in the **Load-bearing** table below, in order. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it.
 
 **Load-bearing — Read in order before acting:**
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{permission_flags}` / `{task_coord}`, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{permission_flags}` emitted unresolved |
 | 2 | [`reference/base-dir.md`](../reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root every scratch / audit / figure write or fall back to `/tmp` |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**

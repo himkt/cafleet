@@ -1,7 +1,7 @@
 # Skill Boilerplate Dedup
 
 **Status**: Approved
-**Progress**: 7/65 tasks complete
+**Progress**: 10/65 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -241,9 +241,9 @@ Executed in Step 9 with `rg` under `skills/`. Each phrase is a verbatim fragment
 
 ### Step 2: B1 — overlay row and preamble standardization (27 entry points)
 
-- [ ] Standardize the Required-reading row-#1 "What you lose if you skip it" cell to the short form in all 27 entry points, keeping per file: the word "overlay", the "read **and resolve**" directive, the *Resolve your overlay* pointer, and one role-relevant token example. <!-- completed: -->
-- [ ] Compress the Required-reading preamble in the same files to the selector clause ("Identify your coding agent first — your spawn prompt's `CODING AGENT:` line names it; a standalone reader uses its own identity"), dropping the repeated "Each carries a protocol you cannot reconstruct from this page" framing where the table is 1–3 pointer rows. <!-- completed: -->
-- [ ] Run `mise //cafleet:test` (row-#1 guard is the sensitive one here). <!-- completed: -->
+- [x] Standardize the Required-reading row-#1 "What you lose if you skip it" cell to the short form in all 27 entry points, keeping per file: the word "overlay", the "read **and resolve**" directive, the *Resolve your overlay* pointer, and one role-relevant token example. <!-- completed: 2026-08-07T09:38 -->
+- [x] Compress the Required-reading preamble in the same files to the selector clause ("Identify your coding agent first — your spawn prompt's `CODING AGENT:` line names it; a standalone reader uses its own identity"), dropping the repeated "Each carries a protocol you cannot reconstruct from this page" framing where the table is 1–3 pointer rows. <!-- completed: 2026-08-07T09:40 -->
+- [x] Run `mise //cafleet:test` (row-#1 guard is the sensitive one here). <!-- completed: 2026-08-07T09:42 -->
 
 ### Step 3: Orchestration dedup — B2, B3, B4, B11
 
