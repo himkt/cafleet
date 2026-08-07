@@ -1,7 +1,7 @@
 # Skill Boilerplate Dedup
 
 **Status**: Approved
-**Progress**: 61/65 tasks complete
+**Progress**: 65/65 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -316,10 +316,10 @@ Executed in Step 9 with `rg` under `skills/`. Each phrase is a verbatim fragment
 
 ### Step 9: Verification and deployment
 
-- [ ] Full `mise //cafleet:test` green; `git diff` confirms zero changes under `cafleet/tests/`. <!-- completed: -->
-- [ ] Execute the per-block ownership sweeps (Specification § *Per-block ownership sweeps*): every one of the B1–B11 phrases matches its expected-hits row. Additionally confirm the poll-id caveat's `distinct from` phrasing has exactly 1 hit under `skills/`, in `cafleet/SKILL.md` § *Poll*. <!-- completed: -->
-- [ ] `git status` confirms nothing under `.scan/` is staged or committed. <!-- completed: -->
-- [ ] Re-run `cafleet setup` for the backends in use so the deployed skill replicas pick up the edited skills. <!-- completed: -->
+- [x] Full `mise //cafleet:test` green; `git diff` confirms zero changes under `cafleet/tests/`. <!-- completed: 2026-08-07T11:44 -->
+- [x] Execute the per-block ownership sweeps (Specification § *Per-block ownership sweeps*): every one of the B1–B11 phrases matches its expected-hits row. Additionally confirm the poll-id caveat's `distinct from` phrasing has exactly 1 hit under `skills/`, in `cafleet/SKILL.md` § *Poll*. <!-- completed: 2026-08-07T11:47 -->
+- [x] `git status` confirms nothing under `.scan/` is staged or committed. <!-- completed: 2026-08-07T11:48 -->
+- [x] Re-run `cafleet setup` for the backends in use so the deployed skill replicas pick up the edited skills. <!-- completed: 2026-08-07T11:55 -->
 
 ---
 
