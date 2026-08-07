@@ -1,7 +1,7 @@
 # Unified Coding-Agent Overlay File
 
 **Status**: Approved
-**Progress**: 8/17 tasks complete
+**Progress**: 10/17 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -164,8 +164,8 @@ The unknown-token walker elsewhere in `docs_sync.rs` scans skill files by direct
 
 ### Step 5: Update the repo-local .claude/skills consumers
 
-- [ ] `.claude/skills/clean-docs/`: `SKILL.md` (row #1 and the spawn-prompt overlay pointer), the 3 workflow bodies (`residue/residue.md`, `affirmative/affirmative.md`, `simplification/simplification.md`), and the 6 role files (`{residue,affirmative,simplification}/roles/{scanner,reviewer}.md`) — row #1 link form. <!-- completed: -->
-- [ ] `.claude/skills/skill-author/SKILL.md` (overlay-home bullet, pointer instruction, rule reference — describe the single-file + Template-section procedure) and `.claude/skills/cafleet-model-list-refresh/SKILL.md` (the `{reviewer_model}` row pointer). <!-- completed: -->
+- [x] `.claude/skills/clean-docs/`: `SKILL.md` (row #1 and the spawn-prompt overlay pointer), the 3 workflow bodies (`residue/residue.md`, `affirmative/affirmative.md`, `simplification/simplification.md`), and the 6 role files (`{residue,affirmative,simplification}/roles/{scanner,reviewer}.md`) — row #1 link form. <!-- completed: 2026-08-07T13:21 -->
+- [x] `.claude/skills/skill-author/SKILL.md` (overlay-home bullet, pointer instruction, rule reference — describe the single-file + Template-section procedure) and `.claude/skills/cafleet-model-list-refresh/SKILL.md` (the `{reviewer_model}` row pointer). <!-- completed: 2026-08-07T13:21 -->
 
 ### Step 6: Docs wording check
 

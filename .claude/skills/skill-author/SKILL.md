@@ -510,11 +510,11 @@ CAFleet runs members on three coding-agent backends — `claude`, `codex`, `open
 The split:
 
 - **Base — your `SKILL.md` and `roles/*.md`.** Write these so they read the same on any backend. State *what* to do in backend-agnostic terms; wherever behavior varies by backend, state the neutral behavior and point the agent at its overlay.
-- **Overlay — `skills/cafleet/reference/coding-agent/<name>-overlay.md`.** This is the single canonical home for every backend delta. The deltas that vary by backend: the decision surface (the `AskUserQuestion` analog or the plain-message fallback), the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, the reasoning-effort levels, and the skill-loading recipe. Put each backend's concrete realization in its overlay; a new overlay starts from `reference/coding-agent/_template.md`.
+- **Overlay — the per-backend sections of `skills/cafleet/reference/coding-agent-overlays.md`.** This is the single canonical home for every backend delta. The deltas that vary by backend: the decision surface (the `AskUserQuestion` analog or the plain-message fallback), the auto-approval / permission flags, the background-task + task-list primitives, pane discovery / pane title, the reasoning-effort levels, and the skill-loading recipe. Put each backend's concrete realization in its own `## <name>` section; a new backend section starts by copying the file's `## Template` section.
 
 Wire it up:
 
-1. **Point at the overlay.** `skills/cafleet/SKILL.md` carries the canonical "apply your coding-agent overlay" instruction; every sibling family `SKILL.md` carries a one-line pointer to `../cafleet/reference/coding-agent/<name>-overlay.md`. A new family skill adds the same pointer near its top.
+1. **Point at the overlay.** `skills/cafleet/SKILL.md` carries the canonical "apply your coding-agent overlay" instruction; every sibling family `SKILL.md` carries a one-line pointer to `../cafleet/reference/coding-agent-overlays.md#<name>`. A new family skill adds the same pointer near its top.
 2. **Stamp the backend into the spawn prompt.** Add a `CODING AGENT: {coding_agent}` line to the spawn prompt's identity block (next to `FLEET ID` / `BASE`). The CLI renders it to the resolved backend name at spawn — no Director-side substitution and no CLI change — so a spawned member knows which overlay to read. A standalone agent uses its own identity instead.
 3. **Keep the homes independent.** The agent-facing overlay home and the human-facing `docs/docs/spec/coding-agent-backends.md` operator docs never cross-link in either direction. Restating an operational fact in both is fine; linking between them is not.
 
