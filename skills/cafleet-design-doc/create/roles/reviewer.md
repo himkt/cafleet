@@ -23,13 +23,9 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 - **Ensure correctness.** Verify technical details are accurate. Implementation steps must match the specification. Cross-check that numbers, constraints, and dependencies are consistent throughout.
 - **Ensure actionability.** An implementer should be able to execute the document without needing to ask clarifying questions. Ambiguous instructions, vague acceptance criteria, or unclear ordering are all issues to flag.
 
-## Placeholder convention
-
-Angle-bracket tokens (`<fleet-id>`, `<my-member-id>`, `<director-member-id>`) are placeholders, **not** shell variables — substitute the literal ids from your spawn prompt; the rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
-
 ## Communication Protocol
 
-You do NOT speak to the user directly; all feedback goes through the Director via the broker. Poll your inbox, `cafleet message ack` each assignment, then read the doc and report via `cafleet message send` — command shapes in the `cafleet` skill core and your spawn prompt.
+Broker protocol (poll/ack/send, ids from your spawn prompt, never the user directly): the `cafleet` skill core.
 
 **Coordination Protocol**: Inter-member cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md): single-line `<verb> (<pointer>)` body, findings in inline `COMMENT(reviewer): [TAG] <body>` markers at the affected section (never in the cafleet body). Report `complete (doc) — N issues` after a review pass, or `approved (doc)` when all quality criteria are met (see § *Approval Signal*).
 
@@ -65,4 +61,4 @@ Aim for thoroughness that makes re-review unnecessary. A review that catches all
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.
+Per `skills/cafleet/roles/member.md` § *Shutdown* — nothing is required of you.

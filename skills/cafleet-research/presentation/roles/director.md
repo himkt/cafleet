@@ -26,7 +26,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 ## Communication Protocol
 
-All Director-to-member messages use `cafleet message send` (members addressed by literal `member_id` from the `cafleet member create` JSON). You `cafleet message ack` each inbound member message after acting (un-acked messages re-surface; command shapes in the `cafleet` skill core). The poll `id:` integer is the cafleet message id — **distinct from** any harness task-list id (present only where your backend has a task list). Pane silence is the expected between-turn state, not a stall — re-engage only when a member's inactivity blocks your next step (e.g. the next VR batch cannot spawn because the current VR has not reported).
+Broker protocol (send/poll/ack, members addressed by the literal `member_id` from the `cafleet member create` JSON): the `cafleet` skill core. Pane silence is the expected between-turn state, not a stall — re-engage only when a member's inactivity blocks your next step (e.g. the next VR batch cannot spawn because the current VR has not reported).
 
 ## Presentation Review Tags
 

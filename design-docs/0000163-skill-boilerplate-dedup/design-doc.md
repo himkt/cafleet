@@ -1,7 +1,7 @@
 # Skill Boilerplate Dedup
 
 **Status**: Approved
-**Progress**: 17/65 tasks complete
+**Progress**: 21/65 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -257,10 +257,10 @@ Executed in Step 9 with `rg` under `skills/`. Each phrase is a verbatim fragment
 
 ### Step 4: Member-frame dedup — B5, B6, B9
 
-- [ ] B5: replace the § Shutdown stanza in the 12 consumer member role files (7 design-doc, 5 research) with a one-line pointer naming `skills/cafleet/roles/member.md` § *Shutdown* — "nothing is required of you"; `visual-reviewer.md` keeps its CLOSE-handshake section unchanged. <!-- completed: -->
-- [ ] B6: in the 13 member role files and the 2 research Director role files (`report/roles/director.md`, `presentation/roles/director.md`), shrink the Communication Protocol paragraph to one pointer sentence (broker cycle, ids from the spawn prompt, never the user directly — the `cafleet` skill core) plus the preserved role deltas listed in the Specification. <!-- completed: -->
-- [ ] B9: delete the standalone Placeholder-convention section from the 7 design-doc member role files; the Director role variants keep only their per-workflow token roster + the canonical pointer. <!-- completed: -->
-- [ ] Run `mise //cafleet:test`. <!-- completed: -->
+- [x] B5: replace the § Shutdown stanza in the 12 consumer member role files (7 design-doc, 5 research) with a one-line pointer naming `skills/cafleet/roles/member.md` § *Shutdown* — "nothing is required of you"; `visual-reviewer.md` keeps its CLOSE-handshake section unchanged. <!-- completed: 2026-08-07T10:08 -->
+- [x] B6: in the 13 member role files and the 2 research Director role files (`report/roles/director.md`, `presentation/roles/director.md`), shrink the Communication Protocol paragraph to one pointer sentence (broker cycle, ids from the spawn prompt, never the user directly — the `cafleet` skill core) plus the preserved role deltas listed in the Specification. <!-- completed: 2026-08-07T10:10 -->
+- [x] B9: delete the standalone Placeholder-convention section from the 7 design-doc member role files; the Director role variants keep only their per-workflow token roster + the canonical pointer. <!-- completed: 2026-08-07T10:11 -->
+- [x] Run `mise //cafleet:test`. <!-- completed: 2026-08-07T10:13 -->
 
 ### Step 5: Skeleton dedup — B7, B8
 

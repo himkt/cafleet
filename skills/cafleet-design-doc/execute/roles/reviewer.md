@@ -23,13 +23,9 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 - **Findings land as markers, never as code edits.** Your only edits are `COMMENT(reviewer): [TAG] <body>` markers — source-anchored findings in the source/test file at `<file>:<line>`, spec-level findings at the affected design-doc paragraph.
 - **Approve only when no substantive issues remain.** Minor style preferences alone are not grounds for blocking approval.
 
-## Placeholder convention
-
-Angle-bracket tokens (`<fleet-id>`, `<my-member-id>`, `<director-member-id>`) are placeholders, **not** shell variables — substitute the literal ids from your spawn prompt; the rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
-
 ## Communication Protocol
 
-You do NOT speak to the user directly; all findings go through the Director via the broker. Poll your inbox, `cafleet message ack` each assignment, then review and report via `cafleet message send` — command shapes in the `cafleet` skill core and your spawn prompt.
+Broker protocol (poll/ack/send, ids from your spawn prompt, never the user directly): the `cafleet` skill core.
 
 **Coordination Protocol**: Inter-member cafleet messages follow the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md): single-line `<verb> (<pointer>)` body, findings in inline `COMMENT(reviewer): [TAG] <body>` markers at the affected pointer (never in the cafleet body).
 
@@ -69,4 +65,4 @@ A routed member may dispute a finding by counter-escalating; the Director arbitr
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.
+Per `skills/cafleet/roles/member.md` § *Shutdown* — nothing is required of you.

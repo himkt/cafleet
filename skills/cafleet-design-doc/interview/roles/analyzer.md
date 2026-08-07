@@ -24,13 +24,9 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 - **Every question must have a number, target section heading, question text, and 2–4 answer options.** Missing fields force the Director to send corrective requests.
 - **End the list with a single line `Total: N questions`** so the Director can verify it received the entire reply.
 
-## Placeholder convention
-
-Angle-bracket tokens (`<fleet-id>`, `<my-member-id>`, `<director-member-id>`) are placeholders, **not** shell variables — substitute the literal ids from your spawn prompt; the rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
-
 ## Communication Protocol
 
-You do NOT speak to the user directly; all output goes to the Director via the broker. Send the numbered list (ending in `Total: N questions`) via `cafleet message send`; poll your inbox and `cafleet message ack` any corrective reformat request, then reformat and resend — command shapes in the `cafleet` skill core and your spawn prompt.
+Broker protocol (poll/ack/send, ids from your spawn prompt, never the user directly): the `cafleet` skill core. On a corrective reformat request from the Director, reformat and resend the list.
 
 ## Question Categories
 
@@ -85,4 +81,4 @@ Rules:
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you.
+Per `skills/cafleet/roles/member.md` § *Shutdown* — nothing is required of you.

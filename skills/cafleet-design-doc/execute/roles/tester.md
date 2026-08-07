@@ -22,13 +22,9 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 - **Resolve test defects promptly.** When the Programmer escalates a suspected test defect (relayed by the Director via `cafleet message send`), evaluate the feedback honestly and fix your tests if they are wrong.
 - **Use the project's existing test patterns.** Match the file naming, directory structure, and assertion style already established in the project.
 
-## Placeholder convention
-
-Angle-bracket tokens (`<fleet-id>`, `<my-member-id>`, `<director-member-id>`) are placeholders, **not** shell variables — substitute the literal ids from your spawn prompt; the rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
-
 ## Communication Protocol
 
-You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each message — command shapes in the `cafleet` skill core; your ids are the literal `FLEET ID:` / `YOUR MEMBER ID:` / `DIRECTOR MEMBER ID:` lines in your spawn prompt.
+Broker protocol (poll/ack/send, ids from your spawn prompt, never the user directly): the `cafleet` skill core.
 
 **Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules.
 
@@ -82,4 +78,4 @@ When the Director sends `ready (paragraph-Implementation > Step N)` after a Prog
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.
+Per `skills/cafleet/roles/member.md` § *Shutdown* — nothing is required of you.

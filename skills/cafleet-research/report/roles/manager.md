@@ -32,7 +32,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 ## Communication Protocol
 
-You do NOT speak to the user directly, nor to Scouts/Researchers — all coordination goes through the Director via `cafleet message send` (spawn requests, contradiction flags, completion reports), and you `cafleet message ack` each inbound Director message after acting (command shapes in the `cafleet` skill core + your spawn prompt). The poll `id:` integer is the cafleet message id — **distinct from** any harness task-list id used for sub-topic tracking (present only where your backend has a task list). Pane silence is the expected between-turn state — work resumes when a new message arrives.
+Broker protocol (poll/ack/send, ids from your spawn prompt, never the user directly): the `cafleet` skill core. You speak to no one but the Director — not to Scouts or Researchers; all coordination goes through the Director. Pane silence is the expected between-turn state — work resumes when a new message arrives.
 
 ## Task-Based Coordination
 
@@ -105,4 +105,4 @@ During compilation, verify for each data point included in the report:
 
 ## Shutdown
 
-You are terminated by the Director via `cafleet member delete`, which kills your pane immediately. Your coding-agent process is terminated — no message-level handshake is required.
+Per `skills/cafleet/roles/member.md` § *Shutdown* — nothing is required of you.

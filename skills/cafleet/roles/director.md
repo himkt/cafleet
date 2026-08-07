@@ -41,7 +41,7 @@ An explicit user `--coding-agent` / `--model` / `--effort` always wins and is re
 
 ## Placeholder convention
 
-Angle-bracket tokens are placeholders, **not** shell variables — substitute the literal integer ids (the placeholder / `permissions.allow` rule is canonical in the `cafleet` skill § Placeholder convention). Your ids: `<fleet-id>` (from `cafleet fleet create`), `<director-member-id>` (your own), `<member-id>` (from `cafleet member list`), `<command>` (only when dispatching via `cafleet member prompt --shell`).
+Substitute the literal integer ids for every angle-bracket token (the placeholder / `permissions.allow` rule is canonical in the `cafleet` skill § Placeholder convention). Your ids: `<fleet-id>` (from `cafleet fleet create`), `<director-member-id>` (your own), `<member-id>` (from `cafleet member list`), `<command>` (only when dispatching via `cafleet member prompt --shell`).
 
 ## Director-only primitives
 

@@ -22,13 +22,9 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 - **Report results with evidence.** Every verification result must include pass/fail status, evidence (command output, screenshots, HTTP responses), and suggested fixes for failures.
 - **Degrade gracefully when tools are unavailable.** If the best tool for a task is unavailable, fall back to alternatives. Never fail silently — always report what could and could not be verified.
 
-## Placeholder convention
-
-Angle-bracket tokens (`<fleet-id>`, `<my-member-id>`, `<director-member-id>`) are placeholders, **not** shell variables — substitute the literal ids from your spawn prompt; the rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
-
 ## Communication Protocol
 
-You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each message — command shapes in the `cafleet` skill core; your ids are the literal `FLEET ID:` / `YOUR MEMBER ID:` / `DIRECTOR MEMBER ID:` lines in your spawn prompt. The Director may relay verification requests from the Programmer or Tester at any time during development, not just at the end.
+Broker protocol (poll/ack/send, ids from your spawn prompt, never the user directly): the `cafleet` skill core. The Director may relay verification requests from the Programmer or Tester at any time during development, not just at the end.
 
 **Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules. **Phase 1 tool-discovery is exempt** from the schema — the inventory is a one-time discovery payload, not iterative coordination, so it rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the interview workflow). Phase 2 verification reports follow the schema.
 
@@ -77,4 +73,4 @@ If the best tool for a verification task is unavailable:
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.
+Per `skills/cafleet/roles/member.md` § *Shutdown* — nothing is required of you.

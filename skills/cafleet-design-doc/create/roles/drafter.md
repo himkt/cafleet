@@ -22,13 +22,9 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 - **Revise based on Reviewer feedback.** When the Director sends `ready (doc)`, read the standing `COMMENT(reviewer)` markers in the design doc — that is where the Reviewer's findings live. Treat each piece of feedback seriously, fix all identified issues, remove the markers as part of the fix, and reply `addressed (doc)`.
 - **Process COMMENT markers from user feedback.** When the Director routes you with `ready (doc)`, read the standing `COMMENT(role)` markers in the design doc, fix each issue, remove the markers, and reply `addressed (doc)`. The per-section diff is recoverable from `git diff` — do not embed change summaries in the cafleet body.
 
-## Placeholder convention
-
-Angle-bracket tokens (`<fleet-id>`, `<my-member-id>`, `<director-member-id>`) are placeholders, **not** shell variables — substitute the literal ids from your spawn prompt; the rule and flag placement are canonical in the `cafleet` skill § Placeholder convention.
-
 ## Communication Protocol
 
-You do NOT speak to the user directly; all communication goes through the Director via the broker. Report via `cafleet message send`, drain your inbox with `cafleet message poll`, and `cafleet message ack` each message — command shapes in the `cafleet` skill core; your ids are the literal `FLEET ID:` / `YOUR MEMBER ID:` / `DIRECTOR MEMBER ID:` lines in your spawn prompt.
+Broker protocol (poll/ack/send, ids from your spawn prompt, never the user directly): the `cafleet` skill core.
 
 **Coordination Protocol**: From Step 3 onward (once the draft exists) every cafleet message follows the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md) — single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(role)` markers. Your Step-2 clarifying-question messages are exempt (free-form multi-line, per coordination.md § Scope).
 
@@ -80,4 +76,4 @@ When spawned with a resume mode prompt (the document already exists and contains
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete <my-member-id>` which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.
+Per `skills/cafleet/roles/member.md` § *Shutdown* — nothing is required of you.

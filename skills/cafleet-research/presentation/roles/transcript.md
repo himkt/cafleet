@@ -27,7 +27,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 ## Communication Protocol
 
-You do NOT speak to the user directly — all coordination flows through the Director via `cafleet message send` (completion reports, questions), and you `cafleet message ack` each inbound Director message after acting (command shapes in the `cafleet` skill core + your spawn prompt; the poll `id:` integer is the `[message-id]`).
+Broker protocol (poll/ack/send, ids from your spawn prompt, never the user directly): the `cafleet` skill core.
 
 ## Timing Awareness
 
@@ -81,4 +81,4 @@ Your work proceeds in two phases:
 
 ## Shutdown
 
-You are terminated by the Director via `cafleet member delete`, which kills your pane immediately. Your coding-agent process is terminated — no message-level handshake is required.
+Per `skills/cafleet/roles/member.md` § *Shutdown* — nothing is required of you.

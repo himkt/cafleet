@@ -26,7 +26,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 ## Communication Protocol
 
-You do NOT speak to the Manager directly — all coordination flows through the Director via `cafleet message send` (completion reports, questions), and you `cafleet message ack` each inbound Director message after acting (command shapes in the `cafleet` skill core + your spawn prompt; the poll `id:` integer is the `[message-id]`). Pane silence after writing your file + completion report is the expected between-turn state — no status pings.
+Broker protocol (poll/ack/send, ids from your spawn prompt, never the user directly): the `cafleet` skill core. You speak to no one but the Director — not to the Manager; all coordination flows through the Director. Pane silence after writing your file + completion report is the expected between-turn state — no status pings.
 
 ## Scout vs Researcher
 
@@ -84,4 +84,4 @@ Structure your findings as markdown with the following sections:
 
 ## Shutdown
 
-You are terminated by the Director via `cafleet member delete`, which kills your pane immediately. Your coding-agent process is terminated — no message-level handshake is required.
+Per `skills/cafleet/roles/member.md` § *Shutdown* — nothing is required of you.

@@ -29,7 +29,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 
 ## Communication Protocol
 
-You do NOT speak to the user directly — all coordination flows through the Director via `cafleet message send` (the structured Visual Review Report), and you `cafleet message ack` each inbound Director message (e.g. a re-check request with a new `ROUND: N` line) after acting (command shapes in the `cafleet` skill core + your spawn prompt; the poll `id:` integer is the `[message-id]`).
+Broker protocol (poll/ack/send, ids from your spawn prompt, never the user directly): the `cafleet` skill core. Your reports go to the Director as the structured Visual Review Report; a re-check request arrives with a new `ROUND: N` line — ack it after acting.
 
 ## Visual Issue Categories
 
