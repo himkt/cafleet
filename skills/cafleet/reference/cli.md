@@ -29,7 +29,7 @@ The detailed member view (`kind`, `skills`, the placement sub-dict) is likewise 
 
 ## Coding-agent backends
 
-Three backends — `claude`, `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent` (omitted → the member inherits the Director's backend). `--model <m>` pins the LLM and `--effort <level>` forwards a reasoning-effort level (claude: `low`–`max`; codex: `minimal`–`xhigh`; opencode: unsupported — any value exits 2); both flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md). All three honor the leading-`!` input shortcut, so `member prompt --shell` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent/claude-overlay.md) / [`codex`](coding-agent/codex-overlay.md) / [`opencode`](coding-agent/opencode-overlay.md).
+Three backends — `claude`, `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent` (omitted → the member inherits the Director's backend). `--model <m>` pins the LLM and `--effort <level>` forwards a reasoning-effort level (claude: `low`–`max`; codex: `minimal`–`xhigh`; opencode: unsupported — any value exits 2); both flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md). All three honor the leading-`!` input shortcut, so `member prompt --shell` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent-overlays.md#claude) / [`codex`](coding-agent-overlays.md#codex) / [`opencode`](coding-agent-overlays.md#opencode).
 
 ## Show (Get Message)
 

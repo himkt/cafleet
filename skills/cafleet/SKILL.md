@@ -15,13 +15,13 @@ Use the `cafleet` CLI to register as a member, send and receive messages, and di
 
 ## Required reading
 
-Before your first action other than these Reads, Read every file in the **Load-bearing** table below, in order (row #2 applies only if you write files). Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity. After reading your overlay, **resolve** it before acting — see *Resolve your overlay* below.
+Before your first action other than these Reads, Read every file in the **Load-bearing** table below, in order (row #2 applies only if you write files). Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity. After reading the overlays file, **resolve** only your backend's section before acting — see *Resolve your overlay* below.
 
 **Load-bearing — Read in order before acting:**
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
+| 1 | your overlay section [`reference/coding-agent-overlays.md#<name>`](reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
 | 2 | [`reference/base-dir.md`](reference/base-dir.md) — if you write any scratch / audit / figure file | the no-bypass write protocol and the `<unset>` contract — you mis-root every write or fall back to `/tmp` |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**
@@ -44,19 +44,19 @@ Exhaustive per-subcommand flags, exit codes, and error strings live in [`docs/do
 
 ## Resolve your overlay
 
-You have read your overlay (Required-reading row #1). Before your first action, resolve it:
+You have read `reference/coding-agent-overlays.md` (Required-reading row #1). Before your first action, resolve **only your backend's section** of it:
 
-1. **Materialize values.** For every `{placeholder}` token you will use this session, take the concrete value from your overlay's table and use that literal value — never the brace token. Resolution order for each token: (i) your overlay's value; (ii) the documented default below, only if your overlay omits the token or you cannot identify your backend. Never a literal `{token}`, never an ad-hoc guess.
-2. **Apply notes.** When you reach a base instruction named in your overlay's *Note → applies at* table, follow that note's caveat there (e.g. on codex, coordinate via cafleet messages, not a harness task list; on opencode, treat a permission popup as a regression to escalate, not a decision point).
+1. **Materialize values.** For every `{placeholder}` token you will use this session, take the concrete value from your backend section's table and use that literal value — never the brace token. Resolution order for each token: (i) your backend section's value; (ii) the documented default below, only if your section omits the token or you cannot identify your backend. Never a literal `{token}`, never an ad-hoc guess — and never a value from another backend's section, which is a resolution defect of the same class as emitting a literal `{token}`.
+2. **Apply notes.** When you reach a base instruction named in your backend section's *Note → applies at* table, follow that note's caveat there (e.g. on codex, coordinate via cafleet messages, not a harness task list; on opencode, treat a permission popup as a regression to escalate, not a decision point).
 3. **Self-check at emission.** A literal `{token}` in any command you run, any message you send, or anything you show the user is a defect — stop and resolve it before emitting.
 
 These steps close the three failure modes of an unresolved overlay: a literal `{token}` emitted in output, a wrong or guessed value acted on, and a backend note ignored.
 
 ### Documented defaults
 
-Used only when your overlay omits a token or your backend is unknown. Each default is the correct neutral-floor behavior — the form that functions on every backend — not a guess.
+Used only when your backend's section omits a token or your backend is unknown. Each default is the correct neutral-floor behavior — the form that functions on every backend — not a guess.
 
-| Token | Documented default (overlay silent / backend unknown) |
+| Token | Documented default (section silent / backend unknown) |
 |-------|-------------------------------------------------------|
 | `{decision_surface}` | a Director-relayed operator message (a member always routes to the Director) |
 | `{reviewer_model}` | the spawning Director's own model (inherit the parent) — a safe floor, possibly intelligence-suboptimal |

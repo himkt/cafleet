@@ -1,7 +1,7 @@
 # Unified Coding-Agent Overlay File
 
 **Status**: Approved
-**Progress**: 3/17 tasks complete
+**Progress**: 6/17 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -153,9 +153,9 @@ The unknown-token walker elsewhere in `docs_sync.rs` scans skill files by direct
 
 ### Step 3: Update the cafleet skill
 
-- [ ] `skills/cafleet/SKILL.md`: Required-reading row #1 link form, § *Resolve your overlay* wording (resolve only your backend's section; other-section values are a resolution defect), and the Required-reading intro sentence. <!-- completed: -->
-- [ ] `skills/cafleet/roles/member.md` and `roles/director.md`: row #1 link form. <!-- completed: -->
-- [ ] `skills/cafleet/reference/supervision.md` (required-reading note and § decision-surface delta), `reference/recovery.md` (decision-prompt row), `reference/cli.md` (per-backend delta links → concrete anchors), `reference/director.md` (backend-delta links, spawn-rendering paragraph's overlay-selector sentence, relayed-question paragraph). <!-- completed: -->
+- [x] `skills/cafleet/SKILL.md`: Required-reading row #1 link form, § *Resolve your overlay* wording (resolve only your backend's section; other-section values are a resolution defect), and the Required-reading intro sentence. <!-- completed: 2026-08-07T13:14 -->
+- [x] `skills/cafleet/roles/member.md` and `roles/director.md`: row #1 link form. <!-- completed: 2026-08-07T13:14 -->
+- [x] `skills/cafleet/reference/supervision.md` (required-reading note and § decision-surface delta), `reference/recovery.md` (decision-prompt row), `reference/cli.md` (per-backend delta links → concrete anchors), `reference/director.md` (backend-delta links, spawn-rendering paragraph's overlay-selector sentence, relayed-question paragraph). <!-- completed: 2026-08-07T13:14 -->
 
 ### Step 4: Update the consumer skill families
 
