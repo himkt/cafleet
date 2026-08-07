@@ -1,6 +1,6 @@
 # Skill Boilerplate Dedup
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 65/65 tasks complete
 **Last Updated**: 2026-08-07
 
@@ -329,3 +329,4 @@ Executed in Step 9 with `rg` under `skills/`. Each phrase is a verbatim fragment
 |------|---------|
 | 2026-08-07 | Initial draft |
 | 2026-08-07 | Reviewer round 1: B3 site count corrected to 5; single-copy-facts table split from the B8 precondition; B6 extended to the two research Director role files; `.scan/` existence precondition task added; owner-add wordings aligned with sweep phrases; per-block ownership sweep table added |
+| 2026-08-07 | Executed: all 9 steps applied and verified; execute-Reviewer round-1 finding (stale binary-embedded replicas) fixed via reinstall + setup re-run; approved and merged as PR #284; status → Complete |
