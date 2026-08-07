@@ -12,7 +12,7 @@ At startup — before you process your first task (the `ready` handshake in the 
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{permission_flags}` emitted unresolved |
+| 1 | your overlay section [`reference/coding-agent-overlays.md#<name>`](../reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{permission_flags}` emitted unresolved |
 | 2 | [`reference/base-dir.md`](../reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root every scratch / audit / figure write or fall back to `/tmp` |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**

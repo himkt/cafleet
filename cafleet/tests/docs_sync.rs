@@ -25,8 +25,8 @@ fn normalize(text: &str) -> String {
         .to_string()
 }
 
-fn assert_terms(relative_path: &str, terms: &[&str]) {
-    let text = read(relative_path).to_lowercase();
+fn assert_terms_in(context: &str, text: &str, terms: &[&str]) {
+    let text = text.to_lowercase();
     let normalized_text = normalize(&text);
     let missing: Vec<&str> = terms
         .iter()
@@ -38,8 +38,33 @@ fn assert_terms(relative_path: &str, terms: &[&str]) {
         .collect();
     assert!(
         missing.is_empty(),
-        "{relative_path} is missing required terms: {missing:?}"
+        "{context} is missing required terms: {missing:?}"
     );
+}
+
+fn assert_terms(relative_path: &str, terms: &[&str]) {
+    assert_terms_in(relative_path, &read(relative_path), terms);
+}
+
+const OVERLAYS_FILE: &str = "skills/cafleet/reference/coding-agent-overlays.md";
+
+/// Slice the merged overlay file at top-level `## ` boundaries.
+/// Panics (test failure) when the named section is missing.
+fn overlay_section<'a>(text: &'a str, name: &str) -> &'a str {
+    let mut start = None;
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        match (start, line.trim_end().strip_prefix("## ")) {
+            (None, Some(title)) if title == name => start = Some(offset),
+            (Some(section_start), Some(_)) => return &text[section_start..offset],
+            _ => {}
+        }
+        offset += line.len();
+    }
+    match start {
+        Some(section_start) => &text[section_start..],
+        None => panic!("{OVERLAYS_FILE} has no top-level `## {name}` section"),
+    }
 }
 
 fn assert_absent(relative_path: &str, terms: &[&str]) {
@@ -186,10 +211,11 @@ fn multiplexer_backends_pins_the_pure_trigger_payload() {
 
 #[test]
 fn every_backend_overlay_defines_the_capture_cues() {
+    let text = read(OVERLAYS_FILE);
     for backend in ["claude", "codex", "opencode"] {
-        let overlay = format!("skills/cafleet/reference/coding-agent/{backend}-overlay.md");
-        assert_terms(
-            &overlay,
+        assert_terms_in(
+            &format!("{OVERLAYS_FILE} § {backend}"),
+            overlay_section(&text, backend),
             &[
                 "working",
                 "stall_candidate",
@@ -198,14 +224,15 @@ fn every_backend_overlay_defines_the_capture_cues() {
                 "pre-ping capture gate",
             ],
         );
-        let mut absent = vec!["pre-nudge"];
-        absent.extend(REMOVED_VOCABULARY);
-        assert_absent(&overlay, &absent);
     }
-    assert_terms(
-        "skills/cafleet/reference/coding-agent/_template.md",
+    assert_terms_in(
+        &format!("{OVERLAYS_FILE} § Template"),
+        overlay_section(&text, "Template"),
         &["working", "stall_candidate", "Note → applies at"],
     );
+    let mut absent = vec!["pre-nudge"];
+    absent.extend(REMOVED_VOCABULARY);
+    assert_absent(OVERLAYS_FILE, &absent);
 }
 
 #[test]
@@ -550,22 +577,17 @@ fn every_brace_token_in_skills_belongs_to_the_known_vocabulary() {
 
 #[test]
 fn every_backend_overlay_defines_the_full_placeholder_vocabulary() {
-    for overlay in [
-        "claude-overlay.md",
-        "codex-overlay.md",
-        "opencode-overlay.md",
-        "_template.md",
-    ] {
-        let relative_path = format!("skills/cafleet/reference/coding-agent/{overlay}");
-        let text = read(&relative_path);
+    let text = read(OVERLAYS_FILE);
+    for section in ["claude", "codex", "opencode", "Template"] {
+        let body = overlay_section(&text, section);
         let missing: Vec<&str> = OVERLAY_PLACEHOLDERS
             .iter()
-            .filter(|placeholder| !text.contains(&format!("{{{placeholder}}}")))
+            .filter(|placeholder| !body.contains(&format!("{{{placeholder}}}")))
             .copied()
             .collect();
         assert!(
             missing.is_empty(),
-            "{relative_path} leaves placeholders undefined: {missing:?}"
+            "{OVERLAYS_FILE} § {section} leaves placeholders undefined: {missing:?}"
         );
     }
 }

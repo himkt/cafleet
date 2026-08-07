@@ -61,8 +61,8 @@ is never used to price a model.
    requires reviewed policy approval in the same pull request. Every row
    carries both prices from its approved source. Re-derive the *Reviewer
    defaults* table from the refreshed backend tables, and mirror its
-   values into each backend overlay's `{reviewer_model}`
-   row (`skills/cafleet/reference/coding-agent/<name>-overlay.md`).
+   values into each backend section's `{reviewer_model}`
+   row (`skills/cafleet/reference/coding-agent-overlays.md`).
 5. **Re-verify every `claude` row's context window on every refresh**, even
    when the prices are unchanged. Take each window from the Claude Code model
    configuration page's *Extended context* section and record it in the

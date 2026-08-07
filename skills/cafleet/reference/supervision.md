@@ -2,7 +2,7 @@
 
 Read this file for CAFleet team supervision — the Director-only governance and the `cafleet monitor` heartbeat mechanism it is performed through. Ordinary members and standalone agents never load it.
 
-**Required reading — read AND resolve your overlay first.** These instructions are backend-neutral and use `{placeholder}` tokens (`{bg_run}`, `{bg_stop}`, `{decision_surface}`, `{permission_flags}`). Before acting on them, Read your overlay [`coding-agent/<name>-overlay.md`](coding-agent/) — `<name>` is the coding agent named on your spawn prompt's `CODING AGENT:` line — then **resolve** it per [`SKILL.md`](../SKILL.md) § *Resolve your overlay*: materialize each token to its overlay value (or the documented default) and apply each bound note before you act. Skip resolution and you emit a literal `{bg_run}` (describing the launch primitive instead of using it), guess a wrong/default value, or ignore a backend note.
+**Required reading — read AND resolve your overlay section first.** These instructions are backend-neutral and use `{placeholder}` tokens (`{bg_run}`, `{bg_stop}`, `{decision_surface}`, `{permission_flags}`). Before acting on them, Read your overlay section [`coding-agent-overlays.md#<name>`](coding-agent-overlays.md) — `<name>` is the coding agent named on your spawn prompt's `CODING AGENT:` line — then **resolve** it per [`SKILL.md`](../SKILL.md) § *Resolve your overlay*: materialize each token to your backend section's value (or the documented default) and apply each bound note before you act. Skip resolution and you emit a literal `{bg_run}` (describing the launch primitive instead of using it), guess a wrong/default value, or ignore a backend note.
 
 ## Core Principle
 
@@ -199,7 +199,7 @@ A Stage-2 `member capture` doubles as the gate capture for that member while sti
 
 **Deferred sends.** `cafleet message send` both persists a broker message and fires the inline-preview keystroke; there is no persist-without-keystroke mode. A round the gate skips (`awaiting_user` / `working`) therefore defers the **entire send**: hold each deferred send as queued work and re-evaluate it with a fresh capture on the next facilitation tick, then fire or skip again. No additional wake channel exists for deferrals — the next periodic wake re-opens your turn, so a deferral resolves within at most one wake interval once the pane clears.
 
-> **The decision surface is a backend delta.** The concrete user-reaction surface by which the Director asks the user is backend-specific — see your overlay ([`coding-agent/<name>-overlay.md`](coding-agent/)). The canonical, backend-neutral user-reaction rule is [`SKILL.md`](../SKILL.md) § *Soliciting user reactions*.
+> **The decision surface is a backend delta.** The concrete user-reaction surface by which the Director asks the user is backend-specific — see your overlay section ([`coding-agent-overlays.md#<name>`](coding-agent-overlays.md)). The canonical, backend-neutral user-reaction rule is [`SKILL.md`](../SKILL.md) § *Soliciting user reactions*.
 
 ### Escalation
 
