@@ -1,5 +1,5 @@
 //! Step 8 contract tests: the WebUI HTTP app, in-process via
-//! `tower::ServiceExt` (SPEC §6.8) — the 9 routes, the `X-Fleet-Id` header
+//! `tower::ServiceExt` (SPEC §6.8) — the 8 routes, the `X-Fleet-Id` header
 //! dependency, the wire renames, the 422 `{"detail": <string>}` body, and the
 //! SPA fallback over the embedded dist.
 //!
@@ -429,6 +429,7 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     assert_eq!(payload["running"], false);
     assert_eq!(payload["pid"], Value::Null);
     assert_eq!(payload["tick_seconds"], Value::Null, "no row at all");
+    assert_eq!(payload["wake_interval_seconds"], Value::Null);
     assert_eq!(payload["last_wake_at"], Value::Null);
     assert_eq!(payload["last_wake_age_seconds"], Value::Null);
     let rows = payload["members"].as_array().unwrap();
@@ -464,8 +465,15 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
 
     let now = cafleet::time::now_utc();
     let pid = i64::from(std::process::id());
-    broker::claim_monitor_runtime(&mut conn, fleet_id, pid, 5, &cafleet::time::format_utc(now))
-        .unwrap();
+    broker::claim_monitor_runtime(
+        &mut conn,
+        fleet_id,
+        pid,
+        5,
+        600,
+        &cafleet::time::format_utc(now),
+    )
+    .unwrap();
     broker::record_monitor_wake(&mut conn, fleet_id, &cafleet::time::format_utc(now)).unwrap();
     let (status, body) = call(app.clone(), "GET", "/api/monitor", Some("1"), None).await;
     assert_eq!(status, StatusCode::OK);
@@ -473,6 +481,7 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     assert_eq!(payload["running"], true);
     assert_eq!(payload["pid"], pid);
     assert_eq!(payload["tick_seconds"], 5);
+    assert_eq!(payload["wake_interval_seconds"], 600);
     let age = payload["last_tick_age_seconds"].as_i64().unwrap();
     assert!((0..=5).contains(&age), "whole-second age, got {age}");
     assert!(payload["last_wake_at"].is_string());
@@ -498,6 +507,10 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
         "a stale row never leaks its pid"
     );
     assert_eq!(payload["tick_seconds"], 5, "only tick_seconds survives");
+    assert_eq!(
+        payload["wake_interval_seconds"], 600,
+        "the interval survives from the stale row, like tick_seconds"
+    );
     assert_eq!(payload["last_tick_at"], Value::Null);
     assert_eq!(payload["started_at"], Value::Null);
     assert_eq!(
@@ -506,6 +519,175 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
         "last_wake_at is masked with the stale row"
     );
     assert_eq!(payload["last_wake_age_seconds"], Value::Null);
+}
+
+#[tokio::test]
+async fn patch_monitor_updates_the_wake_interval_with_the_pinned_error_contract() {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (fleet_id, _, _, _) = seeded_fleet(&mut conn);
+    let app = app(&url);
+    let valid = json!({"wake_interval_seconds": 300});
+
+    let (status, body) = call(
+        app.clone(),
+        "PATCH",
+        "/api/monitor",
+        None,
+        Some(valid.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, r#"{"detail":"X-Fleet-Id header required"}"#);
+
+    let (status, body) = call(
+        app.clone(),
+        "PATCH",
+        "/api/monitor",
+        Some(""),
+        Some(valid.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body, r#"{"detail":"X-Fleet-Id header required"}"#,
+        "empty counts as missing"
+    );
+
+    let (status, body) = call(
+        app.clone(),
+        "PATCH",
+        "/api/monitor",
+        Some("abc"),
+        Some(valid.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, r#"{"detail":"X-Fleet-Id must be an integer"}"#);
+
+    // An unparsable body 422s before the fleet check — the unknown fleet 999
+    // never reaches its 404, matching POST /api/messages/send.
+    let request = Request::builder()
+        .method("PATCH")
+        .uri("/api/monitor")
+        .header("X-Fleet-Id", "999")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from("not json"))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let detail = parsed(core::str::from_utf8(&bytes).unwrap())["detail"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(detail.starts_with("invalid JSON body: "), "got: {detail}");
+
+    // Rejected, not coerced: missing, float, stringified, negative, and
+    // above-i64::MAX — all 422 before the unknown-fleet 404.
+    for bad in [
+        json!({}),
+        json!({"wake_interval_seconds": 1.5}),
+        json!({"wake_interval_seconds": "300"}),
+        json!({"wake_interval_seconds": -1}),
+        json!({"wake_interval_seconds": 9_223_372_036_854_775_808u64}),
+    ] {
+        let (status, body) = call(
+            app.clone(),
+            "PATCH",
+            "/api/monitor",
+            Some("999"),
+            Some(bad.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "for {bad}");
+        assert_eq!(
+            body, r#"{"detail":"wake_interval_seconds must be a non-negative integer"}"#,
+            "for {bad}"
+        );
+    }
+
+    let (status, body) = call(
+        app.clone(),
+        "PATCH",
+        "/api/monitor",
+        Some("999"),
+        Some(valid.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        body, r#"{"detail":"Fleet not found"}"#,
+        "a valid body against an unknown fleet 404s after validation"
+    );
+
+    let (status, body) = call(
+        app.clone(),
+        "PATCH",
+        "/api/monitor",
+        Some("1"),
+        Some(valid.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        body, r#"{"detail":"monitor has never run for this fleet"}"#,
+        "a known fleet with no runtime row"
+    );
+
+    broker::claim_monitor_runtime(
+        &mut conn,
+        fleet_id,
+        i64::from(std::process::id()),
+        5,
+        600,
+        &cafleet::time::format_utc(cafleet::time::now_utc()),
+    )
+    .unwrap();
+    let (status, body) = call(app.clone(), "PATCH", "/api/monitor", Some("1"), Some(valid)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body, r#"{"wake_interval_seconds":300}"#,
+        "the 200 payload is pinned"
+    );
+
+    let (status, body) = call(app.clone(), "GET", "/api/monitor", Some("1"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        parsed(&body)["wake_interval_seconds"],
+        300,
+        "GET reflects the PATCHed value"
+    );
+
+    let (status, body) = call(
+        app.clone(),
+        "PATCH",
+        "/api/monitor",
+        Some("1"),
+        Some(json!({"wake_interval_seconds": 0})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body, r#"{"wake_interval_seconds":0}"#,
+        "0 disables the wake"
+    );
+
+    let (status, body) = call(
+        app,
+        "PATCH",
+        "/api/monitor",
+        Some("1"),
+        Some(json!({"wake_interval_seconds": i64::MAX})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body, r#"{"wake_interval_seconds":9223372036854775807}"#,
+        "i64::MAX is the inclusive domain ceiling"
+    );
 }
 
 #[tokio::test]

@@ -1,8 +1,8 @@
 # Restore WebUI editing of the Director wake interval
 
-**Status**: Approved
-**Progress**: 0/22 tasks complete
-**Last Updated**: 2026-08-06
+**Status**: Complete
+**Progress**: 22/22 tasks complete
+**Last Updated**: 2026-08-07
 
 ## Overview
 
@@ -16,23 +16,23 @@ the current architecture.
 
 ## Success Criteria
 
-- [ ] `monitor_runtime` has a nullable `wake_interval_seconds` column; the
+- [x] `monitor_runtime` has a nullable `wake_interval_seconds` column; the
       migration chain is contiguous from 1 with head **5** and the chain-guard
       test matches.
-- [ ] Every `cafleet monitor` start stamps its startup-resolved interval
+- [x] Every `cafleet monitor` start stamps its startup-resolved interval
       (`--interval` > `CAFLEET_MONITOR_WAKE_INTERVAL` > 600) into the column;
       each tick gates the wake on the column's current value, so an external
       update changes the running loop's cadence within one tick without a
       restart (pinned by a `monitor_tick` test).
-- [ ] `PATCH /api/monitor` updates the column under the `X-Fleet-Id` header
+- [x] `PATCH /api/monitor` updates the column under the `X-Fleet-Id` header
       with the exact 200/400/404/422 contract in § *S3*, pinned by
       `webui_routes` tests.
-- [ ] `GET /api/monitor` includes `wake_interval_seconds` in both the running
+- [x] `GET /api/monitor` includes `wake_interval_seconds` in both the running
       and not-running payload shapes.
-- [ ] The WebUI header monitor indicator opens a popover with the interval
+- [x] The WebUI header monitor indicator opens a popover with the interval
       editor; the editor saves via `PATCH /api/monitor` and is disabled when
       the monitor is not running.
-- [ ] `docs/`, `SPEC.md`, and the skill references are drift-free for the new
+- [x] `docs/`, `SPEC.md`, and the skill references are drift-free for the new
       surfaces; `mise //cafleet:test`, `mise //cafleet:lint`,
       `mise //cafleet:typecheck`, and `mise //admin:lint` pass.
 
@@ -209,7 +209,7 @@ the trigger for a popover carrying the interval editor.
 
 | Element | Behavior |
 |---|---|
-| Trigger | The existing indicator dot, now a button; the tooltip text stays. |
+| Trigger | The existing indicator dot, now a button; the tooltip text stays, except the stopped-state tooltip's launch command reads `cafleet monitor <fleet-id>` (the prior text cited a CLI form that no longer exists). |
 | Interval input | Numeric input in seconds (integer ≥ 0), seeded from `wake_interval_seconds` in the polled `GET /api/monitor` payload. |
 | Zero hint | Inline hint at value `0`: the Director wake is disabled while the loop keeps running. |
 | Save | Calls `PATCH /api/monitor`, surfaces a `detail` error inline on failure, and triggers the dashboard's existing refresh on success. |
@@ -241,97 +241,113 @@ non-negative integer.
 
 ### Step 1: Documentation first
 
-- [ ] Update `docs/docs/concepts/monitoring.md` § cadence: the interval is
+- [x] Update `docs/docs/concepts/monitoring.md` § cadence: the interval is
       stamped per fleet at each monitor start, re-read per tick, and editable
       from the admin WebUI (effective within one tick; re-stamped at the next
-      start). <!-- completed: -->
-- [ ] Update `docs/docs/spec/webui-api.md`: add `PATCH /api/monitor` to the
+      start). <!-- completed: 2026-08-07T05:55 -->
+- [x] Update `docs/docs/spec/webui-api.md`: add `PATCH /api/monitor` to the
       route table and as a section with the § *S3* contract verbatim; add
       `wake_interval_seconds` to the `GET /api/monitor` example and the
-      not-running field table. <!-- completed: -->
-- [ ] Update `docs/docs/spec/data-model.md` § `monitor_runtime`: the
+      not-running field table. <!-- completed: 2026-08-07T05:55 -->
+- [x] Update `docs/docs/spec/data-model.md` § `monitor_runtime`: the
       `wake_interval_seconds` column and its stamp/re-read/preserve
-      lifecycle. <!-- completed: -->
-- [ ] Update `docs/docs/spec/cli-options.md` (monitor loop form): the resolved
+      lifecycle. <!-- completed: 2026-08-07T05:55 -->
+- [x] Update `docs/docs/spec/cli-options.md` (monitor loop form): the resolved
       interval is stamped into `monitor_runtime` at each start.
-      <!-- completed: -->
-- [ ] Update `SPEC.md`: §6.2 (`claim_monitor_runtime` /
+      <!-- completed: 2026-08-07T05:55 -->
+- [x] Update `SPEC.md`: §6.2 (`claim_monitor_runtime` /
       `set_monitor_wake_interval` / payload keys and the schema DDL), §6.3
       (`--interval` stamping and the `i64` domain), §6.6 (per-tick re-read
       order, the dropped `monitor_tick` parameter, and `wake_due`'s `i64`
       interval), §6.8 (`PATCH /api/monitor`, the GET payload addition, and
       the route-catalog title bump "The 7 routes" → 8), §7.1
       (`monitor_wake_interval` domain), and the head version in the migration
-      inventory. <!-- completed: -->
-- [ ] Verify `skills/cafleet/reference/cli.md` and
+      inventory. <!-- completed: 2026-08-07T05:55 -->
+- [x] Verify `skills/cafleet/reference/cli.md` and
       `reference/supervision.md` stay accurate (their `--interval`/env/0
       statements are unchanged by this design); edit only if a statement
-      drifts. <!-- completed: -->
+      drifts. <!-- completed: 2026-08-07T05:55 -->
 
 ### Step 2: Migration
 
-- [ ] Add `cafleet/migrations/V5__monitor_wake_interval.sql` with the § *S1*
-      DDL. <!-- completed: -->
-- [ ] Bump every head-4 assertion in `cafleet/src/db/mod.rs` to head 5 —
+- [x] Add `cafleet/migrations/V5__monitor_wake_interval.sql` with the § *S1*
+      DDL. <!-- completed: 2026-08-07T06:02 -->
+- [x] Bump every head-4 assertion in `cafleet/src/db/mod.rs` to head 5 —
       `migrate_reaches_head_version_4_and_is_idempotent` (renamed),
       `refinery_ledger_records_the_baseline` (`vec![1, 2, 3, 4]` → `..5`),
       and `migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_4`
       (renamed) — and the `applied migrations to head (4).` assertion in
-      `cafleet/tests/cli_setup_doctor.rs`. <!-- completed: -->
+      `cafleet/tests/cli_setup_doctor.rs`. <!-- completed: 2026-08-07T06:02 -->
 
 ### Step 3: Broker layer
 
-- [ ] Extend `claim_monitor_runtime` with the `wake_interval` parameter,
-      stamped in both the INSERT and the reclaim UPDATE. <!-- completed: -->
-- [ ] Carry `wake_interval_seconds` through `RuntimeRow`,
+- [x] Extend `claim_monitor_runtime` with the `wake_interval` parameter,
+      stamped in both the INSERT and the reclaim UPDATE.
+      <!-- completed: 2026-08-07T06:11 -->
+- [x] Carry `wake_interval_seconds` through `RuntimeRow`,
       `read_monitor_runtime`, and `monitor_runtime_payload` (both shapes, key
       after `tick_seconds`); keep `clear_monitor_runtime` preserving it.
-      <!-- completed: -->
-- [ ] Add `set_monitor_wake_interval` returning `changed == 1`.
-      <!-- completed: -->
-- [ ] Colocated broker tests: stamp on claim and reclaim, preservation across
+      <!-- completed: 2026-08-07T06:11 -->
+- [x] Add `set_monitor_wake_interval` returning `changed == 1`.
+      <!-- completed: 2026-08-07T06:11 -->
+- [x] Colocated broker tests: stamp on claim and reclaim, preservation across
       clear, the payload key in running/stale/no-row shapes, and the
-      `set_monitor_wake_interval` true/false split. <!-- completed: -->
+      `set_monitor_wake_interval` true/false split.
+      <!-- completed: 2026-08-07T06:11 -->
 
 ### Step 4: Monitor loop
 
-- [ ] Rework `monitor_tick` to the § *S2* order (drop the parameter, read the
+- [x] Rework `monitor_tick` to the § *S2* order (drop the parameter, read the
       row before the interval gate, `expect` the stamped value); update
       `run_monitor_loop` to pass the startup interval only to the claim, and
-      `wake_due` to take `i64`. <!-- completed: -->
-- [ ] Apply the § *S2* value domain at the CLI/config boundaries: `--interval`
+      `wake_due` to take `i64`. <!-- completed: 2026-08-07T06:19 -->
+- [x] Apply the § *S2* value domain at the CLI/config boundaries: `--interval`
       switches to `clap::value_parser!(i64).range(0..)` in
       `cafleet/src/cli/monitor.rs`, and `Settings.monitor_wake_interval`
       becomes `i64` with an explicit non-negative check preserving the
-      existing error string; update the config tests. <!-- completed: -->
-- [ ] Monitor tests: a mid-run column update changes the cadence on the next
+      existing error string; update the config tests.
+      <!-- completed: 2026-08-07T06:19 -->
+- [x] Monitor tests: a mid-run column update changes the cadence on the next
       tick (shrink-to-due, set-0-disables, raise-re-enables), and the
       first-wake boundary follows an edit made before the first wake.
-      <!-- completed: -->
+      <!-- completed: 2026-08-07T06:19 -->
 
 ### Step 5: HTTP endpoint
 
-- [ ] Add the `PATCH /api/monitor` handler in `cafleet/src/webui/mod.rs` with
+- [x] Add the `PATCH /api/monitor` handler in `cafleet/src/webui/mod.rs` with
       the § *S3* resolution order, validation, and error strings; register the
       route and correct the module doc's route count to 8 (it reads "the 9
-      `/api` routes" today while 7 are registered). <!-- completed: -->
-- [ ] `webui_routes` tests: 200 round-trip (PATCH then GET reflects the
+      `/api` routes" today while 7 are registered).
+      <!-- completed: 2026-08-07T06:24 -->
+- [x] `webui_routes` tests: 200 round-trip (PATCH then GET reflects the
       value), both 400s, fleet 404, both 422s (including
       float/string/negative/above-`i64::MAX` rejection and the
-      422-before-fleet-404 ordering), and the no-row 404. <!-- completed: -->
+      422-before-fleet-404 ordering), and the no-row 404.
+      <!-- completed: 2026-08-07T06:24 -->
 
 ### Step 6: Admin WebUI
 
-- [ ] Extend `MonitorRuntime` in `admin/src/types.ts` and add `patchMonitor`
-      to `admin/src/api.ts`. <!-- completed: -->
-- [ ] Turn the `AppHeader` monitor indicator into the popover editor per
+- [x] Extend `MonitorRuntime` in `admin/src/types.ts` and add `patchMonitor`
+      to `admin/src/api.ts`. <!-- completed: 2026-08-07T06:29 -->
+- [x] Turn the `AppHeader` monitor indicator into the popover editor per
       § *S4* (input, zero hint, save with inline error, disabled not-running
-      state). <!-- completed: -->
-- [ ] Wire `Dashboard` to pass the monitor payload and refresh trigger into
-      `AppHeader`. <!-- completed: -->
+      state). <!-- completed: 2026-08-07T06:29 -->
+- [x] Wire `Dashboard` to pass the monitor payload and refresh trigger into
+      `AppHeader`. <!-- completed: 2026-08-07T06:29 -->
 
 ### Step 7: Verification
 
-- [ ] `mise //cafleet:format`, `mise //cafleet:lint`,
-      `mise //cafleet:typecheck`, `mise //admin:lint`. <!-- completed: -->
-- [ ] `mise //cafleet:test` — full suite green. <!-- completed: -->
+- [x] `mise //cafleet:format`, `mise //cafleet:lint`,
+      `mise //cafleet:typecheck`, `mise //admin:lint`.
+      <!-- completed: 2026-08-07T06:35 -->
+- [x] `mise //cafleet:test` — full suite green.
+      <!-- completed: 2026-08-07T06:35 -->
+
+---
+
+## Changelog
+
+- 2026-08-07: Implementation complete — all 22 tasks and 6 success criteria
+  verified (unit/contract suites, isolated live E2E of the API matrix, and
+  browser checks of the popover editor); Reviewer approved in one round;
+  PR #281 opened. Status: Approved → Complete.

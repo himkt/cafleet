@@ -1,4 +1,4 @@
-//! The admin WebUI HTTP app (SPEC §6.8): the 9 `/api` routes behind the
+//! The admin WebUI HTTP app (SPEC §6.8): the 8 `/api` routes behind the
 //! `X-Fleet-Id` header dependency, the wire renames (`status_state`→`status`,
 //! `text`→`body`), the `{"detail": <string>}` error shape (422 included), and
 //! the SPA fallback over the dist embedded at build time. Handlers bridge to
@@ -38,7 +38,7 @@ pub fn create_app(database_url: &str) -> Result<Router, CafleetError> {
     let api = Router::new()
         .route("/fleets", get(list_fleets))
         .route("/members", get(roster))
-        .route("/monitor", get(monitor))
+        .route("/monitor", get(monitor).patch(patch_monitor))
         .route("/members/{member_id}/inbox", get(inbox))
         .route("/members/{member_id}/sent", get(sent))
         .route("/timeline", get(timeline))
@@ -204,6 +204,49 @@ async fn monitor(State(state): State<AppState>, headers: HeaderMap) -> Response 
         };
         payload["members"] = Value::Array(members);
         json_response(StatusCode::OK, &payload)
+    })
+    .await
+}
+
+/// `wake_interval_seconds` must be a JSON integer in `0..=i64::MAX` — floats,
+/// stringified integers, negatives, and numbers above `i64::MAX` are
+/// rejected, not coerced (SPEC §6.8).
+fn parse_patch_monitor_body(body: &Bytes) -> Result<i64, Box<Response>> {
+    let invalid = |message: &str| Box::new(detail(StatusCode::UNPROCESSABLE_ENTITY, message));
+    let payload: Value =
+        serde_json::from_slice(body).map_err(|e| invalid(&format!("invalid JSON body: {e}")))?;
+    payload["wake_interval_seconds"]
+        .as_i64()
+        .filter(|value| *value >= 0)
+        .ok_or_else(|| invalid("wake_interval_seconds must be a non-negative integer"))
+}
+
+/// Body validation precedes the fleet check, matching `POST /api/messages/send`;
+/// the row update reports a never-run fleet as its own 404.
+async fn patch_monitor(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    let fleet_id = match fleet_header(&headers) {
+        Ok(fleet_id) => fleet_id,
+        Err(response) => return *response,
+    };
+    let wake_interval = match parse_patch_monitor_body(&body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    run_blocking(state, move |conn| {
+        if let Err(response) = require_fleet(conn, fleet_id) {
+            return *response;
+        }
+        match broker::set_monitor_wake_interval(conn, fleet_id, wake_interval) {
+            Ok(true) => json_response(
+                StatusCode::OK,
+                &json!({"wake_interval_seconds": wake_interval}),
+            ),
+            Ok(false) => detail(
+                StatusCode::NOT_FOUND,
+                "monitor has never run for this fleet",
+            ),
+            Err(error) => broker_500(error),
+        }
     })
     .await
 }

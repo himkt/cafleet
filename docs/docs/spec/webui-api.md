@@ -26,6 +26,7 @@ No server-side session cookies. The SPA stores the active fleet_id client-side v
 | `GET` | `/api/fleets` | Non-soft-deleted fleets with member counts | no |
 | `GET` | `/api/members` | The fleet's roster | yes |
 | `GET` | `/api/monitor` | Liveness of the fleet's `cafleet monitor` process plus per-member pending-delivery counts | yes |
+| `PATCH` | `/api/monitor` | The updated Director wake interval | yes |
 | `GET` | `/api/members/{member_id}/inbox` | Messages received by the member | yes |
 | `GET` | `/api/members/{member_id}/sent` | Messages sent by the member | yes |
 | `GET` | `/api/timeline` | The fleet's unified message timeline | yes |
@@ -108,6 +109,7 @@ page show a "monitor running / stopped" indicator. See
   "running": true,
   "pid": 4821,
   "tick_seconds": 5,
+  "wake_interval_seconds": 600,
   "last_tick_at": "2026-06-13T04:51:02+00:00",
   "last_tick_age_seconds": 2,
   "started_at": "2026-06-13T04:50:00+00:00",
@@ -142,11 +144,55 @@ the runtime fields take these values:
 | `last_wake_at` | `null` | `null` |
 | `last_wake_age_seconds` | `null` | `null` |
 | `tick_seconds` | `null` | **preserved** — the cadence the monitor last ran at |
+| `wake_interval_seconds` | `null` | **preserved** — the wake interval the monitor last ran at; `null` when the row predates the column and was never re-stamped |
 
 Launching the loop is CLI-only (`cafleet monitor`, run by the Director
 as a background task in its own pane); there is no `POST`/`DELETE` counterpart
 here and no CLI stop command — the Director stops the background task,
 and a still-running loop self-terminates after `fleet delete`.
+
+### PATCH /api/monitor — Update the Wake Interval {#patch-api-monitor}
+
+Updates the fleet's Director wake interval. The running loop re-reads the
+stored value on every tick, so the edit changes the cadence within one scan
+tick; the next `cafleet monitor` start re-stamps the interval from the CLI/env
+resolution. See
+[Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
+
+**Request**: `X-Fleet-Id: <fleet_id>` header.
+
+```json
+{"wake_interval_seconds": 300}
+```
+
+`wake_interval_seconds` must be a JSON integer in `0..=i64::MAX` — floats,
+stringified integers, negatives, and numbers above `i64::MAX` are rejected,
+not coerced, mirroring the send endpoint's strictness. `0` disables the wake;
+there is no application-level cap below `i64::MAX`.
+
+**Response** (200 OK):
+
+```json
+{"wake_interval_seconds": 300}
+```
+
+**Errors** (all `{"detail": <string>}`-shaped):
+
+| Status | `detail` | Trigger |
+|---|---|---|
+| 400 | `X-Fleet-Id header required` | The `X-Fleet-Id` header is missing or empty |
+| 400 | `X-Fleet-Id must be an integer` | The header value is not an integer |
+| 422 | `invalid JSON body: <parse error>` | The request body is not parsable JSON |
+| 422 | `wake_interval_seconds must be a non-negative integer` | `wake_interval_seconds` is missing, or not an integer in `0..=i64::MAX` |
+| 404 | `Fleet not found` | The header names a fleet id that does not exist |
+| 404 | `monitor has never run for this fleet` | The fleet has no `monitor_runtime` row |
+
+Resolution order (the table's row order): header errors, then body
+validation, then the fleet check, then the row update — matching
+`POST /api/messages/send`, whose body parse likewise precedes the fleet
+check, so an unknown fleet plus an invalid body yields 422 on both
+endpoints. A no-row 404 means the fleet's monitor has never run —
+`monitor_runtime` rows are removed only by `fleet delete`.
 
 ### GET /api/members/{member_id}/inbox — Inbox Messages
 

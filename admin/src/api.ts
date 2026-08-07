@@ -75,3 +75,10 @@ export async function sendMessage(
 export async function getMonitor(): Promise<MonitorRuntime> {
   return request<MonitorRuntime>("/monitor");
 }
+
+export async function patchMonitor(wakeIntervalSeconds: number): Promise<void> {
+  await request<unknown>("/monitor", {
+    method: "PATCH",
+    body: JSON.stringify({ wake_interval_seconds: wakeIntervalSeconds }),
+  });
+}

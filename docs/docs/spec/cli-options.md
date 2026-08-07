@@ -759,6 +759,12 @@ loop, and a still-running loop self-terminates on its next tick after
 | `--tick` | no | The scan-tick cadence in seconds (an integer ≥ 1, default **5**). The tick is the floor on interval precision — see [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision). |
 | `--interval` | no | The Director wake interval in seconds (an integer ≥ 0); `0` disables the wake while the loop keeps heartbeating. When omitted, falls back to `CAFLEET_MONITOR_WAKE_INTERVAL` (default **600**). |
 
+The startup-resolved interval (`--interval` > `CAFLEET_MONITOR_WAKE_INTERVAL`
+> 600) is stamped into the fleet's `monitor_runtime` row at each start and
+re-read on every tick, so a
+[`PATCH /api/monitor`](webui-api.md#patch-api-monitor)
+edit changes the running loop's cadence within one tick.
+
 Runs the loop **in-process** (the Director launches it as a background task
 in its own pane; the loop blocks the task and writes to its stdout — one
 `<iso-ts> tick -> wake director <director-member-id> (<N> members)` line per

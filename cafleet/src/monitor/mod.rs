@@ -24,16 +24,20 @@
 //! // wins as the baseline (unparsable → immediately due); a NULL last_wake_at
 //! // falls back to started_at (NULL or unparsable → immediately due).
 //! pub fn wake_due(last_wake_at: Option<&str>, started_at: Option<&str>,
-//!     wake_interval: u64, now: DateTime<Utc>) -> bool;
+//!     wake_interval: i64, now: DateTime<Utc>) -> bool;
 //!
+//! // No interval parameter: each pass re-reads wake_interval_seconds from
+//! // the fleet's runtime row, so an external update changes the cadence
+//! // within one tick.
 //! pub fn monitor_tick(conn: &mut Connection, mux: &dyn MonitorMux,
 //!     out: &mut dyn std::io::Write, fleet_id: i64, pid: i64,
-//!     wake_interval: u64, now: DateTime<Utc>)
-//!     -> Result<TickResult, CafleetError>;
+//!     now: DateTime<Utc>) -> Result<TickResult, CafleetError>;
 //!
+//! // wake_interval is used only to stamp the claim; the ticks read the
+//! // stored value.
 //! pub fn run_monitor_loop(conn: &mut Connection, mux: &dyn MonitorMux,
 //!     out: &mut dyn std::io::Write, fleet_id: i64, tick_seconds: i64,
-//!     wake_interval: u64) -> Result<(), CafleetError>;
+//!     wake_interval: i64) -> Result<(), CafleetError>;
 //! ```
 
 use std::collections::BTreeSet;
@@ -97,7 +101,7 @@ fn mux_err(error: MultiplexerError) -> CafleetError {
 pub fn wake_due(
     last_wake_at: Option<&str>,
     started_at: Option<&str>,
-    wake_interval: u64,
+    wake_interval: i64,
     now: DateTime<Utc>,
 ) -> bool {
     let Some(baseline) = last_wake_at.or(started_at) else {
@@ -106,19 +110,19 @@ pub fn wake_due(
     let Ok(parsed) = parse_lenient(baseline) else {
         return true;
     };
-    (now - parsed).num_seconds() >= wake_interval as i64
+    (now - parsed).num_seconds() >= wake_interval
 }
 
 /// One scan pass (SPEC §6.6): ownership-checked heartbeat → fleet liveness →
-/// wake-interval gate → Director-pane resolution → one fleet-level wake →
-/// the `woke`-gated ledger write and heartbeat echo.
+/// runtime-row read (the per-tick interval re-read) → wake-interval gate →
+/// Director-pane resolution → one fleet-level wake → the `woke`-gated ledger
+/// write and heartbeat echo.
 pub fn monitor_tick(
     conn: &mut Connection,
     mux: &dyn MonitorMux,
     out: &mut dyn Write,
     fleet_id: i64,
     pid: i64,
-    wake_interval: u64,
     now: DateTime<Utc>,
 ) -> Result<TickResult, CafleetError> {
     let iso = format_utc(now);
@@ -135,11 +139,14 @@ pub fn monitor_tick(
     }
     let fleet = fleet.expect("the live fleet row exists");
 
+    let runtime = broker::read_monitor_runtime(conn, fleet_id)?
+        .expect("the heartbeat just matched this fleet's runtime row");
+    let wake_interval = runtime["wake_interval_seconds"]
+        .as_i64()
+        .expect("the owning loop stamped the interval at claim");
     if wake_interval == 0 {
         return Ok(TickResult::Continue);
     }
-    let runtime = broker::read_monitor_runtime(conn, fleet_id)?
-        .expect("the heartbeat just matched this fleet's runtime row");
     if !wake_due(
         runtime["last_wake_at"].as_str(),
         runtime["started_at"].as_str(),
@@ -205,11 +212,11 @@ pub fn run_monitor_loop(
     out: &mut dyn Write,
     fleet_id: i64,
     tick_seconds: i64,
-    wake_interval: u64,
+    wake_interval: i64,
 ) -> Result<(), CafleetError> {
     let pid = i64::from(std::process::id());
     let now = format_utc(now_utc());
-    if !broker::claim_monitor_runtime(conn, fleet_id, pid, tick_seconds, &now)? {
+    if !broker::claim_monitor_runtime(conn, fleet_id, pid, tick_seconds, wake_interval, &now)? {
         return Err(CafleetError::App(format!(
             "monitor already running for fleet {fleet_id}"
         )));
@@ -232,7 +239,7 @@ pub fn run_monitor_loop(
         if stop.load(Ordering::Relaxed) {
             break Ok(());
         }
-        match monitor_tick(conn, mux, out, fleet_id, pid, wake_interval, now_utc()) {
+        match monitor_tick(conn, mux, out, fleet_id, pid, now_utc()) {
             Ok(TickResult::Continue) => {}
             Ok(TickResult::Stop) => break Ok(()),
             Err(error) => break Err(error),
@@ -322,7 +329,24 @@ mod tests {
     }
 
     fn claim(conn: &mut rusqlite::Connection, fleet_id: i64, pid: i64, now: DateTime<Utc>) {
-        assert!(broker::claim_monitor_runtime(conn, fleet_id, pid, 5, &format_utc(now)).unwrap());
+        claim_with_interval(conn, fleet_id, pid, 600, now);
+    }
+
+    fn claim_with_interval(
+        conn: &mut rusqlite::Connection,
+        fleet_id: i64,
+        pid: i64,
+        wake_interval: i64,
+        now: DateTime<Utc>,
+    ) {
+        assert!(
+            broker::claim_monitor_runtime(conn, fleet_id, pid, 5, wake_interval, &format_utc(now))
+                .unwrap()
+        );
+    }
+
+    fn set_interval(conn: &mut rusqlite::Connection, fleet_id: i64, wake_interval: i64) {
+        assert!(broker::set_monitor_wake_interval(conn, fleet_id, wake_interval).unwrap());
     }
 
     fn tick(
@@ -330,11 +354,10 @@ mod tests {
         mux: &FakeMux,
         fleet_id: i64,
         pid: i64,
-        wake_interval: u64,
         now: DateTime<Utc>,
     ) -> (TickResult, String) {
         let mut out = Vec::new();
-        let result = monitor_tick(conn, mux, &mut out, fleet_id, pid, wake_interval, now).unwrap();
+        let result = monitor_tick(conn, mux, &mut out, fleet_id, pid, now).unwrap();
         (result, String::from_utf8(out).unwrap())
     }
 
@@ -437,11 +460,11 @@ mod tests {
             let mux = FakeMux::with_live_panes(&["%0", "%2", "%4"]);
             let now = base_now();
 
-            let (result, _) = tick(&mut conn, &mux, fleet_id, own_pid(), 600, now);
+            let (result, _) = tick(&mut conn, &mux, fleet_id, own_pid(), now);
             assert!(matches!(result, TickResult::Stop), "no claimed slot → Stop");
 
             claim(&mut conn, fleet_id, own_pid(), now);
-            let (result, _) = tick(&mut conn, &mux, fleet_id, own_pid() + 1, 600, now);
+            let (result, _) = tick(&mut conn, &mux, fleet_id, own_pid() + 1, now);
             assert!(matches!(result, TickResult::Stop), "displaced pid → Stop");
             assert_eq!(mux.wake_count(), 0, "a stopping tick never wakes");
         }
@@ -461,7 +484,7 @@ mod tests {
             .unwrap();
 
             let mux = FakeMux::with_live_panes(&["%0", "%2", "%4"]);
-            let (result, _) = tick(&mut conn, &mux, fleet_id, own_pid(), 600, now);
+            let (result, _) = tick(&mut conn, &mux, fleet_id, own_pid(), now);
             assert!(matches!(result, TickResult::Stop));
         }
 
@@ -475,7 +498,7 @@ mod tests {
             let mux = FakeMux::with_live_panes(&["%0", "%2", "%4"]);
 
             let due_at = now + Duration::seconds(600);
-            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), 600, due_at);
+            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), due_at);
             assert!(matches!(result, TickResult::Continue));
 
             let wakes = mux.wakes.borrow();
@@ -509,7 +532,7 @@ mod tests {
             claim(&mut conn, fleet_id, own_pid(), now);
             let mux = FakeMux::with_live_panes(&["%0", "%2", "%4"]);
 
-            let (_, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), 600, now);
+            let (_, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), now);
             assert_eq!(
                 mux.wake_count(),
                 0,
@@ -522,7 +545,6 @@ mod tests {
                 &mux,
                 fleet_id,
                 own_pid(),
-                600,
                 now + Duration::seconds(599),
             );
             assert_eq!(mux.wake_count(), 0, "599 < 600 since started_at → not due");
@@ -533,7 +555,6 @@ mod tests {
                 &mux,
                 fleet_id,
                 own_pid(),
-                600,
                 now + Duration::seconds(600),
             );
             assert_eq!(
@@ -547,7 +568,6 @@ mod tests {
                 &mux,
                 fleet_id,
                 own_pid(),
-                600,
                 now + Duration::seconds(1199),
             );
             assert_eq!(mux.wake_count(), 1, "599 since the first wake → not due");
@@ -558,7 +578,6 @@ mod tests {
                 &mux,
                 fleet_id,
                 own_pid(),
-                600,
                 now + Duration::seconds(1200),
             );
             assert_eq!(
@@ -574,11 +593,11 @@ mod tests {
             let mut conn = migrated_conn(&dir);
             let (fleet_id, _, _, _) = wake_fleet(&mut conn);
             let now = base_now();
-            claim(&mut conn, fleet_id, own_pid(), now);
+            claim_with_interval(&mut conn, fleet_id, own_pid(), 0, now);
             let mux = FakeMux::with_live_panes(&["%0", "%2", "%4"]);
 
             let later = now + Duration::seconds(2);
-            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), 0, later);
+            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), later);
             assert!(matches!(result, TickResult::Continue));
             assert_eq!(mux.wake_count(), 0, "interval 0 disables the wake");
             assert!(echo.is_empty());
@@ -591,6 +610,172 @@ mod tests {
                 row["last_tick_at"],
                 format_utc(later),
                 "the loop keeps claiming the slot and heartbeating"
+            );
+        }
+
+        #[test]
+        fn a_mid_run_shrink_below_the_elapsed_time_is_due_on_the_next_tick() {
+            let dir = TempDir::new().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet_id, _, _, _) = wake_fleet(&mut conn);
+            let now = base_now();
+            claim(&mut conn, fleet_id, own_pid(), now);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%4"]);
+
+            let (_, _) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(600),
+            );
+            assert_eq!(mux.wake_count(), 1, "the first wake sets the baseline");
+
+            let (_, _) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(900),
+            );
+            assert_eq!(
+                mux.wake_count(),
+                1,
+                "300 < 600 since the baseline → not due"
+            );
+
+            set_interval(&mut conn, fleet_id, 200);
+            let (_, _) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(905),
+            );
+            assert_eq!(
+                mux.wake_count(),
+                2,
+                "305 >= the shrunken 200 → due on the very next tick"
+            );
+        }
+
+        #[test]
+        fn a_mid_run_zero_disables_and_a_raise_re_enables_against_the_baseline() {
+            let dir = TempDir::new().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet_id, _, _, _) = wake_fleet(&mut conn);
+            let now = base_now();
+            claim(&mut conn, fleet_id, own_pid(), now);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%4"]);
+
+            let (_, _) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(600),
+            );
+            assert_eq!(mux.wake_count(), 1, "the first wake sets the baseline");
+
+            set_interval(&mut conn, fleet_id, 0);
+            let at = now + Duration::seconds(800);
+            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), at);
+            assert!(matches!(result, TickResult::Continue));
+            assert_eq!(
+                mux.wake_count(),
+                1,
+                "0 disables the wake from the next tick"
+            );
+            assert!(echo.is_empty());
+            let row = broker::read_monitor_runtime(&conn, fleet_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                row["last_tick_at"],
+                format_utc(at),
+                "the loop keeps heartbeating while disabled"
+            );
+
+            set_interval(&mut conn, fleet_id, 300);
+            let (_, _) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(899),
+            );
+            assert_eq!(
+                mux.wake_count(),
+                1,
+                "299 < 300 since the existing baseline → not yet due"
+            );
+
+            let (_, _) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(900),
+            );
+            assert_eq!(
+                mux.wake_count(),
+                2,
+                "the raise re-enables, gated against the existing baseline"
+            );
+        }
+
+        #[test]
+        fn an_edit_before_the_first_wake_moves_the_first_wake_boundary() {
+            let dir = TempDir::new().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet_id, _, _, _) = wake_fleet(&mut conn);
+            let now = base_now();
+            claim(&mut conn, fleet_id, own_pid(), now);
+            let mux = FakeMux::with_live_panes(&["%0", "%2", "%4"]);
+
+            let (_, _) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(100),
+            );
+            assert_eq!(mux.wake_count(), 0, "not due under the startup 600");
+
+            set_interval(&mut conn, fleet_id, 900);
+            let (_, _) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(600),
+            );
+            assert_eq!(
+                mux.wake_count(),
+                0,
+                "the old started_at + 600 boundary no longer applies"
+            );
+
+            let (_, _) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(899),
+            );
+            assert_eq!(mux.wake_count(), 0, "899 < 900 since started_at → not due");
+
+            let (_, _) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(900),
+            );
+            assert_eq!(
+                mux.wake_count(),
+                1,
+                "the first wake fires at started_at + the new interval"
             );
         }
 
@@ -608,7 +793,6 @@ mod tests {
                 &mux,
                 fleet_id,
                 own_pid(),
-                600,
                 now + Duration::seconds(600),
             );
             assert!(matches!(result, TickResult::Continue));
@@ -636,7 +820,6 @@ mod tests {
                 &mux,
                 fleet_id,
                 own_pid(),
-                600,
                 now + Duration::seconds(600),
             );
             assert!(matches!(result, TickResult::Continue));
@@ -650,7 +833,6 @@ mod tests {
                 &mux,
                 fleet_id,
                 own_pid(),
-                600,
                 now + Duration::seconds(605),
             );
             assert_eq!(mux.wake_count(), 2, "the unstamped fleet stays due");
@@ -671,7 +853,7 @@ mod tests {
             let mux = FakeMux::with_live_panes(&["%0"]);
 
             let due_at = now + Duration::seconds(600);
-            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), 600, due_at);
+            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), due_at);
             assert!(matches!(result, TickResult::Continue));
 
             let wakes = mux.wakes.borrow();

@@ -1,5 +1,6 @@
 export interface MonitorRuntime {
   running: boolean;
+  wake_interval_seconds: number | null;
 }
 
 export interface Member {

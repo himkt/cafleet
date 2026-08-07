@@ -51,7 +51,9 @@
 //! record_monitor_wake(conn: &mut Connection, fleet_id: i64, when: &str) -> Result<()>
 //! list_fleet_wake_targets(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>>
 //! claim_monitor_runtime(conn: &mut Connection, fleet_id: i64, pid: i64,
-//!     tick_seconds: i64, when: &str) -> Result<bool>
+//!     tick_seconds: i64, wake_interval: i64, when: &str) -> Result<bool>
+//! set_monitor_wake_interval(conn: &mut Connection, fleet_id: i64,
+//!     wake_interval: i64) -> Result<bool>  // false ⇔ no row
 //! heartbeat_monitor_runtime(conn: &mut Connection, fleet_id: i64, pid: i64,
 //!     when: &str) -> Result<bool>
 //! clear_monitor_runtime(conn: &mut Connection, fleet_id: i64, pid: i64) -> Result<()>

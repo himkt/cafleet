@@ -50,12 +50,13 @@ struct RuntimeRow {
     started_at: Option<String>,
     last_tick_at: Option<String>,
     tick_seconds: i64,
+    wake_interval_seconds: Option<i64>,
     last_wake_at: Option<String>,
 }
 
 fn runtime_row(conn: &Connection, fleet_id: i64) -> Result<Option<RuntimeRow>, CafleetError> {
     conn.query_row(
-        "SELECT pid, started_at, last_tick_at, tick_seconds, last_wake_at \
+        "SELECT pid, started_at, last_tick_at, tick_seconds, wake_interval_seconds, last_wake_at \
          FROM monitor_runtime WHERE fleet_id=?1",
         [fleet_id],
         |row| {
@@ -64,7 +65,8 @@ fn runtime_row(conn: &Connection, fleet_id: i64) -> Result<Option<RuntimeRow>, C
                 started_at: row.get(1)?,
                 last_tick_at: row.get(2)?,
                 tick_seconds: row.get(3)?,
-                last_wake_at: row.get(4)?,
+                wake_interval_seconds: row.get(4)?,
+                last_wake_at: row.get(5)?,
             })
         },
     )
@@ -137,6 +139,7 @@ pub fn claim_monitor_runtime(
     fleet_id: i64,
     pid: i64,
     tick_seconds: i64,
+    wake_interval: i64,
     when: &str,
 ) -> Result<bool, CafleetError> {
     let now = parse_lenient(when)?;
@@ -158,9 +161,10 @@ pub fn claim_monitor_runtime(
     match existing {
         None => {
             tx.execute(
-                "INSERT INTO monitor_runtime (fleet_id, pid, started_at, last_tick_at, tick_seconds) \
-                 VALUES (?1, ?2, ?3, ?3, ?4)",
-                params![fleet_id, pid, when, tick_seconds],
+                "INSERT INTO monitor_runtime \
+                 (fleet_id, pid, started_at, last_tick_at, tick_seconds, wake_interval_seconds) \
+                 VALUES (?1, ?2, ?3, ?3, ?4, ?5)",
+                params![fleet_id, pid, when, tick_seconds, wake_interval],
             )
             .map_err(db_err)?;
         }
@@ -173,15 +177,32 @@ pub fn claim_monitor_runtime(
             }
             tx.execute(
                 "UPDATE monitor_runtime \
-                 SET pid=?1, started_at=?2, last_tick_at=?2, tick_seconds=?3 \
-                 WHERE fleet_id=?4",
-                params![pid, when, tick_seconds, fleet_id],
+                 SET pid=?1, started_at=?2, last_tick_at=?2, tick_seconds=?3, \
+                     wake_interval_seconds=?4 \
+                 WHERE fleet_id=?5",
+                params![pid, when, tick_seconds, wake_interval, fleet_id],
             )
             .map_err(db_err)?;
         }
     }
     tx.commit().map_err(db_err)?;
     Ok(true)
+}
+
+/// Ownership-free interval update (the WebUI `PATCH /api/monitor` write):
+/// `false` ⇔ no row, i.e. the fleet's monitor has never run.
+pub fn set_monitor_wake_interval(
+    conn: &mut Connection,
+    fleet_id: i64,
+    wake_interval: i64,
+) -> Result<bool, CafleetError> {
+    let changed = conn
+        .execute(
+            "UPDATE monitor_runtime SET wake_interval_seconds=?1 WHERE fleet_id=?2",
+            params![wake_interval, fleet_id],
+        )
+        .map_err(db_err)?;
+    Ok(changed == 1)
 }
 
 /// Ownership-checked heartbeat: a non-owner's tick matches zero rows and
@@ -201,8 +222,9 @@ pub fn heartbeat_monitor_runtime(
     Ok(changed == 1)
 }
 
-/// Ownership-checked clear: nulls the process fields, preserves
-/// `tick_seconds`; a non-owner's clear is a no-op.
+/// Ownership-checked clear: nulls the process fields, preserves the durable
+/// fields (`tick_seconds`, `wake_interval_seconds`, `last_wake_at`); a
+/// non-owner's clear is a no-op.
 pub fn clear_monitor_runtime(
     conn: &mut Connection,
     fleet_id: i64,
@@ -228,6 +250,7 @@ pub fn read_monitor_runtime(
             "started_at": row.started_at,
             "last_tick_at": row.last_tick_at,
             "tick_seconds": row.tick_seconds,
+            "wake_interval_seconds": row.wake_interval_seconds,
             "last_wake_at": row.last_wake_at,
         })
     }))
@@ -249,15 +272,20 @@ pub fn monitor_runtime_payload(
     now: DateTime<Utc>,
 ) -> Result<Value, CafleetError> {
     let row = runtime_row(conn, fleet_id)?;
-    let (running, tick_seconds) = match &row {
-        None => (false, Value::Null),
-        Some(row) => (runtime_live(row, now), json!(row.tick_seconds)),
+    let (running, tick_seconds, wake_interval_seconds) = match &row {
+        None => (false, Value::Null, Value::Null),
+        Some(row) => (
+            runtime_live(row, now),
+            json!(row.tick_seconds),
+            json!(row.wake_interval_seconds),
+        ),
     };
     if !running {
         return Ok(json!({
             "running": false,
             "pid": Value::Null,
             "tick_seconds": tick_seconds,
+            "wake_interval_seconds": wake_interval_seconds,
             "last_tick_at": Value::Null,
             "last_tick_age_seconds": Value::Null,
             "started_at": Value::Null,
@@ -274,6 +302,7 @@ pub fn monitor_runtime_payload(
         "running": true,
         "pid": row.pid,
         "tick_seconds": row.tick_seconds,
+        "wake_interval_seconds": row.wake_interval_seconds,
         "last_tick_at": row.last_tick_at,
         "last_tick_age_seconds": age(row.last_tick_at.as_deref()),
         "started_at": row.started_at,
@@ -360,7 +389,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let when = format_utc(base_time());
-        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, &when).unwrap();
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
 
         broker::record_monitor_wake(&mut conn, fleet_id, &when).unwrap();
         let row = broker::read_monitor_runtime(&conn, fleet_id)
@@ -385,13 +414,13 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let when = format_utc(base_time());
-        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, &when).unwrap();
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
         broker::record_monitor_wake(&mut conn, fleet_id, &when).unwrap();
 
         // stale_after = max(3 * 5, 15) = 15; the 100-second-old heartbeat lets
         // a restarted loop reclaim the slot.
         let later = format_utc(base_time() + Duration::seconds(100));
-        assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, &later).unwrap());
+        assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, 600, &later).unwrap());
         let row = broker::read_monitor_runtime(&conn, fleet_id)
             .unwrap()
             .unwrap();
@@ -472,7 +501,9 @@ mod tests {
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let when = format_utc(base_time());
 
-        assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, &when).unwrap());
+        assert!(
+            broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap()
+        );
         let row = broker::read_monitor_runtime(&conn, fleet_id)
             .unwrap()
             .unwrap();
@@ -492,6 +523,7 @@ mod tests {
             fleet_id,
             own_pid() + 1,
             5,
+            600,
             &format_utc(base_time() + Duration::seconds(1)),
         )
         .unwrap();
@@ -509,6 +541,7 @@ mod tests {
                 fleet_id,
                 own_pid(),
                 5,
+                600,
                 &format_utc(base_time())
             )
             .unwrap()
@@ -517,7 +550,7 @@ mod tests {
         // stale_after = max(3 * 5, 15) = 15; a 100-second-old heartbeat is
         // stale even though the owning process (this test) is alive.
         let later = format_utc(base_time() + Duration::seconds(100));
-        assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, &later).unwrap());
+        assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, 600, &later).unwrap());
         let row = broker::read_monitor_runtime(&conn, fleet_id)
             .unwrap()
             .unwrap();
@@ -536,6 +569,7 @@ mod tests {
                 fleet_id,
                 DEAD_PID,
                 5,
+                600,
                 &format_utc(base_time())
             )
             .unwrap()
@@ -546,6 +580,7 @@ mod tests {
             fleet_id,
             own_pid(),
             5,
+            600,
             &format_utc(base_time() + Duration::seconds(1)),
         )
         .unwrap();
@@ -558,7 +593,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let when = format_utc(base_time());
-        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, &when).unwrap();
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
 
         let tick = format_utc(base_time() + Duration::seconds(2));
         assert!(broker::heartbeat_monitor_runtime(&mut conn, fleet_id, own_pid(), &tick).unwrap());
@@ -582,12 +617,12 @@ mod tests {
     }
 
     #[test]
-    fn clear_is_ownership_checked_and_preserves_tick_seconds_and_last_wake_at() {
+    fn clear_is_ownership_checked_and_preserves_the_durable_fields() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let when = format_utc(base_time());
-        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 7, &when).unwrap();
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 7, 600, &when).unwrap();
         broker::record_monitor_wake(&mut conn, fleet_id, &when).unwrap();
 
         broker::clear_monitor_runtime(&mut conn, fleet_id, 4242).unwrap();
@@ -605,6 +640,10 @@ mod tests {
         assert_eq!(row["last_tick_at"], Value::Null);
         assert_eq!(row["tick_seconds"], 7);
         assert_eq!(
+            row["wake_interval_seconds"], 600,
+            "the interval survives a stop, like tick_seconds"
+        );
+        assert_eq!(
             row["last_wake_at"], when,
             "the wake cadence survives a stop"
         );
@@ -621,7 +660,8 @@ mod tests {
             "no row"
         );
 
-        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, &format_utc(now)).unwrap();
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &format_utc(now))
+            .unwrap();
         assert!(broker::monitor_is_live(&conn, fleet_id, now + Duration::seconds(2)).unwrap());
         assert!(
             !broker::monitor_is_live(&conn, fleet_id, now + Duration::seconds(100)).unwrap(),
@@ -645,7 +685,7 @@ mod tests {
         assert_eq!(absent["tick_seconds"], Value::Null);
 
         let when = format_utc(now);
-        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, &when).unwrap();
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
         let live =
             broker::monitor_runtime_payload(&conn, fleet_id, now + Duration::seconds(2)).unwrap();
         assert_eq!(live["running"], true);
@@ -666,5 +706,112 @@ mod tests {
         assert_eq!(stale["last_tick_at"], Value::Null);
         assert_eq!(stale["last_tick_age_seconds"], Value::Null);
         assert_eq!(stale["started_at"], Value::Null);
+    }
+
+    #[test]
+    fn claim_stamps_the_wake_interval_on_insert_and_reclaim() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let when = format_utc(base_time());
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row["wake_interval_seconds"], 600);
+
+        // stale_after = max(3 * 5, 15) = 15; the 100-second-old heartbeat lets
+        // a restarted loop reclaim the slot and re-stamp the interval.
+        let later = format_utc(base_time() + Duration::seconds(100));
+        assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, 300, &later).unwrap());
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row["wake_interval_seconds"], 300,
+            "a reclaim re-stamps the startup-resolved interval"
+        );
+    }
+
+    #[test]
+    fn set_monitor_wake_interval_updates_the_row_and_reports_a_never_run_fleet() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        assert!(
+            !broker::set_monitor_wake_interval(&mut conn, fleet_id, 120).unwrap(),
+            "no row ⇔ the fleet's monitor has never run"
+        );
+
+        let when = format_utc(base_time());
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
+        assert!(broker::set_monitor_wake_interval(&mut conn, fleet_id, 120).unwrap());
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row["wake_interval_seconds"], 120);
+
+        broker::clear_monitor_runtime(&mut conn, fleet_id, own_pid()).unwrap();
+        assert!(
+            broker::set_monitor_wake_interval(&mut conn, fleet_id, 0).unwrap(),
+            "the update is ownership-free; a stopped loop's row still updates"
+        );
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row["wake_interval_seconds"], 0);
+    }
+
+    #[test]
+    fn runtime_payload_carries_the_wake_interval_in_every_shape() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let now = base_time();
+
+        let absent = broker::monitor_runtime_payload(&conn, fleet_id, now).unwrap();
+        assert_eq!(
+            absent["wake_interval_seconds"],
+            Value::Null,
+            "no row has ever existed"
+        );
+
+        let when = format_utc(now);
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
+        let live =
+            broker::monitor_runtime_payload(&conn, fleet_id, now + Duration::seconds(2)).unwrap();
+        assert_eq!(live["wake_interval_seconds"], 600);
+
+        let stale =
+            broker::monitor_runtime_payload(&conn, fleet_id, now + Duration::seconds(100)).unwrap();
+        assert_eq!(
+            stale["wake_interval_seconds"], 600,
+            "preserved from the stale row, like tick_seconds"
+        );
+
+        for payload in [&live, &stale] {
+            let keys: Vec<&str> = payload
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            let tick_pos = keys.iter().position(|k| *k == "tick_seconds").unwrap();
+            assert_eq!(
+                keys.get(tick_pos + 1),
+                Some(&"wake_interval_seconds"),
+                "the key sits immediately after tick_seconds"
+            );
+        }
+
+        // A row that predates the migration and was never re-claimed since.
+        conn.execute(
+            "UPDATE monitor_runtime SET wake_interval_seconds=NULL WHERE fleet_id=?1",
+            [fleet_id],
+        )
+        .unwrap();
+        let premigration =
+            broker::monitor_runtime_payload(&conn, fleet_id, now + Duration::seconds(100)).unwrap();
+        assert_eq!(premigration["wake_interval_seconds"], Value::Null);
     }
 }
