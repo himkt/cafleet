@@ -10,12 +10,12 @@ Merge the four files under `skills/cafleet/reference/coding-agent/` (`claude-ove
 
 ## Success Criteria
 
-- [ ] `skills/cafleet/reference/coding-agent-overlays.md` exists with four top-level sections (`## claude`, `## codex`, `## opencode`, `## Template`), each self-contained; the four old files and the `coding-agent/` directory are deleted.
-- [ ] No mention of the deleted artifacts remains outside `design-docs/` and git history: `claude-overlay.md` / `codex-overlay.md` / `opencode-overlay.md`, the `<name>-overlay.md` placeholder pattern, `_template.md`, and the `reference/coding-agent/` directory path (per the removal rule, the repo reads as if the per-file layout never existed; the rule file `.claude/rules/coding-agent-overlay.md` keeps its name and matches none of these patterns).
-- [ ] Every skill entry point's Required-reading row #1 links the merged file with a per-backend anchor (`coding-agent-overlays.md#<name>`).
-- [ ] `.claude/rules/coding-agent-overlay.md` states the single-file layout as policy, including the reader contract and the accepted trade-off.
-- [ ] The two `docs_sync.rs` guards assert per-backend-section (section slicing), preserving current guard strength; `mise //cafleet:test` and `mise //cafleet:lint` pass.
-- [ ] The `cafleet` binary is reinstalled and the deployed skill replicas under `~/.claude/skills/` are refreshed from it.
+- [x] `skills/cafleet/reference/coding-agent-overlays.md` exists with four top-level sections (`## claude`, `## codex`, `## opencode`, `## Template`), each self-contained; the four old files and the `coding-agent/` directory are deleted.
+- [x] No mention of the deleted artifacts remains outside `design-docs/` and git history: `claude-overlay.md` / `codex-overlay.md` / `opencode-overlay.md`, the `<name>-overlay.md` placeholder pattern, `_template.md`, and the `reference/coding-agent/` directory path (per the removal rule, the repo reads as if the per-file layout never existed; the rule file `.claude/rules/coding-agent-overlay.md` keeps its name and matches none of these patterns).
+- [x] Every skill entry point's Required-reading row #1 links the merged file with a per-backend anchor (`coding-agent-overlays.md#<name>`).
+- [x] `.claude/rules/coding-agent-overlay.md` states the single-file layout as policy, including the reader contract and the accepted trade-off.
+- [x] The two `docs_sync.rs` guards assert per-backend-section (section slicing), preserving current guard strength; `mise //cafleet:test` and `mise //cafleet:lint` pass.
+- [x] The `cafleet` binary is reinstalled and the deployed skill replicas under `~/.claude/skills/` are refreshed from it.
 
 ---
 
