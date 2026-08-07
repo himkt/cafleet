@@ -1,7 +1,7 @@
 # Unified Coding-Agent Overlay File
 
 **Status**: Approved
-**Progress**: 11/17 tasks complete
+**Progress**: 17/17 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -179,9 +179,9 @@ The unknown-token walker elsewhere in `docs_sync.rs` scans skill files by direct
 
 ### Step 8: Verify and deploy
 
-- [ ] Run `mise //cafleet:test` and `mise //cafleet:lint`; both pass. <!-- completed: -->
-- [ ] Repo-wide sweep scoped to the deleted artifacts: no match for `(claude|codex|opencode)-overlay\.md`, the literal `<name>-overlay.md`, `_template\.md`, or `reference/coding-agent/` remains outside `design-docs/` (`rg` over the repo, `design-docs/` excluded). The surviving rule path `.claude/rules/coding-agent-overlay.md` and the merged filename `coding-agent-overlays.md` match none of these patterns. <!-- completed: -->
-- [ ] Reinstall the binary (`mise //cafleet:install`), then run `cafleet setup` to refresh the deployed skill replicas under `~/.claude/skills/` from the embedded assets. <!-- completed: -->
+- [x] Run `mise //cafleet:test` and `mise //cafleet:lint`; both pass. <!-- completed: 2026-08-07T13:25 -->
+- [x] Repo-wide sweep scoped to the deleted artifacts: no match for `(claude|codex|opencode)-overlay\.md`, the literal `<name>-overlay.md`, `_template\.md`, or `reference/coding-agent/` remains outside `design-docs/` (`rg` over the repo, `design-docs/` excluded). The surviving rule path `.claude/rules/coding-agent-overlay.md` and the merged filename `coding-agent-overlays.md` match none of these patterns. <!-- completed: 2026-08-07T13:25 -->
+- [x] Reinstall the binary (`mise //cafleet:install`), then run `cafleet setup` to refresh the deployed skill replicas under `~/.claude/skills/` from the embedded assets. <!-- completed: 2026-08-07T13:26 -->
 
 ---
 
