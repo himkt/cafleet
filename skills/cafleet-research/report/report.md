@@ -27,11 +27,13 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 ## Prerequisites
 
-The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill (reading its `reference/supervision.md`) and embeds it into every member's spawn prompt. The Director launches the `cafleet monitor` loop as a background task in its own pane; the loop wakes it once per wake interval — see Step 1.
+The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`); everything else is gated in Steps 0–1.
 
 ## Output
 
 The skill writes its working folder to `<CWD>/researches/<topic-slug>/` (one folder per research run, containing `report.md` and per-researcher files). Callers MUST add `researches/` to their per-project `.gitignore` before invoking this skill — the skill does not create or modify `.gitignore` itself, and the working folder is meant to stay out of version control.
+
+Member file-output rules (shared by Scout and Researcher): the output directory already exists — the Director creates it before spawning any members, so members write directly to the assigned path and create no directories; the file is the deliverable and the `cafleet message send` to the Director is the notification — the file must be self-contained; on re-investigation the member overwrites its original file (no version files — the path stays stable across the lifecycle).
 
 ## Architecture
 
@@ -86,11 +88,11 @@ On each active turn, check `${OUTPUT_DIR}` for these expected deliverables:
 - `00-scout-*.md` — Scout landscape/discovery notes (one or more files may exist)
 - `NN-research-*.md` — Researcher findings files for delegated sub-topics (`NN` is the assigned number; one or more files may exist)
 
-Readiness/stall rules (apply per the `cafleet` skill's `reference/supervision.md`):
+Readiness rules:
 
 - After Scouts/Researchers have been spawned and tasks have been assigned, expect at least one `00-scout-*.md` or `NN-research-*.md` file to appear after the first round of replies.
 - Do not consider the workflow ready for Step 5 until `report.md` exists.
-- If a member has an assignment still in progress but their deliverable file is missing past the expected milestone, run the 2-stage health-check from the `cafleet` skill's `reference/supervision.md`: `cafleet message poll` → `cafleet member capture --lines 200` → directed `cafleet message send` → user escalation.
+- The report-specific stall heuristic is [roles/director.md](roles/director.md) § *Progress Monitoring*.
 
 ### Step 2: Spawn Manager (Director)
 
@@ -127,7 +129,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `[message-id]` and `cafleet message ack [message-id]`, then act); plus `You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.` and `The team coordinates sub-topic assignments via {task_coord}.` |
 | start cue (verbatim) | `To request Scouts or Researchers, send the Director a cafleet message specifying: role (Scout or Researcher), scope, search angles, and output file path. The Director will spawn them via cafleet member create and relay their completion reports back to you.` + `Your first compiled report will be reviewed critically by the Director. Aim for highest quality on the first attempt.` |
 
-Render the prompt to `${BASE}/.prompts/manager-<UTC-compact>.md` per the 2b two-step audit-file pattern, then spawn with `--file`:
+Audit file: `${BASE}/.prompts/manager-<UTC-compact>.md`:
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \
@@ -156,7 +158,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form |
 | start cue (verbatim) | `Write findings to the output file, then send the Director a completion summary. The Director will relay your findings to the Manager.` |
 
-Render the prompt to `${BASE}/.prompts/<scout-name>-<UTC-compact>.md` per the 2b two-step audit-file pattern (use `scout` for a single Scout, `scout-1`/`scout-2`/… for multiple; `<scout-name>` is the lowercased `--name`), then spawn with `--file`:
+Audit file: `${BASE}/.prompts/<scout-name>-<UTC-compact>.md` (use `scout` for a single Scout, `scout-1`/`scout-2`/… for multiple; `<scout-name>` is the lowercased `--name`):
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \
@@ -208,7 +210,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form; plus `On start, claim your assignment via {task_coord}.` and `Report completion via {task_coord} when done.` |
 | start cue (verbatim) | `Write findings to the output file, then send the Director a completion summary. The Director will relay findings and any follow-up questions between you and the Manager.` |
 
-Render the prompt to `${BASE}/.prompts/researcher-<NN>-<UTC-compact>.md` per the 2b two-step audit-file pattern, then spawn with `--file`:
+Audit file: `${BASE}/.prompts/researcher-<NN>-<UTC-compact>.md`:
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \

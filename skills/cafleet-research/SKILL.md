@@ -46,9 +46,5 @@ When the user's request matches a scenario below, invoke this skill and run the 
 
 | When the user wants to… | Invoke this skill and run |
 |:--|:--|
-| Research a topic / create a multi-source research report | the **report** workflow ([report/report.md](report/report.md)) — Director/Manager/Researcher team → `researches/<topic>/` |
+| Research a topic / create a multi-source research report | the **report** workflow ([report/report.md](report/report.md)) — Director/Manager/Researcher team → `researches/<topic>/`; chains into the presentation workflow after user approval |
 | Build a presentation / slide deck / reading transcript from a report | the **presentation** workflow ([presentation/presentation.md](presentation/presentation.md)) |
-
-For a chart/figure or the Slidev theme — consult the **On-demand** reference pages in § Required reading above (no team needed).
-
-The report workflow chains into the presentation workflow after user approval. The two reference pages are standalone utilities the presentation workflow also reads. Always route research work through the workflow bodies above — each runs the full CAFleet team.

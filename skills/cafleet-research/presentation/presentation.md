@@ -23,7 +23,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 ## Prerequisites
 
-The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`). The Director loads the `cafleet` skill (reading its `reference/supervision.md`) and embeds it into every member's spawn prompt. The Director launches the `cafleet monitor` loop as a background task in its own pane; the loop wakes it once per wake interval — see Step 1.
+The cafleet binary must be installed and on `PATH` (verify with `cafleet doctor`); everything else is gated in Steps 0–1.
 
 For autonomous Slidev generation, see `../reference/slidev.md` § Autonomous slide generation.
 
@@ -128,7 +128,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `<message-id>` and `cafleet message ack <message-id>`, then act) |
 | start cue (verbatim) | `When complete, send the file path to the Director via cafleet message send.` |
 
-Render the prompt to `${BASE}/.prompts/presentation-<UTC-compact>.md` per the 1c two-step audit-file pattern, then spawn with `--file`:
+Audit file: `${BASE}/.prompts/presentation-<UTC-compact>.md`:
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \
@@ -153,7 +153,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form |
 | start cue (verbatim) | `When complete, send the file path to the Director via cafleet message send.` |
 
-Render the prompt to `${BASE}/.prompts/transcript-<UTC-compact>.md` per the 1c two-step audit-file pattern, then spawn with `--file`:
+Audit file: `${BASE}/.prompts/transcript-<UTC-compact>.md`:
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \
@@ -249,7 +249,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form |
 | start cue (verbatim) | `When complete, persist the report to <folder>/.screenshots/vr<start>-r<round>.md and send it to the Director via cafleet message send.` |
 
-Render the prompt to `${BASE}/.prompts/vr-batch-<start>-<UTC-compact>.md` per the 1c two-step audit-file pattern (`<start>` matches the batch's first-slide index used in `--name`; each VR batch gets its own timestamped file — no overwriting), then spawn with `--file`:
+Audit file: `${BASE}/.prompts/vr-batch-<start>-<UTC-compact>.md` (`<start>` matches the batch's first-slide index used in `--name`; each VR batch gets its own timestamped file — no overwriting):
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \

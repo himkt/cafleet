@@ -71,7 +71,7 @@ Your work proceeds in two phases:
 
 ## The Iterative Improvement Loop
 
-**Expect multiple revision rounds — this is the process working as designed.** The Director reviews your transcript and sends tagged feedback via `cafleet message send` using the canonical **Transcript Review Tags** taxonomy in [roles/director.md](director.md#transcript-review-tags) — `[FLOW]`, `[TIMING]`, `[CONTENT MISMATCH]`, `[READABILITY]`, `[FACTUAL ERROR]`, `[GAP]`, `[REDUNDANCY]`. When the Director sends feedback:
+**Expect multiple revision rounds — this is the process working as designed.** The Director reviews your transcript and sends tagged feedback via `cafleet message send` using the canonical **Transcript Review Tags** taxonomy in [roles/director.md](director.md#transcript-review-tags). When the Director sends feedback:
 
 - Fix each tagged issue directly and thoroughly.
 - Re-check 1:1 slide correspondence after revisions.

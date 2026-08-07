@@ -40,12 +40,7 @@ Broker protocol (poll/ack/send, ids from your spawn prompt, never the user direc
 
 ## File Output
 
-Your spawn prompt includes an `OUTPUT FILE` path (e.g., `researches/[topic-slug]/00-scout-[topic].md`). This file is your primary deliverable.
-
-- **The output directory already exists.** The Director creates it before spawning any members. Do NOT create directories — write files directly to the existing path.
-- **Write your complete findings to the assigned file.** Use the output format defined below. The file must be self-contained — anyone reading it should understand the landscape without needing your messages.
-- **The file is the deliverable; the `cafleet message send` to the Director is the notification.** After writing the file, send the Director a completion report that briefly summarizes key findings. The file must be self-contained.
-- **Overwrite on re-investigation.** If the Director (relaying a Manager request) sends you back for targeted follow-up or to explore a specific area, overwrite your original file with the updated findings. Do not create a new version file. The file path stays the same throughout the scouting lifecycle.
+Your spawn prompt includes an `OUTPUT FILE` path (e.g., `researches/[topic-slug]/00-scout-[topic].md`). This file is your primary deliverable; the shared file-output rules (existing directory, file-is-the-deliverable, overwrite on re-investigation) are in `report.md` § *Output*. Write your complete findings in the output format defined below — the file must be self-contained: anyone reading it should understand the landscape without needing your messages.
 
 ## Output Format
 
@@ -80,7 +75,6 @@ Structure your findings as markdown with the following sections:
 
 - **Send a completion report to the Director on finish.** Summarize your key findings and highlight any surprises or areas that the Manager should prioritize. The Director will relay to the Manager.
 - **Respond to follow-up requests.** The Director (relaying the Manager) may send you back for targeted scouting in specific areas discovered during your initial sweep. When this happens, focus on the requested area while preserving the broader landscape context in your file.
-- **Maximum 3 iterations.** The Scout-Manager loop has a safety cap of 3 iterations (request, investigate, review = one iteration). After 3 iterations, the Manager must proceed to topic decomposition with the knowledge gathered so far.
 
 ## Shutdown
 

@@ -59,16 +59,6 @@ After generating all slides, check every slide:
 
 ## Color
 
-### Tokens
-
-| Token | Use For |
-|-------|---------|
-| `--c-primary` (blue) | Key metrics, links |
-| `--c-accent` (orange) | Warnings |
-| `--c-positive` (green) | Growth, upside |
-| `--c-negative` (red) | Decline, risks |
-| `--c-important` (purple) | Critical points |
-
 ### Application
 
 - `<Highlight type="positive">+99%</Highlight>` — positive emphasis (green)
@@ -78,7 +68,7 @@ After generating all slides, check every slide:
 
 ### Discipline
 
-- **1-2 colored elements per slide max**; **color for data, not decoration** — only color the specific number or keyword. The full semantic-color palette (green = positive, red = negative, blue = neutral, orange = caution, purple = critical) + decision flow is canonical in § *Color Discipline* below.
+- **1-2 colored elements per slide max**; **color for data, not decoration** — only color the specific number or keyword. The color tokens, the full semantic palette, and the decision flow are canonical in § *Color Discipline* below.
 
 ## Figures
 
@@ -215,7 +205,7 @@ Always leave a blank line after the opening tag and before the closing tag for m
 | `type` | String | `'note'` | One of: `note`, `important`, `tip`, `warning`, `caution`, `formula` |
 | `title` | String | Auto from type | Box title text. Defaults to capitalized type name |
 
-The `formula` type has a larger content font size (`1rem` vs `0.85rem`) for better readability of KaTeX-rendered math. All display math (`$$...$$`) must be wrapped in `<Admonition type="formula">` — see § *Math Formulas with KaTeX* below.
+The `formula` type has a larger content font size (`1rem` vs `0.85rem`) for better readability of KaTeX-rendered math — the display-math wrapping rule is § *Math Formulas with KaTeX* below.
 
 #### When to use Admonitions vs alternatives
 
@@ -251,13 +241,13 @@ Revenue grew <Highlight type="positive">+99.3%</Highlight> year-over-year
 
 Every colored element must have a semantic reason for its color. Never use color for decoration.
 
-| Color | Semantic | When to use | Example |
-|-------|----------|-------------|---------|
-| `positive` (green) | Good news | Growth, improvement, achievement, gain | Revenue +93%, adoption 84% |
-| `negative` (red) | Bad news | Decline, risk, vulnerability, loss, stagnation | Vulnerability 45%, -19% slower |
-| `primary` (blue) | Neutral key metric | Quantities without positive/negative connotation | Context window 1M tokens, 5 product forms |
-| `accent` (orange) | Caution / noteworthy | Transitional states, mixed signals, items needing attention | -4% (improved but unreliable) |
-| `important` (purple) | Critical / structural | Must-know points that don't fit other categories | — |
+| Color | Token | Semantic | When to use | Example |
+|-------|-------|----------|-------------|---------|
+| `positive` (green) | `--c-positive` | Good news | Growth, improvement, achievement, gain | Revenue +93%, adoption 84% |
+| `negative` (red) | `--c-negative` | Bad news | Decline, risk, vulnerability, loss, stagnation | Vulnerability 45%, -19% slower |
+| `primary` (blue) | `--c-primary` | Neutral key metric | Quantities without positive/negative connotation; links | Context window 1M tokens, 5 product forms |
+| `accent` (orange) | `--c-accent` | Caution / noteworthy | Transitional states, mixed signals, warnings, items needing attention | -4% (improved but unreliable) |
+| `important` (purple) | `--c-important` | Critical / structural | Must-know points that don't fit other categories | — |
 
 **Decision flow**: Ask "is this good or bad for the audience?" → Good: `positive`. Bad: `negative`. Neither: `primary`. Mixed/uncertain: `accent`.
 
@@ -351,7 +341,7 @@ Where:
 
 ### Formula Admonition Rules
 
-The wrapping rule (§ Display (Block) Formulas above) admits exactly these exceptions; the `formula` type uses a larger content font (`1rem`) for math readability (full Admonition details in § *Admonition* above):
+The wrapping rule (§ Display (Block) Formulas above) admits exactly these exceptions (full Admonition details in § *Admonition* above):
 
 | Math Type | Treatment |
 |-----------|-----------|

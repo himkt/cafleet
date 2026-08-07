@@ -101,7 +101,7 @@ During compilation, verify for each data point included in the report:
 
 ## The Iterative Improvement Loop
 
-**Expect multiple revision rounds — this is the process working as designed.** Researchers investigate → Director relays to you → you compile → Director sends tagged feedback (`[FACTUAL ERROR]`, `[GAP]`, `[WEAK ANALYSIS]`, …) via `cafleet message send` → you revise (fix errors directly; request additional Researchers for gaps rather than filling them from imagination; rewrite weak sections with genuine analytical effort) → Director re-reviews. Repeats until the Director judges the report meets the bar.
+**Expect multiple revision rounds — this is the process working as designed.** Researchers investigate → Director relays to you → you compile → Director sends tagged feedback via `cafleet message send` (canonical tag taxonomy in [roles/director.md](director.md)) → you revise (fix errors directly; request additional Researchers for gaps rather than filling them from imagination; rewrite weak sections with genuine analytical effort) → Director re-reviews. Repeats until the Director judges the report meets the bar.
 
 ## Shutdown
 

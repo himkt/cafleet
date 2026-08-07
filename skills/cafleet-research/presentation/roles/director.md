@@ -109,7 +109,7 @@ Per the User Interaction Contract in `presentation.md`, the Director originates 
 
 ## Server Lifecycle Management
 
-The Director owns the Slidev dev server lifecycle (the Visual Reviewer does not start/stop any server). **Start** it as a backgrounded process via {bg_run} (record the background process handle for shutdown) — the underlying invocation is `pnpm exec slidev --open false <slide>` PTY-wrapped via `script -qfc 'pnpm exec slidev --open false <slide>' /dev/null` (default URL `http://localhost:3030`); see `presentation.md` Step 3 *Server Startup*. **Shutdown** via {bg_stop} (using the recorded handle) after all visual-review rounds — never the broad `pkill -f slidev`. Readiness checking is the VR's job (see `roles/visual-reviewer.md`). On start failure, follow the escalation in `presentation.md` Step 3 *Server Startup*.
+The Director owns the Slidev dev server lifecycle (the Visual Reviewer does not start/stop any server). Start, stop, and on-start-failure escalation per `presentation.md` Step 3 *Server Startup* and Step 5. Readiness checking is the VR's job (see `roles/visual-reviewer.md`).
 
 ## Progress Monitoring
 
@@ -119,4 +119,4 @@ Follow the `cafleet` skill's `reference/supervision.md` for the health-check seq
 
 Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol* (stop the monitor loop's background task first), with this workflow's member delete order: Presentation, Transcript, and any active VR batch — **for an active VR batch, run the close handshake first** (send `CLOSE:` via `cafleet message send`, wait for the VR's `closed` reply, THEN delete it).
 
-Between the `cafleet member list` verification and `cafleet fleet delete`, release this workflow's non-CAFleet resources: `pnpm exec agent-browser close --all` (orphan-session safety net), then stop the Slidev dev server via {bg_stop} using the recorded handle — never the broad `pkill -f slidev`.
+Between the `cafleet member list` verification and `cafleet fleet delete`, release this workflow's non-CAFleet resources per `presentation.md` Step 5 (the agent-browser `close --all` safety net, then the Slidev server stop).

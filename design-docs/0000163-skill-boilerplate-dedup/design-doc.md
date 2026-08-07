@@ -1,7 +1,7 @@
 # Skill Boilerplate Dedup
 
 **Status**: Approved
-**Progress**: 48/65 tasks complete
+**Progress**: 61/65 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -300,19 +300,19 @@ Executed in Step 9 with `rg` under `skills/`. Each phrase is a verbatim fragment
 
 ### Step 8: cafleet-research interior reductions
 
-- [ ] CR-F4: cut each workflow body's Prerequisites to one sentence (`cafleet` on `PATH`, verified by `cafleet doctor`; the rest gated in Steps 0–1). <!-- completed: -->
-- [ ] CR-F6: reduce the per-role spawn-mechanics repetitions to the audit-file filename above each `member create` fence; keep the scout naming and per-batch no-overwrite notes. <!-- completed: -->
-- [ ] CR-F7: `report.md` owns the scout 3-iteration cap; `manager.md` keeps a short clause; delete the `scout.md` bullet. <!-- completed: -->
-- [ ] CR-F8 (preferred variant): hoist the three shared File Output bullets into `report.md`; `scout.md` / `researcher.md` keep their path example and role-specific delta. No file merge. <!-- completed: -->
-- [ ] CR-F9: cut `presentation/roles/presentation.md`'s re-enumerations to link + one clause each (layouts per `slidev.md` Layouts; charts per `visualization.md` § Chart Type Selection; emphasis per `slidev.md` § Usage Rules / Color Discipline; placeholder note per `visualization.md`). <!-- completed: -->
-- [ ] CR-F10: drop the tag-taxonomy re-enumerations in `presentation.md` role files and `manager.md`; keep the canonical-taxonomy links (anchors unchanged). <!-- completed: -->
-- [ ] CR-F11: `presentation.md` Steps 3/5 own the server lifecycle (escalation already moved in Step 1); shrink `roles/director.md` § Server Lifecycle Management and § Shutdown Protocol to pointers; in `visual-reviewer.md`, merge § Browser lifecycle into § Shutdown. <!-- completed: -->
-- [ ] CR-F12: cut the two `visual-reviewer.md` accountability bullets to pointers at § Persist the report. <!-- completed: -->
-- [ ] CR-F13: make § Math Formulas the formula rule's single owner (reduce the early mention to the cross-link; fold the table-intro prose); merge the § Color tokens table into § Color Discipline's table with a "Use for" column, keeping both heading names stable. <!-- completed: -->
-- [ ] CR-F14: rewrite the `web-researcher.md` frontmatter description and mission sentence to the current purpose; drop the cafleet-design-doc pairing framing; keep the file path and the whitelisted `{topic}` / `{current_year}` / `{current_month}` tokens. <!-- completed: -->
-- [ ] CR-F15: `report/roles/director.md` § Progress Monitoring owns the stall heuristic; `report.md` Step 1 keeps the deliverables list + a pointer; the `manager.md` copy stays (different actor). <!-- completed: -->
-- [ ] CR-F16: in `cafleet-research/SKILL.md`, keep the On-demand table + one dispatch sentence; drop the two restatements. <!-- completed: -->
-- [ ] Run `mise //cafleet:test`. <!-- completed: -->
+- [x] CR-F4: cut each workflow body's Prerequisites to one sentence (`cafleet` on `PATH`, verified by `cafleet doctor`; the rest gated in Steps 0–1). <!-- completed: 2026-08-07T11:20 -->
+- [x] CR-F6: reduce the per-role spawn-mechanics repetitions to the audit-file filename above each `member create` fence; keep the scout naming and per-batch no-overwrite notes. <!-- completed: 2026-08-07T11:22 -->
+- [x] CR-F7: `report.md` owns the scout 3-iteration cap; `manager.md` keeps a short clause; delete the `scout.md` bullet. <!-- completed: 2026-08-07T11:23 -->
+- [x] CR-F8 (preferred variant): hoist the three shared File Output bullets into `report.md`; `scout.md` / `researcher.md` keep their path example and role-specific delta. No file merge. <!-- completed: 2026-08-07T11:25 -->
+- [x] CR-F9: cut `presentation/roles/presentation.md`'s re-enumerations to link + one clause each (layouts per `slidev.md` Layouts; charts per `visualization.md` § Chart Type Selection; emphasis per `slidev.md` § Usage Rules / Color Discipline; placeholder note per `visualization.md`). <!-- completed: 2026-08-07T11:27 -->
+- [x] CR-F10: drop the tag-taxonomy re-enumerations in `presentation.md` role files and `manager.md`; keep the canonical-taxonomy links (anchors unchanged). <!-- completed: 2026-08-07T11:28 -->
+- [x] CR-F11: `presentation.md` Steps 3/5 own the server lifecycle (escalation already moved in Step 1); shrink `roles/director.md` § Server Lifecycle Management and § Shutdown Protocol to pointers; in `visual-reviewer.md`, merge § Browser lifecycle into § Shutdown. <!-- completed: 2026-08-07T11:30 -->
+- [x] CR-F12: cut the two `visual-reviewer.md` accountability bullets to pointers at § Persist the report. <!-- completed: 2026-08-07T11:31 -->
+- [x] CR-F13: make § Math Formulas the formula rule's single owner (reduce the early mention to the cross-link; fold the table-intro prose); merge the § Color tokens table into § Color Discipline's table with a "Use for" column, keeping both heading names stable. <!-- completed: 2026-08-07T11:33 -->
+- [x] CR-F14: rewrite the `web-researcher.md` frontmatter description and mission sentence to the current purpose; drop the cafleet-design-doc pairing framing; keep the file path and the whitelisted `{topic}` / `{current_year}` / `{current_month}` tokens. <!-- completed: 2026-08-07T11:34 -->
+- [x] CR-F15: `report/roles/director.md` § Progress Monitoring owns the stall heuristic; `report.md` Step 1 keeps the deliverables list + a pointer; the `manager.md` copy stays (different actor). <!-- completed: 2026-08-07T11:35 -->
+- [x] CR-F16: in `cafleet-research/SKILL.md`, keep the On-demand table + one dispatch sentence; drop the two restatements. <!-- completed: 2026-08-07T11:36 -->
+- [x] Run `mise //cafleet:test`. <!-- completed: 2026-08-07T11:38 -->
 
 ### Step 9: Verification and deployment
 
