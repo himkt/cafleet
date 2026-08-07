@@ -35,7 +35,7 @@ The Director classifies each target from its **content only** (never native `age
 | `working` | Affirmative active-work evidence: the active-turn or `working` indicator, streaming model output, a running tool, or generation in progress. A truncated or ambiguous capture that may still be active is also `working`. |
 | `stall_candidate` | Quiet, non-finished content with no confirmation prompt, no empty at-rest composer, and no active-turn, tool, streaming, generation, or other work cue. |
 
-When a capture cannot separate `awaiting_user` from `finished`, classify `awaiting_user`. When it cannot separate active work from a quiet candidate, classify `working`. `stall_candidate` and `finished` are the two quiet families: the Director confirms a member quiet when its captures on two consecutive wakes are byte-identical.
+Tie-breaks and the two-quiet-families rule: `supervision.md` § *The pre-ping capture gate*.
 
 ## Worked resolution
 

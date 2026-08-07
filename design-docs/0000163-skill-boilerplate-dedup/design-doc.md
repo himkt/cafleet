@@ -1,7 +1,7 @@
 # Skill Boilerplate Dedup
 
 **Status**: Approved
-**Progress**: 25/65 tasks complete
+**Progress**: 34/65 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -271,15 +271,15 @@ Executed in Step 9 with `rg` under `skills/`. Each phrase is a verbatim fragment
 
 ### Step 6: cafleet interior reductions
 
-- [ ] CF-F2: replace the tie-break paragraph in the three overlays with one pointer sentence ("Tie-breaks and the two-quiet-families rule: `supervision.md` § *The pre-ping capture gate*") and update `_template.md` to require the pointer instead of the restatement, preserving the capture-cue term pins per file. <!-- completed: -->
-- [ ] CF-F3: make `prompt-routing.md` the single owner of the per-backend denial semantics (keep one of its two statements); shorten `roles/member.md` § denial and `supervision.md` § routing to trigger cue + link. <!-- completed: -->
-- [ ] CF-F4: collapse `cli.md` § Monitor's scan/capture prose to one clause each + link to `director.md` § Fleet Scan / § Member Capture. <!-- completed: -->
-- [ ] CF-F5: keep `cli.md` § List Members as the column-enumeration owner; reduce `director.md` to the supervision-specific sentence + link; retarget or keep `recovery.md`'s idle-heuristic link accordingly. <!-- completed: -->
-- [ ] CF-F6: in `director.md`, drop the restated `str.format` error strings/hint; keep the exit-2-rolls-back-the-member delta. <!-- completed: -->
-- [ ] CF-F8: shorten `recovery.md` § 2-stage health check to the ordering sentence + the `--lines` bump note + the existing link; keep § Routine monitoring's idle-column heuristic. <!-- completed: -->
-- [ ] CF-F9: fold the `CAFLEET_MAX_TEXT_LEN` subsection's two unique facts (U+2026, spec link) into `cli.md` § Output switch and delete the subsection heading. <!-- completed: -->
-- [ ] CF-F10: cut the self-TOC preamble sentences (`supervision.md`, `cli.md`, and the `SKILL.md` § Team supervision re-enumeration) to the first sentence each. <!-- completed: -->
-- [ ] Run `mise //cafleet:test`. <!-- completed: -->
+- [x] CF-F2: replace the tie-break paragraph in the three overlays with one pointer sentence ("Tie-breaks and the two-quiet-families rule: `supervision.md` § *The pre-ping capture gate*") and update `_template.md` to require the pointer instead of the restatement, preserving the capture-cue term pins per file. <!-- completed: 2026-08-07T10:33 -->
+- [x] CF-F3: make `prompt-routing.md` the single owner of the per-backend denial semantics (keep one of its two statements); shorten `roles/member.md` § denial and `supervision.md` § routing to trigger cue + link. <!-- completed: 2026-08-07T10:35 -->
+- [x] CF-F4: collapse `cli.md` § Monitor's scan/capture prose to one clause each + link to `director.md` § Fleet Scan / § Member Capture. <!-- completed: 2026-08-07T10:37 -->
+- [x] CF-F5: keep `cli.md` § List Members as the column-enumeration owner; reduce `director.md` to the supervision-specific sentence + link; retarget or keep `recovery.md`'s idle-heuristic link accordingly. <!-- completed: 2026-08-07T10:37 -->
+- [x] CF-F6: in `director.md`, drop the restated `str.format` error strings/hint; keep the exit-2-rolls-back-the-member delta. <!-- completed: 2026-08-07T10:38 -->
+- [x] CF-F8: shorten `recovery.md` § 2-stage health check to the ordering sentence + the `--lines` bump note + the existing link; keep § Routine monitoring's idle-column heuristic. <!-- completed: 2026-08-07T10:39 -->
+- [x] CF-F9: fold the `CAFLEET_MAX_TEXT_LEN` subsection's two unique facts (U+2026, spec link) into `cli.md` § Output switch and delete the subsection heading. <!-- completed: 2026-08-07T10:39 -->
+- [x] CF-F10: cut the self-TOC preamble sentences (`supervision.md`, `cli.md`, and the `SKILL.md` § Team supervision re-enumeration) to the first sentence each. <!-- completed: 2026-08-07T10:40 -->
+- [x] Run `mise //cafleet:test`. <!-- completed: 2026-08-07T10:42 -->
 
 ### Step 7: cafleet-design-doc interior reductions
 

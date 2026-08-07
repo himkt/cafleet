@@ -49,7 +49,7 @@ Model availability, reviewed capability classes, standard token prices, and the 
 
 The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`.
 
-**Identity substitution (`str.format`)**: the four-placeholder `str.format` render (and the brace-doubling rule) is canonical in the cafleet [`SKILL.md`](../SKILL.md) § *Spawned-member identity via `str.format` substitution*. Director-side deltas: an unknown placeholder fails with `Error: Unknown placeholder '<name>' in custom prompt.` listing the four supported names, a malformed brace expression with the distinct `Error: Malformed custom prompt: <detail>.`, and both (exit 2) roll back the just-registered member. Each ends with the hint `Double literal braces ({{, }}) to keep them as text.`
+**Identity substitution (`str.format`)**: the four-placeholder `str.format` render, the brace-doubling rule, and the two error strings with their hint are canonical in the cafleet [`SKILL.md`](../SKILL.md) § *Spawned-member identity via `str.format` substitution*. Director-side delta: both errors (exit 2) roll back the just-registered member.
 
 **Spawn prompt size limit**: cafleet passes the prompt to `tmux split-window` as one positional argument, so a large inline prompt fails with `tmux command failed: command too long` (and rolls back the registration) past a few KB. Use `--file` for every templated identity block + role-file-by-path prompt; the inline positional `PROMPT` stays first-class for trivial one-line ad-hoc spawns.
 
@@ -144,7 +144,7 @@ An unknown or inactive `MEMBER_ID` exits 1 (`Error: Member <member-id> not found
 cafleet member list <fleet-id>
 ```
 
-One output shape: every **active** registry entry of the fleet (the root Director, ordinary members, placementless rows), one row each with `member_id`, `name`, `kind` (`director` / `member`), `backend`, `pane_id` (a pending placement renders `(pending)`; placementless rows render `-` placement cells), and `idle` — the humanized wall-time since the member's most recent message activity (`Ns`/`Nm`/`Nh`, `-` when none). `--json` adds the underlying `last_sent` / `last_recv` / `last_ack` timestamps (output shape in [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-list)). Use the `idle` column for routine supervision ticks instead of capturing every member every tick — capture is reserved for the cases the idle column flags.
+One output shape: every **active** registry entry of the fleet, one row each — the column enumeration and the `--json` timestamp additions are canonical in [`reference/cli.md`](cli.md) § *List Members*. Use the `idle` column for routine supervision ticks instead of capturing every member every tick — capture is reserved for the cases the idle column flags.
 
 ## Fleet Scan
 

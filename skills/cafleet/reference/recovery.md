@@ -4,7 +4,7 @@ Director reference for crash / disconnect / idle / wedged-pane recovery. Member-
 
 ## 2-stage health check
 
-Before assuming a member is stalled, run the cheap checks first: poll your own inbox (`cafleet message poll` — the member may have replied via a keystroke you missed) without touching its pane, then capture the member's pane (`cafleet member capture`, default `--lines 20`; bump `--lines` to show a member's full decision-prompt frame — the line count needed is a backend delta, see your overlay). The same poll→capture detection drives the supervision tick — see [`supervision.md`](supervision.md) § Stall Response.
+Before assuming a member is stalled, run the cheap check first — poll your own inbox, then capture the member's pane — per [`supervision.md`](supervision.md) § Stall Response. Recovery-specific detail: bump `cafleet member capture --lines` to show a member's full decision-prompt frame (the line count needed is a backend delta, see your overlay).
 
 ## Routine monitoring via `member list`
 

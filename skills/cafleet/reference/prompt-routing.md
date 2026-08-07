@@ -18,7 +18,7 @@ The bash-via-Director protocol is the **fallback** for a harness-denied command.
 
 ## Member-side: reconsider, then route
 
-Reconsider first: on claude and codex a denial is usually a wrong flag, wrong path, or an unnecessary command; on opencode it usually means the command is outside the allowlist — check whether an allowlisted command covers the need. Fix or drop what you can yourself. Only a genuinely-correct, genuinely-needed, still-denied command gets routed:
+Reconsider first (per-backend denial semantics above): most denials are a wrong flag, wrong path, or an unnecessary command; on opencode check whether an allowlisted command covers the need. Fix or drop what you can yourself. Only a genuinely-correct, genuinely-needed, still-denied command gets routed:
 
 1. Send a plain CAFleet message to the Director:
    ```bash

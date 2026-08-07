@@ -1,6 +1,6 @@
 # CAFleet CLI — Fuller Command Catalog
 
-Read this file for the broker CLI surface beyond the core identity / poll / send / ack lifecycle in [`SKILL.md`](../SKILL.md): environment variables, global options, the output switch, coding-agent backends, cancel / show / broadcast / roster introspection / doctor / the monitor command / fleet delete, the typical workflow, the message lifecycle, and error handling. Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-options.md`](../../../docs/docs/spec/cli-options.md).
+Read this file for the broker CLI surface beyond the core identity / poll / send / ack lifecycle in [`SKILL.md`](../SKILL.md). Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-options.md`](../../../docs/docs/spec/cli-options.md).
 
 ## Environment variables
 
@@ -19,17 +19,13 @@ cafleet message poll <my-member-id> --json
 
 ## Output switch — `--json`
 
-`--json` is cafleet's single output-control flag. Text output (the default) is the compact human/pane form — message bodies truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…`. `--json` switches to compact single-line JSON (no whitespace; non-ASCII emitted as UTF-8) and is always the **complete, untruncated machine form** — full envelopes, full bodies — cheap to pipe into `jq` from a Director loop:
+`--json` is cafleet's single output-control flag. Text output (the default) is the compact human/pane form — message bodies truncated to `CAFLEET_MAX_TEXT_LEN` codepoints (default `200`), suffixed with the single codepoint `…` (U+2026; see [`cli-options.md`](../../../docs/docs/spec/cli-options.md#message-body-truncation)). `--json` switches to compact single-line JSON (no whitespace; non-ASCII emitted as UTF-8) and is always the **complete, untruncated machine form** — full envelopes, full bodies — cheap to pipe into `jq` from a Director loop:
 
 ```bash
 cafleet message poll <my-member-id> --json
 ```
 
 The detailed member view (`kind`, `skills`, the placement sub-dict) is likewise `--json`-only — text `member show` is the compact one-line row. Per-surface shapes: [`cli-options.md`](../../../docs/docs/spec/cli-options.md#output-shapes).
-
-### `CAFLEET_MAX_TEXT_LEN`
-
-Environment variable controlling body truncation in text-mode rendered envelopes and inline previews; default `200` codepoints, suffix the single codepoint `…` (U+2026). `--json` output is never truncated. See [`cli-options.md`](../../../docs/docs/spec/cli-options.md#message-body-truncation).
 
 ## Coding-agent backends
 
@@ -103,9 +99,9 @@ cafleet monitor scan <fleet-id>     # one-shot batch capture: the Director's pan
 
 The loop form takes `--interval N` (the Director wake interval in seconds; omitted → `CAFLEET_MONITOR_WAKE_INTERVAL`, default `600`; `0` disables the wake) and `--tick N` (scan cadence, default `5`). It prints `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` immediately after claiming the runtime row — the line the Director confirms before its first `member create`.
 
-`cafleet monitor scan` is the fleet-wide read: one section per pane — Director first, then members ascending by member id — with `--lines N` (per-pane depth, default `20`), `--ansi`, and `--json` (a top-level array). A pending placement or a failed capture renders an annotated entry and the scan still completes with exit 0; the command performs no DB writes. One fresh scan satisfies the Director's pre-ping capture gate for every member for that facilitation turn.
+`cafleet monitor scan` is the fleet-wide read — flags, output shape, and gate semantics in [`reference/director.md`](director.md) § *Fleet Scan*.
 
-`cafleet member capture <target-member-id>` is the targeted deeper-investigation primitive — a single pane, read-only (default `--lines 20`; `--json` adds `captured_at` and `content_sha256`; `--ansi` preserves escapes); a fresh one at default depth or deeper also satisfies the gate for that one member. A pending-placement target is a hard error.
+`cafleet member capture <target-member-id>` is the targeted single-pane read (a pending-placement target is a hard error) — flags and gate semantics in [`reference/director.md`](director.md) § *Member Capture*.
 
 `cafleet member ping` is a Director write primitive. Against a pending-placement member it skips the keystroke and exits 0 — the member polls its inbox on spawn — with the stable `skipped` JSON key on both success paths.
 

@@ -1,6 +1,6 @@
 # CAFleet Team Supervision
 
-Read this file for CAFleet team supervision — the Director-only governance and the `cafleet monitor` heartbeat mechanism it is performed through. It defines the always-applicable obligations (Core Principle, Communication Model, Idle Semantics, Authorization-Scope Guard, Spawn Protocol), the heartbeat mechanism (the Director-hosted monitor loop, the periodic wake, the 5-step facilitation loop, Monitor Lifecycle), and the recovery surface (Stall Response, User Delegation, Cleanup, Quick Reference). Ordinary members and standalone agents never load it.
+Read this file for CAFleet team supervision — the Director-only governance and the `cafleet monitor` heartbeat mechanism it is performed through. Ordinary members and standalone agents never load it.
 
 **Required reading — read AND resolve your overlay first.** These instructions are backend-neutral and use `{placeholder}` tokens (`{bg_run}`, `{bg_stop}`, `{decision_surface}`, `{permission_flags}`). Before acting on them, Read your overlay [`coding-agent/<name>-overlay.md`](coding-agent/) — `<name>` is the coding agent named on your spawn prompt's `CODING AGENT:` line — then **resolve** it per [`SKILL.md`](../SKILL.md) § *Resolve your overlay*: materialize each token to its overlay value (or the documented default) and apply each bound note before you act. Skip resolution and you emit a literal `{bg_run}` (describing the launch primitive instead of using it), guess a wrong/default value, or ignore a backend note.
 
@@ -156,7 +156,7 @@ After the five steps, honor the wake's resume clause: if the keystroke landed wh
 
 ### Routing member bash requests
 
-The workflow's spawned members run in workspace-scoped auto-approval mode ({permission_flags}; Bash tool enabled, permission prompts auto-resolve), so they run shell commands directly by default. The bash-via-Director protocol is the fallback when a member's Bash invocation is denied by its coding-agent harness (destructive operations such as `git push` on claude/codex; any command outside the preset's deny-by-default allowlist on opencode). The member auto-routes by sending a plain shell-command request via `cafleet message send`, and you respond by sending `! <command>` keystrokes through `cafleet member prompt --shell`. Process such requests one at a time in poll order. Full invocation + flag layout in [`reference/prompt-routing.md`](prompt-routing.md).
+The workflow's spawned members run in workspace-scoped auto-approval mode ({permission_flags}; Bash tool enabled, permission prompts auto-resolve), so they run shell commands directly by default. When a member's harness denies a command (per-backend denial semantics canonical in [`reference/prompt-routing.md`](prompt-routing.md)), it auto-routes a plain shell-command request via `cafleet message send`, and you respond via `cafleet member prompt --shell`. Process such requests one at a time in poll order.
 
 ## Monitor Lifecycle
 
