@@ -1,7 +1,7 @@
 # Unified Coding-Agent Overlay File
 
 **Status**: Approved
-**Progress**: 10/17 tasks complete
+**Progress**: 11/17 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -169,7 +169,7 @@ The unknown-token walker elsewhere in `docs_sync.rs` scans skill files by direct
 
 ### Step 6: Docs wording check
 
-- [ ] Verify `docs/docs/concepts/monitoring.md`'s "backend overlay" wording still reads correctly against the merged layout; adjust only if needed, introducing no repository path. <!-- completed: -->
+- [x] Verify `docs/docs/concepts/monitoring.md`'s "backend overlay" wording still reads correctly against the merged layout; adjust only if needed, introducing no repository path. <!-- completed: 2026-08-07T13:22 -->
 
 ### Step 7: Rewrite the docs_sync guards
 
