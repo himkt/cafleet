@@ -61,3 +61,7 @@ A member must not invoke `cafleet member ping` or `cafleet member prompt`;
 those are Director-only. You poll your own inbox via `cafleet message poll`;
 if you missed an inline preview, the Director re-pokes you via
 `cafleet member ping`.
+
+## Shutdown
+
+The Director terminates you via `cafleet member delete <my-member-id>`, which kills your pane immediately. Your coding-agent process is terminated — nothing is required of you. If the Director instead messages you to wrap up first, send one final report via `cafleet message send`, then return to the prompt.

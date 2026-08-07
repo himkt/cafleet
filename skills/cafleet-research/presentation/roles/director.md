@@ -109,7 +109,7 @@ Per the User Interaction Contract in `presentation.md`, the Director originates 
 
 ## Server Lifecycle Management
 
-The Director owns the Slidev dev server lifecycle (the Visual Reviewer does not start/stop any server). **Start** it as a backgrounded process via {bg_run} (record the background process handle for shutdown) — the underlying invocation is `pnpm exec slidev --open false <slide>` PTY-wrapped via `script -qfc 'pnpm exec slidev --open false <slide>' /dev/null` (default URL `http://localhost:3030`); see `presentation.md` Step 3 *Server Startup*. **Shutdown** via {bg_stop} (using the recorded handle) after all visual-review rounds — never the broad `pkill -f slidev`. Readiness checking is the VR's job (see `roles/visual-reviewer.md`). On start failure: retry the start command once, then escalate to the user via {decision_surface} (options: Retry again / I started it manually — continue / Abort).
+The Director owns the Slidev dev server lifecycle (the Visual Reviewer does not start/stop any server). **Start** it as a backgrounded process via {bg_run} (record the background process handle for shutdown) — the underlying invocation is `pnpm exec slidev --open false <slide>` PTY-wrapped via `script -qfc 'pnpm exec slidev --open false <slide>' /dev/null` (default URL `http://localhost:3030`); see `presentation.md` Step 3 *Server Startup*. **Shutdown** via {bg_stop} (using the recorded handle) after all visual-review rounds — never the broad `pkill -f slidev`. Readiness checking is the VR's job (see `roles/visual-reviewer.md`). On start failure, follow the escalation in `presentation.md` Step 3 *Server Startup*.
 
 ## Progress Monitoring
 
