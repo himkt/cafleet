@@ -319,7 +319,7 @@ Executed in Step 9 with `rg` under `skills/`. Each phrase is a verbatim fragment
 - [x] Full `mise //cafleet:test` green; `git diff` confirms zero changes under `cafleet/tests/`. <!-- completed: 2026-08-07T11:44 -->
 - [x] Execute the per-block ownership sweeps (Specification § *Per-block ownership sweeps*): every one of the B1–B11 phrases matches its expected-hits row. Additionally confirm the poll-id caveat's `distinct from` phrasing has exactly 1 hit under `skills/`, in `cafleet/SKILL.md` § *Poll*. <!-- completed: 2026-08-07T11:47 -->
 - [x] `git status` confirms nothing under `.scan/` is staged or committed. <!-- completed: 2026-08-07T11:48 -->
-- [x] Re-run `cafleet setup` for the backends in use so the deployed skill replicas pick up the edited skills. <!-- completed: 2026-08-07T11:55 -->
+- [x] Re-run `cafleet setup` for the backends in use so the deployed skill replicas pick up the edited skills. <!-- completed: 2026-08-07T12:24 -->
 
 ---
 
