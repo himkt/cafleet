@@ -10,12 +10,12 @@ Simplify the three skills under `skills/` (cafleet, cafleet-design-doc, cafleet-
 
 ## Success Criteria
 
-- [ ] Every finding from the four scan reports is dispositioned by this doc's Scope tables, and every in-scope finding is applied to the tree.
-- [ ] `mise //cafleet:test` passes with zero edits to `cafleet/tests/docs_sync.rs`.
-- [ ] Each hoisted block (B1–B11) has exactly one canonical owner; every former copy is a pointer or a genuinely role/workflow-specific delta, verified by the per-block sweep table (Specification § *Per-block ownership sweeps*) executed in Step 9.
-- [ ] The three single-copy facts (poll-id-vs-task-id caveat, `--coding-agent` substitution rule, Slidev on-start-failure escalation) each exist at their canonical home, and their owner-add commits land before any copy deletion.
-- [ ] No file under `.scan/` is committed; no skill file is moved or renamed.
-- [ ] Deployed skill replicas are refreshed with a `cafleet setup` re-run after the edits land.
+- [x] Every finding from the four scan reports is dispositioned by this doc's Scope tables, and every in-scope finding is applied to the tree.
+- [x] `mise //cafleet:test` passes with zero edits to `cafleet/tests/docs_sync.rs`.
+- [x] Each hoisted block (B1–B11) has exactly one canonical owner; every former copy is a pointer or a genuinely role/workflow-specific delta, verified by the per-block sweep table (Specification § *Per-block ownership sweeps*) executed in Step 9.
+- [x] The three single-copy facts (poll-id-vs-task-id caveat, `--coding-agent` substitution rule, Slidev on-start-failure escalation) each exist at their canonical home, and their owner-add commits land before any copy deletion.
+- [x] No file under `.scan/` is committed; no skill file is moved or renamed.
+- [x] Deployed skill replicas are refreshed with a `cafleet setup` re-run after the edits land.
 
 ---
 
