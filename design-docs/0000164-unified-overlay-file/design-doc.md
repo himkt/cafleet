@@ -1,7 +1,7 @@
 # Unified Coding-Agent Overlay File
 
 **Status**: Approved
-**Progress**: 2/17 tasks complete
+**Progress**: 3/17 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -149,7 +149,7 @@ The unknown-token walker elsewhere in `docs_sync.rs` scans skill files by direct
 
 ### Step 2: Rewrite the project rule
 
-- [ ] Rewrite `.claude/rules/coding-agent-overlay.md` per § *Rule rewrite* (single-file layout, per-backend sections + Template section, anchored row #1, reader contract with the Director exception and the accepted trade-off, updated neutrality scoping clause). <!-- completed: -->
+- [x] Rewrite `.claude/rules/coding-agent-overlay.md` per § *Rule rewrite* (single-file layout, per-backend sections + Template section, anchored row #1, reader contract with the Director exception and the accepted trade-off, updated neutrality scoping clause). <!-- completed: 2026-08-07T13:10 -->
 
 ### Step 3: Update the cafleet skill
 
