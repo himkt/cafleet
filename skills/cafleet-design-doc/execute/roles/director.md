@@ -10,7 +10,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{bg_run}` / `{decision_surface}` / `{permission_flags}` (launch the monitor loop with the wrong primitive), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema — you coordinate in free-form bodies and findings get mis-routed |
 
@@ -20,7 +20,7 @@ Your tokens: `<fleet-id>`, `<director-member-id>`, `<programmer-member-id>`, `<t
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet fleet and keep an active heartbeat.** Load the `cafleet` skill and Read its `reference/supervision.md`. Create a CAFleet fleet via `cafleet fleet create --coding-agent <backend> --json` (must be run inside a tmux or herdr session; for `<backend>`, substitute the coding agent you are actually running on — your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity, e.g. Claude Code → `claude`) — this bootstraps the fleet, registers the root Director (you), and writes your placement row in one transaction. Capture `director.member_id` from the JSON response. Then launch `cafleet monitor <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the `monitor loop started (…)` startup line in the task output; that confirmation gates the first `member create`. Keep the loop running until shutdown stops it.
+- **Bootstrap the CAFleet fleet and keep an active heartbeat.** Load the `cafleet` skill and Read its `reference/supervision.md`. Create a CAFleet fleet via `cafleet fleet create --coding-agent <backend> --json` and capture `director.member_id` from the JSON response, per its § *Spawn Protocol* → *Fleet bootstrap*. Launch the heartbeat per § *Spawn Protocol* and gate the first `member create` on the startup-line confirmation. Keep the loop running until shutdown stops it.
 - **Validate the design document first.** Before spawning any teammates, read the document, check for COMMENT markers and FIXME(agent) markers. If COMMENTs exist, resolve them directly when they are clear: read each COMMENT marker, apply the requested changes to the document, and remove the markers before proceeding. If a COMMENT is ambiguous, conflicts with other parts of the design, or requires a product decision, ask the user for clarification via {decision_surface} before resolving it.
 - **Judge team composition and spawn needed members.** Before spawning, analyze the nature of implementation tasks. Only spawn roles that are actually needed:
   - Code implementation → Programmer + Tester (TDD)
@@ -42,10 +42,7 @@ Your tokens: `<fleet-id>`, `<director-member-id>`, `<programmer-member-id>`, `<t
 
 ## Idle Semantics & Stall Response
 
-Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet member capture` fallback → the decision-relay three-beat for a paused decision-prompt frame, per your overlay) follow the `cafleet` skill's `reference/supervision.md` § Idle Semantics and § Stall Response. Two skill-specific rungs are NOT in those skills and stay here:
-
-- **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet member capture <member-id> --lines 200`, then escalate — in that order.
-- **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via {decision_surface} with concrete options (re-spawn / redistribute / drop scope). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
+Idle Semantics and the stall ladder are canonical in the `cafleet` skill's `reference/supervision.md` § *Idle Semantics* and § *Stall Response*. Two skill-specific deltas: inspect a stalled member with `cafleet member capture <member-id> --lines 200`; and never silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
 
 ## Communication Protocol
 
@@ -57,7 +54,7 @@ Send tasks to members via `cafleet message send` (a push notification keystrokes
 
 ## Escalation Protocol
 
-When the Programmer sends `escalating (paragraph-Implementation > Step N)` (suspected test defect), run the test-defect arbitration loop documented in the SKILL § *Escalation Protocol (Test Defect)*: read the design-doc paragraph + the standing `COMMENT(programmer)` rationale + the failing test, write a `COMMENT(director): <decision> — <rationale, ≤2 sentences>` at the same pointer, then send `ready (paragraph-Implementation > Step N)` to the Tester (fix the test) or Programmer (adjust the implementation). The recipient resolves and replies `addressed (...)`, or counter-`escalating` with a `COMMENT(tester)` marker; 3-round limit before breaking the deadlock via {decision_surface}. Commit test fixes separately (`fix: correct tests for [description]`, `git add` / `git commit` as separate Bash calls).
+When the Programmer sends `escalating (paragraph-Implementation > Step N)` (suspected test defect), run the test-defect arbitration loop documented in the SKILL § *Escalation Protocol (Test Defect)*. Commit test fixes separately (`fix: correct tests for [description]`, `git add` / `git commit` as separate Bash calls).
 
 ## Commit Protocol Summary
 
@@ -81,11 +78,7 @@ No co-author signature (disabled via `attribution.commit` in settings.json).
 
 ### COMMENT Marker Handling
 
-When the user selects "Scan for COMMENT markers":
-
-1. Scan for `COMMENT(` markers in the changed files (files touched on the feature branch) using Grep.
-2. **If no markers are found**: Explain the COMMENT marker convention — add `COMMENT(username): feedback` to the relevant source or test files, using the file's native comment syntax as prefix (e.g., `# COMMENT(...)` for Python/Ruby/YAML, `// COMMENT(...)` for JS/TS/Go). Re-display the `git diff` command so the user can review the changes. Then re-prompt with the same three-option pattern.
-3. **If markers are found**: Classify each COMMENT by file location and route accordingly.
+The user-feedback scan procedure (immediate scan of the changed files, the no-markers re-prompt, classification and routing) is owned by `execute.md` Step 6 § *Revision Loop*.
 
 ### COMMENT Classification by File Location and Role
 

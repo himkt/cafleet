@@ -6,13 +6,13 @@ This file is the role-specific anchor. The actual protocols live in dedicated re
 
 ## Required reading
 
-Before spawning your first member, Read every file in the **Load-bearing** table below, in order — each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it.
+Before spawning your first member, Read every file in the **Load-bearing** table below, in order. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it.
 
 **Load-bearing — Read in order before acting:**
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — you emit a literal `{decision_surface}` / `{bg_run}` / `{permission_flags}`, **or** guess a wrong/default value (launch the monitor loop with the wrong primitive), **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`reference/coding-agent/<name>-overlay.md`](../reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + `cafleet monitor` heartbeat (the Director-hosted monitor launch, the startup-line gate on the first `member create`, the 5-step facilitation loop, the Authorization-Scope Guard) — you spawn an unsupervised team |
 | 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `member delete` / `member list` / `member capture` / `member prompt` / `member ping`), the pre-spawn model-selection step (§ *Model selection before member create* — classify the role, choose the backend/model from the model list, pass the pair to `member create`), and the canonical spawn-prompt skeleton — you can't spawn or drive members, or you spawn them on guessed models |
 
@@ -41,7 +41,7 @@ An explicit user `--coding-agent` / `--model` / `--effort` always wins and is re
 
 ## Placeholder convention
 
-Angle-bracket tokens are placeholders, **not** shell variables — substitute the literal integer ids (the placeholder / `permissions.allow` rule is canonical in the `cafleet` skill § Placeholder convention). Your ids: `<fleet-id>` (from `cafleet fleet create`), `<director-member-id>` (your own), `<member-id>` (from `cafleet member list`), `<command>` (only when dispatching via `cafleet member prompt --shell`).
+Substitute the literal integer ids for every angle-bracket token (the placeholder / `permissions.allow` rule is canonical in the `cafleet` skill § Placeholder convention). Your ids: `<fleet-id>` (from `cafleet fleet create`), `<director-member-id>` (your own), `<member-id>` (from `cafleet member list`), `<command>` (only when dispatching via `cafleet member prompt --shell`).
 
 ## Director-only primitives
 

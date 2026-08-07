@@ -10,7 +10,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{bg_run}` / `{decision_surface}` / `{permission_flags}` (launch the monitor loop with the wrong primitive), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
 | 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema (and the Step-2 clarification exemption) — you coordinate in free-form bodies and findings get lost / mis-routed |
 
@@ -20,7 +20,7 @@ Your tokens: `<fleet-id>`, `<director-member-id>`, `<drafter-member-id>`, `<revi
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet fleet and launch the monitor loop first.** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and governance policy. Create a CAFleet fleet via `cafleet fleet create --coding-agent <backend> --json` (must be run inside a tmux or herdr session; for `<backend>`, substitute the coding agent you are actually running on — your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity, e.g. Claude Code → `claude`) — this bootstraps the fleet, registers the root Director (you), and writes your placement row in one transaction. Capture `director.member_id` from the JSON response. Then launch `cafleet monitor <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the `monitor loop started (…)` startup line in the task output; gate the Drafter/Reviewer spawns on that confirmation. The loop wakes you once per wake interval to health-check your members and resume interrupted work.
+- **Bootstrap the CAFleet fleet and launch the monitor loop first.** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and governance policy. Create a CAFleet fleet via `cafleet fleet create --coding-agent <backend> --json` and capture `director.member_id` from the JSON response, per its § *Spawn Protocol* → *Fleet bootstrap*. Launch the heartbeat per § *Spawn Protocol* and gate the Drafter/Reviewer spawns on the startup-line confirmation. The loop wakes you once per wake interval to health-check your members and resume interrupted work.
 - **Enforce the clarification gate.** The Drafter MUST ask clarifying questions before drafting. If the Drafter sends a draft without having asked questions first, reject it via `cafleet message send` and instruct the Drafter to ask questions first.
 - **Relay communication faithfully.** Members cannot communicate with the user directly. You relay the Drafter's questions to the user via {decision_surface}, and relay the user's answers back to the Drafter via `cafleet message send`.
 - **Orchestrate the internal quality loop.** After the Drafter produces a draft, route it to the Reviewer via `cafleet message send`. If the Reviewer has feedback, route it back to the Drafter for refinement via `cafleet message send`, then back to the Reviewer. Repeat until the Reviewer explicitly signals satisfaction. Do NOT present the draft to the user until the Reviewer has approved it.
@@ -30,10 +30,7 @@ Your tokens: `<fleet-id>`, `<director-member-id>`, `<drafter-member-id>`, `<revi
 
 ## Idle Semantics & Stall Response
 
-Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet member capture` fallback → the decision-relay three-beat for a paused decision-prompt frame, per your overlay) follow the `cafleet` skill's `reference/supervision.md` § Idle Semantics and § Stall Response. Two skill-specific rungs are NOT in those skills and stay here:
-
-- **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet member capture <member-id> --lines 200`, then escalate — in that order.
-- **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via {decision_surface} with concrete options (re-spawn / redistribute / drop scope). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
+Idle Semantics and the stall ladder are canonical in the `cafleet` skill's `reference/supervision.md` § *Idle Semantics* and § *Stall Response*. Two skill-specific deltas: inspect a stalled member with `cafleet member capture <member-id> --lines 200`; and never silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
 
 ## Communication Protocol
 
@@ -52,11 +49,7 @@ A push notification keystrokes the message into the member's pane (see the `cafl
 
 ### COMMENT Marker Handling
 
-See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the role taxonomy and marker rules. Skill-specific user-feedback workflow when the user selects "Scan for COMMENT markers":
-
-1. **Immediately** scan for `COMMENT(` markers in the design document using Grep — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
-2. **If markers are found**: Route the Drafter to address them in-doc with `ready (doc)`. After the Drafter replies `addressed (doc)`, verify with Grep that no `COMMENT(` markers remain.
-3. **If no markers are found**: Explain the marker convention to the user (`# COMMENT(username): feedback` placed directly in the design document) and show the file path so the user can edit it. Then re-prompt with the same three-option pattern (Approve / Scan for COMMENT markers / built-in Other).
+The role taxonomy and marker rules are [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker*; the user-feedback scan procedure (scan immediately on selection, route the Drafter, the no-markers re-prompt) is owned by `create.md` Step 5.
 
 ### Free-form user replies
 

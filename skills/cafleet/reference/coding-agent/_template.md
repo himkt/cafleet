@@ -25,7 +25,7 @@ Required section. Convert every note (a constraint/caveat the inline value shoul
 
 ## Pane-state capture cues
 
-Required section. Give concrete capture-content discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`, from pane text alone and never native `agent_status`. `working` includes visible streaming, generation, tool execution, or any ambiguous/truncated state that might still be active. `stall_candidate` is quiet, non-finished content with no prompt and no active-work cue; it and `finished` are the two quiet families the Director confirms itself — two byte-identical captures across consecutive wakes, recorded in its own notes, confirm the member quiet. Register the table in *Note → applies at* and bind it to the Director's on-tick health check and pre-ping gate.
+Required section. Give concrete capture-content discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`, from pane text alone and never native `agent_status`. `working` includes visible streaming, generation, tool execution, or any ambiguous/truncated state that might still be active. `stall_candidate` is quiet, non-finished content with no prompt and no active-work cue. After the table, add the pointer sentence "Tie-breaks and the two-quiet-families rule: `supervision.md` § *The pre-ping capture gate*." instead of restating those rules. Register the table in *Note → applies at* and bind it to the Director's on-tick health check and pre-ping gate.
 
 | State | <backend> capture cue |
 |---|---|

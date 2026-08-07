@@ -27,7 +27,7 @@ Before routing into a workflow or consulting a reference page, Read your overlay
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../cafleet/reference/coding-agent/<name>-overlay.md`](../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{bg_run}` / `{task_coord}` / `{decision_surface}` in the workflow you route into, **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../cafleet/reference/coding-agent/<name>-overlay.md`](../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
 
 **On-demand — consult directly (no team), only when the task needs it:**
 
@@ -46,9 +46,5 @@ When the user's request matches a scenario below, invoke this skill and run the 
 
 | When the user wants to… | Invoke this skill and run |
 |:--|:--|
-| Research a topic / create a multi-source research report | the **report** workflow ([report/report.md](report/report.md)) — Director/Manager/Researcher team → `researches/<topic>/` |
+| Research a topic / create a multi-source research report | the **report** workflow ([report/report.md](report/report.md)) — Director/Manager/Researcher team → `researches/<topic>/`; chains into the presentation workflow after user approval |
 | Build a presentation / slide deck / reading transcript from a report | the **presentation** workflow ([presentation/presentation.md](presentation/presentation.md)) |
-
-For a chart/figure or the Slidev theme — consult the **On-demand** reference pages in § Required reading above (no team needed).
-
-The report workflow chains into the presentation workflow after user approval. The two reference pages are standalone utilities the presentation workflow also reads. Always route research work through the workflow bodies above — each runs the full CAFleet team.

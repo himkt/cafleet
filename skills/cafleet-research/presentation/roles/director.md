@@ -10,12 +10,12 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — you emit a literal `{decision_surface}` / `{bg_run}` / `{bg_stop}` (can't background the monitor loop or background / stop the Slidev server), **or** guess a wrong/default value, **or** ignore a backend note (codex has no harness task list) |
+| 1 | your overlay [`../../../cafleet/reference/coding-agent/<name>-overlay.md`](../../../cafleet/reference/coding-agent/) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
 
 ## Your Accountability
 
-- **Bootstrap the team and launch the monitor loop first.** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and Stall Response policy. Run `cafleet doctor` then `cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --json` (for `<backend>`, substitute the coding agent you are actually running on — your spawn prompt's `CODING AGENT:` line names it; a standalone Director uses its own identity, e.g. Claude Code → `claude`) and capture the literal `fleet_id` and `director.member_id` integer ids. Then launch `cafleet monitor <fleet-id>` as a background task in your own pane ({bg_run}) and confirm the `monitor loop started (…)` startup line in the task output; gate the Presentation/Transcript spawns on that confirmation. The loop wakes you once per wake interval to health-check your members and resume interrupted work.
+- **Bootstrap the team and launch the monitor loop first.** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and Stall Response policy. Run `cafleet doctor` then `cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --json` and capture the literal `fleet_id` and `director.member_id` integer ids, per its § *Spawn Protocol* → *Fleet bootstrap*. Launch the heartbeat per § *Spawn Protocol* and gate the Presentation/Transcript spawns on the startup-line confirmation. The loop wakes you once per wake interval to health-check your members and resume interrupted work.
 - **Review all deliverables with critical judgment.** Every slide and every narration block must accurately represent the approved report. Misrepresented data, missing coverage, or poor structure is your failure to catch.
 - **Drive the revision loop.** When deliverables fall short, send specific, tagged feedback via `cafleet message send`. Do not settle for "good enough."
 - **Ensure 1:1 slide-transcript correspondence.** After the slide deck is finalized, send the finalized slide structure to the `transcript` member via `cafleet message send` for realignment.
@@ -26,7 +26,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 ## Communication Protocol
 
-All Director-to-member messages use `cafleet message send` (members addressed by literal `member_id` from the `cafleet member create` JSON). You `cafleet message ack` each inbound member message after acting (un-acked messages re-surface; command shapes in the `cafleet` skill core). The poll `id:` integer is the cafleet message id — **distinct from** any harness task-list id (present only where your backend has a task list). Pane silence is the expected between-turn state, not a stall — re-engage only when a member's inactivity blocks your next step (e.g. the next VR batch cannot spawn because the current VR has not reported).
+Broker protocol (send/poll/ack, members addressed by the literal `member_id` from the `cafleet member create` JSON): the `cafleet` skill core. Pane silence is the expected between-turn state, not a stall — re-engage only when a member's inactivity blocks your next step (e.g. the next VR batch cannot spawn because the current VR has not reported).
 
 ## Presentation Review Tags
 
@@ -109,7 +109,7 @@ Per the User Interaction Contract in `presentation.md`, the Director originates 
 
 ## Server Lifecycle Management
 
-The Director owns the Slidev dev server lifecycle (the Visual Reviewer does not start/stop any server). **Start** it as a backgrounded process via {bg_run} (record the background process handle for shutdown) — the underlying invocation is `pnpm exec slidev --open false <slide>` PTY-wrapped via `script -qfc 'pnpm exec slidev --open false <slide>' /dev/null` (default URL `http://localhost:3030`); see `presentation.md` Step 3 *Server Startup*. **Shutdown** via {bg_stop} (using the recorded handle) after all visual-review rounds — never the broad `pkill -f slidev`. Readiness checking is the VR's job (see `roles/visual-reviewer.md`). On start failure: retry the start command once, then escalate to the user via {decision_surface} (options: Retry again / I started it manually — continue / Abort).
+The Director owns the Slidev dev server lifecycle (the Visual Reviewer does not start/stop any server). Start, stop, and on-start-failure escalation per `presentation.md` Step 3 *Server Startup* and Step 5. Readiness checking is the VR's job (see `roles/visual-reviewer.md`).
 
 ## Progress Monitoring
 
@@ -119,4 +119,4 @@ Follow the `cafleet` skill's `reference/supervision.md` for the health-check seq
 
 Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol* (stop the monitor loop's background task first), with this workflow's member delete order: Presentation, Transcript, and any active VR batch — **for an active VR batch, run the close handshake first** (send `CLOSE:` via `cafleet message send`, wait for the VR's `closed` reply, THEN delete it).
 
-Between the `cafleet member list` verification and `cafleet fleet delete`, release this workflow's non-CAFleet resources: `pnpm exec agent-browser close --all` (orphan-session safety net), then stop the Slidev dev server via {bg_stop} using the recorded handle — never the broad `pkill -f slidev`.
+Between the `cafleet member list` verification and `cafleet fleet delete`, release this workflow's non-CAFleet resources per `presentation.md` Step 5 (the agent-browser `close --all` safety net, then the Slidev server stop).
