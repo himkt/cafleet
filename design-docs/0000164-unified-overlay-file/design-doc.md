@@ -1,7 +1,7 @@
 # Unified Coding-Agent Overlay File
 
 **Status**: Approved
-**Progress**: 6/17 tasks complete
+**Progress**: 8/17 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -159,8 +159,8 @@ The unknown-token walker elsewhere in `docs_sync.rs` scans skill files by direct
 
 ### Step 4: Update the consumer skill families
 
-- [ ] `skills/cafleet-design-doc/`: `SKILL.md`, `create/create.md`, `interview/interview.md`, `execute/execute.md`, and the 9 role files (`create/roles/{director,drafter,reviewer}.md`, `interview/roles/analyzer.md`, `execute/roles/{director,programmer,tester,reviewer,verifier}.md`) — row #1 link form. <!-- completed: -->
-- [ ] `skills/cafleet-research/`: `SKILL.md`, `report/report.md`, `presentation/presentation.md`, and the 8 role files (`report/roles/{director,manager,researcher,scout}.md`, `presentation/roles/{director,presentation,transcript,visual-reviewer}.md`) — row #1 link form. <!-- completed: -->
+- [x] `skills/cafleet-design-doc/`: `SKILL.md`, `create/create.md`, `interview/interview.md`, `execute/execute.md`, and the 9 role files (`create/roles/{director,drafter,reviewer}.md`, `interview/roles/analyzer.md`, `execute/roles/{director,programmer,tester,reviewer,verifier}.md`) — row #1 link form. <!-- completed: 2026-08-07T13:18 -->
+- [x] `skills/cafleet-research/`: `SKILL.md`, `report/report.md`, `presentation/presentation.md`, and the 8 role files (`report/roles/{director,manager,researcher,scout}.md`, `presentation/roles/{director,presentation,transcript,visual-reviewer}.md`) — row #1 link form. <!-- completed: 2026-08-07T13:18 -->
 
 ### Step 5: Update the repo-local .claude/skills consumers
 
