@@ -42,10 +42,7 @@ Your tokens: `<fleet-id>`, `<director-member-id>`, `<programmer-member-id>`, `<t
 
 ## Idle Semantics & Stall Response
 
-Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet member capture` fallback → the decision-relay three-beat for a paused decision-prompt frame, per your overlay) follow the `cafleet` skill's `reference/supervision.md` § Idle Semantics and § Stall Response. Two skill-specific rungs are NOT in those skills and stay here:
-
-- **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet member capture <member-id> --lines 200`, then escalate — in that order.
-- **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via {decision_surface} with concrete options (re-spawn / redistribute / drop scope). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
+Idle Semantics and the stall ladder are canonical in the `cafleet` skill's `reference/supervision.md` § *Idle Semantics* and § *Stall Response*. Two skill-specific deltas: inspect a stalled member with `cafleet member capture <member-id> --lines 200`; and never silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
 
 ## Communication Protocol
 
@@ -57,7 +54,7 @@ Send tasks to members via `cafleet message send` (a push notification keystrokes
 
 ## Escalation Protocol
 
-When the Programmer sends `escalating (paragraph-Implementation > Step N)` (suspected test defect), run the test-defect arbitration loop documented in the SKILL § *Escalation Protocol (Test Defect)*: read the design-doc paragraph + the standing `COMMENT(programmer)` rationale + the failing test, write a `COMMENT(director): <decision> — <rationale, ≤2 sentences>` at the same pointer, then send `ready (paragraph-Implementation > Step N)` to the Tester (fix the test) or Programmer (adjust the implementation). The recipient resolves and replies `addressed (...)`, or counter-`escalating` with a `COMMENT(tester)` marker; 3-round limit before breaking the deadlock via {decision_surface}. Commit test fixes separately (`fix: correct tests for [description]`, `git add` / `git commit` as separate Bash calls).
+When the Programmer sends `escalating (paragraph-Implementation > Step N)` (suspected test defect), run the test-defect arbitration loop documented in the SKILL § *Escalation Protocol (Test Defect)*. Commit test fixes separately (`fix: correct tests for [description]`, `git add` / `git commit` as separate Bash calls).
 
 ## Commit Protocol Summary
 
@@ -81,11 +78,7 @@ No co-author signature (disabled via `attribution.commit` in settings.json).
 
 ### COMMENT Marker Handling
 
-When the user selects "Scan for COMMENT markers":
-
-1. Scan for `COMMENT(` markers in the changed files (files touched on the feature branch) using Grep.
-2. **If no markers are found**: Explain the COMMENT marker convention — add `COMMENT(username): feedback` to the relevant source or test files, using the file's native comment syntax as prefix (e.g., `# COMMENT(...)` for Python/Ruby/YAML, `// COMMENT(...)` for JS/TS/Go). Re-display the `git diff` command so the user can review the changes. Then re-prompt with the same three-option pattern.
-3. **If markers are found**: Classify each COMMENT by file location and route accordingly.
+The user-feedback scan procedure (immediate scan of the changed files, the no-markers re-prompt, classification and routing) is owned by `execute.md` Step 6 § *Revision Loop*.
 
 ### COMMENT Classification by File Location and Role
 

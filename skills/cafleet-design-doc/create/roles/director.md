@@ -30,10 +30,7 @@ Your tokens: `<fleet-id>`, `<director-member-id>`, `<drafter-member-id>`, `<revi
 
 ## Idle Semantics & Stall Response
 
-Idle Semantics (idle is normal, not a stall — nudge only when idleness blocks your next step) and the generic 2-stage stall-detection mechanics (message-poll check → `cafleet member capture` fallback → the decision-relay three-beat for a paused decision-prompt frame, per your overlay) follow the `cafleet` skill's `reference/supervision.md` § Idle Semantics and § Stall Response. Two skill-specific rungs are NOT in those skills and stay here:
-
-- **Do NOT skip rungs.** Nudge with a specific instruction first (name the deliverable and blocker, never a generic "are you OK?"), then `cafleet member capture <member-id> --lines 200`, then escalate — in that order.
-- **Escalation is user-facing.** After 2 nudges without progress, escalate to the user via {decision_surface} with concrete options (re-spawn / redistribute / drop scope). Do NOT silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
+Idle Semantics and the stall ladder are canonical in the `cafleet` skill's `reference/supervision.md` § *Idle Semantics* and § *Stall Response*. Two skill-specific deltas: inspect a stalled member with `cafleet member capture <member-id> --lines 200`; and never silently `cafleet member delete` and re-spawn — the user might know something you don't (intentional pause, network glitch).
 
 ## Communication Protocol
 
@@ -52,11 +49,7 @@ A push notification keystrokes the message into the member's pane (see the `cafl
 
 ### COMMENT Marker Handling
 
-See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the role taxonomy and marker rules. Skill-specific user-feedback workflow when the user selects "Scan for COMMENT markers":
-
-1. **Immediately** scan for `COMMENT(` markers in the design document using Grep — do NOT wait for the user to confirm they are done editing. The selection itself is the signal to scan now.
-2. **If markers are found**: Route the Drafter to address them in-doc with `ready (doc)`. After the Drafter replies `addressed (doc)`, verify with Grep that no `COMMENT(` markers remain.
-3. **If no markers are found**: Explain the marker convention to the user (`# COMMENT(username): feedback` placed directly in the design document) and show the file path so the user can edit it. Then re-prompt with the same three-option pattern (Approve / Scan for COMMENT markers / built-in Other).
+The role taxonomy and marker rules are [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker*; the user-feedback scan procedure (scan immediately on selection, route the Drafter, the no-markers re-prompt) is owned by `create.md` Step 5.
 
 ### Free-form user replies
 

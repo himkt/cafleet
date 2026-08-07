@@ -36,30 +36,10 @@ Broker protocol (poll/ack/send, ids from your spawn prompt, never the user direc
 
 When the Director assigns FIXME resolution as a preliminary task (before the TDD cycle begins):
 
-#### Step 1: List All FIXMEs
-
-Use Grep to find all FIXME(agent) comments:
-```
-FIXME(agent)
-```
-
-#### Step 2: Fix Each Issue
-
-For each FIXME:
-1. Read the FIXME comment and understand the issue
-2. Implement the fix
-3. Replace `FIXME(agent): description` with `DONE(agent): what was fixed`
-4. Repeat for all FIXMEs
-
-#### Step 3: Report to Director
-
-After fixing all FIXMEs, send `complete (doc)` via `cafleet message send`. The DONE(agent) comments themselves are the inline trail — do NOT enumerate them in the cafleet body. Wait for the Director's `ready (doc)` confirmation.
-
-#### Step 4: Cleanup DONE Comments
-
-When the Director sends `ready (doc)` to confirm the FIXME fixes are acceptable:
-1. Remove all `DONE(agent)` comments from the codebase
-2. Send `complete (doc)` via `cafleet message send`
+1. Use Grep to find all `FIXME(agent)` comments.
+2. For each: read the issue, implement the fix, and replace `FIXME(agent): description` with `DONE(agent): what was fixed`.
+3. Send `complete (doc)` via `cafleet message send`. The DONE(agent) comments themselves are the inline trail — do NOT enumerate them in the cafleet body. Wait for the Director's `ready (doc)` confirmation.
+4. On the Director's `ready (doc)` confirmation, remove all `DONE(agent)` comments from the codebase and send `complete (doc)` via `cafleet message send`.
 
 **Only proceed to the TDD cycle after all FIXMEs are resolved and confirmed.**
 
@@ -101,7 +81,7 @@ For each step assigned by the Director (you receive `ready (paragraph-Implementa
 If tests fail and you believe the test is defective (your implementation matches the design doc but tests expect something different):
 
 1. **Do NOT modify any test files.** Only the Tester can change tests.
-2. Write a `COMMENT(programmer): test <test-name> expects X but design doc says Y; please arbitrate` marker at `paragraph-Implementation > Step N` in the design doc (per the pointer-marker pairing rule in `../../reference/coordination.md` — marker location matches the cafleet pointer in step 3 below). The marker carries the rationale (specific test failure, why your implementation is correct per the design doc with the cited section, what the test appears to expect differently); the cafleet body does NOT. You may cite the relevant `paragraph-Specification > <…>` heading inside the marker body, but the marker itself MUST live at the `paragraph-Implementation > Step N` you escalate from.
+2. Write a `COMMENT(programmer): test <test-name> expects X but design doc says Y; please arbitrate` marker at `paragraph-Implementation > Step N` in the design doc (pairing rule — marker location matches the cafleet pointer in step 3 below). The marker carries the rationale (specific test failure, why your implementation is correct per the design doc with the cited section, what the test appears to expect differently); the cafleet body does NOT. You may cite the relevant `paragraph-Specification > <…>` heading inside the marker body, but the marker itself MUST live at the `paragraph-Implementation > Step N` you escalate from.
 3. Send `escalating (paragraph-Implementation > Step N)` via `cafleet message send`.
 4. **STOP and wait** for the Director's decision. The Director writes a `COMMENT(director): <decision> — <rationale>` arbitration marker at the same paragraph and sends `ready (paragraph-Implementation > Step N)` to either you or the Tester. If the recipient is you, act on the standing marker and reply `addressed (paragraph-Implementation > Step N)`.
 

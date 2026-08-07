@@ -1,7 +1,7 @@
 # Skill Boilerplate Dedup
 
 **Status**: Approved
-**Progress**: 34/65 tasks complete
+**Progress**: 48/65 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -283,20 +283,20 @@ Executed in Step 9 with `rg` under `skills/`. Each phrase is a verbatim fragment
 
 ### Step 7: cafleet-design-doc interior reductions
 
-- [ ] DD-2: delete the three § Architecture sections (`create.md`, `execute.md`, `interview.md`). <!-- completed: -->
-- [ ] DD-4: per workflow file, state the spawn frame once (render to `${BASE}/.prompts/<role>-<UTC-compact>.md` → `cafleet member create … --file … --json` → parse `member_id`), keep ONE full code block as the worked example, and give the other roles only `--name` / `--description` (+ the Step-5 Reviewer's `--model {reviewer_model}`) in the delta tables. <!-- completed: -->
-- [ ] DD-5: reduce the path-canonicalization bullet pairs in the three workflow bodies to one sentence with an explicit pointer to `base-dir.md` § *Consumer contract*; keep each workflow's branch-on-outcome paragraph. <!-- completed: -->
-- [ ] DD-6: delete the § Additional resources sections in `execute.md` and `interview.md`. <!-- completed: -->
-- [ ] DD-7: in `execute/roles/director.md` § Escalation Protocol, keep the pointer sentence + the commit delta; delete the restated arbitration loop. <!-- completed: -->
-- [ ] DD-8: make the workflow bodies the owner of the user-feedback/COMMENT-scan procedure; shrink each Director role file's § COMMENT Marker Handling to the role-only residue + pointer; re-aim the five workflow-body links; the no-markers step survives exactly once. <!-- completed: -->
-- [ ] DD-9: keep the team-composition decision matrix in `execute/roles/director.md`; reduce `execute.md` 3c to the pointer + the "Reviewer is never part of the initial composition" invariant. <!-- completed: -->
-- [ ] B10: reduce the identical stall-rung block in `create/roles/director.md` and `execute/roles/director.md` to "Stall ladder per `supervision.md` § Stall Response" + the two true deltas (`--lines 200`; never silently `member delete` and re-spawn); drop the "NOT in those skills" framing. <!-- completed: -->
-- [ ] DD-13: merge § Interview Progress Tracking into § `question.md` Format (keep the format example + the two non-redundant facts; delete the lifecycle bullets already owned by Step 1/Step 4). <!-- completed: -->
-- [ ] DD-14: delete the restated dispatch line at the end of `cafleet-design-doc/SKILL.md`. <!-- completed: -->
-- [ ] DD-15: keep the full pointer-marker pairing-rule citation on first use per file; shorten subsequent uses to "(pairing rule)". <!-- completed: -->
-- [ ] DD-17: trim the two `drafter.md` accountability bullets to obligation + § Workflow pointer. <!-- completed: -->
-- [ ] DD-18: collapse `programmer.md` Phase 1.5's four sub-headings into one numbered list, keeping both `complete (doc)` signals and the only-proceed-after-confirmation closer. <!-- completed: -->
-- [ ] Run `mise //cafleet:test`. <!-- completed: -->
+- [x] DD-2: delete the three § Architecture sections (`create.md`, `execute.md`, `interview.md`). <!-- completed: 2026-08-07T10:52 -->
+- [x] DD-4: per workflow file, state the spawn frame once (render to `${BASE}/.prompts/<role>-<UTC-compact>.md` → `cafleet member create … --file … --json` → parse `member_id`), keep ONE full code block as the worked example, and give the other roles only `--name` / `--description` (+ the Step-5 Reviewer's `--model {reviewer_model}`) in the delta tables. <!-- completed: 2026-08-07T10:56 -->
+- [x] DD-5: reduce the path-canonicalization bullet pairs in the three workflow bodies to one sentence with an explicit pointer to `base-dir.md` § *Consumer contract*; keep each workflow's branch-on-outcome paragraph. <!-- completed: 2026-08-07T10:57 -->
+- [x] DD-6: delete the § Additional resources sections in `execute.md` and `interview.md`. <!-- completed: 2026-08-07T10:58 -->
+- [x] DD-7: in `execute/roles/director.md` § Escalation Protocol, keep the pointer sentence + the commit delta; delete the restated arbitration loop. <!-- completed: 2026-08-07T10:59 -->
+- [x] DD-8: make the workflow bodies the owner of the user-feedback/COMMENT-scan procedure; shrink each Director role file's § COMMENT Marker Handling to the role-only residue + pointer; re-aim the five workflow-body links; the no-markers step survives exactly once. <!-- completed: 2026-08-07T11:02 -->
+- [x] DD-9: keep the team-composition decision matrix in `execute/roles/director.md`; reduce `execute.md` 3c to the pointer + the "Reviewer is never part of the initial composition" invariant. <!-- completed: 2026-08-07T11:03 -->
+- [x] B10: reduce the identical stall-rung block in `create/roles/director.md` and `execute/roles/director.md` to "Stall ladder per `supervision.md` § Stall Response" + the two true deltas (`--lines 200`; never silently `member delete` and re-spawn); drop the "NOT in those skills" framing. <!-- completed: 2026-08-07T11:04 -->
+- [x] DD-13: merge § Interview Progress Tracking into § `question.md` Format (keep the format example + the two non-redundant facts; delete the lifecycle bullets already owned by Step 1/Step 4). <!-- completed: 2026-08-07T11:05 -->
+- [x] DD-14: delete the restated dispatch line at the end of `cafleet-design-doc/SKILL.md`. <!-- completed: 2026-08-07T11:06 -->
+- [x] DD-15: keep the full pointer-marker pairing-rule citation on first use per file; shorten subsequent uses to "(pairing rule)". <!-- completed: 2026-08-07T11:07 -->
+- [x] DD-17: trim the two `drafter.md` accountability bullets to obligation + § Workflow pointer. <!-- completed: 2026-08-07T11:08 -->
+- [x] DD-18: collapse `programmer.md` Phase 1.5's four sub-headings into one numbered list, keeping both `complete (doc)` signals and the only-proceed-after-confirmation closer. <!-- completed: 2026-08-07T11:09 -->
+- [x] Run `mise //cafleet:test`. <!-- completed: 2026-08-07T11:11 -->
 
 ### Step 8: cafleet-research interior reductions
 

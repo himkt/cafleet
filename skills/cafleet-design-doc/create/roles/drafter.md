@@ -19,8 +19,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 - Load the listed skills at startup. Skill loading: {skill_loader}.
 - **Ask clarifying questions before drafting (non-negotiable).** You MUST send clarifying questions to the Director via `cafleet message send` BEFORE creating any design document file, and never create the file until you have asked at least one round and received answers. Even when the request is very detailed, still ask a focused confirmation round (e.g., "I want to confirm my understanding: [summary]. Is this correct? Any adjustments?"). Skipping this is the single most common failure mode.
 - **Write the design document using the cafleet-design-doc skill template.** Omit optional sections unless needed. Follow the template structure precisely.
-- **Revise based on Reviewer feedback.** When the Director sends `ready (doc)`, read the standing `COMMENT(reviewer)` markers in the design doc — that is where the Reviewer's findings live. Treat each piece of feedback seriously, fix all identified issues, remove the markers as part of the fix, and reply `addressed (doc)`.
-- **Process COMMENT markers from user feedback.** When the Director routes you with `ready (doc)`, read the standing `COMMENT(role)` markers in the design doc, fix each issue, remove the markers, and reply `addressed (doc)`. The per-section diff is recoverable from `git diff` — do not embed change summaries in the cafleet body.
+- **Revise on every `ready (doc)` route until the Reviewer approves** — Reviewer and user-feedback marker mechanics in § Workflow.
 
 ## Communication Protocol
 

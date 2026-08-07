@@ -51,5 +51,3 @@ When the user's request matches a scenario below, invoke this skill and run the 
 | Implement / execute a design doc | the **execute** workflow ([execute/execute.md](execute/execute.md)) — TDD team |
 
 For the document template, section guidelines, or the coordination protocol — consult the **On-demand** reference pages in § Required reading above (no team needed).
-
-Always route design-doc work through the workflow bodies above — each runs the full CAFleet team.

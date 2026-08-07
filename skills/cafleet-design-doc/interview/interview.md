@@ -20,26 +20,11 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 | **Director (Interviewer)** | Main agent | Resolve doc path, parse `question.md` progress, spawn Analyzer, drive decision-surface Q&A rounds, write answers + COMMENT annotations + progress marker | Read the document for question generation (delegated to Analyzer); conduct the Q&A rounds off {decision_surface} | (inline in this workflow body) |
 | **Analyzer** | CAFleet member spawned via `cafleet member create` | Read the design doc, return a flat numbered question list covering uncovered sections, then idle pending shutdown | Talk to the user; edit any file; persist state across spawns | [roles/analyzer.md](roles/analyzer.md) |
 
-## Additional resources
-
-- For the document template, section guidelines, and quality standards, see: [../reference/guidelines.md](../reference/guidelines.md)
-- Output of the create workflow is the input to this skill; this skill's `COMMENT(user-relay)` markers are consumed by the create workflow's resume mode.
-
 ## Coordination Protocol
 
 This skill writes only `COMMENT(user-relay)` markers in the design document; the Director-Analyzer cafleet messages are exempt from the verb + pointer schema (the Analyzer's question list is a one-time multi-line payload, and the Director's user relay goes through {decision_surface}, not cafleet). The `COMMENT(role)` marker format, the `user-relay` role (the Director as user-mediator, carrying user-derived clarifications), and the one-per-issue / actionable rules are canonical in [../reference/coordination.md](../reference/coordination.md) § *COMMENT(role) Marker*.
 
 Interview-specific: place each `COMMENT(user-relay)` marker on its own line immediately before the section it refers to (e.g. above `### Retry Strategy`); markers persist until the create workflow's resume mode resolves them (reads each marker, applies the fix, removes it).
-
-## Architecture
-
-The Director is the root member of a CAFleet fleet — bootstrapped automatically by `cafleet fleet create` — and spawns one short-lived Analyzer via `cafleet member create`. The Analyzer is torn down BEFORE the interview rounds begin; the Director then runs the rounds (and writes annotations) on its own. All Analyzer coordination goes through the persistent message queue — every message is persisted in SQLite and auditable.
-
-```
-User
- +-- Director (main agent -- cafleet fleet create, cafleet member create, drives Q&A, writes annotations)
-      +-- Analyzer (member -- spawned in tmux pane; returns question list; terminated)
-```
 
 ## Prerequisites
 
@@ -52,30 +37,13 @@ Two mechanisms prevent context compaction:
 1. **Member offloading**: The Analyzer member performs the heavy document analysis (reading, reasoning, question generation) and returns only a compact numbered question list. The Director never reads the entire design document for question generation — it only reads it for resume-mode progress detection (Step 1) and for inserting COMMENT annotations (Step 4).
 2. **Multi-session splitting**: Each invocation covers a batch of sections. The Director tracks progress via `question.md` in the design document's directory, so subsequent invocations skip already-reviewed sections.
 
-## Interview Progress Tracking
-
-Progress is tracked via `question.md` in the design document's directory (e.g., `design-docs/xxx/question.md`):
-
-```html
-<!-- interview-progress: ["Overview", "Success Criteria", "Specification/Retry Strategy"] -->
-```
-
-- The `<!-- interview-progress: [...] -->` HTML comment is at the top of `question.md` (NOT in the design document).
-- Contains a JSON array of section headings that have been reviewed (whether clean or with issues).
-- Created when `question.md` is first written (after the Analyzer returns questions).
-- Appended to on subsequent invocations.
-- Removed when all sections are covered (final invocation). If `question.md` exists but the marker is absent, the interview is considered complete.
-- The Director reads this to determine resume state.
-
 ## Process
 
 ### Step 0: Path Resolution & Doc Validation (Director)
 
 1. Apply the no-bypass write protocol and `<unset>` sentinel contract from the `cafleet` skill's `reference/base-dir.md` (§ Required reading above). Then canonicalize `$ARGUMENTS` and resolve the task-scoped BASE:
 
-   - **Relative input** — accept any of: `0000060-foo`, `0000060-foo/design-doc.md`, `design-docs/0000060-foo`, `design-docs/0000060-foo/design-doc.md`. Canonicalize to `design-docs/<slug>` per the `cafleet` skill's `reference/base-dir.md` § *Consumer contract*, then run the skill's **Step 0 (task-scope resolution)** with that relpath.
-
-   - **Absolute path** (e.g. `/abs/path/to/design-docs/0000060-foo/design-doc.md`): canonicalize per the same § *Consumer contract* row, which leaves the absolute task-folder path verbatim, then run Step 0 with it. Step 0 accepts the absolute path if it lies strictly under the inferred repo root; otherwise it yields the `<unset>` sentinel.
+   Canonicalize `$ARGUMENTS` per the `cafleet` skill's `reference/base-dir.md` § *Consumer contract* row for this skill (relative forms get `design-docs/` prepended and a trailing `/design-doc.md` stripped; absolute paths are used verbatim after the filename strip), then run its **Step 0 (task-scope resolution)** with the result.
 
    Branch on Step 0's outcome: when it **resolves**, set `${BASE}` to the resolved task folder, `dir_path = ${BASE}`, and `doc_path = ${BASE}/design-doc.md` (the task folder IS the design-doc directory; no further `${BASE}/design-docs/...` concatenation). When it yields **`<unset>`** (absolute `$ARGUMENTS` outside the repo root, or equal to the repo root), set `dir_path` to the **canonicalized** absolute task-folder path and `doc_path = dir_path / "design-doc.md"` (unless `$ARGUMENTS` already names `design-doc.md`, in which case use it verbatim and derive `dir_path = dirname(doc_path)`), and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet` skill's `reference/base-dir.md` § *The `<unset>` sentinel*.
 2. Read the design document at `doc_path`. If missing or empty, report the error and stop.
@@ -219,6 +187,8 @@ Present a summary to the user:
 | All sections covered, no COMMENT markers in document | Run the execute workflow with `<doc-path>` to implement |
 
 ## `question.md` Format
+
+Progress is tracked via `question.md` in the design document's directory (e.g., `design-docs/xxx/question.md`). The `<!-- interview-progress: [...] -->` HTML comment at its top holds a JSON array of the section headings already reviewed (whether clean or with issues). The marker lives in `question.md`, NOT in the design document; if `question.md` exists but the marker is absent, the interview is complete.
 
 ```markdown
 <!-- interview-progress: ["Overview", "Specification/Retry Strategy"] -->

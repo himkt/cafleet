@@ -54,7 +54,7 @@ For each step assigned by the Director (you receive `ready (paragraph-Implementa
    - Cover edge cases and error conditions mentioned in the spec
    - Use descriptive test names that reference the requirement being tested
    - Tests WILL fail at this point (no implementation yet) — that is expected
-3. **Send `complete (paragraph-Implementation > Step N) — <count> tests` via `cafleet message send`**. The optional summary respects the ≤ 80-codepoint cap and the ≤ 3-item enumeration cap. **Do NOT enumerate test names, files, or requirements in the body** — the Director recovers per-file detail directly via git. If the spec is unclear or contains untestable areas, send `blocked (paragraph-Implementation > Step N)` and write a `COMMENT(tester): <gap>` marker at the SAME `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in `../../reference/coordination.md`).
+3. **Send `complete (paragraph-Implementation > Step N) — <count> tests` via `cafleet message send`**. The optional summary respects the ≤ 80-codepoint cap and the ≤ 3-item enumeration cap. **Do NOT enumerate test names, files, or requirements in the body** — the Director recovers per-file detail directly via git. If the spec is unclear or contains untestable areas, send `blocked (paragraph-Implementation > Step N)` and write a `COMMENT(tester): <gap>` marker at the SAME `paragraph-Implementation > Step N` (pairing rule).
 4. **Handle Director feedback**: When the Director sends `ready (paragraph-Implementation > Step N)`, read the standing `COMMENT(director)` markers at the pointer, revise your tests to resolve them, remove the markers as part of the fix, and reply `addressed (paragraph-Implementation > Step N)`. Repeat until the Director approves.
 
 ### Phase 3: Test Defect Resolution
@@ -64,7 +64,7 @@ When the Director sends `ready (paragraph-Implementation > Step N)` after a Prog
 1. **Read the markers**: Understand the specific test failure (from the `COMMENT(programmer)` marker), the Programmer's reasoning, and the Director's arbitration decision (from the `COMMENT(director)` marker).
 2. **Evaluate the feedback**:
    - **If valid** (the Director's decision says your test expectation was wrong per the design doc): Fix the test to match the correct behavior, remove the standing markers as part of the fix, and reply `addressed (paragraph-Implementation > Step N)` via `cafleet message send`.
-   - **If you disagree** (your test is correct per the design doc and the Director's arbitration is wrong): Reply `escalating (paragraph-Implementation > Step N)` via `cafleet message send` and write a `COMMENT(tester): <reasoning>` marker at the SAME `paragraph-Implementation > Step N` (per the pointer-marker pairing rule in `../../reference/coordination.md`). You may cite the relevant `paragraph-Specification > <…>` heading inside the marker body.
+   - **If you disagree** (your test is correct per the design doc and the Director's arbitration is wrong): Reply `escalating (paragraph-Implementation > Step N)` via `cafleet message send` and write a `COMMENT(tester): <reasoning>` marker at the SAME `paragraph-Implementation > Step N` (pairing rule). You may cite the relevant `paragraph-Specification > <…>` heading inside the marker body.
 3. **Wait for the Director's next decision.** The Director will arbitrate again — read the updated `COMMENT(director)` marker and act accordingly.
 
 ## Test Writing Guidelines

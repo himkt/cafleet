@@ -61,14 +61,14 @@ For each verification task assigned by the Director (you receive `ready (doc)` o
 
    Then report to the Director via `cafleet message send` per the Verifier-specific reporting policy:
    - **Overall success** (all verifiable criteria pass): send a single `complete (doc)`. E2E commonly spans multiple steps, so success is reported once at doc-level.
-   - **Failures**: send one `escalating (paragraph-Implementation > Step N)` per affected step. The paired `COMMENT(verifier)` marker lives at the SAME `paragraph-Implementation > Step N` per the pointer-marker pairing rule in `../../reference/coordination.md`.
+   - **Failures**: send one `escalating (paragraph-Implementation > Step N)` per affected step. The paired `COMMENT(verifier)` marker lives at the SAME `paragraph-Implementation > Step N` (pairing rule).
 
 ## Graceful Degradation
 
 If the best tool for a verification task is unavailable:
 
 1. **Fall back** to the next best alternative (e.g., WebFetch or an HTTP MCP tool instead of Playwright for HTTP checks — never `curl`/`wget`, which the project Bash ban blocks)
-2. **If no suitable tool exists**, skip that verification item and write a `COMMENT(verifier): test gap — <what was skipped and why>; suggested tooling: <MCP server or tool>` marker. Place the marker at the paragraph that matches the cafleet pointer used to report the gap (per the pointer-marker pairing rule in `../../reference/coordination.md`).
+2. **If no suitable tool exists**, skip that verification item and write a `COMMENT(verifier): test gap — <what was skipped and why>; suggested tooling: <MCP server or tool>` marker. Place the marker at the paragraph that matches the cafleet pointer used to report the gap (pairing rule).
 3. Never fail silently — always record what could and could not be verified in `COMMENT(verifier)` markers.
 
 ## Shutdown
