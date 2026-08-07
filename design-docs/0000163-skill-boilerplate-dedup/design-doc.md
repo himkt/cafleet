@@ -1,7 +1,7 @@
 # Skill Boilerplate Dedup
 
 **Status**: Approved
-**Progress**: 21/65 tasks complete
+**Progress**: 25/65 tasks complete
 **Last Updated**: 2026-08-07
 
 ## Overview
@@ -264,10 +264,10 @@ Executed in Step 9 with `rg` under `skills/`. Each phrase is a verbatim fragment
 
 ### Step 5: Skeleton dedup — B7, B8
 
-- [ ] B7: compress the two-stage rendering paragraph at the 5 consumer spawn sections to one clause — "Render the canonical spawn-prompt skeleton with the delta below (two-stage rendering + brace rules at the skeleton)" — and drop the later-in-file short repeats in `report.md` / `presentation.md`; workflow-specific additions (create's ~2 KB/resume-mode column, execute's load-both-skills note) stay. <!-- completed: -->
-- [ ] B8: in `director.md`, replace the § Lossless rule's verbatim consumer quotes with labels and state that each consuming skill's delta table is the authoritative inventory; keep the two poll-handling form strings in the delta-slot table as their single owner. <!-- completed: -->
-- [ ] B8/CR-F5: reduce the repeated ack-inline parentheticals in `report.md` / `presentation.md` delta tables to the bare named form, keeping the first expansion per workflow file. <!-- completed: -->
-- [ ] Run `mise //cafleet:test`. <!-- completed: -->
+- [x] B7: compress the two-stage rendering paragraph at the 5 consumer spawn sections to one clause — "Render the canonical spawn-prompt skeleton with the delta below (two-stage rendering + brace rules at the skeleton)" — and drop the later-in-file short repeats in `report.md` / `presentation.md`; workflow-specific additions (create's ~2 KB/resume-mode column, execute's load-both-skills note) stay. <!-- completed: 2026-08-07T10:20 -->
+- [x] B8: in `director.md`, replace the § Lossless rule's verbatim consumer quotes with labels and state that each consuming skill's delta table is the authoritative inventory; keep the two poll-handling form strings in the delta-slot table as their single owner. <!-- completed: 2026-08-07T10:22 -->
+- [x] B8/CR-F5: reduce the repeated ack-inline parentheticals in `report.md` / `presentation.md` delta tables to the bare named form, keeping the first expansion per workflow file. <!-- completed: 2026-08-07T10:23 -->
+- [x] Run `mise //cafleet:test`. <!-- completed: 2026-08-07T10:25 -->
 
 ### Step 6: cafleet interior reductions
 

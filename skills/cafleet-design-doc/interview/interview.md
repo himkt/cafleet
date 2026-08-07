@@ -119,7 +119,7 @@ Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt 
 
 **Gate**: do not spawn the Analyzer until the monitor loop's startup line (2b) has been confirmed.
 
-Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (the skeleton's identity lines carry the CLI's four `{fleet_id}` / `{director_member_id}` / `{member_id}` / `{coding_agent}` placeholders, rendered to literals by `cafleet member create` at spawn; `[INSERT …]` markers rendered by the Director first, leaving no stray single braces other than the four identity placeholders):
+Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (two-stage rendering + brace rules at the skeleton):
 
 | Slot | Analyzer |
 |---|---|

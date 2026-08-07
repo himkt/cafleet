@@ -117,7 +117,7 @@ Both work from `report.md` independently. After the slide deck is finalized (Ste
 
 **Presentation spawn prompt:**
 
-Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Presentation delta below (the skeleton's identity lines carry the CLI's four `{...}` placeholders, rendered to literals by `cafleet member create` at spawn; `[INSERT …]` markers rendered by the Director first):
+Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Presentation delta below (two-stage rendering + brace rules at the skeleton):
 
 | Slot | Presentation Specialist |
 |---|---|
@@ -128,7 +128,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `<message-id>` and `cafleet message ack <message-id>`, then act) |
 | start cue (verbatim) | `When complete, send the file path to the Director via cafleet message send.` |
 
-Render the prompt to `${BASE}/.prompts/presentation-<UTC-compact>.md` per the 1c two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--file`:
+Render the prompt to `${BASE}/.prompts/presentation-<UTC-compact>.md` per the 1c two-step audit-file pattern, then spawn with `--file`:
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \

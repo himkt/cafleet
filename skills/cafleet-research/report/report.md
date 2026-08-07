@@ -116,7 +116,7 @@ Substitute these absolute paths into the spawn prompts below.
 
 **Manager spawn prompt:**
 
-Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Manager delta below (the skeleton's identity lines carry the CLI's four `{...}` placeholders, rendered to literals by `cafleet member create` at spawn; `[INSERT …]` markers rendered by the Director first):
+Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Manager delta below (two-stage rendering + brace rules at the skeleton):
 
 | Slot | Manager |
 |---|---|
@@ -127,7 +127,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `[message-id]` and `cafleet message ack [message-id]`, then act); plus `You do NOT talk to Scouts or Researchers directly. The Director spawns them and relays their findings.` and `The team coordinates sub-topic assignments via {task_coord}.` |
 | start cue (verbatim) | `To request Scouts or Researchers, send the Director a cafleet message specifying: role (Scout or Researcher), scope, search angles, and output file path. The Director will spawn them via cafleet member create and relay their completion reports back to you.` + `Your first compiled report will be reviewed critically by the Director. Aim for highest quality on the first attempt.` |
 
-Render the prompt to `${BASE}/.prompts/manager-<UTC-compact>.md` per the 2b two-step audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--file`:
+Render the prompt to `${BASE}/.prompts/manager-<UTC-compact>.md` per the 2b two-step audit-file pattern, then spawn with `--file`:
 
    ```bash
    cafleet member create --fleet-id [fleet-id] \
@@ -153,7 +153,7 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md
 | role-file + ROLE-DEF suffix | `roles/scout.md`; suffix `— landscape-mapping focus, communication protocol, output format, and shutdown.` |
 | cafleet-load purpose | `for the broker primitives and bash-via-Director routing` (no extra skills) |
 | CONTEXT LINES | `CURRENT DATE: [INSERT today's date]` / `YOUR ASSIGNMENT: [landscape scope and what areas to map]` / `OUTPUT FILE: [INSERT <resolved-path>/00-scout-<topic>.md]` |
-| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form (capture the `id:` integer as `[message-id]` and `cafleet message ack [message-id]`, then act) |
+| IMPORTANT / coordination lines (verbatim) | **ack-inline** poll-handling form |
 | start cue (verbatim) | `Write findings to the output file, then send the Director a completion summary. The Director will relay your findings to the Manager.` |
 
 Render the prompt to `${BASE}/.prompts/<scout-name>-<UTC-compact>.md` per the 2b two-step audit-file pattern (use `scout` for a single Scout, `scout-1`/`scout-2`/… for multiple; `<scout-name>` is the lowercased `--name`), then spawn with `--file`:
