@@ -9,7 +9,7 @@ import {
 const demoVideo = (
   <iframe
     className="cafleet-home-demo"
-    src="https://www.youtube.com/embed/cLLp-eoWFBg?rel=0"
+    src="https://www.youtube.com/embed/P97RR7jFmks?rel=0"
     aria-label="CAFleet demo video"
     allowFullScreen
   />
