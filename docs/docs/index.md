@@ -2,7 +2,7 @@
 pageType: home
 hero:
   name: CAFleet
-  text: Agent Teams reinvented
+  text: Coding Agent Multiplexer
   tagline: Collaborative coding across multiple coding-agent backends, with full code transparency.
   actions:
     - theme: brand
