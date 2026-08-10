@@ -16,7 +16,7 @@ importers:
         version: 0.25.0
       agent-browser:
         specifier: ^0.33.0
-        version: 0.33.1
+        version: 0.33.2
       vue:
         specifier: ^3.5.29
         version: 3.5.40(typescript@6.0.3)
@@ -2457,8 +2457,8 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
 
-  agent-browser@0.33.1:
-    resolution: {integrity: sha512-lS0KbU9QdkD0I2n+uzrmNXKNGRjsd6GcB7bR6Wm1eyLcaxTCSf2zuxbWzf76fHCrDA4YoY3TikoOMSA8qA+wFA==}
+  agent-browser@0.33.2:
+    resolution: {integrity: sha512-e+TZ0G04uw2rs+lVB8gn0IWTT7ErfiAl3jQ4zNNwyqDhgXWJKhqxYKkyibjuBGXLzx/APlzU3IWAsOVdRwh0DA==}
     engines: {node: '>=24.0.0', pnpm: '>=11.0.0'}
     hasBin: true
 
@@ -8402,7 +8402,7 @@ snapshots:
 
   acorn@8.18.0: {}
 
-  agent-browser@0.33.1: {}
+  agent-browser@0.33.2: {}
 
   ajv-formats@3.0.1(ajv@8.20.0):
     optionalDependencies:
