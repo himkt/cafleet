@@ -54,7 +54,7 @@ pub fn create_fleet(
     backend: &str,
 ) -> Result<Value, CafleetError> {
     let now = format_utc(now_utc());
-    let card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[]);
+    let card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[], false);
     let tx = conn.transaction().map_err(db_err)?;
     tx.execute(
         "INSERT INTO fleets (name, created_at) VALUES (?1, ?2)",

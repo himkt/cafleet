@@ -316,6 +316,7 @@ fn create(
         description,
         &[],
         Some(&placement),
+        false,
     )
     .map_err(|error| match error {
         CafleetError::App(_) | CafleetError::Usage(_) => error,

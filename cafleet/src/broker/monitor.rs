@@ -1,6 +1,8 @@
 //! Monitor runtime DB layer (SPEC §6.2 *Monitor*) — the fleet-level wake
-//! roster + ledger and the single-instance runtime slot. The colocated tests
-//! pin the contract; see [`super::test_support`] for the API.
+//! roster (non-Director, non-monitor members) + ledger, the Director
+//! descriptor for the wake's `Director:` segment, and the single-instance
+//! runtime slot. The colocated tests pin the contract; see
+//! [`super::test_support`] for the API.
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -99,9 +101,13 @@ pub fn record_monitor_wake(
     Ok(())
 }
 
-/// The fleet-level wake roster: every active, non-Director member with a
-/// placement (a pending pane still makes the roster), ordered by `member_id`
-/// — the order the wake payload's entries render in.
+const NOT_MONITOR_PREDICATE: &str =
+    "json_extract(m.member_card_json, '$.cafleet.kind') IS NOT 'monitor'";
+
+/// The fleet-level wake roster: every active, non-Director, non-monitor
+/// member with a placement (a pending pane still makes the roster), ordered
+/// by `member_id` — the order the wake payload's entries render in. The
+/// monitor member receives the wake and is never a roster entry.
 pub fn list_fleet_wake_targets(
     conn: &Connection,
     fleet_id: i64,
@@ -114,6 +120,7 @@ pub fn list_fleet_wake_targets(
                AND NOT EXISTS(SELECT 1 FROM fleets f \
                               WHERE f.fleet_id=m.fleet_id \
                                 AND f.director_member_id=m.member_id) \
+               AND {NOT_MONITOR_PREDICATE} \
              ORDER BY m.member_id"
         ))
         .map_err(db_err)?;
@@ -130,6 +137,38 @@ pub fn list_fleet_wake_targets(
         .collect::<Result<Vec<_>, _>>()
         .map_err(db_err)?;
     Ok(rows)
+}
+
+/// The fleet's Director descriptor for the wake's trailing `Director:`
+/// segment — the same field grammar as a roster entry. A live fleet always
+/// records its Director with a placement, so a missing row is a loud error,
+/// not a skip.
+pub fn fleet_wake_director(conn: &Connection, fleet_id: i64) -> Result<Value, CafleetError> {
+    conn.query_row(
+        &format!(
+            "SELECT m.member_id, m.name, p.coding_agent, {PENDING_COUNT_SUBQUERY} \
+             FROM fleets f \
+             JOIN members m ON m.member_id=f.director_member_id \
+             JOIN member_placements p ON p.member_id=m.member_id \
+             WHERE f.fleet_id=?1"
+        ),
+        [fleet_id],
+        |row| {
+            Ok(json!({
+                "member_id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "coding_agent": row.get::<_, String>(2)?,
+                "pending_count": row.get::<_, i64>(3)?,
+            }))
+        },
+    )
+    .optional()
+    .map_err(db_err)?
+    .ok_or_else(|| {
+        CafleetError::App(format!(
+            "fleet {fleet_id} has no Director with a placement recorded"
+        ))
+    })
 }
 
 /// Atomically claim the fleet's single-instance runtime slot. A live slot —
@@ -312,7 +351,8 @@ pub fn monitor_runtime_payload(
 }
 
 /// The per-member rows of `GET /api/monitor` (SPEC §6.8): one dict per
-/// wake-roster member, ages integer-truncated against the supplied `now`.
+/// wake-roster member (non-Director, non-monitor), ages integer-truncated
+/// against the supplied `now`.
 pub fn monitor_members_payload(
     conn: &Connection,
     fleet_id: i64,
@@ -331,6 +371,7 @@ pub fn monitor_members_payload(
                AND NOT EXISTS(SELECT 1 FROM fleets f \
                               WHERE f.fleet_id=m.fleet_id \
                                 AND f.director_member_id=m.member_id) \
+               AND {NOT_MONITOR_PREDICATE} \
              ORDER BY m.member_id"
         ))
         .map_err(db_err)?;

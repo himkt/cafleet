@@ -1,6 +1,7 @@
 //! Member registry, placement, roster, and activity proxies (SPEC §6.2
-//! *Members*). The colocated tests pin the contract; see
-//! [`super::test_support`] for the API.
+//! *Members*), including the monitor-member card marker
+//! (`$.cafleet.kind = 'monitor'`) behind the three-value member kind. The
+//! colocated tests pin the contract; see [`super::test_support`] for the API.
 
 use std::collections::BTreeMap;
 
@@ -23,15 +24,29 @@ pub(crate) fn db_err(e: rusqlite::Error) -> CafleetError {
     CafleetError::App(format!("database error: {e}"))
 }
 
-pub(crate) fn member_card(name: &str, description: &str, skills: &[Value]) -> String {
-    json!({"name": name, "description": description, "skills": skills}).to_string()
+pub(crate) fn member_card(name: &str, description: &str, skills: &[Value], monitor: bool) -> String {
+    let mut card = json!({"name": name, "description": description, "skills": skills});
+    if monitor {
+        card["cafleet"] = json!({"kind": "monitor"});
+    }
+    card.to_string()
 }
 
-/// The two-value collapse over the SQL-supplied `is_director` flag
-/// (SPEC §5.4).
-pub(crate) fn derive_member_kind(is_director: bool) -> &'static str {
-    if is_director { "director" } else { "member" }
+/// The three-value derivation over the SQL-supplied `is_director` flag plus
+/// the member card's `$.cafleet.kind` marker (SPEC §5.4); `director` wins, so
+/// a root Director can never read as `monitor` regardless of its card.
+pub(crate) fn derive_member_kind(is_director: bool, is_monitor: bool) -> &'static str {
+    if is_director {
+        "director"
+    } else if is_monitor {
+        "monitor"
+    } else {
+        "member"
+    }
 }
+
+const IS_MONITOR_COLUMN: &str =
+    "COALESCE(json_extract(m.member_card_json, '$.cafleet.kind')='monitor', 0)";
 
 pub(crate) fn card_skills(card_json: &str) -> Value {
     let card: Value = serde_json::from_str(card_json).unwrap_or(Value::Null);
@@ -66,6 +81,7 @@ pub fn register_member(
     description: &str,
     skills: &[Value],
     placement: Option<&NewPlacement>,
+    monitor: bool,
 ) -> Result<Value, CafleetError> {
     let fleet = super::fleets::fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
@@ -92,7 +108,7 @@ pub fn register_member(
     }
 
     let now = format_utc(now_utc());
-    let card = member_card(name, description, skills);
+    let card = member_card(name, description, skills, monitor);
     let tx = conn.transaction().map_err(db_err)?;
     tx.execute(
         "INSERT INTO members (fleet_id, name, description, status, registered_at, member_card_json) \
@@ -129,13 +145,15 @@ pub fn get_member(
 ) -> Result<Option<Value>, CafleetError> {
     let row = conn
         .query_row(
-            "SELECT m.name, m.description, m.status, m.registered_at, m.member_card_json, \
-                    EXISTS(SELECT 1 FROM fleets f \
-                           WHERE f.fleet_id=m.fleet_id AND f.director_member_id=m.member_id), \
-                    p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, \
-                    p.created_at \
-             FROM members m LEFT JOIN member_placements p ON p.member_id=m.member_id \
-             WHERE m.member_id=?1 AND m.fleet_id=?2 AND m.status='active'",
+            &format!(
+                "SELECT m.name, m.description, m.status, m.registered_at, m.member_card_json, \
+                        EXISTS(SELECT 1 FROM fleets f \
+                               WHERE f.fleet_id=m.fleet_id AND f.director_member_id=m.member_id), \
+                        p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, \
+                        p.created_at, {IS_MONITOR_COLUMN} \
+                 FROM members m LEFT JOIN member_placements p ON p.member_id=m.member_id \
+                 WHERE m.member_id=?1 AND m.fleet_id=?2 AND m.status='active'"
+            ),
             params![member_id, fleet_id],
             |row| {
                 Ok((
@@ -151,6 +169,7 @@ pub fn get_member(
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, Option<String>>(10)?,
                     row.get::<_, Option<String>>(11)?,
+                    row.get::<_, bool>(12)?,
                 ))
             },
         )
@@ -170,6 +189,7 @@ pub fn get_member(
             pane,
             agent,
             created,
+            is_monitor,
         )| {
             let placement = match backend {
                 None => Value::Null,
@@ -196,12 +216,31 @@ pub fn get_member(
                 "description": description,
                 "status": status,
                 "registered_at": registered_at,
-                "kind": derive_member_kind(is_director),
+                "kind": derive_member_kind(is_director, is_monitor),
                 "skills": card_skills(&card),
                 "placement": placement,
             })
         },
     ))
+}
+
+/// The fleet's single `status='active'` member whose card carries the
+/// monitor marker (`$.cafleet.kind = 'monitor'`), or `None`. Consumed by the
+/// CLI's two `member create` monitor-role guards and the tick's monitor-pane
+/// resolution.
+pub fn active_monitor_member_id(
+    conn: &Connection,
+    fleet_id: i64,
+) -> Result<Option<i64>, CafleetError> {
+    conn.query_row(
+        "SELECT member_id FROM members \
+         WHERE fleet_id=?1 AND status='active' \
+           AND json_extract(member_card_json, '$.cafleet.kind')='monitor'",
+        [fleet_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(db_err)
 }
 
 /// The fleet id of an active member row — the derivation behind every
@@ -323,6 +362,7 @@ struct RosterRow {
     name: String,
     status: String,
     is_director: bool,
+    is_monitor: bool,
     placement: Option<Value>,
     last_sent: Option<String>,
     last_recv: Option<String>,
@@ -337,7 +377,7 @@ fn roster_rows(
     include_message_holders: bool,
 ) -> Result<Vec<RosterRow>, CafleetError> {
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT m.member_id, m.name, m.status, \
                     EXISTS(SELECT 1 FROM fleets f \
                            WHERE f.fleet_id=m.fleet_id AND f.director_member_id=m.member_id), \
@@ -349,12 +389,12 @@ fn roster_rows(
                     (SELECT MAX(status_timestamp) FROM messages \
                      WHERE owner_member_id=m.member_id AND type='unicast' \
                        AND status_state='completed'), \
-                    m.description, m.registered_at \
+                    m.description, m.registered_at, {IS_MONITOR_COLUMN} \
              FROM members m LEFT JOIN member_placements p ON p.member_id=m.member_id \
              WHERE m.fleet_id=?1 AND (m.status='active' OR (?2 AND EXISTS( \
                    SELECT 1 FROM messages WHERE owner_member_id=m.member_id))) \
-             ORDER BY m.member_id",
-        )
+             ORDER BY m.member_id"
+        ))
         .map_err(db_err)?;
     let rows = stmt
         .query_map(params![fleet_id, include_message_holders], |row| {
@@ -375,6 +415,7 @@ fn roster_rows(
                 name: row.get(1)?,
                 status: row.get(2)?,
                 is_director: row.get(3)?,
+                is_monitor: row.get(15)?,
                 placement,
                 last_sent: row.get(10)?,
                 last_recv: row.get(11)?,
@@ -407,7 +448,7 @@ pub fn list_members(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>, Cafl
             json!({
                 "member_id": row.member_id,
                 "name": row.name,
-                "kind": derive_member_kind(row.is_director),
+                "kind": derive_member_kind(row.is_director, row.is_monitor),
                 "placement": row.placement.clone().unwrap_or(Value::Null),
                 "last_sent": row.last_sent,
                 "last_recv": row.last_recv,
@@ -432,7 +473,7 @@ pub fn list_roster(
                 "description": row.description,
                 "status": row.status,
                 "registered_at": row.registered_at,
-                "kind": derive_member_kind(row.is_director),
+                "kind": derive_member_kind(row.is_director, row.is_monitor),
                 "placement": row.placement.clone().unwrap_or(Value::Null),
             })
         })

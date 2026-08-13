@@ -1,7 +1,7 @@
 # Reintroduce the monitor member — a cheap-model watcher absorbs the periodic tick
 
 **Status**: Approved
-**Progress**: 27/49 tasks complete
+**Progress**: 32/49 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -525,11 +525,11 @@ restart. Mid-run monitor death: the Director re-spawns with `--role monitor`
 
 ### Step 5: Rust — broker and member registry
 
-- [ ] `cafleet/src/broker/members.rs`: `monitor: bool` on `register_member` / `member_card`, the card marker write, `active_monitor_member_id`, three-value `derive_member_kind` (no guards here — § S3 puts them in the CLI layer) <!-- completed: -->
-- [ ] `cafleet/src/broker/monitor.rs`: exclude the monitor member from `list_fleet_wake_targets` and `monitor_members_payload`; add `fleet_wake_director` <!-- completed: -->
-- [ ] `cafleet/src/broker/test_support.rs`: catalogue the new/changed functions; add a monitor-registration helper for the suites that need a monitor fixture (existing `register` call sites stay as they are — the guards are CLI-layer) <!-- completed: -->
-- [ ] Colocated tests in `members.rs` and `monitor.rs` per § S9 <!-- completed: -->
-- [ ] Bring each touched `cafleet/src/broker/*.rs` module `//!` header in line with the new surface <!-- completed: -->
+- [x] `cafleet/src/broker/members.rs`: `monitor: bool` on `register_member` / `member_card`, the card marker write, `active_monitor_member_id`, three-value `derive_member_kind` (no guards here — § S3 puts them in the CLI layer) <!-- completed: 2026-08-13T11:12 -->
+- [x] `cafleet/src/broker/monitor.rs`: exclude the monitor member from `list_fleet_wake_targets` and `monitor_members_payload`; add `fleet_wake_director` <!-- completed: 2026-08-13T11:12 -->
+- [x] `cafleet/src/broker/test_support.rs`: catalogue the new/changed functions; add a monitor-registration helper for the suites that need a monitor fixture (existing `register` call sites stay as they are — the guards are CLI-layer) <!-- completed: 2026-08-13T11:12 -->
+- [x] Colocated tests in `members.rs` and `monitor.rs` per § S9 <!-- completed: 2026-08-13T11:12 -->
+- [x] Bring each touched `cafleet/src/broker/*.rs` module `//!` header in line with the new surface <!-- completed: 2026-08-13T11:12 -->
 
 ### Step 6: Rust — the tick, the multiplexer, the CLI
 
