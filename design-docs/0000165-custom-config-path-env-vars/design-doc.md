@@ -69,7 +69,7 @@ A set variable must hold an absolute path. Any other value — the empty string,
 Error: <VAR> must be an absolute path (got '<value>')
 ```
 
-Exit 1 (`CafleetError::App`, matching the `CAFLEET_*` numeric-validation style in `config.rs`). Validation is lazy: a variable is read and validated only when a site actually resolves that backend's directory. `cafleet setup --coding-agent claude` with an invalid `CODEX_HOME` succeeds; `member create --coding-agent claude` never reads any of the three variables (claude and codex spawn preconditions are PATH-check-only). One exception to strict lazy failure: `doctor` catches per-agent resolution errors and renders them as issues instead of aborting (Part 3).
+Exit 1 (`CafleetError::App`, matching the `CAFLEET_*` numeric-validation style in `config.rs`). Validation is lazy: a variable is read and validated only when a site actually resolves that backend's directory. `cafleet setup --coding-agent claude` with an invalid `CODEX_HOME` succeeds because the selector resolves only the targeted agent's directory. The spawn preconditions themselves read none of the three variables for claude and codex (PATH-check-only; opencode's resolves the preset base) — but the stale-assets guard fronting every fleet-scoped command, `member create` included, resolves all three identity paths (Part 2). One exception to strict lazy failure: `doctor` catches per-agent resolution errors and renders them as issues instead of aborting (Part 3).
 
 #### The shared resolver
 

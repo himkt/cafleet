@@ -1538,11 +1538,14 @@ resolution time with the application error (exit 1):
 
 Validation is lazy: a variable is read and validated only when a site
 actually resolves that backend's directory. `cafleet setup --coding-agent
-claude` with an invalid `CODEX_HOME` succeeds; `member create
---coding-agent claude` never reads any of the three variables (the claude
-and codex spawn preconditions are PATH-check-only). One exception to strict
-lazy failure: `doctor` catches per-agent resolution errors and renders them
-as issues instead of aborting (§ `doctor`).
+claude` with an invalid `CODEX_HOME` succeeds because the selector resolves
+only the targeted agent's directory. The spawn preconditions themselves
+read none of the three variables for claude and codex (PATH-check-only;
+opencode's resolves the preset base) — but the stale-assets guard fronting
+every fleet-scoped command, `member create` included, resolves all three
+identity paths (§ *Stale-assets guard*). One exception to strict lazy
+failure: `doctor` catches per-agent resolution errors and renders them as
+issues instead of aborting (§ `doctor`).
 
 Resolution also reports the winning origin — the supplying variable name or
 the default — which feeds `doctor`'s `source` column and JSON. The three
