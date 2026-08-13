@@ -22,12 +22,13 @@ fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
         "FLEET {fleet_id} ME {member_id} DIRECTOR {director_member_id} AGENT {coding_agent}",
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    assert_eq!(stdout(&output), "2 worker backend=claude pane=%7\n");
+    assert_eq!(stdout(&output), "3 worker backend=claude pane=%7\n");
 
     let split_line = cli
         .shim_calls()
         .into_iter()
-        .find(|line| line.starts_with("split-window"))
+        .filter(|line| line.starts_with("split-window"))
+        .next_back()
         .expect("split-window was invoked");
     assert!(
         split_line.contains("-e CAFLEET_DATABASE_URL=sqlite:///"),
@@ -35,7 +36,7 @@ fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
     );
     assert!(
         split_line.contains(
-            "claude --permission-mode dontAsk --name worker FLEET 1 ME 2 DIRECTOR 1 AGENT claude"
+            "claude --permission-mode dontAsk --name worker FLEET 1 ME 3 DIRECTOR 1 AGENT claude"
         ),
         "the rendered prompt carries literal identity, got: {split_line}"
     );
@@ -43,7 +44,7 @@ fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
     let pane: Option<String> = cli
         .sqlite()
         .query_row(
-            "SELECT mux_pane_id FROM member_placements WHERE member_id=2",
+            "SELECT mux_pane_id FROM member_placements WHERE member_id=3",
             [],
             |row| row.get(0),
         )
@@ -79,7 +80,8 @@ fn member_create_accepts_the_prompt_via_file() {
     let split_line = cli
         .shim_calls()
         .into_iter()
-        .find(|line| line.starts_with("split-window"))
+        .filter(|line| line.starts_with("split-window"))
+        .next_back()
         .expect("split-window was invoked");
     assert!(
         split_line.contains("FLEET 1 AGENT claude"),
@@ -154,7 +156,7 @@ fn member_create_unknown_placeholder_exits_2_and_leaves_no_orphan() {
         )
         .unwrap();
     assert_eq!(
-        members, 1,
+        members, 2,
         "the substitution failure deregisters the member"
     );
 }
@@ -178,7 +180,7 @@ fn member_create_split_failure_rolls_back_the_registration() {
     assert_eq!(code(&output), 1);
     let err = stderr(&output);
     assert!(err.contains("tmux split-window failed:"), "got: {err}");
-    assert!(err.contains("Rolled back registration of 2."), "got: {err}");
+    assert!(err.contains("Rolled back registration of 3."), "got: {err}");
 
     let members: i64 = cli
         .sqlite()
@@ -188,7 +190,7 @@ fn member_create_split_failure_rolls_back_the_registration() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(members, 1, "no orphan row survives the ladder");
+    assert_eq!(members, 2, "no orphan row survives the ladder");
 }
 
 #[test]
@@ -223,7 +225,7 @@ fn member_create_validates_model_and_effort_before_any_side_effect() {
         .sqlite()
         .query_row("SELECT COUNT(*) FROM members", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(members, 1, "validation precedes registration");
+    assert_eq!(members, 2, "validation precedes registration");
 }
 
 #[test]
@@ -258,7 +260,7 @@ fn member_create_requires_the_backend_binary_on_path() {
         .query_row("SELECT COUNT(*) FROM members", [], |row| row.get(0))
         .unwrap();
     assert_eq!(
-        members, 1,
+        members, 2,
         "no registration side effect before the precondition"
     );
 }
@@ -284,6 +286,107 @@ fn member_create_unknown_fleet_is_a_usage_error() {
         "got: {}",
         stderr(&output)
     );
+}
+
+#[test]
+fn member_create_role_monitor_registers_the_monitor_kind() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_bare_fleet();
+    let monitor_id = cli.create_monitor(fleet_id);
+
+    let output = cli.run(&["member", "show", &monitor_id.to_string(), "--json"]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(payload["kind"], "monitor");
+}
+
+#[test]
+fn member_create_without_a_monitor_hits_the_monitor_first_guard() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_bare_fleet();
+    let output = cli.run(&[
+        "member",
+        "create",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--name",
+        "worker",
+        "--description",
+        "d",
+        "prompt",
+    ]);
+    assert_ne!(code(&output), 0, "the monitor-first guard rejects the spawn");
+    assert!(
+        stderr(&output).contains(&format!(
+            "fleet {fleet_id} has no active monitor member; spawn one with --role monitor first"
+        )),
+        "got: {}",
+        stderr(&output)
+    );
+    let members: i64 = cli
+        .sqlite()
+        .query_row("SELECT COUNT(*) FROM members", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(members, 1, "the guard fires before any registration");
+    assert!(
+        !cli.shim_calls()
+            .iter()
+            .any(|line| line.starts_with("split-window")),
+        "the guard fires before any pane effect"
+    );
+}
+
+#[test]
+fn member_create_role_monitor_twice_hits_the_one_per_fleet_guard() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_bare_fleet();
+    let monitor_id = cli.create_monitor(fleet_id);
+
+    let output = cli.run(&[
+        "member",
+        "create",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--role",
+        "monitor",
+        "--name",
+        "monitor2",
+        "--description",
+        "d",
+        "prompt",
+    ]);
+    assert_ne!(code(&output), 0, "the one-per-fleet guard rejects the spawn");
+    assert!(
+        stderr(&output).contains(&format!(
+            "fleet {fleet_id} already has an active monitor member (member {monitor_id})"
+        )),
+        "got: {}",
+        stderr(&output)
+    );
+
+    let deleted = cli.run(&["member", "delete", &monitor_id.to_string()]);
+    assert_eq!(code(&deleted), 0, "stderr: {}", stderr(&deleted));
+    cli.create_monitor(fleet_id);
+}
+
+#[test]
+fn member_create_rejects_any_role_value_but_monitor() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.with_bare_fleet();
+    let output = cli.run(&[
+        "member",
+        "create",
+        "--fleet-id",
+        &fleet_id.to_string(),
+        "--name",
+        "worker",
+        "--description",
+        "d",
+        "--role",
+        "builder",
+        "prompt",
+    ]);
+    assert_eq!(code(&output), 2, "clap rejects the value at parse time");
 }
 
 #[test]
@@ -323,12 +426,13 @@ fn member_list_takes_the_positional_fleet_subject() {
     let output = cli.run(&["member", "list", &fleet_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
-    assert!(out.starts_with("2 members:\n"), "got: {out}");
+    assert!(out.starts_with("3 members:\n"), "got: {out}");
     assert!(
         out.contains("  member_id  name           kind      backend   pane_id  idle"),
         "got: {out}"
     );
     assert!(out.contains("director"), "got: {out}");
+    assert!(out.contains("monitor"), "got: {out}");
     assert!(out.contains("worker"), "got: {out}");
 
     assert_eq!(
@@ -670,6 +774,10 @@ fn monitor_scan_prints_director_first_then_members_ascending() {
         "the Director's section leads, got: {out}"
     );
 
+    assert!(
+        out.contains("=== 2 (monitor; kind=monitor; coding_agent=claude; pane=%7; captured_at="),
+        "the monitor member's section rides the scan, got: {out}"
+    );
     let alpha_header =
         format!("=== {alpha_id} (alpha; kind=member; coding_agent=claude; pane=%7; captured_at=");
     let beta_header =
@@ -699,7 +807,7 @@ fn monitor_scan_json_pins_the_key_order() {
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
     let entries = payload.as_array().expect("a top-level array");
-    assert_eq!(entries.len(), 2, "the Director plus one member");
+    assert_eq!(entries.len(), 3, "the Director, the monitor, one member");
 
     for entry in entries {
         let keys: Vec<&str> = entry
@@ -752,7 +860,11 @@ fn monitor_scan_json_pins_the_key_order() {
         "mode-exact hash of the emitted content"
     );
 
-    let member = &entries[1];
+    let monitor = &entries[1];
+    assert_eq!(monitor["member_id"], 2);
+    assert_eq!(monitor["kind"], "monitor");
+
+    let member = &entries[2];
     assert_eq!(member["member_id"], member_id);
     assert_eq!(member["kind"], "member");
     assert_eq!(member["pane_id"], "%7");
@@ -871,7 +983,7 @@ fn monitor_scan_excludes_a_member_without_a_placement_row() {
 #[test]
 fn monitor_scan_of_a_memberless_fleet_captures_the_director_only() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
+    let (fleet_id, _) = cli.with_bare_fleet();
 
     let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
