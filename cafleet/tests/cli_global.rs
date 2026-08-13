@@ -26,6 +26,9 @@ fn an_unknown_pre_subcommand_option_is_a_parse_error() {
     );
 }
 
+const NO_INSTALL_ERROR: &str = "Error: no assets install is recorded at the resolved paths; \
+     run 'cafleet setup --coding-agent <agent>' to install (agents: claude, codex, opencode)";
+
 #[test]
 fn the_guard_blocks_fleet_scoped_groups_when_no_install_is_recorded() {
     let cli = Cli::new();
@@ -39,12 +42,105 @@ fn the_guard_blocks_fleet_scoped_groups_when_no_install_is_recorded() {
         let output = cli.run(args);
         assert_eq!(code(&output), 1, "guarded: {args:?}");
         assert!(
-            stderr(&output)
-                .contains("Error: no assets install is recorded; run 'cafleet setup' first"),
+            stderr(&output).contains(NO_INSTALL_ERROR),
             "got: {}",
             stderr(&output)
         );
     }
+}
+
+#[test]
+fn the_guard_reports_no_install_when_the_database_is_missing() {
+    let cli = Cli::new();
+    let output = cli.run(&["fleet", "list"]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains(NO_INSTALL_ERROR),
+        "a missing database counts as no rows: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn the_guard_ignores_superseded_rows_at_other_paths() {
+    let cli = Cli::new();
+    cli.migrate();
+    cli.seed_asset_row("claude", VERSION);
+    cli.seed_asset_row_at("claude", "/elsewhere/.claude", "0.1.0");
+    let output = cli.run(&["fleet", "list"]);
+    assert_eq!(
+        code(&output),
+        0,
+        "a stale row at a superseded path never blocks: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn the_guard_skips_agents_with_no_row_at_their_resolved_path() {
+    let cli = Cli::new();
+    cli.migrate();
+    cli.seed_asset_row("claude", VERSION);
+    cli.seed_asset_row_at("codex", "/codex-old", "0.1.0");
+    let output = cli.run(&["fleet", "list"]);
+    assert_eq!(
+        code(&output),
+        0,
+        "codex has no row at its resolved path, so it is unchecked: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn a_config_location_variable_rekeys_the_guard_to_the_resolved_path() {
+    let mut cli = Cli::new();
+    let custom = cli.home.path().join("custom-claude");
+    cli.set_env("CLAUDE_CONFIG_DIR", custom.to_str().unwrap());
+    cli.migrate();
+    cli.seed_asset_row("claude", VERSION);
+    cli.seed_asset_row_at("claude", custom.to_str().unwrap(), "0.1.0");
+    let output = cli.run(&["fleet", "list"]);
+    assert_eq!(code(&output), 1, "the row at $CLAUDE_CONFIG_DIR is current");
+    assert!(
+        stderr(&output).contains(&format!(
+            "Error: stale assets detected (claude=0.1.0; CLI {VERSION}); \
+             run 'cafleet setup' to reinstall"
+        )),
+        "the default-path row is superseded, the env-path row is checked: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn a_config_location_variable_supersedes_the_default_path_row() {
+    let mut cli = Cli::new();
+    let custom = cli.home.path().join("custom-claude");
+    cli.set_env("CLAUDE_CONFIG_DIR", custom.to_str().unwrap());
+    cli.migrate();
+    cli.seed_asset_row("claude", VERSION);
+    let output = cli.run(&["fleet", "list"]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains(NO_INSTALL_ERROR),
+        "the default-path row no longer counts once the variable relocates the path: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn an_invalid_config_location_variable_fails_the_guard_with_the_pinned_error() {
+    let mut cli = Cli::new();
+    cli.set_env("CLAUDE_CONFIG_DIR", "not/absolute");
+    cli.migrate();
+    cli.seed_asset_row("codex", VERSION);
+    let output = cli.run(&["fleet", "list"]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output)
+            .contains("Error: CLAUDE_CONFIG_DIR must be an absolute path (got 'not/absolute')"),
+        "got: {}",
+        stderr(&output)
+    );
 }
 
 #[test]

@@ -1,8 +1,8 @@
 # Custom Config Paths: Env-Var Resolution, Path-Aware Install Records, Setup Selector, and Doctor Redesign
 
-**Status**: Approved
-**Progress**: 0/24 tasks complete
-**Last Updated**: 2026-08-12
+**Status**: Complete
+**Progress**: 24/24 tasks complete
+**Last Updated**: 2026-08-13
 
 ## Overview
 
@@ -10,15 +10,15 @@ The CLI hard-codes each coding-agent backend's user-level config directories whe
 
 ## Success Criteria
 
-- [ ] `cafleet setup` installs skills and presets under the env-var-resolved directories when the variables are set (opencode skills excepted — their install dir is a fixed discovery path), and under today's defaults when unset.
-- [ ] `cafleet member create --coding-agent opencode` checks the preset-existence spawn precondition at the same resolved path `setup` installs to.
-- [ ] A set variable whose value is not an absolute path (including the empty string) fails loudly with the pinned error message and exit 1.
-- [ ] `asset_installs` is keyed on `(coding_agent, path)`; migration `V6` recreates the table with the composite key and the chain-guard test names head 6.
-- [ ] `cafleet setup --coding-agent AGENT` (repeatable) selects the agents to install; `--skip` is gone from the CLI, every doc, every skill, and every test; the no-flag default refreshes only agents recorded at their currently-resolved paths.
-- [ ] `cafleet doctor` renders all three sections (multiplexer, database, coding agents) without early abort, frames the coding-agents table with display-width alignment, keys the setup column on the resolved path only, exits non-zero iff any issue, and mirrors the report in `--json`.
-- [ ] The stale-assets guard checks only each agent's row at its currently-resolved path; superseded rows never block fleet-scoped commands.
-- [ ] `SPEC.md`, `docs/docs/spec/cli-options.md`, `docs/docs/spec/data-model.md`, `docs/docs/spec/coding-agent-backends.md`, `docs/docs/quickstart.md`, `docs/docs/concepts/storage.md`, `docs/docs/contributing.md`, `skills/cafleet/reference/cli.md`, `skills/cafleet/reference/supervision.md`, and `.claude/rules/database-migrations.md` describe the new contracts.
-- [ ] Unit tests cover the resolver (all four outcomes per variable), the migration chain, the guard, the setup selector, the opencode precondition, and the doctor renderings via injected lookups.
+- [x] `cafleet setup` installs skills and presets under the env-var-resolved directories when the variables are set (opencode skills excepted — their install dir is a fixed discovery path), and under today's defaults when unset.
+- [x] `cafleet member create --coding-agent opencode` checks the preset-existence spawn precondition at the same resolved path `setup` installs to.
+- [x] A set variable whose value is not an absolute path (including the empty string) fails loudly with the pinned error message and exit 1.
+- [x] `asset_installs` is keyed on `(coding_agent, path)`; migration `V6` recreates the table with the composite key and the chain-guard test names head 6.
+- [x] `cafleet setup --coding-agent AGENT` (repeatable) selects the agents to install; `--skip` is gone from the CLI, every doc, every skill, and every test; the no-flag default refreshes only agents recorded at their currently-resolved paths.
+- [x] `cafleet doctor` renders all three sections (multiplexer, database, coding agents) without early abort, frames the coding-agents table with display-width alignment, keys the setup column on the resolved path only, exits non-zero iff any issue, and mirrors the report in `--json`.
+- [x] The stale-assets guard checks only each agent's row at its currently-resolved path; superseded rows never block fleet-scoped commands.
+- [x] `SPEC.md`, `docs/docs/spec/cli-options.md`, `docs/docs/spec/data-model.md`, `docs/docs/spec/coding-agent-backends.md`, `docs/docs/quickstart.md`, `docs/docs/concepts/storage.md`, `docs/docs/contributing.md`, `skills/cafleet/reference/cli.md`, `skills/cafleet/reference/supervision.md`, and `.claude/rules/database-migrations.md` describe the new contracts.
+- [x] Unit tests cover the resolver (all four outcomes per variable), the migration chain, the guard, the setup selector, the opencode precondition, and the doctor renderings via injected lookups.
 
 ---
 
@@ -69,7 +69,7 @@ A set variable must hold an absolute path. Any other value — the empty string,
 Error: <VAR> must be an absolute path (got '<value>')
 ```
 
-Exit 1 (`CafleetError::App`, matching the `CAFLEET_*` numeric-validation style in `config.rs`). Validation is lazy: a variable is read and validated only when a site actually resolves that backend's directory. `cafleet setup --coding-agent claude` with an invalid `CODEX_HOME` succeeds; `member create --coding-agent claude` never reads any of the three variables (claude and codex spawn preconditions are PATH-check-only). One exception to strict lazy failure: `doctor` catches per-agent resolution errors and renders them as issues instead of aborting (Part 3).
+Exit 1 (`CafleetError::App`, matching the `CAFLEET_*` numeric-validation style in `config.rs`). Validation is lazy: a variable is read and validated only when a site actually resolves that backend's directory. `cafleet setup --coding-agent claude` with an invalid `CODEX_HOME` succeeds because the selector resolves only the targeted agent's directory. The spawn preconditions themselves read none of the three variables for claude and codex (PATH-check-only; opencode's resolves the preset base) — but the stale-assets guard fronting every fleet-scoped command, `member create` included, resolves all three identity paths (Part 2). One exception to strict lazy failure: `doctor` catches per-agent resolution errors and renders them as issues instead of aborting (Part 3).
 
 #### The shared resolver
 
@@ -365,51 +365,51 @@ No `SKILL.md` names an install path, and the one skills-tree mention — the ope
 
 ### Step 1: Documentation
 
-- [ ] Update `docs/docs/spec/cli-options.md` per the documentation-deltas table (setup, stale-assets guard, doctor, member create) <!-- completed: -->
-- [ ] Update `docs/docs/spec/data-model.md`, `docs/docs/spec/coding-agent-backends.md`, `docs/docs/spec/multiplexer-backends.md`, `docs/docs/quickstart.md` <!-- completed: -->
-- [ ] Update `docs/docs/concepts/storage.md`, `docs/docs/concepts/overview.md`, `docs/docs/contributing.md` <!-- completed: -->
-- [ ] Update `SPEC.md` §5.2, §6.3, §6.7, §8, and the compliance checklist <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/cli.md` and `skills/cafleet/reference/supervision.md` (broadened doctor gate) <!-- completed: -->
-- [ ] Update `.claude/rules/database-migrations.md` (plain `cafleet setup` as the apply path) <!-- completed: -->
+- [x] Update `docs/docs/spec/cli-options.md` per the documentation-deltas table (setup, stale-assets guard, doctor, member create) <!-- completed: 2026-08-13T07:58 -->
+- [x] Update `docs/docs/spec/data-model.md`, `docs/docs/spec/coding-agent-backends.md`, `docs/docs/spec/multiplexer-backends.md`, `docs/docs/quickstart.md` <!-- completed: 2026-08-13T08:01 -->
+- [x] Update `docs/docs/concepts/storage.md`, `docs/docs/concepts/overview.md`, `docs/docs/contributing.md` <!-- completed: 2026-08-13T08:03 -->
+- [x] Update `SPEC.md` §5.2, §6.3, §6.7, §8, and the compliance checklist <!-- completed: 2026-08-13T08:12 -->
+- [x] Update `skills/cafleet/reference/cli.md` and `skills/cafleet/reference/supervision.md` (broadened doctor gate) <!-- completed: 2026-08-13T08:15 -->
+- [x] Update `.claude/rules/database-migrations.md` (plain `cafleet setup` as the apply path) <!-- completed: 2026-08-13T08:10 -->
 
 ### Step 2: Migration
 
-- [ ] Add `cafleet/migrations/V6__path_aware_asset_installs.sql` (drop-and-recreate with the composite key) <!-- completed: -->
-- [ ] Bump the chain-guard test to head 6; update the `cli_setup_doctor.rs` head-message assertions and the `tests/common/mod.rs` seeded rows/helpers <!-- completed: -->
+- [x] Add `cafleet/migrations/V6__path_aware_asset_installs.sql` (drop-and-recreate with the composite key) <!-- completed: 2026-08-13T08:20 -->
+- [x] Bump the chain-guard test to head 6; update the `cli_setup_doctor.rs` head-message assertions and the `tests/common/mod.rs` seeded rows/helpers <!-- completed: 2026-08-13T08:20 -->
 
 ### Step 3: Shared resolver
 
-- [ ] Add `cafleet/src/config_dir.rs` with `ResolvedDir`/`DirSource`, the four public functions, and the private `resolve` <!-- completed: -->
-- [ ] Colocated tests: per variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DIR`) — unset → default + `Default` source, absolute → used verbatim + `EnvVar` source, empty → pinned error, relative → pinned error; `opencode_skills_base` pinned to `home/.config/opencode` <!-- completed: -->
+- [x] Add `cafleet/src/config_dir.rs` with `ResolvedDir`/`DirSource`, the four public functions, and the private `resolve` <!-- completed: 2026-08-13T08:38 -->
+- [x] Colocated tests: per variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DIR`) — unset → default + `Default` source, absolute → used verbatim + `EnvVar` source, empty → pinned error, relative → pinned error; `opencode_skills_base` pinned to `home/.config/opencode` <!-- completed: 2026-08-13T08:38 -->
 
 ### Step 4: Broker rows and stale-assets guard
 
-- [ ] Extend `record_asset_install`/`list_asset_installs` with `path`; update the colocated tests (composite upsert, ordering) <!-- completed: -->
-- [ ] Rewrite `stale_assets_guard` per the path-aware rules table (resolution errors, the updated no-install error, resolved-path-only staleness) <!-- completed: -->
-- [ ] Guard tests: superseded rows are ignored; stale-at-resolved-path fails; no-row-at-resolved-path is unchecked; the all-agents-uninstalled error fires <!-- completed: -->
+- [x] Extend `record_asset_install`/`list_asset_installs` with `path`; update the colocated tests (composite upsert, ordering) <!-- completed: 2026-08-13T08:29 -->
+- [x] Rewrite `stale_assets_guard` per the path-aware rules table (resolution errors, the updated no-install error, resolved-path-only staleness) <!-- completed: 2026-08-13T08:47 -->
+- [x] Guard tests: superseded rows are ignored; stale-at-resolved-path fails; no-row-at-resolved-path is unchecked; the all-agents-uninstalled error fires <!-- completed: 2026-08-13T08:47 -->
 
 ### Step 5: Setup selector
 
-- [ ] Replace `--skip` with repeatable `--coding-agent` in `cli/setup.rs`; implement the selector/no-flag semantics, the guidance line, and the hint lines; route `assets.rs` `skills_dir`/`preset` through `config_dir` and record `(agent, path)` rows <!-- completed: -->
-- [ ] Tests: explicit selector installs only named agents at resolved paths; no-flag refreshes only recorded-at-resolved-path agents; empty table prints the guidance line and exits 0; records-elsewhere prints the hint line; invalid variable fails the assets half with the pinned error; opencode skills stay at `~/.config/opencode/skills` even when `OPENCODE_CONFIG_DIR` is set <!-- completed: -->
-- [ ] Remove every remaining `--skip` mention from tests and helpers <!-- completed: -->
+- [x] Replace `--skip` with repeatable `--coding-agent` in `cli/setup.rs`; implement the selector/no-flag semantics, the guidance line, and the hint lines; route `assets.rs` `skills_dir`/`preset` through `config_dir` and record `(agent, path)` rows <!-- completed: 2026-08-13T08:57 -->
+- [x] Tests: explicit selector installs only named agents at resolved paths; no-flag refreshes only recorded-at-resolved-path agents; empty table prints the guidance line and exits 0; records-elsewhere prints the hint line; invalid variable fails the assets half with the pinned error; opencode skills stay at `~/.config/opencode/skills` even when `OPENCODE_CONFIG_DIR` is set <!-- completed: 2026-08-13T08:57 -->
+- [x] Remove every remaining `--skip` mention from tests and helpers <!-- completed: 2026-08-13T08:57 -->
 
 ### Step 6: opencode spawn precondition
 
-- [ ] Add `SpawnProbe::env_var`; implement on `SystemProbe` and `FakeProbe` <!-- completed: -->
-- [ ] Resolve the preset path in `opencode::ensure_available` via `opencode_preset_base`; tests for the custom-dir check, the default-dir check, and the invalid-variable error <!-- completed: -->
+- [x] Add `SpawnProbe::env_var`; implement on `SystemProbe` and `FakeProbe` <!-- completed: 2026-08-13T09:06 -->
+- [x] Resolve the preset path in `opencode::ensure_available` via `opencode_preset_base`; tests for the custom-dir check, the default-dir check, and the invalid-variable error <!-- completed: 2026-08-13T09:06 -->
 
 ### Step 7: Doctor
 
-- [ ] Add the `unicode-width` dependency; rewrite `cli/doctor.rs`: three sections, no early abort, verdict glyphs, database states, the framed table with display-width alignment, footnotes, footer, exit code <!-- completed: -->
-- [ ] Implement the `--json` payload per the pinned schema (key order, null contracts, exit parity) <!-- completed: -->
-- [ ] Tests: each database state; each setup-cell state including the per-agent resolution error; superseded footnotes; multiplexer-failure rendering; issue counting and exit codes; frame alignment with a multi-width path; JSON shape <!-- completed: -->
+- [x] Add the `unicode-width` dependency; rewrite `cli/doctor.rs`: three sections, no early abort, verdict glyphs, database states, the framed table with display-width alignment, footnotes, footer, exit code <!-- completed: 2026-08-13T09:27 -->
+- [x] Implement the `--json` payload per the pinned schema (key order, null contracts, exit parity) <!-- completed: 2026-08-13T09:27 -->
+- [x] Tests: each database state; each setup-cell state including the per-agent resolution error; superseded footnotes; multiplexer-failure rendering; issue counting and exit codes; frame alignment with a multi-width path; JSON shape <!-- completed: 2026-08-13T09:27 -->
 
 ### Step 8: Verification
 
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format` all pass <!-- completed: -->
-- [ ] `rg -- --skip` over docs, skills, rules, source, and tests returns no setup-flag mentions <!-- completed: -->
-- [ ] Confirm the supervision gate doc matches the shipped exit semantics and the docs build renders the new tables intact <!-- completed: -->
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format` all pass <!-- completed: 2026-08-13T09:35 -->
+- [x] `rg -- --skip` over docs, skills, rules, source, and tests returns no setup-flag mentions beyond the sanctioned no-parse regression guard (removal.md § What stays) <!-- completed: 2026-08-13T09:35 -->
+- [x] Confirm the supervision gate doc matches the shipped exit semantics and the docs build renders the new tables intact <!-- completed: 2026-08-13T09:35 -->
 
 ---
 
@@ -418,3 +418,4 @@ No `SKILL.md` names an install path, and the one skills-tree mention — the ope
 | Date | Changes |
 |------|---------|
 | 2026-08-12 | Rewritten in place with expanded scope: path-aware `asset_installs` (V6), `--coding-agent` setup selector replacing `--skip`, three-section `doctor` redesign |
+| 2026-08-13 | Implemented (24/24 tasks), all success criteria verified, Reviewer-approved after 2 rounds; PR #301 opened; status Complete |

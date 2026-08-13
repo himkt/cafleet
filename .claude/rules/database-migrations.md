@@ -8,7 +8,7 @@ Database migrations live in `cafleet/migrations/` as hand-written SQL files name
 2. Write plain SQLite SQL. Keep every migration data-preserving:
    - For a column rename, use `ALTER TABLE <table> RENAME COLUMN <old> TO <new>` (SQLite ≥ 3.25, in place, FK-safe). A recreate that `DROP TABLE`s a parent fails under FK enforcement on a populated DB.
    - Never drop-and-recreate a populated table when an in-place `ALTER TABLE` form exists.
-3. Apply it with the schema-only setup invocation: `cafleet setup --skip claude --skip codex --skip opencode` (idempotent; migrates to head).
+3. Apply it with `cafleet setup` (idempotent; migrates to head).
 
 refinery has no down migrations — a schema change that must be reversible ships its reversal as the next numbered migration.
 

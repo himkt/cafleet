@@ -66,7 +66,7 @@
 //! asset_installs_table_exists(conn: &Connection) -> bool
 //! list_asset_installs(conn: &Connection) -> Result<Vec<Value>>
 //! record_asset_install(conn: &mut Connection, coding_agent: &str,
-//!     cafleet_version: &str) -> Result<()>
+//!     path: &str, cafleet_version: &str) -> Result<()>
 //! ```
 #![allow(dead_code)]
 

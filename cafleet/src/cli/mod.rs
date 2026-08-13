@@ -36,8 +36,8 @@ enum Command {
     /// Migrate the database schema and install the coding-agent assets
     /// (skills and presets).
     Setup(setup::SetupArgs),
-    /// Print the resolved multiplexer backend, the calling pane's
-    /// identifiers, and the assets-install report.
+    /// Print the three-section environment diagnosis (multiplexer, database,
+    /// coding agents).
     Doctor(doctor::DoctorArgs),
     /// Start the admin WebUI server.
     Server(server::ServerArgs),

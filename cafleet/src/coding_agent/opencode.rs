@@ -4,6 +4,7 @@
 //! [`super::test_support`] for the API.
 
 use super::{CodingAgent, SpawnProbe, missing_binary};
+use crate::config_dir::opencode_preset_base;
 use crate::error::CafleetError;
 
 pub struct Opencode;
@@ -47,12 +48,16 @@ impl CodingAgent for Opencode {
         if !probe.binary_on_path(self.binary_name()) {
             return Err(missing_binary(self.binary_name()));
         }
-        let preset = probe.home_dir().join(".opencode/agents/cafleet.md");
+        let env = |name: &str| probe.env_var(name);
+        let preset = opencode_preset_base(&env, &probe.home_dir())?
+            .path
+            .join("agents/cafleet.md");
         if preset.is_file() {
             Ok(())
         } else {
             Err(CafleetError::App(format!(
-                "opencode agent preset not found at {}; run 'cafleet setup' first",
+                "opencode agent preset not found at {}; \
+                 run 'cafleet setup --coding-agent opencode' first",
                 preset.display()
             )))
         }
@@ -171,7 +176,8 @@ mod tests {
         assert_eq!(
             err.message(),
             format!(
-                "opencode agent preset not found at {}; run 'cafleet setup' first",
+                "opencode agent preset not found at {}; \
+                 run 'cafleet setup --coding-agent opencode' first",
                 preset.display()
             )
         );
@@ -179,5 +185,57 @@ mod tests {
         std::fs::create_dir_all(preset.parent().unwrap()).unwrap();
         std::fs::write(&preset, "---\n{}\n---\n\n# CAFleet member agent\n").unwrap();
         assert!(opencode().ensure_available(&probe).is_ok());
+    }
+
+    #[test]
+    fn ensure_available_resolves_the_preset_through_the_config_dir_variable() {
+        let home = TempDir::new().unwrap();
+        let custom = home.path().join("oc-custom");
+        let mut probe = FakeProbe::with_binary("opencode", home.path());
+        probe.env.insert(
+            "OPENCODE_CONFIG_DIR".to_string(),
+            custom.display().to_string(),
+        );
+
+        let default_preset = home.path().join(".opencode/agents/cafleet.md");
+        std::fs::create_dir_all(default_preset.parent().unwrap()).unwrap();
+        std::fs::write(&default_preset, "x").unwrap();
+
+        let custom_preset = custom.join("agents/cafleet.md");
+        let err = opencode()
+            .ensure_available(&probe)
+            .expect_err("the default-path preset does not satisfy a relocated check");
+        assert_eq!(
+            err.message(),
+            format!(
+                "opencode agent preset not found at {}; \
+                 run 'cafleet setup --coding-agent opencode' first",
+                custom_preset.display()
+            )
+        );
+
+        std::fs::create_dir_all(custom_preset.parent().unwrap()).unwrap();
+        std::fs::write(&custom_preset, "x").unwrap();
+        assert!(opencode().ensure_available(&probe).is_ok());
+    }
+
+    #[test]
+    fn ensure_available_surfaces_an_invalid_config_dir_variable() {
+        let home = TempDir::new().unwrap();
+        let preset = home.path().join(".opencode/agents/cafleet.md");
+        std::fs::create_dir_all(preset.parent().unwrap()).unwrap();
+        std::fs::write(&preset, "x").unwrap();
+
+        let mut probe = FakeProbe::with_binary("opencode", home.path());
+        probe
+            .env
+            .insert("OPENCODE_CONFIG_DIR".to_string(), "rel/path".to_string());
+        let err = opencode()
+            .ensure_available(&probe)
+            .expect_err("validation precedes the existence check");
+        assert_eq!(
+            err.message(),
+            "OPENCODE_CONFIG_DIR must be an absolute path (got 'rel/path')"
+        );
     }
 }
