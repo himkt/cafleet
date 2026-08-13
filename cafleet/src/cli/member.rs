@@ -561,3 +561,83 @@ fn capture(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::MemberCommand;
+
+    #[derive(Parser)]
+    struct Harness {
+        #[command(subcommand)]
+        command: MemberCommand,
+    }
+
+    fn parse(args: &[&str]) -> Result<MemberCommand, clap::Error> {
+        Harness::try_parse_from(args).map(|harness| harness.command)
+    }
+
+    fn create_role(command: MemberCommand) -> Option<String> {
+        let MemberCommand::Create { role, .. } = command else {
+            panic!("parsed a non-create command");
+        };
+        role
+    }
+
+    #[test]
+    fn create_accepts_the_sole_role_value_monitor() {
+        let command = parse(&[
+            "cafleet",
+            "create",
+            "--fleet-id",
+            "1",
+            "--name",
+            "monitor",
+            "--description",
+            "d",
+            "--role",
+            "monitor",
+            "PROMPT",
+        ])
+        .unwrap();
+        assert_eq!(create_role(command).as_deref(), Some("monitor"));
+    }
+
+    #[test]
+    fn create_parses_without_a_role() {
+        let command = parse(&[
+            "cafleet",
+            "create",
+            "--fleet-id",
+            "1",
+            "--name",
+            "worker",
+            "--description",
+            "d",
+            "PROMPT",
+        ])
+        .unwrap();
+        assert_eq!(create_role(command), None);
+    }
+
+    #[test]
+    fn create_rejects_any_other_role_value() {
+        let Err(err) = parse(&[
+            "cafleet",
+            "create",
+            "--fleet-id",
+            "1",
+            "--name",
+            "worker",
+            "--description",
+            "d",
+            "--role",
+            "builder",
+            "PROMPT",
+        ]) else {
+            panic!("monitor is the sole accepted --role value");
+        };
+        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
+    }
+}

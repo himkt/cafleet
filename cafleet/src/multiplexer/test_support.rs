@@ -20,7 +20,7 @@
 //!
 //! // Shared wake payload (byte-identical across backends) + sanitizer.
 //! pub fn sanitize_wake_field(value: &str) -> String
-//! pub fn build_wake_payload(due_members: &[Value], director: &Value)
+//! pub fn build_wake_payload(fleet_id: i64, members: &[Value], director: &Value)
 //!     -> Result<String, MultiplexerError>   // Err aborts the wake (invalid agent)
 //!
 //! // Backend resolution precedence (SPEC §6.5): explicit override → registry
@@ -39,7 +39,7 @@
 //!     command: &[String]) -> Result<String, MultiplexerError>
 //! send_exit(&self, target_pane_id: &str, ignore_missing: bool) -> Result<(), MultiplexerError>
 //! send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool
-//! send_wake_trigger(&self, target_pane_id: &str, due_members: &[Value],
+//! send_wake_trigger(&self, target_pane_id: &str, fleet_id: i64, members: &[Value],
 //!     director: &Value) -> Result<bool, MultiplexerError>  // Ok(false) = keystroke lost
 //! send_inline_preview(&self, target_pane_id: &str, message_id: i64, sender_id: i64,
 //!     ts: &str, text: &str) -> bool

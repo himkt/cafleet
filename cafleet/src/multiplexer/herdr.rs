@@ -928,9 +928,15 @@ mod tests {
             "coding_agent": "codex",
             "pending_count": 0,
         })];
-        assert!(mux.send_wake_trigger("w1:p9", 3, &members).unwrap());
+        let director = json!({
+            "member_id": 2,
+            "name": "Director",
+            "coding_agent": "claude",
+            "pending_count": 1,
+        });
+        assert!(mux.send_wake_trigger("w1:p9", 3, &members, &director).unwrap());
 
-        let payload = build_wake_payload(3, &members).unwrap();
+        let payload = build_wake_payload(3, &members, &director).unwrap();
         assert_eq!(
             runner.events(),
             vec![

@@ -421,9 +421,16 @@ mod tests {
                     placed("claude", json!("%10")),
                     json!(3600),
                 ),
+                row(
+                    6,
+                    "monitor",
+                    "monitor",
+                    placed("claude", json!("%2")),
+                    json!(5),
+                ),
             ];
             let expected = [
-                "5 members:",
+                "6 members:",
                 "  member_id  name           kind      backend   pane_id  idle",
                 "  ---------  -------------  --------  --------  -------  ----",
                 "  1          Director       director  claude    %1       59s",
@@ -431,6 +438,7 @@ mod tests {
                 "  3          helper         member    codex     (pending)  1m",
                 "  4          w2             member    opencode  %9       59m",
                 "  5          w3             member    claude    %10      1h",
+                "  6          monitor        monitor   claude    %2       5s",
             ]
             .join("\n");
             assert_eq!(format_member_list(&members), expected);
