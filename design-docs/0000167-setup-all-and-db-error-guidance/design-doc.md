@@ -1,7 +1,7 @@
 # One-Command Setup and Database-Error Guidance
 
 **Status**: Approved
-**Progress**: 6/24 tasks complete
+**Progress**: 8/24 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -128,8 +128,8 @@ No database migration is needed; the schema is untouched.
 
 ### Step 2: Multi-value `--coding-agent`
 
-- [ ] Add `num_args = 1..` to `SetupArgs::coding_agent`; update the help string <!-- completed: -->
-- [ ] Tests: space-delimited form, repeated-flag form, mixed form, invalid value (exit 2), bare `cafleet setup <word>` still rejected with the unexpected-argument error, `--coding-agent claude <word>` rejected with the invalid-value error <!-- completed: -->
+- [x] Add `num_args = 1..` to `SetupArgs::coding_agent`; update the help string <!-- completed: 2026-08-13T21:53 -->
+- [x] Tests: space-delimited form, repeated-flag form, mixed form, invalid value (exit 2), bare `cafleet setup <word>` still rejected with the unexpected-argument error, `--coding-agent claude <word>` rejected with the invalid-value error <!-- completed: 2026-08-13T21:53 -->
 
 ### Step 3: Plain setup installs all agents
 

@@ -17,8 +17,8 @@ use crate::error::CafleetError;
 
 #[derive(Args)]
 pub struct SetupArgs {
-    /// Install the named agent's assets (repeatable; default: refresh agents already installed at their resolved paths).
-    #[arg(long = "coding-agent", value_name = "AGENT", value_parser = ["claude", "codex", "opencode"])]
+    /// Install the named agent's assets (space-delimited, repeatable; default: all agents).
+    #[arg(long = "coding-agent", value_name = "AGENT", num_args = 1.., value_parser = ["claude", "codex", "opencode"])]
     coding_agent: Vec<String>,
 }
 
