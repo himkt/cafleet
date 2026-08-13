@@ -1,7 +1,7 @@
 # Custom Config Paths: Env-Var Resolution, Path-Aware Install Records, Setup Selector, and Doctor Redesign
 
 **Status**: Approved
-**Progress**: 9/24 tasks complete
+**Progress**: 11/24 tasks complete
 **Last Updated**: 2026-08-12
 
 ## Overview
@@ -379,8 +379,8 @@ No `SKILL.md` names an install path, and the one skills-tree mention — the ope
 
 ### Step 3: Shared resolver
 
-- [ ] Add `cafleet/src/config_dir.rs` with `ResolvedDir`/`DirSource`, the four public functions, and the private `resolve` <!-- completed: -->
-- [ ] Colocated tests: per variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DIR`) — unset → default + `Default` source, absolute → used verbatim + `EnvVar` source, empty → pinned error, relative → pinned error; `opencode_skills_base` pinned to `home/.config/opencode` <!-- completed: -->
+- [x] Add `cafleet/src/config_dir.rs` with `ResolvedDir`/`DirSource`, the four public functions, and the private `resolve` <!-- completed: 2026-08-13T08:38 -->
+- [x] Colocated tests: per variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DIR`) — unset → default + `Default` source, absolute → used verbatim + `EnvVar` source, empty → pinned error, relative → pinned error; `opencode_skills_base` pinned to `home/.config/opencode` <!-- completed: 2026-08-13T08:38 -->
 
 ### Step 4: Broker rows and stale-assets guard
 
