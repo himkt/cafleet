@@ -1011,8 +1011,8 @@ report is `✓` (at head) AND the `asset_installs` table exists. Whenever the
 rows are not read — any non-head state, or an at-head ledger with a
 hand-dropped table — the section renders with no recorded-install data:
 every resolvable agent shows the `–` state, no superseded footnotes render,
-and doctor exits 1 for the database issue — never a raw SQLite error from
-`asset_installs`.
+and — in the non-head states — doctor exits 1 for the database issue;
+either way, never a raw SQLite error from `asset_installs`.
 
 **Coding agents section.** A light box-drawing framed table
 (`┌ ─ ┬ ┐ │ ├ ┼ ┤ └ ┴ ┘`), header separator only, no per-row rules. Column
