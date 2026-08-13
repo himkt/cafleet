@@ -127,14 +127,33 @@ impl Cli {
         );
     }
 
+    /// The agent's recorded-path identity at its default (no env override)
+    /// resolution under the test HOME: claude → `~/.claude`, codex →
+    /// `~/.codex`, opencode → `~/.opencode` (the preset base).
+    pub fn identity_path(&self, coding_agent: &str) -> String {
+        let dir = match coding_agent {
+            "claude" => ".claude",
+            "codex" => ".codex",
+            "opencode" => ".opencode",
+            other => panic!("unknown coding agent '{other}'"),
+        };
+        self.home.path().join(dir).to_str().unwrap().to_string()
+    }
+
+    /// Seed a row at the agent's default identity path.
     pub fn seed_asset_row(&self, coding_agent: &str, version: &str) {
+        self.seed_asset_row_at(coding_agent, &self.identity_path(coding_agent), version);
+    }
+
+    /// Seed a row at an explicit path (e.g. a superseded location).
+    pub fn seed_asset_row_at(&self, coding_agent: &str, path: &str, version: &str) {
         self.sqlite()
             .execute(
-                "INSERT INTO asset_installs (coding_agent, cafleet_version, installed_at) \
-                 VALUES (?1, ?2, '2026-07-30T00:00:00.000000+00:00') \
-                 ON CONFLICT(coding_agent) DO UPDATE SET \
+                "INSERT INTO asset_installs (coding_agent, path, cafleet_version, installed_at) \
+                 VALUES (?1, ?2, ?3, '2026-07-30T00:00:00.000000+00:00') \
+                 ON CONFLICT(coding_agent, path) DO UPDATE SET \
                      cafleet_version=excluded.cafleet_version",
-                rusqlite::params![coding_agent, version],
+                rusqlite::params![coding_agent, path, version],
             )
             .unwrap();
     }
