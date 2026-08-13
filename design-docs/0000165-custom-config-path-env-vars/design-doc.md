@@ -1,8 +1,8 @@
 # Custom Config Paths: Env-Var Resolution, Path-Aware Install Records, Setup Selector, and Doctor Redesign
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 24/24 tasks complete
-**Last Updated**: 2026-08-12
+**Last Updated**: 2026-08-13
 
 ## Overview
 
@@ -418,3 +418,4 @@ No `SKILL.md` names an install path, and the one skills-tree mention — the ope
 | Date | Changes |
 |------|---------|
 | 2026-08-12 | Rewritten in place with expanded scope: path-aware `asset_installs` (V6), `--coding-agent` setup selector replacing `--skip`, three-section `doctor` redesign |
+| 2026-08-13 | Implemented (24/24 tasks), all success criteria verified, Reviewer-approved after 2 rounds; PR #301 opened; status Complete |
