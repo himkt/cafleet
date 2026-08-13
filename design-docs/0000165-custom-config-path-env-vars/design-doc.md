@@ -1,7 +1,7 @@
 # Custom Config Paths: Env-Var Resolution, Path-Aware Install Records, Setup Selector, and Doctor Redesign
 
 **Status**: Approved
-**Progress**: 18/24 tasks complete
+**Progress**: 21/24 tasks complete
 **Last Updated**: 2026-08-12
 
 ## Overview
@@ -401,9 +401,9 @@ No `SKILL.md` names an install path, and the one skills-tree mention — the ope
 
 ### Step 7: Doctor
 
-- [ ] Add the `unicode-width` dependency; rewrite `cli/doctor.rs`: three sections, no early abort, verdict glyphs, database states, the framed table with display-width alignment, footnotes, footer, exit code <!-- completed: -->
-- [ ] Implement the `--json` payload per the pinned schema (key order, null contracts, exit parity) <!-- completed: -->
-- [ ] Tests: each database state; each setup-cell state including the per-agent resolution error; superseded footnotes; multiplexer-failure rendering; issue counting and exit codes; frame alignment with a multi-width path; JSON shape <!-- completed: -->
+- [x] Add the `unicode-width` dependency; rewrite `cli/doctor.rs`: three sections, no early abort, verdict glyphs, database states, the framed table with display-width alignment, footnotes, footer, exit code <!-- completed: 2026-08-13T09:27 -->
+- [x] Implement the `--json` payload per the pinned schema (key order, null contracts, exit parity) <!-- completed: 2026-08-13T09:27 -->
+- [x] Tests: each database state; each setup-cell state including the per-agent resolution error; superseded footnotes; multiplexer-failure rendering; issue counting and exit codes; frame alignment with a multi-width path; JSON shape <!-- completed: 2026-08-13T09:27 -->
 
 ### Step 8: Verification
 

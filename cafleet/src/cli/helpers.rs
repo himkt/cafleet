@@ -85,6 +85,14 @@ pub fn stale_assets_guard(settings: &Settings) -> Result<(), CafleetError> {
     }
 }
 
+/// Render `path` with a `~` abbreviation when it sits under `home`.
+pub(crate) fn tilde(path: &str, home: &std::path::Path) -> String {
+    match std::path::Path::new(path).strip_prefix(home) {
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => path.to_string(),
+    }
+}
+
 /// Whitespace per the empty-text contract: Unicode whitespace plus
 /// U+001C–U+001F (SPEC §6.4 parity with `str.isspace`).
 fn is_blank(text: &str) -> bool {

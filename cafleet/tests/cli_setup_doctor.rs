@@ -407,7 +407,13 @@ fn doctor_reports_a_healthy_environment_with_no_issues() {
         "the version line leads the report: {out}"
     );
     assert!(out.contains("✓ multiplexer"), "got: {out}");
-    for detail in ["tmux", "main", "@1", "%0", "TMUX=/tmp/tmux-1000/default,123,0"] {
+    for detail in [
+        "tmux",
+        "main",
+        "@1",
+        "%0",
+        "TMUX=/tmp/tmux-1000/default,123,0",
+    ] {
         assert!(out.contains(detail), "multiplexer detail {detail}: {out}");
     }
     assert!(out.contains("✓ database"), "got: {out}");
@@ -448,13 +454,19 @@ fn doctor_reports_a_missing_database() {
     assert_eq!(code(&output), 1);
     let out = stdout(&output);
     assert!(out.contains("✗ database"), "got: {out}");
-    assert!(out.contains("no database — run: cafleet setup"), "got: {out}");
+    assert!(
+        out.contains("no database — run: cafleet setup"),
+        "got: {out}"
+    );
     assert_eq!(
         out.matches("– cafleet setup --coding-agent").count(),
         3,
         "every agent renders the not-installed state: {out}"
     );
-    assert!(out.contains("1 issue found"), "the – state never counts: {out}");
+    assert!(
+        out.contains("1 issue found"),
+        "the – state never counts: {out}"
+    );
 }
 
 #[test]
@@ -540,7 +552,12 @@ fn doctor_treats_not_installed_as_informational() {
     let cli = Cli::new();
     cli.migrate();
     let output = cli.run(&["doctor"]);
-    assert_eq!(code(&output), 0, "the – state never fails: {}", stdout(&output));
+    assert_eq!(
+        code(&output),
+        0,
+        "the – state never fails: {}",
+        stdout(&output)
+    );
     let out = stdout(&output);
     assert_eq!(out.matches("– cafleet setup --coding-agent").count(), 3);
     assert!(out.contains("no issues found"), "got: {out}");
@@ -564,7 +581,10 @@ fn doctor_setup_cells_cover_ok_stale_and_not_installed() {
         out.contains("– cafleet setup --coding-agent opencode"),
         "the EN DASH cell carries the remedy: {out}"
     );
-    assert!(out.contains("1 issue found"), "only the stale cell counts: {out}");
+    assert!(
+        out.contains("1 issue found"),
+        "only the stale cell counts: {out}"
+    );
 }
 
 #[test]
@@ -578,7 +598,10 @@ fn doctor_reports_the_env_source_and_a_resolution_error() {
     let output = cli.run(&["doctor"]);
     assert_eq!(code(&output), 1);
     let out = stdout(&output);
-    assert!(out.contains("~/cfg-claude"), "the env path ~-abbreviates: {out}");
+    assert!(
+        out.contains("~/cfg-claude"),
+        "the env path ~-abbreviates: {out}"
+    );
     assert!(out.contains("$CLAUDE_CONFIG_DIR"), "got: {out}");
     assert!(out.contains("default"), "got: {out}");
     assert!(
@@ -601,7 +624,12 @@ fn doctor_lists_superseded_rows_as_footnotes() {
     cli.seed_asset_row_at("claude", "/b-old", "0.1.0");
     cli.seed_asset_row_at("claude", "/a-old", "0.1.0");
     let output = cli.run(&["doctor"]);
-    assert_eq!(code(&output), 0, "footnotes never count as issues: {}", stdout(&output));
+    assert_eq!(
+        code(&output),
+        0,
+        "footnotes never count as issues: {}",
+        stdout(&output)
+    );
     let out = stdout(&output);
     let notes: Vec<&str> = out
         .lines()
@@ -644,9 +672,7 @@ fn doctor_frames_the_table_by_display_width() {
         .lines()
         .filter(|line| {
             let trimmed = line.trim_start();
-            ['┌', '├', '└', '│']
-                .iter()
-                .any(|c| trimmed.starts_with(*c))
+            ['┌', '├', '└', '│'].iter().any(|c| trimmed.starts_with(*c))
         })
         .collect();
     assert_eq!(

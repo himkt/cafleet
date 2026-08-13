@@ -8,6 +8,7 @@ use clap::Args;
 use rusqlite::Connection;
 use serde_json::Value;
 
+use super::helpers::tilde;
 use crate::assets::{TARGET_AGENTS, agent_paths, install_agent};
 use crate::broker::{asset_installs_table_exists, list_asset_installs};
 use crate::config::Settings;
@@ -104,7 +105,7 @@ fn db_half(settings: &Settings) -> Result<(), CafleetError> {
 
 /// The applied-migration high-water mark, `None` when the ledger is absent
 /// or empty.
-fn recorded_version(conn: &Connection) -> Result<Option<u32>, CafleetError> {
+pub(super) fn recorded_version(conn: &Connection) -> Result<Option<u32>, CafleetError> {
     let ledger_exists: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master \
@@ -126,7 +127,7 @@ fn recorded_version(conn: &Connection) -> Result<Option<u32>, CafleetError> {
 
 /// Whether any table outside the ledger (and SQLite's own bookkeeping)
 /// exists.
-fn has_foreign_tables(conn: &Connection) -> Result<bool, CafleetError> {
+pub(super) fn has_foreign_tables(conn: &Connection) -> Result<bool, CafleetError> {
     conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' \
          AND name NOT LIKE 'sqlite_%' AND name != 'refinery_schema_history')",
@@ -222,12 +223,4 @@ fn most_recent_path<'a>(rows: &[&'a Value]) -> &'a str {
     best.expect("callers pass a non-empty row set")["path"]
         .as_str()
         .expect("rows carry the path")
-}
-
-/// Render `path` with a `~` abbreviation when it sits under `home`.
-fn tilde(path: &str, home: &Path) -> String {
-    match Path::new(path).strip_prefix(home) {
-        Ok(rest) => format!("~/{}", rest.display()),
-        Err(_) => path.to_string(),
-    }
 }
