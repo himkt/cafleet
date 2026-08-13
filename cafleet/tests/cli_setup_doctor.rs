@@ -388,6 +388,122 @@ fn setup_rejects_positionals_unknown_agents_and_the_removed_skip_flag() {
     assert_eq!(code(&cli.run(&["setup", "--skip", "claude"])), 2);
 }
 
+#[test]
+fn setup_accepts_space_delimited_coding_agent_values() {
+    let cli = Cli::new();
+    let output = cli.run(&["setup", "--coding-agent", "claude", "codex"]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert!(cli.home.path().join(".claude/skills/cafleet").is_dir());
+    assert!(cli.home.path().join(".codex/skills/cafleet").is_dir());
+    assert!(
+        !cli.home.path().join(".config/opencode/skills").exists(),
+        "only the named agents install"
+    );
+    let agents: Vec<String> = cli
+        .asset_rows()
+        .into_iter()
+        .map(|(agent, _, _)| agent)
+        .collect();
+    assert_eq!(agents, vec!["claude".to_string(), "codex".to_string()]);
+}
+
+#[test]
+fn space_delimited_and_repeated_flag_forms_are_equivalent() {
+    let selections = |cli: &Cli| -> Vec<(String, String)> {
+        cli.asset_rows()
+            .into_iter()
+            .map(|(agent, _, version)| (agent, version))
+            .collect()
+    };
+
+    let space = Cli::new();
+    let output = space.run(&["setup", "--coding-agent", "claude", "codex"]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+
+    let repeated = Cli::new();
+    let output = repeated.run(&["setup", "--coding-agent", "claude", "--coding-agent", "codex"]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+
+    assert_eq!(selections(&space), selections(&repeated));
+}
+
+#[test]
+fn setup_accepts_the_mixed_flag_form() {
+    let cli = Cli::new();
+    let output = cli.run(&[
+        "setup",
+        "--coding-agent",
+        "claude",
+        "codex",
+        "--coding-agent",
+        "opencode",
+    ]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let agents: Vec<String> = cli
+        .asset_rows()
+        .into_iter()
+        .map(|(agent, _, _)| agent)
+        .collect();
+    assert_eq!(
+        agents,
+        vec![
+            "claude".to_string(),
+            "codex".to_string(),
+            "opencode".to_string()
+        ]
+    );
+}
+
+#[test]
+fn setup_rejects_an_unknown_value_in_a_space_delimited_list() {
+    let cli = Cli::new();
+    let output = cli.run(&["setup", "--coding-agent", "claude", "python"]);
+    assert_eq!(code(&output), 2);
+    let err = stderr(&output);
+    assert!(
+        err.contains("invalid value 'python'"),
+        "clap's native invalid-value error: {err}"
+    );
+}
+
+#[test]
+fn bare_setup_word_is_rejected_with_the_unexpected_argument_error() {
+    let cli = Cli::new();
+    let output = cli.run(&["setup", "claude"]);
+    assert_eq!(code(&output), 2);
+    let err = stderr(&output);
+    assert!(
+        err.contains("unexpected argument 'claude'"),
+        "an agent name without the flag is not a selection: {err}"
+    );
+}
+
+#[test]
+fn a_word_following_the_flag_is_rejected_with_the_invalid_value_error() {
+    let cli = Cli::new();
+    let output = cli.run(&["setup", "--coding-agent", "claude", "extra"]);
+    assert_eq!(code(&output), 2);
+    let err = stderr(&output);
+    assert!(
+        err.contains("invalid value 'extra'"),
+        "the word is consumed as another flag value: {err}"
+    );
+}
+
+#[test]
+fn setup_help_documents_the_multi_value_flag() {
+    let cli = Cli::new();
+    let output = cli.run(&["setup", "--help"]);
+    assert_eq!(code(&output), 0);
+    let help: String = stdout(&output).split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        help.contains(
+            "Install the named agent's assets (space-delimited, repeatable; default: all agents)"
+        ),
+        "got: {help}"
+    );
+}
+
 fn seed_all_current(cli: &Cli) {
     for agent in ["claude", "codex", "opencode"] {
         cli.seed_asset_row(agent, VERSION);
