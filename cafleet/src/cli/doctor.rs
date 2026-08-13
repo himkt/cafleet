@@ -253,7 +253,7 @@ fn agent_rows(home: &Path, rows: &[Value]) -> Vec<AgentRow> {
             match resolved {
                 Err(error) => AgentRow {
                     agent,
-                    path_cell: env(var).unwrap_or_default(),
+                    path_cell: env(var).expect("a resolution error implies a set variable"),
                     json_path: Value::Null,
                     source_cell: format!("${var}"),
                     json_source: var.to_string(),
