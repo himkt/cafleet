@@ -125,15 +125,13 @@ impl Cli {
         rusqlite::Connection::open(self.db_path()).unwrap()
     }
 
-    /// The documented schema-only setup invocation (migrates to head, installs
-    /// nothing).
+    /// Migrate to head via plain `cafleet setup` — on a records-free database
+    /// the assets half installs nothing.
     pub fn migrate(&self) {
-        let output = self.run(&[
-            "setup", "--skip", "claude", "--skip", "codex", "--skip", "opencode",
-        ]);
+        let output = self.run(&["setup"]);
         assert!(
             output.status.success(),
-            "schema-only setup must succeed: {}",
+            "plain setup must succeed: {}",
             text(&output.stderr)
         );
     }
@@ -158,15 +156,50 @@ impl Cli {
 
     /// Seed a row at an explicit path (e.g. a superseded location).
     pub fn seed_asset_row_at(&self, coding_agent: &str, path: &str, version: &str) {
+        self.seed_asset_row_dated(
+            coding_agent,
+            path,
+            version,
+            "2026-07-30T00:00:00.000000+00:00",
+        );
+    }
+
+    /// Seed a row with an explicit `installed_at` (for recency tie-breaks).
+    pub fn seed_asset_row_dated(
+        &self,
+        coding_agent: &str,
+        path: &str,
+        version: &str,
+        installed_at: &str,
+    ) {
         self.sqlite()
             .execute(
                 "INSERT INTO asset_installs (coding_agent, path, cafleet_version, installed_at) \
-                 VALUES (?1, ?2, ?3, '2026-07-30T00:00:00.000000+00:00') \
+                 VALUES (?1, ?2, ?3, ?4) \
                  ON CONFLICT(coding_agent, path) DO UPDATE SET \
-                     cafleet_version=excluded.cafleet_version",
-                rusqlite::params![coding_agent, path, version],
+                     cafleet_version=excluded.cafleet_version, \
+                     installed_at=excluded.installed_at",
+                rusqlite::params![coding_agent, path, version, installed_at],
             )
             .unwrap();
+    }
+
+    /// The `(coding_agent, path, cafleet_version)` rows in ascending key
+    /// order.
+    pub fn asset_rows(&self) -> Vec<(String, String, String)> {
+        let conn = self.sqlite();
+        let mut stmt = conn
+            .prepare(
+                "SELECT coding_agent, path, cafleet_version FROM asset_installs \
+                 ORDER BY coding_agent, path",
+            )
+            .unwrap();
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        rows
     }
 
     /// Migrate + record a current-version install so the stale-assets guard
