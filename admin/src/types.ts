@@ -9,7 +9,7 @@ export interface Member {
   description: string;
   status: "active" | "deregistered";
   registered_at: string;
-  kind: "director" | "member";
+  kind: "director" | "monitor" | "member";
 }
 
 export interface TimelineMessage {

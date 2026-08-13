@@ -1,7 +1,7 @@
 # Reintroduce the monitor member — a cheap-model watcher absorbs the periodic tick
 
 **Status**: Approved
-**Progress**: 38/49 tasks complete
+**Progress**: 42/49 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -542,10 +542,10 @@ restart. Mid-run monitor death: the Director re-spawns with `--role monitor`
 
 ### Step 7: HTTP API and admin WebUI
 
-- [ ] `cafleet/src/webui/mod.rs`: the members-array exclusion follows the broker re-source; no route changes <!-- completed: -->
-- [ ] `admin/src/types.ts`: widen the `kind` union to `"director" | "monitor" | "member"` <!-- completed: -->
-- [ ] Admin roster component: restore the `monitor` kind badge <!-- completed: -->
-- [ ] `mise //admin:lint` and `mise //admin:build` pass <!-- completed: -->
+- [x] `cafleet/src/webui/mod.rs`: the members-array exclusion follows the broker re-source; no route changes <!-- completed: 2026-08-13T11:45 -->
+- [x] `admin/src/types.ts`: widen the `kind` union to `"director" | "monitor" | "member"` <!-- completed: 2026-08-13T11:45 -->
+- [x] Admin roster component: restore the `monitor` kind badge <!-- completed: 2026-08-13T11:45 -->
+- [x] `mise //admin:lint` and `mise //admin:build` pass <!-- completed: 2026-08-13T11:45 -->
 
 ### Step 8: Integration tests and verification
 
