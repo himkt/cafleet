@@ -388,42 +388,365 @@ fn setup_rejects_positionals_unknown_agents_and_the_removed_skip_flag() {
     assert_eq!(code(&cli.run(&["setup", "--skip", "claude"])), 2);
 }
 
-#[test]
-fn doctor_reports_the_multiplexer_and_the_assets_install_state() {
-    let cli = Cli::new();
-    cli.ready();
-    let output = cli.run(&["doctor"]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    let out = stdout(&output);
-    assert!(out.contains("assets:"), "got: {out}");
-    assert!(
-        out.contains(&format!("cli_version: {VERSION}")),
-        "got: {out}"
-    );
-    assert!(
-        out.contains("ok"),
-        "the current-version row reports ok: {out}"
-    );
-
-    let json_output = cli.run(&["doctor", "--json"]);
-    assert_eq!(code(&json_output), 0);
-    let payload: serde_json::Value = serde_json::from_str(stdout(&json_output).trim()).unwrap();
-    assert_eq!(payload["multiplexer"]["backend"], "tmux");
-    assert_eq!(payload["multiplexer"]["presence_var"], "TMUX");
-    assert_eq!(payload["assets"]["cli_version"], VERSION);
-    assert_eq!(payload["assets"]["installs"][0]["coding_agent"], "claude");
-    assert_eq!(payload["assets"]["installs"][0]["current"], true);
+fn seed_all_current(cli: &Cli) {
+    for agent in ["claude", "codex", "opencode"] {
+        cli.seed_asset_row(agent, VERSION);
+    }
 }
 
 #[test]
-fn doctor_reports_an_empty_install_state_instead_of_blocking() {
+fn doctor_reports_a_healthy_environment_with_no_issues() {
     let cli = Cli::new();
     cli.migrate();
+    seed_all_current(&cli);
     let output = cli.run(&["doctor"]);
-    assert_eq!(code(&output), 0, "doctor is exempt from the guard");
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let out = stdout(&output);
     assert!(
-        stdout(&output).contains("(no assets install recorded; run 'cafleet setup')"),
+        out.starts_with(&format!("cafleet {VERSION}\n")),
+        "the version line leads the report: {out}"
+    );
+    assert!(out.contains("✓ multiplexer"), "got: {out}");
+    for detail in ["tmux", "main", "@1", "%0", "TMUX=/tmp/tmux-1000/default,123,0"] {
+        assert!(out.contains(detail), "multiplexer detail {detail}: {out}");
+    }
+    assert!(out.contains("✓ database"), "got: {out}");
+    assert!(out.contains("schema 6 (head)"), "got: {out}");
+    assert!(out.contains("✓ coding agents"), "got: {out}");
+    assert_eq!(
+        out.matches(&format!("✓ {VERSION}")).count(),
+        3,
+        "three ok setup cells: {out}"
+    );
+    assert!(out.contains("no issues found"), "got: {out}");
+}
+
+#[test]
+fn doctor_renders_every_section_on_a_multiplexer_failure() {
+    let cli = Cli::new();
+    cli.migrate();
+    seed_all_current(&cli);
+    let output = cli.run_outside_tmux(&["doctor"]);
+    assert_eq!(code(&output), 1, "a rendered issue exits non-zero");
+    let out = stdout(&output);
+    assert!(out.contains("✗ multiplexer"), "got: {out}");
+    assert!(
+        out.contains("✓ database"),
+        "no early abort — the database section renders: {out}"
+    );
+    assert!(
+        out.contains("✓ coding agents"),
+        "no early abort — the coding-agents table renders: {out}"
+    );
+    assert!(out.contains("1 issue found"), "singular footer: {out}");
+}
+
+#[test]
+fn doctor_reports_a_missing_database() {
+    let cli = Cli::new();
+    let output = cli.run(&["doctor"]);
+    assert_eq!(code(&output), 1);
+    let out = stdout(&output);
+    assert!(out.contains("✗ database"), "got: {out}");
+    assert!(out.contains("no database — run: cafleet setup"), "got: {out}");
+    assert_eq!(
+        out.matches("– cafleet setup --coding-agent").count(),
+        3,
+        "every agent renders the not-installed state: {out}"
+    );
+    assert!(out.contains("1 issue found"), "the – state never counts: {out}");
+}
+
+#[test]
+fn doctor_reports_a_behind_head_schema() {
+    let cli = Cli::new();
+    cli.migrate();
+    cli.sqlite()
+        .execute("DELETE FROM refinery_schema_history WHERE version = 6", [])
+        .unwrap();
+    let output = cli.run(&["doctor"]);
+    assert_eq!(code(&output), 1);
+    let out = stdout(&output);
+    assert!(
+        out.contains("schema 5, head is 6 — run: cafleet setup"),
+        "got: {out}"
+    );
+    assert!(
+        out.contains("coding agents"),
+        "the coding-agents section still renders: {out}"
+    );
+}
+
+#[test]
+fn doctor_reports_a_newer_schema_than_the_cli() {
+    let cli = Cli::new();
+    cli.migrate();
+    cli.sqlite()
+        .execute(
+            "INSERT INTO refinery_schema_history (version, name, applied_on, checksum) \
+             VALUES (99, 'future', '2026-01-01T00:00:00', 'x')",
+            [],
+        )
+        .unwrap();
+    let output = cli.run(&["doctor"]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stdout(&output).contains("schema 99 is newer than this CLI (head 6) — upgrade cafleet"),
         "got: {}",
         stdout(&output)
     );
+}
+
+#[test]
+fn doctor_reports_an_unversioned_database() {
+    let cli = Cli::new();
+    let conn = rusqlite::Connection::open(cli.db_path()).unwrap();
+    conn.execute_batch("CREATE TABLE junk (x INTEGER);")
+        .unwrap();
+    drop(conn);
+    let output = cli.run(&["doctor"]);
+    assert_eq!(code(&output), 1);
+    let out = stdout(&output);
+    assert!(
+        out.contains("database has tables but no schema history — not a cafleet database?"),
+        "got: {out}"
+    );
+    assert_eq!(
+        out.matches("– cafleet setup --coding-agent").count(),
+        3,
+        "a missing asset_installs table renders every agent as –: {out}"
+    );
+}
+
+#[test]
+fn doctor_reports_a_database_connection_failure() {
+    let mut cli = Cli::new();
+    let dir = cli.home.path().join("dbdir");
+    std::fs::create_dir_all(&dir).unwrap();
+    let url = format!("sqlite:///{}", dir.display());
+    cli.set_env("CAFLEET_DATABASE_URL", &url);
+    let output = cli.run(&["doctor"]);
+    assert_eq!(code(&output), 1);
+    let out = stdout(&output);
+    assert!(out.contains("✗ database"), "got: {out}");
+    assert!(
+        out.contains("coding agents"),
+        "the report continues past a connection failure: {out}"
+    );
+}
+
+#[test]
+fn doctor_treats_not_installed_as_informational() {
+    let cli = Cli::new();
+    cli.migrate();
+    let output = cli.run(&["doctor"]);
+    assert_eq!(code(&output), 0, "the – state never fails: {}", stdout(&output));
+    let out = stdout(&output);
+    assert_eq!(out.matches("– cafleet setup --coding-agent").count(), 3);
+    assert!(out.contains("no issues found"), "got: {out}");
+}
+
+#[test]
+fn doctor_setup_cells_cover_ok_stale_and_not_installed() {
+    let cli = Cli::new();
+    cli.migrate();
+    cli.seed_asset_row("claude", VERSION);
+    cli.seed_asset_row("codex", "0.1.0");
+    let output = cli.run(&["doctor"]);
+    assert_eq!(code(&output), 1);
+    let out = stdout(&output);
+    assert!(out.contains(&format!("✓ {VERSION}")), "got: {out}");
+    assert!(
+        out.contains("✗ 0.1.0 → cafleet setup --coding-agent codex"),
+        "got: {out}"
+    );
+    assert!(
+        out.contains("– cafleet setup --coding-agent opencode"),
+        "the EN DASH cell carries the remedy: {out}"
+    );
+    assert!(out.contains("1 issue found"), "only the stale cell counts: {out}");
+}
+
+#[test]
+fn doctor_reports_the_env_source_and_a_resolution_error() {
+    let mut cli = Cli::new();
+    let custom = cli.home.path().join("cfg-claude");
+    cli.set_env("CLAUDE_CONFIG_DIR", custom.to_str().unwrap());
+    cli.set_env("CODEX_HOME", "rel");
+    cli.migrate();
+    cli.seed_asset_row_at("claude", custom.to_str().unwrap(), VERSION);
+    let output = cli.run(&["doctor"]);
+    assert_eq!(code(&output), 1);
+    let out = stdout(&output);
+    assert!(out.contains("~/cfg-claude"), "the env path ~-abbreviates: {out}");
+    assert!(out.contains("$CLAUDE_CONFIG_DIR"), "got: {out}");
+    assert!(out.contains("default"), "got: {out}");
+    assert!(
+        out.contains("✗ CODEX_HOME is not an absolute path"),
+        "got: {out}"
+    );
+    assert!(
+        out.contains("rel"),
+        "the raw invalid value shows in the path column: {out}"
+    );
+    assert!(out.contains("1 issue found"), "got: {out}");
+}
+
+#[test]
+fn doctor_lists_superseded_rows_as_footnotes() {
+    let cli = Cli::new();
+    cli.migrate();
+    cli.seed_asset_row("codex", VERSION);
+    cli.seed_asset_row_at("codex", "/codex-old", "0.1.0");
+    cli.seed_asset_row_at("claude", "/b-old", "0.1.0");
+    cli.seed_asset_row_at("claude", "/a-old", "0.1.0");
+    let output = cli.run(&["doctor"]);
+    assert_eq!(code(&output), 0, "footnotes never count as issues: {}", stdout(&output));
+    let out = stdout(&output);
+    let notes: Vec<&str> = out
+        .lines()
+        .filter(|line| line.trim_start().starts_with("note: "))
+        .map(str::trim_start)
+        .collect();
+    assert_eq!(
+        notes,
+        vec![
+            "note: claude was previously set up at /a-old",
+            "note: claude was previously set up at /b-old",
+            "note: codex was previously set up at /codex-old",
+        ],
+        "one line per superseded row, ascending (coding_agent, path): {out}"
+    );
+    assert!(out.contains("no issues found"), "got: {out}");
+}
+
+#[test]
+fn doctor_frames_the_table_by_display_width() {
+    fn display_width(line: &str) -> usize {
+        line.chars()
+            .map(|c| {
+                if ('\u{4E00}'..='\u{9FFF}').contains(&c) {
+                    2
+                } else {
+                    1
+                }
+            })
+            .sum()
+    }
+
+    let mut cli = Cli::new();
+    let custom = cli.home.path().join("設定");
+    cli.set_env("CLAUDE_CONFIG_DIR", custom.to_str().unwrap());
+    cli.migrate();
+    let output = cli.run(&["doctor"]);
+    let out = stdout(&output);
+    let frame: Vec<&str> = out
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim_start();
+            ['┌', '├', '└', '│']
+                .iter()
+                .any(|c| trimmed.starts_with(*c))
+        })
+        .collect();
+    assert_eq!(
+        frame.len(),
+        7,
+        "top, header, separator, three rows, bottom: {out}"
+    );
+    let widths: Vec<usize> = frame.iter().map(|line| display_width(line)).collect();
+    assert!(
+        widths.windows(2).all(|pair| pair[0] == pair[1]),
+        "every frame line has the same display width {widths:?}: {out}"
+    );
+}
+
+#[test]
+fn doctor_json_mirrors_the_report() {
+    let mut cli = Cli::new();
+    let custom = cli.home.path().join("cfg-claude");
+    cli.set_env("CLAUDE_CONFIG_DIR", custom.to_str().unwrap());
+    cli.migrate();
+    cli.seed_asset_row_at("claude", custom.to_str().unwrap(), VERSION);
+    cli.seed_asset_row("codex", "0.1.0");
+    cli.seed_asset_row_at("codex", "/codex-old", "0.0.9");
+    let output = cli.run(&["doctor", "--json"]);
+    assert_eq!(code(&output), 1, "exit parity with text mode");
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+
+    assert_eq!(payload["multiplexer"]["ok"], true);
+    assert_eq!(payload["multiplexer"]["backend"], "tmux");
+    assert_eq!(payload["multiplexer"]["presence_var"], "TMUX");
+    assert_eq!(
+        payload["multiplexer"]["presence_value"],
+        "/tmp/tmux-1000/default,123,0"
+    );
+    assert_eq!(payload["multiplexer"]["error"], serde_json::Value::Null);
+
+    assert_eq!(payload["database"]["ok"], true);
+    assert_eq!(payload["database"]["schema_version"], 6);
+    assert_eq!(payload["database"]["head_version"], 6);
+    assert_eq!(payload["database"]["error"], serde_json::Value::Null);
+
+    let agents = payload["coding_agents"]["agents"].as_array().unwrap();
+    assert_eq!(payload["coding_agents"]["ok"], false);
+    assert_eq!(payload["coding_agents"]["cli_version"], VERSION);
+    assert_eq!(agents[0]["coding_agent"], "claude");
+    assert_eq!(agents[0]["path"], custom.to_str().unwrap());
+    assert_eq!(agents[0]["source"], "CLAUDE_CONFIG_DIR");
+    assert_eq!(agents[0]["state"], "ok");
+    assert_eq!(agents[0]["recorded_version"], VERSION);
+    assert_eq!(agents[1]["coding_agent"], "codex");
+    assert_eq!(agents[1]["source"], "default");
+    assert_eq!(agents[1]["state"], "stale");
+    assert_eq!(agents[1]["recorded_version"], "0.1.0");
+    assert_eq!(agents[2]["coding_agent"], "opencode");
+    assert_eq!(agents[2]["state"], "not_installed");
+    assert_eq!(agents[2]["recorded_version"], serde_json::Value::Null);
+    assert_eq!(agents[2]["installed_at"], serde_json::Value::Null);
+
+    let superseded = payload["coding_agents"]["superseded"].as_array().unwrap();
+    assert_eq!(superseded.len(), 1);
+    assert_eq!(superseded[0]["coding_agent"], "codex");
+    assert_eq!(superseded[0]["path"], "/codex-old");
+    assert_eq!(superseded[0]["recorded_version"], "0.0.9");
+
+    assert_eq!(payload["issues"], 1);
+}
+
+#[test]
+fn doctor_json_null_contracts_on_failures() {
+    let mut cli = Cli::new();
+    cli.set_env("CODEX_HOME", "rel");
+    let output = cli.run_outside_tmux(&["doctor", "--json"]);
+    assert_eq!(code(&output), 1);
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+
+    assert_eq!(payload["multiplexer"]["ok"], false);
+    assert_eq!(payload["multiplexer"]["backend"], serde_json::Value::Null);
+    assert_eq!(payload["multiplexer"]["session"], serde_json::Value::Null);
+    assert_eq!(payload["multiplexer"]["pane_id"], serde_json::Value::Null);
+    assert!(
+        payload["multiplexer"]["error"].is_string(),
+        "the resolver error lands in the error field"
+    );
+
+    assert_eq!(payload["database"]["ok"], false);
+    assert_eq!(
+        payload["database"]["schema_version"],
+        serde_json::Value::Null,
+        "no ledger means a null schema_version"
+    );
+
+    let agents = payload["coding_agents"]["agents"].as_array().unwrap();
+    assert_eq!(agents[1]["coding_agent"], "codex");
+    assert_eq!(agents[1]["state"], "error");
+    assert_eq!(agents[1]["path"], serde_json::Value::Null);
+    assert_eq!(agents[1]["source"], "CODEX_HOME");
+    assert_eq!(
+        agents[1]["error"],
+        "CODEX_HOME must be an absolute path (got 'rel')"
+    );
+
+    assert_eq!(payload["issues"], 3, "multiplexer + database + codex");
 }
