@@ -610,6 +610,89 @@ fn doctor_reports_a_behind_head_schema() {
 }
 
 #[test]
+fn doctor_completes_the_report_against_a_pre_v6_database() {
+    let cli = Cli::new();
+    cli.seed_pre_v6_database();
+    let output = cli.run(&["doctor"]);
+    assert_eq!(code(&output), 1, "the database issue exits 1");
+    let out = stdout(&output);
+    assert!(out.contains("✓ multiplexer"), "got: {out}");
+    assert!(out.contains("✗ database"), "got: {out}");
+    assert!(
+        out.contains("schema 5, head is 6 — run: cafleet setup"),
+        "got: {out}"
+    );
+    assert_eq!(
+        out.matches("– cafleet setup --coding-agent").count(),
+        3,
+        "every resolvable agent renders the not-installed state: {out}"
+    );
+    assert!(
+        out.contains("1 issue found"),
+        "only the database issue counts: {out}"
+    );
+    let combined = format!("{out}{}", stderr(&output));
+    assert!(
+        !combined.contains("no such column"),
+        "no raw SQLite error aborts the report: {combined}"
+    );
+}
+
+#[test]
+fn doctor_json_against_a_pre_v6_database_keeps_the_shape() {
+    let cli = Cli::new();
+    cli.seed_pre_v6_database();
+    let output = cli.run(&["doctor", "--json"]);
+    assert_eq!(code(&output), 1);
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+
+    assert_eq!(payload["database"]["ok"], false);
+    assert_eq!(payload["database"]["schema_version"], 5);
+    assert_eq!(payload["database"]["head_version"], 6);
+
+    let agents = payload["coding_agents"]["agents"].as_array().unwrap();
+    assert_eq!(agents.len(), 3);
+    for agent in agents {
+        assert_eq!(agent["state"], "not_installed");
+        assert_eq!(agent["recorded_version"], serde_json::Value::Null);
+        assert_eq!(agent["installed_at"], serde_json::Value::Null);
+    }
+    assert_eq!(
+        payload["coding_agents"]["superseded"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0,
+        "no recorded rows are read on a behind-head schema"
+    );
+    assert_eq!(payload["issues"], 1, "only the database issue counts");
+}
+
+#[test]
+fn doctor_renders_not_installed_when_the_table_is_dropped_at_head() {
+    let cli = Cli::new();
+    cli.migrate();
+    cli.sqlite()
+        .execute_batch("DROP TABLE asset_installs;")
+        .unwrap();
+    let output = cli.run(&["doctor"]);
+    assert_eq!(
+        code(&output),
+        0,
+        "the missing table carries no issue: {}",
+        stdout(&output)
+    );
+    let out = stdout(&output);
+    assert!(out.contains("✓ database"), "got: {out}");
+    assert_eq!(
+        out.matches("– cafleet setup --coding-agent").count(),
+        3,
+        "every agent renders not-installed with no recorded data: {out}"
+    );
+    assert!(out.contains("no issues found"), "got: {out}");
+}
+
+#[test]
 fn doctor_reports_a_newer_schema_than_the_cli() {
     let cli = Cli::new();
     cli.migrate();
