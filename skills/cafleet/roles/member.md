@@ -2,7 +2,7 @@
 
 You are a **member** spawned by `cafleet member create`. You run in workspace-scoped auto-approval mode ({permission_flags}): your Bash tool is **enabled** and routine permission prompts auto-resolve silently.
 
-This file is your role anchor. The cafleet CLI surface you call (poll / send / ack / show) is in [`skills/cafleet/SKILL.md`](../SKILL.md); the bash-via-Director fallback (when your harness denies a Bash invocation) is in [`reference/prompt-routing.md`](../reference/prompt-routing.md). You do NOT read `reference/director.md` or `reference/recovery.md` — those are Director-side.
+This file is your role anchor. The cafleet CLI surface you call (poll / send / ack / show) is in [`skills/cafleet/SKILL.md`](../SKILL.md); the bash-via-Director fallback (when your harness denies a Bash invocation) is in [`reference/prompt-routing.md`](../reference/prompt-routing.md). You do NOT read `reference/director.md` or `reference/recovery.md` — those are Director-side. The fleet's monitor member follows its own role file, [`monitor.md`](monitor.md), which overrides this generic member protocol where they conflict.
 
 ## Required reading
 
@@ -57,9 +57,11 @@ What your harness denies is per-backend — the semantics are canonical in [`ref
 
 Identity reaches you as literal labeled lines in your spawn prompt — `FLEET ID:` (your fleet), `YOUR MEMBER ID:` (your own id), and `DIRECTOR MEMBER ID:` — rendered by `cafleet member create`'s `str.format` substitution at spawn time. **Take those literal integers from the prompt and pass them explicitly on every call**: `cafleet message poll <my-member-id>`, `cafleet message send --from-member-id <my-member-id> --to-member-id <director-member-id> "..."`. No environment variable supplies them. Do not ask the operator for them; if genuinely missing, let the cafleet call fail with its own CLI error.
 
-A member must not invoke `cafleet member ping` or `cafleet member prompt`;
-those are Director-only. You poll your own inbox via `cafleet message poll`;
-if you missed an inline preview, the Director re-pokes you via
+An ordinary member must not invoke `cafleet member ping` or `cafleet member
+prompt`; `member prompt` is Director-only, and `member ping` belongs to the
+Director and the monitor member (whose fixed-ping exception is its role
+file's). You poll your own inbox via `cafleet message poll`; if you missed an
+inline preview, the Director or the monitor member re-pokes you via
 `cafleet member ping`.
 
 ## Shutdown

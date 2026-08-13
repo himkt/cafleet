@@ -1,7 +1,7 @@
 # Reintroduce the monitor member — a cheap-model watcher absorbs the periodic tick
 
 **Status**: Approved
-**Progress**: 14/49 tasks complete
+**Progress**: 23/49 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -508,15 +508,15 @@ COMMENT(director): standing arbitration for the `.claude/**` harness denial — 
 
 ### Step 3: The `cafleet` skill
 
-- [ ] Create `skills/cafleet/roles/monitor.md` per § S2 (Required-reading block with the overlay row #1, startup order, on-wake protocol, command boundary, teardown, literal-ids, canonical-skeleton delta: `--role monitor --model {monitor_model}`, omit `--coding-agent`) <!-- completed: -->
-- [ ] Rewrite `skills/cafleet/reference/supervision.md`: § The monitor heartbeat (monitor-hosted), § Spawn Protocol (monitor-first + `monitor live` gate; the Director no longer launches the loop), the facilitation-cue paragraph (Director re-engagement channels: broker auto-fire + monitor events), § Monitor Lifecycle, § Cleanup Protocol (§ S7 order), § Quick Reference rows <!-- completed: -->
-- [ ] Update `skills/cafleet/SKILL.md`: § Team supervision rewritten to the monitor-member model; documented-defaults table regains `{monitor_model}` (default: inherit the spawning Director's model) <!-- completed: -->
-- [ ] Update `skills/cafleet/roles/director.md`: Required-reading, the monitor-first spawn step, § Model selection monitor rule (including its *Reviewer defaults* heading reference → *Monitor and reviewer defaults*) <!-- completed: -->
-- [ ] Update `skills/cafleet/roles/member.md`: note that the monitor member's role file overrides the generic member protocol where they conflict <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/director.md`: the `--role` row in the `member create` flag table; § Member Ping ownership wording <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/recovery.md` § Shutdown Protocol: monitor-first-out order + the stale-row reclaim note <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/cli.md`: the monitor member as loop launcher; `member create --role` <!-- completed: -->
-- [ ] Update `.claude/rules/bash-tool.md`: `member ping` ownership becomes "the Director and the monitor member"; add the monitor's fixed-ping exception sentence <!-- completed: -->
+- [x] Create `skills/cafleet/roles/monitor.md` per § S2 (Required-reading block with the overlay row #1, startup order, on-wake protocol, command boundary, teardown, literal-ids, canonical-skeleton delta: `--role monitor --model {monitor_model}`, omit `--coding-agent`) <!-- completed: 2026-08-13T10:26 -->
+- [x] Rewrite `skills/cafleet/reference/supervision.md`: § The monitor heartbeat (monitor-hosted), § Spawn Protocol (monitor-first + `monitor live` gate; the Director no longer launches the loop), the facilitation-cue paragraph (Director re-engagement channels: broker auto-fire + monitor events), § Monitor Lifecycle, § Cleanup Protocol (§ S7 order), § Quick Reference rows <!-- completed: 2026-08-13T10:34 -->
+- [x] Update `skills/cafleet/SKILL.md`: § Team supervision rewritten to the monitor-member model; documented-defaults table regains `{monitor_model}` (default: inherit the spawning Director's model) <!-- completed: 2026-08-13T10:36 -->
+- [x] Update `skills/cafleet/roles/director.md`: Required-reading, the monitor-first spawn step, § Model selection monitor rule (including its *Reviewer defaults* heading reference → *Monitor and reviewer defaults*) <!-- completed: 2026-08-13T10:38 -->
+- [x] Update `skills/cafleet/roles/member.md`: note that the monitor member's role file overrides the generic member protocol where they conflict <!-- completed: 2026-08-13T10:40 -->
+- [x] Update `skills/cafleet/reference/director.md`: the `--role` row in the `member create` flag table; § Member Ping ownership wording <!-- completed: 2026-08-13T10:42 -->
+- [x] Update `skills/cafleet/reference/recovery.md` § Shutdown Protocol: monitor-first-out order + the stale-row reclaim note <!-- completed: 2026-08-13T10:43 -->
+- [x] Update `skills/cafleet/reference/cli.md`: the monitor member as loop launcher; `member create --role` <!-- completed: 2026-08-13T10:45 -->
+- [x] Update `.claude/rules/bash-tool.md`: `member ping` ownership becomes "the Director and the monitor member"; add the monitor's fixed-ping exception sentence <!-- completed: 2026-08-13T10:25 -->
 
 ### Step 4: The workflow skills
 

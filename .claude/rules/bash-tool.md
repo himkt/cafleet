@@ -74,7 +74,7 @@ pre-approved in `permissions.allow` and fires without a per-call confirmation:
 cafleet member ping <member-id>
 ```
 
-The Director owns this primitive; members never invoke it.
+The Director and the monitor member own this primitive — the monitor's fixed-ping exception (one automatic ping per confirmed quiet period, per its role file) is the one non-manual use; ordinary members never invoke it.
 
 For the **shell-dispatch fallback** (a member auto-routed a denied command and needs the Director to dispatch arbitrary shell on its behalf), the Director's primitive is `cafleet member prompt --shell`. This subcommand carries the operator-controlled text as a positional argument, so it remains under `permissions.ask` for per-call confirmation:
 

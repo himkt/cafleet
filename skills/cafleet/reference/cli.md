@@ -29,7 +29,7 @@ The detailed member view (`kind`, `skills`, the placement sub-dict) is likewise 
 
 ## Coding-agent backends
 
-Three backends — `claude`, `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent` (omitted → the member inherits the Director's backend). `--model <m>` pins the LLM and `--effort <level>` forwards a reasoning-effort level (claude: `low`–`max`; codex: `minimal`–`xhigh`; opencode: unsupported — any value exits 2); both flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md). All three honor the leading-`!` input shortcut, so `member prompt --shell` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent-overlays.md#claude) / [`codex`](coding-agent-overlays.md#codex) / [`opencode`](coding-agent-overlays.md#opencode).
+Three backends — `claude`, `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent` (omitted → the member inherits the Director's backend). `--model <m>` pins the LLM, `--effort <level>` forwards a reasoning-effort level (claude: `low`–`max`; codex: `minimal`–`xhigh`; opencode: unsupported — any value exits 2), and `--role monitor` registers the fleet's monitor member (spawned first, one active per fleet); the flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md). All three honor the leading-`!` input shortcut, so `member prompt --shell` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent-overlays.md#claude) / [`codex`](coding-agent-overlays.md#codex) / [`opencode`](coding-agent-overlays.md#opencode).
 
 ## Show (Get Message)
 
@@ -93,17 +93,17 @@ cafleet doctor --json
 `cafleet monitor` is the supervision scheduler — a two-form command with a positional fleet id:
 
 ```bash
-cafleet monitor <fleet-id>          # the scheduler loop (launched by the Director as a background task in its own pane)
+cafleet monitor <fleet-id>          # the scheduler loop (launched by the monitor member as a background task in its own pane)
 cafleet monitor scan <fleet-id>     # one-shot batch capture: the Director's pane + every active member's pane, print, exit
 ```
 
-The loop form takes `--interval N` (the Director wake interval in seconds; omitted → `CAFLEET_MONITOR_WAKE_INTERVAL`, default `600`; `0` disables the wake) and `--tick N` (scan cadence, default `5`). It prints `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` immediately after claiming the runtime row — the line the Director confirms before its first `member create`.
+The loop form takes `--interval N` (the wake interval in seconds; omitted → `CAFLEET_MONITOR_WAKE_INTERVAL`, default `600`; `0` disables the wake) and `--tick N` (scan cadence, default `5`). It prints `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` immediately after claiming the runtime row — the line the monitor member confirms before sending its `monitor live` gate signal to the Director.
 
 `cafleet monitor scan` is the fleet-wide read — flags, output shape, and gate semantics in [`reference/director.md`](director.md) § *Fleet Scan*.
 
 `cafleet member capture <target-member-id>` is the targeted single-pane read (a pending-placement target is a hard error) — flags and gate semantics in [`reference/director.md`](director.md) § *Member Capture*.
 
-`cafleet member ping` is a Director write primitive. Against a pending-placement member it skips the keystroke and exits 0 — the member polls its inbox on spawn — with the stable `skipped` JSON key on both success paths.
+`cafleet member ping` is a write primitive of the Director and the monitor member. Against a pending-placement member it skips the keystroke and exits 0 — the member polls its inbox on spawn — with the stable `skipped` JSON key on both success paths.
 
 ## Deregister
 
