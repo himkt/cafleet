@@ -26,9 +26,8 @@ schema.
 
 The schema is managed by a **chain of SQL migrations embedded in the binary**;
 the applied versions are recorded in the `refinery_schema_history` table.
-Operators run
-`cafleet setup` (schema-only: `cafleet setup --skip claude --skip codex
---skip opencode`) once before starting the server. Existing data (message
+Operators run plain `cafleet setup` once before starting the server — it is
+the migrations-apply path. Existing data (message
 history included) is preserved, so the command is idempotent and safe to
 re-run after every upgrade.
 
@@ -44,15 +43,17 @@ Without the schema, the first request fails with
 
 ## Assets-install recording
 
-The `asset_installs` table records, per
-coding agent, the CLI version that last installed the skills and preset
+The `asset_installs` table records, per coding agent and install path, the
+CLI version that last installed the skills and preset
 (where one exists) there — **not** a schema version. The assets
-half of `cafleet setup`
-upserts one row per target agent after that agent's install succeeds. Every fleet-scoped command (`fleet *`,
-`member *`, `message *`, `monitor *`) checks the recorded rows before running
-and hard-errors when no install is recorded or when any recorded version
-differs from the running CLI version — so the assets can never silently go
-stale after a CLI upgrade. `cafleet doctor` reports the per-agent detail. See
+half of `cafleet setup` upserts one row per installed agent, keyed on the
+agent's resolved config path. Every fleet-scoped command (`fleet *`,
+`member *`, `message *`, `monitor *`) checks each agent's row at its
+currently-resolved path before running and hard-errors when no agent has a
+row at its resolved path or when a row at a resolved path differs from the
+running CLI version — so the assets can never silently go stale after a CLI
+upgrade; records at other paths never block a command.
+`cafleet doctor` reports the per-agent detail. See
 [data model](../spec/data-model.md) for the table schema and
 [CLI options](../spec/cli-options.md) for the guard's error strings.
 

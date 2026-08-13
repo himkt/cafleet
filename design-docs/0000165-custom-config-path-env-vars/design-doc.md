@@ -1,7 +1,7 @@
 # Custom Config Paths: Env-Var Resolution, Path-Aware Install Records, Setup Selector, and Doctor Redesign
 
 **Status**: Approved
-**Progress**: 0/24 tasks complete
+**Progress**: 6/24 tasks complete
 **Last Updated**: 2026-08-12
 
 ## Overview
@@ -365,12 +365,12 @@ No `SKILL.md` names an install path, and the one skills-tree mention — the ope
 
 ### Step 1: Documentation
 
-- [ ] Update `docs/docs/spec/cli-options.md` per the documentation-deltas table (setup, stale-assets guard, doctor, member create) <!-- completed: -->
-- [ ] Update `docs/docs/spec/data-model.md`, `docs/docs/spec/coding-agent-backends.md`, `docs/docs/spec/multiplexer-backends.md`, `docs/docs/quickstart.md` <!-- completed: -->
-- [ ] Update `docs/docs/concepts/storage.md`, `docs/docs/concepts/overview.md`, `docs/docs/contributing.md` <!-- completed: -->
-- [ ] Update `SPEC.md` §5.2, §6.3, §6.7, §8, and the compliance checklist <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/cli.md` and `skills/cafleet/reference/supervision.md` (broadened doctor gate) <!-- completed: -->
-- [ ] Update `.claude/rules/database-migrations.md` (plain `cafleet setup` as the apply path) <!-- completed: -->
+- [x] Update `docs/docs/spec/cli-options.md` per the documentation-deltas table (setup, stale-assets guard, doctor, member create) <!-- completed: 2026-08-13T07:58 -->
+- [x] Update `docs/docs/spec/data-model.md`, `docs/docs/spec/coding-agent-backends.md`, `docs/docs/spec/multiplexer-backends.md`, `docs/docs/quickstart.md` <!-- completed: 2026-08-13T08:01 -->
+- [x] Update `docs/docs/concepts/storage.md`, `docs/docs/concepts/overview.md`, `docs/docs/contributing.md` <!-- completed: 2026-08-13T08:03 -->
+- [x] Update `SPEC.md` §5.2, §6.3, §6.7, §8, and the compliance checklist <!-- completed: 2026-08-13T08:12 -->
+- [x] Update `skills/cafleet/reference/cli.md` and `skills/cafleet/reference/supervision.md` (broadened doctor gate) <!-- completed: 2026-08-13T08:15 -->
+- [x] Update `.claude/rules/database-migrations.md` (plain `cafleet setup` as the apply path) <!-- completed: 2026-08-13T08:10 -->
 
 ### Step 2: Migration
 
