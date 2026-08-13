@@ -1,7 +1,7 @@
 # Custom Config Paths: Env-Var Resolution, Path-Aware Install Records, Setup Selector, and Doctor Redesign
 
 **Status**: Approved
-**Progress**: 21/24 tasks complete
+**Progress**: 24/24 tasks complete
 **Last Updated**: 2026-08-12
 
 ## Overview
@@ -407,9 +407,9 @@ No `SKILL.md` names an install path, and the one skills-tree mention — the ope
 
 ### Step 8: Verification
 
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format` all pass <!-- completed: -->
-- [ ] `rg -- --skip` over docs, skills, rules, source, and tests returns no setup-flag mentions <!-- completed: -->
-- [ ] Confirm the supervision gate doc matches the shipped exit semantics and the docs build renders the new tables intact <!-- completed: -->
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:format` all pass <!-- completed: 2026-08-13T09:35 -->
+- [x] `rg -- --skip` over docs, skills, rules, source, and tests returns no setup-flag mentions <!-- completed: 2026-08-13T09:35 -->
+- [x] Confirm the supervision gate doc matches the shipped exit semantics and the docs build renders the new tables intact <!-- completed: 2026-08-13T09:35 -->
 
 ---
 
