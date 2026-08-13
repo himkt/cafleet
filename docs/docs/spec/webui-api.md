@@ -83,14 +83,15 @@ Returns the selected fleet's roster via `list_roster(include_message_holders=Tru
 }
 ```
 
-**`kind` values** — the unified 2-value vocabulary:
+**`kind` values** — the unified 3-value vocabulary:
 
 | Value | Meaning |
 |---|---|
 | `"director"` | The fleet's root Director (`member_id == fleets.director_member_id`). Exactly one per fleet. |
+| `"monitor"` | The fleet's monitor member — its `member_card_json` carries the `$.cafleet.kind = 'monitor'` marker. At most one active per fleet. |
 | `"member"` | Any other member. |
 
-The discriminator is derived at read time — the fleets join supplies "is this the root Director"; there is no dedicated column.
+The discriminator is derived at read time — the fleets join supplies "is this the root Director" and the member-card marker supplies "is this the monitor member"; there is no dedicated column (see [Data model](data-model.md)).
 
 ### GET /api/monitor — Fleet Monitor Runtime
 
@@ -127,9 +128,11 @@ page show a "monitor running / stopped" indicator. See
 }
 ```
 
-Each `members` element carries the member's count of `input_required` unicast
-deliveries (`pending_count`) and the timestamp and age of the oldest one
-(`null` when there is none), ordered by `member_id` ascending.
+The `members` array is the wake roster: every active placed member excluding
+the Director and the monitor member, ordered by `member_id` ascending. Each
+element carries the member's count of `input_required` unicast deliveries
+(`pending_count`) and the timestamp and age of the oldest one (`null` when
+there is none).
 
 When no monitor is running — no runtime row, or a stale or cleared heartbeat —
 the runtime fields take these values:
@@ -146,14 +149,15 @@ the runtime fields take these values:
 | `tick_seconds` | `null` | **preserved** — the cadence the monitor last ran at |
 | `wake_interval_seconds` | `null` | **preserved** — the wake interval the monitor last ran at; `null` when the row predates the column and was never re-stamped |
 
-Launching the loop is CLI-only (`cafleet monitor`, run by the Director
+Launching the loop is CLI-only (`cafleet monitor`, run by the monitor member
 as a background task in its own pane); there is no `POST`/`DELETE` counterpart
-here and no CLI stop command — the Director stops the background task,
-and a still-running loop self-terminates after `fleet delete`.
+here and no CLI stop command — deleting the monitor member kills the pane
+hosting the loop, and a still-running loop self-terminates after
+`fleet delete`.
 
 ### PATCH /api/monitor — Update the Wake Interval {#patch-api-monitor}
 
-Updates the fleet's Director wake interval. The running loop re-reads the
+Updates the fleet's wake interval. The running loop re-reads the
 stored value on every tick, so the edit changes the cadence within one scan
 tick; the next `cafleet monitor` start re-stamps the interval from the CLI/env
 resolution. See

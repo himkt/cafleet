@@ -1,8 +1,8 @@
 # Reintroduce the monitor member — a cheap-model watcher absorbs the periodic tick
 
 **Status**: Approved
-**Progress**: 0/49 tasks complete
-**Last Updated**: 2026-08-12
+**Progress**: 10/49 tasks complete
+**Last Updated**: 2026-08-13
 
 ## Overview
 
@@ -486,16 +486,16 @@ restart. Mid-run monitor death: the Director re-spawns with `--role monitor`
 
 ### Step 1: Concepts and user-facing docs
 
-- [ ] Rewrite `docs/docs/concepts/monitoring.md`: the monitor member as wake recipient, the on-wake classification + two-wake quiet confirmation, the fixed-ping exception and the stalled-Director ping condition, the `monitor live` gate, the § S4 payload, the reduced operator-typing hazard, lifecycle per § S7 <!-- completed: -->
-- [ ] Update `docs/docs/concepts/overview.md`: the Core terms row for `monitor`, the member-kinds sentence (three-value union), § Monitoring, and the `member create` flag mention <!-- completed: -->
-- [ ] Update `docs/docs/concepts/model-selection.md`: restore the monitor row in the policy-exception table and the "monitor and reviewer are policy exceptions on every team spawn" wording <!-- completed: -->
-- [ ] Update `docs/docs/spec/cli-options.md`: the `--role` flag row (sole value `monitor`), both § S3 guard error strings, the `member ping` ownership wording <!-- completed: -->
-- [ ] Update `docs/docs/spec/data-model.md`: document the `$.cafleet.kind` member-card marker and the three-value derived kind <!-- completed: -->
-- [ ] Update `docs/docs/spec/webui-api.md`: the roster `kind` union, the `GET /api/monitor` members-array exclusion of the monitor member <!-- completed: -->
-- [ ] Update `docs/docs/spec/multiplexer-backends.md`: the § S4 monitor-facing wake payload and recipient (§ *The Director wake and the fixed direct ping* heading retargets) <!-- completed: -->
-- [ ] Update `docs/docs/how-to/mixed-backend-team.md`: add the monitor-first spawn step to the walkthrough <!-- completed: -->
-- [ ] Run the `/update-readme` skill to sync `README.md` and `SPEC.md` <!-- completed: -->
-- [ ] Hand-verify `SPEC.md` against §§ S1–S8 at: §5.4 *Member kind discriminator*; §6.2 *Broker*; §6.3 *CLI* (`member create`, `monitor` group); §6.5 *Multiplexer* (wake payload); §6.6 *Monitor heartbeat loop*; §6.8 *WebUI + Config*; §10 *CLI command checklist* <!-- completed: -->
+- [x] Rewrite `docs/docs/concepts/monitoring.md`: the monitor member as wake recipient, the on-wake classification + two-wake quiet confirmation, the fixed-ping exception and the stalled-Director ping condition, the `monitor live` gate, the § S4 payload, the reduced operator-typing hazard, lifecycle per § S7 <!-- completed: 2026-08-13T09:52 -->
+- [x] Update `docs/docs/concepts/overview.md`: the Core terms row for `monitor`, the member-kinds sentence (three-value union), § Monitoring, and the `member create` flag mention <!-- completed: 2026-08-13T09:54 -->
+- [x] Update `docs/docs/concepts/model-selection.md`: restore the monitor row in the policy-exception table and the "monitor and reviewer are policy exceptions on every team spawn" wording <!-- completed: 2026-08-13T09:55 -->
+- [x] Update `docs/docs/spec/cli-options.md`: the `--role` flag row (sole value `monitor`), both § S3 guard error strings, the `member ping` ownership wording <!-- completed: 2026-08-13T09:58 -->
+- [x] Update `docs/docs/spec/data-model.md`: document the `$.cafleet.kind` member-card marker and the three-value derived kind <!-- completed: 2026-08-13T09:59 -->
+- [x] Update `docs/docs/spec/webui-api.md`: the roster `kind` union, the `GET /api/monitor` members-array exclusion of the monitor member <!-- completed: 2026-08-13T10:01 -->
+- [x] Update `docs/docs/spec/multiplexer-backends.md`: the § S4 monitor-facing wake payload and recipient (§ *The Director wake and the fixed direct ping* heading retargets) <!-- completed: 2026-08-13T10:03 -->
+- [x] Update `docs/docs/how-to/mixed-backend-team.md`: add the monitor-first spawn step to the walkthrough <!-- completed: 2026-08-13T10:06 -->
+- [x] Run the `/update-readme` skill to sync `README.md` and `SPEC.md` <!-- completed: 2026-08-13T10:24 -->
+- [x] Hand-verify `SPEC.md` against §§ S1–S8 at: §5.4 *Member kind discriminator*; §6.2 *Broker*; §6.3 *CLI* (`member create`, `monitor` group); §6.5 *Multiplexer* (wake payload); §6.6 *Monitor heartbeat loop*; §6.8 *WebUI + Config*; §10 *CLI command checklist* <!-- completed: 2026-08-13T10:35 -->
 
 ### Step 2: Model list and overlays
 

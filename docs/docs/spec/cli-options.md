@@ -60,7 +60,7 @@ Every `CAFLEET_`-prefixed variable cafleet reads:
 | `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Text-mode body truncation on `message {send,poll,ack,show}`, and the broker's inline-preview truncation; `--json` output is never truncated | — |
 | `CAFLEET_BROKER_HOST` | `broker_host` | `127.0.0.1` | The `cafleet server` bind address | `--host` |
 | `CAFLEET_BROKER_PORT` | `broker_port` | `8000` | The `cafleet server` bind port | `--port` |
-| `CAFLEET_MONITOR_WAKE_INTERVAL` | `monitor_wake_interval` | `600` | The `cafleet monitor` Director wake interval in seconds; `0` disables the wake while the loop keeps heartbeating. A non-integer value fails loudly | `--interval` |
+| `CAFLEET_MONITOR_WAKE_INTERVAL` | `monitor_wake_interval` | `600` | The `cafleet monitor` wake interval in seconds; `0` disables the wake while the loop keeps heartbeating. A non-integer value fails loudly | `--interval` |
 
 A flag wins over its environment variable, and the environment variable wins
 over the hardcoded default.
@@ -557,6 +557,7 @@ one root Director by construction, so no override flag exists.
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; when omitted, the member — every role — inherits the spawning Director's placement backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. |
 | `--model` | no | Model forwarded to the backend binary's own `--model` flag. The opencode backend additionally requires `<provider-id>/<model-id>`; per-backend formats and create-time validation are in [Model selection](coding-agent-backends.md#model-selection). |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary, validated per backend before any side effect. Accepted levels, forwarding forms, and rejection strings are in [Reasoning effort](coding-agent-backends.md#reasoning-effort). |
+| `--role` | no | The sole accepted value is `monitor` — registers the member as the fleet's monitor member (see [Monitoring](../concepts/monitoring.md)); any other value is the parser's invalid-value error (exit 2). A fleet holds at most one active monitor member, and an ordinary `member create` requires one — both guards are in [Error Messages](#error-messages). |
 | positional `PROMPT` | one of | Inline spawn prompt (backend-neutral template). Exactly one of `PROMPT` / `--file`. |
 | `--file PATH` | one of | Path to a UTF-8 file whose contents are the spawn prompt (`-` = stdin). Inline prompts beyond a few KB exceed the multiplexer argv ceiling — use `--file` for long prompts. |
 | `--json` | no | Output as JSON |
@@ -693,8 +694,10 @@ something was still running.` → `Enter` into the target's pane
 (the leading `Esc` is the permission-prompt safeguard — see
 [Push notifications](multiplexer-backends.md#esc-safeguard)). The manual
 re-poke for a pane that missed the broker's automatic on-delivery
-notification; the action is wholly fixed by the command — no
-operator-controlled body — which is why `member ping` sits in
+notification, owned by the Director and the monitor member (whose fixed-ping
+exception is the one automatic use — see
+[Monitoring](../concepts/monitoring.md)); the action is wholly fixed by the
+command — no operator-controlled body — which is why `member ping` sits in
 `permissions.allow` while `member prompt` stays in `permissions.ask`.
 
 A pending placement (a placement row whose `pane_id` is not yet patched) takes
@@ -750,14 +753,14 @@ forms run behind the [stale-assets guard](#stale-assets-guard).
 `cafleet monitor FLEET_ID [--tick N] [--interval N]` takes the positional
 `FLEET_ID` subject. The conceptual model is
 canonical on the [Monitoring](../concepts/monitoring.md) concepts page; there
-is no stop subcommand — the Director stops the background task hosting the
-loop, and a still-running loop self-terminates on its next tick after
+is no stop subcommand — deleting the monitor member kills the pane hosting
+the loop, and a still-running loop self-terminates on its next tick after
 `fleet delete`.
 
 | Flag | Required | Notes |
 |---|---|---|
 | `--tick` | no | The scan-tick cadence in seconds (an integer ≥ 1, default **5**). The tick is the floor on interval precision — see [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision). |
-| `--interval` | no | The Director wake interval in seconds (an integer ≥ 0); `0` disables the wake while the loop keeps heartbeating. When omitted, falls back to `CAFLEET_MONITOR_WAKE_INTERVAL` (default **600**). |
+| `--interval` | no | The wake interval in seconds (an integer ≥ 0); `0` disables the wake while the loop keeps heartbeating. When omitted, falls back to `CAFLEET_MONITOR_WAKE_INTERVAL` (default **600**). |
 
 The startup-resolved interval (`--interval` > `CAFLEET_MONITOR_WAKE_INTERVAL`
 > 600) is stamped into the fleet's `monitor_runtime` row at each start and
@@ -765,14 +768,14 @@ re-read on every tick, so a
 [`PATCH /api/monitor`](webui-api.md#patch-api-monitor)
 edit changes the running loop's cadence within one tick.
 
-Runs the loop **in-process** (the Director launches it as a background task
-in its own pane; the loop blocks the task and writes to its stdout — one
-`<iso-ts> tick -> wake director <director-member-id> (<N> members)` line per
+Runs the loop **in-process** (the monitor member launches it as a background
+task in its own pane; the loop blocks the task and writes to its stdout — one
+`<iso-ts> tick -> wake monitor <monitor-member-id> (<N> members)` line per
 delivered wake). On startup it runs the multiplexer precondition guard,
 atomically claims the single-instance `monitor_runtime` row, installs
 `SIGTERM`/`SIGINT` handlers (a clean stop clears the row), and — immediately
 after the successful claim, before the first tick — prints the startup line
-the Director confirms before its first `member create`:
+the monitor member confirms before sending `monitor live` to the Director:
 
 ```
 monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)
@@ -886,6 +889,8 @@ failed capture. `lines` always echoes the requested depth.
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 | — |
 | `member create` | The fleet row has no `director_member_id` recorded | `Error: fleet <fleet-id> has no root Director recorded; re-create the fleet with 'cafleet fleet create'.` | 1 | Mid-bootstrap corruption |
 | `member create` | With a placement, when the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 | The `register_member` invariant guard |
+| `member create` | `--role monitor` when the fleet already has an active monitor member | `Error: fleet <fleet-id> already has an active monitor member (member <member-id>)` | 1 | The one-per-fleet guard; evaluated before the monitor-first guard, before any registration or pane effect |
+| `member create` | Without `--role` when the fleet has no active monitor member | `Error: fleet <fleet-id> has no active monitor member; spawn one with --role monitor first` | 1 | The monitor-first placement guard; before any registration or pane effect |
 | `member delete` | Against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` | 1 | — |
 | `message poll` | An unknown or inactive `MEMBER_ID` | `Error: Member <member-id> not found` | 1 | — |
 | `message ack` / `message show` | An unknown `MESSAGE_ID` | `Error: Message <message-id> not found` | 1 | — |
