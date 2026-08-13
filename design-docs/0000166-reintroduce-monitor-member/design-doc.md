@@ -1,7 +1,7 @@
 # Reintroduce the monitor member — a cheap-model watcher absorbs the periodic tick
 
 **Status**: Approved
-**Progress**: 10/49 tasks complete
+**Progress**: 14/49 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -499,10 +499,12 @@ restart. Mid-run monitor death: the Director re-spawns with `--role monitor`
 
 ### Step 2: Model list and overlays
 
-- [ ] `skills/cafleet/reference/model-list.md`: § *Reviewer defaults* → § *Monitor and reviewer defaults* with the § S6 three-column table <!-- completed: -->
-- [ ] `skills/cafleet/reference/coding-agent-overlays.md`: add the `{monitor_model}` row to all four substitution tables; retitle the Template's `{reviewer_model}` row reference to *Monitor and reviewer defaults*; replace each § *Worked resolution* with the monitor-member-side launch; retarget the capture-cues intro + Note bindings to both consumers; name both cross-section readers in the file intro <!-- completed: -->
-- [ ] `.claude/rules/coding-agent-overlay.md`: add `{monitor_model}` to the model-policy paragraph, retitle its *Reviewer defaults* mirror sentence to *Monitor and reviewer defaults*, and name the monitor member as a cross-section reader <!-- completed: -->
-- [ ] `.claude/skills/cafleet-model-list-refresh/SKILL.md`: restore the monitor-model refresh obligation <!-- completed: -->
+- [x] `skills/cafleet/reference/model-list.md`: § *Reviewer defaults* → § *Monitor and reviewer defaults* with the § S6 three-column table <!-- completed: 2026-08-13T10:12 -->
+- [x] `skills/cafleet/reference/coding-agent-overlays.md`: add the `{monitor_model}` row to all four substitution tables; retitle the Template's `{reviewer_model}` row reference to *Monitor and reviewer defaults*; replace each § *Worked resolution* with the monitor-member-side launch; retarget the capture-cues intro + Note bindings to both consumers; name both cross-section readers in the file intro <!-- completed: 2026-08-13T10:16 -->
+- [x] `.claude/rules/coding-agent-overlay.md`: add `{monitor_model}` to the model-policy paragraph, retitle its *Reviewer defaults* mirror sentence to *Monitor and reviewer defaults*, and name the monitor member as a cross-section reader <!-- completed: 2026-08-13T10:15 -->
+- [x] `.claude/skills/cafleet-model-list-refresh/SKILL.md`: restore the monitor-model refresh obligation <!-- completed: 2026-08-13T10:15 -->
+
+COMMENT(director): standing arbitration for the `.claude/**` harness denial — the Director applies all `.claude/**` edits itself (done above for Step 2 tasks 3–4). For Step 3's `.claude/rules/bash-tool.md` and Step 4's `.claude/skills/clean-docs/**` + `.claude/skills/skill-author/SKILL.md`: implement every non-`.claude` task, then send `blocked` with the exact pending edits in a `COMMENT(programmer)` marker at that step, as done for Step 2. Remove this marker when Step 4 completes.
 
 ### Step 3: The `cafleet` skill
 
