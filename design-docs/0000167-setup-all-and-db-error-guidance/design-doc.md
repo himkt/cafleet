@@ -1,7 +1,7 @@
 # One-Command Setup and Database-Error Guidance
 
 **Status**: Approved
-**Progress**: 18/24 tasks complete
+**Progress**: 24/24 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -10,11 +10,11 @@ Make `cafleet setup` a true one-command onboarding: plain `cafleet setup` instal
 
 ## Success Criteria
 
-- [ ] On a fresh machine, plain `cafleet setup` migrates the database AND installs assets for `claude`, `codex`, and `opencode` — no second command needed.
-- [ ] `cafleet setup --coding-agent claude codex` (space-delimited) installs exactly the named agents; the repeated-flag form keeps working.
-- [ ] Running any fleet-scoped command, `monitor`, or `server` against a missing or schema-outdated database fails with an error that names `cafleet setup` (or "upgrade cafleet" for a newer-than-CLI schema) — never a raw SQLite error.
-- [ ] `cafleet doctor` against a pre-head-schema database completes its three-section render (exit 1 with the database issue) instead of aborting with `database error: no such column: path …`.
-- [ ] `mise //cafleet:test` and `mise //cafleet:lint` pass; SPEC.md, docs, and skills reflect the new contract with no drift.
+- [x] On a fresh machine, plain `cafleet setup` migrates the database AND installs assets for `claude`, `codex`, and `opencode` — no second command needed.
+- [x] `cafleet setup --coding-agent claude codex` (space-delimited) installs exactly the named agents; the repeated-flag form keeps working.
+- [x] Running any fleet-scoped command, `monitor`, or `server` against a missing or schema-outdated database fails with an error that names `cafleet setup` (or "upgrade cafleet" for a newer-than-CLI schema) — never a raw SQLite error.
+- [x] `cafleet doctor` against a pre-head-schema database completes its three-section render (exit 1 with the database issue) instead of aborting with `database error: no such column: path …`.
+- [x] `mise //cafleet:test` and `mise //cafleet:lint` pass; SPEC.md, docs, and skills reflect the new contract with no drift.
 
 ---
 
@@ -152,9 +152,9 @@ No database migration is needed; the schema is untouched.
 
 ### Step 6: Verification
 
-- [ ] `mise //cafleet:test` passes <!-- completed: -->
-- [ ] `mise //cafleet:lint` passes <!-- completed: -->
-- [ ] `mise //cafleet:format` clean <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` passes <!-- completed: -->
-- [ ] Grep sweep: no remaining mention of the removed guidance/hint lines anywhere in the repo <!-- completed: -->
-- [ ] `mise //cafleet:install`, then a manual smoke of `cafleet doctor` against a stale fixture DB via a teammate with run permission (per the authorization-scope guard) <!-- completed: -->
+- [x] `mise //cafleet:test` passes <!-- completed: 2026-08-13T22:09 -->
+- [x] `mise //cafleet:lint` passes <!-- completed: 2026-08-13T22:10 -->
+- [x] `mise //cafleet:format` clean <!-- completed: 2026-08-13T22:10 -->
+- [x] `mise //cafleet:typecheck` passes <!-- completed: 2026-08-13T22:10 -->
+- [x] Grep sweep: no remaining mention of the removed guidance/hint lines anywhere in the repo <!-- completed: 2026-08-13T22:11 -->
+- [x] `mise //cafleet:install`, then a manual smoke of `cafleet doctor` against a stale fixture DB via a teammate with run permission (per the authorization-scope guard) <!-- completed: 2026-08-13T22:30 -->
