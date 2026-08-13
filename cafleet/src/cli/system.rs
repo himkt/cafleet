@@ -107,6 +107,10 @@ impl SpawnProbe for SystemProbe {
     fn home_dir(&self) -> PathBuf {
         PathBuf::from(std::env::var("HOME").expect("HOME is set"))
     }
+
+    fn env_var(&self, name: &str) -> Option<String> {
+        std::env::var(name).ok()
+    }
 }
 
 /// Read stdin to EOF as raw bytes.

@@ -11,11 +11,13 @@ pub mod test_support;
 
 use crate::error::CafleetError;
 
-/// The spawn-precondition seam: PATH lookups and the home directory, injected
-/// so preconditions are testable against a temp HOME (SPEC §9).
+/// The spawn-precondition seam: PATH lookups, the home directory, and the
+/// env-var read, injected so preconditions are testable against a temp HOME
+/// and a fake environment (SPEC §9).
 pub trait SpawnProbe {
     fn binary_on_path(&self, name: &str) -> bool;
     fn home_dir(&self) -> std::path::PathBuf;
+    fn env_var(&self, name: &str) -> Option<String>;
 }
 
 pub trait CodingAgent {

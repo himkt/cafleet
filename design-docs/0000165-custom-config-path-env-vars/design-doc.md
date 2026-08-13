@@ -1,7 +1,7 @@
 # Custom Config Paths: Env-Var Resolution, Path-Aware Install Records, Setup Selector, and Doctor Redesign
 
 **Status**: Approved
-**Progress**: 13/24 tasks complete
+**Progress**: 18/24 tasks complete
 **Last Updated**: 2026-08-12
 
 ## Overview
@@ -390,14 +390,14 @@ No `SKILL.md` names an install path, and the one skills-tree mention — the ope
 
 ### Step 5: Setup selector
 
-- [ ] Replace `--skip` with repeatable `--coding-agent` in `cli/setup.rs`; implement the selector/no-flag semantics, the guidance line, and the hint lines; route `assets.rs` `skills_dir`/`preset` through `config_dir` and record `(agent, path)` rows <!-- completed: -->
-- [ ] Tests: explicit selector installs only named agents at resolved paths; no-flag refreshes only recorded-at-resolved-path agents; empty table prints the guidance line and exits 0; records-elsewhere prints the hint line; invalid variable fails the assets half with the pinned error; opencode skills stay at `~/.config/opencode/skills` even when `OPENCODE_CONFIG_DIR` is set <!-- completed: -->
-- [ ] Remove every remaining `--skip` mention from tests and helpers <!-- completed: -->
+- [x] Replace `--skip` with repeatable `--coding-agent` in `cli/setup.rs`; implement the selector/no-flag semantics, the guidance line, and the hint lines; route `assets.rs` `skills_dir`/`preset` through `config_dir` and record `(agent, path)` rows <!-- completed: 2026-08-13T08:57 -->
+- [x] Tests: explicit selector installs only named agents at resolved paths; no-flag refreshes only recorded-at-resolved-path agents; empty table prints the guidance line and exits 0; records-elsewhere prints the hint line; invalid variable fails the assets half with the pinned error; opencode skills stay at `~/.config/opencode/skills` even when `OPENCODE_CONFIG_DIR` is set <!-- completed: 2026-08-13T08:57 -->
+- [x] Remove every remaining `--skip` mention from tests and helpers <!-- completed: 2026-08-13T08:57 -->
 
 ### Step 6: opencode spawn precondition
 
-- [ ] Add `SpawnProbe::env_var`; implement on `SystemProbe` and `FakeProbe` <!-- completed: -->
-- [ ] Resolve the preset path in `opencode::ensure_available` via `opencode_preset_base`; tests for the custom-dir check, the default-dir check, and the invalid-variable error <!-- completed: -->
+- [x] Add `SpawnProbe::env_var`; implement on `SystemProbe` and `FakeProbe` <!-- completed: 2026-08-13T09:06 -->
+- [x] Resolve the preset path in `opencode::ensure_available` via `opencode_preset_base`; tests for the custom-dir check, the default-dir check, and the invalid-variable error <!-- completed: 2026-08-13T09:06 -->
 
 ### Step 7: Doctor
 

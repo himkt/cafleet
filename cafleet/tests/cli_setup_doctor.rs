@@ -273,8 +273,14 @@ fn no_flag_setup_refreshes_only_agents_recorded_at_their_resolved_paths() {
         ),
         "the records-elsewhere agent gets the hint line: {out}"
     );
-    assert!(!out.contains("opencode:"), "no line for a no-rows agent: {out}");
-    assert!(!cli.home.path().join(".codex").exists(), "codex installs nothing");
+    assert!(
+        !out.contains("opencode:"),
+        "no line for a no-rows agent: {out}"
+    );
+    assert!(
+        !cli.home.path().join(".codex").exists(),
+        "codex installs nothing"
+    );
     assert_eq!(
         cli.asset_rows(),
         vec![
@@ -297,8 +303,18 @@ fn no_flag_setup_refreshes_only_agents_recorded_at_their_resolved_paths() {
 fn the_hint_names_the_most_recent_superseded_row() {
     let cli = Cli::new();
     cli.migrate();
-    cli.seed_asset_row_dated("codex", "/a-old", "0.1.0", "2026-07-01T00:00:00.000000+00:00");
-    cli.seed_asset_row_dated("codex", "/b-new", "0.1.0", "2026-08-01T00:00:00.000000+00:00");
+    cli.seed_asset_row_dated(
+        "codex",
+        "/a-old",
+        "0.1.0",
+        "2026-07-01T00:00:00.000000+00:00",
+    );
+    cli.seed_asset_row_dated(
+        "codex",
+        "/b-new",
+        "0.1.0",
+        "2026-08-01T00:00:00.000000+00:00",
+    );
     cli.seed_asset_row_dated("claude", "/t2", "0.1.0", "2026-07-01T00:00:00.000000+00:00");
     cli.seed_asset_row_dated("claude", "/t1", "0.1.0", "2026-07-01T00:00:00.000000+00:00");
     let output = cli.run(&["setup"]);
@@ -322,7 +338,9 @@ fn an_invalid_variable_fails_the_assets_half_with_the_pinned_error() {
     assert_eq!(code(&output), 1);
     let combined = format!("{}{}", stdout(&output), stderr(&output));
     assert!(
-        combined.contains("assets half failed: CODEX_HOME must be an absolute path (got 'relative/path')"),
+        combined.contains(
+            "assets half failed: CODEX_HOME must be an absolute path (got 'relative/path')"
+        ),
         "got: {combined}"
     );
     assert!(
@@ -355,7 +373,9 @@ fn no_flag_setup_fails_on_an_invalid_variable_of_a_recorded_agent() {
     assert_eq!(code(&output), 1);
     let combined = format!("{}{}", stdout(&output), stderr(&output));
     assert!(
-        combined.contains("assets half failed: CODEX_HOME must be an absolute path (got 'relative/path')"),
+        combined.contains(
+            "assets half failed: CODEX_HOME must be an absolute path (got 'relative/path')"
+        ),
         "classifying a recorded agent resolves its path: {combined}"
     );
 }

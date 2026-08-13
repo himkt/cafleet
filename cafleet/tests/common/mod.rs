@@ -194,12 +194,10 @@ impl Cli {
                  ORDER BY coding_agent, path",
             )
             .unwrap();
-        let rows = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
             .unwrap()
             .map(Result::unwrap)
-            .collect();
-        rows
+            .collect()
     }
 
     /// Migrate + record a current-version install so the stale-assets guard
