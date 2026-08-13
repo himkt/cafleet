@@ -1,6 +1,6 @@
 # Reintroduce the monitor member — a cheap-model watcher absorbs the periodic tick
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 49/49 tasks complete
 **Last Updated**: 2026-08-13
 
@@ -566,3 +566,4 @@ restart. Mid-run monitor death: the Director re-spawns with `--role monitor`
 | 2026-08-12 | Initial draft |
 | 2026-08-12 | Review round 1: pinned the on-wake classification universe; added the ping-asymmetry rationale; specified the monitor's loop-restart obligation for a mid-run loop exit; moved both spawn guards to the CLI `member create` layer (broker fixtures untouched); fixed the worked example's Director name casing; named the *Monitor and reviewer defaults* rename ripple targets; corrected the docs_sync payload-pin bullet and the SPEC §6.8 heading |
 | 2026-08-12 | Approved by the user |
+| 2026-08-13 | Implemented on feat/0000166-reintroduce-monitor-member (49/49 tasks, all Success Criteria verified, Reviewer approved round 1, PR #302); status Complete |
