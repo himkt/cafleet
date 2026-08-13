@@ -36,6 +36,7 @@ pub struct Cli {
     pub shim_dir: PathBuf,
     pub shim_log: PathBuf,
     pub fail_subcommand: Option<String>,
+    pub extra_env: Vec<(String, String)>,
 }
 
 impl Cli {
@@ -53,7 +54,14 @@ impl Cli {
             shim_dir,
             shim_log,
             fail_subcommand: None,
+            extra_env: Vec::new(),
         }
+    }
+
+    /// Set an extra environment variable (e.g. a backend config-location
+    /// variable) for every subsequent run.
+    pub fn set_env(&mut self, key: &str, value: &str) {
+        self.extra_env.push((key.to_string(), value.to_string()));
     }
 
     pub fn db_path(&self) -> PathBuf {
@@ -74,6 +82,9 @@ impl Cli {
             .env("CAFLEET_TEST_TMUX_LOG", &self.shim_log);
         if let Some(fail) = &self.fail_subcommand {
             cmd.env("CAFLEET_TEST_TMUX_FAIL", fail);
+        }
+        for (key, value) in &self.extra_env {
+            cmd.env(key, value);
         }
         if inside_tmux {
             cmd.env("TMUX", "/tmp/tmux-1000/default,123,0")
