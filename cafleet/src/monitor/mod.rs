@@ -1,7 +1,8 @@
 //! Monitor heartbeat loop (SPEC §6.6) — the pure `wake_due` check, the
 //! per-tick scan `monitor_tick` (ownership-checked heartbeat, fleet liveness,
-//! the fleet-level Director wake, the `woke`-gated ledger write), and the
-//! foreground driver. The colocated tests pin the contract.
+//! the fleet-level wake into the monitor member's pane, the `woke`-gated
+//! ledger write), and the foreground driver. The colocated tests pin the
+//! contract.
 //!
 //! Expected public API:
 //!
@@ -15,7 +16,8 @@
 //! pub trait MonitorMux {
 //!     fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError>;
 //!     fn send_wake_trigger(&self, target_pane_id: &str, fleet_id: i64,
-//!         members: &[Value]) -> Result<bool, MultiplexerError>;
+//!         members: &[Value], director: &Value)
+//!         -> Result<bool, MultiplexerError>;
 //! }
 //!
 //! pub enum TickResult { Continue, Stop }
@@ -58,7 +60,7 @@ use crate::time::{format_utc, now_utc, parse_lenient};
 pub const DEFAULT_TICK_SECONDS: i64 = 5;
 
 /// What the tick consumes from the resolved backend: pane liveness and the
-/// single Director-wake keystroke.
+/// single monitor-wake keystroke.
 pub trait MonitorMux {
     fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError>;
     fn send_wake_trigger(
@@ -66,6 +68,7 @@ pub trait MonitorMux {
         target_pane_id: &str,
         fleet_id: i64,
         members: &[Value],
+        director: &Value,
     ) -> Result<bool, MultiplexerError>;
 }
 
@@ -79,8 +82,9 @@ impl<M: Multiplexer> MonitorMux for M {
         target_pane_id: &str,
         fleet_id: i64,
         members: &[Value],
+        director: &Value,
     ) -> Result<bool, MultiplexerError> {
-        Multiplexer::send_wake_trigger(self, target_pane_id, fleet_id, members)
+        Multiplexer::send_wake_trigger(self, target_pane_id, fleet_id, members, director)
     }
 }
 
@@ -115,8 +119,8 @@ pub fn wake_due(
 
 /// One scan pass (SPEC §6.6): ownership-checked heartbeat → fleet liveness →
 /// runtime-row read (the per-tick interval re-read) → wake-interval gate →
-/// Director-pane resolution → one fleet-level wake → the `woke`-gated ledger
-/// write and heartbeat echo.
+/// monitor-pane resolution → one fleet-level wake into the monitor member's
+/// pane → the `woke`-gated ledger write and heartbeat echo.
 pub fn monitor_tick(
     conn: &mut Connection,
     mux: &dyn MonitorMux,
@@ -137,7 +141,6 @@ pub fn monitor_tick(
     if !live {
         return Ok(TickResult::Stop);
     }
-    let fleet = fleet.expect("the live fleet row exists");
 
     let runtime = broker::read_monitor_runtime(conn, fleet_id)?
         .expect("the heartbeat just matched this fleet's runtime row");
@@ -156,32 +159,34 @@ pub fn monitor_tick(
         return Ok(TickResult::Continue);
     }
 
-    // A Director with no pane, or a pane absent from the live set, skips the
-    // wake without stamping — the fleet stays due for the next tick.
-    let director_id = fleet["director_member_id"]
-        .as_i64()
-        .expect("a live fleet records its Director");
-    let director = broker::get_member(conn, director_id, fleet_id)?;
-    let director_pane = director
+    // No active monitor member, a monitor with no pane, or a pane absent
+    // from the live set skips the wake without stamping — the fleet stays
+    // due for the next tick.
+    let Some(monitor_id) = broker::active_monitor_member_id(conn, fleet_id)? else {
+        return Ok(TickResult::Continue);
+    };
+    let monitor = broker::get_member(conn, monitor_id, fleet_id)?;
+    let monitor_pane = monitor
         .as_ref()
         .and_then(|member| member["placement"]["mux_pane_id"].as_str());
-    let Some(director_pane) = director_pane else {
+    let Some(monitor_pane) = monitor_pane else {
         return Ok(TickResult::Continue);
     };
     let live_panes = mux.list_pane_ids().map_err(mux_err)?;
-    if !live_panes.contains(director_pane) {
+    if !live_panes.contains(monitor_pane) {
         return Ok(TickResult::Continue);
     }
 
     let roster = broker::list_fleet_wake_targets(conn, fleet_id)?;
+    let director = broker::fleet_wake_director(conn, fleet_id)?;
     let woke = mux
-        .send_wake_trigger(director_pane, fleet_id, &roster)
+        .send_wake_trigger(monitor_pane, fleet_id, &roster, &director)
         .map_err(mux_err)?;
     if woke {
         broker::record_monitor_wake(conn, fleet_id, &iso)?;
         writeln!(
             out,
-            "{iso} tick -> wake director {director_id} ({} members)",
+            "{iso} tick -> wake monitor {monitor_id} ({} members)",
             roster.len()
         )
         .map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))?;

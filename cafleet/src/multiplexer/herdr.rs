@@ -367,15 +367,16 @@ impl HerdrMultiplexer {
         })
     }
 
-    /// Esc first: the wake targets the Director's own pane, which can be
-    /// parked on a permission prompt.
+    /// Esc first: the wake targets the monitor member's own pane, which can
+    /// be parked on a permission prompt.
     pub fn send_wake_trigger(
         &self,
         target_pane_id: &str,
         fleet_id: i64,
         members: &[Value],
+        director: &Value,
     ) -> Result<bool, MultiplexerError> {
-        let payload = build_wake_payload(fleet_id, members)?;
+        let payload = build_wake_payload(fleet_id, members, director)?;
         Ok(self.best_effort(|| {
             self.send_esc(target_pane_id)?;
             self.run(

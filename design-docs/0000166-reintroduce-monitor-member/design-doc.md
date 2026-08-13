@@ -1,7 +1,7 @@
 # Reintroduce the monitor member — a cheap-model watcher absorbs the periodic tick
 
 **Status**: Approved
-**Progress**: 32/49 tasks complete
+**Progress**: 38/49 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -533,12 +533,12 @@ restart. Mid-run monitor death: the Director re-spawns with `--role monitor`
 
 ### Step 6: Rust — the tick, the multiplexer, the CLI
 
-- [ ] `cafleet/src/multiplexer/mod.rs`: `build_wake_payload(fleet_id, members, director)` per § S4; `send_wake_trigger` trait signature gains `director` <!-- completed: -->
-- [ ] `cafleet/src/multiplexer/tmux.rs` and `herdr.rs`: thread the new signature; keystroke sequence unchanged <!-- completed: -->
-- [ ] `cafleet/src/monitor/mod.rs`: retarget `monitor_tick` steps 5–8 per § S5 (monitor-pane resolution, roster + director descriptor, new echo line); narrow nothing else <!-- completed: -->
-- [ ] `cafleet/src/cli/member.rs`: add `--role` (sole value `monitor`), implement both § S3 guards before any registration or pane effect, thread `monitor` into `register_member` <!-- completed: -->
-- [ ] `cafleet/src/output/formatters.rs`: the roster fixture regains the `monitor` kind row <!-- completed: -->
-- [ ] Colocated tests in all six files per § S9 <!-- completed: -->
+- [x] `cafleet/src/multiplexer/mod.rs`: `build_wake_payload(fleet_id, members, director)` per § S4; `send_wake_trigger` trait signature gains `director` <!-- completed: 2026-08-13T11:35 -->
+- [x] `cafleet/src/multiplexer/tmux.rs` and `herdr.rs`: thread the new signature; keystroke sequence unchanged <!-- completed: 2026-08-13T11:35 -->
+- [x] `cafleet/src/monitor/mod.rs`: retarget `monitor_tick` steps 5–8 per § S5 (monitor-pane resolution, roster + director descriptor, new echo line); narrow nothing else <!-- completed: 2026-08-13T11:35 -->
+- [x] `cafleet/src/cli/member.rs`: add `--role` (sole value `monitor`), implement both § S3 guards before any registration or pane effect, thread `monitor` into `register_member` <!-- completed: 2026-08-13T11:35 -->
+- [x] `cafleet/src/output/formatters.rs`: the roster fixture regains the `monitor` kind row <!-- completed: 2026-08-13T11:35 -->
+- [x] Colocated tests in all six files per § S9 <!-- completed: 2026-08-13T11:35 -->
 
 ### Step 7: HTTP API and admin WebUI
 

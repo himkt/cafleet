@@ -99,45 +99,56 @@ pub fn sanitize_wake_field(value: &str) -> String {
         .replace('|', "│")
 }
 
-/// Build the byte-identical tmux/herdr pure-trigger wake payload (SPEC §6.5).
-/// A roster member with an unregistered coding agent aborts the wake.
-pub fn build_wake_payload(fleet_id: i64, members: &[Value]) -> Result<String, MultiplexerError> {
-    for member in members {
-        let agent = member["coding_agent"].as_str().unwrap_or("");
-        if coding_agent(agent).is_none() {
-            return Err(MultiplexerError::new(format!(
-                "member {} has invalid coding_agent '{agent}'",
-                member["member_id"]
-            )));
-        }
+/// Render one wake descriptor — a roster entry or the Director — in the
+/// shared field grammar; an unregistered coding agent aborts the wake.
+fn wake_entry(member: &Value) -> Result<String, MultiplexerError> {
+    let agent = member["coding_agent"].as_str().unwrap_or("");
+    if coding_agent(agent).is_none() {
+        return Err(MultiplexerError::new(format!(
+            "member {} has invalid coding_agent '{agent}'",
+            member["member_id"]
+        )));
     }
-    let clause = if members.is_empty() {
+    let name = member["name"].as_str().unwrap_or("");
+    Ok(format!(
+        "{} ({}; coding_agent={agent}; unacked={})",
+        member["member_id"],
+        sanitize_wake_field(name),
+        member["pending_count"]
+    ))
+}
+
+/// Build the byte-identical tmux/herdr pure-trigger wake payload (SPEC §6.5):
+/// the roster entries, the trailing `Director:` segment, and the two fixed
+/// protocol sentences. A roster member or Director with an unregistered
+/// coding agent aborts the wake.
+pub fn build_wake_payload(
+    fleet_id: i64,
+    members: &[Value],
+    director: &Value,
+) -> Result<String, MultiplexerError> {
+    let entries = members
+        .iter()
+        .map(wake_entry)
+        .collect::<Result<Vec<_>, _>>()?;
+    let director_entry = wake_entry(director)?;
+    let clause = if entries.is_empty() {
         "no members to health-check.".to_string()
     } else {
-        let noun = if members.len() == 1 {
+        let noun = if entries.len() == 1 {
             "member"
         } else {
             "members"
         };
-        let entries = members
-            .iter()
-            .map(|member| {
-                let name = member["name"].as_str().unwrap_or("");
-                let agent = member["coding_agent"].as_str().unwrap_or("");
-                format!(
-                    "{} ({}; coding_agent={agent}; unacked={})",
-                    member["member_id"],
-                    sanitize_wake_field(name),
-                    member["pending_count"]
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("health-check your {} {noun}: {entries}.", members.len())
+        format!(
+            "health-check your {} {noun}: {}.",
+            entries.len(),
+            entries.join(", ")
+        )
     };
     Ok(format!(
-        "[cafleet] tick: fleet {fleet_id} — {clause} Scan panes with \
-         'cafleet monitor scan {fleet_id}', poll your inbox, ACK, dispatch. \
+        "[cafleet] tick: fleet {fleet_id} — {clause} Director: {director_entry}. \
+         Follow your monitor role protocol. \
          Resume your work if something was still running."
     ))
 }
@@ -163,6 +174,7 @@ pub trait Multiplexer {
         target_pane_id: &str,
         fleet_id: i64,
         members: &[Value],
+        director: &Value,
     ) -> Result<bool, MultiplexerError>;
     fn send_inline_preview(
         &self,
@@ -239,8 +251,9 @@ impl Multiplexer for AnyMultiplexer {
         target_pane_id: &str,
         fleet_id: i64,
         members: &[Value],
+        director: &Value,
     ) -> Result<bool, MultiplexerError> {
-        dispatch!(self, mux => mux.send_wake_trigger(target_pane_id, fleet_id, members))
+        dispatch!(self, mux => mux.send_wake_trigger(target_pane_id, fleet_id, members, director))
     }
 
     fn send_inline_preview(

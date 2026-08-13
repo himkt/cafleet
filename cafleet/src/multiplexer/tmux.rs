@@ -225,8 +225,9 @@ impl TmuxMultiplexer {
         target_pane_id: &str,
         fleet_id: i64,
         members: &[Value],
+        director: &Value,
     ) -> Result<bool, MultiplexerError> {
-        let payload = build_wake_payload(fleet_id, members)?;
+        let payload = build_wake_payload(fleet_id, members, director)?;
         Ok(self.best_effort_send(target_pane_id, &payload, true))
     }
 

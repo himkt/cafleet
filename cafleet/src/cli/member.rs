@@ -52,6 +52,9 @@ pub enum MemberCommand {
         /// Reasoning-effort level (claude, codex only).
         #[arg(long)]
         effort: Option<String>,
+        /// Register the fleet's monitor member (sole accepted value: monitor).
+        #[arg(long, value_parser = ["monitor"])]
+        role: Option<String>,
         #[command(flatten)]
         body: PromptArgs,
         /// Output in JSON format.
@@ -222,6 +225,7 @@ pub fn run(settings: &Settings, command: MemberCommand) -> Result<(), CafleetErr
             coding_agent,
             model,
             effort,
+            role,
             body,
             json,
         } => create(
@@ -232,6 +236,7 @@ pub fn run(settings: &Settings, command: MemberCommand) -> Result<(), CafleetErr
             coding_agent.as_deref(),
             model.as_deref(),
             effort.as_deref(),
+            role.is_some(),
             &body,
             json,
         ),
@@ -263,6 +268,7 @@ fn create(
     explicit_agent: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
+    monitor: bool,
     body: &PromptArgs,
     json: bool,
 ) -> Result<(), CafleetError> {
@@ -288,11 +294,26 @@ fn create(
     backend.validate_model(model)?;
     backend.validate_effort(effort)?;
 
-    // 3. Resolve the body before any side effect; substitution is deferred
+    // 3. Monitor-role guards, one-per-fleet first, before any registration
+    //    or pane effect (`register_member` itself is guard-free).
+    let active_monitor = broker::active_monitor_member_id(&conn, fleet_id)?;
+    if monitor {
+        if let Some(existing) = active_monitor {
+            return Err(CafleetError::App(format!(
+                "fleet {fleet_id} already has an active monitor member (member {existing})"
+            )));
+        }
+    } else if active_monitor.is_none() {
+        return Err(CafleetError::App(format!(
+            "fleet {fleet_id} has no active monitor member; spawn one with --role monitor first"
+        )));
+    }
+
+    // 4. Resolve the body before any side effect; substitution is deferred
     //    until the new member id exists.
     let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref())?;
 
-    // 4. Preconditions.
+    // 5. Preconditions.
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
@@ -301,7 +322,8 @@ fn create(
         .context_discovery()
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
-    // 5. Register the member with a pending placement.
+    // 6. Register the member with a pending placement, threading the
+    //    monitor role into its card marker.
     let placement = NewPlacement {
         backend: mux.name().to_string(),
         mux_session: context.session.clone(),
@@ -316,7 +338,7 @@ fn create(
         description,
         &[],
         Some(&placement),
-        false,
+        monitor,
     )
     .map_err(|error| match error {
         CafleetError::App(_) | CafleetError::Usage(_) => error,
@@ -326,7 +348,7 @@ fn create(
         .as_i64()
         .expect("registration returns the new member id");
 
-    // 6. Substitute the identity placeholders; on failure deregister and
+    // 7. Substitute the identity placeholders; on failure deregister and
     //    re-raise the original error unwrapped.
     let rendered = match substitute_spawn_placeholders(
         &prompt_body,
@@ -342,7 +364,7 @@ fn create(
         }
     };
 
-    // 7-8. Build the spawn argv and split the pane, forwarding only
+    // 8-9. Build the spawn argv and split the pane, forwarding only
     //      CAFLEET_DATABASE_URL.
     let argv = backend.build_spawn_argv(&rendered, name, model, effort);
     let mut env = Vec::new();
@@ -360,7 +382,7 @@ fn create(
         }
     };
 
-    // 9. Patch the pane id onto the placement.
+    // 10. Patch the pane id onto the placement.
     let patched = match broker::update_placement_pane_id(&mut conn, member_id, &pane_id) {
         Ok(patched) => patched,
         Err(error) => {
@@ -381,7 +403,7 @@ fn create(
         ));
     };
 
-    // 10. Emit with the placement view attached.
+    // 11. Emit with the placement view attached.
     let result = json!({
         "member_id": member_id,
         "name": name,
