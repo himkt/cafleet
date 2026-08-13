@@ -1,5 +1,5 @@
 [tool.bumpversion]
-current_version = "0.23.4"
+current_version = "0.24.0"
 commit = true
 message = "chore: bump version {current_version} to {new_version}"
 
