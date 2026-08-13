@@ -952,13 +952,13 @@ fleet-gate runs CLI-side. Per invocation, in order:
 Only the shared `--json` flag. A full-environment diagnosis that renders
 **all** sections even when the multiplexer is unavailable or the database is
 missing or stale — no early abort. Diagnosis order: multiplexer, database,
-coding agents. `doctor` is exempt from the stale-assets guard — it reports
-instead of blocking.
+coding agents. `doctor` is exempt from the schema-version and stale-assets
+guards — it reports instead of blocking.
 
 **Text layout.** The first output line of the whole report is `cafleet
 <version>`. Each section is led by a single-width verdict glyph (`✓` U+2713 /
 `✗` U+2717) plus the section name; detail lines are indented two spaces
-beneath. A worked example (behind-head schema, one stale agent, one
+beneath. A worked example (at-head schema, one stale agent, one
 superseded record):
 
 ```
@@ -969,8 +969,8 @@ cafleet 0.22.0
   window_id: @3
   pane_id:   %0
   presence:  TMUX=/tmp/tmux-501/default,12345,0
-✗ database
-  schema 10, head is 12 — run: cafleet setup
+✓ database
+  schema 12 (head)
 ✗ coding agents
   ┌──────────────┬──────────────┬────────────────────┬───────────────────────────────────────────────┐
   │ coding agent │ path         │ source             │ setup                                         │
@@ -980,7 +980,7 @@ cafleet 0.22.0
   │ opencode     │ ~/.opencode  │ default            │ – cafleet setup --coding-agent opencode       │
   └──────────────┴──────────────┴────────────────────┴───────────────────────────────────────────────┘
   note: codex was previously set up at ~/.codex-old
-2 issues found
+1 issue found
 ```
 
 **Multiplexer section.** Resolves the active backend via
@@ -1006,9 +1006,13 @@ version, `<N>` embedded head):
 
 A connection failure (unreadable path) renders `✗` with the connection error
 as the detail line (one issue). A `✗` database never suppresses the
-coding-agents section: the recorded rows are read when the `asset_installs`
-table exists (the ledger-absent-with-tables state included), and a missing
-table renders every agent as the `–` state.
+coding-agents section, but the recorded rows are read only when the database
+report is `✓` (at head) AND the `asset_installs` table exists. Whenever the
+rows are not read — any non-head state, or an at-head ledger with a
+hand-dropped table — the section renders with no recorded-install data:
+every resolvable agent shows the `–` state, no superseded footnotes render,
+and doctor exits 1 for the database issue — never a raw SQLite error from
+`asset_installs`.
 
 **Coding agents section.** A light box-drawing framed table
 (`┌ ─ ┬ ┐ │ ├ ┼ ┤ └ ┴ ┘`), header separator only, no per-row rules. Column
@@ -1069,10 +1073,10 @@ else `null`.
     "error": null
   },
   "database": {
-    "ok": false,
-    "schema_version": 10,
+    "ok": true,
+    "schema_version": 12,
     "head_version": 12,
-    "error": "schema 10, head is 12 — run: cafleet setup"
+    "error": null
   },
   "coding_agents": {
     "ok": false,
@@ -1086,7 +1090,7 @@ else `null`.
       {"coding_agent": "codex", "path": "/Users/x/.codex-old", "recorded_version": "0.20.0", "installed_at": "2026-07-01T00:00:00.000000+00:00"}
     ]
   },
-  "issues": 2
+  "issues": 1
 }
 ```
 
@@ -1098,8 +1102,12 @@ agent resolution error the row is `{"coding_agent": "...", "path": null,
 "error", "error": "<VAR> must be an absolute path (got '<value>')"}` — the
 raw invalid value appears only inside `error`; `path` stays `null` because
 no path resolved. `schema_version` is `null` when the ledger is absent.
-`installed_at` values are printed **verbatim** (microsecond precision,
-exactly as stored). Exit-code semantics are identical to text mode.
+When the recorded rows are not read (a non-`ok` database report, or a
+missing `asset_installs` table), every agent row renders as the
+`"not_installed"` shape and `superseded` is empty — the JSON shape is
+unchanged. `installed_at` values are printed **verbatim** (microsecond
+precision, exactly as stored). Exit-code semantics are identical to text
+mode.
 
 #### `fleet` group
 
@@ -1499,7 +1507,9 @@ soft-deleted fleet or multiplexer unreachable, `2` usage errors.
 
 Options: `--host` (string, default `settings.broker_host` = `127.0.0.1`, shown
 in help), `--port` (integer, default `settings.broker_port` = `8000`, shown in
-help). Serves the WebUI app on host/port; port-in-use and all other server
+help). Serves the WebUI app on host/port. The schema-version guard
+(§ *Schema-version guard*) runs before the server starts (wired into
+`server::run`); port-in-use and all other server
 errors propagate unwrapped.
 
 #### `setup`
@@ -1507,12 +1517,15 @@ errors propagate unwrapped.
 `setup` is a plain **command** (no subcommands) — the single onboarding
 and schema-management entry point. Command help: `Migrate the database schema
 and install the coding-agent assets (skills and presets).` It takes no
-positional arguments — `cafleet setup <word>` fails with clap's native
-unexpected-argument error.
+positional arguments — a bare `cafleet setup <word>` fails with clap's native
+unexpected-argument error, while a word following the flag (`cafleet setup
+--coding-agent claude <word>`) is greedily consumed as another flag value and
+fails with clap's native invalid-value error unless it names an agent (both
+exit 2).
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--coding-agent AGENT` | no | Repeatable. A choice over `claude` / `codex` / `opencode`; an unknown value fails with clap's native invalid-value error (exit 2). Duplicates are deduplicated. Help: `Install the named agent's assets (repeatable; default: refresh agents already installed at their resolved paths).` |
+| `--coding-agent AGENT...` | no | Multi-value (space-delimited) and repeatable — `--coding-agent claude codex` and `--coding-agent claude --coding-agent codex` are valid and equivalent. A choice over `claude` / `codex` / `opencode`; an unknown value fails with clap's native invalid-value error (exit 2). Duplicates are deduplicated. Help: `Install the named agent's assets (space-delimited, repeatable; default: all agents).` |
 
 Reads the CLI's own version and runs two independent halves, **in order** (db
 first, then assets):
@@ -1533,34 +1546,18 @@ first, then assets):
 
   | Invocation | Assets-half behavior |
   |---|---|
-  | `--coding-agent` given (one or more) | Install exactly the named agents, in the fixed order `claude`, `codex`, `opencode`, each at its resolved paths; upsert the `(agent, resolved identity path)` row after that agent's skills and preset (where one exists) install successfully. |
-  | No flag, table has rows | Per agent in the fixed order: a row exists at the resolved identity path → reinstall (refresh) and upsert; rows exist only at other paths → print the hint line below, install nothing; no rows for that agent → nothing. |
-  | No flag, table is empty (first-ever run) | Install nothing; print the guidance line below. Counts as the assets half succeeding — exit 0 when the db half succeeds. |
+  | `--coding-agent` given (one or more values) | Install exactly the named agents, in the fixed order `claude`, `codex`, `opencode`, each at its resolved paths; upsert the `(agent, resolved identity path)` row after that agent's skills and preset (where one exists) install successfully. |
+  | No flag | Install all three agents, in the fixed order — identical to `--coding-agent claude codex opencode`. |
 
   On an application error, print `assets half failed: <message>` and record
   the failure. A config-path validation failure (§ *Config-dir resolution*)
   fails the assets half with the pinned error as `<message>` wherever the
   half resolves an agent's identity path — a targeted agent in the selector
-  form, and any agent being classified in the no-flag-with-rows form; the
-  no-flag empty-table form resolves nothing and cannot fail validation.
+  form, and every agent in the no-flag form, which resolves all three
+  identity paths.
 - If anything that ran failed → application error `<failed halves joined by '
   and '> half failed` (exit 1; db listed first, matching run order — e.g. `db
   and assets half failed`).
-
-Guidance line (empty table, no flag):
-
-```
-no assets install recorded; run 'cafleet setup --coding-agent <agent>' to install (agents: claude, codex, opencode)
-```
-
-Hint line (agent recorded only at other paths, no flag) — one line per such
-agent; `<resolved>` / `<old>` render with `~` abbreviation for `$HOME`;
-`<old>` is the agent's superseded row with the greatest `installed_at`, ties
-broken by ascending `path`:
-
-```
-<agent>: no install at <resolved> (previously set up at <old>); run 'cafleet setup --coding-agent <agent>'
-```
 
 ##### Config-dir resolution
 
@@ -1592,7 +1589,9 @@ resolution time with the application error (exit 1):
 Validation is lazy: a variable is read and validated only when a site
 actually resolves that backend's directory. `cafleet setup --coding-agent
 claude` with an invalid `CODEX_HOME` succeeds because the selector resolves
-only the targeted agent's directory. The spawn preconditions themselves
+only the targeted agent's directory; plain `cafleet setup` resolves all
+three identity paths, so an invalid variable fails its assets half. The
+spawn preconditions themselves
 read none of the three variables for claude and codex (PATH-check-only;
 opencode's resolves the preset base) — but the stale-assets guard fronting
 every fleet-scoped command, `member create` included, resolves all three
@@ -1619,18 +1618,18 @@ absolute-path validation):
 
 ##### Schema-only invocation
 
-Plain `cafleet setup` is the documented migrations-apply (contributor/CI)
-path — there is no dedicated db-only flag. On a records-free database it is
-naturally schema-only: the db half runs, and the assets half installs
-nothing, prints the guidance line, and records no `asset_installs` rows
-(exit 0 when the db half succeeds). On a machine with recorded installs the
-no-flag refresh is idempotent.
+There is no schema-only invocation and no dedicated db-only flag: every
+`cafleet setup` run applies the migrations and then installs the selected
+agents' assets (all three on the no-flag form). Plain `cafleet setup`
+remains the documented migrations-apply (contributor/CI) path; it is
+idempotent and safe to re-run, with each run overwriting the agent-home
+skills and presets with the binary's build-time-embedded assets.
 
 ##### Shared helpers (the assets half)
 
 **resolve-targets** (the selection semantics above: the explicitly named
-agents, or — on the no-flag form — the agents recorded at their resolved
-identity paths, always in the fixed order `claude`, `codex`, `opencode`);
+agents, or — on the no-flag form — all three agents, always in the fixed
+order `claude`, `codex`, `opencode`);
 **install-skills** (per target, create the target's resolved skills dir as
 needed, then
 copy each embedded skill dir — exactly the three skill dirs `cafleet`,
@@ -1662,23 +1661,56 @@ only after a db-half failure or an externally broken schema.)
 
 An install failure aborts the loop; rows recorded before the failure remain.
 
+#### Schema-version guard
+
+Every non-setup command — the `fleet`, `member`, and `message` groups (at
+the top of the group callback, before any subcommand body runs), the
+`monitor` command (both forms, before the command body), and `server` —
+runs a schema-version prologue (`schema_guard` in `cli/helpers.rs`) before
+its command body and before the stale-assets guard. Exempt: `setup` (must
+remain runnable to repair) and `doctor` (reports instead of blocking). The
+guard connects and classifies the database via the `recorded_version` /
+`has_foreign_tables` helpers shared with `setup` and `doctor`; `<M>` is the
+recorded version, `<N>` the embedded head:
+
+| Database state | Guard result (application error, exit 1) |
+|---|---|
+| Recorded version == head | Proceed silently. |
+| Recorded version < head | `database schema is outdated (schema <M>, head <N>); run 'cafleet setup'` |
+| No ledger, no app tables (missing or empty DB file) | `no cafleet database; run 'cafleet setup'` |
+| No ledger, app tables present | `database has tables but no schema history — not a cafleet database?` |
+| Recorded version > head | `database schema <M> is newer than this cafleet (head <N>); upgrade cafleet` |
+
+The table strings are the application-error payloads; the CLI renders each
+with its uniform `Error: ` prefix. `Connection::open` creates an empty DB
+file when missing, so the guard detects "missing" post-hoc as the
+no-ledger/no-tables state — matching doctor's `Missing` classification.
+Connection-level failures (unreadable file, bad URL scheme) keep their
+existing `failed to open database at '<path>': <e>` / scheme errors — those
+are environment errors, not schema states. The guard's wording mirrors
+doctor's report lines (`schema <M>, head is <N> — run: cafleet setup` stays
+doctor's rendering; the guard uses the phrasings above). With this guard in
+front, the stale-assets guard runs only against an at-head schema, so
+`list_asset_installs` can no longer fail there on a missing column.
+
 #### Stale-assets guard
 
 Every fleet-scoped surface — the `fleet`, `member`, and `message` groups (at
 the top of the group callback, before any subcommand body runs) and the
-`monitor` command (both forms, before the command body) — resolves each
+`monitor` command (both forms, before the command body) — resolves, after
+the schema-version guard passes, each
 agent's identity path (§6.3 *Config-dir resolution*) and validates the
 recorded assets installs against the rows at those paths only:
 
 1. If a config-path variable fails validation, exit 1 with the pinned
    validation error (§6.3 *Config-dir resolution*).
 
-2. If no agent has a row at its currently-resolved path (a missing DB file,
-   missing `asset_installs` table, or zero rows included), exit 1 with
-   (`<agent>` shown literally, resolved by the trailing enumeration, exactly
-   as in the setup guidance line):
+2. If no agent has a row at its currently-resolved path (zero rows, or — on
+   a hand-tampered at-head database — a dropped `asset_installs` table,
+   which the kept `asset_installs_table_exists` pre-check classifies as the
+   no-rows case), exit 1 with:
    ```
-   Error: no assets install is recorded at the resolved paths; run 'cafleet setup --coding-agent <agent>' to install (agents: claude, codex, opencode)
+   Error: no assets install is recorded at the resolved paths; run 'cafleet setup' to install
    ```
 
 3. If a row at a resolved path has a `cafleet_version` differing from the
@@ -1693,17 +1725,18 @@ recorded assets installs against the rows at those paths only:
 
 Agents with no row at their currently-resolved path are not checked (they
 contribute nothing to staleness); superseded rows at other paths are ignored
-everywhere in the guard. Plain `cafleet setup` remains the correct stale
-remedy: a stale agent by definition has a row at its resolved path, so the
-no-flag refresh covers it. Exempt surfaces: `setup` (must remain runnable to
+everywhere in the guard. Plain `cafleet setup` remains the correct remedy
+for both errors: it installs all three agents at their resolved paths.
+Exempt surfaces: `setup` (must remain runnable to
 repair), `doctor`
 (reports instead of blocking), and `server` (human-facing WebUI, not
-fleet-scoped).
+fleet-scoped — though the schema-version guard above does cover it).
 
 **Help interaction.** `--help` renders at parse time and exits before any
 command body runs, so neither group-level help (`cafleet fleet --help`) nor
-subcommand help (`cafleet fleet create --help`) triggers the guard — both
-always print help, even under a missing or stale install.
+subcommand help (`cafleet fleet create --help`) triggers either guard — both
+always print help, even under a missing database or a missing or stale
+install.
 
 #### Spawn-prompt resolution (used by `member create`)
 
@@ -2600,9 +2633,8 @@ The preset is a spawn precondition (the spawn argv references `--agent
 cafleet`): opencode's `ensure_available` verifies the file exists at the
 resolved install target and raises `opencode agent preset not found at
 {preset}; run 'cafleet setup --coding-agent opencode' first` when it does
-not — the remedy names the selector because the triggering state (no preset
-at the resolved path) coincides with opencode having no row at its resolved
-identity path, where plain `cafleet setup` installs nothing for opencode.
+not — the remedy names the selector as the targeted repair; plain
+`cafleet setup` also installs it, as it covers all three agents.
 
 #### Exact preset file contents (verbatim)
 
@@ -2833,7 +2865,8 @@ and `--port` (default `settings.broker_port`, integer) both read their defaults
 from settings at command-definition time and are shown in `--help`. Serves the
 app in a single process **with no auto-reload**. Because the defaults
 come from settings, `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` are honored
-indirectly. This is the only entry point to the HTTP server.
+indirectly. The schema-version guard (§6.3) runs in `server::run` before the
+server starts. This is the only entry point to the HTTP server.
 
 #### Configuration
 
@@ -3178,7 +3211,7 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 
 **Top-level:**
 
-- [ ] `cafleet setup` (`--coding-agent AGENT` repeatable choice; no positional arguments; runs the db half then the assets half per the selector semantics — the named agents, or the no-flag refresh of agents recorded at their resolved paths)
+- [ ] `cafleet setup` (`--coding-agent AGENT...` multi-value/repeatable choice; no positional arguments; runs the db half then the assets half per the selector semantics — the named agents, or all three on the no-flag form)
 - [ ] `cafleet doctor` (`--json`; the three-section diagnosis — multiplexer, database, coding agents — no early abort, exit 1 iff any issue)
 - [ ] `cafleet server` (`--host`=settings.broker_host, `--port`=settings.broker_port)
 - [ ] `cafleet monitor FLEET_ID` (the loop form; `--tick`≥1=5, `--interval`≥0=`CAFLEET_MONITOR_WAKE_INTERVAL` (default 600); prints the startup line after a successful runtime claim)
@@ -3250,10 +3283,16 @@ The decisions that shape this surface (full rationale in the design doc):
   included; it refuses to auto-downgrade an ahead-of-head database and
   refuses an unversioned database with existing tables. Upgrade path: after
   installing a new release binary, the first fleet-scoped command errors with
-  the stale-assets message and instructs the operator to run `cafleet setup`
-  to reinstall.
+  the schema-outdated message (when the release adds migrations) or the
+  stale-assets message, and instructs the operator to run `cafleet setup`.
+- **Schema-version guard** (§6.3): every non-setup command (the `fleet` /
+  `member` / `message` group callbacks, the `monitor` command, and `server`)
+  classifies the database against the embedded head before its command body
+  and hard-errors with `cafleet setup` (or upgrade-cafleet) guidance instead
+  of a raw SQLite error (exit 1); exempt: `setup`, `doctor`.
 - **Stale-assets guard** (§6.3): every fleet-scoped surface (the `fleet` /
-  `member` / `message` group callbacks and the `monitor` command) validates
+  `member` / `message` group callbacks and the `monitor` command) validates,
+  after the schema-version guard passes,
   each agent's `asset_installs` row at its currently-resolved identity path
   against the runtime CLI version before any subcommand body runs;
   all-uninstalled/stale-at-resolved-path → hard error (exit 1); superseded

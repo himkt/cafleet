@@ -36,7 +36,7 @@ git clone https://github.com/himkt/cafleet.git
 cd cafleet
 
 mise //cafleet:install    # builds the WebUI dist, then cargo-installs the cafleet CLI (re-run after source edits)
-cafleet setup             # migrate the database schema (idempotent)
+cafleet setup             # migrate the database schema and install the embedded assets (idempotent)
 ```
 
 After that, pick the task you need by name. Every cargo-invoking task first
@@ -74,6 +74,11 @@ This runs `gh skill install ./ --from-local --agent <backend> --force --scope
 user` for each of the three backends (`claude-code`, `codex`, `opencode`),
 placing the skills from your checkout (not a Release) into the three agent
 homes.
+
+Order matters: run `cafleet setup` first, then `mise //:skill-install` —
+`cafleet setup` overwrites the agent-home skills with the binary's
+build-time-embedded assets, so re-run `mise //:skill-install` after any
+later `cafleet setup` to restore the working-tree skills.
 
 ## Building docs locally
 

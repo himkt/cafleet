@@ -1,7 +1,7 @@
 # One-Command Setup and Database-Error Guidance
 
 **Status**: Approved
-**Progress**: 0/24 tasks complete
+**Progress**: 6/24 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -119,12 +119,12 @@ No database migration is needed; the schema is untouched.
 
 ### Step 1: Documentation first
 
-- [ ] Update `SPEC.md` §6.3 `setup`: multi-value flag row + help string, all-agents no-flag selection, delete the guidance and hint lines everywhere, rewrite *Schema-only invocation*, adjust the lazy-validation note <!-- completed: -->
-- [ ] Update `SPEC.md` §6.3 guard sections: add the schema-version guard (states, error strings, guarded surfaces incl. `server`, exemptions, ordering before the stale-assets guard), simplify the stale-assets no-rows error <!-- completed: -->
-- [ ] Update `SPEC.md` §6.3 `doctor`: rows read gated on the at-head report; stale-schema no-abort contract <!-- completed: -->
-- [ ] Apply the same contract edits to `docs/docs/spec/cli-options.md` (setup, guard, doctor, error-string catalog) <!-- completed: -->
-- [ ] Update `docs/docs/quickstart.md`, `docs/docs/concepts/storage.md`, `docs/docs/concepts/coding-agents.md`, `docs/docs/contributing.md` for the one-command story and the schema guard <!-- completed: -->
-- [ ] Run the `/update-readme` skill to sync `README.md` / SPEC drift; verify no skill under `skills/` mentions the removed lines <!-- completed: -->
+- [x] Update `SPEC.md` §6.3 `setup`: multi-value flag row + help string, all-agents no-flag selection, delete the guidance and hint lines everywhere, rewrite *Schema-only invocation*, adjust the lazy-validation note <!-- completed: 2026-08-13T21:43 -->
+- [x] Update `SPEC.md` §6.3 guard sections: add the schema-version guard (states, error strings, guarded surfaces incl. `server`, exemptions, ordering before the stale-assets guard), simplify the stale-assets no-rows error <!-- completed: 2026-08-13T21:43 -->
+- [x] Update `SPEC.md` §6.3 `doctor`: rows read gated on the at-head report; stale-schema no-abort contract <!-- completed: 2026-08-13T21:43 -->
+- [x] Apply the same contract edits to `docs/docs/spec/cli-options.md` (setup, guard, doctor, error-string catalog) <!-- completed: 2026-08-13T21:47 -->
+- [x] Update `docs/docs/quickstart.md`, `docs/docs/concepts/storage.md`, `docs/docs/concepts/coding-agents.md`, `docs/docs/contributing.md` for the one-command story and the schema guard <!-- completed: 2026-08-13T21:50 -->
+- [x] Run the `/update-readme` skill to sync `README.md` / SPEC drift; verify no skill under `skills/` mentions the removed lines <!-- completed: 2026-08-13T21:55 -->
 
 ### Step 2: Multi-value `--coding-agent`
 

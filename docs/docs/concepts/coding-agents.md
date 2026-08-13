@@ -12,6 +12,10 @@ placement's `coding_agent` column.
 | `codex` | OpenAI Codex CLI | Reads the cafleet skill files by absolute path |
 | `opencode` | opencode.ai | Reads the cafleet skill files by absolute path |
 
+Plain `cafleet setup` installs the skills and preset for all three backends
+in one run; `--coding-agent` narrows the selection — see
+[CLI options § cafleet setup](../spec/cli-options.md#cafleet-setup).
+
 The flag means slightly different things per command:
 
 - `cafleet fleet create --coding-agent` is required, operator-declared
