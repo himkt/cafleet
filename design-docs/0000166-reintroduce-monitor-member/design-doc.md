@@ -15,30 +15,30 @@ never nudged by a timer again.
 
 ## Success Criteria
 
-- [ ] The periodic wake keystrokes the **monitor member's** pane; no code path
+- [x] The periodic wake keystrokes the **monitor member's** pane; no code path
       keystrokes the Director's pane on a timer. `cafleet/tests/e2e.rs`
       asserts the wake lands in the monitor pane with the § S4 payload.
-- [ ] `cafleet member create --role monitor` exists (sole accepted value
+- [x] `cafleet member create --role monitor` exists (sole accepted value
       `monitor`), with the one-per-fleet guard and the monitor-first placement
       guard enforced with the § S3 error strings.
-- [ ] The interval surface is unchanged: `cafleet monitor <fleet-id>
+- [x] The interval surface is unchanged: `cafleet monitor <fleet-id>
       --interval N`, `CAFLEET_MONITOR_WAKE_INTERVAL` (default `600`), and live
       per-fleet editing via `PATCH /api/monitor` all still work and now govern
       the monitor-facing wake. No new `cafleet server` flag; the `monitor
       start` subcommand name is NOT reintroduced.
-- [ ] Every backend section of
+- [x] Every backend section of
       `skills/cafleet/reference/coding-agent-overlays.md` (including the
       Template) carries a `{monitor_model}` row and a monitor-member-side
       loop-launch worked resolution; `OVERLAY_PLACEHOLDERS` in
       `cafleet/tests/docs_sync.rs` is back to 10.
-- [ ] `skills/cafleet/reference/model-list.md` carries the monitor defaults:
+- [x] `skills/cafleet/reference/model-list.md` carries the monitor defaults:
       claude → `haiku`, codex → `gpt-5.6-luna`, opencode →
       `opencode/big-pickle`.
-- [ ] `skills/cafleet/roles/monitor.md` exists and is the sole normative
+- [x] `skills/cafleet/roles/monitor.md` exists and is the sole normative
       carrier of the on-wake protocol (docs_sync-enforced).
-- [ ] The migration chain is untouched: head stays **5**; the member-kind
+- [x] The migration chain is untouched: head stays **5**; the member-kind
       marker is application-level JSON in `member_card_json`.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`,
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`,
       and `mise //admin:lint` pass.
 
 ---
