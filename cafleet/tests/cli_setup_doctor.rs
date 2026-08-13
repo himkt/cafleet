@@ -5,11 +5,8 @@ mod common;
 
 use common::{Cli, VERSION, code, stderr, stdout};
 
-const GUIDANCE_LINE: &str = "no assets install recorded; \
-     run 'cafleet setup --coding-agent <agent>' to install (agents: claude, codex, opencode)";
-
 #[test]
-fn plain_setup_migrates_to_head_and_prints_the_guidance_line_on_an_empty_table() {
+fn plain_setup_installs_and_records_all_three_agents_on_a_fresh_database() {
     let cli = Cli::new();
     let output = cli.run(&["setup"]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
@@ -18,12 +15,51 @@ fn plain_setup_migrates_to_head_and_prints_the_guidance_line_on_an_empty_table()
         out.contains("applied migrations to head (6)."),
         "fresh DB reports the created-and-migrated line, got: {out}"
     );
-    assert!(out.contains(GUIDANCE_LINE), "got: {out}");
+    for (agent, skills_dir) in [
+        ("claude", ".claude/skills"),
+        ("codex", ".codex/skills"),
+        ("opencode", ".config/opencode/skills"),
+    ] {
+        assert!(
+            cli.home
+                .path()
+                .join(skills_dir)
+                .join("cafleet/SKILL.md")
+                .is_file(),
+            "{agent} skills installed under {skills_dir}: {out}"
+        );
+        assert!(
+            out.contains(&format!("{agent}: installed cafleet")),
+            "per-target skills echo for {agent}, got: {out}"
+        );
+    }
+    let claude_at = out.find("claude: installed cafleet").unwrap();
+    let codex_at = out.find("codex: installed cafleet").unwrap();
+    let opencode_at = out.find("opencode: installed cafleet").unwrap();
     assert!(
-        !cli.home.path().join(".claude/skills").exists(),
-        "the empty-table no-flag form installs nothing"
+        claude_at < codex_at && codex_at < opencode_at,
+        "fixed install order claude, codex, opencode: {out}"
     );
-    assert!(cli.asset_rows().is_empty(), "no rows are recorded");
+    assert_eq!(
+        cli.asset_rows(),
+        vec![
+            (
+                "claude".to_string(),
+                cli.identity_path("claude"),
+                VERSION.to_string()
+            ),
+            (
+                "codex".to_string(),
+                cli.identity_path("codex"),
+                VERSION.to_string()
+            ),
+            (
+                "opencode".to_string(),
+                cli.identity_path("opencode"),
+                VERSION.to_string()
+            ),
+        ]
+    );
 
     let again = cli.run(&["setup"]);
     assert_eq!(code(&again), 0);
@@ -32,7 +68,6 @@ fn plain_setup_migrates_to_head_and_prints_the_guidance_line_on_an_empty_table()
         "got: {}",
         stdout(&again)
     );
-    assert!(stdout(&again).contains(GUIDANCE_LINE));
 }
 
 #[test]
@@ -252,34 +287,22 @@ fn opencode_skills_stay_at_the_fixed_discovery_path_when_the_variable_is_set() {
 }
 
 #[test]
-fn no_flag_setup_refreshes_only_agents_recorded_at_their_resolved_paths() {
+fn plain_setup_installs_at_the_resolved_path_despite_rows_recorded_elsewhere() {
     let cli = Cli::new();
     cli.migrate();
-    cli.seed_asset_row("claude", "0.1.0");
     cli.seed_asset_row_at("codex", "/codex-old", "0.1.0");
     let output = cli.run(&["setup"]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(
         out.contains(&format!(
-            "claude: installed cafleet, cafleet-design-doc, cafleet-research (v{VERSION})"
+            "codex: installed cafleet, cafleet-design-doc, cafleet-research (v{VERSION})"
         )),
-        "the recorded-at-resolved-path agent is refreshed: {out}"
+        "the records-elsewhere agent installs at the resolved path anyway: {out}"
     );
     assert!(
-        out.contains(
-            "codex: no install at ~/.codex (previously set up at /codex-old); \
-             run 'cafleet setup --coding-agent codex'"
-        ),
-        "the records-elsewhere agent gets the hint line: {out}"
-    );
-    assert!(
-        !out.contains("opencode:"),
-        "no line for a no-rows agent: {out}"
-    );
-    assert!(
-        !cli.home.path().join(".codex").exists(),
-        "codex installs nothing"
+        cli.home.path().join(".codex/skills/cafleet").is_dir(),
+        "codex assets land at the resolved path"
     );
     assert_eq!(
         cli.asset_rows(),
@@ -294,39 +317,18 @@ fn no_flag_setup_refreshes_only_agents_recorded_at_their_resolved_paths() {
                 "/codex-old".to_string(),
                 "0.1.0".to_string()
             ),
+            (
+                "codex".to_string(),
+                cli.identity_path("codex"),
+                VERSION.to_string()
+            ),
+            (
+                "opencode".to_string(),
+                cli.identity_path("opencode"),
+                VERSION.to_string()
+            ),
         ],
-        "claude upserted to the CLI version; the superseded codex row untouched"
-    );
-}
-
-#[test]
-fn the_hint_names_the_most_recent_superseded_row() {
-    let cli = Cli::new();
-    cli.migrate();
-    cli.seed_asset_row_dated(
-        "codex",
-        "/a-old",
-        "0.1.0",
-        "2026-07-01T00:00:00.000000+00:00",
-    );
-    cli.seed_asset_row_dated(
-        "codex",
-        "/b-new",
-        "0.1.0",
-        "2026-08-01T00:00:00.000000+00:00",
-    );
-    cli.seed_asset_row_dated("claude", "/t2", "0.1.0", "2026-07-01T00:00:00.000000+00:00");
-    cli.seed_asset_row_dated("claude", "/t1", "0.1.0", "2026-07-01T00:00:00.000000+00:00");
-    let output = cli.run(&["setup"]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    let out = stdout(&output);
-    assert!(
-        out.contains("codex: no install at ~/.codex (previously set up at /b-new)"),
-        "the greatest installed_at wins: {out}"
-    );
-    assert!(
-        out.contains("claude: no install at ~/.claude (previously set up at /t1)"),
-        "an installed_at tie breaks by ascending path: {out}"
+        "a fresh row lands at the resolved path; the superseded row is untouched"
     );
 }
 
@@ -364,10 +366,8 @@ fn an_invalid_variable_of_an_untargeted_agent_does_not_fail_setup() {
 }
 
 #[test]
-fn no_flag_setup_fails_on_an_invalid_variable_of_a_recorded_agent() {
+fn plain_setup_fails_the_assets_half_on_an_invalid_config_path_variable() {
     let mut cli = Cli::new();
-    cli.migrate();
-    cli.seed_asset_row("codex", VERSION);
     cli.set_env("CODEX_HOME", "relative/path");
     let output = cli.run(&["setup"]);
     assert_eq!(code(&output), 1);
@@ -376,7 +376,11 @@ fn no_flag_setup_fails_on_an_invalid_variable_of_a_recorded_agent() {
         combined.contains(
             "assets half failed: CODEX_HOME must be an absolute path (got 'relative/path')"
         ),
-        "classifying a recorded agent resolves its path: {combined}"
+        "plain setup resolves all three identity paths: {combined}"
+    );
+    assert!(
+        combined.contains("applied migrations to head (6)."),
+        "the db half is unaffected: {combined}"
     );
 }
 
@@ -707,9 +711,9 @@ fn doctor_setup_cells_cover_ok_stale_and_not_installed() {
 fn doctor_reports_the_env_source_and_a_resolution_error() {
     let mut cli = Cli::new();
     let custom = cli.home.path().join("cfg-claude");
+    cli.migrate();
     cli.set_env("CLAUDE_CONFIG_DIR", custom.to_str().unwrap());
     cli.set_env("CODEX_HOME", "rel");
-    cli.migrate();
     cli.seed_asset_row_at("claude", custom.to_str().unwrap(), VERSION);
     let output = cli.run(&["doctor"]);
     assert_eq!(code(&output), 1);

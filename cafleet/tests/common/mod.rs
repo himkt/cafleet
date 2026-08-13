@@ -125,8 +125,10 @@ impl Cli {
         rusqlite::Connection::open(self.db_path()).unwrap()
     }
 
-    /// Migrate to head via plain `cafleet setup` — on a records-free database
-    /// the assets half installs nothing.
+    /// Migrate to head via plain `cafleet setup`, then strip the recorded
+    /// installs and installed asset dirs so every fixture starts from a
+    /// records-free database regardless of setup's install-all-agents
+    /// assets half.
     pub fn migrate(&self) {
         let output = self.run(&["setup"]);
         assert!(
@@ -134,6 +136,15 @@ impl Cli {
             "plain setup must succeed: {}",
             text(&output.stderr)
         );
+        self.sqlite()
+            .execute("DELETE FROM asset_installs", [])
+            .unwrap();
+        for dir in [".claude", ".codex", ".config/opencode", ".opencode"] {
+            let path = self.home.path().join(dir);
+            if path.exists() {
+                std::fs::remove_dir_all(&path).unwrap();
+            }
+        }
     }
 
     /// The agent's recorded-path identity at its default (no env override)

@@ -130,8 +130,8 @@ fn a_config_location_variable_supersedes_the_default_path_row() {
 #[test]
 fn an_invalid_config_location_variable_fails_the_guard_with_the_pinned_error() {
     let mut cli = Cli::new();
-    cli.set_env("CLAUDE_CONFIG_DIR", "not/absolute");
     cli.migrate();
+    cli.set_env("CLAUDE_CONFIG_DIR", "not/absolute");
     cli.seed_asset_row("codex", VERSION);
     let output = cli.run(&["fleet", "list"]);
     assert_eq!(code(&output), 1);
