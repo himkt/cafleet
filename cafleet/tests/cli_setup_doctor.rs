@@ -43,9 +43,7 @@ fn setup_refuses_an_unversioned_database_with_existing_tables() {
         .unwrap();
     drop(conn);
 
-    let output = cli.run(&[
-        "setup", "--skip", "claude", "--skip", "codex", "--skip", "opencode",
-    ]);
+    let output = cli.run(&["setup"]);
     assert_eq!(code(&output), 1);
     let combined = format!("{}{}", stdout(&output), stderr(&output));
     assert!(
