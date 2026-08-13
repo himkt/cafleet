@@ -1,6 +1,6 @@
 //! CLI contract tests: the global surface — `--version`, positional subject
-//! ids, the removed flag set, and the stale-assets guard (SPEC §6.3, §7.2,
-//! §10).
+//! ids, the removed flag set, the schema-version guard, and the stale-assets
+//! guard (SPEC §6.3, §7.2, §10).
 
 mod common;
 
@@ -26,8 +26,13 @@ fn an_unknown_pre_subcommand_option_is_a_parse_error() {
     );
 }
 
-const NO_INSTALL_ERROR: &str = "Error: no assets install is recorded at the resolved paths; \
-     run 'cafleet setup --coding-agent <agent>' to install (agents: claude, codex, opencode)";
+const NO_INSTALL_ERROR: &str =
+    "Error: no assets install is recorded at the resolved paths; run 'cafleet setup' to install";
+
+const OUTDATED_ERROR: &str =
+    "Error: database schema is outdated (schema 5, head 6); run 'cafleet setup'";
+
+const NO_DATABASE_ERROR: &str = "Error: no cafleet database; run 'cafleet setup'";
 
 #[test]
 fn the_guard_blocks_fleet_scoped_groups_when_no_install_is_recorded() {
@@ -50,15 +55,155 @@ fn the_guard_blocks_fleet_scoped_groups_when_no_install_is_recorded() {
 }
 
 #[test]
-fn the_guard_reports_no_install_when_the_database_is_missing() {
+fn the_schema_guard_reports_a_missing_or_empty_database() {
     let cli = Cli::new();
     let output = cli.run(&["fleet", "list"]);
     assert_eq!(code(&output), 1);
     assert!(
-        stderr(&output).contains(NO_INSTALL_ERROR),
-        "a missing database counts as no rows: {}",
+        stderr(&output).contains(NO_DATABASE_ERROR),
+        "a missing database file classifies as no-database: {}",
         stderr(&output)
     );
+
+    assert!(
+        cli.db_path().is_file(),
+        "Connection::open created the empty file on the first run"
+    );
+    let again = cli.run(&["fleet", "list"]);
+    assert_eq!(code(&again), 1);
+    assert!(
+        stderr(&again).contains(NO_DATABASE_ERROR),
+        "an empty database file classifies the same way: {}",
+        stderr(&again)
+    );
+}
+
+#[test]
+fn the_schema_guard_reports_an_outdated_database() {
+    let cli = Cli::new();
+    cli.seed_pre_v6_database();
+    let output = cli.run(&["fleet", "list"]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains(OUTDATED_ERROR),
+        "a behind-head ledger yields the outdated error before any other guard: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn the_schema_guard_reports_a_foreign_database() {
+    let cli = Cli::new();
+    cli.sqlite()
+        .execute_batch("CREATE TABLE junk (x INTEGER);")
+        .unwrap();
+    let output = cli.run(&["fleet", "list"]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output)
+            .contains("Error: database has tables but no schema history — not a cafleet database?"),
+        "got: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn the_schema_guard_reports_a_newer_database() {
+    let cli = Cli::new();
+    cli.migrate();
+    cli.sqlite()
+        .execute(
+            "INSERT INTO refinery_schema_history (version, name, applied_on, checksum) \
+             VALUES (7, 'future', '2026-01-01T00:00:00Z', '0')",
+            [],
+        )
+        .unwrap();
+    let output = cli.run(&["fleet", "list"]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains(
+            "Error: database schema 7 is newer than this cafleet (head 6); upgrade cafleet"
+        ),
+        "got: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn an_at_head_database_passes_the_schema_guard() {
+    let cli = Cli::new();
+    cli.ready();
+    let output = cli.run(&["fleet", "list"]);
+    assert_eq!(
+        code(&output),
+        0,
+        "at head the command proceeds: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn the_schema_guard_blocks_every_guarded_group() {
+    let cli = Cli::new();
+    cli.seed_pre_v6_database();
+    for args in [
+        ["fleet", "list"].as_slice(),
+        ["member", "list", "1"].as_slice(),
+        ["message", "poll", "1"].as_slice(),
+        ["monitor", "1"].as_slice(),
+        ["monitor", "scan", "1"].as_slice(),
+    ] {
+        let output = cli.run(args);
+        assert_eq!(code(&output), 1, "guarded: {args:?}");
+        assert!(
+            stderr(&output).contains(OUTDATED_ERROR),
+            "{args:?} → {}",
+            stderr(&output)
+        );
+    }
+}
+
+#[test]
+fn the_schema_guard_blocks_server_startup() {
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+
+    let cli = Cli::new();
+    cli.seed_pre_v6_database();
+    let mut child = cli.spawn(&["server", "--port", "0"]);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() > deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("server kept running against a behind-head database");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let status = child.try_wait().unwrap().unwrap();
+    assert_eq!(status.code(), Some(1));
+    let mut err = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut err)
+        .unwrap();
+    assert!(err.contains(OUTDATED_ERROR), "got: {err}");
+}
+
+#[test]
+fn a_fleet_scoped_command_against_a_pre_v6_database_names_setup_not_sqlite() {
+    let cli = Cli::new();
+    cli.seed_pre_v6_database();
+    let output = cli.run(&["fleet", "list"]);
+    assert_eq!(code(&output), 1);
+    let err = stderr(&output);
+    assert!(
+        !err.contains("no such column: path"),
+        "the raw SQLite error never surfaces: {err}"
+    );
+    assert!(err.contains("run 'cafleet setup'"), "got: {err}");
 }
 
 #[test]
@@ -130,8 +275,8 @@ fn a_config_location_variable_supersedes_the_default_path_row() {
 #[test]
 fn an_invalid_config_location_variable_fails_the_guard_with_the_pinned_error() {
     let mut cli = Cli::new();
-    cli.set_env("CLAUDE_CONFIG_DIR", "not/absolute");
     cli.migrate();
+    cli.set_env("CLAUDE_CONFIG_DIR", "not/absolute");
     cli.seed_asset_row("codex", VERSION);
     let output = cli.run(&["fleet", "list"]);
     assert_eq!(code(&output), 1);

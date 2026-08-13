@@ -15,7 +15,10 @@ Prerequisites:
 | Terminal multiplexer | tmux or herdr | Auto-detected — see [Multiplexer backends](spec/multiplexer-backends.md) |
 | Coding agent | `claude` (Claude Code), `codex` (OpenAI Codex CLI), or `opencode` | At least one; a mixed fleet may use all three — see [Coding agents](concepts/coding-agents.md) |
 
-Install the CLI with Homebrew, then run the setup:
+Install the CLI with Homebrew, then run the setup — the single
+`cafleet setup` command migrates the database and installs the skills and
+presets for all three coding agents (pass `--coding-agent` to narrow the
+selection):
 
 ```bash
 brew install himkt/tap/cafleet

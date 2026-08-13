@@ -1,7 +1,7 @@
 //! The `cafleet` command tree (SPEC §6.3, §10): clap parsing, the shared
-//! option surface, the stale-assets guard prologue, and the per-group
-//! handlers. Orchestration glue only — it wires broker / multiplexer /
-//! output / coding-agent.
+//! option surface, the schema-version and stale-assets guard prologues, and
+//! the per-group handlers. Orchestration glue only — it wires broker /
+//! multiplexer / output / coding-agent.
 
 mod doctor;
 mod fleet;
@@ -64,18 +64,22 @@ pub fn run() -> Result<(), CafleetError> {
         Command::Doctor(cmd) => doctor::run(&settings, cmd),
         Command::Server(cmd) => server::run(&settings, cmd),
         Command::Fleet(cmd) => {
+            helpers::schema_guard(&settings)?;
             helpers::stale_assets_guard(&settings)?;
             fleet::run(&settings, cmd)
         }
         Command::Member(cmd) => {
+            helpers::schema_guard(&settings)?;
             helpers::stale_assets_guard(&settings)?;
             member::run(&settings, cmd)
         }
         Command::Message(cmd) => {
+            helpers::schema_guard(&settings)?;
             helpers::stale_assets_guard(&settings)?;
             message::run(&settings, cmd)
         }
         Command::Monitor(cmd) => {
+            helpers::schema_guard(&settings)?;
             helpers::stale_assets_guard(&settings)?;
             monitor::run(&settings, cmd)
         }

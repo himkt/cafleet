@@ -125,8 +125,10 @@ impl Cli {
         rusqlite::Connection::open(self.db_path()).unwrap()
     }
 
-    /// Migrate to head via plain `cafleet setup` — on a records-free database
-    /// the assets half installs nothing.
+    /// Migrate to head via plain `cafleet setup`, then strip the recorded
+    /// installs and installed asset dirs so every fixture starts from a
+    /// records-free database regardless of setup's install-all-agents
+    /// assets half.
     pub fn migrate(&self) {
         let output = self.run(&["setup"]);
         assert!(
@@ -134,6 +136,15 @@ impl Cli {
             "plain setup must succeed: {}",
             text(&output.stderr)
         );
+        self.sqlite()
+            .execute("DELETE FROM asset_installs", [])
+            .unwrap();
+        for dir in [".claude", ".codex", ".config/opencode", ".opencode"] {
+            let path = self.home.path().join(dir);
+            if path.exists() {
+                std::fs::remove_dir_all(&path).unwrap();
+            }
+        }
     }
 
     /// The agent's recorded-path identity at its default (no env override)
@@ -198,6 +209,32 @@ impl Cli {
             .unwrap()
             .map(Result::unwrap)
             .collect()
+    }
+
+    /// Hand-write a behind-head database: the refinery ledger at version 5
+    /// with the baseline (path-less) `asset_installs` shape.
+    pub fn seed_pre_v6_database(&self) {
+        self.sqlite()
+            .execute_batch(
+                "CREATE TABLE refinery_schema_history (
+                     version INT4 PRIMARY KEY,
+                     name VARCHAR(255),
+                     applied_on VARCHAR(255),
+                     checksum VARCHAR(255)
+                 );
+                 INSERT INTO refinery_schema_history (version, name, applied_on, checksum) VALUES
+                     (1, 'baseline', '2026-01-01T00:00:00Z', '0'),
+                     (2, 'drop_director_monitor_enrollment', '2026-01-01T00:00:00Z', '0'),
+                     (3, 'strip_monitoring_member_kind', '2026-01-01T00:00:00Z', '0'),
+                     (4, 'fleet_level_wake_schedule', '2026-01-01T00:00:00Z', '0'),
+                     (5, 'monitor_wake_interval', '2026-01-01T00:00:00Z', '0');
+                 CREATE TABLE asset_installs (
+                     coding_agent TEXT NOT NULL PRIMARY KEY,
+                     cafleet_version TEXT NOT NULL,
+                     installed_at TEXT NOT NULL
+                 );",
+            )
+            .unwrap();
     }
 
     /// Migrate + record a current-version install so the stale-assets guard

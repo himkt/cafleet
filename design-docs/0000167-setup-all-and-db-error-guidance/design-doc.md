@@ -1,7 +1,7 @@
 # One-Command Setup and Database-Error Guidance
 
-**Status**: Approved
-**Progress**: 0/24 tasks complete
+**Status**: Complete
+**Progress**: 24/24 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -10,11 +10,11 @@ Make `cafleet setup` a true one-command onboarding: plain `cafleet setup` instal
 
 ## Success Criteria
 
-- [ ] On a fresh machine, plain `cafleet setup` migrates the database AND installs assets for `claude`, `codex`, and `opencode` — no second command needed.
-- [ ] `cafleet setup --coding-agent claude codex` (space-delimited) installs exactly the named agents; the repeated-flag form keeps working.
-- [ ] Running any fleet-scoped command, `monitor`, or `server` against a missing or schema-outdated database fails with an error that names `cafleet setup` (or "upgrade cafleet" for a newer-than-CLI schema) — never a raw SQLite error.
-- [ ] `cafleet doctor` against a pre-head-schema database completes its three-section render (exit 1 with the database issue) instead of aborting with `database error: no such column: path …`.
-- [ ] `mise //cafleet:test` and `mise //cafleet:lint` pass; SPEC.md, docs, and skills reflect the new contract with no drift.
+- [x] On a fresh machine, plain `cafleet setup` migrates the database AND installs assets for `claude`, `codex`, and `opencode` — no second command needed.
+- [x] `cafleet setup --coding-agent claude codex` (space-delimited) installs exactly the named agents; the repeated-flag form keeps working.
+- [x] Running any fleet-scoped command, `monitor`, or `server` against a missing or schema-outdated database fails with an error that names `cafleet setup` (or "upgrade cafleet" for a newer-than-CLI schema) — never a raw SQLite error.
+- [x] `cafleet doctor` against a pre-head-schema database completes its three-section render (exit 1 with the database issue) instead of aborting with `database error: no such column: path …`.
+- [x] `mise //cafleet:test` and `mise //cafleet:lint` pass; SPEC.md, docs, and skills reflect the new contract with no drift.
 
 ---
 
@@ -81,7 +81,7 @@ Notes:
 
 ### 4. Doctor never aborts on a stale schema
 
-In `cafleet/src/cli/doctor.rs`, gate the recorded-rows read on the database report being at head AND the table existing — `db.ok() && asset_installs_table_exists(conn)` (the existing table-existence check is kept, the at-head check added). Whenever the rows are not read — any non-head state, or an at-head ledger with a hand-dropped table — the coding-agents section renders with no recorded-install data (each resolvable agent shows `– cafleet setup --coding-agent <agent>`, state `not_installed`, no issue), the database section renders its existing `✗` detail (`schema <M>, head is <N> — run: cafleet setup` / `no database — run: cafleet setup` / …), and doctor exits 1 for the database issue. With both gates, no missing-table or outdated-schema state reaches `list_asset_installs`, so doctor no longer aborts with a raw SQLite error from `asset_installs`.
+In `cafleet/src/cli/doctor.rs`, gate the recorded-rows read on the database report being at head AND the table existing — `db.ok() && asset_installs_table_exists(conn)` (the existing table-existence check is kept, the at-head check added). Whenever the rows are not read — any non-head state, or an at-head ledger with a hand-dropped table — the coding-agents section renders with no recorded-install data (each resolvable agent shows `– cafleet setup --coding-agent <agent>`, state `not_installed`, no issue); in the non-head states the database section renders its existing `✗` detail (`schema <M>, head is <N> — run: cafleet setup` / `no database — run: cafleet setup` / …) and doctor exits 1 for the database issue, while the at-head dropped-table state keeps the `✓` database section and exits 0. With both gates, no missing-table or outdated-schema state reaches `list_asset_installs`, so doctor no longer aborts with a raw SQLite error from `asset_installs`.
 
 ### 5. Stale-assets guard message simplification
 
@@ -119,42 +119,50 @@ No database migration is needed; the schema is untouched.
 
 ### Step 1: Documentation first
 
-- [ ] Update `SPEC.md` §6.3 `setup`: multi-value flag row + help string, all-agents no-flag selection, delete the guidance and hint lines everywhere, rewrite *Schema-only invocation*, adjust the lazy-validation note <!-- completed: -->
-- [ ] Update `SPEC.md` §6.3 guard sections: add the schema-version guard (states, error strings, guarded surfaces incl. `server`, exemptions, ordering before the stale-assets guard), simplify the stale-assets no-rows error <!-- completed: -->
-- [ ] Update `SPEC.md` §6.3 `doctor`: rows read gated on the at-head report; stale-schema no-abort contract <!-- completed: -->
-- [ ] Apply the same contract edits to `docs/docs/spec/cli-options.md` (setup, guard, doctor, error-string catalog) <!-- completed: -->
-- [ ] Update `docs/docs/quickstart.md`, `docs/docs/concepts/storage.md`, `docs/docs/concepts/coding-agents.md`, `docs/docs/contributing.md` for the one-command story and the schema guard <!-- completed: -->
-- [ ] Run the `/update-readme` skill to sync `README.md` / SPEC drift; verify no skill under `skills/` mentions the removed lines <!-- completed: -->
+- [x] Update `SPEC.md` §6.3 `setup`: multi-value flag row + help string, all-agents no-flag selection, delete the guidance and hint lines everywhere, rewrite *Schema-only invocation*, adjust the lazy-validation note <!-- completed: 2026-08-13T21:43 -->
+- [x] Update `SPEC.md` §6.3 guard sections: add the schema-version guard (states, error strings, guarded surfaces incl. `server`, exemptions, ordering before the stale-assets guard), simplify the stale-assets no-rows error <!-- completed: 2026-08-13T21:43 -->
+- [x] Update `SPEC.md` §6.3 `doctor`: rows read gated on the at-head report; stale-schema no-abort contract <!-- completed: 2026-08-13T21:43 -->
+- [x] Apply the same contract edits to `docs/docs/spec/cli-options.md` (setup, guard, doctor, error-string catalog) <!-- completed: 2026-08-13T21:47 -->
+- [x] Update `docs/docs/quickstart.md`, `docs/docs/concepts/storage.md`, `docs/docs/concepts/coding-agents.md`, `docs/docs/contributing.md` for the one-command story and the schema guard <!-- completed: 2026-08-13T21:50 -->
+- [x] Run the `/update-readme` skill to sync `README.md` / SPEC drift; verify no skill under `skills/` mentions the removed lines <!-- completed: 2026-08-13T21:55 -->
 
 ### Step 2: Multi-value `--coding-agent`
 
-- [ ] Add `num_args = 1..` to `SetupArgs::coding_agent`; update the help string <!-- completed: -->
-- [ ] Tests: space-delimited form, repeated-flag form, mixed form, invalid value (exit 2), bare `cafleet setup <word>` still rejected with the unexpected-argument error, `--coding-agent claude <word>` rejected with the invalid-value error <!-- completed: -->
+- [x] Add `num_args = 1..` to `SetupArgs::coding_agent`; update the help string <!-- completed: 2026-08-13T21:53 -->
+- [x] Tests: space-delimited form, repeated-flag form, mixed form, invalid value (exit 2), bare `cafleet setup <word>` still rejected with the unexpected-argument error, `--coding-agent claude <word>` rejected with the invalid-value error <!-- completed: 2026-08-13T21:53 -->
 
 ### Step 3: Plain setup installs all agents
 
-- [ ] Change `assets_half` empty-selection branch to install all `TARGET_AGENTS`; delete `refresh_recorded` and `most_recent_path` <!-- completed: -->
-- [ ] Delete the guidance-line and hint-line strings and their tests; add tests: fresh DB plain setup installs and records all three; recorded-elsewhere state installs at the resolved path anyway <!-- completed: -->
-- [ ] Test: plain setup with an invalid config-path variable fails the assets half with the pinned validation error; the selector form stays lazy <!-- completed: -->
+- [x] Change `assets_half` empty-selection branch to install all `TARGET_AGENTS`; delete `refresh_recorded` and `most_recent_path` <!-- completed: 2026-08-13T21:58 -->
+- [x] Delete the guidance-line and hint-line strings and their tests; add tests: fresh DB plain setup installs and records all three; recorded-elsewhere state installs at the resolved path anyway <!-- completed: 2026-08-13T21:58 -->
+- [x] Test: plain setup with an invalid config-path variable fails the assets half with the pinned validation error; the selector form stays lazy <!-- completed: 2026-08-13T21:58 -->
 
 ### Step 4: Schema-version guard
 
-- [ ] Add `schema_guard` to `cafleet/src/cli/helpers.rs` with the five-state classification and error strings; share `recorded_version` / `has_foreign_tables` with `setup` and `doctor` <!-- completed: -->
-- [ ] Wire the guard into `cli/mod.rs` for `fleet` / `member` / `message` / `monitor` and into `server::run`; keep `setup` and `doctor` exempt <!-- completed: -->
-- [ ] Simplify the stale-assets guard's no-rows error string (the `asset_installs_table_exists` pre-check stays) <!-- completed: -->
-- [ ] Tests: behind-head fixture (hand-written ledger + pre-V6 `asset_installs` shape) → outdated error; empty DB → no-database error; ahead-of-head ledger → upgrade-cafleet error; foreign-tables-no-ledger → not-a-cafleet-database error; at-head → command proceeds <!-- completed: -->
-- [ ] Test: a fleet-scoped command against the pre-V6 fixture no longer emits `no such column: path` <!-- completed: -->
+- [x] Add `schema_guard` to `cafleet/src/cli/helpers.rs` with the five-state classification and error strings; share `recorded_version` / `has_foreign_tables` with `setup` and `doctor` <!-- completed: 2026-08-13T22:03 -->
+- [x] Wire the guard into `cli/mod.rs` for `fleet` / `member` / `message` / `monitor` and into `server::run`; keep `setup` and `doctor` exempt <!-- completed: 2026-08-13T22:03 -->
+- [x] Simplify the stale-assets guard's no-rows error string (the `asset_installs_table_exists` pre-check stays) <!-- completed: 2026-08-13T22:03 -->
+- [x] Tests: behind-head fixture (hand-written ledger + pre-V6 `asset_installs` shape) → outdated error; empty DB → no-database error; ahead-of-head ledger → upgrade-cafleet error; foreign-tables-no-ledger → not-a-cafleet-database error; at-head → command proceeds <!-- completed: 2026-08-13T22:03 -->
+- [x] Test: a fleet-scoped command against the pre-V6 fixture no longer emits `no such column: path` <!-- completed: 2026-08-13T22:03 -->
 
 ### Step 5: Doctor hardening
 
-- [ ] Gate the recorded-rows read on `db.ok() && asset_installs_table_exists(conn)` in `doctor.rs` <!-- completed: -->
-- [ ] Tests: doctor against the pre-V6 fixture completes all three sections, renders the behind-head database line, exits 1, and emits no raw SQLite error; JSON shape unchanged <!-- completed: -->
+- [x] Gate the recorded-rows read on `db.ok() && asset_installs_table_exists(conn)` in `doctor.rs` <!-- completed: 2026-08-13T22:05 -->
+- [x] Tests: doctor against the pre-V6 fixture completes all three sections, renders the behind-head database line, exits 1, and emits no raw SQLite error; JSON shape unchanged <!-- completed: 2026-08-13T22:05 -->
 
 ### Step 6: Verification
 
-- [ ] `mise //cafleet:test` passes <!-- completed: -->
-- [ ] `mise //cafleet:lint` passes <!-- completed: -->
-- [ ] `mise //cafleet:format` clean <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` passes <!-- completed: -->
-- [ ] Grep sweep: no remaining mention of the removed guidance/hint lines anywhere in the repo <!-- completed: -->
-- [ ] `mise //cafleet:install`, then a manual smoke of `cafleet doctor` against a stale fixture DB via a teammate with run permission (per the authorization-scope guard) <!-- completed: -->
+- [x] `mise //cafleet:test` passes <!-- completed: 2026-08-13T22:09 -->
+- [x] `mise //cafleet:lint` passes <!-- completed: 2026-08-13T22:10 -->
+- [x] `mise //cafleet:format` clean <!-- completed: 2026-08-13T22:10 -->
+- [x] `mise //cafleet:typecheck` passes <!-- completed: 2026-08-13T22:10 -->
+- [x] Grep sweep: no remaining mention of the removed guidance/hint lines anywhere in the repo <!-- completed: 2026-08-13T22:11 -->
+- [x] `mise //cafleet:install`, then a manual smoke of `cafleet doctor` against a stale fixture DB via a teammate with run permission (per the authorization-scope guard) <!-- completed: 2026-08-13T22:30 -->
+
+---
+
+## Changelog
+
+| Date | Change |
+|---|---|
+| 2026-08-13 | Implemented by the execute workflow: all 24 tasks and 5 success criteria complete; Verifier E2E smoke passed; Reviewer approved after 1 round (one `[INCORRECT]` doc-wording fix); user approved; PR [#304](https://github.com/himkt/cafleet/pull/304). Status → Complete. |
