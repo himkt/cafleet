@@ -1,89 +1,85 @@
 //! Embedded skills/presets and the offline installer backing the assets half
-//! of `cafleet setup` (SPEC §6.3, amendment A3): no network access — every
-//! artifact is compiled into the binary.
+//! of `cafleet setup` (SPEC §6.3): no network access — every artifact is
+//! compiled into the binary. Install directories resolve per SPEC §6.3
+//! *Config-dir resolution*.
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
 use crate::broker::record_asset_install;
+use crate::config_dir::{
+    EnvLookup, claude_config_dir, codex_home, opencode_preset_base, opencode_skills_base,
+};
 use crate::embedded::{PRESETS, SKILLS, lookup};
 use crate::error::CafleetError;
 
 const SKILL_NAMES: [&str; 3] = ["cafleet", "cafleet-design-doc", "cafleet-research"];
-const TARGET_AGENTS: [&str; 3] = ["claude", "codex", "opencode"];
+pub const TARGET_AGENTS: [&str; 3] = ["claude", "codex", "opencode"];
 
-fn skills_dir(home: &Path, agent: &str) -> PathBuf {
-    match agent {
-        "claude" => home.join(".claude/skills"),
-        "codex" => home.join(".codex/skills"),
-        _ => home.join(".config/opencode/skills"),
-    }
+/// An agent's resolved install locations plus its recorded-path identity
+/// (SPEC §6.3 *Config-dir resolution*).
+pub struct AgentPaths {
+    pub identity: String,
+    skills_dir: PathBuf,
+    preset: Option<(&'static str, PathBuf)>,
 }
 
-fn identity_path(home: &Path, agent: &str) -> PathBuf {
+pub fn agent_paths(env: EnvLookup, home: &Path, agent: &str) -> Result<AgentPaths, CafleetError> {
     match agent {
-        "claude" => home.join(".claude"),
-        "codex" => home.join(".codex"),
-        _ => home.join(".opencode"),
-    }
-}
-
-fn preset(home: &Path, agent: &str) -> Option<(&'static str, PathBuf)> {
-    match agent {
-        "codex" => Some((
-            "codex/cafleet.rules",
-            home.join(".codex/rules/cafleet.rules"),
-        )),
-        "opencode" => Some((
-            "opencode/cafleet.md",
-            home.join(".opencode/agents/cafleet.md"),
-        )),
-        _ => None,
-    }
-}
-
-/// The assets half: per non-skipped agent, delete-and-reinstall the three
-/// embedded skills and the agent's bundled preset (where one exists), then
-/// record the `asset_installs` row. An install failure aborts the loop; rows
-/// recorded before the failure remain.
-pub fn install_assets(
-    conn: &mut Connection,
-    skip: &BTreeSet<String>,
-    version: &str,
-    home: &Path,
-) -> Result<(), CafleetError> {
-    if !crate::broker::asset_installs_table_exists(conn) {
-        return Err(CafleetError::App(
-            "the database schema is missing or outdated; run 'cafleet setup' first".to_string(),
-        ));
-    }
-    for agent in TARGET_AGENTS {
-        if skip.contains(agent) {
-            continue;
+        "claude" => {
+            let base = claude_config_dir(env, home)?.path;
+            Ok(AgentPaths {
+                identity: base.display().to_string(),
+                skills_dir: base.join("skills"),
+                preset: None,
+            })
         }
-        install_skills(home, agent, version)?;
-        install_preset(home, agent, version)?;
-        record_asset_install(
-            conn,
-            agent,
-            &identity_path(home, agent).display().to_string(),
-            version,
-        )?;
+        "codex" => {
+            let base = codex_home(env, home)?.path;
+            Ok(AgentPaths {
+                identity: base.display().to_string(),
+                skills_dir: base.join("skills"),
+                preset: Some(("codex/cafleet.rules", base.join("rules/cafleet.rules"))),
+            })
+        }
+        "opencode" => {
+            let preset_base = opencode_preset_base(env, home)?.path;
+            Ok(AgentPaths {
+                identity: preset_base.display().to_string(),
+                skills_dir: opencode_skills_base(home).join("skills"),
+                preset: Some(("opencode/cafleet.md", preset_base.join("agents/cafleet.md"))),
+            })
+        }
+        other => unreachable!("'{other}' is outside the clap-validated agent choice set"),
     }
-    Ok(())
 }
 
-fn install_skills(home: &Path, agent: &str, version: &str) -> Result<(), CafleetError> {
-    let skills_dir = skills_dir(home, agent);
+/// Install one agent's skills and preset (where one exists) at its resolved
+/// paths, then upsert its `(coding_agent, path)` row — the row attests
+/// skills + preset. A failure aborts the caller's loop; rows recorded before
+/// the failure remain.
+pub fn install_agent(
+    conn: &mut Connection,
+    agent: &str,
+    paths: &AgentPaths,
+    version: &str,
+) -> Result<(), CafleetError> {
+    install_skills(&paths.skills_dir, agent, version)?;
+    if let Some((source, target)) = &paths.preset {
+        install_preset(source, target, agent, version)?;
+    }
+    record_asset_install(conn, agent, &paths.identity, version)
+}
+
+fn install_skills(skills_dir: &Path, agent: &str, version: &str) -> Result<(), CafleetError> {
     let fail = |e: std::io::Error| {
         CafleetError::App(format!(
             "failed to install skills into {}: {e}",
             skills_dir.display()
         ))
     };
-    std::fs::create_dir_all(&skills_dir).map_err(fail)?;
+    std::fs::create_dir_all(skills_dir).map_err(fail)?;
     for skill in SKILL_NAMES {
         let target = skills_dir.join(skill);
         if target.exists() {
@@ -113,10 +109,12 @@ fn install_skills(home: &Path, agent: &str, version: &str) -> Result<(), Cafleet
     Ok(())
 }
 
-fn install_preset(home: &Path, agent: &str, version: &str) -> Result<(), CafleetError> {
-    let Some((source, target)) = preset(home, agent) else {
-        return Ok(());
-    };
+fn install_preset(
+    source: &'static str,
+    target: &Path,
+    agent: &str,
+    version: &str,
+) -> Result<(), CafleetError> {
     let fail = |e: std::io::Error| {
         CafleetError::App(format!(
             "failed to install preset into {}: {e}",
@@ -128,21 +126,21 @@ fn install_preset(home: &Path, agent: &str, version: &str) -> Result<(), Cafleet
     }
     // The symlink check comes first: a directory check follows symlinks and a
     // recursive delete refuses them.
-    match std::fs::symlink_metadata(&target) {
+    match std::fs::symlink_metadata(target) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
-            std::fs::remove_file(&target).map_err(fail)?;
+            std::fs::remove_file(target).map_err(fail)?;
         }
         Ok(metadata) if metadata.is_dir() => {
-            std::fs::remove_dir_all(&target).map_err(fail)?;
+            std::fs::remove_dir_all(target).map_err(fail)?;
         }
         Ok(_) => {
-            std::fs::remove_file(&target).map_err(fail)?;
+            std::fs::remove_file(target).map_err(fail)?;
         }
         Err(_) => {}
     }
     let bytes = lookup(PRESETS, source)
         .unwrap_or_else(|| panic!("the embedded presets tree carries '{source}'"));
-    std::fs::write(&target, bytes).map_err(fail)?;
+    std::fs::write(target, bytes).map_err(fail)?;
     println!(
         "{agent}: installed preset (v{version}) -> {}",
         target.display()
