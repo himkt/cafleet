@@ -59,6 +59,7 @@ fn seeded_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
         "d",
         &[],
         Some(&placed("%2")),
+        false,
     )
     .unwrap()["member_id"]
         .as_i64()
@@ -70,6 +71,7 @@ fn seeded_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
         "d",
         &[],
         Some(&placed("%3")),
+        false,
     )
     .unwrap()["member_id"]
         .as_i64()
@@ -174,7 +176,8 @@ async fn the_roster_wraps_members_with_the_two_value_kind_union() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (fleet_id, director_id, member_id, helper_id) = seeded_fleet(&mut conn);
-    let holder_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None).unwrap()
+    let holder_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
+        .unwrap()
         ["member_id"]
         .as_i64()
         .unwrap();

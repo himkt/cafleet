@@ -447,7 +447,7 @@ mod tests {
     use crate::broker;
     use crate::broker::test_support as common;
     use crate::broker::test_support::{
-        FakeNotifier, create_fleet, migrated_conn, placement, register,
+        FakeNotifier, create_fleet, migrated_conn, placement, register, register_monitor,
     };
     use crate::error::CafleetError;
     use crate::output::format_json;
@@ -464,6 +464,7 @@ mod tests {
             "test member",
             &[],
             Some(&placement(Some("%2"))),
+            false,
         )
         .unwrap();
         assert!(result["member_id"].as_i64().is_some());
@@ -499,6 +500,7 @@ mod tests {
             "test member",
             &[],
             Some(&placement(Some("%2"))),
+            false,
         )
         .unwrap();
         let member_id = result["member_id"].as_i64().unwrap();
@@ -526,6 +528,7 @@ mod tests {
             "d",
             &skills,
             Some(&placement(Some("%2"))),
+            false,
         )
         .unwrap()["member_id"]
             .as_i64()
@@ -541,7 +544,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let member_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None)
+        let member_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
             .unwrap()["member_id"]
             .as_i64()
             .unwrap();
@@ -555,7 +558,7 @@ mod tests {
     fn register_member_unknown_fleet_is_a_usage_error() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let err = broker::register_member(&mut conn, 999, "x", "d", &[], None)
+        let err = broker::register_member(&mut conn, 999, "x", "d", &[], None, false)
             .expect_err("unknown fleet must error");
         assert!(matches!(err, CafleetError::Usage(_)));
         assert_eq!(err.message(), "Fleet '999' not found.");
@@ -567,7 +570,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         broker::delete_fleet(&mut conn, fleet_id).unwrap();
-        let err = broker::register_member(&mut conn, fleet_id, "x", "d", &[], None)
+        let err = broker::register_member(&mut conn, fleet_id, "x", "d", &[], None, false)
             .expect_err("deleted fleet must error");
         assert!(matches!(err, CafleetError::Usage(_)));
         assert_eq!(err.message(), format!("fleet {fleet_id} is deleted"));
@@ -591,6 +594,7 @@ mod tests {
             "d",
             &[],
             Some(&placement(Some("%2"))),
+            false,
         )
         .expect_err("a placed registration under an inactive Director must fail loudly");
         assert!(matches!(err, CafleetError::App(_)));
@@ -599,7 +603,7 @@ mod tests {
             format!("fleet {fleet_id}'s root Director (member {director_id}) is not active.")
         );
 
-        broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None)
+        broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
             .expect("a placementless registration skips the invariant guard");
     }
 
@@ -684,7 +688,7 @@ mod tests {
             .unwrap();
         assert_eq!(member["placement"]["mux_pane_id"], "%9");
 
-        let placementless = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None)
+        let placementless = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
             .unwrap()["member_id"]
             .as_i64()
             .unwrap();
@@ -732,7 +736,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let ghost_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None)
+        let ghost_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
             .unwrap()["member_id"]
             .as_i64()
             .unwrap();
@@ -778,6 +782,116 @@ mod tests {
         broker::deregister_member(&mut conn, member_id).unwrap();
         let rows = broker::list_members(&conn, fleet_id).unwrap();
         assert!(rows.iter().all(|r| r["member_id"] != member_id));
+    }
+
+    #[test]
+    fn monitor_registration_writes_the_member_card_kind_marker() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let monitor_id = register_monitor(&mut conn, fleet_id, "monitor", Some("%2"));
+        let member_id = register(&mut conn, fleet_id, "worker", Some("%3"));
+
+        let cafleet_object = |id: i64| -> Option<String> {
+            conn.query_row(
+                "SELECT json_extract(member_card_json, '$.cafleet') \
+                 FROM members WHERE member_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let monitor_kind: Option<String> = conn
+            .query_row(
+                "SELECT json_extract(member_card_json, '$.cafleet.kind') \
+                 FROM members WHERE member_id=?1",
+                [monitor_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(monitor_kind.as_deref(), Some("monitor"));
+        assert_eq!(
+            cafleet_object(member_id),
+            None,
+            "an ordinary member writes no $.cafleet object"
+        );
+        assert_eq!(
+            cafleet_object(director_id),
+            None,
+            "the Director writes no $.cafleet object"
+        );
+
+        let monitor = broker::get_member(&conn, monitor_id, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            monitor["skills"],
+            json!([]),
+            "the marker joins the card without displacing its keys"
+        );
+    }
+
+    #[test]
+    fn active_monitor_member_id_counts_only_active_monitor_members() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_a, _) = create_fleet(&mut conn, "alpha");
+        let (fleet_b, _) = create_fleet(&mut conn, "beta");
+        assert_eq!(broker::active_monitor_member_id(&conn, fleet_a).unwrap(), None);
+
+        register(&mut conn, fleet_a, "worker", Some("%2"));
+        assert_eq!(
+            broker::active_monitor_member_id(&conn, fleet_a).unwrap(),
+            None,
+            "an ordinary member never fills the monitor slot"
+        );
+
+        let monitor_id = register_monitor(&mut conn, fleet_a, "monitor", Some("%3"));
+        assert_eq!(
+            broker::active_monitor_member_id(&conn, fleet_a).unwrap(),
+            Some(monitor_id)
+        );
+        assert_eq!(
+            broker::active_monitor_member_id(&conn, fleet_b).unwrap(),
+            None,
+            "the lookup is fleet-scoped"
+        );
+
+        broker::deregister_member(&mut conn, monitor_id).unwrap();
+        assert_eq!(
+            broker::active_monitor_member_id(&conn, fleet_a).unwrap(),
+            None,
+            "a deregistered monitor frees the slot"
+        );
+    }
+
+    #[test]
+    fn member_kind_is_three_valued_across_member_views() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let monitor_id = register_monitor(&mut conn, fleet_id, "monitor", Some("%2"));
+        let member_id = register(&mut conn, fleet_id, "worker", Some("%3"));
+        let expected = [
+            (director_id, "director"),
+            (monitor_id, "monitor"),
+            (member_id, "member"),
+        ];
+
+        for (id, kind) in expected {
+            let member = broker::get_member(&conn, id, fleet_id).unwrap().unwrap();
+            assert_eq!(member["kind"], kind, "get_member kind for member {id}");
+        }
+        let rows = broker::list_members(&conn, fleet_id).unwrap();
+        for (id, kind) in expected {
+            let row = rows.iter().find(|r| r["member_id"] == id).unwrap();
+            assert_eq!(row["kind"], kind, "list_members kind for member {id}");
+        }
+        let roster = broker::list_roster(&conn, fleet_id, false).unwrap();
+        for (id, kind) in expected {
+            let row = roster.iter().find(|r| r["member_id"] == id).unwrap();
+            assert_eq!(row["kind"], kind, "list_roster kind for member {id}");
+        }
     }
 
     #[test]

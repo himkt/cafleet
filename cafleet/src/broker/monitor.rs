@@ -368,7 +368,9 @@ mod tests {
 
     use crate::broker;
     use crate::broker::test_support as common;
-    use crate::broker::test_support::{FakeNotifier, create_fleet, migrated_conn, register};
+    use crate::broker::test_support::{
+        FakeNotifier, create_fleet, migrated_conn, register, register_monitor,
+    };
     use crate::time::format_utc;
 
     fn own_pid() -> i64 {
@@ -437,7 +439,7 @@ mod tests {
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let worker_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let pending_id = register(&mut conn, fleet_id, "pending", None);
-        let ghost_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None)
+        let ghost_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
             .unwrap()["member_id"]
             .as_i64()
             .unwrap();
@@ -492,6 +494,95 @@ mod tests {
         broker::ack_message(&mut conn, first_id).unwrap();
         let targets = broker::list_fleet_wake_targets(&conn, fleet_id).unwrap();
         assert_eq!(targets[0]["pending_count"], 1);
+    }
+
+    #[test]
+    fn list_fleet_wake_targets_excludes_the_monitor_member() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let monitor_id = register_monitor(&mut conn, fleet_id, "monitor", Some("%2"));
+        let worker_id = register(&mut conn, fleet_id, "worker", Some("%3"));
+
+        let targets = broker::list_fleet_wake_targets(&conn, fleet_id).unwrap();
+        assert_eq!(targets.len(), 1, "got: {targets:?}");
+        assert_eq!(targets[0]["member_id"], worker_id);
+        assert!(
+            !targets.iter().any(|t| t["member_id"] == monitor_id),
+            "the monitor member receives the wake, never a roster entry"
+        );
+    }
+
+    #[test]
+    fn monitor_members_payload_excludes_the_monitor_member() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let monitor_id = register_monitor(&mut conn, fleet_id, "monitor", Some("%2"));
+        let worker_id = register(&mut conn, fleet_id, "worker", Some("%3"));
+
+        let rows = broker::monitor_members_payload(&conn, fleet_id, base_time()).unwrap();
+        assert_eq!(rows.len(), 1, "got: {rows:?}");
+        assert_eq!(rows[0]["member_id"], worker_id);
+        assert!(
+            !rows.iter().any(|r| r["member_id"] == monitor_id),
+            "the members array re-sources to the wake roster, which excludes the monitor"
+        );
+    }
+
+    #[test]
+    fn fleet_wake_director_reports_the_director_descriptor() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let worker_id = register(&mut conn, fleet_id, "worker", Some("%2"));
+
+        let director = broker::fleet_wake_director(&conn, fleet_id).unwrap();
+        assert_eq!(director["member_id"], director_id);
+        assert_eq!(director["name"], "Director");
+        assert_eq!(director["coding_agent"], "claude");
+        assert_eq!(director["pending_count"], 0);
+        let keys: std::collections::BTreeSet<&str> = director
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            ["member_id", "name", "coding_agent", "pending_count"].into(),
+            "the descriptor's key set matches the roster-entry grammar"
+        );
+
+        let notifier = FakeNotifier::succeeding();
+        let sent = common::send(&mut conn, &notifier, worker_id, director_id, "status");
+        let message_id = sent["message"]["message_id"].as_i64().unwrap();
+        let director = broker::fleet_wake_director(&conn, fleet_id).unwrap();
+        assert_eq!(
+            director["pending_count"], 1,
+            "pending_count counts the Director's input_required unicast deliveries"
+        );
+
+        broker::ack_message(&mut conn, message_id).unwrap();
+        let director = broker::fleet_wake_director(&conn, fleet_id).unwrap();
+        assert_eq!(director["pending_count"], 0);
+    }
+
+    #[test]
+    fn fleet_wake_director_is_a_loud_error_when_the_row_is_missing() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        broker::fleet_wake_director(&conn, 999)
+            .expect_err("an unknown fleet has no Director row");
+
+        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        conn.execute(
+            "DELETE FROM member_placements WHERE member_id=?1",
+            [director_id],
+        )
+        .unwrap();
+        broker::fleet_wake_director(&conn, fleet_id)
+            .expect_err("a Director without a placement is a loud error, not a skip");
     }
 
     #[test]

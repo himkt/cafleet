@@ -22,9 +22,10 @@
 //! delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value>
 //! // members
 //! register_member(conn: &mut Connection, fleet_id: i64, name: &str,
-//!     description: &str, skills: &[Value], placement: Option<&NewPlacement>)
-//!     -> Result<Value>  // {member_id, name, registered_at}
+//!     description: &str, skills: &[Value], placement: Option<&NewPlacement>,
+//!     monitor: bool) -> Result<Value>  // {member_id, name, registered_at}
 //! get_member(conn: &Connection, member_id: i64, fleet_id: i64) -> Result<Option<Value>>
+//! active_monitor_member_id(conn: &Connection, fleet_id: i64) -> Result<Option<i64>>
 //! deregister_member(conn: &mut Connection, member_id: i64) -> Result<bool>
 //! update_placement_pane_id(conn: &mut Connection, member_id: i64, pane_id: &str)
 //!     -> Result<Option<Value>>
@@ -50,6 +51,7 @@
 //! // monitor
 //! record_monitor_wake(conn: &mut Connection, fleet_id: i64, when: &str) -> Result<()>
 //! list_fleet_wake_targets(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>>
+//! fleet_wake_director(conn: &Connection, fleet_id: i64) -> Result<Value>
 //! claim_monitor_runtime(conn: &mut Connection, fleet_id: i64, pid: i64,
 //!     tick_seconds: i64, wake_interval: i64, when: &str) -> Result<bool>
 //! set_monitor_wake_interval(conn: &mut Connection, fleet_id: i64,
@@ -114,6 +116,22 @@ pub fn register(conn: &mut Connection, fleet_id: i64, name: &str, pane: Option<&
         "test member",
         &[],
         Some(&placement(pane)),
+        false,
+    )
+    .unwrap()["member_id"]
+        .as_i64()
+        .unwrap()
+}
+
+pub fn register_monitor(conn: &mut Connection, fleet_id: i64, name: &str, pane: Option<&str>) -> i64 {
+    broker::register_member(
+        conn,
+        fleet_id,
+        name,
+        "monitor member",
+        &[],
+        Some(&placement(pane)),
+        true,
     )
     .unwrap()["member_id"]
         .as_i64()
