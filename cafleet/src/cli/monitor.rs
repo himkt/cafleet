@@ -26,7 +26,7 @@ pub struct MonitorArgs {
     #[arg(long, default_value_t = crate::monitor::DEFAULT_TICK_SECONDS,
           value_parser = clap::value_parser!(i64).range(1..))]
     tick: i64,
-    /// Director wake interval in seconds (0 disables the wake) [default:
+    /// Wake interval in seconds (0 disables the wake) [default:
     /// CAFLEET_MONITOR_WAKE_INTERVAL, 600].
     #[arg(long, value_parser = clap::value_parser!(i64).range(0..))]
     interval: Option<i64>,

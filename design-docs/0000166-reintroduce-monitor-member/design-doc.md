@@ -1,7 +1,7 @@
 # Reintroduce the monitor member — a cheap-model watcher absorbs the periodic tick
 
 **Status**: Approved
-**Progress**: 48/49 tasks complete
+**Progress**: 49/49 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -555,7 +555,7 @@ restart. Mid-run monitor death: the Director re-spawns with `--role monitor`
 - [x] `cafleet/tests/e2e.rs` per § S9 <!-- completed: 2026-08-13T12:05 -->
 - [x] `rg -n "monitoring member|monitoring-member|ready: monitor live|monitor_config|CAFLEET_MONITOR_STALL_INTERVAL|stall-check" -g '!design-docs/**' -g '!cafleet/migrations/**' -g '!cafleet/tests/docs_sync.rs'` hits only the permanent enforcement carve-outs established by design 0000158 <!-- completed: 2026-08-13T12:05 -->
 - [x] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` pass <!-- completed: 2026-08-13T11:38 -->
-- [ ] `mise //cafleet:install`, then a manual smoke run: `cafleet fleet create`, spawn a monitor member with `--role monitor --interval`-shortened cadence, confirm one `Esc`-first wake lands in the **monitor** pane with the § S4 payload and that the Director's pane receives none <!-- completed: -->
+- [x] `mise //cafleet:install`, then a manual smoke run: `cafleet fleet create`, spawn a monitor member with `--role monitor --interval`-shortened cadence, confirm one `Esc`-first wake lands in the **monitor** pane with the § S4 payload and that the Director's pane receives none <!-- completed: 2026-08-13T11:41 -->
 
 ---
 
