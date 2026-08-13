@@ -383,7 +383,9 @@ mod tests {
             "every migration carries a slug"
         );
         assert_eq!(
-            chain.last().map(|(version, name)| (*version, name.as_str())),
+            chain
+                .last()
+                .map(|(version, name)| (*version, name.as_str())),
             Some((6, "path_aware_asset_installs")),
             "expected head is V6__path_aware_asset_installs"
         );

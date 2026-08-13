@@ -22,6 +22,14 @@ fn skills_dir(home: &Path, agent: &str) -> PathBuf {
     }
 }
 
+fn identity_path(home: &Path, agent: &str) -> PathBuf {
+    match agent {
+        "claude" => home.join(".claude"),
+        "codex" => home.join(".codex"),
+        _ => home.join(".opencode"),
+    }
+}
+
 fn preset(home: &Path, agent: &str) -> Option<(&'static str, PathBuf)> {
     match agent {
         "codex" => Some((
@@ -57,7 +65,12 @@ pub fn install_assets(
         }
         install_skills(home, agent, version)?;
         install_preset(home, agent, version)?;
-        record_asset_install(conn, agent, version)?;
+        record_asset_install(
+            conn,
+            agent,
+            &identity_path(home, agent).display().to_string(),
+            version,
+        )?;
     }
     Ok(())
 }

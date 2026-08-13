@@ -1,7 +1,7 @@
 # Custom Config Paths: Env-Var Resolution, Path-Aware Install Records, Setup Selector, and Doctor Redesign
 
 **Status**: Approved
-**Progress**: 6/24 tasks complete
+**Progress**: 9/24 tasks complete
 **Last Updated**: 2026-08-12
 
 ## Overview
@@ -374,8 +374,8 @@ No `SKILL.md` names an install path, and the one skills-tree mention — the ope
 
 ### Step 2: Migration
 
-- [ ] Add `cafleet/migrations/V6__path_aware_asset_installs.sql` (drop-and-recreate with the composite key) <!-- completed: -->
-- [ ] Bump the chain-guard test to head 6; update the `cli_setup_doctor.rs` head-message assertions and the `tests/common/mod.rs` seeded rows/helpers <!-- completed: -->
+- [x] Add `cafleet/migrations/V6__path_aware_asset_installs.sql` (drop-and-recreate with the composite key) <!-- completed: 2026-08-13T08:20 -->
+- [x] Bump the chain-guard test to head 6; update the `cli_setup_doctor.rs` head-message assertions and the `tests/common/mod.rs` seeded rows/helpers <!-- completed: 2026-08-13T08:20 -->
 
 ### Step 3: Shared resolver
 
@@ -384,7 +384,7 @@ No `SKILL.md` names an install path, and the one skills-tree mention — the ope
 
 ### Step 4: Broker rows and stale-assets guard
 
-- [ ] Extend `record_asset_install`/`list_asset_installs` with `path`; update the colocated tests (composite upsert, ordering) <!-- completed: -->
+- [x] Extend `record_asset_install`/`list_asset_installs` with `path`; update the colocated tests (composite upsert, ordering) <!-- completed: 2026-08-13T08:29 -->
 - [ ] Rewrite `stale_assets_guard` per the path-aware rules table (resolution errors, the updated no-install error, resolved-path-only staleness) <!-- completed: -->
 - [ ] Guard tests: superseded rows are ignored; stale-at-resolved-path fails; no-row-at-resolved-path is unchecked; the all-agents-uninstalled error fires <!-- completed: -->
 
