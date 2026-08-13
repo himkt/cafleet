@@ -96,7 +96,7 @@ pub fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
         Err(error) => DbReport::Unreachable(error.message().to_string()),
     };
     let rows: Vec<Value> = match &conn {
-        Ok(conn) if asset_installs_table_exists(conn) => list_asset_installs(conn)?,
+        Ok(conn) if db.ok() && asset_installs_table_exists(conn) => list_asset_installs(conn)?,
         _ => Vec::new(),
     };
     let agents = agent_rows(&home, &rows);

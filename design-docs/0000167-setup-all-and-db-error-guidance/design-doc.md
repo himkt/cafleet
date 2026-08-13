@@ -1,7 +1,7 @@
 # One-Command Setup and Database-Error Guidance
 
 **Status**: Approved
-**Progress**: 16/24 tasks complete
+**Progress**: 18/24 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -147,8 +147,8 @@ No database migration is needed; the schema is untouched.
 
 ### Step 5: Doctor hardening
 
-- [ ] Gate the recorded-rows read on `db.ok() && asset_installs_table_exists(conn)` in `doctor.rs` <!-- completed: -->
-- [ ] Tests: doctor against the pre-V6 fixture completes all three sections, renders the behind-head database line, exits 1, and emits no raw SQLite error; JSON shape unchanged <!-- completed: -->
+- [x] Gate the recorded-rows read on `db.ok() && asset_installs_table_exists(conn)` in `doctor.rs` <!-- completed: 2026-08-13T22:05 -->
+- [x] Tests: doctor against the pre-V6 fixture completes all three sections, renders the behind-head database line, exits 1, and emits no raw SQLite error; JSON shape unchanged <!-- completed: 2026-08-13T22:05 -->
 
 ### Step 6: Verification
 
