@@ -1,7 +1,7 @@
 # Custom Config Paths: Env-Var Resolution, Path-Aware Install Records, Setup Selector, and Doctor Redesign
 
 **Status**: Approved
-**Progress**: 11/24 tasks complete
+**Progress**: 13/24 tasks complete
 **Last Updated**: 2026-08-12
 
 ## Overview
@@ -385,8 +385,8 @@ No `SKILL.md` names an install path, and the one skills-tree mention — the ope
 ### Step 4: Broker rows and stale-assets guard
 
 - [x] Extend `record_asset_install`/`list_asset_installs` with `path`; update the colocated tests (composite upsert, ordering) <!-- completed: 2026-08-13T08:29 -->
-- [ ] Rewrite `stale_assets_guard` per the path-aware rules table (resolution errors, the updated no-install error, resolved-path-only staleness) <!-- completed: -->
-- [ ] Guard tests: superseded rows are ignored; stale-at-resolved-path fails; no-row-at-resolved-path is unchecked; the all-agents-uninstalled error fires <!-- completed: -->
+- [x] Rewrite `stale_assets_guard` per the path-aware rules table (resolution errors, the updated no-install error, resolved-path-only staleness) <!-- completed: 2026-08-13T08:47 -->
+- [x] Guard tests: superseded rows are ignored; stale-at-resolved-path fails; no-row-at-resolved-path is unchecked; the all-agents-uninstalled error fires <!-- completed: 2026-08-13T08:47 -->
 
 ### Step 5: Setup selector
 

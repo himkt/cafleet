@@ -2,6 +2,7 @@
 //! `--file` body reader, multiplexer resolution, and the JSON-vs-text emit
 //! fork.
 
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use rusqlite::Connection;
@@ -10,6 +11,7 @@ use serde_json::Value;
 use super::system::{SystemRunner, read_stdin};
 use crate::broker::{InlinePreviewSender, asset_installs_table_exists, list_asset_installs};
 use crate::config::Settings;
+use crate::config_dir::{claude_config_dir, codex_home, opencode_preset_base};
 use crate::error::CafleetError;
 use crate::multiplexer::{AnyMultiplexer, Multiplexer, MultiplexerError, resolve_multiplexer};
 use crate::output::format_json;
@@ -18,25 +20,54 @@ pub fn connect(settings: &Settings) -> Result<Connection, CafleetError> {
     crate::db::connect(&settings.database_url)
 }
 
-/// The stale-assets guard (SPEC §6.3): validates the recorded installs before
-/// any fleet-scoped subcommand body runs.
+/// Each agent's recorded-path identity (SPEC §6.3 *Config-dir resolution*),
+/// in the fixed `claude`, `codex`, `opencode` order.
+fn identity_paths() -> Result<[(&'static str, String); 3], CafleetError> {
+    let home = PathBuf::from(
+        std::env::var("HOME").map_err(|_| CafleetError::App("HOME is not set".to_string()))?,
+    );
+    let env = |name: &str| std::env::var(name).ok();
+    Ok([
+        ("claude", claude_config_dir(&env, &home)?.path),
+        ("codex", codex_home(&env, &home)?.path),
+        ("opencode", opencode_preset_base(&env, &home)?.path),
+    ]
+    .map(|(agent, path)| (agent, path.display().to_string())))
+}
+
+/// The stale-assets guard (SPEC §6.3): resolves each agent's identity path
+/// and validates only the recorded rows at those paths before any
+/// fleet-scoped subcommand body runs; superseded rows at other paths are
+/// ignored.
 pub fn stale_assets_guard(settings: &Settings) -> Result<(), CafleetError> {
+    let identities = identity_paths()?;
     let recorded = match connect(settings) {
         Ok(conn) if asset_installs_table_exists(&conn) => list_asset_installs(&conn)?,
         _ => Vec::new(),
     };
-    if recorded.is_empty() {
+    let current: Vec<(&str, &Value)> = identities
+        .iter()
+        .filter_map(|(agent, path)| {
+            recorded
+                .iter()
+                .find(|row| row["coding_agent"] == *agent && row["path"] == path.as_str())
+                .map(|row| (*agent, row))
+        })
+        .collect();
+    if current.is_empty() {
         return Err(CafleetError::App(
-            "no assets install is recorded; run 'cafleet setup' first".to_string(),
+            "no assets install is recorded at the resolved paths; \
+             run 'cafleet setup --coding-agent <agent>' to install \
+             (agents: claude, codex, opencode)"
+                .to_string(),
         ));
     }
-    let stale: Vec<String> = recorded
+    let stale: Vec<String> = current
         .iter()
-        .filter(|row| row["cafleet_version"] != super::VERSION)
-        .map(|row| {
+        .filter(|(_, row)| row["cafleet_version"] != super::VERSION)
+        .map(|(agent, row)| {
             format!(
-                "{}={}",
-                row["coding_agent"].as_str().expect("rows carry the agent"),
+                "{agent}={}",
                 row["cafleet_version"]
                     .as_str()
                     .expect("rows carry the version")
