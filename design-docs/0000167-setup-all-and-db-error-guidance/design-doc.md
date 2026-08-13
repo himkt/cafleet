@@ -1,7 +1,7 @@
 # One-Command Setup and Database-Error Guidance
 
 **Status**: Approved
-**Progress**: 8/24 tasks complete
+**Progress**: 11/24 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -133,9 +133,9 @@ No database migration is needed; the schema is untouched.
 
 ### Step 3: Plain setup installs all agents
 
-- [ ] Change `assets_half` empty-selection branch to install all `TARGET_AGENTS`; delete `refresh_recorded` and `most_recent_path` <!-- completed: -->
-- [ ] Delete the guidance-line and hint-line strings and their tests; add tests: fresh DB plain setup installs and records all three; recorded-elsewhere state installs at the resolved path anyway <!-- completed: -->
-- [ ] Test: plain setup with an invalid config-path variable fails the assets half with the pinned validation error; the selector form stays lazy <!-- completed: -->
+- [x] Change `assets_half` empty-selection branch to install all `TARGET_AGENTS`; delete `refresh_recorded` and `most_recent_path` <!-- completed: 2026-08-13T21:58 -->
+- [x] Delete the guidance-line and hint-line strings and their tests; add tests: fresh DB plain setup installs and records all three; recorded-elsewhere state installs at the resolved path anyway <!-- completed: 2026-08-13T21:58 -->
+- [x] Test: plain setup with an invalid config-path variable fails the assets half with the pinned validation error; the selector form stays lazy <!-- completed: 2026-08-13T21:58 -->
 
 ### Step 4: Schema-version guard
 
