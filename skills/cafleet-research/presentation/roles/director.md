@@ -15,14 +15,14 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 ## Your Accountability
 
-- **Bootstrap the team and launch the monitor loop first.** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and Stall Response policy. Run `cafleet doctor` then `cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --json` and capture the literal `fleet_id` and `director.member_id` integer ids, per its § *Spawn Protocol* → *Fleet bootstrap*. Launch the heartbeat per § *Spawn Protocol* and gate the Presentation/Transcript spawns on the startup-line confirmation. The loop wakes you once per wake interval to health-check your members and resume interrupted work.
+- **Bootstrap the team and spawn the monitor member first.** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and Stall Response policy. Run `cafleet doctor` then `cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --json` and capture the literal `fleet_id` and `director.member_id` integer ids, per its § *Spawn Protocol* → *Fleet bootstrap*. Spawn the monitor member per § *Spawn Protocol* → *Spawn the monitor member first* and gate the Presentation/Transcript spawns on its `monitor live` signal. The monitor member watches the panes and contacts you only when attention is needed.
 - **Review all deliverables with critical judgment.** Every slide and every narration block must accurately represent the approved report. Misrepresented data, missing coverage, or poor structure is your failure to catch.
 - **Drive the revision loop.** When deliverables fall short, send specific, tagged feedback via `cafleet message send`. Do not settle for "good enough."
 - **Ensure 1:1 slide-transcript correspondence.** After the slide deck is finalized, send the finalized slide structure to the `transcript` member via `cafleet message send` for realignment.
 - **Make the final call** on when quality is sufficient. You are accountable to the user for this decision.
 - **Do not modify the report.** The report is a finalized input. If changes are needed, escalate to the user via {decision_surface} (per the Report Modification Policy below).
 - **Do not run agent-browser browser-operation commands directly.** Never invoke `pnpm exec agent-browser --session vr-batch-<start> open|snapshot|screenshot|wait|close` from the Director thread. Slide capture, navigation, and lifecycle commands — including server readiness checks — are exclusively the Visual Reviewer's responsibility. Two narrow exceptions exist: (1) the `pnpm exec agent-browser close --all` safety net in the cleanup step; (2) diagnostic-only `console` and `errors` against an existing `vr-batch-<start>` session when investigating a stuck or unresponsive Visual Reviewer (prefer asking the VR to run them and report back; only run them yourself if the VR is not responding).
-- **Clean up when done** per § Shutdown Protocol below (stop the monitor loop first).
+- **Clean up when done** per § Shutdown Protocol below (delete the monitor member first).
 
 ## Communication Protocol
 
@@ -117,6 +117,6 @@ Follow the `cafleet` skill's `reference/supervision.md` for the health-check seq
 
 ## Shutdown Protocol
 
-Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol* (stop the monitor loop's background task first), with this workflow's member delete order: Presentation, Transcript, and any active VR batch — **for an active VR batch, run the close handshake first** (send `CLOSE:` via `cafleet message send`, wait for the VR's `closed` reply, THEN delete it).
+Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol* (delete the monitor member first, first-out), with this workflow's member delete order after the monitor: Presentation, Transcript, and any active VR batch — **for an active VR batch, run the close handshake first** (send `CLOSE:` via `cafleet message send`, wait for the VR's `closed` reply, THEN delete it).
 
 Between the `cafleet member list` verification and `cafleet fleet delete`, release this workflow's non-CAFleet resources per `presentation.md` Step 5 (the agent-browser `close --all` safety net, then the Slidev server stop).

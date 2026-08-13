@@ -12,7 +12,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 |---|------|------------------------------|
 | 1 | your overlay section [`../../cafleet/reference/coding-agent-overlays.md#<name>`](../../cafleet/reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root the spawn-prompt audit file and `question.md` or fall back to `/tmp` |
-| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the Director-hosted monitor launch, the startup-line gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised Analyzer |
+| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the monitor-first spawn, the `monitor live` gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised Analyzer |
 | 4 | [`../reference/coordination.md`](../reference/coordination.md) | the `COMMENT(user-relay)` marker grammar and anchorless-status rules — your inline annotations are malformed |
 
 | Role | Identity | Does | Does NOT | Role definition |
@@ -73,9 +73,9 @@ cafleet fleet create --name "design-doc-interview-{slug}" --coding-agent <backen
 
 Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
 
-#### 2b. Launch the monitor loop (before the Analyzer)
+#### 2b. Spawn the monitor member (before the Analyzer)
 
-BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Launch the monitor heartbeat per its § *Spawn Protocol*. **The startup-line confirmation gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived. The background task is stopped first in the 2f teardown.
+BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Spawn the fleet's monitor member per its § *Spawn Protocol* → *Spawn the monitor member first* (`--role monitor --model {monitor_model}`, omit `--coding-agent`). **Its `monitor live` gate signal gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived; the CLI's monitor-first guard backstops the wait. The monitor member is deleted first (first-out) in the 2f teardown.
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
@@ -85,7 +85,7 @@ Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt 
 
 #### 2d. Spawn the Analyzer
 
-**Gate**: do not spawn the Analyzer until the monitor loop's startup line (2b) has been confirmed.
+**Gate**: do not spawn the Analyzer until the monitor member's `monitor live` signal (2b) has arrived.
 
 Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (two-stage rendering + brace rules at the skeleton):
 
@@ -115,9 +115,9 @@ Poll `cafleet message poll <director-member-id> --json` until the Analyzer's rep
 
 The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and wait again with `cafleet message poll <director-member-id> --json`. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
 
-#### 2f. Tear down the monitor loop and the Analyzer
+#### 2f. Tear down the monitor member and the Analyzer
 
-The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping it alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*. Workflow delta: teardown fires immediately after the question list is acked; delete the Analyzer.
+The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping it alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (the monitor member goes first, first-out). Workflow delta: teardown fires immediately after the question list is acked; then delete the Analyzer.
 
 #### 2g. Persist the question list to `question.md`
 

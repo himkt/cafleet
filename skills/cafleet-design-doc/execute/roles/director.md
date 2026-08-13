@@ -20,7 +20,7 @@ Your tokens: `<fleet-id>`, `<director-member-id>`, `<programmer-member-id>`, `<t
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet fleet and keep an active heartbeat.** Load the `cafleet` skill and Read its `reference/supervision.md`. Create a CAFleet fleet via `cafleet fleet create --coding-agent <backend> --json` and capture `director.member_id` from the JSON response, per its § *Spawn Protocol* → *Fleet bootstrap*. Launch the heartbeat per § *Spawn Protocol* and gate the first `member create` on the startup-line confirmation. Keep the loop running until shutdown stops it.
+- **Bootstrap the CAFleet fleet and keep an active heartbeat.** Load the `cafleet` skill and Read its `reference/supervision.md`. Create a CAFleet fleet via `cafleet fleet create --coding-agent <backend> --json` and capture `director.member_id` from the JSON response, per its § *Spawn Protocol* → *Fleet bootstrap*. Spawn the monitor member per § *Spawn Protocol* → *Spawn the monitor member first* and gate the first ordinary `member create` on its `monitor live` signal. Keep the monitor member alive until shutdown deletes it first-out.
 - **Validate the design document first.** Before spawning any teammates, read the document, check for COMMENT markers and FIXME(agent) markers. If COMMENTs exist, resolve them directly when they are clear: read each COMMENT marker, apply the requested changes to the document, and remove the markers before proceeding. If a COMMENT is ambiguous, conflicts with other parts of the design, or requires a product decision, ask the user for clarification via {decision_surface} before resolving it.
 - **Judge team composition and spawn needed members.** Before spawning, analyze the nature of implementation tasks. Only spawn roles that are actually needed:
   - Code implementation → Programmer + Tester (TDD)
@@ -94,7 +94,7 @@ Intent judgment and the Abort Flow follow the `cafleet` skill's `reference/super
 
 ## Progress Monitoring
 
-Your turns are granted by an inbound member reply or the periodic monitor wake; run the 2-stage health check (poll → member capture) on each. What counts as stalled, the nudge shape, and the supervision obligations (Authorization-Scope Guard, idle semantics) are canonical in the `cafleet` skill's `reference/supervision.md` § *Stall Response* and § *Idle Semantics*.
+Your turns are granted by an inbound member reply, a monitor event message, or the monitor's stalled-Director ping; run the 2-stage health check (poll → member capture) on each. What counts as stalled, the nudge shape, and the supervision obligations (Authorization-Scope Guard, idle semantics) are canonical in the `cafleet` skill's `reference/supervision.md` § *Stall Response* and § *Idle Semantics*.
 
 ### Skill-specific milestones
 
@@ -110,4 +110,4 @@ Your turns are granted by an inbound member reply or the periodic monitor wake; 
 
 Shutdown runs as Step 8's tail — only AFTER Step 8's doc-complete commit (and the conditional `git push` when the branch is tracked on origin) has landed.
 
-Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol*. Stopping the monitor loop's background task first ({bg_stop}) ends the heartbeat (the single Step 3b `cafleet monitor` launch, run unchanged through Steps 3–8) before any pane is torn down.
+Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol*. Deleting the monitor member first (first-out) takes the wake loop down with its pane, ending the heartbeat (the single monitor member spawned before Step 3's first ordinary member, run unchanged through Steps 3–8) before any other pane is torn down.

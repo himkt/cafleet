@@ -1,7 +1,7 @@
 # Reintroduce the monitor member — a cheap-model watcher absorbs the periodic tick
 
 **Status**: Approved
-**Progress**: 23/49 tasks complete
+**Progress**: 27/49 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -504,8 +504,6 @@ restart. Mid-run monitor death: the Director re-spawns with `--role monitor`
 - [x] `.claude/rules/coding-agent-overlay.md`: add `{monitor_model}` to the model-policy paragraph, retitle its *Reviewer defaults* mirror sentence to *Monitor and reviewer defaults*, and name the monitor member as a cross-section reader <!-- completed: 2026-08-13T10:15 -->
 - [x] `.claude/skills/cafleet-model-list-refresh/SKILL.md`: restore the monitor-model refresh obligation <!-- completed: 2026-08-13T10:15 -->
 
-COMMENT(director): standing arbitration for the `.claude/**` harness denial — the Director applies all `.claude/**` edits itself (done above for Step 2 tasks 3–4). For Step 3's `.claude/rules/bash-tool.md` and Step 4's `.claude/skills/clean-docs/**` + `.claude/skills/skill-author/SKILL.md`: implement every non-`.claude` task, then send `blocked` with the exact pending edits in a `COMMENT(programmer)` marker at that step, as done for Step 2. Remove this marker when Step 4 completes.
-
 ### Step 3: The `cafleet` skill
 
 - [x] Create `skills/cafleet/roles/monitor.md` per § S2 (Required-reading block with the overlay row #1, startup order, on-wake protocol, command boundary, teardown, literal-ids, canonical-skeleton delta: `--role monitor --model {monitor_model}`, omit `--coding-agent`) <!-- completed: 2026-08-13T10:26 -->
@@ -520,10 +518,10 @@ COMMENT(director): standing arbitration for the `.claude/**` harness denial — 
 
 ### Step 4: The workflow skills
 
-- [ ] Update `skills/cafleet-design-doc/`: `SKILL.md`, `create/create.md`, `create/roles/director.md`, `execute/execute.md`, `execute/roles/director.md`, `interview/interview.md` — replace the Director loop-launch + startup-line gate with the monitor-first spawn + `monitor live` gate; update each teardown block <!-- completed: -->
-- [ ] Update `skills/cafleet-research/`: `SKILL.md`, `report/report.md`, `report/roles/director.md`, `presentation/presentation.md`, `presentation/roles/director.md` — same substitution <!-- completed: -->
-- [ ] Update `.claude/skills/clean-docs/**`: the team table and every spawn/teardown mention <!-- completed: -->
-- [ ] Update `.claude/skills/skill-author/SKILL.md`: the bootstrap sections and the worked example <!-- completed: -->
+- [x] Update `skills/cafleet-design-doc/`: `SKILL.md`, `create/create.md`, `create/roles/director.md`, `execute/execute.md`, `execute/roles/director.md`, `interview/interview.md` — replace the Director loop-launch + startup-line gate with the monitor-first spawn + `monitor live` gate; update each teardown block <!-- completed: 2026-08-13T10:52 -->
+- [x] Update `skills/cafleet-research/`: `SKILL.md`, `report/report.md`, `report/roles/director.md`, `presentation/presentation.md`, `presentation/roles/director.md` — same substitution <!-- completed: 2026-08-13T10:58 -->
+- [x] Update `.claude/skills/clean-docs/**`: the team table and every spawn/teardown mention <!-- completed: 2026-08-13T10:44 -->
+- [x] Update `.claude/skills/skill-author/SKILL.md`: the bootstrap sections and the worked example <!-- completed: 2026-08-13T10:47 -->
 
 ### Step 5: Rust — broker and member registry
 

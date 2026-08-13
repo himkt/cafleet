@@ -20,7 +20,7 @@ Your tokens: `<fleet-id>`, `<director-member-id>`, `<drafter-member-id>`, `<revi
 
 ## Your Accountability
 
-- **Bootstrap the CAFleet fleet and launch the monitor loop first.** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and governance policy. Create a CAFleet fleet via `cafleet fleet create --coding-agent <backend> --json` and capture `director.member_id` from the JSON response, per its § *Spawn Protocol* → *Fleet bootstrap*. Launch the heartbeat per § *Spawn Protocol* and gate the Drafter/Reviewer spawns on the startup-line confirmation. The loop wakes you once per wake interval to health-check your members and resume interrupted work.
+- **Bootstrap the CAFleet fleet and spawn the monitor member first.** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and governance policy. Create a CAFleet fleet via `cafleet fleet create --coding-agent <backend> --json` and capture `director.member_id` from the JSON response, per its § *Spawn Protocol* → *Fleet bootstrap*. Spawn the monitor member per § *Spawn Protocol* → *Spawn the monitor member first* and gate the Drafter/Reviewer spawns on its `monitor live` signal. The monitor member watches the panes and contacts you only when attention is needed.
 - **Enforce the clarification gate.** The Drafter MUST ask clarifying questions before drafting. If the Drafter sends a draft without having asked questions first, reject it via `cafleet message send` and instruct the Drafter to ask questions first.
 - **Relay communication faithfully.** Members cannot communicate with the user directly. You relay the Drafter's questions to the user via {decision_surface}, and relay the user's answers back to the Drafter via `cafleet message send`.
 - **Orchestrate the internal quality loop.** After the Drafter produces a draft, route it to the Reviewer via `cafleet message send`. If the Reviewer has feedback, route it back to the Drafter for refinement via `cafleet message send`, then back to the Reviewer. Repeat until the Reviewer explicitly signals satisfaction. Do NOT present the draft to the user until the Reviewer has approved it.
@@ -70,4 +70,4 @@ Your turns are granted by members' replies (broker inline previews) and your own
 
 ## Shutdown Protocol
 
-Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol* (stop the monitor loop's background task first). This workflow adds no extra teardown steps.
+Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol* (delete the monitor member first, first-out). This workflow adds no extra teardown steps.

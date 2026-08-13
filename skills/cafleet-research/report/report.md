@@ -12,7 +12,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 |---|------|------------------------------|
 | 1 | your overlay section [`../../cafleet/reference/coding-agent-overlays.md#<name>`](../../cafleet/reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root the spawn-prompt audit files and `${OUTPUT_DIR}` or fall back to `/tmp` |
-| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the Director-hosted monitor launch, the startup-line gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised team |
+| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the monitor-first spawn, the `monitor live` gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised team |
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
@@ -78,9 +78,9 @@ cafleet fleet create --name "research-[topic-slug]" --coding-agent <backend> --j
 
 Capture `fleet_id` and `director.member_id` from the response. Treat `fleet_id` as `[fleet-id]` and `director.member_id` as `[director-member-id]` for the rest of this skill.
 
-### Step 1: Supervision Model (Director — launch the monitor loop first)
+### Step 1: Supervision Model (Director — spawn the monitor member first)
 
-Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. Launch the monitor heartbeat per its § *Spawn Protocol*. **The startup-line confirmation gates the Manager / Scout / Researcher spawns** — do not spawn a member until it has arrived. The background task is stopped first in the Step 8 teardown.
+Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. Spawn the fleet's monitor member per its § *Spawn Protocol* → *Spawn the monitor member first* (`--role monitor --model {monitor_model}`, omit `--coding-agent`). **Its `monitor live` gate signal gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until it has arrived; the CLI's monitor-first guard backstops the wait. The monitor member is deleted first (first-out) in the Step 8 teardown.
 
 On each active turn, check `${OUTPUT_DIR}` for these expected deliverables:
 
@@ -249,7 +249,7 @@ After user approval, offer to create a presentation via {decision_surface} (adap
 
 ### Step 8: Finalize & Clean Up (Director)
 
-Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*. Workflow delta: delete order Researchers → any active Scout → Manager.
+Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (the monitor member goes first, first-out). Workflow delta: then delete order Researchers → any active Scout → Manager.
 
 ## Spawnable Agents
 
