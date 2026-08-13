@@ -30,6 +30,14 @@ function MemberRow({
     >
       <MemberAvatar member={member} size="sm" />
       <span className="min-w-0 flex-1 truncate">{member.name}</span>
+      {member.kind === "monitor" && (
+        <span
+          title="Monitor member"
+          className="shrink-0 rounded bg-surface-hover px-1 py-0.5 font-mono text-[10px] text-text-muted"
+        >
+          monitor
+        </span>
+      )}
       <span
         aria-hidden="true"
         className={`size-2 shrink-0 rounded-full ${

@@ -27,10 +27,12 @@ backend, and confirm all three reply. Then tear the team down.
 Your agent loads the `cafleet` skill and follows its Director-only
 supervision protocol before spawning members.
 
-The supervision tick is supplied by the `cafleet monitor` loop the Director
-launches as a background task in its own pane, immediately after
-`cafleet fleet create` and before the first `cafleet member create`; it works
-the same on **any** backend (`claude`, `codex`, or `opencode`)
+Supervision is supplied by the **monitor member** the Director spawns first —
+`cafleet member create --role monitor`, immediately after
+`cafleet fleet create` and before any ordinary member. The monitor member
+launches the `cafleet monitor` loop in its own pane and reports `monitor
+live` to the Director before the ordinary members spawn; it works the same on
+**any** backend (`claude`, `codex`, or `opencode`)
 ([Monitoring](../concepts/monitoring.md)).
 
 ## What to expect
@@ -48,7 +50,7 @@ deletes the fleet.
 ## Appendix: the CLI underneath
 
 The commands the agent runs, with literal ids — fleet `1`, root Director
-`2`, members `3`/`4`/`5`; your ids will differ.
+`2`, monitor member `3`, members `4`/`5`/`6`; your ids will differ.
 
 :::details Expand the walkthrough
 
@@ -64,7 +66,24 @@ cafleet fleet create --name "demo" --coding-agent claude
 1 director=2
 ```
 
-Spawn one member per backend:
+Spawn the monitor member first — `--coding-agent` is omitted so it inherits
+the Director's backend, and the model is the backend's monitor default
+([Monitoring](../concepts/monitoring.md)). It launches the wake loop in its
+own pane and reports `monitor live`; an ordinary `member create` before it
+exists fails with the monitor-first guard
+([CLI options](../spec/cli-options.md#member-create)):
+
+```bash
+cafleet member create --fleet-id 1 --role monitor \
+  --name "monitor" --description "monitor member" \
+  --model haiku "You are the monitor member. Follow your monitor role protocol."
+```
+
+```
+3 monitor backend=claude pane=%7
+```
+
+Then spawn one ordinary member per backend:
 
 ```bash
 cafleet member create --fleet-id 1 \
@@ -73,7 +92,7 @@ cafleet member create --fleet-id 1 \
 ```
 
 ```
-3 alice backend=claude pane=%7
+4 alice backend=claude pane=%8
 ```
 
 ```bash
@@ -83,7 +102,7 @@ cafleet member create --fleet-id 1 \
 ```
 
 ```
-4 bob backend=codex pane=%8
+5 bob backend=codex pane=%9
 ```
 
 ```bash
@@ -93,10 +112,10 @@ cafleet member create --fleet-id 1 \
 ```
 
 ```
-5 carol backend=opencode pane=%9
+6 carol backend=opencode pane=%10
 ```
 
-List the panes — only the `claude` pane titles itself with the member name
+List the panes — only the `claude` panes title themselves with the member name
 ([Known asymmetries](../concepts/coding-agents.md#known-asymmetries-intentional-non-goals)),
 so use the `pane_id` column to locate `bob` and `carol`:
 
@@ -105,21 +124,22 @@ cafleet member list 1
 ```
 
 ```
-4 members:
+5 members:
   member_id  name           kind      backend   pane_id  idle
   ---------  -------------  --------  --------  -------  ----
   2          Director       director  claude    %0       -
-  3          alice          member    claude    %7       -
-  4          bob            member    codex     %8       -
-  5          carol          member    opencode  %9       -
+  3          monitor        monitor   claude    %7       -
+  4          alice          member    claude    %8       -
+  5          bob            member    codex     %9       -
+  6          carol          member    opencode  %10      -
 ```
 
-Message each member — repeat with `--to-member-id 4` and `--to-member-id 5`;
+Message each member — repeat with `--to-member-id 5` and `--to-member-id 6`;
 the envelope and the 2-line inline preview are identical for every backend
 ([Push notifications](../spec/multiplexer-backends.md#push-notifications)):
 
 ```bash
-cafleet message send --from-member-id 2 --to-member-id 3 "alice: report status"
+cafleet message send --from-member-id 2 --to-member-id 4 "alice: report status"
 ```
 
 ```
@@ -128,8 +148,9 @@ Message sent.
 alice: report status
 ```
 
-Tear down — repeat `member delete` for members `4` and `5`, then delete the
-fleet:
+Tear down — the monitor member goes first, so the pane kill ends the wake
+loop before any other member disappears; repeat `member delete` for members
+`4`, `5`, and `6`, then delete the fleet:
 
 ```bash
 cafleet member delete 3

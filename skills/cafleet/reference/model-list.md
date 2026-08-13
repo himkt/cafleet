@@ -2,7 +2,7 @@
 
 The catalog of models a Director may pass to `cafleet member create --model`,
 with standard API prices and the official sources. The selection policy —
-cost efficiency mode, the reviewer rule — lives in
+cost efficiency mode, the monitor and reviewer rules — lives in
 [`roles/director.md`](../roles/director.md) § *Model selection*, not on this
 page. The tables are maintained exclusively by the
 `cafleet-model-list-refresh` skill from the official sources linked below —
@@ -23,16 +23,17 @@ value. Each backend's table is ordered most → least capable.
 - [Claude Code model configuration](https://code.claude.com/docs/en/model-config.md)
   — context windows and `[1m]` applicability for the `claude` backend
 
-## Reviewer defaults
+## Monitor and reviewer defaults
 
-Each backend's current `{reviewer_model}` value — the overlays mirror this
-table, and every refresh keeps it in sync with the tables below:
+Each backend's current `{monitor_model}` and `{reviewer_model}` values — the
+overlays mirror this table, and every refresh keeps it in sync with the
+tables below:
 
-| Backend | Reviewer |
-|---|---|
-| claude | fable |
-| codex | gpt-5.6-sol |
-| opencode | opencode/glm-5.2 |
+| Backend | Reviewer | Monitor |
+|---|---|---|
+| claude | fable | haiku |
+| codex | gpt-5.6-sol | gpt-5.6-luna |
+| opencode | opencode/glm-5.2 | opencode/big-pickle |
 
 ## claude
 

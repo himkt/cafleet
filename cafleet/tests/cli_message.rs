@@ -448,8 +448,8 @@ fn broadcast_prints_the_recipients_and_delivered_counts() {
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(
-        out.contains("recipients=1 delivered=1"),
-        "one member peer, preview landed via the shim, got: {out}"
+        out.contains("recipients=2 delivered=2"),
+        "the monitor and worker peers, previews landed via the shim, got: {out}"
     );
     assert!(out.contains("broadcast id="), "got: {out}");
 }
@@ -469,8 +469,8 @@ fn broadcast_json_summary_carries_the_null_recipient() {
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
     let envelope = &payload[0];
-    assert_eq!(envelope["recipients"], 1);
-    assert_eq!(envelope["delivered"], 1);
+    assert_eq!(envelope["recipients"], 2);
+    assert_eq!(envelope["delivered"], 2);
     let summary = &envelope["message"];
     assert_eq!(summary["type"], "broadcast_summary");
     assert_eq!(
@@ -482,7 +482,7 @@ fn broadcast_json_summary_carries_the_null_recipient() {
         summary["origin_message_id"], summary["message_id"],
         "self-referential origin"
     );
-    assert_eq!(summary["text"], "Broadcast sent to 1 recipients");
+    assert_eq!(summary["text"], "Broadcast sent to 2 recipients");
 }
 
 #[test]

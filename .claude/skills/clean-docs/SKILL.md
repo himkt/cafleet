@@ -116,10 +116,10 @@ Per surface, the scope of what may change:
 
 ```
 User → /clean-docs (one workflow)
- └─ Director (main session — resolves BASE, bootstraps fleet, launches the
-              monitor loop in its own pane, partitions slices, merges partials,
+ └─ Director (main session — resolves BASE, bootstraps fleet, spawns the
+              monitor member first, partitions slices, merges partials,
               holds the apply behind review, verifies, commits when asked,
-              stops the loop first at teardown)
+              deletes the monitor member first at teardown)
      ├─ scanner-1  (owns a disjoint file slice: scan → propose → apply after gate)
      ├─ scanner-N  (…)
      └─ reviewer   (the workflow's guard, --model {reviewer_model})
@@ -127,7 +127,7 @@ User → /clean-docs (one workflow)
 
 | Role | Responsibility |
 |---|---|
-| **Director** | Resolve task-scoped `${BASE}`; `cafleet fleet create`; launch `cafleet monitor` as a background task in its own pane ({bg_run}) and gate the first spawn on the startup-line confirmation; partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply any edit a scanner's harness denies (verify the staged diff first); run verification; escalate observations to the user; stop the monitor loop first at teardown. |
+| **Director** | Resolve task-scoped `${BASE}`; `cafleet fleet create`; spawn the monitor member first (`cafleet member create --role monitor --model {monitor_model}`, omit `--coding-agent`) and gate the first ordinary spawn on its `monitor live` message (the CLI monitor-first guard backstops); partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply any edit a scanner's harness denies (verify the staged diff first); run verification; escalate observations to the user; delete the monitor member first (first-out) at teardown. |
 | **scanner** (×N) | For its slice: run the workflow's scan mechanics, propose actions per the workflow's rubric, record observations separately, write its partial artifact under `${BASE}`. After approval is relayed: apply its own slice's approved rows exactly as written, re-verify its diff, route harness-denied writes to the Director. |
 | **reviewer** | Validate the merged artifact **before** any edit, per the workflow's guarantees and guardrails. After apply: run the workflow verification (parameter table below). |
 
@@ -157,10 +157,11 @@ extensions, since a run produces a run artifact, not a design document:
    `reference/base-dir.md`, convention
    `researches/clean-docs-<workflow>-<UTC-compact>/` (gitignored, one folder
    per run).
-2. **Bootstrap** — `cafleet doctor` (gating), `cafleet fleet create`; launch
-   `cafleet monitor <fleet-id>` as a background task in your
-   own pane ({bg_run}; members spawned `{permission_flags}`), gate on the
-   `monitor loop started (…)` startup line.
+2. **Bootstrap** — `cafleet doctor` (gating), `cafleet fleet create`; spawn
+   the monitor member first (`cafleet member create --role monitor
+   --model {monitor_model}`, omit `--coding-agent`; members spawned
+   `{permission_flags}`), gate the first ordinary spawn on its `monitor live`
+   message (the CLI monitor-first guard backstops).
 3. **Spawn workers** — scanners (one per disjoint slice) and the reviewer
    (`--model {reviewer_model}`), each from a rendered prompt at
    `${BASE}/.prompts/<role>-<UTC-compact>.md`.
@@ -181,8 +182,9 @@ extensions, since a run produces a run artifact, not a design document:
    (parameter table below).
 8. **Report + teardown** — the Director reports the applied set and the
    escalated observations, commits only when the user asks, and tears down
-   (stop the monitor loop's background task → delete members → verify via
-   `member list` → `fleet delete`).
+   (delete the monitor member first — the pane kill takes the loop down —
+   → delete the remaining members → verify via `member list` →
+   `fleet delete`).
 
 ### Workflow parameter table
 

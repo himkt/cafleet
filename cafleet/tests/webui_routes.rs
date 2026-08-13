@@ -59,6 +59,7 @@ fn seeded_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
         "d",
         &[],
         Some(&placed("%2")),
+        false,
     )
     .unwrap()["member_id"]
         .as_i64()
@@ -70,6 +71,7 @@ fn seeded_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
         "d",
         &[],
         Some(&placed("%3")),
+        false,
     )
     .unwrap()["member_id"]
         .as_i64()
@@ -170,12 +172,24 @@ async fn the_fleet_header_dependency_resolves_in_the_pinned_order() {
 }
 
 #[tokio::test]
-async fn the_roster_wraps_members_with_the_two_value_kind_union() {
+async fn the_roster_wraps_members_with_the_three_value_kind_union() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (fleet_id, director_id, member_id, helper_id) = seeded_fleet(&mut conn);
-    let holder_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None).unwrap()
-        ["member_id"]
+    let monitor_id = broker::register_member(
+        &mut conn,
+        fleet_id,
+        "monitor",
+        "d",
+        &[],
+        Some(&placed("%4")),
+        true,
+    )
+    .unwrap()["member_id"]
+        .as_i64()
+        .unwrap();
+    let holder_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
+        .unwrap()["member_id"]
         .as_i64()
         .unwrap();
     broker::send_message(
@@ -195,7 +209,7 @@ async fn the_roster_wraps_members_with_the_two_value_kind_union() {
     let members = payload["members"].as_array().expect("wrapped in members");
     assert_eq!(
         members.len(),
-        4,
+        5,
         "active rows + the deregistered message holder"
     );
 
@@ -237,6 +251,8 @@ async fn the_roster_wraps_members_with_the_two_value_kind_union() {
     assert_eq!(worker["kind"], "member");
     let helper = by_id(helper_id);
     assert_eq!(helper["kind"], "member");
+    let monitor = by_id(monitor_id);
+    assert_eq!(monitor["kind"], "monitor");
     let holder = by_id(holder_id);
     assert_eq!(holder["status"], "deregistered");
     assert_eq!(holder["placement"], Value::Null);
@@ -412,6 +428,18 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (fleet_id, director_id, member_id, helper_id) = seeded_fleet(&mut conn);
+    let monitor_id = broker::register_member(
+        &mut conn,
+        fleet_id,
+        "monitor",
+        "d",
+        &[],
+        Some(&placed("%4")),
+        true,
+    )
+    .unwrap()["member_id"]
+        .as_i64()
+        .unwrap();
     broker::send_message(
         &mut conn,
         &NullNotifier,
@@ -436,11 +464,15 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     assert_eq!(
         rows.len(),
         2,
-        "every non-Director active member rides along"
+        "the members array re-sources to the wake roster"
     );
     assert!(
         !rows.iter().any(|row| row["member_id"] == director_id),
         "the root Director has no row, got: {rows:?}"
+    );
+    assert!(
+        !rows.iter().any(|row| row["member_id"] == monitor_id),
+        "the monitor member has no row, got: {rows:?}"
     );
     let worker = rows.iter().find(|r| r["member_id"] == member_id).unwrap();
     assert_eq!(

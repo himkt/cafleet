@@ -12,7 +12,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 |---|------|------------------------------|
 | 1 | your overlay section [`../../cafleet/reference/coding-agent-overlays.md#<name>`](../../cafleet/reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
-| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the Director-hosted monitor launch, the startup-line gate, Authorization-Scope Guard, the facilitation loop) — you spawn an unsupervised team |
+| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the monitor-first spawn, the `monitor live` gate, Authorization-Scope Guard, the facilitation loop) — you spawn an unsupervised team |
 | 4 | [`../reference/coordination.md`](../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema — you coordinate in free-form bodies and findings get mis-routed |
 
 | Role | Identity | Does | Does NOT | Role definition |
@@ -139,9 +139,9 @@ Capture `fleet_id` and `director.member_id` from the JSON response and substitut
 
 If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `member_id` instead of creating a new fleet — the root Director from `fleet create` is the team lead.
 
-#### 3b. Launch the monitor loop (before any member)
+#### 3b. Spawn the monitor member (before any ordinary member)
 
-This team **keeps an active heartbeat**: the Director launches the monitor heartbeat per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*. **The startup-line confirmation gates the first `member create`.** The heartbeat runs **unchanged** through Steps 3–8; the background task is stopped first in Step 8's cleanup. See `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
+This team **keeps an active heartbeat**: the Director spawns the fleet's monitor member per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Spawn the monitor member first* (`--role monitor --model {monitor_model}`, omit `--coding-agent`). **Its `monitor live` gate signal gates the first ordinary `member create`** (the CLI's monitor-first guard backstops the wait). The monitor member runs **unchanged** through Steps 3–8; it is deleted first (first-out) in Step 8's cleanup. See `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -284,7 +284,7 @@ If the Verifier was spawned, assign verification:
 
 ### Step 5: Reviewer Review Loop (Director)
 
-After all TDD steps (and Phase D, if run) complete, the Director runs a fresh-context review loop before anything is presented to the user. **Run to completion / stop means stop**: the loop is uncapped and ends only on Reviewer approval or an explicit user halt/abort. When the user signals halt (explicit "stop", "wait", "pause", profanity / frustration, or repeated rejection of tool calls), the Director halts dispatch immediately, treats periodic monitor wakes as notification-only, and waits for explicit re-authorization; an explicit abort triggers the Abort Flow (Step 6).
+After all TDD steps (and Phase D, if run) complete, the Director runs a fresh-context review loop before anything is presented to the user. **Run to completion / stop means stop**: the loop is uncapped and ends only on Reviewer approval or an explicit user halt/abort. When the user signals halt (explicit "stop", "wait", "pause", profanity / frustration, or repeated rejection of tool calls), the Director halts dispatch immediately, treats monitor pings and event messages as notification-only, and waits for explicit re-authorization; an explicit abort triggers the Abort Flow (Step 6).
 
 #### Success Criteria Verification (gate)
 
@@ -421,5 +421,5 @@ Runs after Step 7 completes, or directly after Step 6 when Step 7 was skipped (g
 4. **Push decision** (separate Bash call): run `git rev-parse --abbrev-ref <branch-name>@{upstream}`.
    - Exit code 0 (branch is tracked on origin): `git push`. Covers both the "Step 7 fully succeeded" path and the "Step 7 partial-fail (push OK, PR create failed)" path.
    - Non-zero exit: skip the push. The docs commit stays local.
-5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*. Workflow delta: delete the Programmer, Tester, Verifier, and Reviewer if spawned.
+5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (the monitor member goes first, first-out). Workflow delta: then delete the Programmer, Tester, Verifier, and Reviewer if spawned.
 6. **Report to the user**: include the PR URL (if Step 7 created one), the Reviewer outcome (rounds to approval), and any skipped-step reasons.

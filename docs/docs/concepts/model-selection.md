@@ -43,11 +43,13 @@ reliably. Without the trigger, existing workflow model behavior is unchanged.
 Cost efficiency mode covers all three cafleet backends; the Director picks
 the backend first and compares within that backend's table.
 
-The reviewer is a policy exception on **every** team spawn, trigger or not:
+The monitor and reviewer are policy exceptions on **every** team spawn,
+trigger or not:
 
 | Role | Model chosen | Needs the `cost efficiency mode` trigger? |
 |---|---|---|
 | Ordinary member | The cheapest model that can finish the task reliably | yes |
+| Monitor member | The backend's monitor default from the model list's *Monitor and reviewer defaults* table | no |
 | Reviewer | The most capable listed model of the chosen backend | no |
 
 Explicit flags stay overrides, and the Director **fails closed** instead of

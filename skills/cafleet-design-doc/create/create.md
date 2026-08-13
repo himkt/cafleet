@@ -12,7 +12,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 |---|------|------------------------------|
 | 1 | your overlay section [`../../cafleet/reference/coding-agent-overlays.md#<name>`](../../cafleet/reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
-| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the Director-hosted monitor launch, the startup-line gate, Authorization-Scope Guard, the 5-step facilitation loop) — you spawn an unsupervised team |
+| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the monitor-first spawn, the `monitor live` gate, Authorization-Scope Guard, the 5-step facilitation loop) — you spawn an unsupervised team |
 | 4 | [`../reference/coordination.md`](../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema (and the Step-2 clarification exemption) — you coordinate in free-form bodies and findings get lost / mis-routed |
 
 | Role | Identity | Does | Does NOT | Role definition |
@@ -76,11 +76,11 @@ Capture `fleet_id` and `director.member_id` from the JSON response and substitut
 
 If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `member_id` instead of creating a new fleet — the root Director from `fleet create` is the team lead.
 
-#### 1b. Launch the monitor loop (before any member)
+#### 1b. Spawn the monitor member (before any ordinary member)
 
-Launch the monitor heartbeat per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*. **The startup-line confirmation gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn a member until it has arrived.
+Spawn the fleet's monitor member per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Spawn the monitor member first* (`--role monitor --model {monitor_model}`, omit `--coding-agent`). **Its `monitor live` gate signal gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn an ordinary member until it has arrived; the CLI's monitor-first guard backstops the wait.
 
-See the `cafleet` skill's `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The heartbeat runs unchanged through the quality loop; the background task is stopped first in Step 6's teardown.
+See the `cafleet` skill's `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The monitor member runs unchanged through the quality loop; it is deleted first (first-out) in Step 6's teardown.
 
 #### 1c. Locate role definitions (path-by-reference)
 
@@ -95,7 +95,7 @@ Substitute these absolute paths into the spawn prompts below.
 
 #### 1d. Spawn the Drafter
 
-**Gate**: do not spawn the Drafter until the monitor loop's startup line (1b) has been confirmed.
+**Gate**: do not spawn the Drafter until the monitor member's `monitor live` signal (1b) has arrived.
 
 **Drafter spawn prompt** — render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below (two-stage rendering + brace rules at the skeleton). Keep the prompt under ~2 KB (path-by-reference). Use the normal-mode column by default; the resume-mode column when Step 0 detected resume mode.
 
@@ -215,6 +215,6 @@ No round limit — loop continues until approved or aborted.
    ```
    Wait for the Drafter's `addressed (doc)` confirmation.
 
-2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol*. Workflow delta: delete the Drafter and Reviewer.
+2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (the monitor member goes first, first-out). Workflow delta: then delete the Drafter and Reviewer.
 
 The fleet row is soft-deleted and `messages` rows are preserved so the message trail remains inspectable in the broker database.

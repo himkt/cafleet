@@ -88,11 +88,11 @@ Never store these IDs in shell variables (`export FLEET=...`). The Claude Code h
 
 If the user is not inside a tmux session, `cafleet fleet create` exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing. Surface this and stop — do NOT try to start a tmux session yourself.
 
-### 2.3 Launch the monitor loop first
+### 2.3 Spawn the monitor member first
 
 CAFleet members do not auto-poll. The broker delivers a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview` keystroke; that preview is the trigger that wakes the recipient. If the keystroke is missed (pane buffered, recipient mid-Bash, etc.), the message just sits in `INPUT_REQUIRED` until the recipient runs `cafleet message poll` themselves.
 
-Every CAFleet-orchestrated skill runs the Director-hosted heartbeat — it is a session-level requirement, not a per-skill choice. Immediately after `cafleet fleet create` and **before** the first `cafleet member create`, the Director launches `cafleet monitor <fleet-id>` as a background task in its own pane and confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. **That confirmation gates the first `member create`.** Once per wake interval (default 600 s; `--interval` / `CAFLEET_MONITOR_WAKE_INTERVAL`, `0` disables the wake) the loop keystrokes one `Esc`-safeguarded fleet-level wake into the Director's own pane, naming every member with its pending-delivery count and closing with the resume clause. Each wake is the Director's cue to poll its inbox, ACK, dispatch queued work, health-check the named members, and then resume its own interrupted work. The loop never keystrokes a member pane. The heartbeat mechanism lives in the `cafleet` skill's `reference/supervision.md` and is identical on any backend (claude, codex, opencode).
+Every CAFleet-orchestrated skill runs the monitor-member heartbeat — it is a session-level requirement, not a per-skill choice. Immediately after `cafleet fleet create` and **before** any ordinary `cafleet member create`, the Director spawns the fleet's monitor member: `cafleet member create --role monitor --model {monitor_model}` (omit `--coding-agent` so it inherits the Director's backend). At startup the monitor member sends `ready`, launches `cafleet monitor <fleet-id>` as a background task in its own pane, confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — and sends the gate signal `monitor live` to the Director. **That message gates the first ordinary `member create`** (the CLI's monitor-first guard backstops a Director that skips the wait). Once per wake interval (default 600 s; `--interval` / `CAFLEET_MONITOR_WAKE_INTERVAL`, `0` disables the wake) the loop keystrokes one `Esc`-safeguarded fleet-level wake into the monitor member's own pane; on each wake the monitor scans the fleet's panes, classifies them, pings a confirmed-quiet member once per quiet period, and messages the Director only when something needs attention. The loop never keystrokes an ordinary member's pane or the Director's. The heartbeat mechanism lives in the `cafleet` skill's `reference/supervision.md`, the monitor's protocol in its `roles/monitor.md`, and both are identical on any backend (claude, codex, opencode).
 
 ### 2.4 Spawn members with `cafleet member create --file <abs path>`
 
@@ -130,11 +130,11 @@ The spawned member opens its role file with `Read` on its first turn. The role f
 
 When the work is done, the Director MUST tear down in this exact order:
 
-1. **Stop the monitor loop's background task first.** The loop's `SIGTERM` handler runs its ownership-checked runtime clear, nulling the process fields and preserving `tick_seconds` and `last_wake_at`. Stopping the heartbeat first keeps a wake from landing mid-teardown.
-2. **`cafleet member delete <id>`** for every member. This sends the backend exit keystroke to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` per member.
+1. **Delete the monitor member first (first-out).** `cafleet member delete <monitor-member-id>` — the pane kill takes the loop process down with it, ending the wake source before any other member disappears. The killed loop leaves a stale `monitor_runtime` row that reads as dead on both liveness axes; `fleet delete` (step 3) removes it unconditionally.
+2. **`cafleet member delete <id>`** for every remaining member. This sends the backend exit keystroke to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` per member.
 3. **`cafleet fleet delete <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active member in the fleet (root Director + remaining members), and physically deletes every associated `member_placements` row. Messages are preserved. `fleet delete` makes any still-running loop self-terminate on its next tick, so step 1 is belt-and-suspenders.
 
-Order matters. Stop the loop before deleting members so a wake cannot land mid-teardown. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
+Order matters. Delete the monitor member before the others so a wake cannot land mid-teardown. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
 
 ---
 
@@ -327,7 +327,7 @@ This is a tiny end-to-end CAFleet-orchestrated skill called `summarize-pr` (sing
 The user invokes `/summarize-pr <pr-number>`. The Director:
 
 1. Fetches the PR diff via `gh pr diff <pr-number>`.
-2. Launches the monitor loop, then spawns a Summarizer member to digest the diff, identify the top 3 risk areas, and write a 200-word summary to a file.
+2. Spawns the monitor member, waits for `monitor live`, then spawns a Summarizer member to digest the diff, identify the top 3 risk areas, and write a 200-word summary to a file.
 3. Reviews the summary, asks the user for approval, then tears down.
 
 ### Resolved task-relpath
@@ -353,15 +353,16 @@ Substitute `7` and `8` literally into every subsequent call the Director makes.
 
 ### Supervision model
 
-Like every CAFleet-orchestrated skill, `summarize-pr` launches the monitor loop **before** the Summarizer spawn (§ 2.3): the Director runs `cafleet monitor 7` as a background task in its own pane and confirms the startup line in the task output. Each periodic wake lands in the Director's own pane and is the cue to poll, ACK, dispatch, and health-check the Summarizer — the heartbeat backstop that surfaces a stall even when the Summarizer never replies.
+Like every CAFleet-orchestrated skill, `summarize-pr` spawns the monitor member **before** the Summarizer spawn (§ 2.3): the Director spawns it for fleet 7 with `--role monitor` and waits for its `ready`, then its `monitor live` gate signal — the monitor member launches `cafleet monitor 7` in its own pane and confirms the startup line itself. Each periodic wake lands in the monitor member's pane; it health-checks the Summarizer and messages the Director only on events — the heartbeat backstop that surfaces a stall even when the Summarizer never replies.
 
 ```bash
-# Background task in the Director's own pane (the backend's background-run primitive):
-cafleet monitor 7
-# task output → monitor loop started (fleet 7, tick 5s, pid 4821)
+cafleet member create --fleet-id 7 --role monitor \
+  --name "monitor" --description "monitor member" \
+  --model haiku --file ${BASE}/prompts/monitor-20260213T143000Z.md --json
+# → {"member_id": 9, ...}; broker → "ready", then "monitor live"
 ```
 
-Confirm the `monitor loop started (…)` line before spawning the Summarizer.
+Wait for the `monitor live` message before spawning the Summarizer (the CLI's monitor-first guard backstops).
 
 ### Render the Summarizer spawn prompt
 
@@ -425,17 +426,18 @@ cafleet message send --from-member-id 8 --to-member-id 11 \
 ### Teardown
 
 ```bash
-# Stop the monitor loop's background task FIRST (the backend's stop primitive),
-# then delete the Summarizer, then the fleet.
+# Delete the monitor member FIRST (the pane kill takes the loop down),
+# then the Summarizer, then the fleet.
+cafleet member delete 9
 cafleet member delete 11
 cafleet fleet delete 7
 ```
 
-Order matters: stop the monitor loop's background task first (its signal handler clears the runtime row), then delete the ordinary Summarizer, then delete the fleet (see § 2.5).
+Order matters: delete the monitor member first (first-out — the pane kill ends the wake source), then the ordinary Summarizer, then the fleet (see § 2.5).
 
 ### What this example demonstrates
 
-- All five integration sub-systems fire (resolve BASE → bootstrap fleet → launch the monitor loop → spawn the member → stop-the-loop-first teardown).
+- All five integration sub-systems fire (resolve BASE → bootstrap fleet → spawn the monitor member → spawn the member → monitor-first-out teardown).
 - The audit file at `${BASE}/prompts/summarizer-<ts>.md` lives under the task folder, not the repo root.
 - The cafleet body uses the verb + pointer schema (`complete (doc)`, `ready (doc)`, `addressed (doc)`).
 - The substantive revision request rides as a `COMMENT(director)` marker in the document, not in the cafleet body.
@@ -487,13 +489,13 @@ Fix: never fall back to `/tmp` silently. The `<unset>` sentinel is a hard stop, 
 
 Symptom: orphan `claude` processes lingering in tmux panes after the skill completes. The user closes the panes manually. On the next `cafleet fleet create`, the panes are rebound and the orphan members re-emerge.
 
-Fix: tear down in this exact order — stop the monitor loop's background task first, then `cafleet member delete` for every member, then `cafleet fleet delete`. See § 2.5.
+Fix: tear down in this exact order — `cafleet member delete` the monitor member first (first-out), then `cafleet member delete` for every remaining member, then `cafleet fleet delete`. See § 2.5.
 
-### 7.8 Spawning members before the monitor loop is live
+### 7.8 Spawning ordinary members before `monitor live`
 
-Symptom: members are spawned before the monitor loop's `monitor loop started (…)` startup line is confirmed, so the heartbeat backstop is not yet running when they begin work.
+Symptom: ordinary members are spawned before the monitor member has sent its `monitor live` gate signal, so the heartbeat backstop is not yet running when they begin work — or the spawn fails outright on the CLI's monitor-first guard (`fleet <fleet-id> has no active monitor member; spawn one with --role monitor first`).
 
-Fix: launch `cafleet monitor <fleet-id>` as a background task in the Director's own pane immediately after `cafleet fleet create`, and confirm the startup line in the task output before any `cafleet member create`.
+Fix: spawn the monitor member (`cafleet member create --role monitor`) immediately after `cafleet fleet create`, and wait for its `ready` then `monitor live` messages before any ordinary `cafleet member create`.
 
 ### 7.9 Leaving stray single braces in the spawn prompt
 

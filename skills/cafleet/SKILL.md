@@ -5,7 +5,7 @@ description: >-
   Use when an agent needs to register as a member, send/receive messages, poll
   inbox, acknowledge messages, or discover other members; or when a Director is
   about to spawn, monitor, health-check, or recover a stalled team of CAFleet
-  members (any `cafleet member create`), which requires the Director-hosted
+  members (any `cafleet member create`), which requires the monitor-member
   heartbeat and the supervision governance.
 ---
 
@@ -60,6 +60,7 @@ Used only when your backend's section omits a token or your backend is unknown. 
 |-------|-------------------------------------------------------|
 | `{decision_surface}` | a Director-relayed operator message (a member always routes to the Director) |
 | `{reviewer_model}` | the spawning Director's own model (inherit the parent) — a safe floor, possibly intelligence-suboptimal |
+| `{monitor_model}` | the spawning Director's own model (inherit the parent) — a safe floor, possibly cost-suboptimal |
 | `{permission_flags}` | describe the mode neutrally as "workspace-scoped auto-approval" — for prose uses only; spawn-flag construction never falls here |
 | `{bg_run}` | a backgrounded `!` shell command |
 | `{bg_stop}` | killing the recorded background process |
@@ -95,9 +96,9 @@ CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFL
 
 ## Team supervision
 
-Before spawning a team, the Director launches the heartbeat itself: immediately after `cafleet fleet create` and before the first `cafleet member create`, it runs `cafleet monitor <fleet-id>` as a background task in its own pane ({bg_run}) and confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — in the task output. That confirmation gates the first `member create`. The loop wakes the Director's own pane once per wake interval; each wake is the cue to scan the fleet's panes (`cafleet monitor scan <fleet-id>`), poll, ACK, dispatch, health-check the members it names, and then resume any interrupted work.
+Before spawning a team, the Director spawns the fleet's **monitor member** first: immediately after `cafleet fleet create` and before any ordinary `cafleet member create`, it runs `cafleet member create --fleet-id <fleet-id> --role monitor --model {monitor_model} …` (omitting `--coding-agent`, so the monitor inherits the Director's backend). At startup the monitor member launches `cafleet monitor <fleet-id>` as a background task in its own pane, confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — and sends the gate signal `monitor live` to the Director. That message gates the first ordinary `member create`, and the CLI's monitor-first guard backstops it. The loop wakes the monitor member's own pane once per wake interval; on each wake the monitor scans the fleet's panes (`cafleet monitor scan <fleet-id>`), classifies them per the **target member's** backend overlay cues, and contacts the Director only when something actually needs attention.
 
-For the full governance + heartbeat mechanism, Read [`reference/supervision.md`](reference/supervision.md).
+For the full governance + heartbeat mechanism, Read [`reference/supervision.md`](reference/supervision.md); the monitor member's own protocol is [`roles/monitor.md`](roles/monitor.md).
 
 ## Placeholder convention
 

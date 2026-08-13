@@ -225,8 +225,9 @@ impl TmuxMultiplexer {
         target_pane_id: &str,
         fleet_id: i64,
         members: &[Value],
+        director: &Value,
     ) -> Result<bool, MultiplexerError> {
-        let payload = build_wake_payload(fleet_id, members)?;
+        let payload = build_wake_payload(fleet_id, members, director)?;
         Ok(self.best_effort_send(target_pane_id, &payload, true))
     }
 
@@ -562,9 +563,15 @@ mod tests {
             "coding_agent": "codex",
             "pending_count": 0,
         })];
-        assert!(mux.send_wake_trigger("%9", 3, &members).unwrap());
+        let director = json!({
+            "member_id": 2,
+            "name": "Director",
+            "coding_agent": "claude",
+            "pending_count": 1,
+        });
+        assert!(mux.send_wake_trigger("%9", 3, &members, &director).unwrap());
 
-        let payload = build_wake_payload(3, &members).unwrap();
+        let payload = build_wake_payload(3, &members, &director).unwrap();
         assert_eq!(
             runner.events(),
             vec![
@@ -588,7 +595,13 @@ mod tests {
             "coding_agent": "python",
             "pending_count": 0,
         })];
-        assert!(mux.send_wake_trigger("%9", 3, &members).is_err());
+        let director = json!({
+            "member_id": 2,
+            "name": "Director",
+            "coding_agent": "claude",
+            "pending_count": 0,
+        });
+        assert!(mux.send_wake_trigger("%9", 3, &members, &director).is_err());
         assert!(runner.events().is_empty());
     }
 

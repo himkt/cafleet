@@ -1,8 +1,9 @@
 //! Docs-sync contracts: the repository documentation is the public contract
-//! for the Director-tick supervision protocol — the fleet-level `[cafleet]
-//! tick:` wake into the Director's pane, the resume clause on both injected
-//! triggers, the `member ping` pending-placement skip, the `member capture`
-//! pane read, and the flattened `monitor` command.
+//! for the monitor-member supervision protocol — the fleet-level `[cafleet]
+//! tick:` wake into the monitor member's pane, the on-wake classification
+//! with the fixed-ping exception, the `monitor live` spawn gate, the resume
+//! clause on both injected triggers, the `member ping` pending-placement
+//! skip, the `member capture` pane read, and the flattened `monitor` command.
 
 use std::path::{Path, PathBuf};
 
@@ -82,7 +83,7 @@ fn assert_absent(relative_path: &str, terms: &[&str]) {
 
 // Episode-machine and monitoring-member vocabulary that must not survive on
 // any contract page.
-const REMOVED_VOCABULARY: [&str; 17] = [
+const REMOVED_VOCABULARY: [&str; 16] = [
     "nudge_claimed",
     "escalation_pending",
     "ping_failed",
@@ -95,7 +96,6 @@ const REMOVED_VOCABULARY: [&str; 17] = [
     "monitor stall",
     "monitoring member",
     "monitoring-member",
-    "--role monitor",
     "ready: monitor live",
     "monitor_config",
     "CAFLEET_MONITOR_STALL_INTERVAL",
@@ -116,7 +116,7 @@ const OLD_CLI_SURFACE: [&str; 8] = [
 ];
 
 #[test]
-fn monitoring_concept_covers_the_director_tick_and_capture_taxonomy() {
+fn monitoring_concept_covers_the_monitor_member_and_capture_taxonomy() {
     assert_terms(
         "docs/docs/concepts/monitoring.md",
         &[
@@ -133,6 +133,10 @@ fn monitoring_concept_covers_the_director_tick_and_capture_taxonomy() {
             "Esc",
             "monitor loop started",
             "member ping",
+            "monitor member",
+            "monitor live",
+            "--role monitor",
+            "Follow your monitor role protocol",
         ],
     );
     let mut absent = OLD_CLI_SURFACE.to_vec();
@@ -200,6 +204,8 @@ fn multiplexer_backends_pins_the_pure_trigger_payload() {
         &[
             "[cafleet] tick:",
             "coding_agent=",
+            "Director:",
+            "Follow your monitor role protocol",
             "Resume your work if something was still running",
             "cafleet message poll <member-id> — then",
         ],
@@ -207,6 +213,28 @@ fn multiplexer_backends_pins_the_pure_trigger_payload() {
     let mut absent = OLD_CLI_SURFACE.to_vec();
     absent.extend(REMOVED_VOCABULARY);
     assert_absent("docs/docs/spec/multiplexer-backends.md", &absent);
+}
+
+#[test]
+fn the_monitor_role_is_the_sole_normative_protocol_carrier() {
+    assert_terms(
+        "skills/cafleet/roles/monitor.md",
+        &[
+            "sole normative",
+            "on-wake protocol",
+            "cafleet monitor scan",
+            "cafleet member ping",
+            "cafleet message send",
+            "monitor live",
+            "two consecutive wakes",
+            "content_sha256",
+            "confirmed quiet",
+            "unacked",
+        ],
+    );
+    let mut absent = OLD_CLI_SURFACE.to_vec();
+    absent.extend(REMOVED_VOCABULARY);
+    assert_absent("skills/cafleet/roles/monitor.md", &absent);
 }
 
 #[test]
@@ -221,6 +249,7 @@ fn every_backend_overlay_defines_the_capture_cues() {
                 "stall_candidate",
                 "quiet",
                 "ambiguous",
+                "on-wake classification",
                 "pre-ping capture gate",
             ],
         );
@@ -228,7 +257,17 @@ fn every_backend_overlay_defines_the_capture_cues() {
     assert_terms_in(
         &format!("{OVERLAYS_FILE} § Template"),
         overlay_section(&text, "Template"),
-        &["working", "stall_candidate", "Note → applies at"],
+        &[
+            "working",
+            "stall_candidate",
+            "Note → applies at",
+            "on-wake classification",
+        ],
+    );
+    assert_terms_in(
+        &format!("{OVERLAYS_FILE} intro"),
+        &text,
+        &["monitor member"],
     );
     let mut absent = vec!["pre-nudge"];
     absent.extend(REMOVED_VOCABULARY);
@@ -236,7 +275,7 @@ fn every_backend_overlay_defines_the_capture_cues() {
 }
 
 #[test]
-fn the_supervision_contract_covers_quiet_members_and_plain_messages() {
+fn the_supervision_contract_covers_the_monitor_member_and_quiet_members() {
     assert_terms(
         "skills/cafleet/reference/supervision.md",
         &[
@@ -246,8 +285,10 @@ fn the_supervision_contract_covers_quiet_members_and_plain_messages() {
             "pre-ping",
             "member capture",
             "cafleet monitor",
-            "monitor loop started",
             "health-check",
+            "monitor member",
+            "monitor live",
+            "--role monitor",
         ],
     );
     let mut absent = vec!["pre-nudge"];
@@ -275,7 +316,7 @@ fn the_director_and_member_roles_keep_the_ping_protocol() {
 
     assert_terms(
         "skills/cafleet/roles/member.md",
-        &["member ping", "member prompt", "Director"],
+        &["member ping", "member prompt", "Director", "monitor member"],
     );
     let mut absent = OLD_CLI_SURFACE.to_vec();
     absent.extend(REMOVED_VOCABULARY);
@@ -292,6 +333,10 @@ fn the_cafleet_skill_and_bash_rule_document_the_director_ping() {
             "member ping",
             "message send",
             "health-check",
+            "monitor member",
+            "monitor live",
+            "--role monitor",
+            "monitor_model",
         ],
     );
     let mut skill_absent = OLD_CLI_SURFACE.to_vec();
@@ -503,10 +548,11 @@ fn every_role_file_gates_its_overlay_as_required_reading_row_one() {
     );
 }
 
-/// The nine placeholders every backend overlay resolves.
-const OVERLAY_PLACEHOLDERS: [&str; 9] = [
+/// The ten placeholders every backend overlay resolves.
+const OVERLAY_PLACEHOLDERS: [&str; 10] = [
     "decision_surface",
     "reviewer_model",
+    "monitor_model",
     "permission_flags",
     "bg_run",
     "bg_stop",

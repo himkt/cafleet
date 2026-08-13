@@ -86,37 +86,45 @@ No DB column backs the native status; supervision does not consume it — the
 monitor loop's wake is unconditional and periodic. See
 [Monitoring](../concepts/monitoring.md).
 
-## The Director wake and the fixed direct ping
+## The monitor wake and the fixed direct ping
 
 The monitor loop is one fixed-cadence `scan → wake → sleep` path on both
-backends. Its only keystroke target is the Director's own pane; it never
-calls `send_poll_trigger` and never keystrokes a member pane.
+backends. Its only keystroke target is the monitor member's own pane; it
+never calls `send_poll_trigger` and never keystrokes any other pane.
 
-`send_wake_trigger` receives the fleet's member roster and emits a **pure
-trigger** — the member list with pending-delivery counts and the two protocol
-sentences; nothing else. Each rendered entry is
+`send_wake_trigger` receives the fleet's wake roster plus a Director
+descriptor and emits a **pure trigger** — the member list with
+pending-delivery counts, the `Director:` segment, the pointer to the monitor
+role protocol, and the resume clause; nothing else. Each rendered entry is
 `<member-id> (<name>; coding_agent=<agent>; unacked=<pending-count>)`, joined
-by `, `, ordered by `member_id` ascending, with `<name>` passed through
-`sanitize_wake_field`; an entry whose `coding_agent` is not a supported
-backend name fails the wake closed. tmux and herdr emit the payload
-byte-identically:
+by `, `, ordered by `member_id` ascending, excluding the Director and the
+monitor member itself; `<pending-count>` counts that member's
+`input_required` unicast deliveries. The `Director:` segment is always
+present, in the same field grammar as an entry. Every `<name>` is passed
+through `sanitize_wake_field`; an entry (roster or Director) whose
+`coding_agent` is not a supported backend name fails the wake closed with
+`member <id> has invalid coding_agent '<agent>'` and no keystroke is sent.
+tmux and herdr emit the payload byte-identically:
 
 ```text
-[cafleet] tick: fleet <fleet-id> — health-check your <N> members: <entries>. Scan panes with 'cafleet monitor scan <fleet-id>', poll your inbox, ACK, dispatch. Resume your work if something was still running.
+[cafleet] tick: fleet <fleet-id> — health-check your <N> members: <entries>. Director: <id> (<name>; coding_agent=<agent>; unacked=<n>). Follow your monitor role protocol. Resume your work if something was still running.
 ```
 
 With `N == 1` the noun is singular (`health-check your 1 member: …`); with
 `N == 0` the clause becomes `no members to health-check.` and there is no
-`<entries>` segment.
+`<entries>` segment — the `Director:` segment stays.
 
 Example:
 
 ```text
-[cafleet] tick: fleet 3 — health-check your 2 members: 4 (drafter; coding_agent=claude; unacked=2), 5 (reviewer; coding_agent=codex; unacked=0). Scan panes with 'cafleet monitor scan 3', poll your inbox, ACK, dispatch. Resume your work if something was still running.
+[cafleet] tick: fleet 3 — health-check your 2 members: 6 (drafter; coding_agent=claude; unacked=2), 7 (reviewer; coding_agent=codex; unacked=0). Director: 4 (Director; coding_agent=claude; unacked=1). Follow your monitor role protocol. Resume your work if something was still running.
 ```
 
-`cafleet member ping` is a Director-only manual primitive, unchanged on both
-backends: `Esc`, then the literal payload
+The Director's `<name>` renders as stored — `fleet create` registers the root
+Director as `Director` — with no case transformation.
+
+`cafleet member ping` is a fixed manual primitive of the Director and the
+monitor member, unchanged on both backends: `Esc`, then the literal payload
 `cafleet message poll <member-id> — then
 resume your work if something was still running.`, then `Enter` (a
 pending-placement target skips the keystroke and succeeds). It cannot carry
@@ -219,7 +227,7 @@ lets the pane settle ~0.1 s, then types the payload and `Enter`.
 | `cafleet member ping` | yes (`send_poll_trigger`, `esc_first=True`) | The literal poll command with the resume clause + `Enter` | The manual re-poke for a pane that missed an inline preview |
 | `cafleet member prompt` (plain form) | yes | The text + `Enter` | The same safeguard, protecting the submitted user turn |
 | `cafleet member prompt --shell` | **no** — a deliberate omission | `! <cmd>` + `Enter` | `! <cmd>` must land in the bare composer, and an `Esc` before it would mis-fire (see [Prompt dispatch](#prompt-dispatch)) |
-| Monitor-loop wake trigger (`send_wake_trigger`) | yes | The `[cafleet] tick:` wake + `Enter` | It targets the Director's pane, which can be parked on a permission prompt (see [Monitoring](../concepts/monitoring.md)) |
+| Monitor-loop wake trigger (`send_wake_trigger`) | yes | The `[cafleet] tick:` wake + `Enter` | It targets the monitor member's pane, which can be parked on a permission prompt (see [Monitoring](../concepts/monitoring.md)) |
 
 ### Design principles
 

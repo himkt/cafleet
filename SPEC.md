@@ -42,8 +42,8 @@ SQLite database holds fleets, members, their tmux placements, messages,
 and a per-fleet monitor runtime row. The `cafleet` CLI is the primary surface:
 it creates fleets, spawns coding-agent members into tmux panes, routes messages
 between them by keystroke-injecting inline previews, and runs a heartbeat loop
-that periodically wakes the fleet's Director to health-check its team. An admin
-WebUI exposes a read-mostly JSON API over the same broker.
+that periodically wakes the fleet's dedicated monitor member to health-check
+the team. An admin WebUI exposes a read-mostly JSON API over the same broker.
 
 **Goal:** specify the **redesigned** `cafleet` command surface end-to-end so any
 implementation can reproduce it. The contract is the *interface and observable
@@ -214,8 +214,9 @@ Edges (who depends on whom):
    post-register failure.
 3. **Monitor loop ↔ broker monitor DB ops.** The loop (§6.6) owns the
    OS-facing half (signal handling, sleep, the single keystroke); all DB
-   mutation (`claim`/`heartbeat`/`clear`/`record_monitor_wake`/
-   `list_fleet_wake_targets`) is the broker's (§6.2). The single-instance /
+   mutation and lookup (`claim`/`heartbeat`/`clear`/`record_monitor_wake`/
+   `list_fleet_wake_targets`/`active_monitor_member_id`) is the broker's
+   (§6.2). The single-instance /
    split-brain guard lives entirely in the broker's runtime-row protocol; the
    loop only consumes its boolean signals.
 
@@ -318,8 +319,8 @@ The unified shapes:
 | `started_at` | optional string | |
 | `last_tick_at` | optional string | |
 | `tick_seconds` | integer | DDL default 5 |
-| `last_wake_at` | optional string | nullable; the UTC ISO timestamp of the last successfully delivered Director wake, durable across loop restarts; preserved by the runtime clear |
-| `wake_interval_seconds` | optional integer | nullable; the live mirror of the running loop's Director wake interval — stamped at every claim/reclaim, re-read per tick, overwritten by `PATCH /api/monitor`, preserved by the runtime clear; `NULL` only in rows that predate the column and were never re-claimed |
+| `last_wake_at` | optional string | nullable; the UTC ISO timestamp of the last successfully delivered wake, durable across loop restarts; preserved by the runtime clear |
+| `wake_interval_seconds` | optional integer | nullable; the live mirror of the running loop's wake interval — stamped at every claim/reclaim, re-read per tick, overwritten by `PATCH /api/monitor`, preserved by the runtime clear; `NULL` only in rows that predate the column and were never re-claimed |
 
 **AssetInstalls** (composite TEXT PK `(coding_agent, path)`, not autoincrement, not FK-linked)
 
@@ -347,13 +348,18 @@ All values are persisted/compared as exact lowercase strings.
 
 ### 5.4 Member kind discriminator (resolved cross-module)
 
-The member "kind" is a **two-value** discriminator — `director` (derived:
-`member_id == fleets.director_member_id`) or `member` (every other active
-member) — derived entirely from the fleet's `director_member_id`
-back-reference at read time. `member_card_json` carries no kind marker: there
-is no `$.cafleet.kind` JSON path and no `derive_member_kind` collapse over a
-card value. The single `is_root` SQL flag produces `kind` directly, shared by
-`get_member`, `list_members`, `list_roster`, and the WebUI roster.
+The member "kind" is a **three-value** discriminator — `director` (derived:
+`member_id == fleets.director_member_id`), `monitor` (derived: the member's
+`member_card_json` carries the application-level marker `$.cafleet.kind ==
+"monitor"`), or `member` (every other active member) — derived at read time
+from the fleet's `director_member_id` back-reference plus the member card.
+`director_member_id` is checked first, so a fleet's root Director can never
+read as `monitor` regardless of its card contents. No dedicated column backs
+the `monitor` value and no schema migration was needed to introduce it — the
+marker is plain JSON written by `register_member` only when the caller
+requests the monitor role (§6.2, § *`member create` — spawn orchestration*).
+`get_member`, `list_members`, `list_roster`, and the WebUI roster all derive
+`kind` through this same rule.
 
 ### 5.5 Nullable `to_member_id` (resolved)
 
@@ -489,8 +495,9 @@ during message delivery (§6.5) and one process-liveness probe (signal-0).
 
 #### Kind constants and intervals
 
-How the broker surfaces the kind (the single `is_root` SQL flag shared by
-`get_member` and `list_members`) is detailed in §5.4.
+How the broker surfaces the kind (the `is_root` SQL flag joined with the
+member card's `$.cafleet.kind` marker, shared by `get_member`,
+`list_members`, and `list_roster`) is detailed in §5.4.
 
 - Liveness staleness (the monitor runtime's own heartbeat, unrelated to any
   per-member cadence): `MONITOR_STALE_FACTOR = 3`,
@@ -529,13 +536,21 @@ How the broker surfaces the kind (the single `is_root` SQL flag shared by
 
 #### Members — registration & lookups
 
-- **`register_member(fleet_id, name, description, skills, placement)`** —
+- **`register_member(fleet_id, name, description, skills, placement,
+  monitor=False)`** —
   pre-transaction validation, then one write_session. Pre-checks: `get_fleet`;
   if None → usage error `Fleet '{fleet_id}' not found.`; if `deleted_at` set →
   usage error `fleet {fleet_id} is deleted`. Build the card `{name, description,
-  skills: skills or []}` — the card carries no kind marker. The
-  `placement` dict carries no director id — the fleet row is the single source
-  of the Director identity. Inside the transaction:
+  skills: skills or []}`, adding `cafleet: {kind: "monitor"}` only when
+  `monitor` is true — an ordinary registration's card carries no kind
+  marker. The `placement` dict carries no director id — the fleet row is the
+  single source of the Director identity. **`register_member` is guard-free
+  with respect to the monitor role**: the one-per-fleet and monitor-first
+  guards (§6.3 `member create`) are evaluated entirely CLI-side, before
+  `register_member` is ever called, so a direct broker caller (as in the
+  broker's own test suite) may register a `monitor=True` or an ordinary
+  member into any fleet state without the CLI's guard checks re-running.
+  Inside the transaction:
   - **Root-Director invariant guard** (only when `placement` is given): the
     fleet's `director_member_id` must reference an active member of the fleet;
     violation → application error `fleet {fleet_id}'s root Director (member
@@ -545,12 +560,20 @@ How the broker surfaces the kind (the single `is_root` SQL flag shared by
   - Insert the member row; if `placement` given, insert it. There is no
     per-member monitor enrollment — supervision cadence lives entirely on the
     fleet-scoped `monitor_runtime` row (§6.2 *Monitor — runtime claim /
-    heartbeat / clear + liveness*).
+    heartbeat / clear + liveness*), and the monitor role marker on the card is
+    the only per-member monitor state.
+- **`active_monitor_member_id(fleet_id)`** — the fleet's single active member
+  whose card carries the monitor marker (`json_extract(member_card_json,
+  '$.cafleet.kind') = 'monitor'`), or `None`. Consumed by the CLI's two
+  `member create` monitor-role guards (§6.3) and by the monitor loop's
+  pane resolution (§6.6).
 - **`get_member(member_id, fleet_id)`** — **active only**. Returns `{member_id,
   name, description, status, registered_at, kind, skills, placement}` where
-  `skills` is the card's `skills` list (usually `[]`) and `kind` is one of two
-  values: `director` (derived: `member_id == fleets.director_member_id`) or
-  `member`; `placement` is None if absent.
+  `skills` is the card's `skills` list (usually `[]`) and `kind` is one of the
+  three values of §5.4: `director` (derived: `member_id ==
+  fleets.director_member_id`), `monitor` (derived: the card's
+  `$.cafleet.kind == "monitor"` marker), or `member`; `placement` is None if
+  absent.
 - **`deregister_member(member_id)`** — soft-delete one member + drop placement.
   If the member is the root Director of any fleet → **application
   error (exit 1)** `cannot deregister the root Director; use 'cafleet fleet
@@ -582,17 +605,18 @@ How the broker surfaces the kind (the single `is_root` SQL flag shared by
   null`; else `most_recent` = lexicographic max of the ISO timestamps, `idle =
   max(0, floor(now − most_recent))` in seconds. Returns `{member_id, name,
   kind, placement, last_sent, last_recv, last_ack, idle}` per row — `kind` is
-  the same two values as `get_member`, `placement` is null for placementless
-  rows. Backs `member list`.
+  the same three values as `get_member` (§5.4), `placement` is null for
+  placementless rows. Backs `member list`.
 - **`list_roster(fleet_id, *, include_message_holders=False)`** — every **active**
   registry row of the fleet: active rows LEFT OUTER
   JOIN `member_placements`, joined against `fleets` for the `is_root` flag that
-  directly produces `kind` (§5.4). With `include_message_holders=True` (the WebUI
+  contributes to `kind` (§5.4), plus the member card's monitor marker. With
+  `include_message_holders=True` (the WebUI
   roster), deregistered members that still own messages (a message exists with
   `owner_member_id = member_id OR from_member_id = member_id`) are also returned, so
   the audit-relevant deregistered set stays visible. Returns `{member_id, name,
-  description, status, registered_at, placement}` per row plus `kind` (the same
-  two values as `get_member`), with
+  description, status, registered_at, placement}` per row plus `kind` (the
+  same three values as `get_member`), with
   `placement` null for placementless rows. Backs `GET /api/members`
   (`include_message_holders=True`); it is not a CLI surface.
 
@@ -668,17 +692,25 @@ How the broker surfaces the kind (the single `is_root` SQL flag shared by
 
 #### Monitor — wake targets
 
-- **`list_fleet_wake_targets(fleet_id)`** — one row per **active, non-Director**
-  member of the fleet (the roster the fleet-level wake names; the root
-  Director is never a target of its own wake). Each row: `{member_id, name,
+- **`list_fleet_wake_targets(fleet_id)`** — one row per **active, non-Director,
+  non-monitor** member of the fleet (the roster the fleet-level wake names;
+  neither the root Director nor the monitor member is ever a target of the
+  wake it hosts). Each row: `{member_id, name,
   coding_agent, pending_count, oldest_pending_ts}`, ordered by `member_id`
   ascending — the order the wake payload's entries render in (§6.5).
   `pending_count` counts messages with `owner_member_id = member_id`,
   `status_state = "input_required"`, `type != "broadcast_summary"`, and
   `oldest_pending_ts` is `MIN(status_timestamp)` over the same predicate set (a
   correlated scalar subquery; `None` when the member has no pending delivery).
-  Feeds both the Director wake payload (§6.5, §6.6) and the WebUI `GET
+  Feeds both the wake payload (§6.5, §6.6) and the WebUI `GET
   /api/monitor` per-member rows (§6.8, via `monitor_members_payload` below).
+- **`fleet_wake_director(fleet_id)`** — the fleet's Director descriptor for
+  the wake's trailing `Director:` segment: `{member_id, name, coding_agent,
+  pending_count}`, `pending_count` computed by the same predicate as
+  `list_fleet_wake_targets`. A live fleet always has its Director registered
+  with a placement, so a missing row is a loud error, not a skip. Feeds only
+  the wake payload (§6.5, §6.6) — the WebUI's `GET /api/monitor` has no
+  Director row.
 
 Supervision cadence lives entirely on the fleet-scoped `monitor_runtime` row
 below — there is no per-member schedule state. Anything a member needs from
@@ -714,7 +746,8 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
 - **`record_monitor_wake(fleet_id, when)`** — update `last_wake_at = when`
   for the fleet's runtime row: one unconditional `UPDATE` keyed on
   `fleet_id` — no pid parameter, no ownership check, no return value beyond
-  success. Called only after a successful Director wake keystroke (§6.6).
+  success. Called only after a successful wake keystroke into the monitor
+  member's own pane (§6.6).
 - **`set_monitor_wake_interval(fleet_id, wake_interval_seconds)`** — one
   ownership-free `UPDATE monitor_runtime SET wake_interval_seconds = ?1 WHERE
   fleet_id = ?2`, returning `true` iff exactly one row changed. `false` ⇔ no
@@ -746,7 +779,7 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
   by the WebUI `GET /api/monitor`: one dict per `list_fleet_wake_targets` row —
   `{member_id, name, pending_count, oldest_pending_ts,
   oldest_pending_age_seconds}` (`coding_agent` is dropped at this wire layer —
-  it feeds only the Director wake payload, §6.5) — with
+  it feeds only the wake payload, §6.5) — with
   `oldest_pending_age_seconds` computed against the single supplied `now`
   (whole seconds, integer-truncated; `None` when the source timestamp is
   `None`).
@@ -1173,13 +1206,18 @@ Director's placement backend; the help default text reads `inherits the
 Director's backend`),
 `--model` (string, optional), `--effort` (string, optional — reasoning-effort
 level, validated per backend; help text `Reasoning-effort level (claude, codex
-only).`), the shared body input (positional `PROMPT` or `--file PATH`,
+only).`), `--role` (choice, optional — the sole accepted value is `monitor`;
+any other value is the parser's native invalid-value error, exit 2; omitted →
+the member registers as an ordinary member), the shared body input (positional
+`PROMPT` or `--file PATH`,
 exactly one; §6.3 [text-body input](#text-body-input)), and the shared
 `--json`.
-Every spawned member is an ordinary member; the
-member `kind` union is `"director" | "member"` (§5.4), with `director`
-reserved for the fleet's single root Director bootstrapped by `fleet create`.
-Sequence:
+A `member create` without `--role` registers an ordinary member; with
+`--role monitor` it registers the fleet's monitor member. The member `kind`
+union is `"director" | "monitor" | "member"` (§5.4), with `director` reserved
+for the fleet's single root Director bootstrapped by `fleet create` — no
+`member create` invocation, with or without `--role`, can produce a
+`director` kind. Sequence:
 
 1. Read `fleet_id`; **auto-resolve the Director** from `broker.get_fleet`,
    first thing: fleet missing → usage error (exit 2) `Fleet '<fleet-id>' not
@@ -1192,40 +1230,51 @@ Sequence:
 2. **Model and effort validation** — validate `--model`, then `--effort`
    (`validate_model` then `validate_effort`); a failure → usage error (exit 2)
    with the backend's message, **before any registration or tmux side effect**.
-3. **Resolve the body** — via the shared positional-`PROMPT` / `--file` reader
+3. **Monitor-role guards** — evaluated CLI-side (`register_member` itself is
+   guard-free, §6.2), before any registration or pane effect, one-per-fleet
+   guard first: `--role monitor` into a fleet that already has an active
+   monitor member (via the broker's `active_monitor_member_id`, §6.2) →
+   application error `fleet <fleet-id> already has an active monitor member
+   (member <member-id>)`; no `--role` (an ordinary member) into a fleet with
+   no active monitor member → application error `fleet <fleet-id> has no
+   active monitor member; spawn one with --role monitor first`.
+4. **Resolve the body** — via the shared positional-`PROMPT` / `--file` reader
    (§6.3 [text-body input](#text-body-input)): exactly-one enforced at parse
    time (clap-native, exit 2), `-` stdin, abs /
    CWD-relative path, UTF-8, uniform empty-body rejection. An empty inline
    body is a usage error (exit 2); a file / stdin surface is an
    application error (exit 1). Resolved **before any registration or tmux side
-   effect**; substitution (step 6) is deferred until the new member id exists.
-4. **Preconditions** — ensure tmux available, the backend binary on PATH, and
+   effect**; substitution (step 7) is deferred until the new member id exists.
+5. **Preconditions** — ensure tmux available, the backend binary on PATH, and
    discover the tmux context; any tmux/runtime error → application error (exit
    1).
-5. **Register the member** — with a placement carrying the tmux session, tmux
+6. **Register the member** — with a placement carrying the tmux session, tmux
    window id, an unset pane id, and the coding agent (no director id — the
-   fleet row is the single source). Re-raise an application error verbatim
+   fleet row is the single source), passing `--role`'s presence through as
+   `register_member`'s `monitor` boolean (§6.2) so a monitor registration's
+   card carries the `$.cafleet.kind == "monitor"` marker. Re-raise an
+   application error verbatim
    (preserves the root-Director invariant guard); wrap any other exception as
    `register failed: <error>`. Capture the new member id.
-6. **Substitute placeholders** (below) — run `str.format` over the resolved body
-   (step 3), substituting `{fleet_id}` / `{member_id}` (the new member id from
-   step 5) / `{director_member_id}` (the auto-resolved Director) /
+7. **Substitute placeholders** (below) — run `str.format` over the resolved body
+   (step 4), substituting `{fleet_id}` / `{member_id}` (the new member id from
+   step 6) / `{director_member_id}` (the auto-resolved Director) /
    `{coding_agent}`. An unknown-placeholder or
    malformed-brace error is a usage error (exit 2); on it,
    **deregister-with-warning, then re-raise the original error unwrapped** —
    preserving both the exact message and its exit code.
-7. **Build the spawn argv** from the backend (the rendered prompt from step 6,
+8. **Build the spawn argv** from the backend (the rendered prompt from step 7,
    display name, model, effort).
-8. **Split the pane** — split the window to obtain the pane id. The only
+9. **Split the pane** — split the window to obtain the pane id. The only
    forwarded env var is `CAFLEET_DATABASE_URL` (when set); identity travels in
-   the rendered prompt (step 6), not the environment. tmux error →
+   the rendered prompt (step 7), not the environment. tmux error →
    rollback-register, reason `tmux split-window failed: <error>`.
-9. **Patch the pane id** — record it on the placement. On exception: best-effort
-   send `/exit` (tolerating a missing pane), then rollback-register, reason
-   `placement update failed: <error>`. If the placement row vanished: same
-   best-effort `/exit`, then rollback-register, reason `placement row vanished
-   before pane-id patch`.
-10. **Emit** — attach the placement view; emit JSON (the complete result) or
+10. **Patch the pane id** — record it on the placement. On exception: best-effort
+    send `/exit` (tolerating a missing pane), then rollback-register, reason
+    `placement update failed: <error>`. If the placement row vanished: same
+    best-effort `/exit`, then rollback-register, reason `placement row vanished
+    before pane-id patch`.
+11. **Emit** — attach the placement view; emit JSON (the complete result) or
     the compact spawned-member text formatter (`format_member`, §6.4).
 
 The ladder contract: any post-register failure deregisters the member so no
@@ -1282,7 +1331,7 @@ identity flag. Lists every **active registry entry** of the fleet via
 `list_members` (§6.2) — the root Director, ordinary members, and placementless
 rows. Empty case `0 members.`; else the header is
 `<N> members:` and the table renders one row per member with `member_id`,
-`name`, `kind` (the two `get_member` values), `backend` (the placement's
+`name`, `kind` (the three `get_member` values, §5.4), `backend` (the placement's
 `coding_agent`), `pane_id` (`(pending)` when unset), and the humanized `idle`
 columns (§6.4 `format_member_list`); a placementless row renders `-` in the
 `backend` and `pane_id` cells. JSON emits
@@ -1369,16 +1418,20 @@ with the positional `FLEET_ID` subject. A
 or above-`i64::MAX` value fails the parser's standard invalid-value error,
 exit 2; optional; when omitted, falls back to
 `CAFLEET_MONITOR_WAKE_INTERVAL` §7.1, default 600). `--interval 0` disables
-the Director wake while the loop keeps heartbeating every tick. The
+the wake while the loop keeps heartbeating every tick. The
 startup-resolved interval is stamped into the fleet's `monitor_runtime` row
 by the claim and re-read on every tick (§6.6), so a `PATCH /api/monitor`
 edit (§6.8) changes a running loop's cadence within one tick. Requires a
 live fleet, then tmux. Runs the monitor loop in-process (blocking),
-launched by the Director as a background task in its own pane immediately
-after `cafleet fleet create` and before the first `cafleet member create`.
+launched by the fleet's monitor member as a background task in its own pane
+immediately
+after `cafleet member create --role monitor` (itself run immediately after
+`cafleet fleet create`, before any ordinary member).
 Immediately after the successful runtime claim, before the first tick, the
-loop prints the startup line the Director confirms before spawning any
-member: `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)`.
+loop prints the startup line the monitor member confirms before sending the
+`monitor live` gate signal to the Director — the signal that unblocks the
+Director's first ordinary
+`cafleet member create`: `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)`.
 
 ##### `monitor scan`
 
@@ -1801,8 +1854,8 @@ Every field is read with required access unless marked optional; required access
   `last_sent`, `last_recv`, `last_ack` (ISO str | null), `idle` (int seconds |
   null).
 - **Roster row (the WebUI `GET /api/members` roster)**: `member_id`, `name`,
-  `description`, `status`, `registered_at`, `kind` (the two `get_member`
-  values), `placement` (null when placementless); serialized directly by the
+  `description`, `status`, `registered_at`, `kind` (the three `get_member`
+  values, §5.4), `placement` (null when placementless); serialized directly by the
   WebUI, not by a formatter. The monitor runtime/member payloads (§6.2) are
   likewise serialized directly by the WebUI (§6.8), not by a formatter.
 
@@ -1933,35 +1986,43 @@ Director's `MultiplexerContext` and passes it directly.
   <member_id> — then resume your work if something was
   still running.`; literal-then-Enter, `timeout=5`s,
   **Esc-first=YES**, any error → `false`. Used only by `member ping`.
-- **`send_wake_trigger(*, target_pane_id, fleet_id, members) -> bool`** —
+- **`send_wake_trigger(*, target_pane_id, fleet_id, members, director) ->
+  bool`** —
   best-effort; the **sole** keystroke the monitor loop fires, targeted at the
-  fleet's **Director's own pane** (the loop never keystrokes an ordinary
-  member's pane). Each roster entry has `member_id`, `name`, validated
-  `coding_agent`, and `pending_count`; an entry whose `coding_agent` is not a
+  fleet's **monitor member's own pane** (the loop never keystrokes any other
+  pane — not the Director's, not an ordinary member's). `members` is the wake
+  roster (§6.2 `list_fleet_wake_targets`, excluding the Director and the
+  monitor member); `director` is a single descriptor carrying the Director's
+  own `member_id`, `name`, `coding_agent`, and `pending_count`, rendered as
+  the wake's trailing `Director:` segment. Each roster entry has `member_id`,
+  `name`, validated
+  `coding_agent`, and `pending_count`; an entry — roster or Director — whose
+  `coding_agent` is not a
   supported backend name raises `member <id> has invalid coding_agent
   '<agent>'` — no keystroke, no cadence commit, and the loop surfaces the
   error and exits (distinct from a `false` return — backend missing or
   keystroke failed — which the loop retries next tick, §6.6). Names and agent
-  values pass the single-line sanitizer. Render each
+  values pass the single-line sanitizer. Render each roster
   entry as `<member_id> (<name>; coding_agent=<agent>; unacked=<pending_count>)`,
-  joined by `, `, ordered by `member_id` ascending.
+  joined by `, `, ordered by `member_id` ascending; the Director renders in the
+  identical field grammar as its own trailing segment.
 
   The tmux/herdr payload is byte-identical and is a **pure, unconditional
-  trigger** — the member roster and two fixed protocol sentences; nothing
+  trigger** — the member roster, the Director segment, and two fixed protocol
+  sentences; nothing
   else:
 
   ```
-  [cafleet] tick: fleet <fleet_id> — health-check your <N> members: <entries>. Scan panes with 'cafleet monitor scan <fleet_id>', poll your inbox, ACK, dispatch. Resume your work if something was still running.
+  [cafleet] tick: fleet <fleet_id> — health-check your <N> members: <entries>. Director: <director_id> (<director_name>; coding_agent=<director_agent>; unacked=<director_pending_count>). Follow your monitor role protocol. Resume your work if something was still running.
   ```
 
   `N == 1` uses the singular noun (`health-check your 1 member: …`); `N == 0`
   drops the `<entries>` segment and the clause reads `no members to
-  health-check.`, followed by the same scan-poll and resume sentences — the
-  scan clause is unconditional. The scan instruction uses single quotes (no
-  backtick, keeping the payload free of shell-sensitive characters). The wake
+  health-check.`, with the `Director:` segment still present in both forms.
+  The wake
   fires whenever the interval has elapsed and the
-  Director's pane is alive — **including when the fleet has no other
-  members**. The wake keystroke is literal-then-Enter with `timeout=5`s and
+  monitor member's own pane is alive — **including when the fleet has no
+  ordinary members**. The wake keystroke is literal-then-Enter with `timeout=5`s and
   **Esc-first=YES** (a wake landing on a pending permission prompt clears it
   instead of answering it); any error returns false. It contains no backtick,
   command-substitution sequence, or pipe.
@@ -2162,11 +2223,12 @@ Each method's herdr realization:
   run <id> "cafleet message poll <member_id>
   — then resume your work if something was still running."`.
 - **`send_wake_trigger(...) -> bool`** — best-effort. `herdr pane send-keys <id>
-  esc` (the Esc safeguard — the target is the Director's own pane, which can be
+  esc` (the Esc safeguard — the target is the monitor member's own pane, which
+  can be
   parked on a permission prompt), then `herdr pane run <id> "<payload>"`. The
-  `<payload>` — its single-line `[cafleet] tick:` text and its per-member
+  `<payload>` — its single-line `[cafleet] tick:` text, its per-member
   `<member_id> (<name>; coding_agent=<agent>; unacked=<pending_count>)`
-  entry list — is **byte-identical** to the tmux `send_wake_trigger` payload
+  entry list, and its trailing `Director:` segment — is **byte-identical** to the tmux `send_wake_trigger` payload
   above, carrying no backtick, no command-substitution sequence, and no pipe.
 - **`send_inline_preview(...) -> bool`** — best-effort. `herdr pane send-keys
   <id> esc`, then `herdr pane send-text <id> "<2-line payload>"` (raw, no Enter —
@@ -2217,11 +2279,16 @@ unconditional and interval-driven, on both backends.
 
 ### 6.6 Monitor heartbeat loop
 
-**Scope:** the in-process supervision scheduler. The Director launches
-`run_monitor_loop` as a background task in its own pane, immediately after
-`cafleet fleet create` and before the first `cafleet member create`. It fires
-one unconditional, fleet-level wake into the **Director's own pane** once per
-wake interval, asking it to health-check its members and resume its own work
+**Scope:** the in-process supervision scheduler. The fleet's **monitor
+member** — a dedicated watcher spawned first via `cafleet member create
+--role monitor`, immediately after `cafleet fleet create` and before any
+ordinary `cafleet member create` — launches
+`run_monitor_loop` as a background task in its own pane. It fires
+one unconditional, fleet-level wake into the **monitor member's own pane**
+once per
+wake interval, naming every ordinary member and the Director with their
+pending-delivery counts, pointing at the monitor role protocol, and resuming
+the monitor member's own work
 if something was still running. The module owns the OS-facing half — the pure
 due-check, one scan pass, the foreground driver with signal handling and
 runtime-row cleanup, and the scan-cadence and default-wake-interval constants.
@@ -2251,7 +2318,7 @@ of `AgentStateAware` native status.
 - **`CONTINUE` / `STOP`** — tick-result markers distinguishing "keep looping"
   from "self-terminate".
 - **`DEFAULT_TICK_SECONDS = 5`** — default scan cadence (seconds).
-- **`DEFAULT_WAKE_INTERVAL_SECONDS = 600`** — default Director wake interval
+- **`DEFAULT_WAKE_INTERVAL_SECONDS = 600`** — default wake interval
   (seconds), re-exported from `settings.monitor_wake_interval` (§7.1) so the
   loop imports policy from one place.
 - Re-exports `MONITOR_STALE_FACTOR` (3), `MONITOR_STALE_FLOOR_SECONDS` (15) —
@@ -2275,29 +2342,36 @@ One scan pass, steps in order:
    take its `wake_interval_seconds` — the owning loop stamped the value at
    claim, so `NULL` here is corrupt state and fails loudly.
 4. **Wake-interval gate.** `wake_interval_seconds == 0` → return `CONTINUE`
-   (a heartbeat-only tick: no due-check, no Director resolution, no
+   (a heartbeat-only tick: no due-check, no monitor-member resolution, no
    multiplexer call). Evaluated per tick against the value just read.
 5. **Compute due-ness.** Call
    `wake_due(last_wake_at, started_at, wake_interval_seconds, now)` on the
    row's values. Not due →
    return `CONTINUE` with no multiplexer call.
-6. **Resolve the Director's pane.** Read the fleet's `director_member_id` and
-   its placement's `mux_pane_id`. A Director with no pane → return `CONTINUE`
+6. **Resolve the monitor member's pane.** Call the broker's
+   `active_monitor_member_id(fleet_id)` (§6.2) and, when it resolves, read
+   that member's placement `mux_pane_id`. No active monitor member, or one
+   with no pane →
+   return `CONTINUE`
    (nothing recorded — the fleet stays due).
 7. **Fetch pane liveness once.** A single `list_pane_ids` call against the
-   resolved backend (§6.5). The Director's pane absent from the live set →
+   resolved backend (§6.5). The monitor member's pane absent from the live set →
    return `CONTINUE` (nothing recorded — the fleet stays due).
-8. **Wake the Director.** Fetch the wake roster via the broker's
-   `list_fleet_wake_targets(fleet_id)` (§6.2 — every active, non-Director
-   member with its `coding_agent` and `pending_count`), then call the
-   multiplexer's wake trigger against the Director's own pane (the loop's
-   **only** keystroke), passing `fleet_id` and the roster; it returns a
-   boolean `woke`. An entry with an invalid `coding_agent` aborts the wake
+8. **Wake the monitor member.** Fetch the wake roster via the broker's
+   `list_fleet_wake_targets(fleet_id)` (§6.2 — every active, non-Director,
+   non-monitor
+   member with its `coding_agent` and `pending_count`) and the Director's own
+   descriptor via the broker's `fleet_wake_director(fleet_id)` (§6.2), then call the
+   multiplexer's wake trigger against the monitor member's own pane (the loop's
+   **only** keystroke), passing `fleet_id`, the roster, and the Director
+   descriptor; it returns a
+   boolean `woke`. An entry — roster or Director — with an invalid
+   `coding_agent` aborts the wake
    without a cadence commit (§6.5).
    - If `woke` is true: call the broker's `record_monitor_wake` with
      `now-as-ISO`, then emit one stdout heartbeat line:
      ```
-     {now as canonical ISO-8601, §5.1} tick -> wake director {director_member_id} ({N} members)
+     {now as canonical ISO-8601, §5.1} tick -> wake monitor {monitor_member_id} ({N} members)
      ```
      `N` is the roster size (may be `0`).
    - If `woke` is false: do not record the wake and do not echo — the wake
@@ -2306,9 +2380,10 @@ One scan pass, steps in order:
 
 **Critical ordering invariant:** `record_monitor_wake` and the heartbeat echo
 are both gated behind `woke == true`. Preserve this gating exactly. The wake
-fires **even when the fleet has no other members** (`N == 0`) — the Director
-is itself a supervision target and a fleet with no members yet is a transient
-bootstrap state, not a steady state.
+fires **even when the fleet has no ordinary members** (`N == 0`) — the
+Director is itself a supervision target, carried in the wake's trailing
+`Director:` segment even on an empty roster, and a fleet with no ordinary
+members yet is a transient bootstrap state, not a steady state.
 
 The per-tick re-read is what makes the interval externally editable: an
 `UPDATE` to `wake_interval_seconds` (the WebUI `PATCH /api/monitor`, §6.8)
@@ -2332,8 +2407,9 @@ artifact (no PID file); identity throughout is the OS process id.
    fleet that never received its first wake waits a fresh full
    `wake_interval_seconds` from the restart. On success, print the startup line
    `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` to
-   stdout before the first tick — the line the Director confirms before its
-   first `cafleet member create`.
+   stdout before the first tick — the line the monitor member confirms
+   before sending the `monitor live` gate signal that unblocks the Director's
+   first ordinary `cafleet member create`.
 3. **Install signal handlers** for SIGTERM and SIGINT; each flips the shared stop
    flag to true (the handler is minimal — just a flag flip).
 4. **Loop** while the stop flag is false: if `monitor_tick(fleet_id, now)`
@@ -2678,8 +2754,11 @@ same `{"detail": <string>}` shape (a single human-readable string).
 - **`GET /api/members`** — fleet-scoped. Returns the roster via
   `list_roster(include_message_holders=True)` (§6.2) — every active registry row
   plus deregistered members still owning messages — each row carrying the
-  two-value `kind` (§5.4). Response `{"members": [ <member dict>, … ]}`. Roster
-  rows carry no `monitor` key.
+  three-value `kind` (§5.4): `"director"` for the fleet's root Director
+  (exactly one per fleet), `"monitor"` for the fleet's monitor member (at most
+  one active per fleet, derived from the member card's `$.cafleet.kind`
+  marker), `"member"` for every other row. Response
+  `{"members": [ <member dict>, … ]}`.
 - **`GET /api/monitor`** — fleet-scoped. Returns the flat runtime keys
   `{running, pid, tick_seconds, wake_interval_seconds, last_tick_at,
   last_tick_age_seconds,
@@ -2698,7 +2777,7 @@ same `{"detail": <string>}` shape (a single human-readable string).
   its source timestamp is null; else whole-seconds
   now − parsed timestamp, **integer-truncated**). `members` carries the
   shared `monitor_members_payload` rows (§6.2) — one element per active,
-  non-Director member, `{member_id, name, pending_count, oldest_pending_ts,
+  non-Director, non-monitor member, `{member_id, name, pending_count, oldest_pending_ts,
   oldest_pending_age_seconds}` — computed with the same
   `now` as the runtime fields; the flat runtime keys are unchanged by this
   addition. There is no `GET`/`PATCH` per-member monitor endpoint — supervision
@@ -2801,7 +2880,7 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
   `resolve_multiplexer()` (§6.5). `None` (unset) means auto-detect from
   `HERDR_ENV` / `TMUX` — a legitimate default, not a fallback for a missing value.
   A set value must name a registry key (`tmux`/`herdr`) or resolution raises.
-- **`monitor_wake_interval`** is the `cafleet monitor` Director wake interval in
+- **`monitor_wake_interval`** is the `cafleet monitor` wake interval in
   seconds, overridden per-invocation by `--interval` (§6.3). `0` disables the
   wake while the loop keeps heartbeating every tick. The value is a
   non-negative 64-bit integer; anything else fails loudly at startup with
@@ -2894,7 +2973,7 @@ UTF-8 (no ASCII escaping).
 ### 7.4 Logging & stdout discipline
 
 - The monitor loop emits one heartbeat line per delivered wake to **stdout**
-  (`{iso} tick -> wake director {director_member_id} ({N} members)`).
+  (`{iso} tick -> wake monitor {monitor_member_id} ({N} members)`).
 - `member create` rollback diagnostics go to **stderr**. Preserve the stream
   choice (stdout vs. stderr) — it is part of the observable contract.
 
@@ -2971,10 +3050,12 @@ baseline:
 3. `V3__strip_monitoring_member_kind.sql` — data migration: removes the whole
    `$.cafleet` object from `member_card_json`
    (`json_remove(member_card_json, '$.cafleet')`) on every row whose
-   `$.cafleet.kind` carries the legacy member-kind marker — `cafleet.kind` was
-   the sole key under `$.cafleet`, so the whole object goes. Kind is derived
-   entirely from `fleets.director_member_id` from this point on (§5.4) — no
-   member row is written with a kind marker after this migration.
+   `$.cafleet.kind` carries the retired per-member enrollment marker (the
+   migration file names the literal) — `cafleet.kind` was the sole key under
+   `$.cafleet`, so the whole object goes. The marker `register_member` writes
+   for the fleet's monitor member, `$.cafleet.kind == "monitor"` (§5.4,
+   §6.2), is a different literal value, so `V3` never touches a monitor
+   member's card.
 4. `V4__fleet_level_wake_schedule.sql` — drops the per-member monitor
    schedule table (supervision cadence lives solely on `monitor_runtime`) and
    runs `ALTER TABLE monitor_runtime ADD COLUMN last_wake_at TEXT` (nullable,
@@ -3112,7 +3193,7 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 
 **`member`:**
 
-- [ ] `cafleet member create` (no identity flag — Director auto-resolved; `--fleet-id` required, `--name`, `--description`, `--coding-agent`, `--model`, `--effort`, positional `PROMPT` / `--file PATH` xor-required, `--json`)
+- [ ] `cafleet member create` (no identity flag — Director auto-resolved; `--fleet-id` required, `--name`, `--description`, `--coding-agent`, `--model`, `--effort`, `--role` (optional, sole accepted value `monitor`), positional `PROMPT` / `--file PATH` xor-required, `--json`)
 - [ ] `cafleet member delete MEMBER_ID` (`--json`; pane path kills immediately and always exits 0; placementless target → registry soft-delete, exit 0)
 - [ ] `cafleet member show MEMBER_ID` (`--json`)
 - [ ] `cafleet member list FLEET_ID` (`--json`)
@@ -3202,8 +3283,9 @@ specified in the cited section):
 ### Cross-module consistency notes
 
 - **Timestamps** unified in §5.1 (string storage + comparison; parse for math).
-- **Member kind** unified in §5.4 (a single two-value discriminator, derived
-  entirely from `fleets.director_member_id`; no card marker).
+- **Member kind** unified in §5.4 (a three-value discriminator, derived from
+  `fleets.director_member_id` plus the member card's `$.cafleet.kind ==
+  "monitor"` marker).
 - **Policy tunables** (the runtime-liveness stale factor/floor 3/15, and the
   default wake interval 600) have a single home in the broker/config modules,
   re-exported by the monitor module.

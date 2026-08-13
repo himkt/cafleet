@@ -175,7 +175,7 @@ fn fleet_delete_reports_the_count_and_is_idempotent() {
     let output = cli.run(&["fleet", "delete", &fleet_id.to_string()]);
     assert_eq!(code(&output), 0);
     assert!(
-        stdout(&output).contains("Deleted fleet 1. Deregistered 1 members."),
+        stdout(&output).contains("Deleted fleet 1. Deregistered 2 members."),
         "got: {}",
         stdout(&output)
     );
@@ -196,5 +196,5 @@ fn fleet_delete_json_reports_the_deregistered_count() {
     let output = cli.run(&["fleet", "delete", &fleet_id.to_string(), "--json"]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
-    assert_eq!(payload["deregistered_count"], 1);
+    assert_eq!(payload["deregistered_count"], 2);
 }

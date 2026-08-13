@@ -1,6 +1,6 @@
 # Coding-Agent Overlays
 
-One top-level section per backend; every section is self-contained. Identify your backend from your spawn prompt's `CODING AGENT:` line (a standalone agent uses its own identity), then resolve **only your backend's section** per the cafleet `SKILL.md` § *Resolve your overlay*. Values in other sections are never applicable to you — taking a value from another backend's section is a resolution defect, the same class as emitting a literal `{token}`. The Director is the sole cross-section reader: it applies the **target member's** section for pane-state cues.
+One top-level section per backend; every section is self-contained. Identify your backend from your spawn prompt's `CODING AGENT:` line (a standalone agent uses its own identity), then resolve **only your backend's section** per the cafleet `SKILL.md` § *Resolve your overlay*. Values in other sections are never applicable to you — taking a value from another backend's section is a resolution defect, the same class as emitting a literal `{token}`. The cross-section readers are the Director and the monitor member: each applies the **target member's** section for pane-state cues.
 
 ## claude
 
@@ -10,6 +10,7 @@ Substitute these into the base `{…}` placeholders.
 |---|---|
 | `{decision_surface}` | the AskUserQuestion tool |
 | `{reviewer_model}` | `fable` |
+| `{monitor_model}` | `haiku` |
 | `{permission_flags}` | `--permission-mode dontAsk` |
 | `{bg_run}` | the Bash tool's `run_in_background: true` |
 | `{bg_stop}` | `TaskStop` |
@@ -26,11 +27,11 @@ Every note names the base token/instruction it qualifies.
 |------|-----------|
 | `AskUserQuestion` takes ≤ 4 options/question; the built-in "Other" is the free-text path (don't add an explicit "Other"). Question shapes → form: choice among ≤ 4 labeled options; approve-or-revise (two options); continue-or-abort (two options); open-ended draft-comparison (2–4 full candidate bodies). | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions; `cafleet-design-doc/create/create.md` Step 2 question batch |
 | `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet`: register a sub-topic with `TaskCreate`, claim with `TaskUpdate` (owner + `in_progress`), complete with `TaskUpdate` (`completed`), check progress with `TaskList`. | `{task_coord}` — `cafleet-research/report/report.md` task coordination |
-| *Pane-state capture cues* (below) — the concrete claude-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the Director's on-tick health check and pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (the Director applies the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — the concrete claude-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (each reader applies the cues of the **target member's** backend overlay). |
 
 ### Pane-state capture cues
 
-The Director classifies each target from its **content only** (never native `agent_status`) using that target's backend overlay:
+A cross-section reader — the monitor member on each wake, the Director at its pre-ping gate — classifies each target from its **content only** (never native `agent_status`) using that target's backend overlay:
 
 | State | claude capture cue |
 |---|---|
@@ -43,9 +44,9 @@ Tie-breaks and the two-quiet-families rule: `supervision.md` § *The pre-ping ca
 
 ### Worked resolution
 
-The canonical Director-side monitor launch, fully resolved for this backend:
+The canonical monitor-member-side loop launch, fully resolved for this backend:
 
-Launch `cafleet monitor <fleet-id>` via the Bash tool with `run_in_background: true`, and confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in the task output before the first `member create` (members spawned `--permission-mode dontAsk`).
+Launch `cafleet monitor <fleet-id>` via the Bash tool with `run_in_background: true`, confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in the task output, then send `monitor live` to the Director.
 
 ## codex
 
@@ -55,6 +56,7 @@ Substitute these into the base `{…}` placeholders.
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
 | `{reviewer_model}` | `gpt-5.6-sol` |
+| `{monitor_model}` | `gpt-5.6-luna` |
 | `{permission_flags}` | `--ask-for-approval never --sandbox workspace-write` |
 | `{bg_run}` | a backgrounded `!` shell command |
 | `{bg_stop}` | killing the recorded background process |
@@ -71,11 +73,11 @@ Every note names the base token/instruction it qualifies.
 |------|-----------|
 | No in-pane prompt — a fleet member sends its question to the Director, which answers as a plain operator message. Ask a concrete, answerable question, not free-form prose. | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions |
 | No harness task list — track sub-topic registrations, claims, and completions as cafleet messages. | `{task_coord}` — `cafleet-research/report/report.md` task coordination |
-| *Pane-state capture cues* (below) — the concrete codex-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the Director's on-tick health check and pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (the Director applies the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — the concrete codex-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (each reader applies the cues of the **target member's** backend overlay). |
 
 ### Pane-state capture cues
 
-The Director classifies each target from its **content only** (never native `agent_status`) using that target's backend overlay:
+A cross-section reader — the monitor member on each wake, the Director at its pre-ping gate — classifies each target from its **content only** (never native `agent_status`) using that target's backend overlay:
 
 | State | codex capture cue |
 |---|---|
@@ -88,9 +90,9 @@ Tie-breaks and the two-quiet-families rule: `supervision.md` § *The pre-ping ca
 
 ### Worked resolution
 
-The canonical Director-side monitor launch, fully resolved for this backend:
+The canonical monitor-member-side loop launch, fully resolved for this backend:
 
-Launch `cafleet monitor <fleet-id> &` as a backgrounded `!` shell command, and confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in its output before the first `member create` (members spawned `--ask-for-approval never --sandbox workspace-write`).
+Launch `cafleet monitor <fleet-id> &` as a backgrounded `!` shell command, confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in its output, then send `monitor live` to the Director.
 
 ## opencode
 
@@ -100,6 +102,7 @@ Substitute these into the base `{…}` placeholders.
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
 | `{reviewer_model}` | `opencode/glm-5.2` |
+| `{monitor_model}` | `opencode/big-pickle` |
 | `{permission_flags}` | `--agent cafleet` |
 | `{bg_run}` | a backgrounded `!` shell command |
 | `{bg_stop}` | killing the recorded background process |
@@ -116,11 +119,11 @@ Every note names the base token/instruction it qualifies.
 |------|-----------|
 | No in-pane prompt — a fleet member sends its question to the Director, which answers as a plain operator message. The `--agent cafleet` safety floor shows no popup; if a popup ever appears it is a regression to escalate, not a decision point. | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions |
 | No harness task list — track sub-topic registrations, claims, and completions as cafleet messages. | `{task_coord}` — `cafleet-research/report/report.md` task coordination |
-| *Pane-state capture cues* (below) — the concrete opencode-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the Director's on-tick health check and pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (the Director applies the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — the concrete opencode-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (each reader applies the cues of the **target member's** backend overlay). |
 
 ### Pane-state capture cues
 
-The Director classifies each target from its **content only** (never native `agent_status`) using that target's backend overlay:
+A cross-section reader — the monitor member on each wake, the Director at its pre-ping gate — classifies each target from its **content only** (never native `agent_status`) using that target's backend overlay:
 
 | State | opencode capture cue |
 |---|---|
@@ -133,9 +136,9 @@ Tie-breaks and the two-quiet-families rule: `supervision.md` § *The pre-ping ca
 
 ### Worked resolution
 
-The canonical Director-side monitor launch, fully resolved for this backend:
+The canonical monitor-member-side loop launch, fully resolved for this backend:
 
-Launch `cafleet monitor <fleet-id> &` as a backgrounded `!` shell command, and confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in its output before the first `member create` (members spawned `--agent cafleet`).
+Launch `cafleet monitor <fleet-id> &` as a backgrounded `!` shell command, confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in its output, then send `monitor live` to the Director.
 
 ## Template
 
@@ -146,7 +149,8 @@ Substitute these into the base `{…}` placeholders. Each value must be a short 
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | <this backend's recorded-user-reaction surface as a short noun phrase: its interactive prompt tool, or "a Director-relayed operator message" — a fleet member always routes its question to the Director> |
-| `{reviewer_model}` | <this backend's reviewer default from the model list's *Reviewer defaults* table> |
+| `{reviewer_model}` | <this backend's reviewer default from the model list's *Monitor and reviewer defaults* table> |
+| `{monitor_model}` | <this backend's monitor default from the model list's *Monitor and reviewer defaults* table> |
 | `{permission_flags}` | <the exact spawn flags for workspace-scoped auto-approval> |
 | `{bg_run}` | <this backend's primitive for running long-lived background work, as a noun phrase> |
 | `{bg_stop}` | <the matching stop primitive, as a noun phrase> |
@@ -162,11 +166,11 @@ Required section. Convert every note (a constraint/caveat the inline value shoul
 | Note | Applies at |
 |------|-----------|
 | <the caveat, one row each> | `{token}` — `<skill>/<file>` § <base heading> |
-| *Pane-state capture cues* (below) — this backend's `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate` discriminators. | the Director's on-tick health check and pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (the Director applies the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — this backend's `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate` discriminators. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (each reader applies the cues of the **target member's** backend overlay). |
 
 ### Pane-state capture cues
 
-Required section. Give concrete capture-content discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`, from pane text alone and never native `agent_status`. `working` includes visible streaming, generation, tool execution, or any ambiguous/truncated state that might still be active. `stall_candidate` is quiet, non-finished content with no prompt and no active-work cue. After the table, add the pointer sentence "Tie-breaks and the two-quiet-families rule: `supervision.md` § *The pre-ping capture gate*." instead of restating those rules. Register the table in *Note → applies at* and bind it to the Director's on-tick health check and pre-ping gate.
+Required section. Give concrete capture-content discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`, from pane text alone and never native `agent_status`. `working` includes visible streaming, generation, tool execution, or any ambiguous/truncated state that might still be active. `stall_candidate` is quiet, non-finished content with no prompt and no active-work cue. After the table, add the pointer sentence "Tie-breaks and the two-quiet-families rule: `supervision.md` § *The pre-ping capture gate*." instead of restating those rules. Register the table in *Note → applies at* and bind it to the monitor member's on-wake classification and the Director's pre-ping gate.
 
 | State | <backend> capture cue |
 |---|---|
@@ -179,6 +183,6 @@ State both ambiguity tie-breaks: `awaiting_user` wins over `finished`, and `work
 
 ### Worked resolution
 
-Required section. Give the canonical Director-side monitor launch fully resolved for this backend — every `{placeholder}` replaced by its concrete value — so the reader has a concrete string to match rather than a transformation to invent:
+Required section. Give the canonical monitor-member-side loop launch fully resolved for this backend — every `{placeholder}` replaced by its concrete value — so the reader has a concrete string to match rather than a transformation to invent:
 
-Launch `cafleet monitor <fleet-id>` via <this backend's background-run primitive>, and confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in its output before the first `member create` (members spawned `<this backend's permission flags>`).
+Launch `cafleet monitor <fleet-id>` via <this backend's background-run primitive>, confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in its output, then send `monitor live` to the Director.

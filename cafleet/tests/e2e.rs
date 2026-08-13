@@ -1,6 +1,7 @@
 //! End-to-end binary tests (design § Success Criteria): fleet create →
-//! member create (tmux shim) → message send/poll/ack → one monitor tick, all
-//! against a fresh temp DB.
+//! monitor member create (`--role monitor`, first) → member create (tmux
+//! shim) → message send/poll/ack → one monitor tick waking the monitor
+//! member's pane, all against a fresh temp DB.
 
 mod common;
 
@@ -24,6 +25,7 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     assert_eq!(stdout(&output), "1 director=1\n");
 
+    let monitor_id = cli.create_monitor(1);
     let worker_id = cli.create_member(1, "worker");
     let helper_id = cli.create_member(1, "helper");
 
@@ -79,20 +81,30 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
         "the startup confirmation line, got: {loop_stdout}"
     );
     assert!(
-        loop_stdout.contains("tick -> wake director 1 (2 members)"),
+        loop_stdout.contains(&format!("tick -> wake monitor {monitor_id} (2 members)")),
         "got: {loop_stdout}"
     );
 
+    let payload = format!(
+        "[cafleet] tick: fleet 1 — health-check your 2 members: \
+         {worker_id} (worker; coding_agent=claude; unacked=0), \
+         {helper_id} (helper; coding_agent=claude; unacked=0). \
+         Director: 1 (Director; coding_agent=claude; unacked=0). \
+         Follow your monitor role protocol. \
+         Resume your work if something was still running."
+    );
     assert!(
-        cli.shim_calls().iter().any(|line| line.contains(&format!(
-            "[cafleet] tick: fleet 1 — health-check your 2 members: \
-             {worker_id} (worker; coding_agent=claude; unacked=0), \
-             {helper_id} (helper; coding_agent=claude; unacked=0). \
-             Scan panes with 'cafleet monitor scan 1', \
-             poll your inbox, ACK, dispatch. \
-             Resume your work if something was still running."
-        ))),
-        "the wake keystroke reached the Director's pane, got: {:?}",
+        cli.shim_calls()
+            .iter()
+            .any(|line| line.contains("send-keys -t %7 -l") && line.contains(&payload)),
+        "the wake keystroke reached the monitor member's pane, got: {:?}",
+        cli.shim_calls()
+    );
+    assert!(
+        !cli.shim_calls()
+            .iter()
+            .any(|line| line.contains("-t %0") && line.contains("[cafleet] tick:")),
+        "no code path keystrokes the Director's pane on a timer, got: {:?}",
         cli.shim_calls()
     );
 

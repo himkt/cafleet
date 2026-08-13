@@ -207,8 +207,10 @@ impl Cli {
         self.seed_asset_row("claude", VERSION);
     }
 
-    /// `ready()` + a fleet (id 1, director member 1) via `fleet create`.
-    pub fn with_fleet(&self) -> (i64, i64) {
+    /// `ready()` + a bare fleet (id 1, director member 1) via `fleet create` —
+    /// no monitor member yet, for the monitor-first / one-per-fleet guard
+    /// tests.
+    pub fn with_bare_fleet(&self) -> (i64, i64) {
         self.ready();
         let output = self.run(&[
             "fleet",
@@ -224,6 +226,42 @@ impl Cli {
             text(&output.stderr)
         );
         (1, 1)
+    }
+
+    /// `with_bare_fleet()` + the fleet's monitor member (id 2) via
+    /// `member create --role monitor`, satisfying the monitor-first guard.
+    pub fn with_fleet(&self) -> (i64, i64) {
+        let ids = self.with_bare_fleet();
+        self.create_monitor(ids.0);
+        ids
+    }
+
+    /// Spawn the fleet's monitor member through `member create --role monitor`.
+    pub fn create_monitor(&self, fleet_id: i64) -> i64 {
+        let output = self.run(&[
+            "member",
+            "create",
+            "--fleet-id",
+            &fleet_id.to_string(),
+            "--role",
+            "monitor",
+            "--name",
+            "monitor",
+            "--description",
+            "fleet monitor member",
+            "follow your monitor role protocol",
+        ]);
+        assert!(
+            output.status.success(),
+            "monitor member create must succeed: {}",
+            text(&output.stderr)
+        );
+        text(&output.stdout)
+            .split_whitespace()
+            .next()
+            .expect("compact member-create output starts with the id")
+            .parse()
+            .expect("the first token is the member id")
     }
 
     /// Spawn a member through `member create`; returns its id parsed from the

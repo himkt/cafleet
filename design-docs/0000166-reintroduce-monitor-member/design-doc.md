@@ -1,8 +1,8 @@
 # Reintroduce the monitor member — a cheap-model watcher absorbs the periodic tick
 
-**Status**: Approved
-**Progress**: 0/49 tasks complete
-**Last Updated**: 2026-08-12
+**Status**: Complete
+**Progress**: 49/49 tasks complete
+**Last Updated**: 2026-08-13
 
 ## Overview
 
@@ -15,30 +15,30 @@ never nudged by a timer again.
 
 ## Success Criteria
 
-- [ ] The periodic wake keystrokes the **monitor member's** pane; no code path
+- [x] The periodic wake keystrokes the **monitor member's** pane; no code path
       keystrokes the Director's pane on a timer. `cafleet/tests/e2e.rs`
       asserts the wake lands in the monitor pane with the § S4 payload.
-- [ ] `cafleet member create --role monitor` exists (sole accepted value
+- [x] `cafleet member create --role monitor` exists (sole accepted value
       `monitor`), with the one-per-fleet guard and the monitor-first placement
       guard enforced with the § S3 error strings.
-- [ ] The interval surface is unchanged: `cafleet monitor <fleet-id>
+- [x] The interval surface is unchanged: `cafleet monitor <fleet-id>
       --interval N`, `CAFLEET_MONITOR_WAKE_INTERVAL` (default `600`), and live
       per-fleet editing via `PATCH /api/monitor` all still work and now govern
       the monitor-facing wake. No new `cafleet server` flag; the `monitor
       start` subcommand name is NOT reintroduced.
-- [ ] Every backend section of
+- [x] Every backend section of
       `skills/cafleet/reference/coding-agent-overlays.md` (including the
       Template) carries a `{monitor_model}` row and a monitor-member-side
       loop-launch worked resolution; `OVERLAY_PLACEHOLDERS` in
       `cafleet/tests/docs_sync.rs` is back to 10.
-- [ ] `skills/cafleet/reference/model-list.md` carries the monitor defaults:
+- [x] `skills/cafleet/reference/model-list.md` carries the monitor defaults:
       claude → `haiku`, codex → `gpt-5.6-luna`, opencode →
       `opencode/big-pickle`.
-- [ ] `skills/cafleet/roles/monitor.md` exists and is the sole normative
+- [x] `skills/cafleet/roles/monitor.md` exists and is the sole normative
       carrier of the on-wake protocol (docs_sync-enforced).
-- [ ] The migration chain is untouched: head stays **5**; the member-kind
+- [x] The migration chain is untouched: head stays **5**; the member-kind
       marker is application-level JSON in `member_card_json`.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`,
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`,
       and `mise //admin:lint` pass.
 
 ---
@@ -486,76 +486,76 @@ restart. Mid-run monitor death: the Director re-spawns with `--role monitor`
 
 ### Step 1: Concepts and user-facing docs
 
-- [ ] Rewrite `docs/docs/concepts/monitoring.md`: the monitor member as wake recipient, the on-wake classification + two-wake quiet confirmation, the fixed-ping exception and the stalled-Director ping condition, the `monitor live` gate, the § S4 payload, the reduced operator-typing hazard, lifecycle per § S7 <!-- completed: -->
-- [ ] Update `docs/docs/concepts/overview.md`: the Core terms row for `monitor`, the member-kinds sentence (three-value union), § Monitoring, and the `member create` flag mention <!-- completed: -->
-- [ ] Update `docs/docs/concepts/model-selection.md`: restore the monitor row in the policy-exception table and the "monitor and reviewer are policy exceptions on every team spawn" wording <!-- completed: -->
-- [ ] Update `docs/docs/spec/cli-options.md`: the `--role` flag row (sole value `monitor`), both § S3 guard error strings, the `member ping` ownership wording <!-- completed: -->
-- [ ] Update `docs/docs/spec/data-model.md`: document the `$.cafleet.kind` member-card marker and the three-value derived kind <!-- completed: -->
-- [ ] Update `docs/docs/spec/webui-api.md`: the roster `kind` union, the `GET /api/monitor` members-array exclusion of the monitor member <!-- completed: -->
-- [ ] Update `docs/docs/spec/multiplexer-backends.md`: the § S4 monitor-facing wake payload and recipient (§ *The Director wake and the fixed direct ping* heading retargets) <!-- completed: -->
-- [ ] Update `docs/docs/how-to/mixed-backend-team.md`: add the monitor-first spawn step to the walkthrough <!-- completed: -->
-- [ ] Run the `/update-readme` skill to sync `README.md` and `SPEC.md` <!-- completed: -->
-- [ ] Hand-verify `SPEC.md` against §§ S1–S8 at: §5.4 *Member kind discriminator*; §6.2 *Broker*; §6.3 *CLI* (`member create`, `monitor` group); §6.5 *Multiplexer* (wake payload); §6.6 *Monitor heartbeat loop*; §6.8 *WebUI + Config*; §10 *CLI command checklist* <!-- completed: -->
+- [x] Rewrite `docs/docs/concepts/monitoring.md`: the monitor member as wake recipient, the on-wake classification + two-wake quiet confirmation, the fixed-ping exception and the stalled-Director ping condition, the `monitor live` gate, the § S4 payload, the reduced operator-typing hazard, lifecycle per § S7 <!-- completed: 2026-08-13T09:52 -->
+- [x] Update `docs/docs/concepts/overview.md`: the Core terms row for `monitor`, the member-kinds sentence (three-value union), § Monitoring, and the `member create` flag mention <!-- completed: 2026-08-13T09:54 -->
+- [x] Update `docs/docs/concepts/model-selection.md`: restore the monitor row in the policy-exception table and the "monitor and reviewer are policy exceptions on every team spawn" wording <!-- completed: 2026-08-13T09:55 -->
+- [x] Update `docs/docs/spec/cli-options.md`: the `--role` flag row (sole value `monitor`), both § S3 guard error strings, the `member ping` ownership wording <!-- completed: 2026-08-13T09:58 -->
+- [x] Update `docs/docs/spec/data-model.md`: document the `$.cafleet.kind` member-card marker and the three-value derived kind <!-- completed: 2026-08-13T09:59 -->
+- [x] Update `docs/docs/spec/webui-api.md`: the roster `kind` union, the `GET /api/monitor` members-array exclusion of the monitor member <!-- completed: 2026-08-13T10:01 -->
+- [x] Update `docs/docs/spec/multiplexer-backends.md`: the § S4 monitor-facing wake payload and recipient (§ *The Director wake and the fixed direct ping* heading retargets) <!-- completed: 2026-08-13T10:03 -->
+- [x] Update `docs/docs/how-to/mixed-backend-team.md`: add the monitor-first spawn step to the walkthrough <!-- completed: 2026-08-13T10:06 -->
+- [x] Run the `/update-readme` skill to sync `README.md` and `SPEC.md` <!-- completed: 2026-08-13T10:24 -->
+- [x] Hand-verify `SPEC.md` against §§ S1–S8 at: §5.4 *Member kind discriminator*; §6.2 *Broker*; §6.3 *CLI* (`member create`, `monitor` group); §6.5 *Multiplexer* (wake payload); §6.6 *Monitor heartbeat loop*; §6.8 *WebUI + Config*; §10 *CLI command checklist* <!-- completed: 2026-08-13T10:35 -->
 
 ### Step 2: Model list and overlays
 
-- [ ] `skills/cafleet/reference/model-list.md`: § *Reviewer defaults* → § *Monitor and reviewer defaults* with the § S6 three-column table <!-- completed: -->
-- [ ] `skills/cafleet/reference/coding-agent-overlays.md`: add the `{monitor_model}` row to all four substitution tables; retitle the Template's `{reviewer_model}` row reference to *Monitor and reviewer defaults*; replace each § *Worked resolution* with the monitor-member-side launch; retarget the capture-cues intro + Note bindings to both consumers; name both cross-section readers in the file intro <!-- completed: -->
-- [ ] `.claude/rules/coding-agent-overlay.md`: add `{monitor_model}` to the model-policy paragraph, retitle its *Reviewer defaults* mirror sentence to *Monitor and reviewer defaults*, and name the monitor member as a cross-section reader <!-- completed: -->
-- [ ] `.claude/skills/cafleet-model-list-refresh/SKILL.md`: restore the monitor-model refresh obligation <!-- completed: -->
+- [x] `skills/cafleet/reference/model-list.md`: § *Reviewer defaults* → § *Monitor and reviewer defaults* with the § S6 three-column table <!-- completed: 2026-08-13T10:12 -->
+- [x] `skills/cafleet/reference/coding-agent-overlays.md`: add the `{monitor_model}` row to all four substitution tables; retitle the Template's `{reviewer_model}` row reference to *Monitor and reviewer defaults*; replace each § *Worked resolution* with the monitor-member-side launch; retarget the capture-cues intro + Note bindings to both consumers; name both cross-section readers in the file intro <!-- completed: 2026-08-13T10:16 -->
+- [x] `.claude/rules/coding-agent-overlay.md`: add `{monitor_model}` to the model-policy paragraph, retitle its *Reviewer defaults* mirror sentence to *Monitor and reviewer defaults*, and name the monitor member as a cross-section reader <!-- completed: 2026-08-13T10:15 -->
+- [x] `.claude/skills/cafleet-model-list-refresh/SKILL.md`: restore the monitor-model refresh obligation <!-- completed: 2026-08-13T10:15 -->
 
 ### Step 3: The `cafleet` skill
 
-- [ ] Create `skills/cafleet/roles/monitor.md` per § S2 (Required-reading block with the overlay row #1, startup order, on-wake protocol, command boundary, teardown, literal-ids, canonical-skeleton delta: `--role monitor --model {monitor_model}`, omit `--coding-agent`) <!-- completed: -->
-- [ ] Rewrite `skills/cafleet/reference/supervision.md`: § The monitor heartbeat (monitor-hosted), § Spawn Protocol (monitor-first + `monitor live` gate; the Director no longer launches the loop), the facilitation-cue paragraph (Director re-engagement channels: broker auto-fire + monitor events), § Monitor Lifecycle, § Cleanup Protocol (§ S7 order), § Quick Reference rows <!-- completed: -->
-- [ ] Update `skills/cafleet/SKILL.md`: § Team supervision rewritten to the monitor-member model; documented-defaults table regains `{monitor_model}` (default: inherit the spawning Director's model) <!-- completed: -->
-- [ ] Update `skills/cafleet/roles/director.md`: Required-reading, the monitor-first spawn step, § Model selection monitor rule (including its *Reviewer defaults* heading reference → *Monitor and reviewer defaults*) <!-- completed: -->
-- [ ] Update `skills/cafleet/roles/member.md`: note that the monitor member's role file overrides the generic member protocol where they conflict <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/director.md`: the `--role` row in the `member create` flag table; § Member Ping ownership wording <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/recovery.md` § Shutdown Protocol: monitor-first-out order + the stale-row reclaim note <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/cli.md`: the monitor member as loop launcher; `member create --role` <!-- completed: -->
-- [ ] Update `.claude/rules/bash-tool.md`: `member ping` ownership becomes "the Director and the monitor member"; add the monitor's fixed-ping exception sentence <!-- completed: -->
+- [x] Create `skills/cafleet/roles/monitor.md` per § S2 (Required-reading block with the overlay row #1, startup order, on-wake protocol, command boundary, teardown, literal-ids, canonical-skeleton delta: `--role monitor --model {monitor_model}`, omit `--coding-agent`) <!-- completed: 2026-08-13T10:26 -->
+- [x] Rewrite `skills/cafleet/reference/supervision.md`: § The monitor heartbeat (monitor-hosted), § Spawn Protocol (monitor-first + `monitor live` gate; the Director no longer launches the loop), the facilitation-cue paragraph (Director re-engagement channels: broker auto-fire + monitor events), § Monitor Lifecycle, § Cleanup Protocol (§ S7 order), § Quick Reference rows <!-- completed: 2026-08-13T10:34 -->
+- [x] Update `skills/cafleet/SKILL.md`: § Team supervision rewritten to the monitor-member model; documented-defaults table regains `{monitor_model}` (default: inherit the spawning Director's model) <!-- completed: 2026-08-13T10:36 -->
+- [x] Update `skills/cafleet/roles/director.md`: Required-reading, the monitor-first spawn step, § Model selection monitor rule (including its *Reviewer defaults* heading reference → *Monitor and reviewer defaults*) <!-- completed: 2026-08-13T10:38 -->
+- [x] Update `skills/cafleet/roles/member.md`: note that the monitor member's role file overrides the generic member protocol where they conflict <!-- completed: 2026-08-13T10:40 -->
+- [x] Update `skills/cafleet/reference/director.md`: the `--role` row in the `member create` flag table; § Member Ping ownership wording <!-- completed: 2026-08-13T10:42 -->
+- [x] Update `skills/cafleet/reference/recovery.md` § Shutdown Protocol: monitor-first-out order + the stale-row reclaim note <!-- completed: 2026-08-13T10:43 -->
+- [x] Update `skills/cafleet/reference/cli.md`: the monitor member as loop launcher; `member create --role` <!-- completed: 2026-08-13T10:45 -->
+- [x] Update `.claude/rules/bash-tool.md`: `member ping` ownership becomes "the Director and the monitor member"; add the monitor's fixed-ping exception sentence <!-- completed: 2026-08-13T10:25 -->
 
 ### Step 4: The workflow skills
 
-- [ ] Update `skills/cafleet-design-doc/`: `SKILL.md`, `create/create.md`, `create/roles/director.md`, `execute/execute.md`, `execute/roles/director.md`, `interview/interview.md` — replace the Director loop-launch + startup-line gate with the monitor-first spawn + `monitor live` gate; update each teardown block <!-- completed: -->
-- [ ] Update `skills/cafleet-research/`: `SKILL.md`, `report/report.md`, `report/roles/director.md`, `presentation/presentation.md`, `presentation/roles/director.md` — same substitution <!-- completed: -->
-- [ ] Update `.claude/skills/clean-docs/**`: the team table and every spawn/teardown mention <!-- completed: -->
-- [ ] Update `.claude/skills/skill-author/SKILL.md`: the bootstrap sections and the worked example <!-- completed: -->
+- [x] Update `skills/cafleet-design-doc/`: `SKILL.md`, `create/create.md`, `create/roles/director.md`, `execute/execute.md`, `execute/roles/director.md`, `interview/interview.md` — replace the Director loop-launch + startup-line gate with the monitor-first spawn + `monitor live` gate; update each teardown block <!-- completed: 2026-08-13T10:52 -->
+- [x] Update `skills/cafleet-research/`: `SKILL.md`, `report/report.md`, `report/roles/director.md`, `presentation/presentation.md`, `presentation/roles/director.md` — same substitution <!-- completed: 2026-08-13T10:58 -->
+- [x] Update `.claude/skills/clean-docs/**`: the team table and every spawn/teardown mention <!-- completed: 2026-08-13T10:44 -->
+- [x] Update `.claude/skills/skill-author/SKILL.md`: the bootstrap sections and the worked example <!-- completed: 2026-08-13T10:47 -->
 
 ### Step 5: Rust — broker and member registry
 
-- [ ] `cafleet/src/broker/members.rs`: `monitor: bool` on `register_member` / `member_card`, the card marker write, `active_monitor_member_id`, three-value `derive_member_kind` (no guards here — § S3 puts them in the CLI layer) <!-- completed: -->
-- [ ] `cafleet/src/broker/monitor.rs`: exclude the monitor member from `list_fleet_wake_targets` and `monitor_members_payload`; add `fleet_wake_director` <!-- completed: -->
-- [ ] `cafleet/src/broker/test_support.rs`: catalogue the new/changed functions; add a monitor-registration helper for the suites that need a monitor fixture (existing `register` call sites stay as they are — the guards are CLI-layer) <!-- completed: -->
-- [ ] Colocated tests in `members.rs` and `monitor.rs` per § S9 <!-- completed: -->
-- [ ] Bring each touched `cafleet/src/broker/*.rs` module `//!` header in line with the new surface <!-- completed: -->
+- [x] `cafleet/src/broker/members.rs`: `monitor: bool` on `register_member` / `member_card`, the card marker write, `active_monitor_member_id`, three-value `derive_member_kind` (no guards here — § S3 puts them in the CLI layer) <!-- completed: 2026-08-13T11:12 -->
+- [x] `cafleet/src/broker/monitor.rs`: exclude the monitor member from `list_fleet_wake_targets` and `monitor_members_payload`; add `fleet_wake_director` <!-- completed: 2026-08-13T11:12 -->
+- [x] `cafleet/src/broker/test_support.rs`: catalogue the new/changed functions; add a monitor-registration helper for the suites that need a monitor fixture (existing `register` call sites stay as they are — the guards are CLI-layer) <!-- completed: 2026-08-13T11:12 -->
+- [x] Colocated tests in `members.rs` and `monitor.rs` per § S9 <!-- completed: 2026-08-13T11:12 -->
+- [x] Bring each touched `cafleet/src/broker/*.rs` module `//!` header in line with the new surface <!-- completed: 2026-08-13T11:12 -->
 
 ### Step 6: Rust — the tick, the multiplexer, the CLI
 
-- [ ] `cafleet/src/multiplexer/mod.rs`: `build_wake_payload(fleet_id, members, director)` per § S4; `send_wake_trigger` trait signature gains `director` <!-- completed: -->
-- [ ] `cafleet/src/multiplexer/tmux.rs` and `herdr.rs`: thread the new signature; keystroke sequence unchanged <!-- completed: -->
-- [ ] `cafleet/src/monitor/mod.rs`: retarget `monitor_tick` steps 5–8 per § S5 (monitor-pane resolution, roster + director descriptor, new echo line); narrow nothing else <!-- completed: -->
-- [ ] `cafleet/src/cli/member.rs`: add `--role` (sole value `monitor`), implement both § S3 guards before any registration or pane effect, thread `monitor` into `register_member` <!-- completed: -->
-- [ ] `cafleet/src/output/formatters.rs`: the roster fixture regains the `monitor` kind row <!-- completed: -->
-- [ ] Colocated tests in all six files per § S9 <!-- completed: -->
+- [x] `cafleet/src/multiplexer/mod.rs`: `build_wake_payload(fleet_id, members, director)` per § S4; `send_wake_trigger` trait signature gains `director` <!-- completed: 2026-08-13T11:35 -->
+- [x] `cafleet/src/multiplexer/tmux.rs` and `herdr.rs`: thread the new signature; keystroke sequence unchanged <!-- completed: 2026-08-13T11:35 -->
+- [x] `cafleet/src/monitor/mod.rs`: retarget `monitor_tick` steps 5–8 per § S5 (monitor-pane resolution, roster + director descriptor, new echo line); narrow nothing else <!-- completed: 2026-08-13T11:35 -->
+- [x] `cafleet/src/cli/member.rs`: add `--role` (sole value `monitor`), implement both § S3 guards before any registration or pane effect, thread `monitor` into `register_member` <!-- completed: 2026-08-13T11:35 -->
+- [x] `cafleet/src/output/formatters.rs`: the roster fixture regains the `monitor` kind row <!-- completed: 2026-08-13T11:35 -->
+- [x] Colocated tests in all six files per § S9 <!-- completed: 2026-08-13T11:35 -->
 
 ### Step 7: HTTP API and admin WebUI
 
-- [ ] `cafleet/src/webui/mod.rs`: the members-array exclusion follows the broker re-source; no route changes <!-- completed: -->
-- [ ] `admin/src/types.ts`: widen the `kind` union to `"director" | "monitor" | "member"` <!-- completed: -->
-- [ ] Admin roster component: restore the `monitor` kind badge <!-- completed: -->
-- [ ] `mise //admin:lint` and `mise //admin:build` pass <!-- completed: -->
+- [x] `cafleet/src/webui/mod.rs`: the members-array exclusion follows the broker re-source; no route changes <!-- completed: 2026-08-13T11:45 -->
+- [x] `admin/src/types.ts`: widen the `kind` union to `"director" | "monitor" | "member"` <!-- completed: 2026-08-13T11:45 -->
+- [x] Admin roster component: restore the `monitor` kind badge <!-- completed: 2026-08-13T11:45 -->
+- [x] `mise //admin:lint` and `mise //admin:build` pass <!-- completed: 2026-08-13T11:45 -->
 
 ### Step 8: Integration tests and verification
 
-- [ ] `cafleet/tests/docs_sync.rs` per § S8 <!-- completed: -->
-- [ ] `cafleet/tests/cli_member.rs` per § S9 <!-- completed: -->
-- [ ] `cafleet/tests/webui_routes.rs` per § S9 <!-- completed: -->
-- [ ] `cafleet/tests/e2e.rs` per § S9 <!-- completed: -->
-- [ ] `rg -n "monitoring member|monitoring-member|ready: monitor live|monitor_config|CAFLEET_MONITOR_STALL_INTERVAL|stall-check" -g '!design-docs/**' -g '!cafleet/migrations/**' -g '!cafleet/tests/docs_sync.rs'` hits only the permanent enforcement carve-outs established by design 0000158 <!-- completed: -->
-- [ ] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` pass <!-- completed: -->
-- [ ] `mise //cafleet:install`, then a manual smoke run: `cafleet fleet create`, spawn a monitor member with `--role monitor --interval`-shortened cadence, confirm one `Esc`-first wake lands in the **monitor** pane with the § S4 payload and that the Director's pane receives none <!-- completed: -->
+- [x] `cafleet/tests/docs_sync.rs` per § S8 <!-- completed: 2026-08-13T12:05 -->
+- [x] `cafleet/tests/cli_member.rs` per § S9 <!-- completed: 2026-08-13T12:05 -->
+- [x] `cafleet/tests/webui_routes.rs` per § S9 <!-- completed: 2026-08-13T12:05 -->
+- [x] `cafleet/tests/e2e.rs` per § S9 <!-- completed: 2026-08-13T12:05 -->
+- [x] `rg -n "monitoring member|monitoring-member|ready: monitor live|monitor_config|CAFLEET_MONITOR_STALL_INTERVAL|stall-check" -g '!design-docs/**' -g '!cafleet/migrations/**' -g '!cafleet/tests/docs_sync.rs'` hits only the permanent enforcement carve-outs established by design 0000158 <!-- completed: 2026-08-13T12:05 -->
+- [x] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` pass <!-- completed: 2026-08-13T11:38 -->
+- [x] `mise //cafleet:install`, then a manual smoke run: `cafleet fleet create`, spawn a monitor member with `--role monitor --interval`-shortened cadence, confirm one `Esc`-first wake lands in the **monitor** pane with the § S4 payload and that the Director's pane receives none <!-- completed: 2026-08-13T11:41 -->
 
 ---
 
@@ -566,3 +566,4 @@ restart. Mid-run monitor death: the Director re-spawns with `--role monitor`
 | 2026-08-12 | Initial draft |
 | 2026-08-12 | Review round 1: pinned the on-wake classification universe; added the ping-asymmetry rationale; specified the monitor's loop-restart obligation for a mid-run loop exit; moved both spawn guards to the CLI `member create` layer (broker fixtures untouched); fixed the worked example's Director name casing; named the *Monitor and reviewer defaults* rename ripple targets; corrected the docs_sync payload-pin bullet and the SPEC §6.8 heading |
 | 2026-08-12 | Approved by the user |
+| 2026-08-13 | Implemented on feat/0000166-reintroduce-monitor-member (49/49 tasks, all Success Criteria verified, Reviewer approved round 1, PR #302); status Complete |

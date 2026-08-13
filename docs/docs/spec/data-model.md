@@ -31,8 +31,12 @@ post-bootstrap NOT NULL invariant.
 ### `members`
 
 Active query paths filter `status='active'`. A member's `kind` (`director` /
-`member`) is derived from the fleet's `director_member_id` back-reference at
-read time; no kind marker is stored in `member_card_json`.
+`monitor` / `member`) is derived at read time from the fleet's
+`director_member_id` back-reference plus the member card: a monitor-member
+registration writes the application-level marker
+`"cafleet": {"kind": "monitor"}` into `member_card_json`, while the Director
+and ordinary members write no `$.cafleet` object. The marker is plain JSON —
+no schema migration backs it, and no dedicated column exists.
 
 ### `messages`
 
@@ -56,10 +60,10 @@ value.
 `monitor_runtime` is the one-row-per-fleet loop pid/heartbeat table: the
 single-instance claim (`pid`, `started_at`), the liveness heartbeat
 (`last_tick_at`, `tick_seconds`), `last_wake_at` — the nullable UTC ISO
-timestamp of the last successfully delivered Director wake, kept durable
+timestamp of the last successfully delivered wake, kept durable
 across loop restarts so an immediate restart honors the remaining wake
 cadence — and `wake_interval_seconds`, the nullable live mirror of the
-running loop's Director wake interval: stamped with the startup-resolved
+running loop's wake interval: stamped with the startup-resolved
 value at every `cafleet monitor` start (claim and reclaim), re-read by the loop on
 every tick, overwritten by `PATCH /api/monitor`, and preserved across a
 loop stop like `tick_seconds`. It is `NULL` only in rows that predate the
