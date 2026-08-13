@@ -1,7 +1,7 @@
 # One-Command Setup and Database-Error Guidance
 
 **Status**: Approved
-**Progress**: 11/24 tasks complete
+**Progress**: 16/24 tasks complete
 **Last Updated**: 2026-08-13
 
 ## Overview
@@ -139,11 +139,11 @@ No database migration is needed; the schema is untouched.
 
 ### Step 4: Schema-version guard
 
-- [ ] Add `schema_guard` to `cafleet/src/cli/helpers.rs` with the five-state classification and error strings; share `recorded_version` / `has_foreign_tables` with `setup` and `doctor` <!-- completed: -->
-- [ ] Wire the guard into `cli/mod.rs` for `fleet` / `member` / `message` / `monitor` and into `server::run`; keep `setup` and `doctor` exempt <!-- completed: -->
-- [ ] Simplify the stale-assets guard's no-rows error string (the `asset_installs_table_exists` pre-check stays) <!-- completed: -->
-- [ ] Tests: behind-head fixture (hand-written ledger + pre-V6 `asset_installs` shape) → outdated error; empty DB → no-database error; ahead-of-head ledger → upgrade-cafleet error; foreign-tables-no-ledger → not-a-cafleet-database error; at-head → command proceeds <!-- completed: -->
-- [ ] Test: a fleet-scoped command against the pre-V6 fixture no longer emits `no such column: path` <!-- completed: -->
+- [x] Add `schema_guard` to `cafleet/src/cli/helpers.rs` with the five-state classification and error strings; share `recorded_version` / `has_foreign_tables` with `setup` and `doctor` <!-- completed: 2026-08-13T22:03 -->
+- [x] Wire the guard into `cli/mod.rs` for `fleet` / `member` / `message` / `monitor` and into `server::run`; keep `setup` and `doctor` exempt <!-- completed: 2026-08-13T22:03 -->
+- [x] Simplify the stale-assets guard's no-rows error string (the `asset_installs_table_exists` pre-check stays) <!-- completed: 2026-08-13T22:03 -->
+- [x] Tests: behind-head fixture (hand-written ledger + pre-V6 `asset_installs` shape) → outdated error; empty DB → no-database error; ahead-of-head ledger → upgrade-cafleet error; foreign-tables-no-ledger → not-a-cafleet-database error; at-head → command proceeds <!-- completed: 2026-08-13T22:03 -->
+- [x] Test: a fleet-scoped command against the pre-V6 fixture no longer emits `no such column: path` <!-- completed: 2026-08-13T22:03 -->
 
 ### Step 5: Doctor hardening
 

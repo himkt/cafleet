@@ -33,6 +33,7 @@ pub struct ServerArgs {
 }
 
 pub fn run(settings: &Settings, args: ServerArgs) -> Result<(), CafleetError> {
+    super::helpers::schema_guard(settings)?;
     let app = crate::webui::create_app(&settings.database_url)?;
     let address = format!("{}:{}", args.host, args.port);
     let runtime = tokio::runtime::Runtime::new()

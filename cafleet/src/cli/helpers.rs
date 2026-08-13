@@ -1,6 +1,6 @@
-//! Shared CLI plumbing: the stale-assets guard, the positional-`TEXT` /
-//! `--file` body reader, multiplexer resolution, and the JSON-vs-text emit
-//! fork.
+//! Shared CLI plumbing: the schema-version and stale-assets guards, the
+//! positional-`TEXT` / `--file` body reader, multiplexer resolution, and the
+//! JSON-vs-text emit fork.
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -35,6 +35,30 @@ fn identity_paths() -> Result<[(&'static str, String); 3], CafleetError> {
     .map(|(agent, path)| (agent, path.display().to_string())))
 }
 
+/// The schema-version guard (SPEC §6.3): classifies the database against the
+/// embedded head before any non-setup command body runs — ahead of the
+/// stale-assets guard, so no missing or outdated schema state reaches
+/// `asset_installs`. Connection-level failures keep their own errors.
+pub fn schema_guard(settings: &Settings) -> Result<(), CafleetError> {
+    let conn = connect(settings)?;
+    let head = crate::db::head_version();
+    match super::setup::recorded_version(&conn)? {
+        Some(recorded) if recorded == head => Ok(()),
+        Some(recorded) if recorded < head => Err(CafleetError::App(format!(
+            "database schema is outdated (schema {recorded}, head {head}); run 'cafleet setup'"
+        ))),
+        Some(recorded) => Err(CafleetError::App(format!(
+            "database schema {recorded} is newer than this cafleet (head {head}); upgrade cafleet"
+        ))),
+        None if super::setup::has_foreign_tables(&conn)? => Err(CafleetError::App(
+            "database has tables but no schema history — not a cafleet database?".to_string(),
+        )),
+        None => Err(CafleetError::App(
+            "no cafleet database; run 'cafleet setup'".to_string(),
+        )),
+    }
+}
+
 /// The stale-assets guard (SPEC §6.3): resolves each agent's identity path
 /// and validates only the recorded rows at those paths before any
 /// fleet-scoped subcommand body runs; superseded rows at other paths are
@@ -57,8 +81,7 @@ pub fn stale_assets_guard(settings: &Settings) -> Result<(), CafleetError> {
     if current.is_empty() {
         return Err(CafleetError::App(
             "no assets install is recorded at the resolved paths; \
-             run 'cafleet setup --coding-agent <agent>' to install \
-             (agents: claude, codex, opencode)"
+             run 'cafleet setup' to install"
                 .to_string(),
         ));
     }
