@@ -322,15 +322,16 @@ The unified shapes:
 | `last_wake_at` | optional string | nullable; the UTC ISO timestamp of the last successfully delivered wake, durable across loop restarts; preserved by the runtime clear |
 | `wake_interval_seconds` | optional integer | nullable; the live mirror of the running loop's wake interval — stamped at every claim/reclaim, re-read per tick, overwritten by `PATCH /api/monitor`, preserved by the runtime clear; `NULL` only in rows that predate the column and were never re-claimed |
 
-**AssetInstalls** (`coding_agent` TEXT PK, not autoincrement, not FK-linked)
+**AssetInstalls** (composite TEXT PK `(coding_agent, path)`, not autoincrement, not FK-linked)
 
 | Field | Type | Notes |
 |---|---|---|
-| `coding_agent` | string | PK; one of `"claude"` / `"codex"` / `"opencode"` |
+| `coding_agent` | string | PK part; one of `"claude"` / `"codex"` / `"opencode"` |
+| `path` | string | PK part; the agent's resolved identity path (§6.3 *Config-dir resolution*), stored absolute exactly as resolved |
 | `cafleet_version` | string | the CLI's compile-time version string at install time (§7.6) |
 | `installed_at` | string | UTC ISO-8601 with microsecond precision |
 
-Writes are upserts. Rows are written by the assets half of `cafleet setup` — one row per target agent (`claude`, `codex`, `opencode`, minus any `--skip`ped agent) — after that agent's skills and preset (where one exists) install successfully, so a row attests skills + preset; the db half never touches the rows. The rows feed the stale-assets guard on every fleet-scoped command group and the `cafleet doctor` assets report.
+Writes are upserts on the composite key (`ON CONFLICT(coding_agent, path) DO UPDATE SET cafleet_version, installed_at`). Rows are written by the assets half of `cafleet setup` — one row per installed agent at its resolved identity path — after that agent's skills and preset (where one exists) install successfully, so a row attests skills + preset; the db half never touches the rows. Consumers partition an agent's rows by comparing `path` against the currently-resolved identity path: the row at the resolved path (at most one, by the primary key) is **current**; every other row of that agent is **superseded**. Current rows feed the stale-assets guard on every fleet-scoped command group and the `cafleet doctor` coding-agents section; superseded rows surface only as informational doctor footnotes.
 
 ### 5.3 Enums (literal string contracts)
 
@@ -948,55 +949,157 @@ fleet-gate runs CLI-side. Per invocation, in order:
 
 #### `doctor`
 
-Only the shared `--json` flag. Resolves the active backend via `resolve_multiplexer()`
-(re-wrapping a `MultiplexerError` as an application error, exit 1), ensures it is
-available (`ensure_available()`), discovers the pane context
-(`context_discovery()`), and reads the backend's presence env var (`TMUX` for
-tmux, `HERDR_ENV` for herdr). Emits a JSON object under a `multiplexer` key
-carrying `backend`, `session`, `window_id`, `pane_id`, `presence_var`, and
-`presence_value` (or the equivalent text block), followed by the assets-install
-report.
+Only the shared `--json` flag. A full-environment diagnosis that renders
+**all** sections even when the multiplexer is unavailable or the database is
+missing or stale — no early abort. Diagnosis order: multiplexer, database,
+coding agents. `doctor` is exempt from the stale-assets guard — it reports
+instead of blocking.
 
-**Assets-install report.** Read all `asset_installs` rows (or detect a missing
-table). In text mode, append an `assets:` block after the `multiplexer:` block:
-
-```
-assets:
-  cli_version: 0.6.0
-  claude:      0.6.0 (2026-07-04T00:12:09.123456+00:00) ok
-  codex:       0.5.0 (2026-06-20T10:00:00.987654+00:00) STALE
-```
-
-One line per recorded `asset_installs` row, format `<agent>:  <version>
-(<installed_at verbatim>) ok|STALE` where `ok` means the recorded version equals
-the runtime CLI version, `STALE` means it differs. `installed_at` is printed
-**verbatim** (microsecond precision, exactly as stored). When no rows exist (or
-the table is missing):
+**Text layout.** The first output line of the whole report is `cafleet
+<version>`. Each section is led by a single-width verdict glyph (`✓` U+2713 /
+`✗` U+2717) plus the section name; detail lines are indented two spaces
+beneath. A worked example (behind-head schema, one stale agent, one
+superseded record):
 
 ```
-assets:
-  (no assets install recorded; run 'cafleet setup')
+cafleet 0.22.0
+✓ multiplexer
+  backend:   tmux
+  session:   main
+  window_id: @3
+  pane_id:   %0
+  presence:  TMUX=/tmp/tmux-501/default,12345,0
+✗ database
+  schema 10, head is 12 — run: cafleet setup
+✗ coding agents
+  ┌──────────────┬──────────────┬────────────────────┬───────────────────────────────────────────────┐
+  │ coding agent │ path         │ source             │ setup                                         │
+  ├──────────────┼──────────────┼────────────────────┼───────────────────────────────────────────────┤
+  │ claude       │ ~/cfg/claude │ $CLAUDE_CONFIG_DIR │ ✓ 0.22.0                                      │
+  │ codex        │ ~/.codex     │ default            │ ✗ 0.21.0 → cafleet setup --coding-agent codex │
+  │ opencode     │ ~/.opencode  │ default            │ – cafleet setup --coding-agent opencode       │
+  └──────────────┴──────────────┴────────────────────┴───────────────────────────────────────────────┘
+  note: codex was previously set up at ~/.codex-old
+2 issues found
 ```
 
-In JSON mode, a `"assets"` key sibling to `"multiplexer"`:
+**Multiplexer section.** Resolves the active backend via
+`resolve_multiplexer()`, ensures it is available (`ensure_available()`),
+discovers the pane context (`context_discovery()`), and reads the backend's
+presence env var (`TMUX` for tmux, `HERDR_ENV` for herdr). `✓` with the five
+detail lines (`backend`, `session`, `window_id`, `pane_id`, `presence`). On
+any multiplexer or environment failure (no supported multiplexer, ambiguous
+environment, binary not on `PATH`, pane not discoverable): `✗ multiplexer`
+with the resolver's error message as the single detail line, and the report
+continues. One issue.
+
+**Database section.** One detail line; the five states (`<M>` recorded
+version, `<N>` embedded head):
+
+| State | Glyph | Detail line | Issue |
+|---|---|---|---|
+| Ledger present, `<M>` = `<N>` | `✓` | `schema <N> (head)` | no |
+| Ledger present, `<M>` < `<N>` | `✗` | `schema <M>, head is <N> — run: cafleet setup` | yes |
+| Ledger present, `<M>` > `<N>` | `✗` | `schema <M> is newer than this CLI (head <N>) — upgrade cafleet` | yes |
+| Ledger absent, foreign tables present | `✗` | `database has tables but no schema history — not a cafleet database?` | yes |
+| Ledger absent, no tables (or no DB file) | `✗` | `no database — run: cafleet setup` | yes |
+
+A connection failure (unreadable path) renders `✗` with the connection error
+as the detail line (one issue). A `✗` database never suppresses the
+coding-agents section: the recorded rows are read when the `asset_installs`
+table exists (the ledger-absent-with-tables state included), and a missing
+table renders every agent as the `–` state.
+
+**Coding agents section.** A light box-drawing framed table
+(`┌ ─ ┬ ┐ │ ├ ┼ ┤ └ ┴ ┘`), header separator only, no per-row rules. Column
+alignment uses **display width** (Unicode display-width, e.g. via a
+unicode-width facility), never byte length — the glyphs and `→` are
+single-width, but the rule is general. One row per agent in the fixed order
+`claude`, `codex`, `opencode`.
+
+| Column | Content |
+|---|---|
+| `coding agent` | The agent name. |
+| `path` | The resolved identity path (§6.3 *Config-dir resolution*), with `~` abbreviation when under `$HOME`. On a resolution error: the raw invalid variable value. |
+| `source` | The winning origin: `$<VAR>` (e.g. `$CLAUDE_CONFIG_DIR`) or `default`. |
+| `setup` | The state below, keyed on the **resolved path only**. |
+
+| State | Cell | Issue |
+|---|---|---|
+| A row exists at the resolved path, version = CLI version (string equality) | `✓ <version>` | no |
+| A row exists at the resolved path, version ≠ CLI version (string inequality, either direction — never semver comparison) | `✗ <recorded-version> → cafleet setup --coding-agent <agent>` | yes |
+| No row exists at the resolved path (regardless of rows elsewhere) | `– cafleet setup --coding-agent <agent>` (`–` U+2013 EN DASH) | never |
+| The agent's config-path variable fails validation (caught per-agent, not fatal) | `✗ <VAR> is not an absolute path` | yes |
+
+Records at other paths only feed informational footnote lines under the
+table, one per superseded row, ordered ascending `(coding_agent, path)`,
+`~`-abbreviated:
+
+```
+note: <agent> was previously set up at <path>
+```
+
+Footnotes are informational — they never count as issues.
+
+**Footer and exit code.** Last line: `no issues found`, `1 issue found`, or
+`<N> issues found` (proper pluralization). Exit code: 0 when no issues, 1
+otherwise — the `–` state and footnotes never count. No failure exits before
+output; every failure is a rendered issue.
+
+**JSON mode.** Mirrors the sections with `ok` booleans, unabbreviated
+absolute paths, and the issue count. `source` holds the winning env-var
+**name** (no `$`) or the literal `"default"`; `state` is `"ok" | "stale" |
+"not_installed" | "error"` (`"error"` is the per-agent resolution-error
+state; `"not_installed"` never contributes to `issues`). Every agent row
+carries the same keys; `error` is `null` except in the `"error"` state,
+where it holds the pinned validation message (without the `Error: ` prefix).
+Section `error` fields likewise hold the detail text when `ok` is false,
+else `null`.
 
 ```json
 {
-  "multiplexer": { "backend": "tmux", "session": "...", "window_id": "...", "pane_id": "...", "presence_var": "TMUX", "presence_value": "..." },
-  "assets": {
-    "cli_version": "0.6.0",
-    "installs": [
-      {"coding_agent": "claude", "cafleet_version": "0.6.0", "installed_at": "2026-07-04T00:12:09.123456+00:00", "current": true},
-      {"coding_agent": "codex", "cafleet_version": "0.5.0", "installed_at": "2026-06-20T10:00:00.987654+00:00", "current": false}
+  "multiplexer": {
+    "ok": true,
+    "backend": "tmux",
+    "session": "main",
+    "window_id": "@3",
+    "pane_id": "%0",
+    "presence_var": "TMUX",
+    "presence_value": "/tmp/tmux-501/default,12345,0",
+    "error": null
+  },
+  "database": {
+    "ok": false,
+    "schema_version": 10,
+    "head_version": 12,
+    "error": "schema 10, head is 12 — run: cafleet setup"
+  },
+  "coding_agents": {
+    "ok": false,
+    "cli_version": "0.22.0",
+    "agents": [
+      {"coding_agent": "claude", "path": "/Users/x/cfg/claude", "source": "CLAUDE_CONFIG_DIR", "recorded_version": "0.22.0", "installed_at": "2026-08-12T00:00:00.000000+00:00", "state": "ok", "error": null},
+      {"coding_agent": "codex", "path": "/Users/x/.codex", "source": "default", "recorded_version": "0.21.0", "installed_at": "2026-08-01T00:00:00.000000+00:00", "state": "stale", "error": null},
+      {"coding_agent": "opencode", "path": "/Users/x/.opencode", "source": "default", "recorded_version": null, "installed_at": null, "state": "not_installed", "error": null}
+    ],
+    "superseded": [
+      {"coding_agent": "codex", "path": "/Users/x/.codex-old", "recorded_version": "0.20.0", "installed_at": "2026-07-01T00:00:00.000000+00:00"}
     ]
-  }
+  },
+  "issues": 2
 }
 ```
 
-`installs` is an empty array when no rows exist. `current` is `true` when the
-recorded `cafleet_version` equals the runtime CLI version, else `false`. Rows
-in `installs` are ordered by ascending `coding_agent`. `doctor` is exempt from
-the stale-assets guard — it reports instead of blocking.
+On a multiplexer failure the `multiplexer` object is `{"ok": false,
+"backend": null, "session": null, "window_id": null, "pane_id": null,
+"presence_var": null, "presence_value": null, "error": "<message>"}`. On an
+agent resolution error the row is `{"coding_agent": "...", "path": null,
+"source": "<VAR>", "recorded_version": null, "installed_at": null, "state":
+"error", "error": "<VAR> must be an absolute path (got '<value>')"}` — the
+raw invalid value appears only inside `error`; `path` stays `null` because
+no path resolved. `schema_version` is `null` when the ledger is absent.
+`installed_at` values are printed **verbatim** (microsecond precision,
+exactly as stored). Exit-code semantics are identical to text mode.
 
 #### `fleet` group
 
@@ -1409,7 +1512,7 @@ unexpected-argument error.
 
 | Flag | Required | Notes |
 |---|---|---|
-| `--skip AGENT` | no | Repeatable. A choice over `claude` / `codex` / `opencode`; an unknown value fails with clap's native invalid-value error (exit 2). Duplicates are deduplicated. Help: `Skip the named agent's assets install (repeatable).` |
+| `--coding-agent AGENT` | no | Repeatable. A choice over `claude` / `codex` / `opencode`; an unknown value fails with clap's native invalid-value error (exit 2). Duplicates are deduplicated. Help: `Install the named agent's assets (repeatable; default: refresh agents already installed at their resolved paths).` |
 
 Reads the CLI's own version and runs two independent halves, **in order** (db
 first, then assets):
@@ -1420,34 +1523,116 @@ first, then assets):
   application error, print `db half failed: <message>` and record the
   failure. If the db half failed, the assets half fails its schema pre-flight and
   both halves are reported failed.
-- **Assets half** — targets are the fixed list `claude`, `codex`, `opencode`
-  (in that order) minus the `--skip`ped agents (no home auto-detection: each
-  target's agent directories are created as needed). Installs, from the data
-  embedded in the binary at build time (§7.6) with **no network access**, the
-  skills plus each target's bundled preset (where one
-  exists), upserting one `asset_installs` row per target after that target's
-  install succeeds. On an application error, print `assets half failed:
-  <message>` and record the failure. When all three agents are skipped, the
-  half is skipped entirely: the command echoes `assets half skipped (all
-  agents skipped)` and the half counts as **not-run** — it cannot contribute a
-  failure.
+- **Assets half** — installs, from the data embedded in the binary at build
+  time (§7.6) with **no network access**, each selected agent's skills plus
+  its bundled preset (where one exists) at the directories resolved per
+  § *Config-dir resolution* (each target's agent directories are created as
+  needed), upserting one `asset_installs` row keyed
+  `(coding_agent, identity path)` per installed agent after that agent's
+  install succeeds. Selection:
+
+  | Invocation | Assets-half behavior |
+  |---|---|
+  | `--coding-agent` given (one or more) | Install exactly the named agents, in the fixed order `claude`, `codex`, `opencode`, each at its resolved paths; upsert the `(agent, resolved identity path)` row after that agent's skills and preset (where one exists) install successfully. |
+  | No flag, table has rows | Per agent in the fixed order: a row exists at the resolved identity path → reinstall (refresh) and upsert; rows exist only at other paths → print the hint line below, install nothing; no rows for that agent → nothing. |
+  | No flag, table is empty (first-ever run) | Install nothing; print the guidance line below. Counts as the assets half succeeding — exit 0 when the db half succeeds. |
+
+  On an application error, print `assets half failed: <message>` and record
+  the failure. A config-path validation failure (§ *Config-dir resolution*)
+  fails the assets half with the pinned error as `<message>` wherever the
+  half resolves an agent's identity path — a targeted agent in the selector
+  form, and any agent being classified in the no-flag-with-rows form; the
+  no-flag empty-table form resolves nothing and cannot fail validation.
 - If anything that ran failed → application error `<failed halves joined by '
   and '> half failed` (exit 1; db listed first, matching run order — e.g. `db
   and assets half failed`).
 
+Guidance line (empty table, no flag):
+
+```
+no assets install recorded; run 'cafleet setup --coding-agent <agent>' to install (agents: claude, codex, opencode)
+```
+
+Hint line (agent recorded only at other paths, no flag) — one line per such
+agent; `<resolved>` / `<old>` render with `~` abbreviation for `$HOME`;
+`<old>` is the agent's superseded row with the greatest `installed_at`, ties
+broken by ascending `path`:
+
+```
+<agent>: no install at <resolved> (previously set up at <old>); run 'cafleet setup --coding-agent <agent>'
+```
+
+##### Config-dir resolution
+
+Backend config directories resolve through the backends' native
+config-location environment variables, falling back to the defaults when
+unset:
+
+| Backend | Variable | Base when set | Base when unset | Skills dir | Preset target |
+|---|---|---|---|---|---|
+| claude | `CLAUDE_CONFIG_DIR` | `$CLAUDE_CONFIG_DIR` | `~/.claude` | `<base>/skills` | — |
+| codex | `CODEX_HOME` | `$CODEX_HOME` | `~/.codex` | `<base>/skills` | `<base>/rules/cafleet.rules` |
+| opencode (skills) | — (fixed discovery path) | — | `~/.config/opencode` | `<base>/skills` | — |
+| opencode (preset) | `OPENCODE_CONFIG_DIR` | `$OPENCODE_CONFIG_DIR` | `~/.opencode` | — | `<base>/agents/cafleet.md` |
+
+opencode splits by purpose: `agents/` is in `OPENCODE_CONFIG_DIR`'s
+documented search list, so the preset may relocate and remain a valid
+`--agent cafleet` discovery path; skills are not in that list — opencode
+discovers them only at fixed paths — so the skills install ignores the
+variable. `OPENCODE_CONFIG` (a config **file** variable) is ignored.
+
+**Validation.** A set variable must hold an absolute path. Any other value —
+the empty string, a relative path, a literal unexpanded `~/…` — fails at
+resolution time with the application error (exit 1):
+
+```
+<VAR> must be an absolute path (got '<value>')
+```
+
+Validation is lazy: a variable is read and validated only when a site
+actually resolves that backend's directory. `cafleet setup --coding-agent
+claude` with an invalid `CODEX_HOME` succeeds because the selector resolves
+only the targeted agent's directory. The spawn preconditions themselves
+read none of the three variables for claude and codex (PATH-check-only;
+opencode's resolves the preset base) — but the stale-assets guard fronting
+every fleet-scoped command, `member create` included, resolves all three
+identity paths (§ *Stale-assets guard*). One exception to strict lazy
+failure: `doctor` catches per-agent resolution errors and renders them as
+issues instead of aborting (§ `doctor`).
+
+Resolution also reports the winning origin — the supplying variable name or
+the default — which feeds `doctor`'s `source` column and JSON. The three
+variables are **not** configuration fields (§7.1): they are backend-native
+variables read at point of use through an injected env lookup, so tests run
+against fakes.
+
+**Recorded-path identity.** Every surface that keys on "the agent's resolved
+path" uses one canonical path per agent — the resolved **base** directory —
+stored absolute, exactly as resolved (no canonicalization beyond the
+absolute-path validation):
+
+| Agent | Recorded / status-keyed path |
+|---|---|
+| claude | The resolved claude config dir (`$CLAUDE_CONFIG_DIR` or `~/.claude`) |
+| codex | The resolved codex home (`$CODEX_HOME` or `~/.codex`) |
+| opencode | The resolved preset base (`$OPENCODE_CONFIG_DIR` or `~/.opencode`) — the only opencode root that can vary; the skills base is fixed and carries no identity |
+
 ##### Schema-only invocation
 
-`cafleet setup --skip claude --skip codex --skip opencode` is the documented
-contributor/CI path: it is deterministic (independent of which agent homes
-exist) and runs the db half only (the assets half is skipped and cannot
-contribute a failure). It never records `asset_installs` rows.
+Plain `cafleet setup` is the documented migrations-apply (contributor/CI)
+path — there is no dedicated db-only flag. On a records-free database it is
+naturally schema-only: the db half runs, and the assets half installs
+nothing, prints the guidance line, and records no `asset_installs` rows
+(exit 0 when the db half succeeds). On a machine with recorded installs the
+no-flag refresh is idempotent.
 
 ##### Shared helpers (the assets half)
 
-**resolve-targets** (the fixed list `claude`, `codex`, `opencode` minus the
-`--skip`ped agents, in that fixed order; all three skipped → the assets half
-is skipped entirely, per above);
-**install-skills** (per target, create the target's skills dir as needed, then
+**resolve-targets** (the selection semantics above: the explicitly named
+agents, or — on the no-flag form — the agents recorded at their resolved
+identity paths, always in the fixed order `claude`, `codex`, `opencode`);
+**install-skills** (per target, create the target's resolved skills dir as
+needed, then
 copy each embedded skill dir — exactly the three skill dirs `cafleet`,
 `cafleet-design-doc`, `cafleet-research` — into it, removing any existing copy
 first; a filesystem error → `failed to install skills into <skills_dir>: <error>`;
@@ -1455,8 +1640,8 @@ success prints
 `<agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>)
 -> <skills dir>`);
 **install-preset** (per target with a preset — codex: embedded source
-`presets/codex/cafleet.rules` → `~/.codex/rules/cafleet.rules`; opencode:
-`presets/opencode/cafleet.md` → `~/.opencode/agents/cafleet.md`; claude has
+`presets/codex/cafleet.rules` → `<codex home>/rules/cafleet.rules`; opencode:
+`presets/opencode/cafleet.md` → `<preset base>/agents/cafleet.md`; claude has
 none: create the target's parent directory chain recursively, remove any
 existing target in this explicit check order — a symlink → unlink; else a
 directory → recursive delete; else if it exists → unlink (the symlink check
@@ -1465,9 +1650,10 @@ delete refuses them) — then
 copy the embedded source in; a filesystem error → `failed to install preset into
 <target>: <error>`; success prints `<agent>: installed preset (v<version>) ->
 <target>`). A target's `asset_installs` row is upserted only after both its
-skills and its preset (where one exists) install successfully. Known skills
-dirs: `claude` → `~/.claude/skills`, `codex` → `~/.codex/skills`, `opencode` →
-`~/.config/opencode/skills`.
+skills and its preset (where one exists) install successfully. Skills dirs
+resolve per § *Config-dir resolution*: `claude` → `<claude base>/skills`,
+`codex` → `<codex home>/skills`, `opencode` → `~/.config/opencode/skills`
+(fixed).
 
 Assets-half pre-flight: the `asset_installs` table must exist, else the half
 fails with `the database schema is missing or outdated; run 'cafleet setup'
@@ -1480,26 +1666,37 @@ An install failure aborts the loop; rows recorded before the failure remain.
 
 Every fleet-scoped surface — the `fleet`, `member`, and `message` groups (at
 the top of the group callback, before any subcommand body runs) and the
-`monitor` command (both forms, before the command body) — validates the
-recorded assets installs:
+`monitor` command (both forms, before the command body) — resolves each
+agent's identity path (§6.3 *Config-dir resolution*) and validates the
+recorded assets installs against the rows at those paths only:
 
-1. If the DB file, the `asset_installs` table, or all rows are missing, exit 1
-   with:
+1. If a config-path variable fails validation, exit 1 with the pinned
+   validation error (§6.3 *Config-dir resolution*).
+
+2. If no agent has a row at its currently-resolved path (a missing DB file,
+   missing `asset_installs` table, or zero rows included), exit 1 with
+   (`<agent>` shown literally, resolved by the trailing enumeration, exactly
+   as in the setup guidance line):
    ```
-   Error: no assets install is recorded; run 'cafleet setup' first
+   Error: no assets install is recorded at the resolved paths; run 'cafleet setup --coding-agent <agent>' to install (agents: claude, codex, opencode)
    ```
 
-2. If any recorded `cafleet_version` differs from the runtime CLI version
-   (simple string inequality — a downgrade also triggers), exit 1 with the
-   stale agents listed in ascending `coding_agent` order:
+3. If a row at a resolved path has a `cafleet_version` differing from the
+   runtime CLI version (simple string inequality — a downgrade also
+   triggers), exit 1 with the stale agents listed in ascending
+   `coding_agent` order:
    ```
    Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall
    ```
 
-3. Otherwise proceed silently.
+4. Otherwise proceed silently.
 
-Agents with no recorded row (an agent that was never installed) are not
-checked. Exempt surfaces: `setup` (must remain runnable to repair), `doctor`
+Agents with no row at their currently-resolved path are not checked (they
+contribute nothing to staleness); superseded rows at other paths are ignored
+everywhere in the guard. Plain `cafleet setup` remains the correct stale
+remedy: a stale agent by definition has a row at its resolved path, so the
+no-flag refresh covers it. Exempt surfaces: `setup` (must remain runnable to
+repair), `doctor`
 (reports instead of blocking), and `server` (human-facing WebUI, not
 fleet-scoped).
 
@@ -2264,6 +2461,11 @@ Each exposes two read-only properties and three methods:
   binary resolves on `PATH` and (for backends with bundled presets) the preset
   file exists on disk. A shared helper resolves `binary_name` against `PATH`
   and, on a miss, raises `binary {binary_name} not found on PATH`.
+  Preconditions read the host environment through a **spawn-probe seam**
+  (`SpawnProbe`): binary lookup plus `env_var(name) -> optional string`. The
+  system implementation reads the process environment; the test fake carries
+  a settable env map defaulting to empty, so precondition tests inject
+  environments without mutating the process.
 - **`validate_model(model)`** — `model` is optional; raises a value-error if
   malformed for this backend; a `None` model is always valid. **Exit-code note:**
   `member create` translates this value-error to a **usage error (exit 2)** with
@@ -2339,7 +2541,11 @@ opencode effort value-error (see § Contract error strings) — the backend has
 no reasoning-effort control, so `build_spawn_argv` never receives a non-None
 `effort` and never emits effort tokens (it asserts `effort is None`).
 `ensure_available` PATH check on `opencode` **first**, then verify
-the preset file exists at `~/.opencode/agents/cafleet.md` (see § opencode
+the preset file exists at the resolved preset path `<preset
+base>/agents/cafleet.md` — `<preset base>` resolved through the probe's
+`env_var` lookup per §6.3 *Config-dir resolution* (`OPENCODE_CONFIG_DIR`,
+default `~/.opencode`); an invalid variable surfaces the pinned validation
+error before the existence check (see § opencode
 preset). `display_name` is silently ignored; the prompt is passed
 as a `--prompt <prompt>` flag pair (two tokens), unlike claude/codex's bare
 positional.
@@ -2354,10 +2560,12 @@ positional.
 
 The codex auto-approval rules for `cafleet` commands are a static file embedded
 in the binary (source `presets/codex/cafleet.rules`) and installed to
-`~/.codex/rules/cafleet.rules` (expanding `~`) by the assets half of `setup`
+`<codex home>/rules/cafleet.rules` — `<codex home>` resolved per §6.3
+*Config-dir resolution* (`CODEX_HOME`, default `~/.codex`) — by the assets
+half of `setup`
 (§6.3), overwriting any existing target. The file is not a spawn precondition —
 codex's `ensure_available` is PATH-check-only — and codex loads every `*.rules`
-file under `~/.codex/rules/`, applying the strictest matching decision, so
+file under its rules directory, applying the strictest matching decision, so
 operator customizations live in a separate rules file in that directory. Exact
 contents (verbatim):
 
@@ -2375,18 +2583,26 @@ prefix_rule(
 
 The `cafleet` agent definition is a static file embedded in the binary
 (source `presets/opencode/cafleet.md`) and installed to
-`~/.opencode/agents/cafleet.md` (expanding `~`) by the assets half of `setup`
+`<preset base>/agents/cafleet.md` — `<preset base>` resolved per §6.3
+*Config-dir resolution* (`OPENCODE_CONFIG_DIR`, default `~/.opencode`) — by
+the assets half of `setup`
 (§6.3), overwriting any existing target. **Two opencode base directories serve
 two distinct purposes** and are not interchangeable: the agent preset lives
-under `~/.opencode/`, which is opencode's mandated `--agent cafleet` discovery
-path; `setup`'s skills install (§6.3) targets `~/.config/opencode/`, cafleet's
+under the resolved preset base (default `~/.opencode/`), which is opencode's
+`--agent cafleet` discovery path (`agents/` is in `OPENCODE_CONFIG_DIR`'s
+documented search list, so a relocated preset remains discoverable);
+`setup`'s skills install (§6.3) targets the fixed `~/.config/opencode/`,
+cafleet's
 own skills-install target for the opencode agent. Both paths are correct for
 their purpose — keep each as written.
 
 The preset is a spawn precondition (the spawn argv references `--agent
 cafleet`): opencode's `ensure_available` verifies the file exists at the
-install target and raises `opencode agent preset not found at {preset}; run
-'cafleet setup' first` when it does not.
+resolved install target and raises `opencode agent preset not found at
+{preset}; run 'cafleet setup --coding-agent opencode' first` when it does
+not — the remedy names the selector because the triggering state (no preset
+at the resolved path) coincides with opencode having no row at its resolved
+identity path, where plain `cafleet setup` installs nothing for opencode.
 
 #### Exact preset file contents (verbatim)
 
@@ -2470,7 +2686,9 @@ heading and its blank line); the file ends with exactly one trailing newline.
   low, medium, high, xhigh (got '{effort}').`
 - opencode effort: `opencode does not support reasoning effort.`
 - missing opencode preset: `opencode agent preset not found at {preset}; run
-  'cafleet setup' first`
+  'cafleet setup --coding-agent opencode' first`
+- invalid config-path variable: `{var} must be an absolute path (got
+  '{value}')` (§6.3 *Config-dir resolution*)
 
 ### 6.8 WebUI + Config
 
@@ -2796,7 +3014,8 @@ recording one row per applied migration: version, name, applied-on timestamp,
 checksum). The schema
 is created and evolved by a **chain of embedded SQL migrations** — numbered
 files `V<N>__<slug>.sql`, contiguous from 1, compiled into the binary;
-applying the chain in place preserves existing data (§11). Column types,
+applying the chain in place preserves existing data (§11; the one exception
+is `V6`, which restarts `asset_installs` empty — see the chain below). Column types,
 defaults, FK rules, AUTOINCREMENT, and the create-order quirk are in §6.1.
 
 **Indexes (non-unique), at head:**
@@ -2805,7 +3024,7 @@ defaults, FK rules, AUTOINCREMENT, and the create-order quirk are in §6.1.
 - `idx_messages_owner_member_status_ts` on `messages(owner_member_id, status_timestamp)`
 - `idx_messages_from_member_status_ts` on `messages(from_member_id, status_timestamp)`
 
-**The migration chain.** Head is **`V5`**, contiguous from 1 with exactly one
+**The migration chain.** Head is **`V6`**, contiguous from 1 with exactly one
 baseline:
 
 1. `V1__baseline.sql` — the baseline, creating the schema in this order:
@@ -2814,12 +3033,9 @@ baseline:
    the still-uncreated `fleets` (§6.1), AUTOINCREMENT; `fleets`, AUTOINCREMENT;
    `asset_installs` — TEXT PK `coding_agent`, no AUTOINCREMENT, no FK
    constraint, columns `coding_agent` TEXT PK, `cafleet_version` TEXT NOT NULL,
-   `installed_at` TEXT NOT NULL (upsert semantics; rows written by the assets
-   half of `setup` — one row per target agent (the fixed list `claude`,
-   `codex`, `opencode` minus any `--skip`ped agent) — after that target's
-   skills and preset, where one exists, install successfully — the row
-   attests skills + preset; never written by the db half; feeds the
-   stale-assets guard and `doctor`); `member_placements` — PK=FK `member_id`,
+   `installed_at` TEXT NOT NULL (recreated with the composite
+   `(coding_agent, path)` key at `V6`, below — §5.2 carries the head-shape
+   semantics); `member_placements` — PK=FK `member_id`,
    not AUTOINCREMENT, `backend` DDL default `"tmux"`, `coding_agent` NOT NULL
    with no DDL default; the per-member monitor schedule table — PK=FK
    `member_id` ON DELETE CASCADE, `interval_seconds` default 60, `enabled`
@@ -2858,6 +3074,26 @@ baseline:
        wake_interval_seconds INTEGER
    );
    ```
+6. `V6__path_aware_asset_installs.sql` — drops and recreates `asset_installs`
+   with the composite `(coding_agent, path)` key. A `PRIMARY KEY` change has
+   no in-place `ALTER TABLE` form in SQLite, and the table has no FK parents,
+   so drop-and-recreate is the legitimate path; the table restarts empty —
+   the old rows' install locations were `$HOME`-dependent hard-coded
+   defaults, and a plain-SQL migration cannot know `$HOME` to backfill a
+   truthful `path` value, so an empty restart is the only non-fabricated
+   option (every machine re-runs `setup` per agent after upgrading). Head
+   `asset_installs` schema:
+   ```sql
+   DROP TABLE asset_installs;
+
+   CREATE TABLE asset_installs (
+       coding_agent TEXT NOT NULL,
+       path TEXT NOT NULL,
+       cafleet_version TEXT NOT NULL,
+       installed_at TEXT NOT NULL,
+       PRIMARY KEY (coding_agent, path)
+   );
+   ```
 
 There are no CHECK constraints. Future schema changes are hand-written
 numbered files `V<N>__<slug>.sql` appended to the chain; the chain stays
@@ -2881,7 +3117,7 @@ automatically.`; (5) already at head (recorded version == head) → print
 pending migrations to head and print `Created <db_file> and applied migrations
 to head (<N>).` when no version was recorded before the run (a fresh or
 table-less DB), else `Upgraded from <M> to <N>.`. `<M>` / `<N>` are the
-integer migration versions (the head is `5`). The driver's
+integer migration versions (the head is `6`). The driver's
 connection is closed when the command finishes (success or failure).
 
 ---
@@ -2900,7 +3136,8 @@ connection is closed when the command finishes (success or failure).
     sanitizer substitutions, and best-effort-vs-raising contracts.
   - *Coding-agent* — assert each `build_spawn_argv` argv, the opencode model
     validation, and each backend's `ensure_available` preconditions (PATH
-    check; opencode's preset-existence check) against a temp HOME.
+    check; opencode's preset-existence check at the resolved preset path)
+    against a temp HOME and an injected env lookup.
   - *Monitor* — `wake_due` is pure (table-test interval gating,
     `last_wake_at` precedence, the `started_at` baseline, and corrupt
     stamps); `monitor_tick` against a fake broker+multiplexer asserting the
@@ -2941,8 +3178,8 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 
 **Top-level:**
 
-- [ ] `cafleet setup` (`--skip AGENT` repeatable choice; no positional arguments; runs the db half then the assets half for the fixed target list claude/codex/opencode minus the skipped agents)
-- [ ] `cafleet doctor` (`--json`; emits tmux block + assets-install report)
+- [ ] `cafleet setup` (`--coding-agent AGENT` repeatable choice; no positional arguments; runs the db half then the assets half per the selector semantics — the named agents, or the no-flag refresh of agents recorded at their resolved paths)
+- [ ] `cafleet doctor` (`--json`; the three-section diagnosis — multiplexer, database, coding agents — no early abort, exit 1 iff any issue)
 - [ ] `cafleet server` (`--host`=settings.broker_host, `--port`=settings.broker_port)
 - [ ] `cafleet monitor FLEET_ID` (the loop form; `--tick`≥1=5, `--interval`≥0=`CAFLEET_MONITOR_WAKE_INTERVAL` (default 600); prints the startup line after a successful runtime claim)
 - [ ] `cafleet monitor scan FLEET_ID` (`--lines`≥1=**20**, `--ansi`, `--json`; one-shot batch capture — Director first, then members ascending; annotated entries still exit 0)
@@ -3017,9 +3254,10 @@ The decisions that shape this surface (full rationale in the design doc):
   to reinstall.
 - **Stale-assets guard** (§6.3): every fleet-scoped surface (the `fleet` /
   `member` / `message` group callbacks and the `monitor` command) validates
-  recorded `asset_installs` versions against the runtime CLI version before any
-  subcommand body runs; missing/stale → hard error (exit 1); exempt: `setup`,
-  `doctor`, `server`.
+  each agent's `asset_installs` row at its currently-resolved identity path
+  against the runtime CLI version before any subcommand body runs;
+  all-uninstalled/stale-at-resolved-path → hard error (exit 1); superseded
+  rows at other paths never block; exempt: `setup`, `doctor`, `server`.
 - **Nullable `to_member_id`** (§5.5): `NULL` on `broadcast_summary` rows; no `0`
   sentinel.
 - **Prompt-substitution identity delivery** (§6.3/§7.1): identity reaches a
@@ -3033,7 +3271,8 @@ The decisions that shape this surface (full rationale in the design doc):
 Choices left unconstrained by the contract (each underlying behavior is fully
 specified in the cited section):
 
-- **CLI (§6.3):** the `--coding-agent`/`--skip` choice sets may be
+- **CLI (§6.3):** the `--coding-agent` choice sets (on `fleet create`,
+  `member create`, and `setup`) may be
   hardcoded to `claude`/`codex`/`opencode` or data-driven off the registry —
   an implementation choice.
 - **Multiplexer (§6.5):** `env` argument ordering in `split_window` is not

@@ -81,7 +81,7 @@ cafleet member show <target-member-id>
 
 ## Doctor
 
-Print the resolved multiplexer backend and the calling pane's session/window/pane identifiers for diagnosing placement without raw multiplexer commands. Takes no id; requires a supported multiplexer to be detected (tmux or herdr).
+The full-environment diagnosis: a three-section report — multiplexer (the resolved backend and the calling pane's session/window/pane identifiers), database (recorded schema version vs. the embedded head), and coding agents (per-agent install state at the resolved config paths) — rendered without early abort, replacing raw multiplexer commands for placement diagnosis. Takes no id. Exits non-zero iff any section reports an issue (a not-installed agent never counts as one).
 
 ```bash
 cafleet doctor
@@ -126,7 +126,7 @@ Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters ever
 
 ## Typical Workflow
 
-0. **Verify pane env** (Director): run `cafleet doctor` to confirm a supported multiplexer (tmux or herdr) is detected — the canonical pane-identity probe, before `cafleet fleet create` and any `cafleet member create`.
+0. **Verify pane env** (Director): run `cafleet doctor` — the canonical pane-identity probe, before `cafleet fleet create` and any `cafleet member create`. It renders the three-section diagnosis (multiplexer, database, coding agents) and exits non-zero on any rendered issue; a non-zero exit aborts the spawn protocol.
 
 1. **Create a fleet** (if none exists):
    ```bash

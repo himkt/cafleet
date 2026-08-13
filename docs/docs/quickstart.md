@@ -46,6 +46,11 @@ system:
 | `codex` (OpenAI Codex CLI) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` | [The `cafleet` rules file](spec/coding-agent-backends.md#cafleet-rules-file) |
 | `opencode` | none | none required | The skills, plus the `cafleet` agent preset at `~/.opencode/agents/cafleet.md` | [Opencode](spec/coding-agent-backends.md#opencode) |
 
+The paths above are the defaults: the backend config-location variables
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `OPENCODE_CONFIG_DIR` relocate them,
+and `cafleet setup` installs to the same resolved directories — see
+[Config-dir resolution](spec/cli-options.md#config-dir-resolution).
+
 The snippets below are the recommended starting points for the two backends
 that need one.
 

@@ -4,10 +4,12 @@
 //!
 //! ```text
 //! // The spawn-precondition seam (SPEC §9: PATH check + opencode's
-//! // preset-existence check against a temp HOME).
+//! // preset-existence check at the resolved preset path, against a temp
+//! // HOME and an injected env map).
 //! pub trait SpawnProbe {
 //!     fn binary_on_path(&self, name: &str) -> bool;
 //!     fn home_dir(&self) -> std::path::PathBuf;
+//!     fn env_var(&self, name: &str) -> Option<String>;
 //! }
 //!
 //! pub trait CodingAgent {
@@ -29,7 +31,7 @@
 //! §6.7), so these tests assert `message()` only, never the variant.
 #![allow(dead_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use super::SpawnProbe;
@@ -37,6 +39,7 @@ use super::SpawnProbe;
 pub struct FakeProbe {
     pub binaries: BTreeSet<String>,
     pub home: PathBuf,
+    pub env: BTreeMap<String, String>,
 }
 
 impl FakeProbe {
@@ -44,6 +47,7 @@ impl FakeProbe {
         FakeProbe {
             binaries: BTreeSet::from([name.to_string()]),
             home: home.to_path_buf(),
+            env: BTreeMap::new(),
         }
     }
 
@@ -51,6 +55,7 @@ impl FakeProbe {
         FakeProbe {
             binaries: BTreeSet::new(),
             home: home.to_path_buf(),
+            env: BTreeMap::new(),
         }
     }
 }
@@ -62,6 +67,10 @@ impl SpawnProbe for FakeProbe {
 
     fn home_dir(&self) -> PathBuf {
         self.home.clone()
+    }
+
+    fn env_var(&self, name: &str) -> Option<String> {
+        self.env.get(name).cloned()
     }
 }
 

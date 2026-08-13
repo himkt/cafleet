@@ -30,7 +30,7 @@ command groups:
 | Entry point | Scope | Subcommands |
 |---|---|---|
 | `setup` | one-time onboarding: brings the database to the current schema and installs the coding-agent assets | — |
-| `doctor` | environment check: reports the resolved multiplexer, the calling pane, and what is installed | — |
+| `doctor` | environment check: a three-section diagnosis covering the multiplexer, the database schema, and the coding-agent installs | — |
 | `server` | serves the admin WebUI | — |
 | `monitor` | the supervision scheduler, run as `cafleet monitor FLEET_ID` | — |
 | `fleet` | fleet lifecycle | `create`, `list`, `show`, `delete` |

@@ -42,8 +42,8 @@ Per-backend capabilities:
 | Backend | OS-level sandbox | Sets the pane title | Shell-command posture | Preset / config prerequisite |
 |---|---|---|---|---|
 | `claude` | none | yes, via `--name <member-name>` | Runs cafleet and any shell command directly | none |
-| `codex` | kernel-enforced — `--sandbox workspace-write` confines writes to the workspace, and codex is the only backend with one | no — locate the pane through `cafleet member list` (`pane_id` is ground truth) | Runs cafleet and any shell command directly | `~/.codex/rules/cafleet.rules`, plus the `~/.codex/config.toml` settings and a trusted working directory. The rules file is a permission posture, not a spawn dependency — `member create --coding-agent codex` needs only the `codex` binary on PATH |
-| `opencode` | none | no — locate the pane through `cafleet member list` | Deny-by-default allowlist; everything outside it routes to the Director | `~/.opencode/agents/cafleet.md`, a spawn precondition — when it is missing the spawn fails with `opencode agent preset not found at <preset>; run 'cafleet setup' first` |
+| `codex` | kernel-enforced — `--sandbox workspace-write` confines writes to the workspace, and codex is the only backend with one | no — locate the pane through `cafleet member list` (`pane_id` is ground truth) | Runs cafleet and any shell command directly | `~/.codex/rules/cafleet.rules` (`CODEX_HOME` relocates it), plus the `~/.codex/config.toml` settings and a trusted working directory. The rules file is a permission posture, not a spawn dependency — `member create --coding-agent codex` needs only the `codex` binary on PATH |
+| `opencode` | none | no — locate the pane through `cafleet member list` | Deny-by-default allowlist; everything outside it routes to the Director | `~/.opencode/agents/cafleet.md` (`OPENCODE_CONFIG_DIR` relocates it), a spawn precondition — when it is missing the spawn fails with `opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first` |
 
 ## Model selection {#model-selection}
 
@@ -94,8 +94,10 @@ trust_level = "trusted"
 ### The `cafleet` rules file {#cafleet-rules-file}
 
 `~/.codex/rules/cafleet.rules` grants the auto-approval posture for `cafleet`
-commands. It ships as a static file in the assets release archive
-(`presets/codex/cafleet.rules`) and is installed by `cafleet setup`:
+commands (`CODEX_HOME` relocates the `~/.codex` base — see
+[Config-dir resolution](cli-options.md#config-dir-resolution)). It ships as
+a static file in the assets release archive (`presets/codex/cafleet.rules`)
+and is installed by `cafleet setup`:
 
 ```text
 prefix_rule(pattern = ["cafleet"], decision = "allow")
@@ -129,14 +131,17 @@ long-lived, observable pane like the other backends. The prompt is passed via
 
 ### The `cafleet` agent preset {#cafleet-agent-preset}
 
-`--agent cafleet` binds the member to `~/.opencode/agents/cafleet.md`. The
+`--agent cafleet` binds the member to `~/.opencode/agents/cafleet.md`
+(`OPENCODE_CONFIG_DIR` relocates the `~/.opencode` base — see
+[Config-dir resolution](cli-options.md#config-dir-resolution); the spawn
+precondition checks the same resolved path `setup` installs to). The
 preset ships as a static file in the assets release archive
 (`presets/opencode/cafleet.md`) and is installed — overwriting any existing
 copy — by `cafleet setup`; to refresh after a CAFleet upgrade, re-run it. The
 preset is a spawn precondition: the spawn argv references `--agent cafleet`,
 so `cafleet member create --coding-agent opencode` fails with `opencode agent
-preset not found at <preset>; run 'cafleet setup' first` when the file is
-missing.
+preset not found at <preset>; run 'cafleet setup --coding-agent opencode'
+first` when the file is missing.
 
 The preset's `bash` ruleset is deny-by-default: a `"*": "deny"` base first,
 then an explicit allowlist translated from the operator's Claude Code

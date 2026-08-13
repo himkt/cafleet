@@ -36,7 +36,7 @@ git clone https://github.com/himkt/cafleet.git
 cd cafleet
 
 mise //cafleet:install    # builds the WebUI dist, then cargo-installs the cafleet CLI (re-run after source edits)
-cafleet setup --skip claude --skip codex --skip opencode   # migrate the database schema only (idempotent)
+cafleet setup             # migrate the database schema (idempotent)
 ```
 
 After that, pick the task you need by name. Every cargo-invoking task first

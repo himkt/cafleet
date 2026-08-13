@@ -19,7 +19,7 @@ Minted ids are **never reused** and real ids are always `>= 1`.
 | `messages` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `members.member_id`, via `owner_member_id` | `RESTRICT` | Not deleted |
 | `member_placements` | Reuses `members.member_id` | `members` | `CASCADE` | Hard-deleted on deregistration |
 | `monitor_runtime` | Reuses `fleets.fleet_id` | `fleets` | `RESTRICT` | Removed inside the `fleet delete` transaction; "no monitor" is modeled as "no row" |
-| `asset_installs` | `coding_agent` (the agent name) | — | — | Upserted, one row per coding agent |
+| `asset_installs` | `(coding_agent, path)` composite | — | — | Upserted, one row per coding agent and install path |
 
 ### `fleets`
 
@@ -73,10 +73,16 @@ stamped. The cadence semantics are defined in
 
 ### `asset_installs`
 
-One upserted row per coding agent, recording the CLI version whose skills
-and preset (where one exists) install last landed there — the row attests
-both. Written by the assets half of `cafleet setup`; feeds the stale-assets
-guard and the `cafleet doctor` report (see
+One upserted row per `(coding_agent, path)`, recording the CLI version whose
+skills and preset (where one exists) install last landed at that path — the
+row attests both. `path` is the agent's resolved identity path (see
+[CLI options](cli-options.md#config-dir-resolution)), stored absolute exactly
+as resolved. Consumers partition an agent's rows by comparing `path` against
+the currently-resolved identity path: the row at the resolved path (at most
+one, by the primary key) is **current**; every other row of that agent is
+**superseded**. Written by the assets half of `cafleet setup`; the current
+row feeds the stale-assets guard and the `cafleet doctor` setup column, while
+superseded rows surface only as informational doctor footnotes (see
 [CLI options](cli-options.md#stale-assets-guard)).
 
 ## Foreign key enforcement

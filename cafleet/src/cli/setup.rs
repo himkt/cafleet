@@ -2,25 +2,27 @@
 //! (SPEC §6.3, §8): the refinery db half, then the offline embedded assets
 //! half, failing independently.
 
-use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Args;
 use rusqlite::Connection;
+use serde_json::Value;
 
-use crate::assets::install_assets;
+use super::helpers::tilde;
+use crate::assets::{TARGET_AGENTS, agent_paths, install_agent};
+use crate::broker::{asset_installs_table_exists, list_asset_installs};
 use crate::config::Settings;
+use crate::config_dir::EnvLookup;
 use crate::error::CafleetError;
 
 #[derive(Args)]
 pub struct SetupArgs {
-    /// Skip the named agent's assets install (repeatable).
-    #[arg(long = "skip", value_name = "AGENT", value_parser = ["claude", "codex", "opencode"])]
-    skip: Vec<String>,
+    /// Install the named agent's assets (repeatable; default: refresh agents already installed at their resolved paths).
+    #[arg(long = "coding-agent", value_name = "AGENT", value_parser = ["claude", "codex", "opencode"])]
+    coding_agent: Vec<String>,
 }
 
 pub fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
-    let skip: BTreeSet<String> = args.skip.into_iter().collect();
     let mut failed_halves: Vec<&str> = Vec::new();
 
     if let Err(error) = db_half(settings) {
@@ -28,9 +30,7 @@ pub fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
         failed_halves.push("db");
     }
 
-    if skip.len() == 3 {
-        println!("assets half skipped (all agents skipped)");
-    } else if let Err(error) = assets_half(settings, &skip) {
+    if let Err(error) = assets_half(settings, &args.coding_agent) {
         println!("assets half failed: {}", error.message());
         failed_halves.push("assets");
     }
@@ -105,7 +105,7 @@ fn db_half(settings: &Settings) -> Result<(), CafleetError> {
 
 /// The applied-migration high-water mark, `None` when the ledger is absent
 /// or empty.
-fn recorded_version(conn: &Connection) -> Result<Option<u32>, CafleetError> {
+pub(super) fn recorded_version(conn: &Connection) -> Result<Option<u32>, CafleetError> {
     let ledger_exists: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master \
@@ -127,7 +127,7 @@ fn recorded_version(conn: &Connection) -> Result<Option<u32>, CafleetError> {
 
 /// Whether any table outside the ledger (and SQLite's own bookkeeping)
 /// exists.
-fn has_foreign_tables(conn: &Connection) -> Result<bool, CafleetError> {
+pub(super) fn has_foreign_tables(conn: &Connection) -> Result<bool, CafleetError> {
     conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' \
          AND name NOT LIKE 'sqlite_%' AND name != 'refinery_schema_history')",
@@ -137,10 +137,90 @@ fn has_foreign_tables(conn: &Connection) -> Result<bool, CafleetError> {
     .map_err(|e| CafleetError::App(format!("database error: {e}")))
 }
 
-fn assets_half(settings: &Settings, skip: &BTreeSet<String>) -> Result<(), CafleetError> {
+/// The assets half (SPEC §6.3): the explicit selector installs exactly the
+/// named agents; the no-flag form refreshes the agents recorded at their
+/// resolved identity paths. An install failure aborts the loop; rows
+/// recorded before the failure remain.
+fn assets_half(settings: &Settings, selected: &[String]) -> Result<(), CafleetError> {
     let mut conn = crate::db::connect(&settings.database_url)?;
+    if !asset_installs_table_exists(&conn) {
+        return Err(CafleetError::App(
+            "the database schema is missing or outdated; run 'cafleet setup' first".to_string(),
+        ));
+    }
     let home = PathBuf::from(
         std::env::var("HOME").map_err(|_| CafleetError::App("HOME is not set".to_string()))?,
     );
-    install_assets(&mut conn, skip, super::VERSION, &home)
+    let env = |name: &str| std::env::var(name).ok();
+
+    if selected.is_empty() {
+        return refresh_recorded(&mut conn, &env, &home);
+    }
+    for agent in TARGET_AGENTS {
+        if !selected.iter().any(|s| s == agent) {
+            continue;
+        }
+        let paths = agent_paths(&env, &home, agent)?;
+        install_agent(&mut conn, agent, &paths, super::VERSION)?;
+    }
+    Ok(())
+}
+
+/// The no-flag form: per agent in the fixed order, a row at the resolved
+/// identity path is refreshed, rows only at other paths earn the hint line,
+/// and a row-less agent installs nothing.
+fn refresh_recorded(
+    conn: &mut Connection,
+    env: EnvLookup,
+    home: &Path,
+) -> Result<(), CafleetError> {
+    let rows = list_asset_installs(conn)?;
+    if rows.is_empty() {
+        println!(
+            "no assets install recorded; run 'cafleet setup --coding-agent <agent>' \
+             to install (agents: claude, codex, opencode)"
+        );
+        return Ok(());
+    }
+    for agent in TARGET_AGENTS {
+        let agent_rows: Vec<&Value> = rows
+            .iter()
+            .filter(|row| row["coding_agent"] == agent)
+            .collect();
+        if agent_rows.is_empty() {
+            continue;
+        }
+        let paths = agent_paths(env, home, agent)?;
+        let installed_here = agent_rows
+            .iter()
+            .any(|row| row["path"] == paths.identity.as_str());
+        if installed_here {
+            install_agent(conn, agent, &paths, super::VERSION)?;
+        } else {
+            println!(
+                "{agent}: no install at {} (previously set up at {}); \
+                 run 'cafleet setup --coding-agent {agent}'",
+                tilde(&paths.identity, home),
+                tilde(most_recent_path(&agent_rows), home)
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The superseded row the hint line names: greatest `installed_at`, ties
+/// broken by ascending `path` (the strict `>` keeps the first row of a tie,
+/// and rows arrive path-ascending).
+fn most_recent_path<'a>(rows: &[&'a Value]) -> &'a str {
+    let mut best: Option<&Value> = None;
+    for row in rows {
+        let newer = best
+            .is_none_or(|current| row["installed_at"].as_str() > current["installed_at"].as_str());
+        if newer {
+            best = Some(row);
+        }
+    }
+    best.expect("callers pass a non-empty row set")["path"]
+        .as_str()
+        .expect("rows carry the path")
 }
