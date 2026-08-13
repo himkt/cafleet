@@ -100,9 +100,8 @@ fn the_schema_guard_reports_a_foreign_database() {
     let output = cli.run(&["fleet", "list"]);
     assert_eq!(code(&output), 1);
     assert!(
-        stderr(&output).contains(
-            "Error: database has tables but no schema history — not a cafleet database?"
-        ),
+        stderr(&output)
+            .contains("Error: database has tables but no schema history — not a cafleet database?"),
         "got: {}",
         stderr(&output)
     );
@@ -122,8 +121,9 @@ fn the_schema_guard_reports_a_newer_database() {
     let output = cli.run(&["fleet", "list"]);
     assert_eq!(code(&output), 1);
     assert!(
-        stderr(&output)
-            .contains("Error: database schema 7 is newer than this cafleet (head 6); upgrade cafleet"),
+        stderr(&output).contains(
+            "Error: database schema 7 is newer than this cafleet (head 6); upgrade cafleet"
+        ),
         "got: {}",
         stderr(&output)
     );
@@ -183,7 +183,12 @@ fn the_schema_guard_blocks_server_startup() {
     let status = child.try_wait().unwrap().unwrap();
     assert_eq!(status.code(), Some(1));
     let mut err = String::new();
-    child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut err)
+        .unwrap();
     assert!(err.contains(OUTDATED_ERROR), "got: {err}");
 }
 

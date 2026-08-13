@@ -425,7 +425,13 @@ fn space_delimited_and_repeated_flag_forms_are_equivalent() {
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
 
     let repeated = Cli::new();
-    let output = repeated.run(&["setup", "--coding-agent", "claude", "--coding-agent", "codex"]);
+    let output = repeated.run(&[
+        "setup",
+        "--coding-agent",
+        "claude",
+        "--coding-agent",
+        "codex",
+    ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
 
     assert_eq!(selections(&space), selections(&repeated));
@@ -499,7 +505,10 @@ fn setup_help_documents_the_multi_value_flag() {
     let cli = Cli::new();
     let output = cli.run(&["setup", "--help"]);
     assert_eq!(code(&output), 0);
-    let help: String = stdout(&output).split_whitespace().collect::<Vec<_>>().join(" ");
+    let help: String = stdout(&output)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(
         help.contains(
             "Install the named agent's assets (space-delimited, repeatable; default: all agents)"
