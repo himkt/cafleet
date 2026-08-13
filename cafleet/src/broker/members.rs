@@ -24,7 +24,12 @@ pub(crate) fn db_err(e: rusqlite::Error) -> CafleetError {
     CafleetError::App(format!("database error: {e}"))
 }
 
-pub(crate) fn member_card(name: &str, description: &str, skills: &[Value], monitor: bool) -> String {
+pub(crate) fn member_card(
+    name: &str,
+    description: &str,
+    skills: &[Value],
+    monitor: bool,
+) -> String {
     let mut card = json!({"name": name, "description": description, "skills": skills});
     if monitor {
         card["cafleet"] = json!({"kind": "monitor"});
@@ -585,8 +590,16 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let member_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
-            .unwrap()["member_id"]
+        let member_id = broker::register_member(
+            &mut conn,
+            fleet_id,
+            "ghost",
+            "d",
+            &[],
+            None,
+            false,
+        )
+        .unwrap()["member_id"]
             .as_i64()
             .unwrap();
         let member = broker::get_member(&conn, member_id, fleet_id)
@@ -729,8 +742,16 @@ mod tests {
             .unwrap();
         assert_eq!(member["placement"]["mux_pane_id"], "%9");
 
-        let placementless = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
-            .unwrap()["member_id"]
+        let placementless = broker::register_member(
+            &mut conn,
+            fleet_id,
+            "ghost",
+            "d",
+            &[],
+            None,
+            false,
+        )
+        .unwrap()["member_id"]
             .as_i64()
             .unwrap();
         assert!(
@@ -878,7 +899,10 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_a, _) = create_fleet(&mut conn, "alpha");
         let (fleet_b, _) = create_fleet(&mut conn, "beta");
-        assert_eq!(broker::active_monitor_member_id(&conn, fleet_a).unwrap(), None);
+        assert_eq!(
+            broker::active_monitor_member_id(&conn, fleet_a).unwrap(),
+            None
+        );
 
         register(&mut conn, fleet_a, "worker", Some("%2"));
         assert_eq!(

@@ -189,8 +189,7 @@ async fn the_roster_wraps_members_with_the_three_value_kind_union() {
         .as_i64()
         .unwrap();
     let holder_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
-        .unwrap()
-        ["member_id"]
+        .unwrap()["member_id"]
         .as_i64()
         .unwrap();
     broker::send_message(

@@ -27,8 +27,7 @@ fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
     let split_line = cli
         .shim_calls()
         .into_iter()
-        .filter(|line| line.starts_with("split-window"))
-        .next_back()
+        .rfind(|line| line.starts_with("split-window"))
         .expect("split-window was invoked");
     assert!(
         split_line.contains("-e CAFLEET_DATABASE_URL=sqlite:///"),
@@ -80,8 +79,7 @@ fn member_create_accepts_the_prompt_via_file() {
     let split_line = cli
         .shim_calls()
         .into_iter()
-        .filter(|line| line.starts_with("split-window"))
-        .next_back()
+        .rfind(|line| line.starts_with("split-window"))
         .expect("split-window was invoked");
     assert!(
         split_line.contains("FLEET 1 AGENT claude"),
@@ -315,7 +313,11 @@ fn member_create_without_a_monitor_hits_the_monitor_first_guard() {
         "d",
         "prompt",
     ]);
-    assert_ne!(code(&output), 0, "the monitor-first guard rejects the spawn");
+    assert_ne!(
+        code(&output),
+        0,
+        "the monitor-first guard rejects the spawn"
+    );
     assert!(
         stderr(&output).contains(&format!(
             "fleet {fleet_id} has no active monitor member; spawn one with --role monitor first"
@@ -355,7 +357,11 @@ fn member_create_role_monitor_twice_hits_the_one_per_fleet_guard() {
         "d",
         "prompt",
     ]);
-    assert_ne!(code(&output), 0, "the one-per-fleet guard rejects the spawn");
+    assert_ne!(
+        code(&output),
+        0,
+        "the one-per-fleet guard rejects the spawn"
+    );
     assert!(
         stderr(&output).contains(&format!(
             "fleet {fleet_id} already has an active monitor member (member {monitor_id})"

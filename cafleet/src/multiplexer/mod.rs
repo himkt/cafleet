@@ -439,8 +439,7 @@ mod tests {
 
         #[test]
         fn an_empty_roster_drops_the_entries_and_keeps_the_director_segment() {
-            let payload =
-                build_wake_payload(7, &[], &member(2, "Director", "claude", 3)).unwrap();
+            let payload = build_wake_payload(7, &[], &member(2, "Director", "claude", 3)).unwrap();
             assert_eq!(
                 payload,
                 "[cafleet] tick: fleet 7 — no members to health-check. \

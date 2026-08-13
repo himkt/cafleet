@@ -286,10 +286,12 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 7, 30, 10, 0, 0).unwrap()
     }
 
+    type WakeCall = (String, i64, Vec<Value>, Value);
+
     struct FakeMux {
         live_panes: BTreeSet<String>,
         wake_ok: Cell<bool>,
-        wakes: RefCell<Vec<(String, i64, Vec<Value>, Value)>>,
+        wakes: RefCell<Vec<WakeCall>>,
     }
 
     impl FakeMux {
@@ -502,8 +504,7 @@ mod tests {
         fn a_due_tick_wakes_the_monitor_and_stamps_last_wake_at() {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet_id, director_id, monitor_id, member_id, second_id) =
-                wake_fleet(&mut conn);
+            let (fleet_id, director_id, monitor_id, member_id, second_id) = wake_fleet(&mut conn);
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
             let mux = FakeMux::with_live_panes(&["%0", "%1", "%2", "%4"]);

@@ -123,7 +123,12 @@ pub fn register(conn: &mut Connection, fleet_id: i64, name: &str, pane: Option<&
         .unwrap()
 }
 
-pub fn register_monitor(conn: &mut Connection, fleet_id: i64, name: &str, pane: Option<&str>) -> i64 {
+pub fn register_monitor(
+    conn: &mut Connection,
+    fleet_id: i64,
+    name: &str,
+    pane: Option<&str>,
+) -> i64 {
     broker::register_member(
         conn,
         fleet_id,

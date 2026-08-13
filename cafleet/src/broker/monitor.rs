@@ -613,8 +613,7 @@ mod tests {
     fn fleet_wake_director_is_a_loud_error_when_the_row_is_missing() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        broker::fleet_wake_director(&conn, 999)
-            .expect_err("an unknown fleet has no Director row");
+        broker::fleet_wake_director(&conn, 999).expect_err("an unknown fleet has no Director row");
 
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         conn.execute(

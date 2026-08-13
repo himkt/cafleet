@@ -31,10 +31,11 @@ pane — a pure trigger, not a protocol payload. It opens `[cafleet] tick:`,
 names every active ordinary member (the Director and the monitor member
 excluded) as `<member-id> (<name>; coding_agent=<agent>;
 unacked=<pending-count>)` in ascending member-id order, always carries a
-`Director:` segment in the same field grammar, then closes with `Follow your
-monitor role protocol.` and the resume clause: `Resume your work if something
-was still running.` A fleet with no ordinary members receives the `no members
-to health-check.` form, still carrying the `Director:` segment. The tmux and
+`Director:` segment in the same field grammar, then closes with
+`Follow your monitor role protocol.` and the resume clause:
+`Resume your work if something was still running.` A fleet with no ordinary
+members receives the `no members to health-check.` form, still carrying the
+`Director:` segment. The tmux and
 herdr payloads are byte-identical; the exact grammar is pinned in
 [Multiplexer backends](../spec/multiplexer-backends.md).
 
