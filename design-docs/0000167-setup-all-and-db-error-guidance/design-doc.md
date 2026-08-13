@@ -1,6 +1,6 @@
 # One-Command Setup and Database-Error Guidance
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 24/24 tasks complete
 **Last Updated**: 2026-08-13
 
@@ -158,3 +158,11 @@ No database migration is needed; the schema is untouched.
 - [x] `mise //cafleet:typecheck` passes <!-- completed: 2026-08-13T22:10 -->
 - [x] Grep sweep: no remaining mention of the removed guidance/hint lines anywhere in the repo <!-- completed: 2026-08-13T22:11 -->
 - [x] `mise //cafleet:install`, then a manual smoke of `cafleet doctor` against a stale fixture DB via a teammate with run permission (per the authorization-scope guard) <!-- completed: 2026-08-13T22:30 -->
+
+---
+
+## Changelog
+
+| Date | Change |
+|---|---|
+| 2026-08-13 | Implemented by the execute workflow: all 24 tasks and 5 success criteria complete; Verifier E2E smoke passed; Reviewer approved after 1 round (one `[INCORRECT]` doc-wording fix); user approved; PR [#304](https://github.com/himkt/cafleet/pull/304). Status → Complete. |
