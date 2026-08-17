@@ -10,12 +10,12 @@ Fix two fleet-operability gaps (GitHub issues #312 and #313) with three changes:
 
 ## Success Criteria
 
-- [ ] The canonical supervision protocol states the dispatch-on-ready rule in one place, and all four team workflow bodies (design-doc create, design-doc execute, research report, research presentation) plus their Director role files are consistent with it — no workflow instructs the Director to hold a ready member's first dispatch until other members are ready.
-- [ ] The monitor member's role file and the Director-side supervision governance both state that the monitor member — and only the monitor member — launches `cafleet monitor <fleet-id>`.
-- [ ] `POST /api/monitor/wake` against a fleet with a live monitor loop returns 200 and the loop delivers a wake within one tick (default 5 s), even when `wake_interval_seconds = 0`.
-- [ ] `POST /api/monitor/wake` against a fleet whose monitor loop is not running returns 404.
-- [ ] The WebUI monitor popover shows a "Wake now" button that triggers the endpoint and is disabled while the monitor is stopped.
-- [ ] Migration chain is contiguous 1..7 with head V7; `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass.
+- [x] The canonical supervision protocol states the dispatch-on-ready rule in one place, and all four team workflow bodies (design-doc create, design-doc execute, research report, research presentation) plus their Director role files are consistent with it — no workflow instructs the Director to hold a ready member's first dispatch until other members are ready.
+- [x] The monitor member's role file and the Director-side supervision governance both state that the monitor member — and only the monitor member — launches `cafleet monitor <fleet-id>`.
+- [x] `POST /api/monitor/wake` against a fleet with a live monitor loop returns 200 and the loop delivers a wake within one tick (default 5 s), even when `wake_interval_seconds = 0`.
+- [x] `POST /api/monitor/wake` against a fleet whose monitor loop is not running returns 404.
+- [x] The WebUI monitor popover shows a "Wake now" button that triggers the endpoint and is disabled while the monitor is stopped.
+- [x] Migration chain is contiguous 1..7 with head V7; `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass.
 
 ---
 
