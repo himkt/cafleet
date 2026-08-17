@@ -27,6 +27,7 @@ No server-side session cookies. The SPA stores the active fleet_id client-side v
 | `GET` | `/api/members` | The fleet's roster | yes |
 | `GET` | `/api/monitor` | Liveness of the fleet's `cafleet monitor` process plus per-member pending-delivery counts | yes |
 | `PATCH` | `/api/monitor` | The updated Director wake interval | yes |
+| `POST` | `/api/monitor/wake` | The timestamp of the recorded immediate-wake request | yes |
 | `GET` | `/api/members/{member_id}/inbox` | Messages received by the member | yes |
 | `GET` | `/api/members/{member_id}/sent` | Messages sent by the member | yes |
 | `GET` | `/api/timeline` | The fleet's unified message timeline | yes |
@@ -196,7 +197,41 @@ validation, then the fleet check, then the row update — matching
 `POST /api/messages/send`, whose body parse likewise precedes the fleet
 check, so an unknown fleet plus an invalid body yields 422 on both
 endpoints. A no-row 404 means the fleet's monitor has never run —
-`monitor_runtime` rows are removed only by `fleet delete`.
+`monitor_runtime` rows are removed only by `fleet delete`. The two monitor
+write endpoints gate their 404s differently: this endpoint's gate is row
+**existence** (the interval is a durable setting), while
+`POST /api/monitor/wake` below gates on **liveness** — a wake request needs
+a live consumer; against a dead loop it would silently never fire.
+
+### POST /api/monitor/wake — Request an Immediate Wake {#post-api-monitor-wake}
+
+Records a durable request for an immediate monitor wake on the fleet's
+runtime row. The running loop honors the request on its next tick, so the
+wake lands within one scan tick (default 5 s) — bypassing a disabled
+schedule (`wake_interval_seconds = 0`) and a not-yet-due one alike. Repeat
+requests overwrite the stored timestamp, coalescing into a single wake. A
+delivered wake — scheduled or forced — stamps the last-wake timestamp and
+clears the request in one write, so a forced wake resets the schedule
+baseline. See
+[Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
+
+**Request**: `X-Fleet-Id: <fleet_id>` header. No request body; any body is
+ignored.
+
+**Response** (200 OK):
+
+```json
+{"wake_requested_at": "2026-06-13T04:52:00+00:00"}
+```
+
+**Errors** (all `{"detail": <string>}`-shaped):
+
+| Status | `detail` | Trigger |
+|---|---|---|
+| 400 | `X-Fleet-Id header required` | The `X-Fleet-Id` header is missing or empty |
+| 400 | `X-Fleet-Id must be an integer` | The header value is not an integer |
+| 404 | `Fleet not found` | The header names a fleet id that does not exist |
+| 404 | `monitor is not running for this fleet` | The fleet's monitor loop is not live — no runtime row, a cleared slot, or a stale heartbeat — or the row vanished between the liveness check and the write (e.g. a concurrent fleet delete) |
 
 ### GET /api/members/{member_id}/inbox — Inbox Messages
 

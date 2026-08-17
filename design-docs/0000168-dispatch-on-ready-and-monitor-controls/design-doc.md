@@ -1,8 +1,8 @@
 # Dispatch-on-Ready and Monitor Controls
 
 **Status**: Approved
-**Progress**: 0/21 tasks complete
-**Last Updated**: 2026-08-16
+**Progress**: 5/21 tasks complete
+**Last Updated**: 2026-08-17
 
 ## Overview
 
@@ -146,11 +146,11 @@ Documentation first, per the project's documentation-maintenance rule; code only
 
 ### Step 1: User-facing documentation (docs/, SPEC.md)
 
-- [ ] `docs/docs/spec/webui-api.md`: add `POST /api/monitor/wake` to the routes table and as a full section (contract table above, verbatim error strings); note the liveness-vs-row-existence 404 distinction next to the PATCH section's shared-dependency note. <!-- completed: -->
-- [ ] `docs/docs/spec/data-model.md`: add `wake_requested_at` to the `monitor_runtime` columns with its NULL/coalescing semantics and both clearing writes (a delivered wake via `record_monitor_wake`, and the reclaim reset in `claim_monitor_runtime`). <!-- completed: -->
-- [ ] `docs/docs/concepts/monitoring.md`: dispatch-on-ready in the Lifecycle → Spawn narrative; monitor-loop launch ownership; a forced-wake paragraph in the cadence section (bypasses a disabled/not-due schedule, resets the baseline, ≤ one tick latency). <!-- completed: -->
-- [ ] `docs/docs/how-to/use-the-webui.md`: document the "Wake now" control alongside the wake-interval control, and correct the page's summary of what the UI can write. <!-- completed: -->
-- [ ] `SPEC.md`: `monitor_runtime` DDL with `wake_requested_at`; §6.6 loop semantics (forced-wake gate order, request consumption on a delivered wake, the claim-time reset — a pending request never survives into a later loop instance — and the echo line); §6.8 the new route's full contract. <!-- completed: -->
+- [x] `docs/docs/spec/webui-api.md`: add `POST /api/monitor/wake` to the routes table and as a full section (contract table above, verbatim error strings); note the liveness-vs-row-existence 404 distinction next to the PATCH section's shared-dependency note. <!-- completed: 2026-08-17T07:58 -->
+- [x] `docs/docs/spec/data-model.md`: add `wake_requested_at` to the `monitor_runtime` columns with its NULL/coalescing semantics and both clearing writes (a delivered wake via `record_monitor_wake`, and the reclaim reset in `claim_monitor_runtime`). <!-- completed: 2026-08-17T07:59 -->
+- [x] `docs/docs/concepts/monitoring.md`: dispatch-on-ready in the Lifecycle → Spawn narrative; monitor-loop launch ownership; a forced-wake paragraph in the cadence section (bypasses a disabled/not-due schedule, resets the baseline, ≤ one tick latency). <!-- completed: 2026-08-17T08:00 -->
+- [x] `docs/docs/how-to/use-the-webui.md`: document the "Wake now" control alongside the wake-interval control, and correct the page's summary of what the UI can write. <!-- completed: 2026-08-17T08:02 -->
+- [x] `SPEC.md`: `monitor_runtime` DDL with `wake_requested_at`; §6.6 loop semantics (forced-wake gate order, request consumption on a delivered wake, the claim-time reset — a pending request never survives into a later loop instance — and the echo line); §6.8 the new route's full contract. <!-- completed: 2026-08-17T08:06 -->
 
 ### Step 2: Skills (changes 1 and 2)
 

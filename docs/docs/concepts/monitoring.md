@@ -126,6 +126,18 @@ effect within one tick and lasts until the next `cafleet monitor` start
 re-stamps the interval from the CLI/env resolution. Saving `0` disables the
 wake exactly as `--interval 0` does, while the loop keeps heartbeating.
 
+The schedule is not the only wake trigger: the admin WebUI's "Wake now"
+control (`POST /api/monitor/wake`) records a durable wake request on the
+fleet's runtime row, and the running loop honors it on its next tick — the
+wake lands within one scan tick even when the interval is `0` or the
+schedule is not yet due, because an explicit operator action bypasses a
+disabled or not-yet-due schedule. Repeat requests coalesce into a single
+wake, and a wake the loop has to skip (no resolvable monitor pane) leaves
+the request pending to retry on the next tick, exactly as a scheduled wake
+stays due. A delivered wake — scheduled or forced — stamps the last-wake
+timestamp and clears any pending request in the same write, so a forced
+wake resets the schedule baseline.
+
 The wake fires whenever the interval has elapsed and the fleet's monitor
 member is resolvable to a live pane, **including when the fleet has no
 ordinary members** (the `no members to health-check.` payload form). No
@@ -172,7 +184,10 @@ standard `ready` signal, launches `cafleet monitor <fleet-id>` as a
 background task in its own pane, confirms the startup line the loop prints
 immediately after claiming the runtime row — `monitor loop started (fleet
 <fleet_id>, tick <tick>s, pid <pid>)` — and then sends the gate signal
-`monitor live` to the Director. That message gates the Director's first
+`monitor live` to the Director. The monitor member is the only party that
+launches the loop: the Director never runs the loop itself — it spawns the
+monitor member and waits for `monitor live` — and ordinary members never run
+it. That gate message unblocks the Director's first
 ordinary `cafleet member create`; the CLI enforces the same order (spawning
 an ordinary member into a fleet with no active monitor member fails — see
 [CLI options](../spec/cli-options.md#member-create)), and a second
@@ -180,6 +195,16 @@ an ordinary member into a fleet with no active monitor member fails — see
 also fails. A loop task that exits instead of printing the startup line
 (runtime-claim conflict, dead fleet) is a failed start the monitor member
 reports to the Director instead of proceeding.
+
+Once `monitor live` arrives, the Director spawns the ordinary members and
+**dispatches on ready**: when a member's ready signal arrives, the Director
+ACKs it and dispatches that member's first task in the same turn, provided
+the task's inputs exist. First-task dispatch is per-member — never held
+waiting for other members' ready signals or placements. A member whose
+first task genuinely depends on an input that does not yet exist (e.g. a
+deliverable another member has not produced) legitimately stays idle until
+that input lands — the Director dispatches whatever is dispatchable, to
+whoever is ready.
 
 **Teardown**, in order: the Director deletes the **monitor member first**
 (first-out — the pane kill takes the loop process down, ending the wake
