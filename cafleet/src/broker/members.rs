@@ -493,7 +493,8 @@ mod tests {
     use crate::broker;
     use crate::broker::test_support as common;
     use crate::broker::test_support::{
-        FakeNotifier, create_fleet, migrated_conn, placement, register, register_monitor,
+        FakeNotifier, bootstrap_monitor, create_fleet, migrated_conn, placement, register,
+        register_monitor,
     };
     use crate::error::CafleetError;
     use crate::output::format_json;
@@ -808,7 +809,11 @@ mod tests {
         let message_id = sent["message"]["message_id"].as_i64().unwrap();
 
         let rows = broker::list_members(&conn, fleet_id).unwrap();
-        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows.len(),
+            4,
+            "Director + bootstrap monitor + worker + ghost"
+        );
         let by_id = |id: i64| rows.iter().find(|r| r["member_id"] == id).unwrap();
 
         let director = by_id(director_id);
@@ -851,6 +856,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let dead_monitor = bootstrap_monitor(&conn, fleet_id);
+        broker::deregister_member(&mut conn, dead_monitor).unwrap();
         let monitor_id = register_monitor(&mut conn, fleet_id, "monitor", Some("%2"));
         let member_id = register(&mut conn, fleet_id, "worker", Some("%3"));
 
@@ -899,9 +906,20 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_a, _) = create_fleet(&mut conn, "alpha");
         let (fleet_b, _) = create_fleet(&mut conn, "beta");
+        let monitor_a = bootstrap_monitor(&conn, fleet_a);
+        let monitor_b = bootstrap_monitor(&conn, fleet_b);
+        assert_ne!(monitor_a, monitor_b, "the lookup is fleet-scoped");
+
+        broker::deregister_member(&mut conn, monitor_a).unwrap();
         assert_eq!(
             broker::active_monitor_member_id(&conn, fleet_a).unwrap(),
-            None
+            None,
+            "a deregistered monitor frees the slot"
+        );
+        assert_eq!(
+            broker::active_monitor_member_id(&conn, fleet_b).unwrap(),
+            Some(monitor_b),
+            "a neighbour fleet's monitor never leaks into the lookup"
         );
 
         register(&mut conn, fleet_a, "worker", Some("%2"));
@@ -911,22 +929,11 @@ mod tests {
             "an ordinary member never fills the monitor slot"
         );
 
-        let monitor_id = register_monitor(&mut conn, fleet_a, "monitor", Some("%3"));
+        let recovered_id = register_monitor(&mut conn, fleet_a, "monitor", Some("%3"));
         assert_eq!(
             broker::active_monitor_member_id(&conn, fleet_a).unwrap(),
-            Some(monitor_id)
-        );
-        assert_eq!(
-            broker::active_monitor_member_id(&conn, fleet_b).unwrap(),
-            None,
-            "the lookup is fleet-scoped"
-        );
-
-        broker::deregister_member(&mut conn, monitor_id).unwrap();
-        assert_eq!(
-            broker::active_monitor_member_id(&conn, fleet_a).unwrap(),
-            None,
-            "a deregistered monitor frees the slot"
+            Some(recovered_id),
+            "the recovery re-spawn refills the slot"
         );
     }
 
@@ -935,7 +942,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let monitor_id = register_monitor(&mut conn, fleet_id, "monitor", Some("%2"));
+        let monitor_id = bootstrap_monitor(&conn, fleet_id);
         let member_id = register(&mut conn, fleet_id, "worker", Some("%3"));
         let expected = [
             (director_id, "director"),

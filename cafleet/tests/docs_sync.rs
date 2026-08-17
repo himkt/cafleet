@@ -298,6 +298,23 @@ fn the_supervision_contract_covers_the_monitor_member_and_quiet_members() {
 }
 
 #[test]
+fn the_bootstrap_docs_carry_the_monitor_file_contract() {
+    assert_terms(
+        "docs/docs/spec/cli-options.md",
+        &["--monitor-file", "--monitor-model"],
+    );
+    assert_terms("SPEC.md", &["--monitor-file", "--monitor-model"]);
+    assert_terms(
+        "skills/cafleet/reference/supervision.md",
+        &["--monitor-file"],
+    );
+    assert_terms(
+        "skills/cafleet/roles/monitor.md",
+        &["fleet create", "--monitor-file", "--role monitor"],
+    );
+}
+
+#[test]
 fn the_director_and_member_roles_keep_the_ping_protocol() {
     assert_terms(
         "skills/cafleet/reference/director.md",

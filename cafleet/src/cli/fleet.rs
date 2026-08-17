@@ -155,3 +155,89 @@ fn delete(settings: &Settings, fleet_id: i64, json: bool) -> Result<(), CafleetE
     });
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::FleetCommand;
+
+    #[derive(Parser)]
+    struct Harness {
+        #[command(subcommand)]
+        command: FleetCommand,
+    }
+
+    fn parse(args: &[&str]) -> Result<FleetCommand, clap::Error> {
+        Harness::try_parse_from(args).map(|harness| harness.command)
+    }
+
+    fn create_monitor_flags(command: FleetCommand) -> (String, Option<String>) {
+        let FleetCommand::Create {
+            monitor_file,
+            monitor_model,
+            ..
+        } = command
+        else {
+            panic!("parsed a non-create command");
+        };
+        (monitor_file, monitor_model)
+    }
+
+    #[test]
+    fn create_requires_the_monitor_file() {
+        let Err(err) = parse(&[
+            "cafleet",
+            "create",
+            "--name",
+            "alpha",
+            "--coding-agent",
+            "claude",
+        ]) else {
+            panic!("--monitor-file is required");
+        };
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+        assert!(
+            err.to_string().contains("--monitor-file"),
+            "the error names the missing flag, got: {err}"
+        );
+    }
+
+    #[test]
+    fn create_parses_without_a_monitor_model() {
+        let command = parse(&[
+            "cafleet",
+            "create",
+            "--name",
+            "alpha",
+            "--coding-agent",
+            "claude",
+            "--monitor-file",
+            "prompt.md",
+        ])
+        .unwrap();
+        let (monitor_file, monitor_model) = create_monitor_flags(command);
+        assert_eq!(monitor_file, "prompt.md");
+        assert_eq!(monitor_model, None);
+    }
+
+    #[test]
+    fn create_accepts_stdin_as_the_monitor_file_and_a_monitor_model() {
+        let command = parse(&[
+            "cafleet",
+            "create",
+            "--name",
+            "alpha",
+            "--coding-agent",
+            "claude",
+            "--monitor-file",
+            "-",
+            "--monitor-model",
+            "haiku",
+        ])
+        .unwrap();
+        let (monitor_file, monitor_model) = create_monitor_flags(command);
+        assert_eq!(monitor_file, "-", "the stdin sentinel is an ordinary value");
+        assert_eq!(monitor_model.as_deref(), Some("haiku"));
+    }
+}

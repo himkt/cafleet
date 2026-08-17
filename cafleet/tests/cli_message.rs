@@ -239,12 +239,13 @@ fn send_rejects_a_cross_fleet_pair() {
         "beta",
         "--coding-agent",
         "claude",
+        "--monitor-file",
+        &cli.monitor_prompt_path(),
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let stranger_id: i64 = stdout(&output)
-        .trim()
-        .split("director=")
-        .nth(1)
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix("director="))
         .expect("the compact fleet-create line names the director")
         .parse()
         .expect("the director id is an integer");

@@ -1,6 +1,6 @@
-//! End-to-end binary tests (design § Success Criteria): fleet create →
-//! monitor member create (`--role monitor`, first) → member create (tmux
-//! shim) → message send/poll/ack → one monitor tick waking the monitor
+//! End-to-end binary tests (design § Success Criteria): atomic fleet create
+//! (fleet + Director + monitor member in one invocation) → member create
+//! (tmux shim) → message send/poll/ack → one monitor tick waking the monitor
 //! member's pane, all against a fresh temp DB.
 
 mod common;
@@ -21,11 +21,13 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
         "e2e",
         "--coding-agent",
         "claude",
+        "--monitor-file",
+        &cli.monitor_prompt_path(),
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    assert_eq!(stdout(&output), "1 director=1\n");
+    assert_eq!(stdout(&output), "1 director=1 monitor=2\n");
 
-    let monitor_id = cli.create_monitor(1);
+    let monitor_id = Cli::BOOTSTRAP_MONITOR_ID;
     let worker_id = cli.create_member(1, "worker");
     let helper_id = cli.create_member(1, "helper");
 

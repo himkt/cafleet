@@ -329,12 +329,18 @@ fn member_create_without_a_monitor_hits_the_monitor_first_guard() {
         .sqlite()
         .query_row("SELECT COUNT(*) FROM members", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(members, 1, "the guard fires before any registration");
-    assert!(
-        !cli.shim_calls()
-            .iter()
-            .any(|line| line.starts_with("split-window")),
-        "the guard fires before any pane effect"
+    assert_eq!(
+        members, 2,
+        "Director + the deleted bootstrap monitor; the guard fires before any registration"
+    );
+    let splits = cli
+        .shim_calls()
+        .iter()
+        .filter(|line| line.starts_with("split-window"))
+        .count();
+    assert_eq!(
+        splits, 1,
+        "only the bootstrap's monitor spawn split a pane; the guard fires before any pane effect"
     );
 }
 

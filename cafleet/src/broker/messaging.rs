@@ -272,7 +272,8 @@ mod tests {
     use crate::broker;
     use crate::broker::test_support as common;
     use crate::broker::test_support::{
-        FakeNotifier, MAX_TEXT_LEN, create_fleet, migrated_conn, register,
+        FakeNotifier, MAX_TEXT_LEN, MONITOR_PANE, bootstrap_monitor, create_fleet, migrated_conn,
+        register,
     };
     use crate::error::CafleetError;
     use crate::output::format_json;
@@ -442,6 +443,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let monitor_id = bootstrap_monitor(&conn, fleet_id);
         let member_a = register(&mut conn, fleet_id, "a", Some("%2"));
         let member_b = register(&mut conn, fleet_id, "b", Some("%3"));
         let notifier = FakeNotifier::succeeding();
@@ -451,8 +453,8 @@ mod tests {
                 .unwrap();
         assert_eq!(result.len(), 1, "single-element result list");
         let envelope = &result[0];
-        assert_eq!(envelope["recipients"], 2);
-        assert_eq!(envelope["delivered"], 2);
+        assert_eq!(envelope["recipients"], 3, "monitor + two workers");
+        assert_eq!(envelope["delivered"], 3);
 
         let summary = &envelope["message"];
         let summary_id = summary["message_id"].as_i64().unwrap();
@@ -465,11 +467,15 @@ mod tests {
             summary["origin_message_id"], summary_id,
             "self-referential origin"
         );
-        assert_eq!(summary["text"], "Broadcast sent to 2 recipients");
+        assert_eq!(summary["text"], "Broadcast sent to 3 recipients");
 
         let calls = notifier.calls.borrow();
-        assert_eq!(calls.len(), 2);
-        for (recipient, pane) in [(member_a, "%2"), (member_b, "%3")] {
+        assert_eq!(calls.len(), 3);
+        for (recipient, pane) in [
+            (monitor_id, MONITOR_PANE),
+            (member_a, "%2"),
+            (member_b, "%3"),
+        ] {
             let pending = broker::poll_messages(&conn, recipient).unwrap();
             assert_eq!(pending.len(), 1);
             let delivery = &pending[0];
@@ -507,16 +513,16 @@ mod tests {
                 .unwrap();
         let envelope = &result[0];
         assert_eq!(
-            envelope["recipients"], 3,
-            "director + pane-bound peer + pending peer; sender excluded"
+            envelope["recipients"], 4,
+            "director + monitor + pane-bound peer + pending peer; sender excluded"
         );
         assert_eq!(
-            envelope["delivered"], 2,
+            envelope["delivered"], 3,
             "the paneless peer contributes no preview"
         );
         assert_eq!(
             envelope["message"]["text"],
-            "Broadcast sent to 3 recipients"
+            "Broadcast sent to 4 recipients"
         );
     }
 

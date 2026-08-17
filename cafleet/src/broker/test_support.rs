@@ -16,7 +16,9 @@
 //! // fleets
 //! create_fleet(conn: &mut Connection, name: Option<&str>, mux_session: &str,
 //!     mux_window_id: &str, mux_pane_id: &str, coding_agent: &str,
-//!     backend: &str) -> Result<Value>
+//!     backend: &str, monitor_name: &str, monitor_description: &str,
+//!     spawn_monitor: impl FnOnce(i64, i64, i64) -> Result<String>)
+//!     -> Result<Value>  // callback args: (fleet_id, director_id, monitor_id)
 //! list_fleets(conn: &Connection) -> Result<Vec<Value>>
 //! get_fleet(conn: &Connection, fleet_id: i64) -> Result<Option<Value>>
 //! delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value>
@@ -99,13 +101,37 @@ pub fn placement(pane: Option<&str>) -> NewPlacement {
     }
 }
 
+pub const MONITOR_NAME: &str = "monitor";
+pub const MONITOR_DESCRIPTION: &str = "Monitor member for this fleet";
+pub const MONITOR_PANE: &str = "%1";
+
+/// Atomic bootstrap on the canned tmux context: Director on `%0`, monitor
+/// member on [`MONITOR_PANE`] via an always-succeeding spawn callback.
 pub fn create_fleet(conn: &mut Connection, name: &str) -> (i64, i64) {
-    let fleet =
-        broker::create_fleet(conn, Some(name), "main", "@1", "%0", "claude", "tmux").unwrap();
+    let fleet = broker::create_fleet(
+        conn,
+        Some(name),
+        "main",
+        "@1",
+        "%0",
+        "claude",
+        "tmux",
+        MONITOR_NAME,
+        MONITOR_DESCRIPTION,
+        |_, _, _| Ok(MONITOR_PANE.to_string()),
+    )
+    .unwrap();
     (
         fleet["fleet_id"].as_i64().unwrap(),
         fleet["director"]["member_id"].as_i64().unwrap(),
     )
+}
+
+/// The monitor member the atomic bootstrap registered for `fleet_id`.
+pub fn bootstrap_monitor(conn: &Connection, fleet_id: i64) -> i64 {
+    broker::active_monitor_member_id(conn, fleet_id)
+        .unwrap()
+        .expect("the atomic bootstrap registers the monitor member")
 }
 
 pub fn register(conn: &mut Connection, fleet_id: i64, name: &str, pane: Option<&str>) -> i64 {

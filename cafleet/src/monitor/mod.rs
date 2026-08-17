@@ -277,7 +277,9 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::broker;
-    use crate::broker::test_support::{create_fleet, migrated_conn, register, register_monitor};
+    use crate::broker::test_support::{
+        bootstrap_monitor, create_fleet, migrated_conn, register, register_monitor,
+    };
     use crate::monitor::{
         DEFAULT_TICK_SECONDS, MONITOR_STALE_FACTOR, MONITOR_STALE_FLOOR_SECONDS, MonitorMux,
         TickResult, monitor_tick, run_monitor_loop, wake_due,
@@ -337,11 +339,11 @@ mod tests {
         }
     }
 
-    /// Fleet with a monitor member (the wake recipient) on `%1` and two
-    /// pane-bound workers on `%2` and `%4`; the Director sits on `%0`.
+    /// Fleet with its bootstrap monitor member (the wake recipient) on `%1`
+    /// and two pane-bound workers on `%2` and `%4`; the Director sits on `%0`.
     fn wake_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64, i64) {
         let (fleet_id, director_id) = create_fleet(conn, "alpha");
-        let monitor_id = register_monitor(conn, fleet_id, "monitor", Some("%1"));
+        let monitor_id = bootstrap_monitor(conn, fleet_id);
         let member_id = register(conn, fleet_id, "worker", Some("%2"));
         let second_id = register(conn, fleet_id, "helper", Some("%4"));
         (fleet_id, director_id, monitor_id, member_id, second_id)
@@ -853,6 +855,8 @@ mod tests {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
             let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+            let dead_monitor = bootstrap_monitor(&conn, fleet_id);
+            broker::deregister_member(&mut conn, dead_monitor).unwrap();
             register(&mut conn, fleet_id, "worker", Some("%2"));
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
@@ -876,6 +880,8 @@ mod tests {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
             let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+            let dead_monitor = bootstrap_monitor(&conn, fleet_id);
+            broker::deregister_member(&mut conn, dead_monitor).unwrap();
             register_monitor(&mut conn, fleet_id, "monitor", None);
             register(&mut conn, fleet_id, "worker", Some("%2"));
             let now = base_now();
@@ -938,7 +944,7 @@ mod tests {
             let dir = TempDir::new().unwrap();
             let mut conn = migrated_conn(&dir);
             let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-            let monitor_id = register_monitor(&mut conn, fleet_id, "monitor", Some("%1"));
+            let monitor_id = bootstrap_monitor(&conn, fleet_id);
             let now = base_now();
             claim(&mut conn, fleet_id, own_pid(), now);
             let mux = FakeMux::with_live_panes(&["%0", "%1"]);
