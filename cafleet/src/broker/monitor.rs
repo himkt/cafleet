@@ -945,4 +945,87 @@ mod tests {
             broker::monitor_runtime_payload(&conn, fleet_id, now + Duration::seconds(100)).unwrap();
         assert_eq!(premigration["wake_interval_seconds"], Value::Null);
     }
+
+    #[test]
+    fn request_monitor_wake_stamps_the_row_and_reports_a_never_run_fleet() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let when = format_utc(base_time());
+        assert!(
+            !broker::request_monitor_wake(&mut conn, fleet_id, &when).unwrap(),
+            "no row ⇔ the fleet's monitor has never run"
+        );
+
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
+        assert!(broker::request_monitor_wake(&mut conn, fleet_id, &when).unwrap());
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row["wake_requested_at"], when);
+
+        let later = format_utc(base_time() + Duration::seconds(30));
+        assert!(broker::request_monitor_wake(&mut conn, fleet_id, &later).unwrap());
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row["wake_requested_at"], later,
+            "repeat requests coalesce into the latest stamp"
+        );
+    }
+
+    #[test]
+    fn a_fresh_claim_reads_a_null_request_and_a_reclaim_resets_a_pending_one() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let when = format_utc(base_time());
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row["wake_requested_at"],
+            Value::Null,
+            "a fresh slot has no pending request"
+        );
+
+        assert!(broker::request_monitor_wake(&mut conn, fleet_id, &when).unwrap());
+
+        // stale_after = max(3 * 5, 15) = 15; the 100-second-old heartbeat lets
+        // a restarted loop reclaim the slot.
+        let later = format_utc(base_time() + Duration::seconds(100));
+        assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, 600, &later).unwrap());
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row["wake_requested_at"],
+            Value::Null,
+            "a pending request never survives into a later loop instance"
+        );
+    }
+
+    #[test]
+    fn record_monitor_wake_clears_a_pending_request() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let when = format_utc(base_time());
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
+        assert!(broker::request_monitor_wake(&mut conn, fleet_id, &when).unwrap());
+
+        let later = format_utc(base_time() + Duration::seconds(10));
+        broker::record_monitor_wake(&mut conn, fleet_id, &later).unwrap();
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row["last_wake_at"], later);
+        assert_eq!(
+            row["wake_requested_at"],
+            Value::Null,
+            "a delivered wake consumes the request in the same write"
+        );
+    }
 }
