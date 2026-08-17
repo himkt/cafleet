@@ -1,7 +1,7 @@
 # Dispatch-on-Ready and Monitor Controls
 
 **Status**: Approved
-**Progress**: 11/21 tasks complete
+**Progress**: 16/21 tasks complete
 **Last Updated**: 2026-08-17
 
 ## Overview
@@ -163,14 +163,14 @@ Documentation first, per the project's documentation-maintenance rule; code only
 
 ### Step 3: Migration V7
 
-- [ ] Add `cafleet/migrations/V7__monitor_wake_request.sql` (the `ALTER TABLE` above). <!-- completed: -->
-- [ ] Update the chain-guard tests: `cafleet/src/db/mod.rs` (head `(7, "monitor_wake_request")`, versions 1..7) and every head assertion in `cafleet/tests/cli_setup_doctor.rs`. <!-- completed: -->
+- [x] Add `cafleet/migrations/V7__monitor_wake_request.sql` (the `ALTER TABLE` above). <!-- completed: 2026-08-17T08:22 -->
+- [x] Update the chain-guard tests: `cafleet/src/db/mod.rs` (head `(7, "monitor_wake_request")`, versions 1..7) and every head assertion in `cafleet/tests/cli_setup_doctor.rs`. <!-- completed: 2026-08-17T08:22 -->
 
 ### Step 4: Broker and monitor loop
 
-- [ ] `cafleet/src/broker/monitor.rs`: add `request_monitor_wake`; reset `wake_requested_at` in `claim_monitor_runtime`'s reclaim UPDATE; clear it in `record_monitor_wake`; expose it in `read_monitor_runtime`. <!-- completed: -->
-- [ ] `cafleet/src/monitor/mod.rs`: the `forced` gate in `monitor_tick` (bypass interval-0 and `wake_due`; skips leave the request pending) and the `forced wake` echo line. <!-- completed: -->
-- [ ] Broker + tick tests per the Tests table. <!-- completed: -->
+- [x] `cafleet/src/broker/monitor.rs`: add `request_monitor_wake`; reset `wake_requested_at` in `claim_monitor_runtime`'s reclaim UPDATE; clear it in `record_monitor_wake`; expose it in `read_monitor_runtime`. <!-- completed: 2026-08-17T08:22 -->
+- [x] `cafleet/src/monitor/mod.rs`: the `forced` gate in `monitor_tick` (bypass interval-0 and `wake_due`; skips leave the request pending) and the `forced wake` echo line. <!-- completed: 2026-08-17T08:22 -->
+- [x] Broker + tick tests per the Tests table. <!-- completed: 2026-08-17T08:22 -->
 
 ### Step 5: HTTP route
 

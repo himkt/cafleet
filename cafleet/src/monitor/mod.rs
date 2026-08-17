@@ -118,9 +118,10 @@ pub fn wake_due(
 }
 
 /// One scan pass (SPEC §6.6): ownership-checked heartbeat → fleet liveness →
-/// runtime-row read (the per-tick interval re-read) → wake-interval gate →
-/// monitor-pane resolution → one fleet-level wake into the monitor member's
-/// pane → the `woke`-gated ledger write and heartbeat echo.
+/// runtime-row read (the per-tick interval re-read) → the schedule gates
+/// (wake-interval and due-check, both bypassed by a pending forced-wake
+/// request) → monitor-pane resolution → one fleet-level wake into the monitor
+/// member's pane → the `woke`-gated ledger write and heartbeat echo.
 pub fn monitor_tick(
     conn: &mut Connection,
     mux: &dyn MonitorMux,
@@ -147,16 +148,21 @@ pub fn monitor_tick(
     let wake_interval = runtime["wake_interval_seconds"]
         .as_i64()
         .expect("the owning loop stamped the interval at claim");
-    if wake_interval == 0 {
-        return Ok(TickResult::Continue);
-    }
-    if !wake_due(
-        runtime["last_wake_at"].as_str(),
-        runtime["started_at"].as_str(),
-        wake_interval,
-        now,
-    ) {
-        return Ok(TickResult::Continue);
+    // A pending operator request bypasses both schedule gates — a disabled
+    // interval and a not-yet-due wake alike.
+    let forced = !runtime["wake_requested_at"].is_null();
+    if !forced {
+        if wake_interval == 0 {
+            return Ok(TickResult::Continue);
+        }
+        if !wake_due(
+            runtime["last_wake_at"].as_str(),
+            runtime["started_at"].as_str(),
+            wake_interval,
+            now,
+        ) {
+            return Ok(TickResult::Continue);
+        }
     }
 
     // No active monitor member, a monitor with no pane, or a pane absent
@@ -184,9 +190,10 @@ pub fn monitor_tick(
         .map_err(mux_err)?;
     if woke {
         broker::record_monitor_wake(conn, fleet_id, &iso)?;
+        let label = if forced { "forced wake" } else { "wake" };
         writeln!(
             out,
-            "{iso} tick -> wake monitor {monitor_id} ({} members)",
+            "{iso} tick -> {label} monitor {monitor_id} ({} members)",
             roster.len()
         )
         .map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))?;
