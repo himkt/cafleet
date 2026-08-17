@@ -1,6 +1,6 @@
 # Dispatch-on-Ready and Monitor Controls
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 21/21 tasks complete
 **Last Updated**: 2026-08-17
 
@@ -196,3 +196,4 @@ Documentation first, per the project's documentation-maintenance rule; code only
 | 2026-08-16 | Initial draft |
 | 2026-08-16 | Reviewer round 1: claim-time reset scoped to the reclaim branch; row-vanished 404 specified; cleared-slot route test added; `wake_requested_at` lifecycle made explicit in the SPEC/data-model tasks |
 | 2026-08-17 | Execution: user-approved amendment — the pre-existing `mise //admin:lint` failure (typescript-eslint rejects TypeScript 7) is unblocked in this branch by aliasing `typescript` to the TS6 compat shim for tooling while keeping TypeScript 7 as `@typescript/native` for the build; recorded in the Step 6 WebUI table. Also: `cafleet/tests/cli_global.rs` head assertions added to the Step 3 chain-guard sweep (a Tests-table gap); live Phase D E2E skipped by user decision (criteria verified via the unit/route suites and code review). |
+| 2026-08-17 | Complete: Reviewer approved in round 1; user approved; PR #317 opened |
