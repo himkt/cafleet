@@ -139,11 +139,11 @@ mod tests {
     }
 
     #[test]
-    fn migrate_reaches_head_version_6_and_is_idempotent() {
+    fn migrate_reaches_head_version_7_and_is_idempotent() {
         let dir = TempDir::new().unwrap();
         let mut conn = connect(&temp_db_url(&dir)).unwrap();
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 6);
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 6);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 7);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 7);
     }
 
     #[test]
@@ -359,14 +359,14 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
     }
 
     // The chain guard reads the refinery-embedded listing, not the filesystem:
     // `migration_chain()` returns the `(version, name)` pairs of the embedded
     // runner's migrations, sorted ascending.
     #[test]
-    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_6() {
+    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_7() {
         let chain = migration_chain();
         let versions: Vec<u32> = chain.iter().map(|(version, _)| *version).collect();
         let contiguous: Vec<u32> = (1..=versions.len() as u32).collect();
@@ -386,8 +386,8 @@ mod tests {
             chain
                 .last()
                 .map(|(version, name)| (*version, name.as_str())),
-            Some((6, "path_aware_asset_installs")),
-            "expected head is V6__path_aware_asset_installs"
+            Some((7, "monitor_wake_request")),
+            "expected head is V7__monitor_wake_request"
         );
     }
 }

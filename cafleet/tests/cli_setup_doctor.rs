@@ -12,7 +12,7 @@ fn plain_setup_installs_and_records_all_three_agents_on_a_fresh_database() {
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(
-        out.contains("applied migrations to head (6)."),
+        out.contains("applied migrations to head (7)."),
         "fresh DB reports the created-and-migrated line, got: {out}"
     );
     for (agent, skills_dir) in [
@@ -64,7 +64,7 @@ fn plain_setup_installs_and_records_all_three_agents_on_a_fresh_database() {
     let again = cli.run(&["setup"]);
     assert_eq!(code(&again), 0);
     assert!(
-        stdout(&again).contains("Already at head (6); nothing to do."),
+        stdout(&again).contains("Already at head (7); nothing to do."),
         "got: {}",
         stdout(&again)
     );
@@ -346,7 +346,7 @@ fn an_invalid_variable_fails_the_assets_half_with_the_pinned_error() {
         "got: {combined}"
     );
     assert!(
-        combined.contains("applied migrations to head (6)."),
+        combined.contains("applied migrations to head (7)."),
         "the db half is unaffected: {combined}"
     );
 }
@@ -379,7 +379,7 @@ fn plain_setup_fails_the_assets_half_on_an_invalid_config_path_variable() {
         "plain setup resolves all three identity paths: {combined}"
     );
     assert!(
-        combined.contains("applied migrations to head (6)."),
+        combined.contains("applied migrations to head (7)."),
         "the db half is unaffected: {combined}"
     );
 }
@@ -546,7 +546,7 @@ fn doctor_reports_a_healthy_environment_with_no_issues() {
         assert!(out.contains(detail), "multiplexer detail {detail}: {out}");
     }
     assert!(out.contains("✓ database"), "got: {out}");
-    assert!(out.contains("schema 6 (head)"), "got: {out}");
+    assert!(out.contains("schema 7 (head)"), "got: {out}");
     assert!(out.contains("✓ coding agents"), "got: {out}");
     assert_eq!(
         out.matches(&format!("✓ {VERSION}")).count(),
@@ -603,13 +603,13 @@ fn doctor_reports_a_behind_head_schema() {
     let cli = Cli::new();
     cli.migrate();
     cli.sqlite()
-        .execute("DELETE FROM refinery_schema_history WHERE version = 6", [])
+        .execute("DELETE FROM refinery_schema_history WHERE version = 7", [])
         .unwrap();
     let output = cli.run(&["doctor"]);
     assert_eq!(code(&output), 1);
     let out = stdout(&output);
     assert!(
-        out.contains("schema 5, head is 6 — run: cafleet setup"),
+        out.contains("schema 6, head is 7 — run: cafleet setup"),
         "got: {out}"
     );
     assert!(
@@ -628,7 +628,7 @@ fn doctor_completes_the_report_against_a_pre_v6_database() {
     assert!(out.contains("✓ multiplexer"), "got: {out}");
     assert!(out.contains("✗ database"), "got: {out}");
     assert!(
-        out.contains("schema 5, head is 6 — run: cafleet setup"),
+        out.contains("schema 5, head is 7 — run: cafleet setup"),
         "got: {out}"
     );
     assert_eq!(
@@ -657,7 +657,7 @@ fn doctor_json_against_a_pre_v6_database_keeps_the_shape() {
 
     assert_eq!(payload["database"]["ok"], false);
     assert_eq!(payload["database"]["schema_version"], 5);
-    assert_eq!(payload["database"]["head_version"], 6);
+    assert_eq!(payload["database"]["head_version"], 7);
 
     let agents = payload["coding_agents"]["agents"].as_array().unwrap();
     assert_eq!(agents.len(), 3);
@@ -715,7 +715,7 @@ fn doctor_reports_a_newer_schema_than_the_cli() {
     let output = cli.run(&["doctor"]);
     assert_eq!(code(&output), 1);
     assert!(
-        stdout(&output).contains("schema 99 is newer than this CLI (head 6) — upgrade cafleet"),
+        stdout(&output).contains("schema 99 is newer than this CLI (head 7) — upgrade cafleet"),
         "got: {}",
         stdout(&output)
     );
@@ -922,8 +922,8 @@ fn doctor_json_mirrors_the_report() {
     assert_eq!(payload["multiplexer"]["error"], serde_json::Value::Null);
 
     assert_eq!(payload["database"]["ok"], true);
-    assert_eq!(payload["database"]["schema_version"], 6);
-    assert_eq!(payload["database"]["head_version"], 6);
+    assert_eq!(payload["database"]["schema_version"], 7);
+    assert_eq!(payload["database"]["head_version"], 7);
     assert_eq!(payload["database"]["error"], serde_json::Value::Null);
 
     let agents = payload["coding_agents"]["agents"].as_array().unwrap();
