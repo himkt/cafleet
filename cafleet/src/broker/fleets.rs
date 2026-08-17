@@ -1,6 +1,7 @@
-//! Fleet CRUD (SPEC §6.2 *Fleets*) — atomic fleet + Director bootstrap with
-//! `director_member_id` backfill, list/get/soft-delete + cascade. The
-//! colocated tests pin the contract; see [`super::test_support`] for the API.
+//! Fleet CRUD (SPEC §6.2 *Fleets*) — atomic fleet + Director + monitor
+//! bootstrap with `director_member_id` backfill and a caller-supplied monitor
+//! spawn callback, list/get/soft-delete + cascade. The colocated tests pin
+//! the contract; see [`super::test_support`] for the API.
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
@@ -42,8 +43,14 @@ pub(crate) fn fetch_fleet(
     .map_err(db_err)
 }
 
-/// Atomic fleet + root-Director bootstrap: fleet row → Director member →
-/// placement → `director_member_id` backfill.
+/// Atomic fleet + Director + monitor bootstrap: fleet row → Director member +
+/// placement → `director_member_id` backfill → monitor member with its card
+/// marker → `spawn_monitor` callback (invoked with the three allocated ids,
+/// returning the monitor's pane id) → monitor placement → commit. Any
+/// failure — the callback's included — unwinds the whole transaction, so
+/// nothing persists and the call is retryable as-is. The write lock is held
+/// across the callback (backstopped by the `busy_timeout` PRAGMA).
+#[allow(clippy::too_many_arguments)]
 pub fn create_fleet(
     conn: &mut Connection,
     name: Option<&str>,
@@ -52,9 +59,13 @@ pub fn create_fleet(
     mux_pane_id: &str,
     coding_agent: &str,
     backend: &str,
+    monitor_name: &str,
+    monitor_description: &str,
+    spawn_monitor: impl FnOnce(i64, i64, i64) -> Result<String, CafleetError>,
 ) -> Result<Value, CafleetError> {
     let now = format_utc(now_utc());
-    let card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[], false);
+    let director_card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[], false);
+    let monitor_card = member_card(monitor_name, monitor_description, &[], true);
     let tx = conn.transaction().map_err(db_err)?;
     tx.execute(
         "INSERT INTO fleets (name, created_at) VALUES (?1, ?2)",
@@ -65,7 +76,13 @@ pub fn create_fleet(
     tx.execute(
         "INSERT INTO members (fleet_id, name, description, status, registered_at, member_card_json) \
          VALUES (?1, ?2, ?3, 'active', ?4, ?5)",
-        params![fleet_id, DIRECTOR_NAME, DIRECTOR_DESCRIPTION, now, card],
+        params![
+            fleet_id,
+            DIRECTOR_NAME,
+            DIRECTOR_DESCRIPTION,
+            now,
+            director_card
+        ],
     )
     .map_err(db_err)?;
     let director_id = tx.last_insert_rowid();
@@ -89,6 +106,29 @@ pub fn create_fleet(
         params![director_id, fleet_id],
     )
     .map_err(db_err)?;
+    tx.execute(
+        "INSERT INTO members (fleet_id, name, description, status, registered_at, member_card_json) \
+         VALUES (?1, ?2, ?3, 'active', ?4, ?5)",
+        params![fleet_id, monitor_name, monitor_description, now, monitor_card],
+    )
+    .map_err(db_err)?;
+    let monitor_id = tx.last_insert_rowid();
+    let monitor_pane_id = spawn_monitor(fleet_id, director_id, monitor_id)?;
+    tx.execute(
+        "INSERT INTO member_placements \
+         (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            monitor_id,
+            mux_session,
+            mux_window_id,
+            monitor_pane_id,
+            backend,
+            coding_agent,
+            now
+        ],
+    )
+    .map_err(db_err)?;
     tx.commit().map_err(db_err)?;
     Ok(json!({
         "fleet_id": fleet_id,
@@ -104,6 +144,20 @@ pub fn create_fleet(
                 "mux_session": mux_session,
                 "mux_window_id": mux_window_id,
                 "mux_pane_id": mux_pane_id,
+                "coding_agent": coding_agent,
+                "created_at": now,
+            },
+        },
+        "monitor": {
+            "member_id": monitor_id,
+            "name": monitor_name,
+            "description": monitor_description,
+            "registered_at": now,
+            "placement": {
+                "backend": backend,
+                "mux_session": mux_session,
+                "mux_window_id": mux_window_id,
+                "mux_pane_id": monitor_pane_id,
                 "coding_agent": coding_agent,
                 "created_at": now,
             },

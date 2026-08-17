@@ -311,7 +311,7 @@ fn create(
 
     // 4. Resolve the body before any side effect; substitution is deferred
     //    until the new member id exists.
-    let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref())?;
+    let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref(), "--file")?;
 
     // 5. Preconditions.
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;

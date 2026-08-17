@@ -1,18 +1,25 @@
-//! The `fleet` group (SPEC §6.3 *fleet group*).
+//! The `fleet` group (SPEC §6.3 *fleet group*) — the atomic fleet + Director
+//! + monitor bootstrap, list, show, and soft-delete.
 
 use clap::Subcommand;
 use serde_json::Value;
 
-use super::helpers::{connect, emit, resolve_mux};
+use super::helpers::{connect, emit, resolve_body, resolve_mux};
+use super::system::SystemProbe;
 use crate::broker;
+use crate::coding_agent::coding_agent;
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::multiplexer::Multiplexer;
 use crate::output::format_fleet_create;
+use crate::spawn_prompt::substitute_spawn_placeholders;
+
+const MONITOR_NAME: &str = "monitor";
+const MONITOR_DESCRIPTION: &str = "Monitor member for this fleet";
 
 #[derive(Subcommand)]
 pub enum FleetCommand {
-    /// Create a fleet with its root Director.
+    /// Create a fleet with its root Director and monitor member.
     Create {
         /// Human-readable name for the fleet.
         #[arg(long)]
@@ -20,6 +27,12 @@ pub enum FleetCommand {
         /// The backend the Director is actually running on.
         #[arg(long = "coding-agent", value_parser = ["claude", "codex", "opencode"])]
         coding_agent: String,
+        /// UTF-8 file whose contents are the monitor's spawn prompt (`-` = stdin).
+        #[arg(long = "monitor-file", value_name = "PATH")]
+        monitor_file: String,
+        /// Model passed to the monitor's backend binary.
+        #[arg(long = "monitor-model", value_name = "MODEL")]
+        monitor_model: Option<String>,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -55,18 +68,34 @@ pub fn run(settings: &Settings, command: FleetCommand) -> Result<(), CafleetErro
         FleetCommand::Create {
             name,
             coding_agent,
+            monitor_file,
+            monitor_model,
             json,
-        } => create(settings, &name, &coding_agent, json),
+        } => create(
+            settings,
+            &name,
+            &coding_agent,
+            &monitor_file,
+            monitor_model.as_deref(),
+            json,
+        ),
         FleetCommand::List { json } => list(settings, json),
         FleetCommand::Show { fleet_id, json } => show(settings, fleet_id, json),
         FleetCommand::Delete { fleet_id, json } => delete(settings, fleet_id, json),
     }
 }
 
+/// The atomic bootstrap ladder (SPEC §6.3 *fleet group* → create): multiplexer
+/// preconditions → monitor prompt resolution → backend checks → the broker's
+/// single transaction, whose spawn callback substitutes the identity
+/// placeholders and splits the monitor pane. A post-spawn failure kills the
+/// recorded pane; nothing persists on any failure.
 fn create(
     settings: &Settings,
     name: &str,
-    coding_agent: &str,
+    agent_name: &str,
+    monitor_file: &str,
+    monitor_model: Option<&str>,
     json: bool,
 ) -> Result<(), CafleetError> {
     let inside_session = || {
@@ -77,16 +106,57 @@ fn create(
     let mux = resolve_mux(settings).map_err(|_| inside_session())?;
     mux.ensure_available().map_err(|_| inside_session())?;
     let context = mux.context_discovery().map_err(|_| inside_session())?;
+
+    let prompt_body = resolve_body(None, Some(monitor_file), "--monitor-file")?;
+
+    let backend = coding_agent(agent_name)
+        .unwrap_or_else(|| panic!("'{agent_name}' is a registry-validated backend"));
+    backend.validate_model(monitor_model)?;
+    backend.ensure_available(&SystemProbe)?;
+
     let mut conn = connect(settings)?;
-    let fleet = broker::create_fleet(
+    let mut spawned_pane: Option<String> = None;
+    let bootstrap = broker::create_fleet(
         &mut conn,
         Some(name),
         &context.session,
         &context.window_id,
         &context.pane_id,
-        coding_agent,
+        agent_name,
         mux.name(),
-    )?;
+        MONITOR_NAME,
+        MONITOR_DESCRIPTION,
+        |fleet_id, director_id, monitor_id| {
+            let rendered = substitute_spawn_placeholders(
+                &prompt_body,
+                fleet_id,
+                monitor_id,
+                director_id,
+                agent_name,
+            )?;
+            let argv = backend.build_spawn_argv(&rendered, MONITOR_NAME, monitor_model, None);
+            let mut env = Vec::new();
+            if let Ok(url) = std::env::var("CAFLEET_DATABASE_URL") {
+                env.push(("CAFLEET_DATABASE_URL".to_string(), url));
+            }
+            let pane_id = mux.split_window(&context, &env, &argv).map_err(|error| {
+                CafleetError::App(format!(
+                    "tmux split-window failed: {error}. Rolled back fleet creation."
+                ))
+            })?;
+            spawned_pane = Some(pane_id.clone());
+            Ok(pane_id)
+        },
+    );
+    let fleet = match bootstrap {
+        Ok(fleet) => fleet,
+        Err(error) => {
+            if let Some(pane_id) = &spawned_pane {
+                let _ = mux.send_exit(pane_id, true);
+            }
+            return Err(error);
+        }
+    };
     emit(json, &fleet, || format_fleet_create(&fleet));
     Ok(())
 }

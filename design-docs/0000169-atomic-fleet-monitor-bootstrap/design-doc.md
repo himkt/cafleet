@@ -1,7 +1,7 @@
 # Atomic Fleet + Monitor Bootstrap
 
 **Status**: Approved
-**Progress**: 7/14 tasks complete
+**Progress**: 11/14 tasks complete
 **Last Updated**: 2026-08-17
 
 ## Overview
@@ -154,10 +154,10 @@ Documentation first (project rule), then code, then tests.
 
 ### Step 2: Code
 
-- [ ] Extend `broker::create_fleet` (`cafleet/src/broker/fleets.rs`) into the atomic bootstrap: monitor member + card marker + placement inside the single transaction, with a spawn callback invoked between monitor registration and placement insert; callback error unwinds the transaction <!-- completed: -->
-- [ ] Extend `cafleet/src/cli/fleet.rs`: `--monitor-file` / `--monitor-model` flags, prompt resolution, backend model validation + availability check, the substitution + `split_window` callback, the commit-failure pane kill, and the new error strings <!-- completed: -->
-- [ ] Generalize `resolve_body` (`cafleet/src/cli/helpers.rs`) to take the flag label so `fleet create` errors name `--monitor-file` while `member create` / `message send` keep their current strings <!-- completed: -->
-- [ ] Extend `format_fleet_create` (`cafleet/src/output/formatters.rs`) to `<fleet_id> director=<id> monitor=<id>` <!-- completed: -->
+- [x] Extend `broker::create_fleet` (`cafleet/src/broker/fleets.rs`) into the atomic bootstrap: monitor member + card marker + placement inside the single transaction, with a spawn callback invoked between monitor registration and placement insert; callback error unwinds the transaction <!-- completed: 2026-08-17T10:44 -->
+- [x] Extend `cafleet/src/cli/fleet.rs`: `--monitor-file` / `--monitor-model` flags, prompt resolution, backend model validation + availability check, the substitution + `split_window` callback, the commit-failure pane kill, and the new error strings <!-- completed: 2026-08-17T10:44 -->
+- [x] Generalize `resolve_body` (`cafleet/src/cli/helpers.rs`) to take the flag label so `fleet create` errors name `--monitor-file` while `member create` / `message send` keep their current strings <!-- completed: 2026-08-17T10:44 -->
+- [x] Extend `format_fleet_create` (`cafleet/src/output/formatters.rs`) to `<fleet_id> director=<id> monitor=<id>` <!-- completed: 2026-08-17T10:44 -->
 
 ### Step 3: Tests and verification
 
