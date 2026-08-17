@@ -82,22 +82,24 @@ Step 5 (cleanup) is autonomous — no user prompt.
 
 ### Step 1: Bootstrap CAFleet Fleet & Spawn Presentation + Transcript (Director)
 
-Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The Director spawns the fleet's monitor member first; the monitor member launches the `cafleet monitor` loop in its own pane and the loop wakes it once per wake interval. Gate the Presentation/Transcript spawns on the monitor's `monitor live` signal — see 1b.
+Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The `cafleet fleet create` bootstrap spawns the fleet's monitor member; the monitor member launches the `cafleet monitor` loop in its own pane and the loop wakes it once per wake interval. Gate the Presentation/Transcript spawns on the monitor's `monitor live` signal — see 1b.
 
-#### 1a. Environment precheck and fleet bootstrap
+#### 1a. Environment precheck and fleet bootstrap (monitor included)
+
+Write the monitor member's spawn prompt first and pass it via `--monitor-file`, with `--monitor-model {monitor_model}`, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)*:
 
 ```bash
 cafleet doctor
-cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --json
+cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} --json
 ```
 
-This is the gating env-check per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*.
+`cafleet doctor` is the gating env-check per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*.
 
-Capture `fleet_id` and `director.member_id` from the JSON response and substitute them into every subsequent `cafleet ...` call, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
+Capture `fleet_id` and `director.member_id` from the JSON response and substitute them into every subsequent `cafleet ...` call.
 
-#### 1b. Spawn the monitor member (before any ordinary member)
+#### 1b. Wait for the monitor gate (before any ordinary member)
 
-Spawn the fleet's monitor member per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Spawn the monitor member first* (`--role monitor --model {monitor_model}`, omit `--coding-agent`). **Its `monitor live` gate signal gates the Presentation/Transcript spawns** (1d) — do not spawn an ordinary member until it has arrived; the CLI's monitor-first guard backstops the wait. The monitor member is deleted first (first-out) in the Step 5 teardown. Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
+Wait for the monitor member's `ready` then `monitor live` signals per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor gate*. **The `monitor live` gate signal gates the Presentation/Transcript spawns** (1d) — do not spawn an ordinary member until it has arrived; the CLI's monitor-first guard backstops the wait. The monitor member is deleted first (first-out) in the Step 5 teardown; re-spawn a dead monitor mid-run with `cafleet member create --role monitor`. Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 

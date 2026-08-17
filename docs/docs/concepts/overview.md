@@ -12,7 +12,7 @@ each other; members in different fleets are invisible to one another.
 | Term | Definition | Links to |
 |---|---|---|
 | fleet | isolated namespace partitioning members; identified by a non-secret integer `fleet_id` | [Fleet isolation](fleet-isolation.md) |
-| root Director | the member created by `fleet create`; the only member that may own other members | [Member lifecycle](member-lifecycle.md) |
+| root Director | the member created by the `fleet create` bootstrap; the only member that may own other members | [Member lifecycle](member-lifecycle.md) |
 | member | a registry entry spawned by the Director via `cafleet member create`, bound to a multiplexer pane (tmux or herdr) | [Member lifecycle](member-lifecycle.md) |
 | placement | the row linking a member to its multiplexer session/window/pane and backend | [Data model](../spec/data-model.md) |
 | broker | the data-access layer all CLI commands and the WebUI share; writes SQLite directly | Overview (this page) |
@@ -20,7 +20,7 @@ each other; members in different fleets are invisible to one another.
 | inline preview | the 2-line message preview the broker keystrokes into the recipient's pane | [Multiplexer backends](../spec/multiplexer-backends.md#push-notifications) |
 | poll / ack | how a recipient fetches and then confirms consumption of a message | [CLI options](../spec/cli-options.md) |
 | coding-agent backend | the binary in a member pane: `claude`, `codex`, or `opencode` | [Coding agents](coding-agents.md) |
-| monitor member | the dedicated watcher member spawned first via `cafleet member create --role monitor`; it hosts the fleet's wake loop, classifies member panes on each wake, and contacts the Director only when attention is needed | [Monitoring](monitoring.md) |
+| monitor member | the dedicated watcher member spawned by the `fleet create` bootstrap (re-spawned mid-run via `cafleet member create --role monitor`); it hosts the fleet's wake loop, classifies member panes on each wake, and contacts the Director only when attention is needed | [Monitoring](monitoring.md) |
 
 ## CLI
 
@@ -55,8 +55,8 @@ per-member routes live at [WebUI API](../spec/webui-api.md).
 
 ## Monitoring
 
-A fleet is supervised by its **monitor member** — a dedicated watcher the
-Director spawns first with `cafleet member create --role monitor`. The monitor
+A fleet is supervised by its **monitor member** — a dedicated watcher spawned
+as part of the `cafleet fleet create` bootstrap. The monitor
 member runs the `cafleet monitor` loop as a background task in its own pane;
 once per wake interval the loop keystrokes a wake into the monitor member's
 pane naming every ordinary member and its pending-message count. The monitor

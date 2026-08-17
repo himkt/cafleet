@@ -65,17 +65,19 @@ In resume mode where Step 2 IS run, parse the JSON array from the existing `inte
 
 **Skip this step entirely when `SKIP_ANALYZER=true`** (Step 1 found unanswered questions still in `question.md` from a prior invocation — the Director already has the question list).
 
-#### 2a. Establish a CAFleet fleet
+#### 2a. Establish a CAFleet fleet (monitor included)
+
+Write the monitor member's spawn prompt first and pass it via `--monitor-file`, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)*:
 
 ```bash
-cafleet fleet create --name "design-doc-interview-{slug}" --coding-agent <backend> --json
+cafleet fleet create --name "design-doc-interview-{slug}" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} --json
 ```
 
-Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
+Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command.
 
-#### 2b. Spawn the monitor member (before the Analyzer)
+#### 2b. Wait for the monitor gate (before the Analyzer)
 
-BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Spawn the fleet's monitor member per its § *Spawn Protocol* → *Spawn the monitor member first* (`--role monitor --model {monitor_model}`, omit `--coding-agent`). **Its `monitor live` gate signal gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived; the CLI's monitor-first guard backstops the wait. The monitor member is deleted first (first-out) in the 2f teardown.
+BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Wait for the monitor member's `ready` then `monitor live` signals per its § *Spawn Protocol* → *Wait for the monitor gate*. **The `monitor live` gate signal gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived; the CLI's monitor-first guard backstops the wait. The monitor member is deleted first (first-out) in the 2f teardown.
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 

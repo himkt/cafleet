@@ -103,7 +103,7 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
             body,
             json,
         } => {
-            let text = resolve_body(body.text.as_deref(), body.file.as_deref())?;
+            let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
             let mut conn = connect(settings)?;
             let notifier = CliNotifier::new(settings);
             let result = broker::send_message(
@@ -124,7 +124,7 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
             body,
             json,
         } => {
-            let text = resolve_body(body.text.as_deref(), body.file.as_deref())?;
+            let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
             let mut conn = connect(settings)?;
             let notifier = CliNotifier::new(settings);
             let result = broker::broadcast_message(

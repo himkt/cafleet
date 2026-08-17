@@ -1,7 +1,7 @@
 # Atomic Fleet + Monitor Bootstrap
 
-**Status**: Approved
-**Progress**: 0/14 tasks complete
+**Status**: Complete
+**Progress**: 14/14 tasks complete
 **Last Updated**: 2026-08-17
 
 ## Overview
@@ -10,11 +10,11 @@
 
 ## Success Criteria
 
-- [ ] `cafleet fleet create --name <n> --coding-agent <a> --monitor-file <path> [--monitor-model <m>]` creates the fleet, the Director, and the monitor member (registration + pane) in one invocation.
-- [ ] Any failure during the command leaves no fleet row, no Director row, no monitor row, and no placement rows behind; a spawned pane is killed on a post-spawn failure. The command is retryable as-is.
-- [ ] `cafleet member create --role monitor` still works as the mid-run recovery path for re-spawning a dead monitor; the one-per-fleet and monitor-first guards are unchanged.
-- [ ] The Director-facing skill instructions (supervision spawn protocol) describe the two-command startup; no skill or doc page still instructs spawning the monitor via `member create --role monitor` at bootstrap.
-- [ ] `mise //cafleet:test` and `mise //cafleet:lint` pass; SPEC.md, cli-options.md, and the pinned output-shape tests reflect the new contract.
+- [x] `cafleet fleet create --name <n> --coding-agent <a> --monitor-file <path> [--monitor-model <m>]` creates the fleet, the Director, and the monitor member (registration + pane) in one invocation.
+- [x] Any failure during the command leaves no fleet row, no Director row, no monitor row, and no placement rows behind; a spawned pane is killed on a post-spawn failure. The command is retryable as-is.
+- [x] `cafleet member create --role monitor` still works as the mid-run recovery path for re-spawning a dead monitor; the one-per-fleet and monitor-first guards are unchanged.
+- [x] The Director-facing skill instructions (supervision spawn protocol) describe the two-command startup; no skill or doc page still instructs spawning the monitor via `member create --role monitor` at bootstrap.
+- [x] `mise //cafleet:test` and `mise //cafleet:lint` pass; SPEC.md, cli-options.md, and the pinned output-shape tests reflect the new contract.
 
 ---
 
@@ -144,26 +144,26 @@ Documentation first (project rule), then code, then tests.
 
 ### Step 1: Documentation
 
-- [ ] Update `docs/docs/spec/cli-options.md`: the `fleet create` flag table (+ `--monitor-file`, `--monitor-model`), its section prose (atomic fleet + Director + monitor), the new/changed error-message rows — restating the pre-existing click-style `--name` / `--coding-agent` missing-flag rows in the parser's-native convention alongside the new `--monitor-file` row — the output-shapes section, and the monitor-first guard row's framing (bootstrap-satisfied; recovery-path trigger) <!-- completed: -->
-- [ ] Update `docs/docs/spec/data-model.md`: the bootstrap transaction description now includes the monitor member + placement, plus the write-lock window of holding the transaction across the pane spawn (backstopped by `busy_timeout=5000`) <!-- completed: -->
-- [ ] Update `SPEC.md`: §6.3 `fleet create` contract (flags, ladder, error strings), §6.4 output shapes (JSON key order + text form), the reimplementation checklist line, and the monitor-first framing <!-- completed: -->
-- [ ] Update `docs/docs/concepts/monitoring.md`, `docs/docs/concepts/overview.md`, and `docs/docs/how-to/mixed-backend-team.md`: bootstrap narrative (fleet create spawns the monitor; `member create --role monitor` is the recovery path) <!-- completed: -->
-- [ ] Update `skills/cafleet`: `SKILL.md` § Team supervision, `reference/supervision.md` (§ Spawn Protocol, § Monitor Lifecycle, § Quick Reference rows), `reference/director.md` (`--role` row → recovery-only framing), `reference/cli.md` (`fleet create` synopsis), `roles/monitor.md` (spawned by `fleet create --monitor-file`; recovery via `member create --role monitor`), `roles/director.md` where it names the old sequence <!-- completed: -->
-- [ ] Update consuming skills that restate the monitor-first spawn sequence: `skills/cafleet-design-doc/SKILL.md` + `create/create.md` + `interview/interview.md` + `execute/execute.md`; `skills/cafleet-research/SKILL.md` + `report/report.md` + `presentation/presentation.md` <!-- completed: -->
-- [ ] Update project-local skills `.claude/skills/skill-author/SKILL.md` and `.claude/skills/clean-docs/SKILL.md` (they teach/restate the monitor-first spawn) <!-- completed: -->
+- [x] Update `docs/docs/spec/cli-options.md`: the `fleet create` flag table (+ `--monitor-file`, `--monitor-model`), its section prose (atomic fleet + Director + monitor), the new/changed error-message rows — restating the pre-existing click-style `--name` / `--coding-agent` missing-flag rows in the parser's-native convention alongside the new `--monitor-file` row — the output-shapes section, and the monitor-first guard row's framing (bootstrap-satisfied; recovery-path trigger) <!-- completed: 2026-08-17T09:56 -->
+- [x] Update `docs/docs/spec/data-model.md`: the bootstrap transaction description now includes the monitor member + placement, plus the write-lock window of holding the transaction across the pane spawn (backstopped by `busy_timeout=5000`) <!-- completed: 2026-08-17T09:58 -->
+- [x] Update `SPEC.md`: §6.3 `fleet create` contract (flags, ladder, error strings), §6.4 output shapes (JSON key order + text form), the reimplementation checklist line, and the monitor-first framing <!-- completed: 2026-08-17T10:04 -->
+- [x] Update `docs/docs/concepts/monitoring.md`, `docs/docs/concepts/overview.md`, and `docs/docs/how-to/mixed-backend-team.md`: bootstrap narrative (fleet create spawns the monitor; `member create --role monitor` is the recovery path) <!-- completed: 2026-08-17T10:08 -->
+- [x] Update `skills/cafleet`: `SKILL.md` § Team supervision, `reference/supervision.md` (§ Spawn Protocol, § Monitor Lifecycle, § Quick Reference rows), `reference/director.md` (`--role` row → recovery-only framing), `reference/cli.md` (`fleet create` synopsis), `roles/monitor.md` (spawned by `fleet create --monitor-file`; recovery via `member create --role monitor`), `roles/director.md` where it names the old sequence <!-- completed: 2026-08-17T10:16 -->
+- [x] Update consuming skills that restate the monitor-first spawn sequence: `skills/cafleet-design-doc/SKILL.md` + `create/create.md` + `interview/interview.md` + `execute/execute.md`; `skills/cafleet-research/SKILL.md` + `report/report.md` + `presentation/presentation.md` <!-- completed: 2026-08-17T10:24 -->
+- [x] Update project-local skills `.claude/skills/skill-author/SKILL.md` and `.claude/skills/clean-docs/SKILL.md` (they teach/restate the monitor-first spawn) <!-- completed: 2026-08-17T10:14 -->
 
 ### Step 2: Code
 
-- [ ] Extend `broker::create_fleet` (`cafleet/src/broker/fleets.rs`) into the atomic bootstrap: monitor member + card marker + placement inside the single transaction, with a spawn callback invoked between monitor registration and placement insert; callback error unwinds the transaction <!-- completed: -->
-- [ ] Extend `cafleet/src/cli/fleet.rs`: `--monitor-file` / `--monitor-model` flags, prompt resolution, backend model validation + availability check, the substitution + `split_window` callback, the commit-failure pane kill, and the new error strings <!-- completed: -->
-- [ ] Generalize `resolve_body` (`cafleet/src/cli/helpers.rs`) to take the flag label so `fleet create` errors name `--monitor-file` while `member create` / `message send` keep their current strings <!-- completed: -->
-- [ ] Extend `format_fleet_create` (`cafleet/src/output/formatters.rs`) to `<fleet_id> director=<id> monitor=<id>` <!-- completed: -->
+- [x] Extend `broker::create_fleet` (`cafleet/src/broker/fleets.rs`) into the atomic bootstrap: monitor member + card marker + placement inside the single transaction, with a spawn callback invoked between monitor registration and placement insert; callback error unwinds the transaction <!-- completed: 2026-08-17T10:44 -->
+- [x] Extend `cafleet/src/cli/fleet.rs`: `--monitor-file` / `--monitor-model` flags, prompt resolution, backend model validation + availability check, the substitution + `split_window` callback, the commit-failure pane kill, and the new error strings <!-- completed: 2026-08-17T10:44 -->
+- [x] Generalize `resolve_body` (`cafleet/src/cli/helpers.rs`) to take the flag label so `fleet create` errors name `--monitor-file` while `member create` / `message send` keep their current strings <!-- completed: 2026-08-17T10:44 -->
+- [x] Extend `format_fleet_create` (`cafleet/src/output/formatters.rs`) to `<fleet_id> director=<id> monitor=<id>` <!-- completed: 2026-08-17T10:44 -->
 
 ### Step 3: Tests and verification
 
-- [ ] Broker tests (`fleets.rs` colocated + `test_support`): bootstrap registers the monitor member with card marker and pane placement; the pinned JSON-shape and text-form tests updated; rollback tests for callback failure and substitution failure leave zero rows; update the shared `test_support::create_fleet` helper for the new signature and audit its call sites <!-- completed: -->
-- [ ] CLI parse tests (`cli/fleet.rs`): `--monitor-file` required, `--monitor-model` optional, `-` accepted as the file value <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:format` <!-- completed: -->
+- [x] Broker tests (`fleets.rs` colocated + `test_support`): bootstrap registers the monitor member with card marker and pane placement; the pinned JSON-shape and text-form tests updated; rollback tests for callback failure and substitution failure leave zero rows; update the shared `test_support::create_fleet` helper for the new signature and audit its call sites <!-- completed: 2026-08-17T10:41 -->
+- [x] CLI parse tests (`cli/fleet.rs`): `--monitor-file` required, `--monitor-model` optional, `-` accepted as the file value <!-- completed: 2026-08-17T10:41 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:format` <!-- completed: 2026-08-17T10:49 -->
 
 ---
 
@@ -173,3 +173,4 @@ Documentation first (project rule), then code, then tests.
 |------|---------|
 | 2026-08-17 | Initial draft |
 | 2026-08-17 | Review round 1: specified the caller-held pane-id capture for post-spawn failure kills; recorded the transaction write-lock window trade-off; directed the cli-options.md edit to unify the missing-flag error-row style |
+| 2026-08-17 | Executed: all 14 tasks and 5 success criteria complete; Reviewer approved after 1 fix round; PR #318 opened; status Complete |

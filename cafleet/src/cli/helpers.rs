@@ -123,11 +123,16 @@ fn is_blank(text: &str) -> bool {
         .all(|c| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
 }
 
-/// The shared positional-`TEXT` / `--file` body reader (SPEC §6.3 *text-body
+/// The shared positional-`TEXT` / file-flag body reader (SPEC §6.3 *text-body
 /// input*): `-` = stdin, raw-bytes UTF-8 decode with no newline translation,
 /// uniform empty-body rejection. Exactly one source is present — clap's
-/// required argument group enforces it at parse time.
-pub fn resolve_body(inline: Option<&str>, file: Option<&str>) -> Result<String, CafleetError> {
+/// required argument group enforces it at parse time. Error strings name the
+/// file flag the caller exposes (`--file`, `--monitor-file`) via `flag`.
+pub fn resolve_body(
+    inline: Option<&str>,
+    file: Option<&str>,
+    flag: &str,
+) -> Result<String, CafleetError> {
     match (inline, file) {
         (Some(text), None) => {
             if is_blank(text) {
@@ -137,11 +142,11 @@ pub fn resolve_body(inline: Option<&str>, file: Option<&str>) -> Result<String, 
             }
         }
         (None, Some("-")) => {
-            let bytes = read_stdin().map_err(|e| CafleetError::App(format!("--file -: {e}")))?;
+            let bytes = read_stdin().map_err(|e| CafleetError::App(format!("{flag} -: {e}")))?;
             let body = String::from_utf8(bytes)
-                .map_err(|_| CafleetError::App("--file -: file is not valid UTF-8.".to_string()))?;
+                .map_err(|_| CafleetError::App(format!("{flag} -: file is not valid UTF-8.")))?;
             if is_blank(&body) {
-                Err(CafleetError::App("--file -: stdin is empty.".to_string()))
+                Err(CafleetError::App(format!("{flag} -: stdin is empty.")))
             } else {
                 Ok(body)
             }
@@ -150,17 +155,17 @@ pub fn resolve_body(inline: Option<&str>, file: Option<&str>) -> Result<String, 
             let bytes = std::fs::read(path).map_err(|e| {
                 let message = match e.kind() {
                     std::io::ErrorKind::NotFound | std::io::ErrorKind::IsADirectory => {
-                        format!("--file {path}: file does not exist or is not a regular file.")
+                        format!("{flag} {path}: file does not exist or is not a regular file.")
                     }
-                    _ => format!("--file {path}: file is not readable."),
+                    _ => format!("{flag} {path}: file is not readable."),
                 };
                 CafleetError::App(message)
             })?;
             let body = String::from_utf8(bytes).map_err(|_| {
-                CafleetError::App(format!("--file {path}: file is not valid UTF-8."))
+                CafleetError::App(format!("{flag} {path}: file is not valid UTF-8."))
             })?;
             if is_blank(&body) {
-                Err(CafleetError::App(format!("--file {path}: file is empty.")))
+                Err(CafleetError::App(format!("{flag} {path}: file is empty.")))
             } else {
                 Ok(body)
             }

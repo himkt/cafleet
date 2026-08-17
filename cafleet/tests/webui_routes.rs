@@ -46,10 +46,22 @@ fn placed(pane: &str) -> NewPlacement {
     }
 }
 
-/// Fleet 1 with director 1 (`%0`) and two pane-bound workers (`%2`, `%3`).
+/// Fleet 1 with director 1 (`%0`), its bootstrap monitor member 2 (`%1`),
+/// and two pane-bound workers (`%2`, `%3`).
 fn seeded_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
-    let fleet =
-        broker::create_fleet(conn, Some("web"), "main", "@1", "%0", "claude", "tmux").unwrap();
+    let fleet = broker::create_fleet(
+        conn,
+        Some("web"),
+        "main",
+        "@1",
+        "%0",
+        "claude",
+        "tmux",
+        "monitor",
+        "Monitor member for this fleet",
+        |_, _, _| Ok("%1".to_string()),
+    )
+    .unwrap();
     let fleet_id = fleet["fleet_id"].as_i64().unwrap();
     let director_id = fleet["director"]["member_id"].as_i64().unwrap();
     let member_id = broker::register_member(
@@ -131,7 +143,10 @@ async fn get_fleets_is_an_unscoped_bare_array() {
     assert_eq!(fleets.len(), 1);
     assert_eq!(fleets[0]["fleet_id"], 1);
     assert_eq!(fleets[0]["name"], "web");
-    assert_eq!(fleets[0]["member_count"], 3);
+    assert_eq!(
+        fleets[0]["member_count"], 4,
+        "director + bootstrap monitor + two workers"
+    );
 }
 
 #[tokio::test]
@@ -176,18 +191,9 @@ async fn the_roster_wraps_members_with_the_three_value_kind_union() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (fleet_id, director_id, member_id, helper_id) = seeded_fleet(&mut conn);
-    let monitor_id = broker::register_member(
-        &mut conn,
-        fleet_id,
-        "monitor",
-        "d",
-        &[],
-        Some(&placed("%4")),
-        true,
-    )
-    .unwrap()["member_id"]
-        .as_i64()
-        .unwrap();
+    let monitor_id = broker::active_monitor_member_id(&conn, fleet_id)
+        .unwrap()
+        .expect("the bootstrap registers the monitor member");
     let holder_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
         .unwrap()["member_id"]
         .as_i64()
@@ -428,18 +434,9 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (fleet_id, director_id, member_id, helper_id) = seeded_fleet(&mut conn);
-    let monitor_id = broker::register_member(
-        &mut conn,
-        fleet_id,
-        "monitor",
-        "d",
-        &[],
-        Some(&placed("%4")),
-        true,
-    )
-    .unwrap()["member_id"]
-        .as_i64()
-        .unwrap();
+    let monitor_id = broker::active_monitor_member_id(&conn, fleet_id)
+        .unwrap()
+        .expect("the bootstrap registers the monitor member");
     broker::send_message(
         &mut conn,
         &NullNotifier,

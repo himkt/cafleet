@@ -133,23 +133,29 @@ the `fleet create` and `member create` commands require one.
 :::details Expand the walkthrough
 
 The walkthrough pastes literal integer ids: fleet `1`, root Director `2`,
-members `3` and `4`, message `10`. Your ids will differ — substitute the
-integers your own commands print.
+monitor member `3`, members `4` and `5`, message `10`. Your ids will
+differ — substitute the integers your own commands print.
 
-Create a fleet. This records your current pane as the root Director's
-pane; `--coding-agent` is required — pass the backend the Director is
-actually running on (here, Claude Code):
+Create a fleet. One command atomically creates the fleet, records your
+current pane as the root Director's pane, and spawns the fleet's monitor
+member. `--coding-agent` is required — pass the backend the Director is
+actually running on (here, Claude Code); the monitor member inherits it.
+`--monitor-file` is required and carries the monitor's spawn prompt (a
+one-liner is enough for this demo); `--monitor-model` optionally pins the
+monitor's model:
 
 ```bash
-cafleet fleet create --name "demo" --coding-agent claude
+echo "You are the monitor member. Follow your monitor role protocol." > monitor-prompt.md
+cafleet fleet create --name "demo" --coding-agent claude \
+  --monitor-file monitor-prompt.md --monitor-model haiku
 ```
 
 ```
-1 director=2
+1 director=2 monitor=3
 ```
 
-The line carries the fleet id (`1`) and the root Director's member id
-(`2`). If it scrolls away, run
+The line carries the fleet id (`1`), the root Director's member id (`2`),
+and the monitor member's id (`3`). If it scrolls away, run
 `cafleet fleet list` — it re-prints the fleet id and the Director id (the
 `DIRECTOR` column).
 
@@ -165,7 +171,7 @@ cafleet member create --fleet-id 1 \
 ```
 
 ```
-3 demo-member backend=claude pane=%7
+4 demo-member backend=claude pane=%8
 ```
 
 ```bash
@@ -176,35 +182,36 @@ cafleet member create --fleet-id 1 \
 ```
 
 ```
-4 reviewer backend=claude pane=%8
+5 reviewer backend=claude pane=%9
 ```
 
-List the fleet's roster — the new members' ids (`3` and `4`) appear
-alongside the Director:
+List the fleet's roster — the new members' ids (`4` and `5`) appear
+alongside the Director and the bootstrap monitor member:
 
 ```bash
 cafleet member list 1
 ```
 
 ```
-3 members:
+4 members:
   member_id  name           kind      backend   pane_id  idle
   ---------  -------------  --------  --------  -------  ----
   2          Director       director  claude    %0       -
-  3          demo-member    member    claude    %7       -
-  4          reviewer       member    claude    %8       -
+  3          monitor        monitor   claude    %7       -
+  4          demo-member    member    claude    %8       -
+  5          reviewer       member    claude    %9       -
 ```
 
-Send a message between the members — `demo-member` (`3`) messages
-`reviewer` (`4`):
+Send a message between the members — `demo-member` (`4`) messages
+`reviewer` (`5`):
 
 ```bash
-cafleet message send --from-member-id 3 --to-member-id 4 "hi"
+cafleet message send --from-member-id 4 --to-member-id 5 "hi"
 ```
 
 ```
 Message sent.
-[10 | from:3 | 2026-06-11T09:00:00.123456+00:00]
+[10 | from:4 | 2026-06-11T09:00:00.123456+00:00]
 hi
 ```
 
@@ -213,11 +220,14 @@ tmux pane and the message lands in the broker queue. From here, the typical
 flow is `cafleet message poll` from the recipient and `cafleet message ack`
 once it has consumed the message.
 
-When you are done, tear the fleet down:
+When you are done, tear the fleet down — the monitor member goes first
+(first-out), so its pane kill ends the wake loop before any other member
+disappears:
 
 ```bash
 cafleet member delete 3
 cafleet member delete 4
+cafleet member delete 5
 cafleet fleet delete 1
 ```
 

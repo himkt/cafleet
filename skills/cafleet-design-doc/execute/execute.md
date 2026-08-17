@@ -126,22 +126,22 @@ Before registering with CAFleet:
 
 Load the `cafleet` skill; its `reference/supervision.md` governance is § Required reading above.
 
-#### 3a. Establish a CAFleet fleet and capture the root Director's `member_id`
+#### 3a. Establish a CAFleet fleet (monitor included) and capture the ids
 
-`cafleet fleet create` atomically creates the fleet and registers a root Director bound to the current multiplexer pane. Use `--json` so both IDs are machine-parseable:
+`cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current multiplexer pane, and spawns the fleet's monitor member — write the monitor's spawn prompt first and pass it via `--monitor-file`, with `--monitor-model {monitor_model}`, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)*. Use `--json` so the IDs are machine-parseable:
 
 ```bash
-cafleet fleet create --name "design-doc-execute-{slug}" --coding-agent <backend> --json
-# → { "fleet_id": <int>, "director": { "member_id": <int>, "name": "Director", "placement": {...} } }
+cafleet fleet create --name "design-doc-execute-{slug}" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} --json
+# → { "fleet_id": <int>, "director": { "member_id": <int>, ... }, "monitor": { "member_id": <int>, ... } }
 ```
 
-Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
+Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command.
 
 If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `member_id` instead of creating a new fleet — the root Director from `fleet create` is the team lead.
 
-#### 3b. Spawn the monitor member (before any ordinary member)
+#### 3b. Wait for the monitor gate (before any ordinary member)
 
-This team **keeps an active heartbeat**: the Director spawns the fleet's monitor member per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Spawn the monitor member first* (`--role monitor --model {monitor_model}`, omit `--coding-agent`). **Its `monitor live` gate signal gates the first ordinary `member create`** (the CLI's monitor-first guard backstops the wait). The monitor member runs **unchanged** through Steps 3–8; it is deleted first (first-out) in Step 8's cleanup. See `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
+This team **keeps an active heartbeat**: wait for the monitor member's `ready` then `monitor live` signals per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor gate*. **The `monitor live` gate signal gates the first ordinary `member create`** (the CLI's monitor-first guard backstops the wait). The monitor member runs **unchanged** through Steps 3–8; it is deleted first (first-out) in Step 8's cleanup; re-spawn a dead monitor mid-run with `cafleet member create --role monitor`. See `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
 
 #### 3c. Analyze implementation tasks to decide team composition
 

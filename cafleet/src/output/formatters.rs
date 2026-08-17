@@ -64,12 +64,13 @@ pub fn format_member_detail(member: &Value) -> String {
     )
 }
 
-/// `<fleet_id> director=<id>` — the only text form (SPEC §6.4).
+/// `<fleet_id> director=<id> monitor=<id>` — the only text form (SPEC §6.4).
 pub fn format_fleet_create(data: &Value) -> String {
     format!(
-        "{} director={}",
+        "{} director={} monitor={}",
         scalar(&data["fleet_id"]),
         scalar(&data["director"]["member_id"]),
+        scalar(&data["monitor"]["member_id"]),
     )
 }
 
@@ -288,6 +289,15 @@ mod tests {
                     "placement": {
                         "mux_session": "main",
                         "mux_window_id": "@1",
+                        "mux_pane_id": "%0",
+                    },
+                },
+                "monitor": {
+                    "member_id": 2,
+                    "name": "monitor",
+                    "placement": {
+                        "mux_session": "main",
+                        "mux_window_id": "@1",
                         "mux_pane_id": "%1",
                     },
                 },
@@ -295,10 +305,10 @@ mod tests {
         }
 
         #[test]
-        fn compact_is_fleet_id_and_director() {
+        fn compact_is_fleet_id_director_and_monitor() {
             assert_eq!(
                 format_fleet_create(&fleet_create_result(json!("alpha"))),
-                "3 director=1"
+                "3 director=1 monitor=2"
             );
         }
 
@@ -306,7 +316,7 @@ mod tests {
         fn compact_ignores_the_name_and_placement() {
             assert_eq!(
                 format_fleet_create(&fleet_create_result(Value::Null)),
-                "3 director=1",
+                "3 director=1 monitor=2",
                 "the detailed view is --json only"
             );
         }

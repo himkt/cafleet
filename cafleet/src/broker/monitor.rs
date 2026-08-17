@@ -433,7 +433,7 @@ mod tests {
     use crate::broker;
     use crate::broker::test_support as common;
     use crate::broker::test_support::{
-        FakeNotifier, create_fleet, migrated_conn, register, register_monitor,
+        FakeNotifier, bootstrap_monitor, create_fleet, migrated_conn, register,
     };
     use crate::time::format_utc;
 
@@ -565,7 +565,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let monitor_id = register_monitor(&mut conn, fleet_id, "monitor", Some("%2"));
+        let monitor_id = bootstrap_monitor(&conn, fleet_id);
         let worker_id = register(&mut conn, fleet_id, "worker", Some("%3"));
 
         let targets = broker::list_fleet_wake_targets(&conn, fleet_id).unwrap();
@@ -582,7 +582,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let monitor_id = register_monitor(&mut conn, fleet_id, "monitor", Some("%2"));
+        let monitor_id = bootstrap_monitor(&conn, fleet_id);
         let worker_id = register(&mut conn, fleet_id, "worker", Some("%3"));
 
         let rows = broker::monitor_members_payload(&conn, fleet_id, base_time()).unwrap();

@@ -1,6 +1,7 @@
-//! Fleet CRUD (SPEC §6.2 *Fleets*) — atomic fleet + Director bootstrap with
-//! `director_member_id` backfill, list/get/soft-delete + cascade. The
-//! colocated tests pin the contract; see [`super::test_support`] for the API.
+//! Fleet CRUD (SPEC §6.2 *Fleets*) — atomic fleet + Director + monitor
+//! bootstrap with `director_member_id` backfill and a caller-supplied monitor
+//! spawn callback, list/get/soft-delete + cascade. The colocated tests pin
+//! the contract; see [`super::test_support`] for the API.
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
@@ -42,8 +43,14 @@ pub(crate) fn fetch_fleet(
     .map_err(db_err)
 }
 
-/// Atomic fleet + root-Director bootstrap: fleet row → Director member →
-/// placement → `director_member_id` backfill.
+/// Atomic fleet + Director + monitor bootstrap: fleet row → Director member +
+/// placement → `director_member_id` backfill → monitor member with its card
+/// marker → `spawn_monitor` callback (invoked with the three allocated ids,
+/// returning the monitor's pane id) → monitor placement → commit. Any
+/// failure — the callback's included — unwinds the whole transaction, so
+/// nothing persists and the call is retryable as-is. The write lock is held
+/// across the callback (backstopped by the `busy_timeout` PRAGMA).
+#[allow(clippy::too_many_arguments)]
 pub fn create_fleet(
     conn: &mut Connection,
     name: Option<&str>,
@@ -52,9 +59,13 @@ pub fn create_fleet(
     mux_pane_id: &str,
     coding_agent: &str,
     backend: &str,
+    monitor_name: &str,
+    monitor_description: &str,
+    spawn_monitor: impl FnOnce(i64, i64, i64) -> Result<String, CafleetError>,
 ) -> Result<Value, CafleetError> {
     let now = format_utc(now_utc());
-    let card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[], false);
+    let director_card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[], false);
+    let monitor_card = member_card(monitor_name, monitor_description, &[], true);
     let tx = conn.transaction().map_err(db_err)?;
     tx.execute(
         "INSERT INTO fleets (name, created_at) VALUES (?1, ?2)",
@@ -65,7 +76,13 @@ pub fn create_fleet(
     tx.execute(
         "INSERT INTO members (fleet_id, name, description, status, registered_at, member_card_json) \
          VALUES (?1, ?2, ?3, 'active', ?4, ?5)",
-        params![fleet_id, DIRECTOR_NAME, DIRECTOR_DESCRIPTION, now, card],
+        params![
+            fleet_id,
+            DIRECTOR_NAME,
+            DIRECTOR_DESCRIPTION,
+            now,
+            director_card
+        ],
     )
     .map_err(db_err)?;
     let director_id = tx.last_insert_rowid();
@@ -89,6 +106,29 @@ pub fn create_fleet(
         params![director_id, fleet_id],
     )
     .map_err(db_err)?;
+    tx.execute(
+        "INSERT INTO members (fleet_id, name, description, status, registered_at, member_card_json) \
+         VALUES (?1, ?2, ?3, 'active', ?4, ?5)",
+        params![fleet_id, monitor_name, monitor_description, now, monitor_card],
+    )
+    .map_err(db_err)?;
+    let monitor_id = tx.last_insert_rowid();
+    let monitor_pane_id = spawn_monitor(fleet_id, director_id, monitor_id)?;
+    tx.execute(
+        "INSERT INTO member_placements \
+         (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            monitor_id,
+            mux_session,
+            mux_window_id,
+            monitor_pane_id,
+            backend,
+            coding_agent,
+            now
+        ],
+    )
+    .map_err(db_err)?;
     tx.commit().map_err(db_err)?;
     Ok(json!({
         "fleet_id": fleet_id,
@@ -104,6 +144,20 @@ pub fn create_fleet(
                 "mux_session": mux_session,
                 "mux_window_id": mux_window_id,
                 "mux_pane_id": mux_pane_id,
+                "coding_agent": coding_agent,
+                "created_at": now,
+            },
+        },
+        "monitor": {
+            "member_id": monitor_id,
+            "name": monitor_name,
+            "description": monitor_description,
+            "registered_at": now,
+            "placement": {
+                "backend": backend,
+                "mux_session": mux_session,
+                "mux_window_id": mux_window_id,
+                "mux_pane_id": monitor_pane_id,
                 "coding_agent": coding_agent,
                 "created_at": now,
             },
@@ -188,16 +242,53 @@ pub fn delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value, Cafle
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::Connection;
+    use serde_json::Value;
     use tempfile::TempDir;
 
     use crate::broker;
     use crate::broker::test_support as common;
-    use crate::broker::test_support::{FakeNotifier, create_fleet, migrated_conn, register};
+    use crate::broker::test_support::{
+        FakeNotifier, MONITOR_DESCRIPTION, MONITOR_NAME, MONITOR_PANE, bootstrap_monitor,
+        create_fleet, migrated_conn, register,
+    };
     use crate::error::CafleetError;
     use crate::output::format_json;
+    use crate::spawn_prompt::substitute_spawn_placeholders;
+
+    fn bootstrap(
+        conn: &mut Connection,
+        spawn_monitor: impl FnOnce(i64, i64, i64) -> Result<String, CafleetError>,
+    ) -> Result<Value, CafleetError> {
+        broker::create_fleet(
+            conn,
+            Some("alpha"),
+            "main",
+            "@1",
+            "%0",
+            "claude",
+            "tmux",
+            MONITOR_NAME,
+            MONITOR_DESCRIPTION,
+            spawn_monitor,
+        )
+    }
+
+    fn row_count(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+            row.get(0)
+        })
+        .unwrap()
+    }
+
+    fn assert_no_rows_persisted(conn: &Connection) {
+        for table in ["fleets", "members", "member_placements"] {
+            assert_eq!(row_count(conn, table), 0, "{table} must hold zero rows");
+        }
+    }
 
     #[test]
-    fn create_fleet_bootstraps_the_fleet_and_backfills_the_director() {
+    fn create_fleet_bootstraps_the_fleet_the_director_and_the_monitor() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
@@ -217,27 +308,68 @@ mod tests {
         assert_eq!(director["placement"]["mux_pane_id"], "%0");
         assert_eq!(director["placement"]["backend"], "tmux");
         assert_eq!(director["placement"]["coding_agent"], "claude");
+
+        let monitor_id = bootstrap_monitor(&conn, fleet_id);
+        let monitor = broker::get_member(&conn, monitor_id, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(monitor["name"], "monitor");
+        assert_eq!(monitor["description"], "Monitor member for this fleet");
+        assert_eq!(monitor["status"], "active");
+        assert_eq!(monitor["kind"], "monitor");
+        assert_eq!(
+            monitor["placement"]["mux_pane_id"], MONITOR_PANE,
+            "the placement carries the pane id the spawn callback returned"
+        );
+        assert_eq!(monitor["placement"]["mux_session"], "main");
+        assert_eq!(monitor["placement"]["mux_window_id"], "@1");
+        assert_eq!(monitor["placement"]["backend"], "tmux");
+        assert_eq!(monitor["placement"]["coding_agent"], "claude");
+
+        let card_kind: Option<String> = conn
+            .query_row(
+                "SELECT json_extract(member_card_json, '$.cafleet.kind') \
+                 FROM members WHERE member_id=?1",
+                [monitor_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            card_kind.as_deref(),
+            Some("monitor"),
+            "the bootstrap writes the same card marker as member create --role monitor"
+        );
+    }
+
+    #[test]
+    fn create_fleet_invokes_the_spawn_callback_with_the_three_allocated_ids() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let mut seen = None;
+        let fleet = bootstrap(&mut conn, |fleet_id, director_id, monitor_id| {
+            seen = Some((fleet_id, director_id, monitor_id));
+            Ok(MONITOR_PANE.to_string())
+        })
+        .unwrap();
+
+        let (fleet_id, director_id, monitor_id) = seen.expect("the callback ran");
+        assert_eq!(fleet["fleet_id"], fleet_id);
+        assert_eq!(fleet["director"]["member_id"], director_id);
+        assert_eq!(fleet["monitor"]["member_id"], monitor_id);
+        assert_eq!(bootstrap_monitor(&conn, fleet_id), monitor_id);
     }
 
     #[test]
     fn create_fleet_result_shape_is_pinned() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let fleet = broker::create_fleet(
-            &mut conn,
-            Some("alpha"),
-            "main",
-            "@1",
-            "%0",
-            "claude",
-            "tmux",
-        )
-        .unwrap();
+        let fleet = bootstrap(&mut conn, |_, _, _| Ok(MONITOR_PANE.to_string())).unwrap();
         let fleet_id = fleet["fleet_id"].as_i64().unwrap();
         let director_id = fleet["director"]["member_id"].as_i64().unwrap();
+        let monitor_id = fleet["monitor"]["member_id"].as_i64().unwrap();
         let ts = fleet["created_at"].as_str().unwrap().to_string();
         let expected = format!(
-            r#"{{"fleet_id":{fleet_id},"name":"alpha","created_at":"{ts}","director":{{"member_id":{director_id},"name":"Director","description":"Root Director for this fleet","registered_at":"{ts}","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%0","coding_agent":"claude","created_at":"{ts}"}}}}}}"#
+            r#"{{"fleet_id":{fleet_id},"name":"alpha","created_at":"{ts}","director":{{"member_id":{director_id},"name":"Director","description":"Root Director for this fleet","registered_at":"{ts}","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%0","coding_agent":"claude","created_at":"{ts}"}}}},"monitor":{{"member_id":{monitor_id},"name":"monitor","description":"Monitor member for this fleet","registered_at":"{ts}","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%1","coding_agent":"claude","created_at":"{ts}"}}}}}}"#
         );
         assert_eq!(format_json(&fleet), expected);
     }
@@ -246,20 +378,80 @@ mod tests {
     fn create_fleet_timestamps_are_canonical() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let fleet = broker::create_fleet(
-            &mut conn,
-            Some("alpha"),
-            "main",
-            "@1",
-            "%0",
-            "claude",
-            "tmux",
-        )
-        .unwrap();
+        let fleet = bootstrap(&mut conn, |_, _, _| Ok(MONITOR_PANE.to_string())).unwrap();
         let created_at = fleet["created_at"].as_str().unwrap();
         assert_eq!(created_at.len(), 32, "fixed-width form, got: {created_at}");
         assert!(created_at.ends_with("+00:00"));
         assert!(crate::time::parse_lenient(created_at).is_ok());
+    }
+
+    #[test]
+    fn create_fleet_rolls_back_everything_on_a_spawn_callback_failure() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let err = bootstrap(&mut conn, |_, _, _| {
+            Err(CafleetError::App(
+                "tmux split-window failed: boom".to_string(),
+            ))
+        })
+        .expect_err("a callback failure must fail the bootstrap");
+        assert_eq!(
+            err.message(),
+            "tmux split-window failed: boom",
+            "the callback error surfaces verbatim"
+        );
+        assert_no_rows_persisted(&conn);
+    }
+
+    #[test]
+    fn create_fleet_rolls_back_everything_on_a_substitution_failure() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let err = bootstrap(&mut conn, |fleet_id, director_id, monitor_id| {
+            substitute_spawn_placeholders(
+                "hello {typo}",
+                fleet_id,
+                monitor_id,
+                director_id,
+                "claude",
+            )
+            .map(|_| MONITOR_PANE.to_string())
+        })
+        .expect_err("a substitution failure must fail the bootstrap");
+        assert!(matches!(err, CafleetError::Usage(_)));
+        assert_eq!(err.exit_code(), 2);
+        assert_eq!(
+            err.message(),
+            "Unknown placeholder 'typo' in custom prompt. \
+             Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, \
+             {coding_agent}. Double literal braces ({{, }}) to keep them as text.",
+            "the existing substitution error string is re-raised unchanged"
+        );
+        assert_no_rows_persisted(&conn);
+    }
+
+    #[test]
+    fn create_fleet_is_retryable_as_is_after_a_rollback() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        bootstrap(&mut conn, |_, _, _| {
+            Err(CafleetError::App(
+                "tmux split-window failed: boom".to_string(),
+            ))
+        })
+        .expect_err("the first attempt fails");
+        assert_no_rows_persisted(&conn);
+
+        let fleet = bootstrap(&mut conn, |_, _, _| Ok(MONITOR_PANE.to_string()))
+            .expect("the retry succeeds with the same arguments");
+        assert_eq!(row_count(&conn, "fleets"), 1);
+        assert_eq!(row_count(&conn, "members"), 2, "Director + monitor");
+        assert_eq!(row_count(&conn, "member_placements"), 2);
+        let fleet_id = fleet["fleet_id"].as_i64().unwrap();
+        assert_eq!(
+            fleet["monitor"]["member_id"],
+            bootstrap_monitor(&conn, fleet_id)
+        );
     }
 
     #[test]
@@ -270,13 +462,13 @@ mod tests {
 
         let rows = broker::list_fleets(&conn).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0]["member_count"], 1);
+        assert_eq!(rows[0]["member_count"], 2, "Director + bootstrap monitor");
 
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        assert_eq!(broker::list_fleets(&conn).unwrap()[0]["member_count"], 2);
+        assert_eq!(broker::list_fleets(&conn).unwrap()[0]["member_count"], 3);
 
         broker::deregister_member(&mut conn, member_id).unwrap();
-        assert_eq!(broker::list_fleets(&conn).unwrap()[0]["member_count"], 1);
+        assert_eq!(broker::list_fleets(&conn).unwrap()[0]["member_count"], 2);
     }
 
     #[test]
@@ -328,7 +520,10 @@ mod tests {
         assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, 600, &now).unwrap());
 
         let result = broker::delete_fleet(&mut conn, fleet_id).unwrap();
-        assert_eq!(result["deregistered_count"], 2);
+        assert_eq!(
+            result["deregistered_count"], 3,
+            "Director + bootstrap monitor + worker"
+        );
 
         let (status, deregistered_at): (String, Option<String>) = conn
             .query_row(
@@ -340,14 +535,11 @@ mod tests {
         assert_eq!(status, "deregistered");
         assert!(deregistered_at.is_some());
 
-        let placements: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM member_placements WHERE member_id IN (?1, ?2)",
-                [director_id, member_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(placements, 0);
+        let placements = row_count(&conn, "member_placements");
+        assert_eq!(
+            placements, 0,
+            "the cascade drops the Director, monitor, and worker placements"
+        );
         assert!(
             broker::read_monitor_runtime(&conn, fleet_id)
                 .unwrap()

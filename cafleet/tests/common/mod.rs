@@ -244,10 +244,24 @@ impl Cli {
         self.seed_asset_row("claude", VERSION);
     }
 
-    /// `ready()` + a bare fleet (id 1, director member 1) via `fleet create` —
-    /// no monitor member yet, for the monitor-first / one-per-fleet guard
-    /// tests.
-    pub fn with_bare_fleet(&self) -> (i64, i64) {
+    /// The monitor member id the atomic `fleet create` bootstrap allocates in
+    /// a fresh database (fleet 1, Director 1, monitor 2).
+    pub const BOOTSTRAP_MONITOR_ID: i64 = 2;
+
+    /// Write (once) and return the monitor spawn-prompt file `fleet create
+    /// --monitor-file` consumes.
+    pub fn monitor_prompt_path(&self) -> String {
+        let path = self.home.path().join("monitor-prompt.md");
+        if !path.exists() {
+            std::fs::write(&path, "follow your monitor role protocol").unwrap();
+        }
+        path.to_str().unwrap().to_string()
+    }
+
+    /// `ready()` + a fleet via the atomic `fleet create` bootstrap: fleet 1,
+    /// Director member 1, and monitor member [`Self::BOOTSTRAP_MONITOR_ID`]
+    /// spawned from `--monitor-file`.
+    pub fn with_fleet(&self) -> (i64, i64) {
         self.ready();
         let output = self.run(&[
             "fleet",
@@ -256,6 +270,8 @@ impl Cli {
             "testfleet",
             "--coding-agent",
             "claude",
+            "--monitor-file",
+            &self.monitor_prompt_path(),
         ]);
         assert!(
             output.status.success(),
@@ -265,11 +281,17 @@ impl Cli {
         (1, 1)
     }
 
-    /// `with_bare_fleet()` + the fleet's monitor member (id 2) via
-    /// `member create --role monitor`, satisfying the monitor-first guard.
-    pub fn with_fleet(&self) -> (i64, i64) {
-        let ids = self.with_bare_fleet();
-        self.create_monitor(ids.0);
+    /// `with_fleet()` with its monitor member deleted — the dead-monitor
+    /// state the monitor-first / one-per-fleet guard tests and the
+    /// `member create --role monitor` recovery path start from.
+    pub fn with_bare_fleet(&self) -> (i64, i64) {
+        let ids = self.with_fleet();
+        let output = self.run(&["member", "delete", &Self::BOOTSTRAP_MONITOR_ID.to_string()]);
+        assert!(
+            output.status.success(),
+            "monitor delete must succeed: {}",
+            text(&output.stderr)
+        );
         ids
     }
 

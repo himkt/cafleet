@@ -131,7 +131,11 @@ mod tests {
             .unwrap();
 
         let sent = broker::list_sent(&conn, director_id).unwrap();
-        assert_eq!(sent.len(), 2, "one delivery per peer; summary excluded");
+        assert_eq!(
+            sent.len(),
+            3,
+            "one delivery per peer (monitor included); summary excluded"
+        );
         assert!(sent.iter().all(|m| m["type"] == "unicast"));
         assert!(sent.iter().all(|m| m["from_member_id"] == director_id));
     }
