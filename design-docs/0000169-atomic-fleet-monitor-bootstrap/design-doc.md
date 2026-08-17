@@ -1,7 +1,7 @@
 # Atomic Fleet + Monitor Bootstrap
 
 **Status**: Approved
-**Progress**: 11/14 tasks complete
+**Progress**: 14/14 tasks complete
 **Last Updated**: 2026-08-17
 
 ## Overview
@@ -10,11 +10,11 @@
 
 ## Success Criteria
 
-- [ ] `cafleet fleet create --name <n> --coding-agent <a> --monitor-file <path> [--monitor-model <m>]` creates the fleet, the Director, and the monitor member (registration + pane) in one invocation.
-- [ ] Any failure during the command leaves no fleet row, no Director row, no monitor row, and no placement rows behind; a spawned pane is killed on a post-spawn failure. The command is retryable as-is.
-- [ ] `cafleet member create --role monitor` still works as the mid-run recovery path for re-spawning a dead monitor; the one-per-fleet and monitor-first guards are unchanged.
-- [ ] The Director-facing skill instructions (supervision spawn protocol) describe the two-command startup; no skill or doc page still instructs spawning the monitor via `member create --role monitor` at bootstrap.
-- [ ] `mise //cafleet:test` and `mise //cafleet:lint` pass; SPEC.md, cli-options.md, and the pinned output-shape tests reflect the new contract.
+- [x] `cafleet fleet create --name <n> --coding-agent <a> --monitor-file <path> [--monitor-model <m>]` creates the fleet, the Director, and the monitor member (registration + pane) in one invocation.
+- [x] Any failure during the command leaves no fleet row, no Director row, no monitor row, and no placement rows behind; a spawned pane is killed on a post-spawn failure. The command is retryable as-is.
+- [x] `cafleet member create --role monitor` still works as the mid-run recovery path for re-spawning a dead monitor; the one-per-fleet and monitor-first guards are unchanged.
+- [x] The Director-facing skill instructions (supervision spawn protocol) describe the two-command startup; no skill or doc page still instructs spawning the monitor via `member create --role monitor` at bootstrap.
+- [x] `mise //cafleet:test` and `mise //cafleet:lint` pass; SPEC.md, cli-options.md, and the pinned output-shape tests reflect the new contract.
 
 ---
 
@@ -161,9 +161,9 @@ Documentation first (project rule), then code, then tests.
 
 ### Step 3: Tests and verification
 
-- [ ] Broker tests (`fleets.rs` colocated + `test_support`): bootstrap registers the monitor member with card marker and pane placement; the pinned JSON-shape and text-form tests updated; rollback tests for callback failure and substitution failure leave zero rows; update the shared `test_support::create_fleet` helper for the new signature and audit its call sites <!-- completed: -->
-- [ ] CLI parse tests (`cli/fleet.rs`): `--monitor-file` required, `--monitor-model` optional, `-` accepted as the file value <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:format` <!-- completed: -->
+- [x] Broker tests (`fleets.rs` colocated + `test_support`): bootstrap registers the monitor member with card marker and pane placement; the pinned JSON-shape and text-form tests updated; rollback tests for callback failure and substitution failure leave zero rows; update the shared `test_support::create_fleet` helper for the new signature and audit its call sites <!-- completed: 2026-08-17T10:41 -->
+- [x] CLI parse tests (`cli/fleet.rs`): `--monitor-file` required, `--monitor-model` optional, `-` accepted as the file value <!-- completed: 2026-08-17T10:41 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:format` <!-- completed: 2026-08-17T10:49 -->
 
 ---
 
