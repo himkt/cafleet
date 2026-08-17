@@ -116,8 +116,8 @@ Per surface, the scope of what may change:
 
 ```
 User → /clean-docs (one workflow)
- └─ Director (main session — resolves BASE, bootstraps fleet, spawns the
-              monitor member first, partitions slices, merges partials,
+ └─ Director (main session — resolves BASE, bootstraps fleet + monitor
+              member atomically, partitions slices, merges partials,
               holds the apply behind review, verifies, commits when asked,
               deletes the monitor member first at teardown)
      ├─ scanner-1  (owns a disjoint file slice: scan → propose → apply after gate)
@@ -127,7 +127,7 @@ User → /clean-docs (one workflow)
 
 | Role | Responsibility |
 |---|---|
-| **Director** | Resolve task-scoped `${BASE}`; `cafleet fleet create`; spawn the monitor member first (`cafleet member create --role monitor --model {monitor_model}`, omit `--coding-agent`) and gate the first ordinary spawn on its `monitor live` message (the CLI monitor-first guard backstops); partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply any edit a scanner's harness denies (verify the staged diff first); run verification; escalate observations to the user; delete the monitor member first (first-out) at teardown. |
+| **Director** | Resolve task-scoped `${BASE}`; bootstrap the fleet with the monitor member included (`cafleet fleet create --monitor-file <abs path> --monitor-model {monitor_model}`) and gate the first ordinary spawn on its `monitor live` message (the CLI monitor-first guard backstops); partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply any edit a scanner's harness denies (verify the staged diff first); run verification; escalate observations to the user; delete the monitor member first (first-out) at teardown. |
 | **scanner** (×N) | For its slice: run the workflow's scan mechanics, propose actions per the workflow's rubric, record observations separately, write its partial artifact under `${BASE}`. After approval is relayed: apply its own slice's approved rows exactly as written, re-verify its diff, route harness-denied writes to the Director. |
 | **reviewer** | Validate the merged artifact **before** any edit, per the workflow's guarantees and guardrails. After apply: run the workflow verification (parameter table below). |
 
@@ -157,11 +157,12 @@ extensions, since a run produces a run artifact, not a design document:
    `reference/base-dir.md`, convention
    `researches/clean-docs-<workflow>-<UTC-compact>/` (gitignored, one folder
    per run).
-2. **Bootstrap** — `cafleet doctor` (gating), `cafleet fleet create`; spawn
-   the monitor member first (`cafleet member create --role monitor
-   --model {monitor_model}`, omit `--coding-agent`; members spawned
-   `{permission_flags}`), gate the first ordinary spawn on its `monitor live`
-   message (the CLI monitor-first guard backstops).
+2. **Bootstrap** — `cafleet doctor` (gating), then `cafleet fleet create
+   --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md>
+   --monitor-model {monitor_model}` (one atomic command: fleet + Director +
+   monitor member; members spawned `{permission_flags}`); gate the first
+   ordinary spawn on the monitor's `monitor live` message (the CLI
+   monitor-first guard backstops).
 3. **Spawn workers** — scanners (one per disjoint slice) and the reviewer
    (`--model {reviewer_model}`), each from a rendered prompt at
    `${BASE}/.prompts/<role>-<UTC-compact>.md`.

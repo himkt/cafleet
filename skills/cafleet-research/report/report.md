@@ -68,19 +68,19 @@ Before creating the team, resolve the task-scoped base directory for this run.
 
 Run the gating `cafleet doctor` env-check per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*.
 
-### Step 0b: Bootstrap CAFleet Fleet (Director — MANDATORY)
+### Step 0b: Bootstrap CAFleet Fleet (Director — MANDATORY, monitor included)
 
-Capture the `fleet_id` and `director.member_id` integer ids from the JSON response and substitute them into every subsequent `cafleet ...` call, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap*.
+One command atomically creates the fleet, the root Director, and the fleet's monitor member — write the monitor's spawn prompt first and pass it via `--monitor-file`, with `--monitor-model {monitor_model}`, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)*:
 
 ```bash
-cafleet fleet create --name "research-[topic-slug]" --coding-agent <backend> --json
+cafleet fleet create --name "research-[topic-slug]" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} --json
 ```
 
 Capture `fleet_id` and `director.member_id` from the response. Treat `fleet_id` as `[fleet-id]` and `director.member_id` as `[director-member-id]` for the rest of this skill.
 
-### Step 1: Supervision Model (Director — spawn the monitor member first)
+### Step 1: Supervision Model (Director — wait for the monitor gate)
 
-Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. Spawn the fleet's monitor member per its § *Spawn Protocol* → *Spawn the monitor member first* (`--role monitor --model {monitor_model}`, omit `--coding-agent`). **Its `monitor live` gate signal gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until it has arrived; the CLI's monitor-first guard backstops the wait. The monitor member is deleted first (first-out) in the Step 8 teardown.
+Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. Wait for the monitor member's `ready` then `monitor live` signals per its § *Spawn Protocol* → *Wait for the monitor gate*. **The `monitor live` gate signal gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until it has arrived; the CLI's monitor-first guard backstops the wait. The monitor member is deleted first (first-out) in the Step 8 teardown; re-spawn a dead monitor mid-run with `cafleet member create --role monitor`.
 
 On each active turn, check `${OUTPUT_DIR}` for these expected deliverables:
 

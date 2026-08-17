@@ -3,7 +3,7 @@
 `cafleet monitor` is a fleet-scoped foreground loop — `scan → wake → sleep` —
 that the fleet's **monitor member** runs as a background task in its own pane.
 The monitor member is a dedicated watcher spawned before any other member
-(`cafleet member create --role monitor`) on a cheap model — its work is
+(by the `cafleet fleet create` bootstrap) on a cheap model — its work is
 bounded classification, not generation. The loop supplies the **heartbeat**: a
 plain loop, not agent reasoning, that fires one unconditional fleet-level wake
 into the monitor member's own pane once per wake interval. On each wake the
@@ -177,21 +177,27 @@ rows and it self-terminates.
 
 ## Lifecycle
 
-**Spawn.** Immediately after `cafleet fleet create`, the Director spawns the
-monitor member first: `cafleet member create --role monitor`, on the
-backend's monitor-default model. At startup the monitor member sends the
+**Spawn.** `cafleet fleet create` spawns the monitor member as part of the
+fleet bootstrap: one command atomically creates the fleet, the root
+Director, and the monitor member — registration and pane — with the
+Director-authored monitor prompt passed via `--monitor-file` and the
+backend's monitor-default model via `--monitor-model` (see
+[CLI options](../spec/cli-options.md#fleet-create)). Any failure rolls the
+whole bootstrap back — no fleet, no rows, no pane — so the command is
+retryable as-is. At startup the monitor member sends the
 standard `ready` signal, launches `cafleet monitor <fleet-id>` as a
 background task in its own pane, confirms the startup line the loop prints
 immediately after claiming the runtime row — `monitor loop started (fleet
 <fleet_id>, tick <tick>s, pid <pid>)` — and then sends the gate signal
 `monitor live` to the Director. The monitor member is the only party that
-launches the loop: the Director never runs the loop itself — it spawns the
-monitor member and waits for `monitor live` — and ordinary members never run
+launches the loop: the Director never runs the loop itself — it waits for
+`monitor live` — and ordinary members never run
 it. That gate message unblocks the Director's first
 ordinary `cafleet member create`; the CLI enforces the same order (spawning
 an ordinary member into a fleet with no active monitor member fails — see
-[CLI options](../spec/cli-options.md#member-create)), and a second
-`--role monitor` spawn into a fleet that already has an active monitor member
+[CLI options](../spec/cli-options.md#member-create)), and a
+`member create --role monitor` spawn into a fleet that already has an active
+monitor member
 also fails. A loop task that exits instead of printing the startup line
 (runtime-claim conflict, dead fleet) is a failed start the monitor member
 reports to the Director instead of proceeding.

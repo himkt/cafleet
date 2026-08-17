@@ -507,12 +507,15 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   per-member cadence): `MONITOR_STALE_FACTOR = 3`,
   `MONITOR_STALE_FLOOR_SECONDS = 15` → `stale_after = max(3·tick_seconds, 15)`.
 - Root Director identity strings written by `create_fleet`: name `Director`,
-  description `Root Director for this fleet`.
+  description `Root Director for this fleet`. Monitor member identity strings
+  written by `create_fleet`: name `monitor`, description `Monitor member for
+  this fleet`.
 
 #### Fleets
 
-- **`create_fleet(name, director_context, coding_agent)`** — atomically
-  bootstraps a fleet and its root Director in one
+- **`create_fleet(name, director_context, coding_agent, spawn_monitor)`** —
+  atomically bootstraps a fleet, its root Director, and its monitor member
+  (registration **and** pane) in one
   write_session. Order: stamp `created_at`; insert the fleet with
   `director_member_id = NULL`; insert the Director member row (`name="Director"`,
   `description="Root Director for this fleet"`, `status="active"`, card
@@ -520,8 +523,20 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   Director's placement (the root Director is pane-bound and keeps its own
   placement row) carrying the multiplexer identity (`mux_session`
   / `mux_window_id` / `mux_pane_id`), the `backend` (the resolved `mux.name`),
-  and `coding_agent`; back-fill the fleet's `director_member_id`. Returns
-  `{fleet_id, name, created_at, director:{…}}`.
+  and `coding_agent`; insert the monitor member row (`name="monitor"`,
+  `description="Monitor member for this fleet"`, `status="active"`, card
+  carrying the monitor marker `cafleet: {kind: "monitor"}`); back-fill the
+  fleet's `director_member_id`; invoke the caller-supplied `spawn_monitor`
+  callback with the three allocated ids (`fleet_id`, `director_member_id`,
+  the monitor's `member_id`) — the CLI's callback performs the prompt
+  substitution and the pane split and returns the pane id; insert the
+  monitor placement row with the returned pane id (same session/window
+  context as the Director; `coding_agent` = the fleet's coding agent);
+  commit. A callback error unwinds the whole transaction — no fleet,
+  Director, monitor, or placement rows persist. The transaction holds
+  SQLite's write lock across the callback's subprocess call, backstopped by
+  the connection's `busy_timeout=5000` PRAGMA. Returns
+  `{fleet_id, name, created_at, director:{…}, monitor:{…}}`.
 - **`list_fleets()`** — one record `{fleet_id, director_member_id, name,
   created_at, member_count}` per non-soft-deleted fleet (`deleted_at IS NULL`);
   `member_count` counts only **active** members (0 for empty fleets). Ordering:
@@ -1137,14 +1152,35 @@ subcommands take the shared `--json` flag and emit JSON when it is set.
 `fleet show` and `fleet delete` take the positional `FLEET_ID` subject (§6.3
 *Positional subject ids*).
 
-- **create** — `--name` (string, **required**; no `--name` → clap's native
-  missing-required-argument error naming `--name`, exit 2), `--coding-agent`
-  (choice over the coding-agent names, **required**; omitted → clap's native
-  missing-required-argument error naming `--coding-agent`, exit 2), `--json`
-  (shared).
-  Requires a supported multiplexer: on a `MultiplexerError`
-  → application error `cafleet fleet create must be run inside a tmux or herdr
-  session` (exit 1, no DB writes).
+- **create** — `--name` (string, **required**), `--coding-agent`
+  (choice over the coding-agent names, **required**; the monitor member
+  inherits this backend by construction — there is no
+  `--monitor-coding-agent`), `--monitor-file PATH` (**required**; a UTF-8
+  file whose contents are the monitor's spawn prompt, `-` = stdin; the same
+  body semantics as `member create --file`, with the rejection strings
+  naming the flag label `--monitor-file`; no inline positional form),
+  `--monitor-model MODEL` (optional; validated by the `--coding-agent`
+  backend exactly as `member create --model`; omitted → the backend's own
+  default model), `--json` (shared). Omitting any required flag → clap's
+  native missing-required-argument error naming the flag, exit 2.
+  One invocation atomically creates the fleet, the root Director, and the
+  monitor member (registration + pane). Ladder: (1) multiplexer
+  preconditions — on a `MultiplexerError` → application error `cafleet
+  fleet create must be run inside a tmux or herdr session` (exit 1, no DB
+  writes); (2) resolve the monitor prompt body from `--monitor-file`;
+  (3) backend checks before any write — backend lookup, `validate_model`
+  on `--monitor-model`, `ensure_available`; (4) broker `create_fleet`
+  (§6.2) with a callback that substitutes the four identity placeholders
+  (substitution errors → the two `member create` strings verbatim, exit 2,
+  transaction rolled back) and spawns the monitor pane detached
+  (`display_name="monitor"`, the `--monitor-model` value, no effort,
+  `CAFLEET_DATABASE_URL` as the only forwarded environment variable;
+  `split_window` failure → application error `tmux split-window failed:
+  <detail>. Rolled back fleet creation.`, exit 1). Any failure leaves no
+  rows; a placement-insert or commit failure after a successful split also
+  kills the spawned pane (the callback records the pane id into a
+  caller-held capture the error path consults). The command is retryable
+  as-is.
 - **list** — `--json` (shared). Empty → `No fleets found.`; else a header plus
   one formatted row per fleet (five columns: FLEET_ID / DIRECTOR / NAME / MEMBERS
   left-padded 40 / 40 / 20 / 8, then a trailing unpadded CREATED_AT; nullable
@@ -1242,7 +1278,9 @@ the member registers as an ordinary member), the shared body input (positional
 exactly one; §6.3 [text-body input](#text-body-input)), and the shared
 `--json`.
 A `member create` without `--role` registers an ordinary member; with
-`--role monitor` it registers the fleet's monitor member. The member `kind`
+`--role monitor` it registers the fleet's monitor member — the mid-run
+recovery path for re-spawning a dead monitor; the bootstrap monitor is
+spawned by `fleet create` (§6.3 `fleet` group). The member `kind`
 union is `"director" | "monitor" | "member"` (§5.4), with `director` reserved
 for the fleet's single root Director bootstrapped by `fleet create` — no
 `member create` invocation, with or without `--role`, can produce a
@@ -1453,9 +1491,9 @@ by the claim and re-read on every tick (§6.6), so a `PATCH /api/monitor`
 edit (§6.8) changes a running loop's cadence within one tick. Requires a
 live fleet, then tmux. Runs the monitor loop in-process (blocking),
 launched by the fleet's monitor member as a background task in its own pane
-immediately
-after `cafleet member create --role monitor` (itself run immediately after
-`cafleet fleet create`, before any ordinary member).
+immediately after its pane boots (the pane is spawned by the `cafleet fleet
+create` bootstrap, before any ordinary member; `cafleet member create
+--role monitor` is the mid-run re-spawn path).
 Immediately after the successful runtime claim, before the first tick, the
 loop prints the startup line the monitor member confirms before sending the
 `monitor live` gate signal to the Director — the signal that unblocks the
@@ -1898,7 +1936,8 @@ Every field is read with required access unless marked optional; required access
   `status` (req). The detailed view (description, kind, skills, placement) is
   the broker `get_member` dict, emitted by `--json` (§6.3).
 - **Fleet-create** (`format_fleet_create`): `fleet_id` (req), `director` (req
-  nested) → `member_id` (req).
+  nested) → `member_id` (req), `monitor` (req nested, after `director`, the
+  identical member shape) → `member_id` (req).
 - **Member-create** (`format_member`): `member_id` (req), `name` (req),
   `placement` (req) → `coding_agent` (req), `mux_pane_id` (req key; `(pending)`
   when falsy).
@@ -1935,7 +1974,8 @@ the **only** text form; the full envelope is `--json` (§6.3).
 `format_member_detail` — `<member_id> <name> <status>` (single spaces, no
 labels). The detailed view is `--json` (the broker `get_member` dict, §6.3).
 
-`format_fleet_create` — `<fleet_id> director=<director.member_id>`.
+`format_fleet_create` — `<fleet_id> director=<director.member_id>
+monitor=<monitor.member_id>`.
 
 `format_member` — `<member_id> <name> backend=<coding_agent> pane=<pane>`
 (`pane` = `mux_pane_id` or `(pending)`).
@@ -2334,9 +2374,9 @@ unconditional and interval-driven, on both backends.
 ### 6.6 Monitor heartbeat loop
 
 **Scope:** the in-process supervision scheduler. The fleet's **monitor
-member** — a dedicated watcher spawned first via `cafleet member create
---role monitor`, immediately after `cafleet fleet create` and before any
-ordinary `cafleet member create` — launches
+member** — a dedicated watcher spawned by the `cafleet fleet create`
+bootstrap, before any ordinary `cafleet member create` (re-spawned mid-run
+via `cafleet member create --role monitor` after a monitor death) — launches
 `run_monitor_loop` as a background task in its own pane. It fires
 one unconditional, fleet-level wake into the **monitor member's own pane**
 once per
@@ -3279,7 +3319,7 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 
 **`fleet`:**
 
-- [ ] `cafleet fleet create` (`--name`, `--coding-agent` required, `--json`)
+- [ ] `cafleet fleet create` (`--name`, `--coding-agent`, `--monitor-file PATH` required, `--monitor-model` optional, `--json`; atomic fleet + Director + monitor bootstrap)
 - [ ] `cafleet fleet list` (`--json`)
 - [ ] `cafleet fleet show FLEET_ID` (`--json`)
 - [ ] `cafleet fleet delete FLEET_ID` (`--json`)

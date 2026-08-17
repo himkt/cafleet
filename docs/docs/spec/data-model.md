@@ -24,9 +24,19 @@ Minted ids are **never reused** and real ids are always `>= 1`.
 ### `fleets`
 
 `cafleet fleet create` writes the fleet row, the root Director (and its
-placement), and the `director_member_id` back-reference in one all-or-nothing
-transaction — which is why `director_member_id` is DB-nullable despite the
-post-bootstrap NOT NULL invariant.
+placement), the `director_member_id` back-reference, and the monitor member
+(its row, its monitor card marker, and — after the pane spawn — its
+placement) in one all-or-nothing transaction — which is why
+`director_member_id` is DB-nullable despite the post-bootstrap NOT NULL
+invariant. The pane spawn happens **inside** the transaction, between the
+monitor registration and its placement insert, so any failure (spawn
+included) unwinds every row; a pane spawned before a placement-insert or
+commit failure is killed by the CLI error path. The flip side is the
+write-lock window: the connection holds SQLite's write lock across the
+pane-spawn subprocess call, so a concurrent cafleet writer on the shared
+database blocks for the duration of the multiplexer call, backstopped by
+the connection's `busy_timeout=5000` PRAGMA — an accepted trade-off of the
+literally-atomic bootstrap.
 
 ### `members`
 

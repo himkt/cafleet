@@ -1,7 +1,7 @@
 # Atomic Fleet + Monitor Bootstrap
 
 **Status**: Approved
-**Progress**: 0/14 tasks complete
+**Progress**: 7/14 tasks complete
 **Last Updated**: 2026-08-17
 
 ## Overview
@@ -144,13 +144,13 @@ Documentation first (project rule), then code, then tests.
 
 ### Step 1: Documentation
 
-- [ ] Update `docs/docs/spec/cli-options.md`: the `fleet create` flag table (+ `--monitor-file`, `--monitor-model`), its section prose (atomic fleet + Director + monitor), the new/changed error-message rows — restating the pre-existing click-style `--name` / `--coding-agent` missing-flag rows in the parser's-native convention alongside the new `--monitor-file` row — the output-shapes section, and the monitor-first guard row's framing (bootstrap-satisfied; recovery-path trigger) <!-- completed: -->
-- [ ] Update `docs/docs/spec/data-model.md`: the bootstrap transaction description now includes the monitor member + placement, plus the write-lock window of holding the transaction across the pane spawn (backstopped by `busy_timeout=5000`) <!-- completed: -->
-- [ ] Update `SPEC.md`: §6.3 `fleet create` contract (flags, ladder, error strings), §6.4 output shapes (JSON key order + text form), the reimplementation checklist line, and the monitor-first framing <!-- completed: -->
-- [ ] Update `docs/docs/concepts/monitoring.md`, `docs/docs/concepts/overview.md`, and `docs/docs/how-to/mixed-backend-team.md`: bootstrap narrative (fleet create spawns the monitor; `member create --role monitor` is the recovery path) <!-- completed: -->
-- [ ] Update `skills/cafleet`: `SKILL.md` § Team supervision, `reference/supervision.md` (§ Spawn Protocol, § Monitor Lifecycle, § Quick Reference rows), `reference/director.md` (`--role` row → recovery-only framing), `reference/cli.md` (`fleet create` synopsis), `roles/monitor.md` (spawned by `fleet create --monitor-file`; recovery via `member create --role monitor`), `roles/director.md` where it names the old sequence <!-- completed: -->
-- [ ] Update consuming skills that restate the monitor-first spawn sequence: `skills/cafleet-design-doc/SKILL.md` + `create/create.md` + `interview/interview.md` + `execute/execute.md`; `skills/cafleet-research/SKILL.md` + `report/report.md` + `presentation/presentation.md` <!-- completed: -->
-- [ ] Update project-local skills `.claude/skills/skill-author/SKILL.md` and `.claude/skills/clean-docs/SKILL.md` (they teach/restate the monitor-first spawn) <!-- completed: -->
+- [x] Update `docs/docs/spec/cli-options.md`: the `fleet create` flag table (+ `--monitor-file`, `--monitor-model`), its section prose (atomic fleet + Director + monitor), the new/changed error-message rows — restating the pre-existing click-style `--name` / `--coding-agent` missing-flag rows in the parser's-native convention alongside the new `--monitor-file` row — the output-shapes section, and the monitor-first guard row's framing (bootstrap-satisfied; recovery-path trigger) <!-- completed: 2026-08-17T09:56 -->
+- [x] Update `docs/docs/spec/data-model.md`: the bootstrap transaction description now includes the monitor member + placement, plus the write-lock window of holding the transaction across the pane spawn (backstopped by `busy_timeout=5000`) <!-- completed: 2026-08-17T09:58 -->
+- [x] Update `SPEC.md`: §6.3 `fleet create` contract (flags, ladder, error strings), §6.4 output shapes (JSON key order + text form), the reimplementation checklist line, and the monitor-first framing <!-- completed: 2026-08-17T10:04 -->
+- [x] Update `docs/docs/concepts/monitoring.md`, `docs/docs/concepts/overview.md`, and `docs/docs/how-to/mixed-backend-team.md`: bootstrap narrative (fleet create spawns the monitor; `member create --role monitor` is the recovery path) <!-- completed: 2026-08-17T10:08 -->
+- [x] Update `skills/cafleet`: `SKILL.md` § Team supervision, `reference/supervision.md` (§ Spawn Protocol, § Monitor Lifecycle, § Quick Reference rows), `reference/director.md` (`--role` row → recovery-only framing), `reference/cli.md` (`fleet create` synopsis), `roles/monitor.md` (spawned by `fleet create --monitor-file`; recovery via `member create --role monitor`), `roles/director.md` where it names the old sequence <!-- completed: 2026-08-17T10:16 -->
+- [x] Update consuming skills that restate the monitor-first spawn sequence: `skills/cafleet-design-doc/SKILL.md` + `create/create.md` + `interview/interview.md` + `execute/execute.md`; `skills/cafleet-research/SKILL.md` + `report/report.md` + `presentation/presentation.md` <!-- completed: 2026-08-17T10:24 -->
+- [x] Update project-local skills `.claude/skills/skill-author/SKILL.md` and `.claude/skills/clean-docs/SKILL.md` (they teach/restate the monitor-first spawn) <!-- completed: 2026-08-17T10:14 -->
 
 ### Step 2: Code
 

@@ -29,7 +29,7 @@ The detailed member view (`kind`, `skills`, the placement sub-dict) is likewise 
 
 ## Coding-agent backends
 
-Three backends — `claude`, `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent` (omitted → the member inherits the Director's backend). `--model <m>` pins the LLM, `--effort <level>` forwards a reasoning-effort level (claude: `low`–`max`; codex: `minimal`–`xhigh`; opencode: unsupported — any value exits 2), and `--role monitor` registers the fleet's monitor member (spawned first, one active per fleet); the flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md). All three honor the leading-`!` input shortcut, so `member prompt --shell` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent-overlays.md#claude) / [`codex`](coding-agent-overlays.md#codex) / [`opencode`](coding-agent-overlays.md#opencode).
+Three backends — `claude`, `codex`, `opencode` — chosen per member at `member create` time via `--coding-agent` (omitted → the member inherits the Director's backend). `--model <m>` pins the LLM, `--effort <level>` forwards a reasoning-effort level (claude: `low`–`max`; codex: `minimal`–`xhigh`; opencode: unsupported — any value exits 2), and `--role monitor` re-spawns the fleet's monitor member mid-run (the bootstrap monitor is spawned by `fleet create`; one active per fleet); the flags, the model-name-to-backend inference, the per-backend available-model tables, and the spawn-argv detail live in [`reference/director.md`](director.md). All three honor the leading-`!` input shortcut, so `member prompt --shell` and inline previews work uniformly. Per-backend deltas: [`claude`](coding-agent-overlays.md#claude) / [`codex`](coding-agent-overlays.md#codex) / [`opencode`](coding-agent-overlays.md#opencode).
 
 ## Show (Get Message)
 
@@ -128,12 +128,13 @@ Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters ever
 
 0. **Verify pane env** (Director): run `cafleet doctor` — the canonical pane-identity probe, before `cafleet fleet create` and any `cafleet member create`. It renders the three-section diagnosis (multiplexer, database, coding agents) and exits non-zero on any rendered issue; a non-zero exit aborts the spawn protocol.
 
-1. **Create a fleet** (if none exists):
+1. **Create a fleet** (if none exists) — one atomic command creates the fleet, the root Director, and the monitor member (registration and pane); any failure rolls everything back:
    ```bash
-   cafleet fleet create --name "my-project" --coding-agent <backend>
-   # text: '<fleet-id> director=<root-director-member-id>'; append --json for the nested shape
+   cafleet fleet create --name "my-project" --coding-agent <backend> \
+     --monitor-file <abs path to monitor prompt> --monitor-model <model>
+   # text: '<fleet-id> director=<root-director-member-id> monitor=<monitor-member-id>'; append --json for the nested shape
    ```
-   `--coding-agent <backend>` — the substitution rule is [`reference/supervision.md`](supervision.md) § *Spawn Protocol* → *Fleet bootstrap*.
+   `--coding-agent <backend>` — the substitution rule is [`reference/supervision.md`](supervision.md) § *Spawn Protocol* → *Fleet bootstrap (monitor included)*; the monitor member inherits it by construction. `--monitor-file` (required) carries the Director-authored monitor spawn prompt (`-` = stdin); `--monitor-model` (optional) is the backend's monitor-default model per your overlay.
    Must run inside a tmux or herdr session (else exits 1 with `Error: cafleet fleet create must be run inside a tmux or herdr session`, writes nothing).
 
 2. **Discover, send, poll, ack** per the command sections above; append a trailing `--json` when parsing output. Director-side create/capture/prompt/ping: [`reference/director.md`](director.md); shutdown ordering: [`reference/recovery.md`](recovery.md).

@@ -19,7 +19,7 @@ fleet the new member joins) and the two-party pair `--from-member-id`
 | `server` | Start the admin WebUI server | — | — | [server](#cafleet-server) |
 | `monitor` | Run the per-fleet scheduler loop in-process (launch as a background task) | `FLEET_ID` | — | [monitor](#cafleet-monitor) |
 | `monitor scan` | Capture the Director's pane and every active member's pane once | `FLEET_ID` | — | [monitor scan](#cafleet-monitor-scan) |
-| `fleet create` | Create a fleet with its root Director | — | — | [fleet create](#fleet-create) |
+| `fleet create` | Create a fleet with its root Director and monitor member | — | — | [fleet create](#fleet-create) |
 | `fleet list` | List non-deleted fleets | — | — | [fleet list](#fleet-list) |
 | `fleet show` | Show one fleet (soft-deleted included) | `FLEET_ID` | — | [fleet show](#fleet-show) |
 | `fleet delete` | Soft-delete a fleet and deregister its members | `FLEET_ID` | — | [fleet delete](#fleet-delete) |
@@ -78,7 +78,7 @@ is the complete, untruncated machine form.
 
 | Subcommand | Text output | JSON payload |
 |---|---|---|
-| `fleet create` | The compact line `<fleet_id> director=<director_member_id>` | The fleet dict with a nested `director` (including its `placement`) |
+| `fleet create` | The compact line `<fleet_id> director=<director_member_id> monitor=<monitor_member_id>` | The fleet dict with nested `director` and `monitor` objects (each including its `placement`) |
 | `fleet list` | `FLEET_ID`, `DIRECTOR`, `NAME`, `MEMBERS`, `CREATED_AT` columns, one row per fleet | Output as JSON |
 | `fleet show` | The fleet row, adding a `deleted_at:` line | Always includes `deleted_at`, null when active |
 | `fleet delete` | `Deleted fleet <fleet_id>. Deregistered N members.` | `{"deregistered_count": <n>}` |
@@ -469,18 +469,55 @@ Fleet lifecycle; writes directly to SQLite — no server required.
 | Flag | Required | Notes |
 |---|---|---|
 | `--name` | yes | Human-readable name for the fleet |
-| `--coding-agent` | yes | One of `claude`, `codex`, or `opencode`, recorded as the root Director's placement `coding_agent` — the operator declares the backend the Director is actually running on; see [Coding agents](../concepts/coding-agents.md). |
+| `--coding-agent` | yes | One of `claude`, `codex`, or `opencode`, recorded as the root Director's placement `coding_agent` — the operator declares the backend the Director is actually running on; see [Coding agents](../concepts/coding-agents.md). The monitor member inherits this backend by construction — there is no `--monitor-coding-agent`. |
+| `--monitor-file PATH` | yes | UTF-8 file whose contents are the monitor member's spawn prompt (`-` = stdin). Same body semantics as `member create --file` (empty / non-UTF-8 rejection); there is no inline positional form. |
+| `--monitor-model MODEL` | no | Model forwarded to the monitor's backend binary, validated by the `--coding-agent` backend exactly as `member create --model`. When omitted the backend spawns on its own default model. |
 | `--json` | no | Output as JSON |
 
-Omitting `--coding-agent` exits 2 with the parser's native
-missing-required-argument error naming `--coding-agent`.
+Omitting a required flag exits 2 with the parser's native
+missing-required-argument error naming the flag.
 
 **Must be run inside a tmux or herdr session** — outside one it exits 1 with
 `Error: cafleet fleet create must be run inside a tmux or herdr session` and
-writes nothing. It creates the fleet and its root Director (hardcoded
-`name="Director"`; there is no `--description` flag)
-atomically — see [data-model.md](./data-model.md). Output shapes are in
+writes nothing. One invocation atomically creates the fleet, its root
+Director, and its monitor member — registration **and** pane spawn. The
+Director and monitor identities are hardcoded (Director:
+`name="Director"`, `description="Root Director for this fleet"`; monitor:
+`name="monitor"`, `description="Monitor member for this fleet"`); there are
+no name / description / effort flags for either. Output shapes are in
 [Output shapes](#output-shapes).
+
+The command runs a single-transaction ladder — see
+[data-model.md](./data-model.md) for the transaction description:
+
+1. Multiplexer preconditions (unchanged from before any write).
+2. Resolve the monitor prompt body from `--monitor-file` (file, or stdin
+   via `-`).
+3. Backend checks before any write: backend lookup,
+   `--monitor-model` validation, and the binary-on-`PATH` availability
+   check (`Error: binary <name> not found on PATH`, exit 1).
+4. In one SQLite transaction: insert the fleet row, the Director member +
+   placement, backfill `fleets.director_member_id`, and insert the monitor
+   member row with the monitor card marker.
+5. Substitute the four identity placeholders into the prompt body
+   (same substitution and error strings as
+   [`member create`](#member-create)).
+6. Spawn the monitor pane (detached split, `CAFLEET_DATABASE_URL` as the
+   only forwarded environment variable).
+7. Insert the monitor placement row (same session/window context as the
+   Director), then commit.
+
+**Any failure rolls back the whole transaction** — no fleet row, no
+Director row, no monitor row, no placement rows. A failure after a
+successful pane spawn (placement insert or commit) also kills the spawned
+pane. The command is retryable as-is. Error strings are in
+[Error Messages](#error-messages).
+
+The monitor member's own protocol is unchanged: once its pane boots it
+sends `ready`, launches the `cafleet monitor` wake loop, and sends
+`monitor live` (see [Monitoring](../concepts/monitoring.md)).
+`member create --role monitor` remains the mid-run recovery path for
+re-spawning a dead monitor.
 
 ### `fleet list`
 
@@ -799,7 +836,7 @@ one root Director by construction, so no override flag exists.
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; when omitted, the member — every role — inherits the spawning Director's placement backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. The opencode backend additionally requires its agent preset at the resolved preset path (via `OPENCODE_CONFIG_DIR` — see [Config-dir resolution](#config-dir-resolution)); a missing preset or an invalid variable exits 1 per [Error Messages](#error-messages). |
 | `--model` | no | Model forwarded to the backend binary's own `--model` flag. The opencode backend additionally requires `<provider-id>/<model-id>`; per-backend formats and create-time validation are in [Model selection](coding-agent-backends.md#model-selection). |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary, validated per backend before any side effect. Accepted levels, forwarding forms, and rejection strings are in [Reasoning effort](coding-agent-backends.md#reasoning-effort). |
-| `--role` | no | The sole accepted value is `monitor` — registers the member as the fleet's monitor member (see [Monitoring](../concepts/monitoring.md)); any other value is the parser's invalid-value error (exit 2). A fleet holds at most one active monitor member, and an ordinary `member create` requires one — both guards are in [Error Messages](#error-messages). |
+| `--role` | no | The sole accepted value is `monitor` — registers the member as the fleet's monitor member (see [Monitoring](../concepts/monitoring.md)); any other value is the parser's invalid-value error (exit 2). The bootstrap monitor is spawned by [`fleet create`](#fleet-create); this flag is the mid-run recovery path for re-spawning a dead monitor. A fleet holds at most one active monitor member, and an ordinary `member create` requires one — both guards are in [Error Messages](#error-messages). |
 | positional `PROMPT` | one of | Inline spawn prompt (backend-neutral template). Exactly one of `PROMPT` / `--file`. |
 | `--file PATH` | one of | Path to a UTF-8 file whose contents are the spawn prompt (`-` = stdin). Inline prompts beyond a few KB exceed the multiplexer argv ceiling — use `--file` for long prompts. |
 | `--json` | no | Output as JSON |
@@ -1129,16 +1166,20 @@ failed capture. `lines` always echoes the requested depth.
 | `setup` | The `asset_installs` table is missing as the assets half starts | `the database schema is missing or outdated; run 'cafleet setup' first` | 1 | An assets-half failure, after a db-half failure or an externally broken schema |
 | (any subject-taking command) | Missing positional subject id | The parser's native missing-required-argument error naming the positional | 2 | — |
 | (any id argument) | A non-integer id | The parser's native invalid-value error | 2 | — |
-| `fleet create` | No `--name` | `Error: Missing option '--name'.` | 2 | — |
-| `fleet create` | `--coding-agent` omitted | `Error: Missing option '--coding-agent'. Choose from:` followed by `claude,` / `codex,` / `opencode`, one per tab-indented line | 2 | Recorded verbatim under [`fleet create`](#fleet-create) |
+| `fleet create` | `--name`, `--coding-agent`, or `--monitor-file` omitted | The parser's native missing-required-argument error naming the flag | 2 | — |
 | `fleet create` | Run outside a supported multiplexer | `Error: cafleet fleet create must be run inside a tmux or herdr session` | 1 | No DB writes |
+| `fleet create` | `--monitor-file` resolution failure (empty, missing, unreadable, or non-UTF-8 file, or the empty-stdin variant via `-`) | The `--file` rejection strings with the flag label `--monitor-file` (e.g. `Error: --monitor-file <path>: file is empty.`) | 1 | The message names the flag the user typed; nothing written |
+| `fleet create` | Invalid `--monitor-model` for the `--coding-agent` backend | The `member create` `--model` validation string, verbatim | 2 | Nothing written — see [Model selection](coding-agent-backends.md#model-selection) |
+| `fleet create` | The `--coding-agent` binary missing from `PATH` | `Error: binary <name> not found on PATH` | 1 | Nothing written |
+| `fleet create` | `tmux split-window` fails during the monitor pane spawn | `Error: tmux split-window failed: <detail>. Rolled back fleet creation.` | 1 | Transaction rolled back — no rows persisted |
+| `fleet create` | Placement insert or commit fails after a successful pane spawn | The underlying error | 1 | Transaction unwound and the spawned pane killed; no rows persisted |
 | `fleet show` / `fleet delete` | Unknown `FLEET_ID` | `Error: fleet 'X' not found.` | 1 | — |
 | `member create` | Unknown `--fleet-id` | `Error: Fleet '<fleet-id>' not found.` | 2 | Director auto-discovery runs first thing |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 | — |
 | `member create` | The fleet row has no `director_member_id` recorded | `Error: fleet <fleet-id> has no root Director recorded; re-create the fleet with 'cafleet fleet create'.` | 1 | Mid-bootstrap corruption |
 | `member create` | With a placement, when the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 | The `register_member` invariant guard |
 | `member create` | `--role monitor` when the fleet already has an active monitor member | `Error: fleet <fleet-id> already has an active monitor member (member <member-id>)` | 1 | The one-per-fleet guard; evaluated before the monitor-first guard, before any registration or pane effect |
-| `member create` | Without `--role` when the fleet has no active monitor member | `Error: fleet <fleet-id> has no active monitor member; spawn one with --role monitor first` | 1 | The monitor-first placement guard; before any registration or pane effect |
+| `member create` | Without `--role` when the fleet has no active monitor member | `Error: fleet <fleet-id> has no active monitor member; spawn one with --role monitor first` | 1 | The monitor-first placement guard, before any registration or pane effect — satisfied by the `fleet create` bootstrap; it fires only after a monitor death with no re-spawn |
 | `member delete` | Against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` | 1 | — |
 | `message poll` | An unknown or inactive `MEMBER_ID` | `Error: Member <member-id> not found` | 1 | — |
 | `message ack` / `message show` | An unknown `MESSAGE_ID` | `Error: Message <message-id> not found` | 1 | — |
@@ -1164,8 +1205,8 @@ failed capture. `lines` always echoes the requested depth.
 | `member create` | `--effort` with a level unknown to the claude backend | `Error: --effort for the claude backend must be one of low, medium, high, xhigh, max (got '<value>').` | 2 | Fires before any side effect |
 | `member create` | `--coding-agent codex --effort` with an unknown level | `Error: --effort for the codex backend must be one of minimal, low, medium, high, xhigh (got '<value>').` | 2 | Fires before any side effect |
 | `member create` | `--coding-agent opencode --effort` with any value | `Error: opencode does not support reasoning effort.` | 2 | Fires before any side effect |
-| `member create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` | 2 | The just-registered member is rolled back |
-| `member create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 | The just-registered member is rolled back |
+| `member create` / `fleet create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` | 2 | `member create` rolls back the just-registered member; `fleet create` unwinds the whole bootstrap transaction |
+| `member create` / `fleet create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 | `member create` rolls back the just-registered member; `fleet create` unwinds the whole bootstrap transaction |
 | `member create` | `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the member's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
 | `member create` | `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the member's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
 | `monitor` (loop form) | The fleet already has a live monitor | `Error: monitor already running for fleet <id>` | 1 | — |
