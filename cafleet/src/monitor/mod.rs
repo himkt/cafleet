@@ -1008,7 +1008,11 @@ mod tests {
                 own_pid(),
                 now + Duration::seconds(95),
             );
-            assert_eq!(mux.wake_count(), 0, "no request → the not-yet-due gate holds");
+            assert_eq!(
+                mux.wake_count(),
+                0,
+                "no request → the not-yet-due gate holds"
+            );
             assert!(echo.is_empty());
 
             request_wake(&mut conn, fleet_id, now + Duration::seconds(99));
@@ -1072,7 +1076,11 @@ mod tests {
                 now + Duration::seconds(5),
             );
             assert!(matches!(result, TickResult::Continue));
-            assert_eq!(dead_pane_mux.wake_count(), 0, "no live monitor pane → no wake");
+            assert_eq!(
+                dead_pane_mux.wake_count(),
+                0,
+                "no live monitor pane → no wake"
+            );
             assert!(echo.is_empty());
             assert_eq!(
                 wake_requested_at(&conn, fleet_id),

@@ -1,7 +1,7 @@
 # Dispatch-on-Ready and Monitor Controls
 
 **Status**: Approved
-**Progress**: 20/21 tasks complete
+**Progress**: 21/21 tasks complete
 **Last Updated**: 2026-08-17
 
 ## Overview
@@ -184,7 +184,7 @@ Documentation first, per the project's documentation-maintenance rule; code only
 
 ### Step 7: Verification
 
-- [ ] `mise //admin:lint`, `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass. <!-- completed: -->
+- [x] `mise //admin:lint`, `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass. <!-- completed: 2026-08-17T09:24 -->
 
 ---
 

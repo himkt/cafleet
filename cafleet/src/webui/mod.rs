@@ -266,7 +266,12 @@ async fn post_monitor_wake(State(state): State<AppState>, headers: HeaderMap) ->
         if let Err(response) = require_fleet(conn, fleet_id) {
             return *response;
         }
-        let not_running = || detail(StatusCode::NOT_FOUND, "monitor is not running for this fleet");
+        let not_running = || {
+            detail(
+                StatusCode::NOT_FOUND,
+                "monitor is not running for this fleet",
+            )
+        };
         match broker::monitor_is_live(conn, fleet_id, now_utc()) {
             Ok(true) => {}
             Ok(false) => return not_running(),
