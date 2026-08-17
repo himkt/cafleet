@@ -3,7 +3,8 @@
 The admin WebUI is a browser dashboard for watching and joining a fleet's
 message traffic ([Overview](../concepts/overview.md)). It is the only
 surface that needs a running server — CLI commands write to SQLite directly
-and never require one — and it is read/write for messages only.
+and never require one. Its writes are messages and the monitor controls
+(the wake interval and the forced wake); everything else is read-only.
 
 ## Start the server
 
@@ -37,6 +38,23 @@ yourself as a member to use the dashboard.
 Clicking a member in the sidebar opens its detail panel with Inbox / Sent
 tabs. This works for deregistered members too — the WebUI is the only surface
 that shows them ([Storage](../concepts/storage.md#no-physical-cleanup)).
+
+## Control the monitor
+
+The header shows a monitor indicator — running or stopped — for the selected
+fleet's monitor loop ([Monitoring](../concepts/monitoring.md)). Clicking it
+opens a popover with the two monitor controls:
+
+- **Wake interval** — edits the running loop's wake cadence; the change
+  takes effect within one scan tick, and `0` disables the scheduled wake
+  while the loop keeps running.
+- **Wake now** — requests an immediate wake outside the schedule; the loop
+  delivers it within one scan tick, even when the interval is `0` or the
+  next scheduled wake is not yet due.
+
+Both controls are disabled while the monitor is stopped: the interval is
+re-stamped from the CLI/env when the monitor starts, and a wake request
+needs a running loop to deliver it.
 
 ## API contracts
 

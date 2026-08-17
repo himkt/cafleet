@@ -82,3 +82,11 @@ export async function patchMonitor(wakeIntervalSeconds: number): Promise<void> {
     body: JSON.stringify({ wake_interval_seconds: wakeIntervalSeconds }),
   });
 }
+
+export async function postMonitorWake(): Promise<{
+  wake_requested_at: string;
+}> {
+  return request<{ wake_requested_at: string }>("/monitor/wake", {
+    method: "POST",
+  });
+}

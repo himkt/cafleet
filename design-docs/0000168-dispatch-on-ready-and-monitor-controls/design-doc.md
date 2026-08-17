@@ -1,8 +1,8 @@
 # Dispatch-on-Ready and Monitor Controls
 
-**Status**: Approved
-**Progress**: 0/21 tasks complete
-**Last Updated**: 2026-08-16
+**Status**: Complete
+**Progress**: 21/21 tasks complete
+**Last Updated**: 2026-08-17
 
 ## Overview
 
@@ -10,12 +10,12 @@ Fix two fleet-operability gaps (GitHub issues #312 and #313) with three changes:
 
 ## Success Criteria
 
-- [ ] The canonical supervision protocol states the dispatch-on-ready rule in one place, and all four team workflow bodies (design-doc create, design-doc execute, research report, research presentation) plus their Director role files are consistent with it — no workflow instructs the Director to hold a ready member's first dispatch until other members are ready.
-- [ ] The monitor member's role file and the Director-side supervision governance both state that the monitor member — and only the monitor member — launches `cafleet monitor <fleet-id>`.
-- [ ] `POST /api/monitor/wake` against a fleet with a live monitor loop returns 200 and the loop delivers a wake within one tick (default 5 s), even when `wake_interval_seconds = 0`.
-- [ ] `POST /api/monitor/wake` against a fleet whose monitor loop is not running returns 404.
-- [ ] The WebUI monitor popover shows a "Wake now" button that triggers the endpoint and is disabled while the monitor is stopped.
-- [ ] Migration chain is contiguous 1..7 with head V7; `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass.
+- [x] The canonical supervision protocol states the dispatch-on-ready rule in one place, and all four team workflow bodies (design-doc create, design-doc execute, research report, research presentation) plus their Director role files are consistent with it — no workflow instructs the Director to hold a ready member's first dispatch until other members are ready.
+- [x] The monitor member's role file and the Director-side supervision governance both state that the monitor member — and only the monitor member — launches `cafleet monitor <fleet-id>`.
+- [x] `POST /api/monitor/wake` against a fleet with a live monitor loop returns 200 and the loop delivers a wake within one tick (default 5 s), even when `wake_interval_seconds = 0`.
+- [x] `POST /api/monitor/wake` against a fleet whose monitor loop is not running returns 404.
+- [x] The WebUI monitor popover shows a "Wake now" button that triggers the endpoint and is disabled while the monitor is stopped.
+- [x] Migration chain is contiguous 1..7 with head V7; `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, and `mise //admin:lint` pass.
 
 ---
 
@@ -123,6 +123,7 @@ Decision: the 404 gate is **liveness**, not row-existence as in `PATCH /api/moni
 |---|---|
 | `admin/src/api.ts` | `postMonitorWake(): Promise<{ wake_requested_at: string }>` → `POST /monitor/wake` (fleet header injected by `request`). |
 | `admin/src/components/AppHeader.tsx` (`MonitorIndicator` popover) | A "Wake now" button beneath the wake-interval control. Disabled when `!running` or while a request is in flight (spinner, matching the Save button's pattern). On success: show a transient note "Wake requested — fires within one tick", and fire the existing refresh callback so the polled payload picks up the new `last_wake_at` once the wake lands. Errors render in the popover's existing error slot. |
+| `admin/package.json` + `pnpm-lock.yaml` | User-approved lint-toolchain unblock: `mise //admin:lint` was failing pre-change (typescript-eslint aborts at startup under TypeScript 7). The `typescript` devDependency is aliased to the TS6 compat shim (`npm:@typescript/typescript6`) so typescript-eslint gets the TS6 API, and TypeScript 7 stays installed as the `@typescript/native` alias, whose `tsc` bin the build resolves. |
 
 `MonitorRuntime` in `admin/src/types.ts` is unchanged (GET payload unchanged).
 
@@ -146,45 +147,45 @@ Documentation first, per the project's documentation-maintenance rule; code only
 
 ### Step 1: User-facing documentation (docs/, SPEC.md)
 
-- [ ] `docs/docs/spec/webui-api.md`: add `POST /api/monitor/wake` to the routes table and as a full section (contract table above, verbatim error strings); note the liveness-vs-row-existence 404 distinction next to the PATCH section's shared-dependency note. <!-- completed: -->
-- [ ] `docs/docs/spec/data-model.md`: add `wake_requested_at` to the `monitor_runtime` columns with its NULL/coalescing semantics and both clearing writes (a delivered wake via `record_monitor_wake`, and the reclaim reset in `claim_monitor_runtime`). <!-- completed: -->
-- [ ] `docs/docs/concepts/monitoring.md`: dispatch-on-ready in the Lifecycle → Spawn narrative; monitor-loop launch ownership; a forced-wake paragraph in the cadence section (bypasses a disabled/not-due schedule, resets the baseline, ≤ one tick latency). <!-- completed: -->
-- [ ] `docs/docs/how-to/use-the-webui.md`: document the "Wake now" control alongside the wake-interval control, and correct the page's summary of what the UI can write. <!-- completed: -->
-- [ ] `SPEC.md`: `monitor_runtime` DDL with `wake_requested_at`; §6.6 loop semantics (forced-wake gate order, request consumption on a delivered wake, the claim-time reset — a pending request never survives into a later loop instance — and the echo line); §6.8 the new route's full contract. <!-- completed: -->
+- [x] `docs/docs/spec/webui-api.md`: add `POST /api/monitor/wake` to the routes table and as a full section (contract table above, verbatim error strings); note the liveness-vs-row-existence 404 distinction next to the PATCH section's shared-dependency note. <!-- completed: 2026-08-17T07:58 -->
+- [x] `docs/docs/spec/data-model.md`: add `wake_requested_at` to the `monitor_runtime` columns with its NULL/coalescing semantics and both clearing writes (a delivered wake via `record_monitor_wake`, and the reclaim reset in `claim_monitor_runtime`). <!-- completed: 2026-08-17T07:59 -->
+- [x] `docs/docs/concepts/monitoring.md`: dispatch-on-ready in the Lifecycle → Spawn narrative; monitor-loop launch ownership; a forced-wake paragraph in the cadence section (bypasses a disabled/not-due schedule, resets the baseline, ≤ one tick latency). <!-- completed: 2026-08-17T08:00 -->
+- [x] `docs/docs/how-to/use-the-webui.md`: document the "Wake now" control alongside the wake-interval control, and correct the page's summary of what the UI can write. <!-- completed: 2026-08-17T08:02 -->
+- [x] `SPEC.md`: `monitor_runtime` DDL with `wake_requested_at`; §6.6 loop semantics (forced-wake gate order, request consumption on a delivered wake, the claim-time reset — a pending request never survives into a later loop instance — and the echo line); §6.8 the new route's full contract. <!-- completed: 2026-08-17T08:06 -->
 
 ### Step 2: Skills (changes 1 and 2)
 
-- [ ] `skills/cafleet/reference/supervision.md`: add the canonical dispatch-on-ready rule and align the end-turn decision table + facilitation step; add the Director-side loop-ownership statement. <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/create/create.md`: reframe § 1f as a non-gating placement audit; Step 2 proceeds on the Drafter's ready. <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/execute.md`: reframe § 3f; key Step 4's first dispatch to the Tester's ready signal. <!-- completed: -->
-- [ ] `skills/cafleet-research/report/report.md` and `skills/cafleet-research/presentation/presentation.md`: one-sentence dispatch-on-ready echo at the spawn blocks. <!-- completed: -->
-- [ ] The four workflow Director role files: one-sentence echo with a pointer to supervision.md. <!-- completed: -->
-- [ ] `skills/cafleet/roles/monitor.md`: ownership statement in Startup; `skills/cafleet/SKILL.md` § Team supervision aligned. <!-- completed: -->
+- [x] `skills/cafleet/reference/supervision.md`: add the canonical dispatch-on-ready rule and align the end-turn decision table + facilitation step; add the Director-side loop-ownership statement. <!-- completed: 2026-08-17T08:09 -->
+- [x] `skills/cafleet-design-doc/create/create.md`: reframe § 1f as a non-gating placement audit; Step 2 proceeds on the Drafter's ready. <!-- completed: 2026-08-17T08:11 -->
+- [x] `skills/cafleet-design-doc/execute/execute.md`: reframe § 3f; key Step 4's first dispatch to the Tester's ready signal. <!-- completed: 2026-08-17T08:13 -->
+- [x] `skills/cafleet-research/report/report.md` and `skills/cafleet-research/presentation/presentation.md`: one-sentence dispatch-on-ready echo at the spawn blocks. <!-- completed: 2026-08-17T08:15 -->
+- [x] The four workflow Director role files: one-sentence echo with a pointer to supervision.md. <!-- completed: 2026-08-17T08:17 -->
+- [x] `skills/cafleet/roles/monitor.md`: ownership statement in Startup; `skills/cafleet/SKILL.md` § Team supervision aligned. <!-- completed: 2026-08-17T08:19 -->
 
 ### Step 3: Migration V7
 
-- [ ] Add `cafleet/migrations/V7__monitor_wake_request.sql` (the `ALTER TABLE` above). <!-- completed: -->
-- [ ] Update the chain-guard tests: `cafleet/src/db/mod.rs` (head `(7, "monitor_wake_request")`, versions 1..7) and every head assertion in `cafleet/tests/cli_setup_doctor.rs`. <!-- completed: -->
+- [x] Add `cafleet/migrations/V7__monitor_wake_request.sql` (the `ALTER TABLE` above). <!-- completed: 2026-08-17T08:22 -->
+- [x] Update the chain-guard tests: `cafleet/src/db/mod.rs` (head `(7, "monitor_wake_request")`, versions 1..7) and every head assertion in `cafleet/tests/cli_setup_doctor.rs`. <!-- completed: 2026-08-17T08:22 -->
 
 ### Step 4: Broker and monitor loop
 
-- [ ] `cafleet/src/broker/monitor.rs`: add `request_monitor_wake`; reset `wake_requested_at` in `claim_monitor_runtime`'s reclaim UPDATE; clear it in `record_monitor_wake`; expose it in `read_monitor_runtime`. <!-- completed: -->
-- [ ] `cafleet/src/monitor/mod.rs`: the `forced` gate in `monitor_tick` (bypass interval-0 and `wake_due`; skips leave the request pending) and the `forced wake` echo line. <!-- completed: -->
-- [ ] Broker + tick tests per the Tests table. <!-- completed: -->
+- [x] `cafleet/src/broker/monitor.rs`: add `request_monitor_wake`; reset `wake_requested_at` in `claim_monitor_runtime`'s reclaim UPDATE; clear it in `record_monitor_wake`; expose it in `read_monitor_runtime`. <!-- completed: 2026-08-17T08:22 -->
+- [x] `cafleet/src/monitor/mod.rs`: the `forced` gate in `monitor_tick` (bypass interval-0 and `wake_due`; skips leave the request pending) and the `forced wake` echo line. <!-- completed: 2026-08-17T08:22 -->
+- [x] Broker + tick tests per the Tests table. <!-- completed: 2026-08-17T08:22 -->
 
 ### Step 5: HTTP route
 
-- [ ] `cafleet/src/webui/mod.rs`: register `/monitor/wake` and implement `post_monitor_wake` (header deps → fleet check → `monitor_is_live` gate → `request_monitor_wake` → 200 payload). <!-- completed: -->
-- [ ] Route tests in `cafleet/tests/webui_routes.rs` per the Tests table. <!-- completed: -->
+- [x] `cafleet/src/webui/mod.rs`: register `/monitor/wake` and implement `post_monitor_wake` (header deps → fleet check → `monitor_is_live` gate → `request_monitor_wake` → 200 payload). <!-- completed: 2026-08-17T08:26 -->
+- [x] Route tests in `cafleet/tests/webui_routes.rs` per the Tests table. <!-- completed: 2026-08-17T08:26 -->
 
 ### Step 6: WebUI frontend
 
-- [ ] `admin/src/api.ts`: `postMonitorWake`. <!-- completed: -->
-- [ ] `admin/src/components/AppHeader.tsx`: the "Wake now" button with disabled/in-flight/success/error states. <!-- completed: -->
+- [x] `admin/src/api.ts`: `postMonitorWake`. <!-- completed: 2026-08-17T08:32 -->
+- [x] `admin/src/components/AppHeader.tsx`: the "Wake now" button with disabled/in-flight/success/error states. <!-- completed: 2026-08-17T08:32 -->
 
 ### Step 7: Verification
 
-- [ ] `mise //admin:lint`, `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass. <!-- completed: -->
+- [x] `mise //admin:lint`, `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test` all pass. <!-- completed: 2026-08-17T09:24 -->
 
 ---
 
@@ -194,3 +195,5 @@ Documentation first, per the project's documentation-maintenance rule; code only
 |------|---------|
 | 2026-08-16 | Initial draft |
 | 2026-08-16 | Reviewer round 1: claim-time reset scoped to the reclaim branch; row-vanished 404 specified; cleared-slot route test added; `wake_requested_at` lifecycle made explicit in the SPEC/data-model tasks |
+| 2026-08-17 | Execution: user-approved amendment — the pre-existing `mise //admin:lint` failure (typescript-eslint rejects TypeScript 7) is unblocked in this branch by aliasing `typescript` to the TS6 compat shim for tooling while keeping TypeScript 7 as `@typescript/native` for the build; recorded in the Step 6 WebUI table. Also: `cafleet/tests/cli_global.rs` head assertions added to the Step 3 chain-guard sweep (a Tests-table gap); live Phase D E2E skipped by user decision (criteria verified via the unit/route suites and code review). |
+| 2026-08-17 | Complete: Reviewer approved in round 1; user approved; PR #317 opened |

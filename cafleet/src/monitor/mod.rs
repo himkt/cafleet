@@ -118,9 +118,10 @@ pub fn wake_due(
 }
 
 /// One scan pass (SPEC §6.6): ownership-checked heartbeat → fleet liveness →
-/// runtime-row read (the per-tick interval re-read) → wake-interval gate →
-/// monitor-pane resolution → one fleet-level wake into the monitor member's
-/// pane → the `woke`-gated ledger write and heartbeat echo.
+/// runtime-row read (the per-tick interval re-read) → the schedule gates
+/// (wake-interval and due-check, both bypassed by a pending forced-wake
+/// request) → monitor-pane resolution → one fleet-level wake into the monitor
+/// member's pane → the `woke`-gated ledger write and heartbeat echo.
 pub fn monitor_tick(
     conn: &mut Connection,
     mux: &dyn MonitorMux,
@@ -147,16 +148,21 @@ pub fn monitor_tick(
     let wake_interval = runtime["wake_interval_seconds"]
         .as_i64()
         .expect("the owning loop stamped the interval at claim");
-    if wake_interval == 0 {
-        return Ok(TickResult::Continue);
-    }
-    if !wake_due(
-        runtime["last_wake_at"].as_str(),
-        runtime["started_at"].as_str(),
-        wake_interval,
-        now,
-    ) {
-        return Ok(TickResult::Continue);
+    // A pending operator request bypasses both schedule gates — a disabled
+    // interval and a not-yet-due wake alike.
+    let forced = !runtime["wake_requested_at"].is_null();
+    if !forced {
+        if wake_interval == 0 {
+            return Ok(TickResult::Continue);
+        }
+        if !wake_due(
+            runtime["last_wake_at"].as_str(),
+            runtime["started_at"].as_str(),
+            wake_interval,
+            now,
+        ) {
+            return Ok(TickResult::Continue);
+        }
     }
 
     // No active monitor member, a monitor with no pane, or a pane absent
@@ -184,9 +190,10 @@ pub fn monitor_tick(
         .map_err(mux_err)?;
     if woke {
         broker::record_monitor_wake(conn, fleet_id, &iso)?;
+        let label = if forced { "forced wake" } else { "wake" };
         writeln!(
             out,
-            "{iso} tick -> wake monitor {monitor_id} ({} members)",
+            "{iso} tick -> {label} monitor {monitor_id} ({} members)",
             roster.len()
         )
         .map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))?;
@@ -378,6 +385,17 @@ mod tests {
             .unwrap()
             .unwrap()["last_wake_at"]
             .clone()
+    }
+
+    fn wake_requested_at(conn: &rusqlite::Connection, fleet_id: i64) -> Value {
+        broker::read_monitor_runtime(conn, fleet_id)
+            .unwrap()
+            .unwrap()["wake_requested_at"]
+            .clone()
+    }
+
+    fn request_wake(conn: &mut rusqlite::Connection, fleet_id: i64, when: DateTime<Utc>) {
+        assert!(broker::request_monitor_wake(conn, fleet_id, &format_utc(when)).unwrap());
     }
 
     mod constants {
@@ -946,6 +964,172 @@ mod tests {
                 format!("{iso} tick -> wake monitor {monitor_id} (0 members)\n")
             );
             assert_eq!(last_wake_at(&conn, fleet_id), iso.as_str());
+        }
+
+        #[test]
+        fn a_forced_wake_fires_when_the_interval_is_zero() {
+            let dir = TempDir::new().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet_id, _, _, _, _) = wake_fleet(&mut conn);
+            let now = base_now();
+            claim_with_interval(&mut conn, fleet_id, own_pid(), 0, now);
+            let mux = FakeMux::with_live_panes(&["%0", "%1", "%2", "%4"]);
+            request_wake(&mut conn, fleet_id, now + Duration::seconds(1));
+
+            let (result, echo) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(4),
+            );
+            assert!(matches!(result, TickResult::Continue));
+            assert_eq!(
+                mux.wake_count(),
+                1,
+                "an explicit operator request bypasses the disabled schedule"
+            );
+            assert!(!echo.is_empty());
+        }
+
+        #[test]
+        fn a_forced_wake_fires_before_the_schedule_is_due_and_resets_the_baseline() {
+            let dir = TempDir::new().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet_id, _, _, _, _) = wake_fleet(&mut conn);
+            let now = base_now();
+            claim(&mut conn, fleet_id, own_pid(), now);
+            let mux = FakeMux::with_live_panes(&["%0", "%1", "%2", "%4"]);
+
+            let (_, echo) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(95),
+            );
+            assert_eq!(
+                mux.wake_count(),
+                0,
+                "no request → the not-yet-due gate holds"
+            );
+            assert!(echo.is_empty());
+
+            request_wake(&mut conn, fleet_id, now + Duration::seconds(99));
+            let (_, _) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(100),
+            );
+            assert_eq!(
+                mux.wake_count(),
+                1,
+                "100 < 600 since started_at, but the request bypasses the wake_due gate"
+            );
+
+            let (_, echo) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(699),
+            );
+            assert_eq!(
+                mux.wake_count(),
+                1,
+                "599 < 600 since the forced wake → the baseline reset gates the schedule"
+            );
+            assert!(echo.is_empty());
+
+            let (_, echo) = tick(
+                &mut conn,
+                &mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(700),
+            );
+            assert_eq!(mux.wake_count(), 2, "600 since the forced wake → due again");
+            assert!(
+                !echo.contains("forced"),
+                "a scheduled wake keeps the unchanged echo line: {echo}"
+            );
+        }
+
+        #[test]
+        fn a_skipped_forced_wake_leaves_the_request_pending_and_retries() {
+            let dir = TempDir::new().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet_id, _, _, _, _) = wake_fleet(&mut conn);
+            let now = base_now();
+            claim(&mut conn, fleet_id, own_pid(), now);
+            let requested_at = now + Duration::seconds(1);
+            request_wake(&mut conn, fleet_id, requested_at);
+
+            let dead_pane_mux = FakeMux::with_live_panes(&["%0", "%2", "%4"]);
+            let (result, echo) = tick(
+                &mut conn,
+                &dead_pane_mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(5),
+            );
+            assert!(matches!(result, TickResult::Continue));
+            assert_eq!(
+                dead_pane_mux.wake_count(),
+                0,
+                "no live monitor pane → no wake"
+            );
+            assert!(echo.is_empty());
+            assert_eq!(
+                wake_requested_at(&conn, fleet_id),
+                format_utc(requested_at).as_str(),
+                "a skipped wake never consumes the request"
+            );
+            assert_eq!(last_wake_at(&conn, fleet_id), Value::Null);
+
+            let live_pane_mux = FakeMux::with_live_panes(&["%0", "%1", "%2", "%4"]);
+            let (_, _) = tick(
+                &mut conn,
+                &live_pane_mux,
+                fleet_id,
+                own_pid(),
+                now + Duration::seconds(10),
+            );
+            assert_eq!(
+                live_pane_mux.wake_count(),
+                1,
+                "the pending request retries on the next tick"
+            );
+        }
+
+        #[test]
+        fn a_delivered_forced_wake_clears_the_request_stamps_the_ledger_and_echoes() {
+            let dir = TempDir::new().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet_id, _, monitor_id, _, _) = wake_fleet(&mut conn);
+            let now = base_now();
+            claim(&mut conn, fleet_id, own_pid(), now);
+            let mux = FakeMux::with_live_panes(&["%0", "%1", "%2", "%4"]);
+            request_wake(&mut conn, fleet_id, now + Duration::seconds(1));
+
+            let wake_at = now + Duration::seconds(5);
+            let (result, echo) = tick(&mut conn, &mux, fleet_id, own_pid(), wake_at);
+            assert!(matches!(result, TickResult::Continue));
+            assert_eq!(mux.wake_count(), 1);
+
+            let iso = format_utc(wake_at);
+            assert_eq!(
+                echo,
+                format!("{iso} tick -> forced wake monitor {monitor_id} (2 members)\n")
+            );
+            assert_eq!(last_wake_at(&conn, fleet_id), iso.as_str());
+            assert_eq!(
+                wake_requested_at(&conn, fleet_id),
+                Value::Null,
+                "the delivered wake consumes the request"
+            );
         }
     }
 

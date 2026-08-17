@@ -68,7 +68,14 @@ value at every `cafleet monitor` start (claim and reclaim), re-read by the loop 
 every tick, overwritten by `PATCH /api/monitor`, and preserved across a
 loop stop like `tick_seconds`. It is `NULL` only in rows that predate the
 column and have not been re-claimed since — a running loop's row is always
-stamped. The cadence semantics are defined in
+stamped. The row also carries `wake_requested_at`, the nullable UTC ISO
+timestamp of the latest pending forced-wake request
+(`POST /api/monitor/wake`): `NULL` when no request is pending, and repeat
+requests overwrite the timestamp, coalescing into a single wake. Exactly two
+writes clear it: a delivered wake — scheduled or forced — stamps
+`last_wake_at` and clears the request in the same write, and a new loop
+instance's reclaim resets it, so a pending request never survives into a
+later loop instance. The cadence semantics are defined in
 [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
 
 ### `asset_installs`

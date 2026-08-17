@@ -1,5 +1,5 @@
 //! Step 8 contract tests: the WebUI HTTP app, in-process via
-//! `tower::ServiceExt` (SPEC §6.8) — the 8 routes, the `X-Fleet-Id` header
+//! `tower::ServiceExt` (SPEC §6.8) — the 9 routes, the `X-Fleet-Id` header
 //! dependency, the wire renames, the 422 `{"detail": <string>}` body, and the
 //! SPA fallback over the embedded dist.
 //!
@@ -719,6 +719,131 @@ async fn patch_monitor_updates_the_wake_interval_with_the_pinned_error_contract(
     assert_eq!(
         body, r#"{"wake_interval_seconds":9223372036854775807}"#,
         "i64::MAX is the inclusive domain ceiling"
+    );
+}
+
+#[tokio::test]
+async fn post_monitor_wake_requests_a_forced_wake_with_the_pinned_error_contract() {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (fleet_id, _, _, _) = seeded_fleet(&mut conn);
+    let app = app(&url);
+
+    let (status, body) = call(app.clone(), "POST", "/api/monitor/wake", None, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, r#"{"detail":"X-Fleet-Id header required"}"#);
+
+    let (status, body) = call(app.clone(), "POST", "/api/monitor/wake", Some(""), None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body, r#"{"detail":"X-Fleet-Id header required"}"#,
+        "empty counts as missing"
+    );
+
+    let (status, body) = call(app.clone(), "POST", "/api/monitor/wake", Some("abc"), None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, r#"{"detail":"X-Fleet-Id must be an integer"}"#);
+
+    let (status, body) = call(app.clone(), "POST", "/api/monitor/wake", Some("999"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body, r#"{"detail":"Fleet not found"}"#);
+
+    let (status, body) = call(app.clone(), "POST", "/api/monitor/wake", Some("1"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        body, r#"{"detail":"monitor is not running for this fleet"}"#,
+        "no runtime row — the fleet's monitor has never run"
+    );
+
+    let pid = i64::from(std::process::id());
+    let now = cafleet::time::now_utc();
+    broker::claim_monitor_runtime(
+        &mut conn,
+        fleet_id,
+        pid,
+        5,
+        600,
+        &cafleet::time::format_utc(now),
+    )
+    .unwrap();
+    let stale = cafleet::time::format_utc(now - chrono::Duration::seconds(100));
+    conn.execute(
+        "UPDATE monitor_runtime SET last_tick_at=?1, started_at=?1 WHERE fleet_id=?2",
+        rusqlite::params![stale, fleet_id],
+    )
+    .unwrap();
+    let (status, body) = call(app.clone(), "POST", "/api/monitor/wake", Some("1"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        body, r#"{"detail":"monitor is not running for this fleet"}"#,
+        "a stale heartbeat reads as not running"
+    );
+    let row = broker::read_monitor_runtime(&conn, fleet_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        row["wake_requested_at"],
+        Value::Null,
+        "a refused request never stamps the row"
+    );
+
+    broker::claim_monitor_runtime(
+        &mut conn,
+        fleet_id,
+        pid,
+        5,
+        600,
+        &cafleet::time::format_utc(cafleet::time::now_utc()),
+    )
+    .unwrap();
+    broker::clear_monitor_runtime(&mut conn, fleet_id, pid).unwrap();
+    let (status, body) = call(app.clone(), "POST", "/api/monitor/wake", Some("1"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        body, r#"{"detail":"monitor is not running for this fleet"}"#,
+        "a cleared slot (pid NULL after a clean loop exit) is stopped"
+    );
+
+    broker::claim_monitor_runtime(
+        &mut conn,
+        fleet_id,
+        pid,
+        5,
+        600,
+        &cafleet::time::format_utc(cafleet::time::now_utc()),
+    )
+    .unwrap();
+    let (status, body) = call(app.clone(), "POST", "/api/monitor/wake", Some("1"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let payload = parsed(&body);
+    assert_eq!(
+        keys(&payload),
+        ["wake_requested_at"],
+        "the 200 payload carries exactly the stamp"
+    );
+    let stamp = payload["wake_requested_at"]
+        .as_str()
+        .expect("a UTC ISO string");
+    let row = broker::read_monitor_runtime(&conn, fleet_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        row["wake_requested_at"], stamp,
+        "the 200 stamps the row with the returned timestamp"
+    );
+
+    let (status, body) = call(
+        app,
+        "POST",
+        "/api/monitor/wake",
+        Some("1"),
+        Some(json!({"ignored": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        parsed(&body)["wake_requested_at"].is_string(),
+        "any request body is ignored"
     );
 }
 

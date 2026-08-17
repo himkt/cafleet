@@ -54,11 +54,13 @@ struct RuntimeRow {
     tick_seconds: i64,
     wake_interval_seconds: Option<i64>,
     last_wake_at: Option<String>,
+    wake_requested_at: Option<String>,
 }
 
 fn runtime_row(conn: &Connection, fleet_id: i64) -> Result<Option<RuntimeRow>, CafleetError> {
     conn.query_row(
-        "SELECT pid, started_at, last_tick_at, tick_seconds, wake_interval_seconds, last_wake_at \
+        "SELECT pid, started_at, last_tick_at, tick_seconds, wake_interval_seconds, last_wake_at, \
+                wake_requested_at \
          FROM monitor_runtime WHERE fleet_id=?1",
         [fleet_id],
         |row| {
@@ -69,6 +71,7 @@ fn runtime_row(conn: &Connection, fleet_id: i64) -> Result<Option<RuntimeRow>, C
                 tick_seconds: row.get(3)?,
                 wake_interval_seconds: row.get(4)?,
                 last_wake_at: row.get(5)?,
+                wake_requested_at: row.get(6)?,
             })
         },
     )
@@ -87,14 +90,16 @@ fn runtime_live(row: &RuntimeRow, now: DateTime<Utc>) -> bool {
 }
 
 /// Stamp the fleet's durable wake ledger; called only after a delivered
-/// Director wake (the `woke`-gated write, SPEC §6.6).
+/// Director wake (the `woke`-gated write, SPEC §6.6). The same write clears
+/// any pending forced-wake request — the wake the operator asked for has
+/// happened, whether it fired forced or on schedule.
 pub fn record_monitor_wake(
     conn: &mut Connection,
     fleet_id: i64,
     when: &str,
 ) -> Result<(), CafleetError> {
     conn.execute(
-        "UPDATE monitor_runtime SET last_wake_at=?1 WHERE fleet_id=?2",
+        "UPDATE monitor_runtime SET last_wake_at=?1, wake_requested_at=NULL WHERE fleet_id=?2",
         params![when, fleet_id],
     )
     .map_err(db_err)?;
@@ -217,7 +222,7 @@ pub fn claim_monitor_runtime(
             tx.execute(
                 "UPDATE monitor_runtime \
                  SET pid=?1, started_at=?2, last_tick_at=?2, tick_seconds=?3, \
-                     wake_interval_seconds=?4 \
+                     wake_interval_seconds=?4, wake_requested_at=NULL \
                  WHERE fleet_id=?5",
                 params![pid, when, tick_seconds, wake_interval, fleet_id],
             )
@@ -226,6 +231,23 @@ pub fn claim_monitor_runtime(
     }
     tx.commit().map_err(db_err)?;
     Ok(true)
+}
+
+/// Ownership-free forced-wake request (the WebUI `POST /api/monitor/wake`
+/// write): `false` ⇔ no row. Repeat requests overwrite the timestamp, so
+/// they coalesce into a single wake.
+pub fn request_monitor_wake(
+    conn: &mut Connection,
+    fleet_id: i64,
+    when: &str,
+) -> Result<bool, CafleetError> {
+    let changed = conn
+        .execute(
+            "UPDATE monitor_runtime SET wake_requested_at=?1 WHERE fleet_id=?2",
+            params![when, fleet_id],
+        )
+        .map_err(db_err)?;
+    Ok(changed == 1)
 }
 
 /// Ownership-free interval update (the WebUI `PATCH /api/monitor` write):
@@ -291,6 +313,7 @@ pub fn read_monitor_runtime(
             "tick_seconds": row.tick_seconds,
             "wake_interval_seconds": row.wake_interval_seconds,
             "last_wake_at": row.last_wake_at,
+            "wake_requested_at": row.wake_requested_at,
         })
     }))
 }
@@ -944,5 +967,88 @@ mod tests {
         let premigration =
             broker::monitor_runtime_payload(&conn, fleet_id, now + Duration::seconds(100)).unwrap();
         assert_eq!(premigration["wake_interval_seconds"], Value::Null);
+    }
+
+    #[test]
+    fn request_monitor_wake_stamps_the_row_and_reports_a_never_run_fleet() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let when = format_utc(base_time());
+        assert!(
+            !broker::request_monitor_wake(&mut conn, fleet_id, &when).unwrap(),
+            "no row ⇔ the fleet's monitor has never run"
+        );
+
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
+        assert!(broker::request_monitor_wake(&mut conn, fleet_id, &when).unwrap());
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row["wake_requested_at"], when);
+
+        let later = format_utc(base_time() + Duration::seconds(30));
+        assert!(broker::request_monitor_wake(&mut conn, fleet_id, &later).unwrap());
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row["wake_requested_at"], later,
+            "repeat requests coalesce into the latest stamp"
+        );
+    }
+
+    #[test]
+    fn a_fresh_claim_reads_a_null_request_and_a_reclaim_resets_a_pending_one() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let when = format_utc(base_time());
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row["wake_requested_at"],
+            Value::Null,
+            "a fresh slot has no pending request"
+        );
+
+        assert!(broker::request_monitor_wake(&mut conn, fleet_id, &when).unwrap());
+
+        // stale_after = max(3 * 5, 15) = 15; the 100-second-old heartbeat lets
+        // a restarted loop reclaim the slot.
+        let later = format_utc(base_time() + Duration::seconds(100));
+        assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, 600, &later).unwrap());
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row["wake_requested_at"],
+            Value::Null,
+            "a pending request never survives into a later loop instance"
+        );
+    }
+
+    #[test]
+    fn record_monitor_wake_clears_a_pending_request() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
+        let when = format_utc(base_time());
+        broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
+        assert!(broker::request_monitor_wake(&mut conn, fleet_id, &when).unwrap());
+
+        let later = format_utc(base_time() + Duration::seconds(10));
+        broker::record_monitor_wake(&mut conn, fleet_id, &later).unwrap();
+        let row = broker::read_monitor_runtime(&conn, fleet_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row["last_wake_at"], later);
+        assert_eq!(
+            row["wake_requested_at"],
+            Value::Null,
+            "a delivered wake consumes the request in the same write"
+        );
     }
 }

@@ -34,7 +34,10 @@ while every other `{placeholder}` still resolves from your own section only.
    `cafleet message send --from-member-id <my-member-id> --to-member-id
    <director-member-id> "ready"`.
 2. Launch the heartbeat in THIS pane as a background task ({bg_run}):
-   `cafleet monitor <fleet-id>`.
+   `cafleet monitor <fleet-id>`. You launch the loop in your own pane as
+   part of this startup sequence, and you are the only party that does so —
+   the Director never runs the loop itself (it spawns you and waits for
+   `monitor live`), and ordinary members never run it.
 3. Confirm the startup line in the task output:
    `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)`.
    A task that exits instead (runtime-claim conflict, dead fleet) is a failed

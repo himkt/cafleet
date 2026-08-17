@@ -1,4 +1,4 @@
-//! The admin WebUI HTTP app (SPEC §6.8): the 8 `/api` routes behind the
+//! The admin WebUI HTTP app (SPEC §6.8): the 9 `/api` routes behind the
 //! `X-Fleet-Id` header dependency, the wire renames (`status_state`→`status`,
 //! `text`→`body`), the `{"detail": <string>}` error shape (422 included), and
 //! the SPA fallback over the dist embedded at build time. Handlers bridge to
@@ -20,7 +20,7 @@ use crate::cli::helpers::CliNotifier;
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::format_json;
-use crate::time::now_utc;
+use crate::time::{format_utc, now_utc};
 
 const RESERVED_PREFIXES: [&str; 2] = ["ui", "api"];
 
@@ -39,6 +39,7 @@ pub fn create_app(database_url: &str) -> Result<Router, CafleetError> {
         .route("/fleets", get(list_fleets))
         .route("/members", get(roster))
         .route("/monitor", get(monitor).patch(patch_monitor))
+        .route("/monitor/wake", post(post_monitor_wake))
         .route("/members/{member_id}/inbox", get(inbox))
         .route("/members/{member_id}/sent", get(sent))
         .route("/timeline", get(timeline))
@@ -245,6 +246,41 @@ async fn patch_monitor(State(state): State<AppState>, headers: HeaderMap, body: 
                 StatusCode::NOT_FOUND,
                 "monitor has never run for this fleet",
             ),
+            Err(error) => broker_500(error),
+        }
+    })
+    .await
+}
+
+/// The 404 gate is liveness, not row existence as in `PATCH /api/monitor` —
+/// a wake request needs a live consumer. The check-then-write pair is not
+/// transactional; a row that vanishes in between (`request_monitor_wake`
+/// returning `false` after the gate passed) yields the same 404. Any request
+/// body is ignored.
+async fn post_monitor_wake(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let fleet_id = match fleet_header(&headers) {
+        Ok(fleet_id) => fleet_id,
+        Err(response) => return *response,
+    };
+    run_blocking(state, move |conn| {
+        if let Err(response) = require_fleet(conn, fleet_id) {
+            return *response;
+        }
+        let not_running = || {
+            detail(
+                StatusCode::NOT_FOUND,
+                "monitor is not running for this fleet",
+            )
+        };
+        match broker::monitor_is_live(conn, fleet_id, now_utc()) {
+            Ok(true) => {}
+            Ok(false) => return not_running(),
+            Err(error) => return broker_500(error),
+        }
+        let when = format_utc(now_utc());
+        match broker::request_monitor_wake(conn, fleet_id, &when) {
+            Ok(true) => json_response(StatusCode::OK, &json!({"wake_requested_at": when})),
+            Ok(false) => not_running(),
             Err(error) => broker_500(error),
         }
     })
