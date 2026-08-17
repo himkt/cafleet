@@ -123,6 +123,7 @@ Decision: the 404 gate is **liveness**, not row-existence as in `PATCH /api/moni
 |---|---|
 | `admin/src/api.ts` | `postMonitorWake(): Promise<{ wake_requested_at: string }>` → `POST /monitor/wake` (fleet header injected by `request`). |
 | `admin/src/components/AppHeader.tsx` (`MonitorIndicator` popover) | A "Wake now" button beneath the wake-interval control. Disabled when `!running` or while a request is in flight (spinner, matching the Save button's pattern). On success: show a transient note "Wake requested — fires within one tick", and fire the existing refresh callback so the polled payload picks up the new `last_wake_at` once the wake lands. Errors render in the popover's existing error slot. |
+| `admin/package.json` + `pnpm-lock.yaml` | User-approved lint-toolchain unblock: `mise //admin:lint` was failing pre-change (typescript-eslint aborts at startup under TypeScript 7). The `typescript` devDependency is aliased to the TS6 compat shim (`npm:@typescript/typescript6`) so typescript-eslint gets the TS6 API, and TypeScript 7 stays installed as the `@typescript/native` alias, whose `tsc` bin the build resolves. |
 
 `MonitorRuntime` in `admin/src/types.ts` is unchanged (GET payload unchanged).
 
@@ -194,3 +195,4 @@ Documentation first, per the project's documentation-maintenance rule; code only
 |------|---------|
 | 2026-08-16 | Initial draft |
 | 2026-08-16 | Reviewer round 1: claim-time reset scoped to the reclaim branch; row-vanished 404 specified; cleared-slot route test added; `wake_requested_at` lifecycle made explicit in the SPEC/data-model tasks |
+| 2026-08-17 | Execution: user-approved amendment — the pre-existing `mise //admin:lint` failure (typescript-eslint rejects TypeScript 7) is unblocked in this branch by aliasing `typescript` to the TS6 compat shim for tooling while keeping TypeScript 7 as `@typescript/native` for the build; recorded in the Step 6 WebUI table. Also: `cafleet/tests/cli_global.rs` head assertions added to the Step 3 chain-guard sweep (a Tests-table gap); live Phase D E2E skipped by user decision (criteria verified via the unit/route suites and code review). |
