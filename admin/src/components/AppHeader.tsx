@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, RefreshCw } from "lucide-react";
 import type { MonitorRuntime } from "../types";
-import { patchMonitor } from "../api";
+import { patchMonitor, postMonitorWake } from "../api";
 import ThemeToggle from "./ThemeToggle";
 
 function BrandMark() {
@@ -35,6 +35,8 @@ function MonitorIndicator({
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [waking, setWaking] = useState(false);
+  const [wakeRequested, setWakeRequested] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -68,6 +70,7 @@ function MonitorIndicator({
           : String(monitor.wake_interval_seconds),
       );
       setError(null);
+      setWakeRequested(false);
     }
     setOpen((wasOpen) => !wasOpen);
   };
@@ -85,6 +88,23 @@ function MonitorIndicator({
       setSaving(false);
     }
     setOpen(false);
+    onSaved();
+  };
+
+  const wake = async () => {
+    if (!running || waking) return;
+    setWaking(true);
+    setError(null);
+    setWakeRequested(false);
+    try {
+      await postMonitorWake();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Wake failed");
+      return;
+    } finally {
+      setWaking(false);
+    }
+    setWakeRequested(true);
     onSaved();
   };
 
@@ -162,6 +182,26 @@ function MonitorIndicator({
             )}
             Save
           </button>
+          <button
+            type="button"
+            onClick={() => void wake()}
+            disabled={!running || waking}
+            className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-2 py-1.5 text-xs font-medium hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {waking && (
+              <LoaderCircle
+                size={12}
+                className="motion-safe:animate-spin"
+                aria-hidden="true"
+              />
+            )}
+            Wake now
+          </button>
+          {wakeRequested && (
+            <p className="mt-1.5 text-[11px] text-text-muted">
+              Wake requested — fires within one tick.
+            </p>
+          )}
         </div>
       )}
     </div>

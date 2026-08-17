@@ -1,7 +1,7 @@
 # Dispatch-on-Ready and Monitor Controls
 
 **Status**: Approved
-**Progress**: 18/21 tasks complete
+**Progress**: 20/21 tasks complete
 **Last Updated**: 2026-08-17
 
 ## Overview
@@ -179,8 +179,8 @@ Documentation first, per the project's documentation-maintenance rule; code only
 
 ### Step 6: WebUI frontend
 
-- [ ] `admin/src/api.ts`: `postMonitorWake`. <!-- completed: -->
-- [ ] `admin/src/components/AppHeader.tsx`: the "Wake now" button with disabled/in-flight/success/error states. <!-- completed: -->
+- [x] `admin/src/api.ts`: `postMonitorWake`. <!-- completed: 2026-08-17T08:32 -->
+- [x] `admin/src/components/AppHeader.tsx`: the "Wake now" button with disabled/in-flight/success/error states. <!-- completed: 2026-08-17T08:32 -->
 
 ### Step 7: Verification
 
