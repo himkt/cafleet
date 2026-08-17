@@ -1,7 +1,7 @@
 # Dispatch-on-Ready and Monitor Controls
 
 **Status**: Approved
-**Progress**: 16/21 tasks complete
+**Progress**: 18/21 tasks complete
 **Last Updated**: 2026-08-17
 
 ## Overview
@@ -174,8 +174,8 @@ Documentation first, per the project's documentation-maintenance rule; code only
 
 ### Step 5: HTTP route
 
-- [ ] `cafleet/src/webui/mod.rs`: register `/monitor/wake` and implement `post_monitor_wake` (header deps → fleet check → `monitor_is_live` gate → `request_monitor_wake` → 200 payload). <!-- completed: -->
-- [ ] Route tests in `cafleet/tests/webui_routes.rs` per the Tests table. <!-- completed: -->
+- [x] `cafleet/src/webui/mod.rs`: register `/monitor/wake` and implement `post_monitor_wake` (header deps → fleet check → `monitor_is_live` gate → `request_monitor_wake` → 200 payload). <!-- completed: 2026-08-17T08:26 -->
+- [x] Route tests in `cafleet/tests/webui_routes.rs` per the Tests table. <!-- completed: 2026-08-17T08:26 -->
 
 ### Step 6: WebUI frontend
 
