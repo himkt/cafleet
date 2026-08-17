@@ -132,13 +132,13 @@ Spawn per the Step 1c spawn frame (both normal and resume modes). Worked example
 
 Spawn per the Step 1c spawn frame (audit file `${BASE}/.prompts/reviewer-<UTC-compact>.md`).
 
-#### 1f. Verify members are live
+#### 1f. Spawn-health placement audit (non-gating)
 
 ```bash
 cafleet member list <fleet-id>
 ```
 
-Both members must show `status: active` with a non-null `pane_id`. If either is missing or pending, retry the spawn before proceeding.
+Each spawned member should show `status: active` with a non-null `pane_id`; a missing or pending row means that spawn failed — retry it. This audit checks pane placement only and gates nothing: it does not gate Step 2 or any dispatch. Act on each member's ready signal as it arrives, per supervision's dispatch-on-ready rule ([`supervision.md`](../../cafleet/reference/supervision.md) § *Spawn Protocol* → *Dispatch-on-ready*) — the Drafter's first task is embedded in its spawn prompt and needs no separate dispatch, so Step 2 proceeds on the Drafter's ready signal regardless of the Reviewer's state.
 
 ### Step 2: Clarification Phase (Director)
 

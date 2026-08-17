@@ -107,7 +107,7 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 - `roles/transcript.md`
 - `roles/visual-reviewer.md`
 
-> **Spawn mechanics**: render each spawn prompt to `${BASE}/.prompts/<role>-<UTC-compact>.md` and spawn from that file by path — the two-step, the path-by-reference requirement, and the brace-doubling rule are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol*.
+> **Spawn mechanics**: render each spawn prompt to `${BASE}/.prompts/<role>-<UTC-compact>.md` and spawn from that file by path — the two-step, the path-by-reference requirement, and the brace-doubling rule are canonical in the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol*. Members are spawned on demand and each gets its first task on its own ready signal, never held for other members' readiness (dispatch-on-ready, canonical in the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) § *Spawn Protocol*).
 
 #### 1d. Spawn Presentation + Transcript in parallel
 

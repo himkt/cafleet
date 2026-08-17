@@ -208,13 +208,13 @@ Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/tester-<UTC-compact>.
 
 Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/verifier-<UTC-compact>.md`).
 
-#### 3f. Verify members are live
+#### 3f. Spawn-health placement audit (non-gating)
 
 ```bash
 cafleet member list <fleet-id>
 ```
 
-All spawned members must show `status: active` with a non-null `pane_id`. If any is missing or pending, retry the spawn before proceeding.
+Each spawned member should show `status: active` with a non-null `pane_id`; a missing or pending row means that spawn failed — retry it. This audit checks pane placement only and gates nothing: it does not gate Step 4 or any dispatch. Act on each member's ready signal as it arrives, per supervision's dispatch-on-ready rule ([`supervision.md`](../../cafleet/reference/supervision.md) § *Spawn Protocol* → *Dispatch-on-ready*).
 
 See [roles/director.md](roles/director.md) for commit message conventions.
 
@@ -226,7 +226,7 @@ For each step in the design document:
 
 **Skip this phase entirely when the Tester was not spawned** (Programmer-only team composition for config/documentation-only steps). Proceed directly to Phase B and assign the step to the Programmer without a separate test-writing commit.
 
-1. **Assign**: Send the Tester a verb + pointer poke. The Tester reads the step description and specification directly from the design document at the pointer.
+1. **Assign**: Send the Tester a verb + pointer poke. Fire this first dispatch on the Tester's own ready signal — its input, the approved design doc, already exists — never on full-team placement (dispatch-on-ready, § 3f). The Tester reads the step description and specification directly from the design document at the pointer.
    ```bash
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <tester-member-id> "ready (paragraph-Implementation > Step N)"

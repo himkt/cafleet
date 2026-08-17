@@ -1,7 +1,7 @@
 # Dispatch-on-Ready and Monitor Controls
 
 **Status**: Approved
-**Progress**: 5/21 tasks complete
+**Progress**: 11/21 tasks complete
 **Last Updated**: 2026-08-17
 
 ## Overview
@@ -154,12 +154,12 @@ Documentation first, per the project's documentation-maintenance rule; code only
 
 ### Step 2: Skills (changes 1 and 2)
 
-- [ ] `skills/cafleet/reference/supervision.md`: add the canonical dispatch-on-ready rule and align the end-turn decision table + facilitation step; add the Director-side loop-ownership statement. <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/create/create.md`: reframe § 1f as a non-gating placement audit; Step 2 proceeds on the Drafter's ready. <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/execute.md`: reframe § 3f; key Step 4's first dispatch to the Tester's ready signal. <!-- completed: -->
-- [ ] `skills/cafleet-research/report/report.md` and `skills/cafleet-research/presentation/presentation.md`: one-sentence dispatch-on-ready echo at the spawn blocks. <!-- completed: -->
-- [ ] The four workflow Director role files: one-sentence echo with a pointer to supervision.md. <!-- completed: -->
-- [ ] `skills/cafleet/roles/monitor.md`: ownership statement in Startup; `skills/cafleet/SKILL.md` § Team supervision aligned. <!-- completed: -->
+- [x] `skills/cafleet/reference/supervision.md`: add the canonical dispatch-on-ready rule and align the end-turn decision table + facilitation step; add the Director-side loop-ownership statement. <!-- completed: 2026-08-17T08:09 -->
+- [x] `skills/cafleet-design-doc/create/create.md`: reframe § 1f as a non-gating placement audit; Step 2 proceeds on the Drafter's ready. <!-- completed: 2026-08-17T08:11 -->
+- [x] `skills/cafleet-design-doc/execute/execute.md`: reframe § 3f; key Step 4's first dispatch to the Tester's ready signal. <!-- completed: 2026-08-17T08:13 -->
+- [x] `skills/cafleet-research/report/report.md` and `skills/cafleet-research/presentation/presentation.md`: one-sentence dispatch-on-ready echo at the spawn blocks. <!-- completed: 2026-08-17T08:15 -->
+- [x] The four workflow Director role files: one-sentence echo with a pointer to supervision.md. <!-- completed: 2026-08-17T08:17 -->
+- [x] `skills/cafleet/roles/monitor.md`: ownership statement in Startup; `skills/cafleet/SKILL.md` § Team supervision aligned. <!-- completed: 2026-08-17T08:19 -->
 
 ### Step 3: Migration V7
 
