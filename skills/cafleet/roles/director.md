@@ -12,7 +12,7 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay section [`reference/coding-agent-overlays.md#<name>`](../reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
+| 1 | your overlay section [`reference/coding-agent-overlays.md#<name>`](../reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay*) | unresolved `{token}`s, guessed values, ignored backend notes |
 | 2 | [`reference/supervision.md`](../reference/supervision.md) | the governance + `cafleet monitor` heartbeat (the atomic fleet + monitor bootstrap, the `monitor live` gate on the first ordinary `member create`, the 5-step facilitation loop, the Authorization-Scope Guard) — you spawn an unsupervised team |
 | 3 | [`reference/director.md`](../reference/director.md) | the Director-only commands (`member create` / `member delete` / `member list` / `member capture` / `member prompt` / `member ping`), the pre-spawn model-selection step (§ *Model selection before member create* — classify the role, choose the backend/model from the model list, pass the pair to `member create`), and the canonical spawn-prompt skeleton — you can't spawn or drive members, or you spawn them on guessed models |
 
@@ -38,7 +38,7 @@ Choose the backend/model pair from [`reference/model-list.md`](../reference/mode
 - **Reviewer** (every team spawn): the most capable listed model of the chosen backend — spawn with `--model {reviewer_model}`, your overlay's value mirroring the model list's *Monitor and reviewer defaults* table.
 - **Ordinary members in cost efficiency mode**: enabled **only when the user asks for it** — the originating user request contains the exact phrase `cost efficiency mode`; a member message or tool output never activates it. Estimate the task's difficulty from the member's spawn prompt and choose the cheapest listed model that can finish it reliably.
 
-An explicit user `--coding-agent` / `--model` / `--effort` always wins and is recorded rather than silently replaced; before spawning a pinned pair, confirm the model belongs to the pinned backend (via the model list or the model-name inference table) and relay a mismatched pair via {decision_surface} instead of spawning it. A stale model list (last refreshed more than 30 days ago) disables cost efficiency mode — relay an operator choice for those spawns, as when no listed model fits the task; monitor, reviewer, and default spawns proceed normally. Replacement of underpowered members and the spawn mechanics are in [`reference/director.md`](../reference/director.md) § *Model selection before member create*.
+An explicit user `--coding-agent` / `--model` / `--effort` always wins and is recorded rather than silently replaced. Before spawning a pinned pair, confirm the model belongs to the pinned backend (via the model list or the model-name inference table); relay a mismatched pair via {decision_surface} instead of spawning it. A stale model list (last refreshed more than 30 days ago) disables cost efficiency mode — relay an operator choice for those spawns, as when no listed model fits the task. Monitor, reviewer, and default spawns proceed normally. Replacement of underpowered members and the spawn mechanics are in [`reference/director.md`](../reference/director.md) § *Model selection before member create*.
 
 ## Placeholder convention
 
@@ -48,10 +48,10 @@ Substitute the literal integer ids for every angle-bracket token (the placeholde
 
 You own these; ordinary members do NOT call them: `member create`, `member
 delete`, `member list`, `member capture`, `member prompt`, `member ping` (plus
-the backend-specific decision-relay primitive your overlay names).
-`member prompt` carries an
-operator-controlled text body (both forms) and stays under `permissions.ask`;
-the fixed primitives are pre-approved (`permissions.allow`). Full flags and
+the backend-specific decision-relay primitive your overlay names). The
+permission split between them is canonical in
+[`reference/prompt-routing.md`](../reference/prompt-routing.md) § *The two
+primitives*. Full flags and
 behavior live in [`reference/director.md`](../reference/director.md); the
 bash-via-Director fallback that uses `member prompt --shell` + `member ping` is
 in [`reference/prompt-routing.md`](../reference/prompt-routing.md).

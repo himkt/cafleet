@@ -1,7 +1,7 @@
 # Affirmative & Simplification Sweep of docs/, skills/, README, SPEC, and Rules
 
 **Status**: Approved
-**Progress**: 7/28 tasks complete
+**Progress**: 13/28 tasks complete
 **Last Updated**: 2026-08-18
 
 ## Overview
@@ -149,12 +149,12 @@ Per the user's answer to Q2, deletions of reactive residue that change what agen
 
 ### Step 2: skills/cafleet tree
 
-- [ ] `SKILL.md`: compress § Team supervision to 2–3 sentences + the two existing pointers; split the § Send run-on into three sentences; shorten the Required-reading row #1 loss cell to "unresolved `{token}`s, guessed values, ignored backend notes" — mirrored in lockstep in the three role files <!-- completed: -->
-- [ ] `supervision.md` deduplication: re-engagement channels enumerated once (Facilitation cue), passive-hold owned by § Authorization-Scope Guard, Idle-Semantics bullets defer to the gate table's state→action rows, single freshness definition, loop-launch exclusivity stated once + pointer to `roles/monitor.md`, § Cleanup Protocol teardown replay reduced to first-out clause + `recovery.md` pointer <!-- completed: -->
-- [ ] `supervision.md` affirmative rewrites: § Authorization-Scope Guard leads with the positive persistence rule; apply flagged edit 3 (§ User Delegation); § Spawn Protocol doctor bullet states the two positive rules with the do-NOT enumeration compressed to one paired clause <!-- completed: -->
-- [ ] `reference/cli.md` + `reference/director.md` + `roles/director.md`: split the multi-rule run-on sentences (`reference/cli.md` § Coding-agent backends; `reference/director.md` § Member Ping; `roles/director.md` § Model selection); in `reference/director.md`, move the `--role` cell detail to adjacent prose, end the rendering paragraph at the lockstep sentence, and reduce the two-forms sentence and permission split to pointers at `prompt-routing.md` <!-- completed: -->
-- [ ] Apply flagged edits 4 and 5 (`prompt-routing.md`, `recovery.md`) <!-- completed: -->
-- [ ] `base-dir.md`: hoist the absolute-path caveat to one sentence below the consumer table; `<unset>` contract single-homed per the ownership table; no-bypass item 2 drops the restated spawn mechanics (pointer stays). `roles/member.md` wait-loop enumeration compressed to the positive rule + single-poll allowance; `roles/monitor.md` step 5 rationale aside cut to one clause <!-- completed: -->
+- [x] `SKILL.md`: compress § Team supervision to 2–3 sentences + the two existing pointers; split the § Send run-on into three sentences; shorten the Required-reading row #1 loss cell to "unresolved `{token}`s, guessed values, ignored backend notes" — mirrored in lockstep in the three role files <!-- completed: 2026-08-18T21:00 -->
+- [x] `supervision.md` deduplication: re-engagement channels enumerated once (Facilitation cue), passive-hold owned by § Authorization-Scope Guard, Idle-Semantics bullets defer to the gate table's state→action rows, single freshness definition, loop-launch exclusivity stated once + pointer to `roles/monitor.md`, § Cleanup Protocol teardown replay reduced to first-out clause + `recovery.md` pointer <!-- completed: 2026-08-18T21:00 -->
+- [x] `supervision.md` affirmative rewrites: § Authorization-Scope Guard leads with the positive persistence rule; apply flagged edit 3 (§ User Delegation); § Spawn Protocol doctor bullet states the two positive rules with the do-NOT enumeration compressed to one paired clause <!-- completed: 2026-08-18T21:00 -->
+- [x] `reference/cli.md` + `reference/director.md` + `roles/director.md`: split the multi-rule run-on sentences (`reference/cli.md` § Coding-agent backends; `reference/director.md` § Member Ping; `roles/director.md` § Model selection); in `reference/director.md`, move the `--role` cell detail to adjacent prose, end the rendering paragraph at the lockstep sentence, and reduce the two-forms sentence and permission split to pointers at `prompt-routing.md` <!-- completed: 2026-08-18T21:00 -->
+- [x] Apply flagged edits 4 and 5 (`prompt-routing.md`, `recovery.md`) <!-- completed: 2026-08-18T21:00 -->
+- [x] `base-dir.md`: hoist the absolute-path caveat to one sentence below the consumer table; `<unset>` contract single-homed per the ownership table; no-bypass item 2 drops the restated spawn mechanics (pointer stays). `roles/member.md` wait-loop enumeration compressed to the positive rule + single-poll allowance; `roles/monitor.md` step 5 rationale aside cut to one clause <!-- completed: 2026-08-18T21:00 -->
 
 ### Step 3: skills/cafleet-design-doc + skills/cafleet-research trees
 
