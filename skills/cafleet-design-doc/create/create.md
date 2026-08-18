@@ -127,7 +127,7 @@ Spawn per the Step 1c spawn frame (both normal and resume modes). Worked example
 | role-file | `roles/reviewer.md` |
 | EXTRA SKILL LOADS | `cafleet-design-doc` (template + guidelines) |
 | CONTEXT LINES | `DESIGN DOCUMENT: [INSERT DOC PATH]` |
-| start cue (verbatim) | `Wait for the Director to assign a document for review (cafleet body: ready (doc)). When you receive that message, the doc pointer refers to the DESIGN DOCUMENT path above — read that file and provide specific, actionable feedback per the role definition.` |
+| start cue (verbatim) | `Send your on-spawn ready signal, then wait for the Director to assign a document for review (cafleet body: ready (doc)). When you receive that message, the doc pointer refers to the DESIGN DOCUMENT path above — read that file and provide specific, actionable feedback per the role definition.` |
 | `--name` / `--description` | `Reviewer` / `Critically reviews drafts for rule compliance and quality` |
 
 Spawn per the Step 1c spawn frame (audit file `${BASE}/.prompts/reviewer-<UTC-compact>.md`).
