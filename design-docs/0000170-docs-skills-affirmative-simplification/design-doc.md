@@ -1,7 +1,7 @@
 # Affirmative & Simplification Sweep of docs/, skills/, README, SPEC, and Rules
 
 **Status**: Approved
-**Progress**: 26/28 tasks complete
+**Progress**: 28/28 tasks complete
 **Last Updated**: 2026-08-18
 
 ## Overview
@@ -10,12 +10,12 @@ A one-time documentation sweep that simplifies the repository's Markdown documen
 
 ## Success Criteria
 
-- [ ] Zero prohibition-only sections (P1) and zero unpaired load-bearing prohibitions (P2) remain in touched files, Reviewer-verified.
+- [x] Zero prohibition-only sections (P1) and zero unpaired load-bearing prohibitions (P2) remain in touched files, Reviewer-verified.
 - [x] Every duplication cluster in § Ownership assignments is reduced to the owning location(s) listed there; every non-owning mention is a link plus at most a one-clause summary.
-- [ ] All contract surfaces — CLI flags and error strings, protocol verbs and pointer forms, `{placeholder}` tokens, pane-state cues, command shapes, `SPEC.md` literals — appear unchanged in the final diff, except the edits enumerated in § Flagged edits.
+- [x] All contract surfaces — CLI flags and error strings, protocol verbs and pointer forms, `{placeholder}` tokens, pane-state cues, command shapes, `SPEC.md` literals — appear unchanged in the final diff, except the edits enumerated in § Flagged edits.
 - [x] `mise //:docs-build` completes cleanly.
 - [x] Every intra-repo Markdown link and anchor in touched files resolves to an existing file/heading.
-- [ ] Each edit listed in § Flagged edits is applied exactly as specified (or explicitly rejected with a recorded reason).
+- [x] Each edit listed in § Flagged edits is applied exactly as specified (or explicitly rejected with a recorded reason).
 
 ---
 
@@ -179,8 +179,8 @@ Branch-level exception: commit 619e9f06 — independent, operator-requested pre-
 
 - [x] Run `mise //:docs-build` and confirm a clean exit <!-- completed: 2026-08-18T21:33 -->
 - [x] Verify every intra-repo link/anchor in touched files resolves; re-check `documentation-tables.md` conventions (incl. rendered HTML for piped cells) on touched docs pages <!-- completed: 2026-08-18T21:33 -->
-- [ ] Reviewer pass: zero P1/P2 residue in touched files; every § Flagged edit applied as specified or rejected with recorded reason <!-- completed: -->
-- [ ] Reviewer diff check: no contract surface altered (CLI flags, error strings, verbs, placeholder tokens, pane-state cues, `SPEC.md` literals), except the edits enumerated in § Flagged edits <!-- completed: -->
+- [x] Reviewer pass: zero P1/P2 residue in touched files; every § Flagged edit applied as specified or rejected with recorded reason <!-- completed: 2026-08-18T21:42 -->
+- [x] Reviewer diff check: no contract surface altered (CLI flags, error strings, verbs, placeholder tokens, pane-state cues, `SPEC.md` literals), except the edits enumerated in § Flagged edits <!-- completed: 2026-08-18T21:42 -->
 
 ---
 
