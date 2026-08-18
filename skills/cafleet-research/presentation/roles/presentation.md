@@ -26,18 +26,11 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 - **Never invent data.** Every number, claim, and insight must come from the report.
 - **Match the report's language.**
 - **Save to the file path** specified by the Director.
+- **Choose layouts** per the `../../reference/slidev.md` Layouts table, and **pick the chart/format** per `../../reference/visualization.md` § Chart Type Selection — don't default to bullets or bar charts.
 
 ## Communication Protocol
 
 Broker protocol (poll/ack/send, ids from your spawn prompt, never the user directly): the `cafleet` skill core.
-
-## Layout Selection
-
-Choose layouts per the `../../reference/slidev.md` Layouts table (read at startup).
-
-## Information Representation
-
-Pick the chart/format per the `../../reference/visualization.md` § Chart Type Selection (read at startup). Don't default to bullets or bar charts.
 
 ## Figures
 

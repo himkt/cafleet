@@ -52,7 +52,7 @@ Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt. The audit-
 
 1. **File does not exist** → Fresh creation (proceed to Step 1 as normal).
 2. **File exists** → Check for `COMMENT(user-relay)` markers:
-   - Use Grep to search for `COMMENT(user-relay)` in the file. The grep is tightened to the `user-relay` role because user-derived clarifications are the only marker class that warrants resume-mode. Stale `COMMENT(reviewer)` / `COMMENT(director)` / `COMMENT(programmer)` markers from other workflows MUST NOT be misclassified as interview-resume. (The execute workflow's transient `COMMENT(user-relay): <choice>` arbitration markers are removed by the routed member under normal flow; if one survives into a create invocation, treating it as resume-mode is acceptable — the Drafter reads and resolves it like an interview clarification.)
+   - Use Grep to search for `COMMENT(user-relay)` in the file. The grep is tightened to the `user-relay` role because user-derived clarifications are the only marker class that warrants resume-mode. Stale `COMMENT(reviewer)` / `COMMENT(director)` / `COMMENT(programmer)` markers from other workflows MUST NOT be misclassified as interview-resume (a stray execute-workflow `COMMENT(user-relay)` marker is safely treated as resume-mode — the Drafter resolves it like an interview clarification).
 
    - **`COMMENT(user-relay)` markers found** → This is **resume mode**. Proceed to Step 1 with the resume-specific Drafter spawn prompt. Set an internal flag `SKIP_CLARIFICATION=true` so Step 2 (clarification) is skipped.
    - **No `COMMENT(user-relay)` markers found** → Inform the user: "No `COMMENT(user-relay)` markers found in the existing document." Present two options through {decision_surface}:
@@ -65,7 +65,7 @@ Load the `cafleet` skill; its `reference/supervision.md` governance is § Requir
 
 #### 1a. Establish a CAFleet fleet (monitor included) and capture the ids
 
-`cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current multiplexer pane, and spawns the fleet's monitor member — write the monitor's spawn prompt first and pass it via `--monitor-file`, with `--monitor-model {monitor_model}`, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)*. Use `--json` so the IDs are machine-parseable:
+Bootstrap the fleet per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)* (write the monitor's spawn prompt first and pass it via `--monitor-file`; the reuse-a-running-fleet rule is there too). Use `--json` so the IDs are machine-parseable:
 
 ```bash
 cafleet fleet create --name "design-doc-create-{slug}" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} --json
@@ -74,13 +74,9 @@ cafleet fleet create --name "design-doc-create-{slug}" --coding-agent <backend> 
 
 Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command.
 
-If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `member_id` instead of creating a new fleet — the root Director from `fleet create` is the team lead.
-
 #### 1b. Wait for the monitor gate (before any ordinary member)
 
-Wait for the monitor member's `ready` then `monitor live` signals per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor gate*. **The `monitor live` gate signal gates the Drafter and Reviewer spawns** (1d/1e) — do not spawn an ordinary member until it has arrived; the CLI's monitor-first guard backstops the wait. Re-spawn a dead monitor mid-run with `cafleet member create --role monitor`.
-
-See the `cafleet` skill's `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics, Stall Response). The monitor member runs unchanged through the quality loop; it is deleted first (first-out) in Step 6's teardown.
+Wait for the monitor member's `ready` then `monitor live` signals per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor gate* — `monitor live` gates the Drafter and Reviewer spawns (1d/1e). The monitor member runs unchanged through the quality loop and is deleted first (first-out) in Step 6's teardown.
 
 #### 1c. Locate role definitions (path-by-reference)
 
@@ -138,7 +134,7 @@ Spawn per the Step 1c spawn frame (audit file `${BASE}/.prompts/reviewer-<UTC-co
 cafleet member list <fleet-id>
 ```
 
-Each spawned member should show `status: active` with a non-null `pane_id`; a missing or pending row means that spawn failed — retry it. This audit checks pane placement only and gates nothing: it does not gate Step 2 or any dispatch. Act on each member's ready signal as it arrives, per supervision's dispatch-on-ready rule ([`supervision.md`](../../cafleet/reference/supervision.md) § *Spawn Protocol* → *Dispatch-on-ready*) — the Drafter's first task is embedded in its spawn prompt and needs no separate dispatch, so Step 2 proceeds on the Drafter's ready signal regardless of the Reviewer's state.
+Placement-audit semantics — non-gating, retry a missing or pending row, dispatch rides each member's ready signal — per [`supervision.md`](../../cafleet/reference/supervision.md) § *Spawn Protocol*. The Drafter's first task is embedded in its spawn prompt and needs no separate dispatch, so Step 2 proceeds on the Drafter's ready signal regardless of the Reviewer's state.
 
 ### Step 2: Clarification Phase (Director)
 

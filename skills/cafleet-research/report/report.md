@@ -70,7 +70,7 @@ Run the gating `cafleet doctor` env-check per the `cafleet` skill's `reference/s
 
 ### Step 0b: Bootstrap CAFleet Fleet (Director — MANDATORY, monitor included)
 
-One command atomically creates the fleet, the root Director, and the fleet's monitor member — write the monitor's spawn prompt first and pass it via `--monitor-file`, with `--monitor-model {monitor_model}`, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)*:
+Bootstrap the fleet per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)* — write the monitor's spawn prompt first and pass it via `--monitor-file`:
 
 ```bash
 cafleet fleet create --name "research-[topic-slug]" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} --json
@@ -80,7 +80,7 @@ Capture `fleet_id` and `director.member_id` from the response. Treat `fleet_id` 
 
 ### Step 1: Supervision Model (Director — wait for the monitor gate)
 
-Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. Wait for the monitor member's `ready` then `monitor live` signals per its § *Spawn Protocol* → *Wait for the monitor gate*. **The `monitor live` gate signal gates the Manager / Scout / Researcher spawns** — do not spawn an ordinary member until it has arrived; the CLI's monitor-first guard backstops the wait. The monitor member is deleted first (first-out) in the Step 8 teardown; re-spawn a dead monitor mid-run with `cafleet member create --role monitor`.
+Wait for the monitor member's `ready` then `monitor live` signals per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor gate* — `monitor live` gates the Manager / Scout / Researcher spawns. The monitor member is deleted first (first-out) in the Step 8 teardown.
 
 On each active turn, check `${OUTPUT_DIR}` for these expected deliverables:
 
@@ -234,10 +234,10 @@ When the Manager delivers the compiled `report.md`:
      "review feedback round <N>: [FACTUAL ERROR] ... / [GAP] ... / ..."
    ```
 3. The Manager revises the report (requesting additional Researchers from the Director as needed) and sends a completion message back via `cafleet message send`.
-4. Each polled inbound message MUST be `ack`ed via `cafleet message ack [message-id]` after acting on it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle.
-5. Repeat until the Director judges quality is sufficient. Aim for 2–3 rounds maximum.
+4. ACK each polled inbound message after acting on it (`cafleet` skill § *Acknowledge*).
+5. Repeat until the Director judges quality is sufficient (rounds cap: [roles/director.md](roles/director.md) § *Quality Iteration Criteria*).
 
-If the Manager asks the Director a question that is really a user decision (e.g. language choice, scope trade-off), the Director MUST relay via {decision_surface} and pass the user's verbatim answer back via `cafleet message send`. Never decide on the user's behalf.
+A Manager question that is really a user decision (e.g. language choice, scope trade-off) is relayed per [roles/director.md](roles/director.md) § *User Delegation*.
 
 ### Step 6: Present to User (Director)
 

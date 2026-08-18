@@ -1,7 +1,7 @@
 # Affirmative & Simplification Sweep of docs/, skills/, README, SPEC, and Rules
 
 **Status**: Approved
-**Progress**: 13/28 tasks complete
+**Progress**: 20/28 tasks complete
 **Last Updated**: 2026-08-18
 
 ## Overview
@@ -158,13 +158,13 @@ Per the user's answer to Q2, deletions of reactive residue that change what agen
 
 ### Step 3: skills/cafleet-design-doc + skills/cafleet-research trees
 
-- [ ] Reduce the 9-location bootstrap restatements to command block + pointer sentence (`supervision.md` § Spawn Protocol owns), including the reuse-running-fleet and spawn-health-audit twins <!-- completed: -->
-- [ ] Shrink all pointer-marker pairing restatements across the execute tree and `create/roles/drafter.md` to "(pairing rule, coordination.md)"; `coordination.md` verb-choice paragraph keeps only the when-in-doubt heuristic <!-- completed: -->
-- [ ] Compress the four Director role files to responsibility + pointer: Accountability bullets stop re-narrating workflow steps (judgment content stays), milestone tables state the stall-nudge rule once above the table, § Shutdown/§ User Delegation defer to their owners; fix the "Critical Review Checklist" dangling reference to "§ Review & Feedback" <!-- completed: -->
-- [ ] Apply flagged edits 6, 7, and 8 (programmer.md consolidation; the four "Do NOT:" wall recasts; presentation.md section folds) plus the remaining execute-tree P5 items (execute.md opening paragraph, run-to-completion ownership, Phase B item 1 reduction, separate-commands rule to Commit Protocol owner) <!-- completed: -->
-- [ ] Apply flagged edit 9 (slidev color-cap resolution) and consolidate `slidev.md` color guidance into the § Highlight block <!-- completed: -->
-- [ ] Apply the remaining report/presentation same-reader dedupes (report.md ACK/user-delegation/rounds-cap pointers; manager.md three-homes items; researcher/scout delegation-bullet compression with thresholds owned by `web-researcher.md`; presentation-tree handshake/agent-browser/threshold re-pointering; visual-reviewer table-cell trims) and sync the flagged disjoint-reader twins (reviewer front-load paragraph) to identical wording <!-- completed: -->
-- [ ] `create/create.md` + `interview/interview.md` residual items: resume-detection parenthetical compressed to one clause; drafter MANDATORY double-framing reduced to one; interview 2c size-limit rationale reduced to the director-reference pointer <!-- completed: -->
+- [x] Reduce the 9-location bootstrap restatements to command block + pointer sentence (`supervision.md` § Spawn Protocol owns), including the reuse-running-fleet and spawn-health-audit twins <!-- completed: 2026-08-18T21:18 -->
+- [x] Shrink all pointer-marker pairing restatements across the execute tree and `create/roles/drafter.md` to "(pairing rule, coordination.md)"; `coordination.md` verb-choice paragraph keeps only the when-in-doubt heuristic <!-- completed: 2026-08-18T21:18 -->
+- [x] Compress the four Director role files to responsibility + pointer: Accountability bullets stop re-narrating workflow steps (judgment content stays), milestone tables state the stall-nudge rule once above the table, § Shutdown/§ User Delegation defer to their owners; fix the "Critical Review Checklist" dangling reference to "§ Review & Feedback" <!-- completed: 2026-08-18T21:18 -->
+- [x] Apply flagged edits 6, 7, and 8 (programmer.md consolidation; the four "Do NOT:" wall recasts; presentation.md section folds) plus the remaining execute-tree P5 items (execute.md opening paragraph, run-to-completion ownership, Phase B item 1 reduction, separate-commands rule to Commit Protocol owner) <!-- completed: 2026-08-18T21:18 -->
+- [x] Apply flagged edit 9 (slidev color-cap resolution) and consolidate `slidev.md` color guidance into the § Highlight block <!-- completed: 2026-08-18T21:18 -->
+- [x] Apply the remaining report/presentation same-reader dedupes (report.md ACK/user-delegation/rounds-cap pointers; manager.md three-homes items; researcher/scout delegation-bullet compression with thresholds owned by `web-researcher.md`; presentation-tree handshake/agent-browser/threshold re-pointering; visual-reviewer table-cell trims) and sync the flagged disjoint-reader twins (reviewer front-load paragraph) to identical wording <!-- completed: 2026-08-18T21:18 -->
+- [x] `create/create.md` + `interview/interview.md` residual items: resume-detection parenthetical compressed to one clause; drafter MANDATORY double-framing reduced to one; interview 2c size-limit rationale reduced to the director-reference pointer <!-- completed: 2026-08-18T21:18 -->
 
 ### Step 4: README.md, SPEC.md, .claude/rules/
 

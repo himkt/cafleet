@@ -15,7 +15,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 ## Your Accountability
 
-- **Bootstrap the team (monitor included).** Load the `cafleet` skill and Read its `reference/supervision.md` for the heartbeat, facilitation, and Stall Response policy. Run `cafleet doctor` then `cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --monitor-file <abs path> --monitor-model {monitor_model} --json` — one command creates the fleet, you as root Director, and the monitor member — and capture the literal `fleet_id` and `director.member_id` integer ids, per its § *Spawn Protocol* → *Fleet bootstrap (monitor included)*. Gate the Presentation/Transcript spawns on the monitor member's `monitor live` signal per § *Spawn Protocol* → *Wait for the monitor gate*. Act on each ordinary member's ready signal as it arrives — never hold a ready member's first dispatch for other members' readiness (dispatch-on-ready, canonical in `reference/supervision.md` § *Spawn Protocol* → *Dispatch-on-ready*). The monitor member watches the panes and contacts you only when attention is needed.
+- **Bootstrap the team (monitor included).** Load the `cafleet` skill and Read its `reference/supervision.md`; follow its § *Spawn Protocol* end to end — the gating `cafleet doctor`, fleet bootstrap via `cafleet fleet create`, the `monitor live` gate on the Presentation/Transcript spawns, and dispatch-on-ready.
 - **Review all deliverables with critical judgment.** Every slide and every narration block must accurately represent the approved report. Misrepresented data, missing coverage, or poor structure is your failure to catch.
 - **Drive the revision loop.** When deliverables fall short, send specific, tagged feedback via `cafleet message send`. Do not settle for "good enough."
 - **Ensure 1:1 slide-transcript correspondence.** After the slide deck is finalized, send the finalized slide structure to the `transcript` member via `cafleet message send` for realignment.
@@ -117,6 +117,6 @@ Follow the `cafleet` skill's `reference/supervision.md` for the health-check seq
 
 ## Shutdown Protocol
 
-Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol* (delete the monitor member first, first-out), with this workflow's member delete order after the monitor: Presentation, Transcript, and any active VR batch — **for an active VR batch, run the close handshake first** (send `CLOSE:` via `cafleet message send`, wait for the VR's `closed` reply, THEN delete it).
+Run the canonical teardown per the `cafleet` skill's `reference/supervision.md` § *Cleanup Protocol* (delete the monitor member first, first-out), with this workflow's member delete order after the monitor: Presentation, Transcript, and any active VR batch — an active VR batch gets the close handshake first (per `presentation.md` Step 3's loop).
 
 Between the `cafleet member list` verification and `cafleet fleet delete`, release this workflow's non-CAFleet resources per `presentation.md` Step 5 (the agent-browser `close --all` safety net, then the Slidev server stop).
