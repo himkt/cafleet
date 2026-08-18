@@ -1,13 +1,13 @@
 # Member lifecycle
 
 The `cafleet member` CLI group wraps the two-step "register + spawn a
-tmux pane" recipe behind `cafleet member create` and persists the member-to-pane
+pane" recipe behind `cafleet member create` and persists the member-to-pane
 mapping in the `member_placements` table. An ordinary member is an active
-registry row with a placement row other than the fleet's root Director,
-spawned by a Director via `cafleet member create` and linked to a specific
-tmux pane, window, and session. The root Director is instead bootstrapped
-internally by `cafleet fleet create`, keeping its own placement row since it
-is pane-bound.
+registry row with a placement row, other than the fleet's root Director: it
+is spawned by a Director via `cafleet member create` and linked to a
+specific multiplexer pane, window, and session. The root Director is instead
+bootstrapped by `cafleet fleet create` and keeps its own placement row since
+it is pane-bound.
 
 **Single-Director invariant**: A fleet has exactly one Director — the root
 Director recorded in `fleets.director_member_id` at `fleet create` time. Only
@@ -20,7 +20,7 @@ team nesting.
 
 `cafleet member create` is atomic: it registers the member with a
 pending placement (no pane id yet), spawns the member pane in the Director's
-own tmux window, then patches the placement row with the real pane id. If the
+own window, then patches the placement row with the real pane id. If the
 spawn or the patch fails, the registration is rolled back. The pending window
 is ping-tolerant: `cafleet member ping` against a member whose placement has
 no pane yet skips the keystroke and succeeds — the member polls its inbox on

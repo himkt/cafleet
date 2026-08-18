@@ -8,7 +8,7 @@ Every message is a flat row of typed columns in `messages` — there is no JSON 
 
 ## Rendered shape
 
-The broker's read paths return the persisted columns as a flat dict (the typed-column dict). `--json` emits that typed-column envelope verbatim — every persisted column, the body complete and untruncated. Text mode projects the dict into a compact rendered line and truncates the body.
+The broker's read paths return the persisted columns as a flat dict (the typed-column dict), projected per output mode below.
 
 ### Text-mode projection
 
@@ -29,7 +29,7 @@ The compact text rendering omits the columns whose values are constant or recove
 
 ### JSON output
 
-CLI JSON output is governed by the `--json` flag — the single output switch:
+CLI JSON output is governed by the [`--json`](cli-options.md#json-output) flag:
 
 | Mode | Output |
 |---|---|
@@ -67,5 +67,5 @@ The controls that govern envelope rendering are documented in [cli-options.md](c
 
 | Control | Default | Effect on the envelope |
 |---|---|---|
-| [`--json`](cli-options.md#json-output) | off — text mode | Emits compact single-line JSON with the complete, untruncated body |
+| [`--json`](cli-options.md#json-output) | off — text mode | Switches to the JSON output mode above |
 | [`CAFLEET_MAX_TEXT_LEN`](cli-options.md#message-body-truncation) | `200` | Truncates the text-mode body at that many codepoints, appending `…` |

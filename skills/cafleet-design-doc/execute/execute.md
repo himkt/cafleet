@@ -1,6 +1,6 @@
 # Design Doc Execute (CAFleet Edition)
 
-Implement features based on a design document using up to five roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), Verifier (E2E/integration testing), and Reviewer (fresh post-implementation review). Every inter-member message is persisted in SQLite and auditable. The Director judges which members to spawn from the nature of the implementation tasks and drives a per-step TDD cycle: the Tester writes unit tests, the Director reviews and approves them, the Programmer implements to pass them, and the Director reviews the implementation before committing. After all TDD steps, the Verifier (if spawned) runs Phase D E2E verification; Step 5 spawns a fresh Reviewer that reviews the full branch diff and loops until it approves; Step 6 presents the change to the user; Step 7 pushes the branch and opens a PR; Step 8 finalizes and tears the team down.
+Implement features based on a design document using up to five roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), Verifier (E2E/integration testing), and Reviewer (fresh post-implementation review). Every inter-member message is persisted in SQLite and auditable. The Director judges which members to spawn from the nature of the implementation tasks and drives a per-step TDD cycle (Tester writes unit tests → Director reviews → Programmer implements → Director reviews and commits). After all TDD steps: Phase D E2E verification (if the Verifier was spawned), the Step 5 fresh-Reviewer loop until approval, Step 6 user approval, Step 7 push + PR, Step 8 finalize and teardown.
 
 ## Required reading
 
@@ -128,7 +128,7 @@ Load the `cafleet` skill; its `reference/supervision.md` governance is § Requir
 
 #### 3a. Establish a CAFleet fleet (monitor included) and capture the ids
 
-`cafleet fleet create` atomically creates the fleet, registers a root Director bound to the current multiplexer pane, and spawns the fleet's monitor member — write the monitor's spawn prompt first and pass it via `--monitor-file`, with `--monitor-model {monitor_model}`, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)*. Use `--json` so the IDs are machine-parseable:
+Bootstrap the fleet per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)* (write the monitor's spawn prompt first and pass it via `--monitor-file`; the reuse-a-running-fleet rule is there too). Use `--json` so the IDs are machine-parseable:
 
 ```bash
 cafleet fleet create --name "design-doc-execute-{slug}" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} --json
@@ -137,11 +137,9 @@ cafleet fleet create --name "design-doc-execute-{slug}" --coding-agent <backend>
 
 Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command.
 
-If you already have a running fleet (e.g. an outer orchestration), reuse its `fleet_id` and its root Director's `member_id` instead of creating a new fleet — the root Director from `fleet create` is the team lead.
-
 #### 3b. Wait for the monitor gate (before any ordinary member)
 
-This team **keeps an active heartbeat**: wait for the monitor member's `ready` then `monitor live` signals per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor gate*. **The `monitor live` gate signal gates the first ordinary `member create`** (the CLI's monitor-first guard backstops the wait). The monitor member runs **unchanged** through Steps 3–8; it is deleted first (first-out) in Step 8's cleanup; re-spawn a dead monitor mid-run with `cafleet member create --role monitor`. See `reference/supervision.md` for supervision obligations (Authorization-Scope Guard, idle semantics).
+Wait for the monitor member's `ready` then `monitor live` signals per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor gate* — `monitor live` gates the first ordinary `member create`. The monitor member runs unchanged through Steps 3–8 and is deleted first (first-out) in Step 8's cleanup.
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -170,7 +168,7 @@ Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/
 | ROLE TITLE | `the Programmer` |
 | role-file | `roles/programmer.md` |
 | IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` |
-| start cue | `Start by reading the design document. Then wait for the Director to assign your first step.` |
+| start cue | `Send your on-spawn ready signal, then read the design document and wait for the Director to assign your first step.` |
 
 Spawn per the 3e spawn frame. Worked example — the one full command block of this file; the Tester, Verifier, and Step-5 Reviewer spawns reuse the frame with their own literals:
 
@@ -189,7 +187,7 @@ Spawn per the 3e spawn frame. Worked example — the one full command block of t
 | ROLE TITLE | `the Tester` |
 | role-file | `roles/tester.md` |
 | IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: Do NOT write implementation code — only test code.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` |
-| start cue | `Start by reading the design document. Then wait for the Director to assign your first step.` |
+| start cue | `Send your on-spawn ready signal, then read the design document and wait for the Director to assign your first step.` |
 | `--name` / `--description` | `Tester` / `Writes unit tests per step` |
 
 Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/tester-<UTC-compact>.md`).
@@ -203,7 +201,7 @@ Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/tester-<UTC-compact>.
 | ROLE TITLE | `the Verifier` |
 | role-file | `roles/verifier.md` |
 | IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code or modify implementation/test files.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` |
-| start cue | `Start by reading the design document and discovering available tools. Then wait for the Director to assign your first verification task.` |
+| start cue | `Send your on-spawn ready signal, then read the design document and discover available tools. Wait for the Director to assign your first verification task.` |
 | `--name` / `--description` | `Verifier` / `E2E/integration testing and evidence collection` |
 
 Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/verifier-<UTC-compact>.md`).
@@ -214,7 +212,7 @@ Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/verifier-<UTC-compact
 cafleet member list <fleet-id>
 ```
 
-Each spawned member should show `status: active` with a non-null `pane_id`; a missing or pending row means that spawn failed — retry it. This audit checks pane placement only and gates nothing: it does not gate Step 4 or any dispatch. Act on each member's ready signal as it arrives, per supervision's dispatch-on-ready rule ([`supervision.md`](../../cafleet/reference/supervision.md) § *Spawn Protocol* → *Dispatch-on-ready*).
+Placement-audit semantics — non-gating, retry a missing or pending row, dispatch rides each member's ready signal — per [`supervision.md`](../../cafleet/reference/supervision.md) § *Spawn Protocol*.
 
 See [roles/director.md](roles/director.md) for commit message conventions.
 
@@ -231,15 +229,15 @@ For each step in the design document:
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <tester-member-id> "ready (paragraph-Implementation > Step N)"
    ```
-2. **Wait for the Tester's `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear)** via `cafleet message poll <director-member-id>`. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (per the pointer-marker pairing rule in the Coordination Protocol section above); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via {decision_surface}, write the answer back as `COMMENT(user-relay): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
+2. **Wait for the Tester's `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear)** via `cafleet message poll <director-member-id>`. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (pairing rule, coordination.md); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via {decision_surface}, write the answer back as `COMMENT(user-relay): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
 3. **Review tests** against the design doc. If issues are found, write `COMMENT(director): <issue>` markers at `paragraph-Implementation > Step N` (pairing rule) and reply `ready (paragraph-Implementation > Step N)`; the Tester resolves the markers and replies `addressed (paragraph-Implementation > Step N)`. Repeat until satisfied.
-4. **Commit tests** (separate commands, do NOT chain with `&&`). Recover the per-test file list directly via git (`git status` / `git diff --stat` / `git log --name-only`) — the Tester does not embed file lists in cafleet bodies under the verb + pointer schema.
+4. **Commit tests** per the Commit Protocol ([roles/director.md](roles/director.md)). Recover the per-test file list directly via git (`git status` / `git diff --stat` / `git log --name-only`) — the Tester does not embed file lists in cafleet bodies under the verb + pointer schema.
    - `git add <test-files>`
    - `git commit -m "test: add tests for [feature description]"`
 
 #### Phase B: Implementation
 
-1. **Assign**: Send the Programmer a verb + pointer poke. The Programmer reads the step spec at the pointer and locates the Tester's freshly-committed test files via git (`git log <base>..HEAD --name-only`, reading the test content out of the Tester's commits — Rust unit tests live in `#[cfg(test)]` modules inside the source files they cover, which no pathspec can select); the prior Tester `complete (...) — N tests` summary went Tester → Director, not Tester → Programmer.
+1. **Assign**: Send the Programmer a verb + pointer poke. The Programmer reads the step spec at the pointer and locates the Tester's freshly-committed test files via git, per its role file.
    ```bash
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <programmer-member-id> "ready (paragraph-Implementation > Step N)"
@@ -250,14 +248,14 @@ For each step in the design document:
 #### Phase C: Code Review (Director)
 
 1. **Review**: Verify code matches design doc, quality is acceptable, no unnecessary changes.
-2. **Feedback loop**: If issues are found, write a `COMMENT(director): <issue>` marker — for design-doc-anchored issues, place it at `paragraph-Implementation > Step N` and send `ready (paragraph-Implementation > Step N)`; for source-anchored issues, place it at `<file>:<line>` and send `ready (<file>:<line>)`. The marker location MUST match the cafleet pointer (pairing rule). The Programmer resolves the markers, re-runs tests, and replies `addressed (paragraph-Implementation > Step N)` (or `addressed (<file>:<line>)`). Repeat until satisfied.
-3. **Commit implementation** (separate commands, do NOT chain with `&&`). Recover the per-file list via git (`git status` / `git diff --stat <base>..HEAD`):
+2. **Feedback loop**: If issues are found, write a `COMMENT(director): <issue>` marker — for design-doc-anchored issues, place it at `paragraph-Implementation > Step N` and send `ready (paragraph-Implementation > Step N)`; for source-anchored issues, place it at `<file>:<line>` and send `ready (<file>:<line>)` (pairing rule, coordination.md). The Programmer resolves the markers, re-runs tests, and replies `addressed (paragraph-Implementation > Step N)` (or `addressed (<file>:<line>)`). Repeat until satisfied.
+3. **Commit implementation** per the Commit Protocol ([roles/director.md](roles/director.md)). Recover the per-file list via git (`git status` / `git diff --stat <base>..HEAD`):
    - `git add <files> <design-doc>`
    - `git commit -m "feat: [description of what was implemented]"`
 
 Repeat from Phase A for the next step. Always include the design document in the implementation commit.
 
-**Escalation Protocol (Test Defect):** When the Programmer sends `escalating (paragraph-Implementation > Step N)`, the Director reads the design doc paragraph, the Programmer's `COMMENT(programmer)` rationale at that pointer (the marker MUST live at `paragraph-Implementation > Step N` — pairing rule), and the failing test. The Director then writes a `COMMENT(director): <decision> — <rationale, ≤2 sentences>` marker at the same `paragraph-Implementation > Step N` stating the arbitration outcome, and sends `ready (paragraph-Implementation > Step N)` to whichever member needs to act (Tester to fix the test, or Programmer to adjust the implementation). The recipient acts on the standing markers and replies `addressed (paragraph-Implementation > Step N)`. 3-round limit before escalating to the user.
+**Escalation Protocol (Test Defect):** When the Programmer sends `escalating (paragraph-Implementation > Step N)`, the Director reads the design doc paragraph, the Programmer's `COMMENT(programmer)` rationale at that pointer (pairing rule, coordination.md), and the failing test. The Director then writes a `COMMENT(director): <decision> — <rationale, ≤2 sentences>` marker at the same `paragraph-Implementation > Step N` stating the arbitration outcome, and sends `ready (paragraph-Implementation > Step N)` to whichever member needs to act (Tester to fix the test, or Programmer to adjust the implementation). The recipient acts on the standing markers and replies `addressed (paragraph-Implementation > Step N)`. 3-round limit before escalating to the user.
 
 **On-Demand Verification**: Any member can request verification mid-task via `cafleet message send` to the Director. The Director decides whether to route immediately or defer:
 
@@ -278,7 +276,7 @@ If the Verifier was spawned, assign verification:
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <verifier-member-id> "ready (doc)"
    ```
-2. The Verifier discovers tools, executes E2E verification, captures evidence, and writes each fail / suggested-fix as a `COMMENT(verifier): <category> <body>` marker (category = impl bug / test gap / spec issue). Marker location MUST match the cafleet pointer used to report the failure — for per-step `escalating (paragraph-Implementation > Step N)` reports, the paired `COMMENT(verifier)` marker lives at the SAME `paragraph-Implementation > Step N` (pairing rule). On overall success the Verifier sends a single `complete (doc)`; on failures the Verifier sends one `escalating (paragraph-Implementation > Step N)` per affected step.
+2. The Verifier discovers tools, executes E2E verification, captures evidence, and writes each fail / suggested-fix as a `COMMENT(verifier): <category> <body>` marker (category = impl bug / test gap / spec issue) at the pointer used to report the failure (pairing rule, coordination.md). On overall success the Verifier sends a single `complete (doc)`; on failures the Verifier sends one `escalating (paragraph-Implementation > Step N)` per affected step.
 3. **Route failures** by reading the standing `COMMENT(verifier)` markers and dispatching with `ready (paragraph-Implementation > Step N)`: impl-bug markers → Programmer, test-gap markers → Tester, spec-issue markers → Director resolves directly via `COMMENT(director)` arbitration (or escalates to the user via {decision_surface} if a product decision is needed).
 4. Re-verify after fixes. Proceed to Step 5 (Reviewer Review Loop) when all verifiable criteria pass.
 
@@ -311,7 +309,7 @@ This is the first and only time the Reviewer exists in the fleet (never in the S
 | CONTEXT LINES | `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` / `BASE BRANCH: [INSERT default branch name from Step 2]` |
 | poll-handling line (verbatim) | `When you see cafleet message poll output with a message from the Director, act on those instructions.` |
 | IMPORTANT (verbatim) | `IMPORTANT: You are a fresh reviewer with no implementation context — judge only what you can verify from the design document, the diff, and the checks you run.` / `IMPORTANT: Do NOT write or modify implementation or test code. Your only edits are COMMENT(reviewer) markers.` / `IMPORTANT: Do NOT commit. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` |
-| start cue | `Start by reading the design document and the branch diff. Then act on the Director's ready (doc) assignment.` |
+| start cue | `Send your on-spawn ready signal, then read the design document and the branch diff. Then act on the Director's ready (doc) assignment.` |
 | `--name` / `--description` / `--model` | `Reviewer` / `Fresh post-implementation review` / `{reviewer_model}` (your overlay's resolved value) |
 
 Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/reviewer-<UTC-compact>.md`), adding `--model {reviewer_model}`. Verify `status: active` via `cafleet member list <fleet-id>` before assigning.
@@ -329,7 +327,7 @@ Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/reviewer-<UTC-compact
    | Design doc | Director | Resolves directly: apply the spec change, remove the marker; no cafleet route (escalate to the user via {decision_surface} only when a product decision is needed) |
 
    The routed member fixes the target, removes the `COMMENT(reviewer)` marker as part of the fix, re-runs tests, and replies `addressed (<file>:<line>)`.
-4. **Commit** (after all routed fixes report `addressed`; each `git add` / `git commit` is its own Bash call, no `&&`):
+4. **Commit** (after all routed fixes report `addressed`; per the Commit Protocol):
    - Programmer fixes: `git commit -m "fix: address Reviewer feedback - <short summary>"`
    - Tester fixes: `git commit -m "fix: address Reviewer test feedback - <short summary>"`
    - Director doc fixes: `git commit -m "docs: address Reviewer feedback - <short summary>"`
@@ -378,12 +376,12 @@ No round limit — the loop continues until the user approves or aborts.
 #### Abort Flow
 
 1. Update design document Status to "Aborted", add Changelog entry. Place a `COMMENT(director): aborting — finalize and stand by` marker near the top of the doc body (above the Overview section — `Status:` is bold metadata, not a heading, so it is not a valid `paragraph-` target). Notify any still-live members with a single `cafleet message send ... "ready (doc)"` per member so they read the marker and stand by.
-2. Commit (separate commands): `git add <design-doc>` then `git commit -m "docs: mark design doc as aborted"`
+2. Commit: `git add <design-doc>` then `git commit -m "docs: mark design doc as aborted"`
 3. Follow Shutdown Protocol (Step 8: the canonical teardown per the `cafleet` skill § *Shutdown Protocol*).
 
 ### Step 7: Push & Create PR (Director)
 
-After Step 6 Approve, the Director pushes the feature branch and opens a PR BEFORE marking the design doc complete. Nothing waits on the PR after creation. Every command is run as a separate Bash call — do NOT chain with `&&`.
+After Step 6 Approve, the Director pushes the feature branch and opens a PR BEFORE marking the design doc complete. Nothing waits on the PR after creation. Every command runs per the Commit Protocol's separate-commands rule ([roles/director.md](roles/director.md)).
 
 #### 7a. Preconditions (checked in order; first failure aborts to Step 8 local-finalize)
 
@@ -416,9 +414,9 @@ The three Step 7a precondition failures (`gh auth status` fails / on default bra
 Runs after Step 7 completes, or directly after Step 6 when Step 7 was skipped (gh not authenticated / default branch / no commits / approve-local intent).
 
 1. Update design document Status to "Complete" and add a final Changelog entry.
-2. `git add <design-doc>` (separate Bash call).
-3. `git commit -m "docs: mark design doc as complete"` (separate Bash call).
-4. **Push decision** (separate Bash call): run `git rev-parse --abbrev-ref <branch-name>@{upstream}`.
+2. `git add <design-doc>`.
+3. `git commit -m "docs: mark design doc as complete"`.
+4. **Push decision**: run `git rev-parse --abbrev-ref <branch-name>@{upstream}`.
    - Exit code 0 (branch is tracked on origin): `git push`. Covers both the "Step 7 fully succeeded" path and the "Step 7 partial-fail (push OK, PR create failed)" path.
    - Non-zero exit: skip the push. The docs commit stays local.
 5. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (the monitor member goes first, first-out). Workflow delta: then delete the Programmer, Tester, Verifier, and Reviewer if spawned.

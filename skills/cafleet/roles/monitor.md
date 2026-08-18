@@ -22,7 +22,7 @@ spawn prompt's `CODING AGENT:` line names it.
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay section [`reference/coding-agent-overlays.md#<name>`](../reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay* in [`SKILL.md`](../SKILL.md)) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved — and you cannot classify any pane |
+| 1 | your overlay section [`reference/coding-agent-overlays.md#<name>`](../reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay* in [`SKILL.md`](../SKILL.md)) | unresolved `{token}`s, guessed values, ignored backend notes |
 
 You are a **cross-section reader** (shared with the Director): on each wake
 you classify panes of members on any backend, so for capture cues you read
@@ -83,10 +83,9 @@ members and the Director with their `unacked` counts. Run these steps:
 5. **Ping the Director only when it is actually stalled**: confirmed quiet
    across two consecutive wakes AND its wake-payload `unacked` count is
    greater than 0. A quiet Director with an empty inbox is at legitimate
-   rest — leave it. The extra `unacked` condition is deliberate and does NOT
-   extend step 4's quiet-alone rule to the Director: pinging the Director on
-   quiet alone would recreate the timer-nudge problem your role exists to
-   remove. One ping per quiet period, same re-arm rules as step 3.
+   rest — leave it; pinging on quiet alone would recreate the timer-nudge
+   problem your role exists to remove. One ping per quiet period, same
+   re-arm rules as step 3.
 6. **Message the Director per event** (`cafleet message send`, plain ordinary
    message): a member still unchanged at the next wake after its ping, a ping
    delivery failure, or an `unknown` capture — each said once per quiet

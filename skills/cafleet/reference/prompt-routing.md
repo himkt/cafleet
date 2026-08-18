@@ -29,7 +29,7 @@ Reconsider first (per-backend denial semantics above): most denials are a wrong 
 2. **Wait** for the Director's `member prompt --shell` dispatch to land in your pane; the bang-shortcut output appears in your next-turn context.
 3. Process the output; reply to the Director if a follow-up is expected.
 
-The forbidden behaviors (never fake `<bash-input>` markup or fabricate output, never answer from stale context, never assume Bash is denied without trying) are canonical in [`roles/member.md`](../roles/member.md#what-you-must-never-do). Two routing-specific additions: never route without reconsidering first, and never offer the operator a list of routing options — the operator already asked for the command to run; routing is implementation. If your `cafleet message send` is *also* harness-denied, tell the operator both are denied (the only time you ask the operator for help); otherwise route silently.
+The forbidden behaviors (never fake `<bash-input>` markup or fabricate output, never answer from stale context, never assume Bash is denied without trying) are canonical in [`roles/member.md`](../roles/member.md#what-you-must-never-do). One routing-specific addition: never offer the operator a list of routing options — the operator already asked for the command to run; routing is implementation. If your `cafleet message send` is *also* harness-denied, tell the operator both are denied (the only time you ask the operator for help); otherwise route silently.
 
 ## Director-side dispatch
 
@@ -41,7 +41,7 @@ cafleet member ping <member-id>
 cafleet message ack <message-id>
 ```
 
-The `member ping` is required — `member prompt --shell` only stages the bang output; the ping advances the member's turn so it consumes the output (see [`reference/director.md`](director.md#member-prompt) § Required follow-up).
+The `member ping` is required — `member prompt --shell` only stages the bang output; the ping advances the member's turn so it consumes the output.
 
 **Serialize.** Process requests in poll order, one at a time: `prompt --shell → ping → ack → next`. Two `member prompt` dispatches firing concurrently against the same pane race the keystroke sequence and corrupt output. Within one member, `prompt --shell → ping → prompt --shell → ping`; never two concurrent prompt dispatches.
 

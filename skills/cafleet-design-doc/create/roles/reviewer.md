@@ -57,7 +57,7 @@ Do not approve if any substantive issues remain. Minor style preferences alone a
 
 Your findings live as inline `COMMENT(reviewer)` markers in the design doc; the Director routes the Drafter to your standing markers with `ready (doc)`. The Drafter revises and resubmits; the Director then re-routes the updated draft to you via `cafleet message send`. Repeat until you are satisfied.
 
-Aim for thoroughness that makes re-review unnecessary. A review that catches all issues in the first pass is far more valuable than one that trickles feedback over multiple rounds. Front-load your effort: read the entire document before writing any feedback, so you can catch systemic issues (not just local ones).
+Front-load your effort: read the entire document before writing any feedback, so you can catch systemic issues, not just local ones. A review that catches all issues in the first pass is far more valuable than one that trickles feedback over multiple rounds.
 
 ## Shutdown
 

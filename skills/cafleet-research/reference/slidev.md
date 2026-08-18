@@ -59,16 +59,12 @@ After generating all slides, check every slide:
 
 ## Color
 
-### Application
-
 - `<Highlight type="positive">+99%</Highlight>` — positive emphasis (green)
 - `<Highlight>81.2%</Highlight>` — neutral emphasis (blue, default)
 - `<Admonition type="tip" title="Key Takeaway">text</Admonition>` — callout box
 - `<div class="bg-primary-light">text</div>` — lightweight single-line highlight
 
-### Discipline
-
-- **1-2 colored elements per slide max**; **color for data, not decoration** — only color the specific number or keyword. The color tokens, the full semantic palette, and the decision flow are canonical in § *Color Discipline* below.
+Color for data, not decoration — the color tokens, the semantic palette, the decision flow, and the per-slide caps are canonical in § *Highlight* below (§ *Color Discipline* + § *Usage Rules*).
 
 ## Figures
 

@@ -10,14 +10,7 @@ resolves type disagreements centrally, and carries the full per-module
 behavioral contract inline — there is no external detail document to consult.
 
 The implementation is **documented as the eight sections** below, each specified
-in full in [§6](#6-module-specifications). Note that this documentation grouping
-differs from the **architectural decomposition** in [§3](#3-module-layout) /
-[§4](#4-architecture--module-dependency-graph): the dependency graph keeps
-`config` as its own leaf module and `cli` as its own unit (nine modules total),
-whereas the table below documents `config` inside the WebUI section (§6.8) and
-gives `cli` its own section (§6.3). `config` is an independent module regardless
-of where it is documented (§3/§4/§11) — the "WebUI + Config" row is a doc-layout
-choice, not a merge.
+in full in [§6](#6-module-specifications).
 
 | Module | Scope |
 |---|---|
@@ -49,8 +42,7 @@ the team. An admin WebUI exposes a read-mostly JSON API over the same broker.
 implementation can reproduce it. The contract is the *interface and observable
 behavior* of the surface defined here, not the internal byte-for-byte mechanics.
 This is a deliberate, greenfield redesign: it is **not** behavior-preserving with
-respect to any earlier `cafleet`, and reference-parity with a prior
-implementation is **not** a goal.
+respect to any earlier `cafleet` (see **Non-goals** below).
 
 What is part of the contract (must be reproduced):
 
@@ -99,7 +91,7 @@ CLI, broker, monitor, multiplexer, and coding-agent layers are all synchronous;
 only the WebUI HTTP server may be asynchronous, and it calls the synchronous
 broker from blocking tasks.
 
-This mirrors the reference implementation's sync-CLI / async-server split:
+The rationale for the split:
 
 - CLI invocations stay runtime-free — no async runtime spin-up for a one-shot
   command like `cafleet message send`.
@@ -138,8 +130,7 @@ cafleet
 
 **Entry points:** exactly one user-facing binary/command — `cafleet`. There is
 no separate server binary; `cafleet server` constructs the WebUI app and serves
-it. The reference implementation's server target maps to "construct the WebUI
-application object and serve it".
+it.
 
 ---
 
@@ -253,7 +244,8 @@ is stored as an **ISO-8601 string** in UTC with an explicit `+00:00` offset and
   the one canonical format. Do **not** parse-then-compare for ordering; preserve
   string comparison.
 - **Arithmetic:** for age/idle math only, parse the ISO-8601 string and compute
-  seconds (float, or integer-truncated where the reference truncates).
+  seconds (float, integer-truncated where the consuming surface specifies an
+  integer).
 
 ### 5.2 Core entities
 
@@ -356,8 +348,8 @@ The member "kind" is a **three-value** discriminator — `director` (derived:
 from the fleet's `director_member_id` back-reference plus the member card.
 `director_member_id` is checked first, so a fleet's root Director can never
 read as `monitor` regardless of its card contents. No dedicated column backs
-the `monitor` value and no schema migration was needed to introduce it — the
-marker is plain JSON written by `register_member` only when the caller
+the `monitor` value — the marker is plain JSON written by `register_member`
+only when the caller
 requests the monitor role (§6.2, § *`member create` — spawn orchestration*).
 `get_member`, `list_members`, `list_roster`, and the WebUI roster all derive
 `kind` through this same rule.
@@ -374,8 +366,7 @@ sentinel.
 
 ### 5.6 Result shapes vs. typed entities
 
-The reference broker returns dictionaries; the output and webui layers are
-duck-typed on them. How the boundary is modeled — typed entities (as in §5.2)
+How the broker-result boundary is modeled — typed entities (as in §5.2)
 for broker results, versus a generic JSON/value type for the output render
 walkers (which must handle heterogeneous nested shapes and conditional key
 emission) — is an implementation choice and is not part of the contract. The
@@ -414,10 +405,9 @@ disposes its own short-lived engine when it finishes.
   connect time. The default URL is already `sqlite://…`. A user-supplied
   `CAFLEET_DATABASE_URL` is otherwise passed through verbatim (§7.1). The same
   validation is applied independently by the `setup` db-migration driver.
-- **Cross-thread sharing.** The connection is shared across threads (the
-  reference disables SQLite's same-thread check). This is part of the contract.
-- Post-commit object usability (the reference keeps loaded attributes valid
-  after commit) is a reference-ORM artifact and is not part of the contract.
+- **Cross-thread sharing.** The connection is shared across threads — disable
+  SQLite's same-thread check where the runtime enforces one. This is part of
+  the contract.
 
 #### Per-connection PRAGMAs (mandatory)
 
@@ -1574,7 +1564,8 @@ errors propagate unwrapped.
 #### `setup`
 
 `setup` is a plain **command** (no subcommands) — the single onboarding
-and schema-management entry point. Command help: `Migrate the database schema
+and schema-management entry point, and the migrations-apply path
+(idempotent; safe to re-run). Command help: `Migrate the database schema
 and install the coding-agent assets (skills and presets).` It takes no
 positional arguments — a bare `cafleet setup <word>` fails with clap's native
 unexpected-argument error, while a word following the flag (`cafleet setup
@@ -1675,15 +1666,6 @@ absolute-path validation):
 | codex | The resolved codex home (`$CODEX_HOME` or `~/.codex`) |
 | opencode | The resolved preset base (`$OPENCODE_CONFIG_DIR` or `~/.opencode`) — the only opencode root that can vary; the skills base is fixed and carries no identity |
 
-##### Schema-only invocation
-
-There is no schema-only invocation and no dedicated db-only flag: every
-`cafleet setup` run applies the migrations and then installs the selected
-agents' assets (all three on the no-flag form). Plain `cafleet setup`
-remains the documented migrations-apply (contributor/CI) path; it is
-idempotent and safe to re-run, with each run overwriting the agent-home
-skills and presets with the binary's build-time-embedded assets.
-
 ##### Shared helpers (the assets half)
 
 **resolve-targets** (the selection semantics above: the explicitly named
@@ -1725,7 +1707,7 @@ An install failure aborts the loop; rows recorded before the failure remain.
 Every non-setup command — the `fleet`, `member`, and `message` groups (at
 the top of the group callback, before any subcommand body runs), the
 `monitor` command (both forms, before the command body), and `server` —
-runs a schema-version prologue (`schema_guard` in `cli/helpers.rs`) before
+runs a schema-version prologue before
 its command body and before the stale-assets guard. Exempt: `setup` (must
 remain runnable to repair) and `doctor` (reports instead of blocking). The
 guard connects and classifies the database via the `recorded_version` /
@@ -1749,8 +1731,9 @@ existing `failed to open database at '<path>': <e>` / scheme errors — those
 are environment errors, not schema states. The guard's wording mirrors
 doctor's report lines (`schema <M>, head is <N> — run: cafleet setup` stays
 doctor's rendering; the guard uses the phrasings above). With this guard in
-front, the stale-assets guard runs only against an at-head schema, so
-`list_asset_installs` can no longer fail there on a missing column.
+front, the stale-assets guard runs only against an at-head schema — a
+missing or outdated schema never surfaces a raw SQLite error from a guarded
+command.
 
 #### Stale-assets guard
 
@@ -2016,7 +1999,7 @@ shell interpolation — load-bearing for the literal `send-keys -l` payloads on
 tmux). The exact argv each method builds is given verbatim; preserve subcommand,
 flags, and ordering.
 
-**Error taxonomy.** A shared base `MultiplexerError(Exception)` in `base.py`;
+**Error taxonomy.** A shared base `MultiplexerError(Exception)`;
 `TmuxError(MultiplexerError)` and `HerdrError(MultiplexerError)` are the
 backend-specific subclasses. Every CLI boundary that converts a backend failure
 to an application error catches `MultiplexerError`, so both backends' failures
@@ -2039,8 +2022,7 @@ resolves its backend through this function rather than a hardcoded
    nor TMUX is set; run cafleet inside a tmux or herdr session, or set
    CAFLEET_MULTIPLEXER`. Exactly one present ⇒ that backend.
 
-An unset `CAFLEET_MULTIPLEXER` (auto-detect) is a legitimate default — absence is
-a valid, well-defined state, not a fallback for a missing value; the override is
+An unset `CAFLEET_MULTIPLEXER` (auto-detect) is the default; the override is
 the deterministic escape hatch.
 
 #### Interface signature note — `split_window`
@@ -2048,7 +2030,8 @@ the deterministic escape hatch.
 `Multiplexer.split_window(*, reference: MultiplexerContext, env, command) -> str`
 takes the full reference context rather than a bare window id: tmux splits a
 *window* and uses `reference.window_id`; herdr splits a *pane* and uses
-`reference.pane_id`. The sole call site (`cli/member.py`) already holds the
+`reference.pane_id`. The sole call site — the `member create` spawn
+orchestration (§6.3) — already holds the
 Director's `MultiplexerContext` and passes it directly.
 
 #### `TmuxMultiplexer` method surface
@@ -2704,8 +2687,7 @@ under the resolved preset base (default `~/.opencode/`), which is opencode's
 documented search list, so a relocated preset remains discoverable);
 `setup`'s skills install (§6.3) targets the fixed `~/.config/opencode/`,
 cafleet's
-own skills-install target for the opencode agent. Both paths are correct for
-their purpose — keep each as written.
+own skills-install target for the opencode agent.
 
 The preset is a spawn precondition (the spawn argv references `--agent
 cafleet`): opencode's `ensure_available` verifies the file exists at the
@@ -2805,8 +2787,8 @@ heading and its blank line); the file ends with exactly one trailing newline.
 **Scope (two concerns):** (a) the HTTP app factory `create_app`, the `/api/*`
 router, the `X-Fleet-Id` header dependency, the SPA-fallback static server, and
 the `cafleet server` launcher; (b) the global `Settings` singleton from the
-`CAFLEET_*` env block — consumed CLI-wide, not webui-local. The reference builds
-a specific HTTP framework's app; the contract below is stack-neutral. The config
+`CAFLEET_*` env block — consumed CLI-wide, not webui-local. The contract below
+is stack-neutral. The config
 env-var table is §7.1.
 
 #### App factory (`create_app`)
@@ -2961,7 +2943,7 @@ and `--port` (default `settings.broker_port`, integer) both read their defaults
 from settings at command-definition time and are shown in `--help`. Serves the
 app in a single process **with no auto-reload**. Because the defaults
 come from settings, `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT` are honored
-indirectly. The schema-version guard (§6.3) runs in `server::run` before the
+indirectly. The schema-version guard (§6.3) runs before the
 server starts. This is the only entry point to the HTTP server.
 
 #### Configuration
@@ -3007,7 +2989,7 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 
 - **`multiplexer`** is the explicit backend override consumed by
   `resolve_multiplexer()` (§6.5). `None` (unset) means auto-detect from
-  `HERDR_ENV` / `TMUX` — a legitimate default, not a fallback for a missing value.
+  `HERDR_ENV` / `TMUX`.
   A set value must name a registry key (`tmux`/`herdr`) or resolution raises.
 - **`monitor_wake_interval`** is the `cafleet monitor` wake interval in
   seconds, overridden per-invocation by `--interval` (§6.3). `0` disables the
@@ -3366,7 +3348,7 @@ failure, and an exception's exact internal-repr fragment.
 
 ### Surface-redesign decisions
 
-The decisions that shape this surface (full rationale in the design doc):
+The decisions that shape this surface:
 
 - **`member` is the single member-lifecycle surface.** `member` owns member registration, teardown, introspection (`show`, `list`), and keystroke interaction (`create`/`delete`/`show`/`list`/`capture`/`prompt`/`ping`). There is no separate `agent` group.
 - **The subject id is positional; relationship ids are flags** (§6.3): the

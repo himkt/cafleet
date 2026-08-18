@@ -82,24 +82,22 @@ Step 5 (cleanup) is autonomous — no user prompt.
 
 ### Step 1: Bootstrap CAFleet Fleet & Spawn Presentation + Transcript (Director)
 
-Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. The `cafleet fleet create` bootstrap spawns the fleet's monitor member; the monitor member launches the `cafleet monitor` loop in its own pane and the loop wakes it once per wake interval. Gate the Presentation/Transcript spawns on the monitor's `monitor live` signal — see 1b.
+Load the `cafleet` skill; its `reference/supervision.md` policy (heartbeat, facilitation, Stall Response) is § Required reading above. Gate the Presentation/Transcript spawns on the monitor member's `monitor live` signal — see 1b.
 
 #### 1a. Environment precheck and fleet bootstrap (monitor included)
 
-Write the monitor member's spawn prompt first and pass it via `--monitor-file`, with `--monitor-model {monitor_model}`, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)*:
+Bootstrap the fleet per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)* — the gating `cafleet doctor` env-check first, then the fleet create with the monitor member's spawn prompt written first and passed via `--monitor-file`:
 
 ```bash
 cafleet doctor
 cafleet fleet create --name "present-[topic-slug]" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} --json
 ```
 
-`cafleet doctor` is the gating env-check per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*.
-
 Capture `fleet_id` and `director.member_id` from the JSON response and substitute them into every subsequent `cafleet ...` call.
 
 #### 1b. Wait for the monitor gate (before any ordinary member)
 
-Wait for the monitor member's `ready` then `monitor live` signals per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor gate*. **The `monitor live` gate signal gates the Presentation/Transcript spawns** (1d) — do not spawn an ordinary member until it has arrived; the CLI's monitor-first guard backstops the wait. The monitor member is deleted first (first-out) in the Step 5 teardown; re-spawn a dead monitor mid-run with `cafleet member create --role monitor`. Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
+Wait for the monitor member's `ready` then `monitor live` signals per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor gate* — `monitor live` gates the Presentation/Transcript spawns (1d). The monitor member is deleted first (first-out) in the Step 5 teardown. Expected member-produced deliverables: `${FOLDER}/slide.md`, `${FOLDER}/transcript.md`. Active members will include `monitor`, `presentation`, `transcript`, and later `vr-batch-*`.
 
 #### 1c. Read role definitions
 
@@ -197,7 +195,7 @@ Once Step 2 converges on an approved slide deck and transcript, the Director run
 2. Start the Slidev dev server **as a backgrounded process** — refer to your host project's agent rules directory (`.claude/rules/` in this repo) for the canonical launcher. The underlying invocation is `pnpm exec slidev --open false <folder>/slide.md` (the `--open false` flag is required for headless review) and the launcher MUST PTY-wrap stdout (e.g., via `script -qfc`) so Slidev does not exit on detecting a non-TTY. **Record the background process handle** your coding agent returns when it backgrounds the process — the overall Step 5 of this skill (*Finalize & Clean Up*, further down the page) needs it to stop the server cleanly without falling back on `pkill`. Run the backgrounded process via {bg_run}; stop it at teardown via {bg_stop}. On start failure: retry the start command once, then escalate to the user via {decision_surface} (options: Retry again / I started it manually — continue / Abort).
 3. Set `<server_url>` to the Slidev dev server URL (default: `http://localhost:3030`). Use this value when spawning Visual Reviewers.
 4. Create the persistent screenshots directory: write `<folder>/.screenshots/.keep` (empty file) using the Write tool. This is a one-time operation per presentation-workflow run; do NOT delete or wipe it on subsequent batches. agent-browser does not auto-create parent directories when given an explicit `screenshot <path>`, so this step is required for VR's per-slide capture to succeed.
-5. The Director MUST NOT run `pnpm exec agent-browser --session vr-batch-* open|snapshot|screenshot|wait|close` (or the equivalent `pnpm exec agent-browser ...`) directly — agent-browser's browser-operation commands are exclusively for Visual Reviewers (the only exception is the `close --all` safety net in Step 5 *Finalize & Clean Up*). The Director MAY run `console` and `errors` for diagnostics if needed (e.g., investigating a stuck VR), but should prefer letting the VR do it.
+5. The Director runs no agent-browser browser-operation commands — that restriction and its two narrow exceptions are canonical in [roles/director.md](roles/director.md) § *Your Accountability*.
 
 **Batched Review Loop** (batch_size=10, fresh Visual Reviewer per batch to avoid context overflow):
 
@@ -282,7 +280,7 @@ No round limit — loop until approved.
 
 **Only enter after the user approves in Step 4.**
 
-Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (the monitor member goes first, first-out). Workflow delta: then delete Presentation, Transcript, and any active VR batch — but **for an active VR batch, run the close handshake first**: the Director sends `CLOSE:` via `cafleet message send`, the VR runs `pnpm exec agent-browser --session vr-batch-<start> close` and replies `closed`, THEN delete it.
+Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (the monitor member goes first, first-out). Workflow delta: then delete Presentation, Transcript, and any active VR batch — an active VR batch gets the close handshake first (per the Step 3 loop).
 
 Then the presentation-specific teardown:
 

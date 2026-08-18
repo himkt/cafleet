@@ -67,7 +67,7 @@ In resume mode where Step 2 IS run, parse the JSON array from the existing `inte
 
 #### 2a. Establish a CAFleet fleet (monitor included)
 
-Write the monitor member's spawn prompt first and pass it via `--monitor-file`, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)*:
+Bootstrap the fleet per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)* — write the monitor member's spawn prompt first and pass it via `--monitor-file`:
 
 ```bash
 cafleet fleet create --name "design-doc-interview-{slug}" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} --json
@@ -77,11 +77,11 @@ Capture `fleet_id` and `director.member_id` from the JSON response and substitut
 
 #### 2b. Wait for the monitor gate (before the Analyzer)
 
-BEFORE spawning the Analyzer, apply the `cafleet` skill's `reference/supervision.md` policy (§ Required reading above): heartbeat, Authorization-Scope Guard, idle semantics, Stall Response. Wait for the monitor member's `ready` then `monitor live` signals per its § *Spawn Protocol* → *Wait for the monitor gate*. **The `monitor live` gate signal gates the Analyzer spawn** (2d) — do not spawn the Analyzer until it has arrived; the CLI's monitor-first guard backstops the wait. The monitor member is deleted first (first-out) in the 2f teardown.
+Wait for the monitor member's `ready` then `monitor live` signals per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor gate* — `monitor live` gates the Analyzer spawn (2d). The monitor member is deleted first (first-out) in the 2f teardown.
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
-Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it with `Read` on its first turn. Do NOT inline the role content — `cafleet member create` fails with `tmux command failed: command too long` once the shell-quoted prompt grows past a few KB. See `skills/cafleet/reference/director.md` § *Spawn prompt size limit* for the canonical write-up.
+Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it with `Read` on its first turn. Do NOT inline the role content (spawn prompt size limit — `skills/cafleet/reference/director.md` § *Spawn prompt size limit*).
 
 > **Spawn-prompt audit file**: the spawn below renders the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` and spawns from that file, per the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol*.
 

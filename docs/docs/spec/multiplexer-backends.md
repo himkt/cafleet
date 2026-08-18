@@ -63,8 +63,8 @@ The outcomes of that order:
 The four override-set combinations collapse into the first two rows because an
 explicit override wins outright, whatever the environment holds.
 
-Auto-detect (an unset `CAFLEET_MULTIPLEXER`) is the default: absence is a valid,
-well-defined state. `cafleet doctor` reports the resolved backend and its
+Auto-detect (an unset `CAFLEET_MULTIPLEXER`) is the default. `cafleet doctor`
+reports the resolved backend and its
 identifiers (see [CLI options](cli-options.md#cafleet-doctor)).
 
 ## Error taxonomy
@@ -136,13 +136,8 @@ inline-preview path every fleet message uses.
 
 ## Access mechanism
 
-Each backend's access mechanism is in the [backend matrix](#backend-matrix) —
-no new dependency either way; the binary is expected on `PATH`. herdr
-also exposes a JSON unix-socket API whose only unique
-capability is a push event stream; that would require a persistent connection
-and a concurrent reader that cafleet's synchronous `scan → wake → sleep`
-monitor loop does not have, so the socket stream is a deliberately-deferred
-optimization.
+Each backend's access mechanism is in the [backend matrix](#backend-matrix);
+the backend's binary is expected on `PATH` — no other dependency.
 
 ## Pane spawn working directory {#pane-spawn-cwd}
 

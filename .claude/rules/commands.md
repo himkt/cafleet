@@ -24,7 +24,7 @@ Every cargo-invoking task (`test`, `lint`, `typecheck`, `build`, `install`, `dev
 - **mise tasks forward positional args to the underlying command.** When you need to pass cargo-test args (test-name filters, `--nocapture`, etc.), pass them directly to the mise task — do NOT fall back to `cargo test` to "get more control". Examples:
   - Run tests matching a name: `mise //cafleet:test my_test_name`
   - Show test output: `mise //cafleet:test my_test_name -- --nocapture`
-  - **Defensive `--` separator** for args that might collide with a mise flag: the bare form works for plain test-name filters; reach for `--` when an arg starts with two dashes AND could plausibly be parsed by mise itself (all `--`-prefixed args after the first `--` reach the test harness).
+  - **`--` separator**: pass test-name filters bare; insert `--` before any `--`-prefixed arg (everything after the first `--` reaches the test harness).
 
 ## NEVER bypass mise with the underlying tool
 

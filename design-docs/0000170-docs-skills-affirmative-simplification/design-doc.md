@@ -1,8 +1,8 @@
 # Affirmative & Simplification Sweep of docs/, skills/, README, SPEC, and Rules
 
-**Status**: Approved
-**Progress**: 0/28 tasks complete
-**Last Updated**: 2026-08-17
+**Status**: Complete
+**Progress**: 28/28 tasks complete
+**Last Updated**: 2026-08-18
 
 ## Overview
 
@@ -10,12 +10,12 @@ A one-time documentation sweep that simplifies the repository's Markdown documen
 
 ## Success Criteria
 
-- [ ] Zero prohibition-only sections (P1) and zero unpaired load-bearing prohibitions (P2) remain in touched files, Reviewer-verified.
-- [ ] Every duplication cluster in § Ownership assignments is reduced to the owning location(s) listed there; every non-owning mention is a link plus at most a one-clause summary.
-- [ ] All contract surfaces — CLI flags and error strings, protocol verbs and pointer forms, `{placeholder}` tokens, pane-state cues, command shapes, `SPEC.md` literals — appear unchanged in the final diff, except the edits enumerated in § Flagged edits.
-- [ ] `mise //:docs-build` completes cleanly.
-- [ ] Every intra-repo Markdown link and anchor in touched files resolves to an existing file/heading.
-- [ ] Each edit listed in § Flagged edits is applied exactly as specified (or explicitly rejected with a recorded reason).
+- [x] Zero prohibition-only sections (P1) and zero unpaired load-bearing prohibitions (P2) remain in touched files, Reviewer-verified.
+- [x] Every duplication cluster in § Ownership assignments is reduced to the owning location(s) listed there; every non-owning mention is a link plus at most a one-clause summary.
+- [x] All contract surfaces — CLI flags and error strings, protocol verbs and pointer forms, `{placeholder}` tokens, pane-state cues, command shapes, `SPEC.md` literals — appear unchanged in the final diff, except the edits enumerated in § Flagged edits.
+- [x] `mise //:docs-build` completes cleanly.
+- [x] Every intra-repo Markdown link and anchor in touched files resolves to an existing file/heading.
+- [x] Each edit listed in § Flagged edits is applied exactly as specified (or explicitly rejected with a recorded reason).
 
 ---
 
@@ -96,6 +96,8 @@ The single-owner decisions for every cross-location duplication cluster the scan
 
 Per the user's answer to Q2, deletions of reactive residue that change what agents or readers are literally instructed are allowed but must be flagged individually. These are the flagged edits; everything else in the sweep is voice- and behavior-preserving rewording.
 
+Branch-level exception: commit 619e9f06 — independent, operator-requested pre-sweep work on this branch — alters the spawn-frame `start cue` rows in `create/create.md` and `execute/execute.md` to instruct the on-spawn ready signal; the contract-surface criterion and the Reviewer diff check treat it as an enumerated exception alongside the edits below.
+
 1. § Schema-only invocation, in both `cli-options.md` and `SPEC.md` §6.3 — delete the verbatim-equivalent absence-framed sections; fold any affirmative sentence not already present into each document's `setup` section.
 2. `webui-api.md` GET /api/timeline — delete the speculative future-failure warning about ACK timestamps; retarget its dead link ("Data model § ACK timestamp inference") to `data-model.md` § Broadcast Grouping.
 3. `supervision.md` § User Delegation Protocol — delete the two "What you MUST NOT do" bullets that restate step 3's positive spec; fold the two bullets with novel content (no batching of distinct questions; invoke pane primitives via your own Bash tool) into the numbered steps.
@@ -139,46 +141,46 @@ Per the user's answer to Q2, deletions of reactive residue that change what agen
 
 ### Step 1: docs/ tree
 
-- [ ] Apply the docs-tree ownership assignments: bootstrap story to `monitoring.md` + `cli-options.md` § fleet create; `--json` truncation to `cli-options.md` § JSON output (page-local: `message-envelope.md` § JSON output); stale-assets guard to `cli-options.md` § Stale-assets guard — non-owning mentions become link + clause <!-- completed: -->
-- [ ] Tabulate `data-model.md` § `monitor_runtime` (column / meaning / written-cleared-by), keeping coalescing/reclaim semantics as adjacent prose <!-- completed: -->
-- [ ] Remove design-doc/maintainer voice and historical residue (class R) from spec pages: `data-model.md` § fleets trade-off framing, `cli-options.md` row-count defense + "kept as defense" + "unchanged", `multiplexer-backends.md` deferred-alternative narration + meta-justification clause, `coding-agent-backends.md` § Safety-floor record-here clause <!-- completed: -->
-- [ ] `webui-api.md`: replace implementation names (`list_roster(...)`, index name) with behavioral descriptions; let the three-endpoint comparison table own shared attributes; apply flagged edit 2 <!-- completed: -->
-- [ ] Apply flagged edit 1 (`cli-options.md` § Schema-only invocation deletion) <!-- completed: -->
-- [ ] Apply the remaining docs-tree P3/P5 findings: `contributing.md` tables bullet, `overview.md` § Monitoring, `monitoring.md` intro + § Keystroke safety, `member-lifecycle.md` intro split + multiplexer-neutral terms, `model-selection.md` duplicate clause, `coding-agents.md` heading restatement, `storage.md` guard paragraph, `mixed-backend-team.md` duplicate bootstrap paragraphs, `coding-agent-backends.md` table-cell/section duplication <!-- completed: -->
-- [ ] Apply flagged edit 10 (accuracy corrections in `quickstart.md` and `fleet-isolation.md`) <!-- completed: -->
+- [x] Apply the docs-tree ownership assignments: bootstrap story to `monitoring.md` + `cli-options.md` § fleet create; `--json` truncation to `cli-options.md` § JSON output (page-local: `message-envelope.md` § JSON output); stale-assets guard to `cli-options.md` § Stale-assets guard — non-owning mentions become link + clause <!-- completed: 2026-08-18T20:50 -->
+- [x] Tabulate `data-model.md` § `monitor_runtime` (column / meaning / written-cleared-by), keeping coalescing/reclaim semantics as adjacent prose <!-- completed: 2026-08-18T20:50 -->
+- [x] Remove design-doc/maintainer voice and historical residue (class R) from spec pages: `data-model.md` § fleets trade-off framing, `cli-options.md` row-count defense + "kept as defense" + "unchanged", `multiplexer-backends.md` deferred-alternative narration + meta-justification clause, `coding-agent-backends.md` § Safety-floor record-here clause <!-- completed: 2026-08-18T20:50 -->
+- [x] `webui-api.md`: replace implementation names (`list_roster(...)`, index name) with behavioral descriptions; let the three-endpoint comparison table own shared attributes; apply flagged edit 2 <!-- completed: 2026-08-18T20:50 -->
+- [x] Apply flagged edit 1 (`cli-options.md` § Schema-only invocation deletion) <!-- completed: 2026-08-18T20:50 -->
+- [x] Apply the remaining docs-tree P3/P5 findings: `contributing.md` tables bullet, `overview.md` § Monitoring, `monitoring.md` intro + § Keystroke safety, `member-lifecycle.md` intro split + multiplexer-neutral terms, `model-selection.md` duplicate clause, `coding-agents.md` heading restatement, `storage.md` guard paragraph, `mixed-backend-team.md` duplicate bootstrap paragraphs, `coding-agent-backends.md` table-cell/section duplication <!-- completed: 2026-08-18T20:50 -->
+- [x] Apply flagged edit 10 (accuracy corrections in `quickstart.md` and `fleet-isolation.md`) <!-- completed: 2026-08-18T20:50 -->
 
 ### Step 2: skills/cafleet tree
 
-- [ ] `SKILL.md`: compress § Team supervision to 2–3 sentences + the two existing pointers; split the § Send run-on into three sentences; shorten the Required-reading row #1 loss cell to "unresolved `{token}`s, guessed values, ignored backend notes" — mirrored in lockstep in the three role files <!-- completed: -->
-- [ ] `supervision.md` deduplication: re-engagement channels enumerated once (Facilitation cue), passive-hold owned by § Authorization-Scope Guard, Idle-Semantics bullets defer to the gate table's state→action rows, single freshness definition, loop-launch exclusivity stated once + pointer to `roles/monitor.md`, § Cleanup Protocol teardown replay reduced to first-out clause + `recovery.md` pointer <!-- completed: -->
-- [ ] `supervision.md` affirmative rewrites: § Authorization-Scope Guard leads with the positive persistence rule; apply flagged edit 3 (§ User Delegation); § Spawn Protocol doctor bullet states the two positive rules with the do-NOT enumeration compressed to one paired clause <!-- completed: -->
-- [ ] `reference/cli.md` + `reference/director.md` + `roles/director.md`: split the multi-rule run-on sentences (`reference/cli.md` § Coding-agent backends; `reference/director.md` § Member Ping; `roles/director.md` § Model selection); in `reference/director.md`, move the `--role` cell detail to adjacent prose, end the rendering paragraph at the lockstep sentence, and reduce the two-forms sentence and permission split to pointers at `prompt-routing.md` <!-- completed: -->
-- [ ] Apply flagged edits 4 and 5 (`prompt-routing.md`, `recovery.md`) <!-- completed: -->
-- [ ] `base-dir.md`: hoist the absolute-path caveat to one sentence below the consumer table; `<unset>` contract single-homed per the ownership table; no-bypass item 2 drops the restated spawn mechanics (pointer stays). `roles/member.md` wait-loop enumeration compressed to the positive rule + single-poll allowance; `roles/monitor.md` step 5 rationale aside cut to one clause <!-- completed: -->
+- [x] `SKILL.md`: compress § Team supervision to 2–3 sentences + the two existing pointers; split the § Send run-on into three sentences; shorten the Required-reading row #1 loss cell to "unresolved `{token}`s, guessed values, ignored backend notes" — mirrored in lockstep in the three role files <!-- completed: 2026-08-18T21:00 -->
+- [x] `supervision.md` deduplication: re-engagement channels enumerated once (Facilitation cue), passive-hold owned by § Authorization-Scope Guard, Idle-Semantics bullets defer to the gate table's state→action rows, single freshness definition, loop-launch exclusivity stated once + pointer to `roles/monitor.md`, § Cleanup Protocol teardown replay reduced to first-out clause + `recovery.md` pointer <!-- completed: 2026-08-18T21:00 -->
+- [x] `supervision.md` affirmative rewrites: § Authorization-Scope Guard leads with the positive persistence rule; apply flagged edit 3 (§ User Delegation); § Spawn Protocol doctor bullet states the two positive rules with the do-NOT enumeration compressed to one paired clause <!-- completed: 2026-08-18T21:00 -->
+- [x] `reference/cli.md` + `reference/director.md` + `roles/director.md`: split the multi-rule run-on sentences (`reference/cli.md` § Coding-agent backends; `reference/director.md` § Member Ping; `roles/director.md` § Model selection); in `reference/director.md`, move the `--role` cell detail to adjacent prose, end the rendering paragraph at the lockstep sentence, and reduce the two-forms sentence and permission split to pointers at `prompt-routing.md` <!-- completed: 2026-08-18T21:00 -->
+- [x] Apply flagged edits 4 and 5 (`prompt-routing.md`, `recovery.md`) <!-- completed: 2026-08-18T21:00 -->
+- [x] `base-dir.md`: hoist the absolute-path caveat to one sentence below the consumer table; `<unset>` contract single-homed per the ownership table; no-bypass item 2 drops the restated spawn mechanics (pointer stays). `roles/member.md` wait-loop enumeration compressed to the positive rule + single-poll allowance; `roles/monitor.md` step 5 rationale aside cut to one clause <!-- completed: 2026-08-18T21:00 -->
 
 ### Step 3: skills/cafleet-design-doc + skills/cafleet-research trees
 
-- [ ] Reduce the 9-location bootstrap restatements to command block + pointer sentence (`supervision.md` § Spawn Protocol owns), including the reuse-running-fleet and spawn-health-audit twins <!-- completed: -->
-- [ ] Shrink all pointer-marker pairing restatements across the execute tree and `create/roles/drafter.md` to "(pairing rule, coordination.md)"; `coordination.md` verb-choice paragraph keeps only the when-in-doubt heuristic <!-- completed: -->
-- [ ] Compress the four Director role files to responsibility + pointer: Accountability bullets stop re-narrating workflow steps (judgment content stays), milestone tables state the stall-nudge rule once above the table, § Shutdown/§ User Delegation defer to their owners; fix the "Critical Review Checklist" dangling reference to "§ Review & Feedback" <!-- completed: -->
-- [ ] Apply flagged edits 6, 7, and 8 (programmer.md consolidation; the four "Do NOT:" wall recasts; presentation.md section folds) plus the remaining execute-tree P5 items (execute.md opening paragraph, run-to-completion ownership, Phase B item 1 reduction, separate-commands rule to Commit Protocol owner) <!-- completed: -->
-- [ ] Apply flagged edit 9 (slidev color-cap resolution) and consolidate `slidev.md` color guidance into the § Highlight block <!-- completed: -->
-- [ ] Apply the remaining report/presentation same-reader dedupes (report.md ACK/user-delegation/rounds-cap pointers; manager.md three-homes items; researcher/scout delegation-bullet compression with thresholds owned by `web-researcher.md`; presentation-tree handshake/agent-browser/threshold re-pointering; visual-reviewer table-cell trims) and sync the flagged disjoint-reader twins (reviewer front-load paragraph) to identical wording <!-- completed: -->
-- [ ] `create/create.md` + `interview/interview.md` residual items: resume-detection parenthetical compressed to one clause; drafter MANDATORY double-framing reduced to one; interview 2c size-limit rationale reduced to the director-reference pointer <!-- completed: -->
+- [x] Reduce the 9-location bootstrap restatements to command block + pointer sentence (`supervision.md` § Spawn Protocol owns), including the reuse-running-fleet and spawn-health-audit twins <!-- completed: 2026-08-18T21:18 -->
+- [x] Shrink all pointer-marker pairing restatements across the execute tree and `create/roles/drafter.md` to "(pairing rule, coordination.md)"; `coordination.md` verb-choice paragraph keeps only the when-in-doubt heuristic <!-- completed: 2026-08-18T21:18 -->
+- [x] Compress the four Director role files to responsibility + pointer: Accountability bullets stop re-narrating workflow steps (judgment content stays), milestone tables state the stall-nudge rule once above the table, § Shutdown/§ User Delegation defer to their owners; fix the "Critical Review Checklist" dangling reference to "§ Review & Feedback" <!-- completed: 2026-08-18T21:18 -->
+- [x] Apply flagged edits 6, 7, and 8 (programmer.md consolidation; the four "Do NOT:" wall recasts; presentation.md section folds) plus the remaining execute-tree P5 items (execute.md opening paragraph, run-to-completion ownership, Phase B item 1 reduction, separate-commands rule to Commit Protocol owner) <!-- completed: 2026-08-18T21:18 -->
+- [x] Apply flagged edit 9 (slidev color-cap resolution) and consolidate `slidev.md` color guidance into the § Highlight block <!-- completed: 2026-08-18T21:18 -->
+- [x] Apply the remaining report/presentation same-reader dedupes (report.md ACK/user-delegation/rounds-cap pointers; manager.md three-homes items; researcher/scout delegation-bullet compression with thresholds owned by `web-researcher.md`; presentation-tree handshake/agent-browser/threshold re-pointering; visual-reviewer table-cell trims) and sync the flagged disjoint-reader twins (reviewer front-load paragraph) to identical wording <!-- completed: 2026-08-18T21:18 -->
+- [x] `create/create.md` + `interview/interview.md` residual items: resume-detection parenthetical compressed to one clause; drafter MANDATORY double-framing reduced to one; interview 2c size-limit rationale reduced to the director-reference pointer <!-- completed: 2026-08-18T21:18 -->
 
 ### Step 4: README.md, SPEC.md, .claude/rules/
 
-- [ ] `README.md`: split the pitch run-on into two–three short sentences (what it is; how it works; who it is for), thin surface preserved; `/update-readme` sync if the Step 1 docs edits moved owned facts <!-- completed: -->
-- [ ] `SPEC.md` register sweep: state each contract directly without reference-implementation attribution (§2, §5.6, §6.1, §6.8, §11) or internal source paths (schema-version guard, server launcher, §6.5); delete the doc-grouping reconciliation paragraph; single-home the reference-parity non-goal in § Non-goals; drop both "absence is a valid, well-defined state" justification clauses (§6.5, §7.1) and the §6.7 "keep each as written" sentence; rewrite the §5.4 and schema-version-guard closings as plain invariants (class R) <!-- completed: -->
-- [ ] Apply flagged edit 1 in `SPEC.md` (§6.3 deletion); per flagged edit 11, leave the §6.7 preset block untouched (the artifact defect is recorded there as a follow-up) <!-- completed: -->
-- [ ] `.claude/rules/` sweep: `commands.md` `--` separator condition becomes one plain rule ("pass test-name filters bare; insert `--` before any `--`-prefixed arg"); `bash-tool.md` per flagged edit 12, including deleting the prior-protocol comparison sentence and the § Director side restatement; `documentation-maintenance.md` first-class targets become a target/update-trigger/drift-consequence table with one owning blocker statement, § Implementation Order linking instead of restating <!-- completed: -->
+- [x] `README.md`: split the pitch run-on into two–three short sentences (what it is; how it works; who it is for), thin surface preserved; `/update-readme` sync if the Step 1 docs edits moved owned facts (not needed — no owned thin-surface fact moved) <!-- completed: 2026-08-18T21:25 -->
+- [x] `SPEC.md` register sweep: state each contract directly without reference-implementation attribution (§2, §5.6, §6.1, §6.8, §11) or internal source paths (schema-version guard, server launcher, §6.5); delete the doc-grouping reconciliation paragraph; single-home the reference-parity non-goal in § Non-goals; drop both "absence is a valid, well-defined state" justification clauses (§6.5, §7.1) and the §6.7 "keep each as written" sentence; rewrite the §5.4 and schema-version-guard closings as plain invariants (class R) <!-- completed: 2026-08-18T21:25 -->
+- [x] Apply flagged edit 1 in `SPEC.md` (§6.3 deletion); per flagged edit 11, leave the §6.7 preset block untouched (the artifact defect is recorded there as a follow-up) <!-- completed: 2026-08-18T21:25 -->
+- [x] `.claude/rules/` sweep: `commands.md` `--` separator condition becomes one plain rule ("pass test-name filters bare; insert `--` before any `--`-prefixed arg"); `bash-tool.md` per flagged edit 12, including deleting the prior-protocol comparison sentence and the § Director side restatement; `documentation-maintenance.md` first-class targets become a target/update-trigger/drift-consequence table with one owning blocker statement, § Implementation Order linking instead of restating <!-- completed: 2026-08-18T21:29 -->
 
 ### Step 5: Verification
 
-- [ ] Run `mise //:docs-build` and confirm a clean exit <!-- completed: -->
-- [ ] Verify every intra-repo link/anchor in touched files resolves; re-check `documentation-tables.md` conventions (incl. rendered HTML for piped cells) on touched docs pages <!-- completed: -->
-- [ ] Reviewer pass: zero P1/P2 residue in touched files; every § Flagged edit applied as specified or rejected with recorded reason <!-- completed: -->
-- [ ] Reviewer diff check: no contract surface altered (CLI flags, error strings, verbs, placeholder tokens, pane-state cues, `SPEC.md` literals), except the edits enumerated in § Flagged edits <!-- completed: -->
+- [x] Run `mise //:docs-build` and confirm a clean exit <!-- completed: 2026-08-18T21:33 -->
+- [x] Verify every intra-repo link/anchor in touched files resolves; re-check `documentation-tables.md` conventions (incl. rendered HTML for piped cells) on touched docs pages <!-- completed: 2026-08-18T21:33 -->
+- [x] Reviewer pass: zero P1/P2 residue in touched files; every § Flagged edit applied as specified or rejected with recorded reason <!-- completed: 2026-08-18T21:42 -->
+- [x] Reviewer diff check: no contract surface altered (CLI flags, error strings, verbs, placeholder tokens, pane-state cues, `SPEC.md` literals), except the edits enumerated in § Flagged edits <!-- completed: 2026-08-18T21:42 -->
 
 ---
 
@@ -189,3 +191,4 @@ Per the user's answer to Q2, deletions of reactive residue that change what agen
 | 2026-08-17 | Initial draft |
 | 2026-08-17 | Fold in root-slice evidence (README/SPEC/.claude-rules): flagged edits 11–12, two ownership rows, evidence-based Step 4 |
 | 2026-08-17 | Review round 1: touched-files criterion, owning-location(s) wording, flagged-edits carve-out in criterion/gate/task, edit 11 respecified as recorded follow-up (artifact-internal defect, frontmatter wins), Step 2 file-to-section mapping |
+| 2026-08-18 | Executed: all 28 tasks complete, Phase D verification passed (docs-build clean, 498/498 links resolve), Reviewer approved in 2 rounds, branch-level exception 619e9f06 recorded, PR #321 opened. Status → Complete |

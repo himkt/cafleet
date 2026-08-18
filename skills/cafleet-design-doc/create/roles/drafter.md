@@ -46,15 +46,13 @@ You MUST present questions from at least 3 categories from the framework below. 
 | **Security** | Authentication, authorization, data sensitivity, input validation needs? |
 | **Testing** | What needs to be tested? What test infrastructure exists? |
 
-**MANDATORY Rules:**
-- If the user's initial request already answers some questions, do not re-ask them
-- After receiving answers, at most one focused follow-up round if critical ambiguities remain
+Two further rules: if the user's initial request already answers some questions, do not re-ask them; after receiving answers, at most one focused follow-up round if critical ambiguities remain.
 
 ## Workflow
 
 1. **Clarify**: Read the target codebase for context. Send clarifying questions to the Director via `cafleet message send` (free-form body — Step 2 is exempt from the verb + pointer schema). Do NOT create any file until this step is complete.
 2. **Draft**: Create the document at the OUTPUT PATH you were given. Use the `cafleet-design-doc` skill template. Omit optional sections unless needed. Send `complete (doc)` for fresh drafts.
-3. **Internal Quality Loop**: The Director will route the Reviewer's feedback via `ready (doc)`. Read the inline `COMMENT(reviewer)` markers in the design doc, apply revisions to the affected sections, and remove each marker as part of the fix. Send `addressed (doc)` for revision rounds (resolving `COMMENT(reviewer)` markers). If you encounter a spec ambiguity you cannot resolve unaided, write a `COMMENT(drafter): <issue>` marker AND send `blocked (<same-pointer>)` — the marker MUST live at the SAME pointer as the cafleet body (per the pointer-marker pairing rule in `../../reference/coordination.md`). For paragraph-local ambiguities, use `blocked (paragraph-<HeadingPath>)` with the marker at that paragraph; for doc-wide ambiguities, use `blocked (doc)` with the marker placed near the top of the doc body. Repeat until the Reviewer approves.
+3. **Internal Quality Loop**: The Director will route the Reviewer's feedback via `ready (doc)`. Read the inline `COMMENT(reviewer)` markers in the design doc, apply revisions to the affected sections, and remove each marker as part of the fix. Send `addressed (doc)` for revision rounds (resolving `COMMENT(reviewer)` markers). If you encounter a spec ambiguity you cannot resolve unaided, write a `COMMENT(drafter): <issue>` marker AND send `blocked (<same-pointer>)` (pairing rule, coordination.md). For paragraph-local ambiguities, use `blocked (paragraph-<HeadingPath>)` with the marker at that paragraph; for doc-wide ambiguities, use `blocked (doc)` with the marker placed near the top of the doc body. Repeat until the Reviewer approves.
 4. **User Approval**: The Director presents the polished draft to the user. If the user returns COMMENT markers or verbal feedback, the Director routes you with `ready (doc)`; resolve the markers and reply `addressed (doc)`. Repeat until approved.
 5. **Finalize**: When the Director signals user approval with `ready (doc)`, update Status, verify implementation steps are actionable, and reply `addressed (doc)` via `cafleet message send`.
 

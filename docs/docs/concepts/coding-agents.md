@@ -64,8 +64,6 @@ accepted levels, forwarding forms, and rejection strings are in
 
 ## Known asymmetries (intentional non-goals) {#known-asymmetries-intentional-non-goals}
 
-These are intentional non-goals, not gaps.
-
 | Dimension | `claude` | `codex` | `opencode` |
 |---|---|---|---|
 | Reasoning effort | supported | supported | not supported |

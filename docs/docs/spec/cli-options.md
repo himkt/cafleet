@@ -57,7 +57,7 @@ Every `CAFLEET_`-prefixed variable cafleet reads:
 |---|---|---|---|---|
 | `CAFLEET_DATABASE_URL` | `database_url` | `sqlite:///` + `~/.local/share/cafleet/cafleet_v6.db` | The registry database location; an absolute path is required | — |
 | `CAFLEET_MULTIPLEXER` | `multiplexer` | unset ⇒ auto-detect | The multiplexer backend, per [Backend selection](multiplexer-backends.md#backend-selection) | — |
-| `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Text-mode body truncation on `message {send,poll,ack,show}`, and the broker's inline-preview truncation; `--json` output is never truncated | — |
+| `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Text-mode body truncation on `message {send,poll,ack,show}`, and the broker's inline-preview truncation | — |
 | `CAFLEET_BROKER_HOST` | `broker_host` | `127.0.0.1` | The `cafleet server` bind address | `--host` |
 | `CAFLEET_BROKER_PORT` | `broker_port` | `8000` | The `cafleet server` bind port | `--port` |
 | `CAFLEET_MONITOR_WAKE_INTERVAL` | `monitor_wake_interval` | `600` | The `cafleet monitor` wake interval in seconds; `0` disables the wake while the loop keeps heartbeating. A non-integer value fails loudly | `--interval` |
@@ -73,8 +73,8 @@ exits 0, short-circuiting before subcommand dispatch.
 ## Output shapes {#output-shapes}
 
 One row per subcommand. Text output is the human/pane form — message bodies
-truncated per [Message Body Truncation](#message-body-truncation); `--json`
-is the complete, untruncated machine form.
+truncated per [Message Body Truncation](#message-body-truncation); the
+machine form is [`--json`](#json-output).
 
 | Subcommand | Text output | JSON payload |
 |---|---|---|
@@ -97,10 +97,8 @@ is the complete, untruncated machine form.
 | `monitor scan` | One `===`-header section per roster entry, separated by one blank line — see [monitor scan](#cafleet-monitor-scan) | A top-level array, one object per entry in the pinned key order |
 | `doctor` | The three-section diagnosis report (multiplexer, database, coding agents) plus the issue-count footer | Output as JSON |
 
-`setup`, `server`, and the `monitor` loop form are absent by design — they
-stream progress or run a loop rather than emitting a one-shot payload — so the
-[Subcommand summary](#subcommand-summary) legitimately carries three more rows
-than this table.
+`setup`, `server`, and the `monitor` loop form stream progress or run a loop
+rather than emitting a one-shot payload, so they carry no output-shape row.
 
 ## JSON output (`--json`) {#json-output}
 
@@ -209,8 +207,8 @@ The four subcommands that emit a user-supplied delivery body —
 `cafleet message {send,poll,ack,show}` — truncate the `text` body in **text
 output** to the first `CAFLEET_MAX_TEXT_LEN` Unicode codepoints plus a single
 `…` (U+2026) suffix. Length is measured in Unicode codepoints, never bytes.
-There is no untruncated text form; [`--json`](#json-output) is the complete,
-untruncated machine form.
+There is no untruncated text form — the full body is available via
+[`--json`](#json-output).
 
 The limit is `CAFLEET_MAX_TEXT_LEN` — see
 [Environment variables](#environment-variables).
@@ -236,9 +234,11 @@ the error strings are in [Error Messages](#error-messages).
 ## `cafleet setup` — Onboarding and Schema Management {#cafleet-setup}
 
 `cafleet setup` is a plain command — the single onboarding and
-schema-management entry point (the recommended end-user path — see
-[Quickstart](../quickstart.md#install)). Command help: `Migrate the database
-schema and install the coding-agent assets (skills and presets).` It takes no
+schema-management entry point: the recommended end-user path (see
+[Quickstart](../quickstart.md#install)) and the migrations-apply path for
+contributors and CI, idempotent and safe to re-run. Command help: `Migrate
+the database schema and install the coding-agent assets (skills and
+presets).` It takes no
 positional arguments — a bare `cafleet setup <word>` fails with the parser's
 unexpected-argument error, while a word following the flag (`cafleet setup
 --coding-agent claude <word>`) is greedily consumed as another flag value and
@@ -299,9 +299,9 @@ halves joined by `' and '`.
 | assets | A skills install fails for a target | `failed to install skills into <skills_dir>: <error>` | Aborts the loop; rows recorded before the failure remain |
 | assets | A preset install fails for a target | `failed to install preset into <target>: <error>` | Aborts the loop; rows recorded before the failure remain |
 
-The assets-half pre-flight fires only after a db-half failure or an externally
-broken schema, since the db half always runs first within the same command; it
-is kept as defense.
+The assets-half pre-flight can fire only after a db-half failure or an
+externally broken schema — the db half always runs first within the same
+command.
 
 ### Config-dir resolution {#config-dir-resolution}
 
@@ -356,15 +356,6 @@ validation):
 | claude | The resolved claude config dir (`$CLAUDE_CONFIG_DIR` or `~/.claude`) |
 | codex | The resolved codex home (`$CODEX_HOME` or `~/.codex`) |
 | opencode | The resolved preset base (`$OPENCODE_CONFIG_DIR` or `~/.opencode`) — the only opencode root that can vary; the skills base is fixed and carries no identity |
-
-### Schema-only invocation {#schema-only}
-
-There is no schema-only invocation and no dedicated db-only flag: every
-`cafleet setup` run applies the migrations and then installs the selected
-agents' assets (all three on the no-flag form). Plain `cafleet setup`
-remains the documented migrations-apply path (the contributor and CI path);
-it is idempotent and safe to re-run, with each run overwriting the
-agent-home skills and presets with the binary's build-time-embedded assets.
 
 ### Assets half {#assets-half}
 
@@ -490,7 +481,7 @@ no name / description / effort flags for either. Output shapes are in
 The command runs a single-transaction ladder — see
 [data-model.md](./data-model.md) for the transaction description:
 
-1. Multiplexer preconditions (unchanged from before any write).
+1. Multiplexer preconditions, before any write.
 2. Resolve the monitor prompt body from `--monitor-file` (file, or stdin
    via `-`).
 3. Backend checks before any write: backend lookup,
@@ -513,9 +504,9 @@ successful pane spawn (placement insert or commit) also kills the spawned
 pane. The command is retryable as-is. Error strings are in
 [Error Messages](#error-messages).
 
-The monitor member's own protocol is unchanged: once its pane boots it
-sends `ready`, launches the `cafleet monitor` wake loop, and sends
-`monitor live` (see [Monitoring](../concepts/monitoring.md)).
+Once its pane boots, the monitor member sends `ready`, launches the
+`cafleet monitor` wake loop, and sends `monitor live` (see
+[Monitoring](../concepts/monitoring.md)).
 `member create --role monitor` remains the mid-run recovery path for
 re-spawning a dead monitor.
 

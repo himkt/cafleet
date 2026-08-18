@@ -9,10 +9,10 @@ plain loop, not agent reasoning, that fires one unconditional fleet-level wake
 into the monitor member's own pane once per wake interval. On each wake the
 monitor member classifies every member pane and contacts the Director only
 when something actually needs attention, so the Director is never nudged by a
-timer. While the loop runs it spends no model tokens, and because it is just a
-backgrounded command it works identically on any backend. One monitor loop per
-fleet; deleting the monitor member ends it — the pane kill takes the loop
-process down with it.
+timer. While running, the loop spends no model tokens and — as a plain
+backgrounded command — works identically on any backend. One monitor loop per
+fleet; deleting the monitor member kills its pane and the loop process with
+it.
 
 ## Heartbeat, classification, facilitation
 
@@ -160,10 +160,9 @@ stalls mid-turn is re-engaged by its own next wake.
 One hazard is documented rather than guarded: if the operator is
 mid-composition at the monitor member's pane when a wake lands, the `Esc`
 clears any pending prompt box and the payload is appended to whatever text is
-already in the composer, then `Enter` submits both together. The hazard is
-much reduced from the Director-facing wake it replaces — an operator is far
-less likely to be typing in the monitor member's pane than in the
-Director's — and `--interval 0` remains the escape for hands-on sessions.
+already in the composer, then `Enter` submits both together. An operator is
+rarely typing in the monitor member's pane, and `--interval 0` is the escape
+for hands-on sessions.
 
 ## Single-instance and liveness
 

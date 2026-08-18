@@ -28,7 +28,7 @@ Broker protocol (poll/ack/send, ids from your spawn prompt, never the user direc
 
 **Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules. **Phase 1 tool-discovery is exempt** from the schema — the inventory is a one-time discovery payload, not iterative coordination, so it rides as a free-form multi-line cafleet body (same precedent as the Analyzer's question list in the interview workflow). Phase 2 verification reports follow the schema.
 
-**Do NOT:** commit code or run git write operations; modify implementation or test files; communicate with the user directly; spawn subagents or run coding-agent CLI commands; continue with assumptions when blocked — message the Director via `cafleet message send` instead.
+**Role boundaries:** the Director owns all git operations and every commit, and all user communication; the Programmer and Tester own the implementation and test files — you modify neither; blockers route to the Director via `cafleet message send`. You run no subagents and no coding-agent CLI commands.
 
 ## Workflow
 
@@ -57,7 +57,7 @@ For each verification task assigned by the Director (you receive `ready (doc)` o
 | Configuration change | Validate config syntax, dry-run | -- |
 
 3. **Execute verification**: Start the application/service if applicable, perform E2E interactions matching success criteria, and capture evidence (command output, screenshots via Playwright, HTTP responses, logs).
-4. **Record findings as inline markers in the design doc**: write each fail / suggested-fix as a `COMMENT(verifier)` marker per [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker*. Marker location MUST match the cafleet pointer used to report the failure (canonical pointer-marker pairing rule in `../../reference/coordination.md`).
+4. **Record findings as inline markers in the design doc**: write each fail / suggested-fix as a `COMMENT(verifier)` marker per [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker*, at the pointer used to report the failure (pairing rule, coordination.md).
 
    Then report to the Director via `cafleet message send` per the Verifier-specific reporting policy:
    - **Overall success** (all verifiable criteria pass): send a single `complete (doc)`. E2E commonly spans multiple steps, so success is reported once at doc-level.
@@ -68,7 +68,7 @@ For each verification task assigned by the Director (you receive `ready (doc)` o
 If the best tool for a verification task is unavailable:
 
 1. **Fall back** to the next best alternative (e.g., WebFetch or an HTTP MCP tool instead of Playwright for HTTP checks — never `curl`/`wget`, which the project Bash ban blocks)
-2. **If no suitable tool exists**, skip that verification item and write a `COMMENT(verifier): test gap — <what was skipped and why>; suggested tooling: <MCP server or tool>` marker. Place the marker at the paragraph that matches the cafleet pointer used to report the gap (pairing rule).
+2. **If no suitable tool exists**, skip that verification item and write a `COMMENT(verifier): test gap — <what was skipped and why>; suggested tooling: <MCP server or tool>` marker at the pointer used to report the gap (pairing rule, coordination.md).
 3. Never fail silently — always record what could and could not be verified in `COMMENT(verifier)` markers.
 
 ## Shutdown

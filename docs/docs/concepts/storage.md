@@ -38,11 +38,9 @@ re-run after every upgrade.
 | Ahead of the bundled head | Refuses to auto-downgrade |
 | Unversioned, with tables it does not recognize | Refuses |
 
-Every non-setup command — the fleet-scoped groups, `monitor`, and `server` —
-checks the schema version before running: a missing or behind-head database
-fails with guidance naming `cafleet setup`, and a database newer than the
-CLI with an upgrade prompt — never a raw SQLite error. `doctor` reports the
-same states instead of blocking. The exact error strings are in
+Every non-setup command checks the schema version before running and fails
+with guidance naming `cafleet setup` — never a raw SQLite error; `doctor`
+reports instead of blocking. The exact rules and error strings are in
 [CLI options](../spec/cli-options.md#schema-version-guard).
 
 ## Assets-install recording
@@ -52,15 +50,12 @@ CLI version that last installed the skills and preset
 (where one exists) there — **not** a schema version. The assets
 half of `cafleet setup` upserts one row per installed agent — all three
 agents on the no-flag form — keyed on the
-agent's resolved config path. Every fleet-scoped command (`fleet *`,
-`member *`, `message *`, `monitor *`) checks each agent's row at its
-currently-resolved path before running and hard-errors when no agent has a
-row at its resolved path or when a row at a resolved path differs from the
-running CLI version — so the assets can never silently go stale after a CLI
-upgrade; records at other paths never block a command.
-`cafleet doctor` reports the per-agent detail. See
-[data model](../spec/data-model.md) for the table schema and
-[CLI options](../spec/cli-options.md) for the guard's error strings.
+agent's resolved config path. Every fleet-scoped command validates these
+rows before running — the
+[stale-assets guard](../spec/cli-options.md#stale-assets-guard) — so the
+assets can never silently go stale after a CLI upgrade. `cafleet doctor`
+reports the per-agent detail. See
+[data model](../spec/data-model.md) for the table schema.
 
 ## No physical cleanup
 

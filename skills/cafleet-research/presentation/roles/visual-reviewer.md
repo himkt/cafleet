@@ -23,7 +23,7 @@ Identify your coding agent first — your spawn prompt's `CODING AGENT:` line na
 - **Re-check affected slides after fixes.** When the Director requests a re-check, verify only the specified slides — not the entire deck.
 - **Persist the structured review log** once per batch+round, BEFORE sending the report to the Director — filename scheme and no-overwrite rule per § *Persist the report* below.
 
-**Do NOT:** Edit `slide.md` or any other file; fix visual issues directly; modify the report or transcript; communicate with the user directly.
+**Role boundaries:** you detect and flag — the Presentation member owns every fix and every edit to `slide.md`; the report and transcript are inputs you never modify; the Director owns user communication. Your only writes are the screenshots and the persisted review log.
 
 **Browser lifecycle:** the CLOSE handshake is § *Shutdown* below.
 
@@ -41,9 +41,9 @@ Broker protocol (poll/ack/send, ids from your spawn prompt, never the user direc
 | `[OVERLAP]` | Elements overlapping each other | Title text overlapping bullet list |
 | `[EMPTY_SLIDE]` | Slide appears empty or near-empty | Only background color visible |
 | `[RENDER_ERROR]` | General rendering failure | Error message displayed, or slide blank |
-| `[CONSOLE_ERROR]` | Browser console error or uncaught page error detected via the Diagnostic Escalation procedure (`agent-browser console` / `errors`). Distinct from `[RENDER_ERROR]`, which covers visually observable breakage. | "Uncaught TypeError: Cannot read property 'foo' of undefined at slide-7.vue:42" |
-| `[TEXT_WRAPPING]` | **Critical defect.** Text breaks at a wrong boundary or leaves an orphan fragment. See detailed checking procedure below. | "9-13B" → "9-" + "13B"; "ダウンロー" + "ド"; "[46]" alone on a line; "を実証 [47]" as a 2-word orphan line |
-| `[MULTILINE_BULLET]` | **Critical defect.** A top-level bullet wraps to a 2nd visible line. Every top-level bullet must fit on a single visible line — if the text is too long, it must be refactored into a parent bullet plus nested sub-bullets, NOT left to wrap. | A 2-line bullet "Reasoning-as-product era opened with o1-preview (Sep 2024) and propagated to every major lab within twelve months [5]" → must be refactored into "Reasoning-as-product era" with sub-bullets for each clause. |
+| `[CONSOLE_ERROR]` | Browser console error or uncaught page error detected via the Diagnostic Escalation procedure (`agent-browser console` / `errors`); distinct from `[RENDER_ERROR]`, which covers visually observable breakage. | "Uncaught TypeError: Cannot read property 'foo' of undefined at slide-7.vue:42" |
+| `[TEXT_WRAPPING]` | **Critical defect.** Text breaks at a wrong boundary or leaves an orphan fragment — see the deep-check procedure below. | "9-13B" → "9-" + "13B"; "[46]" alone on a line |
+| `[MULTILINE_BULLET]` | **Critical defect.** A top-level bullet wraps to a 2nd visible line — see the check procedure below. | A 2-line bullet that should be a parent bullet plus nested sub-bullets |
 
 ### TEXT_WRAPPING Deep Check Procedure (MANDATORY for every slide)
 

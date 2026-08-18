@@ -21,7 +21,7 @@ Before your first action other than these Reads, Read every file in the **Load-b
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay section [`reference/coding-agent-overlays.md#<name>`](reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
+| 1 | your overlay section [`reference/coding-agent-overlays.md#<name>`](reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay*) | unresolved `{token}`s, guessed values, ignored backend notes |
 | 2 | [`reference/base-dir.md`](reference/base-dir.md) — if you write any scratch / audit / figure file | the no-bypass write protocol and the `<unset>` contract — you mis-root every write or fall back to `/tmp` |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**
@@ -96,7 +96,7 @@ CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFL
 
 ## Team supervision
 
-The fleet's **monitor member** is spawned by the bootstrap itself: `cafleet fleet create --name <n> --coding-agent <backend> --monitor-file <path> --monitor-model {monitor_model}` atomically creates the fleet, the root Director, and the monitor member — registration and pane — before any ordinary `cafleet member create` (the monitor inherits the Director's backend by construction). At startup the monitor member launches `cafleet monitor <fleet-id>` as a background task in its own pane — it is the only party that launches the loop; the Director and ordinary members never run it — confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — and sends the gate signal `monitor live` to the Director. That message gates the first ordinary `member create`, and the CLI's monitor-first guard backstops it; `cafleet member create --role monitor` is the mid-run recovery path for re-spawning a dead monitor. The loop wakes the monitor member's own pane once per wake interval; on each wake the monitor scans the fleet's panes (`cafleet monitor scan <fleet-id>`), classifies them per the **target member's** backend overlay cues, and contacts the Director only when something actually needs attention.
+The fleet's **monitor member** is spawned by the `cafleet fleet create` bootstrap itself, before any ordinary `cafleet member create`. At startup it launches the `cafleet monitor` wake loop in its own pane, confirms the loop's `monitor loop started` line, and sends the gate signal `monitor live` to the Director — the message that gates the first ordinary spawn (the CLI's monitor-first guard backstops it). On each wake it classifies the fleet's panes and contacts the Director only when something actually needs attention. A dead monitor is re-spawned mid-run with `cafleet member create --role monitor`.
 
 For the full governance + heartbeat mechanism, Read [`reference/supervision.md`](reference/supervision.md); the monitor member's own protocol is [`roles/monitor.md`](roles/monitor.md).
 
@@ -123,7 +123,7 @@ cafleet message send --from-member-id <my-member-id> \
   --to-member-id <target-member-id> "Did the API schema change?"
 ```
 
-`--to-member-id` (recipient id) is required, plus exactly one of the positional `TEXT` (inline body) or `--file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`); the delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview and text output; `--json` carries the complete untruncated body per [`reference/cli.md`](reference/cli.md) § *Output switch*. After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast`), caught on the next manual `message poll` or a Director `cafleet member ping` if missed; full mechanics in [`multiplexer-backends.md`](../../docs/docs/spec/multiplexer-backends.md#push-notifications).
+`--to-member-id` (recipient id) is required, plus exactly one of the positional `TEXT` (inline body) or `--file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`). The delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview and text output. `--json` carries the complete untruncated body per [`reference/cli.md`](reference/cli.md) § *Output switch*. After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast`), caught on the next manual `message poll` or a Director `cafleet member ping` if missed; full mechanics in [`multiplexer-backends.md`](../../docs/docs/spec/multiplexer-backends.md#push-notifications).
 
 ## Poll (Check Inbox)
 

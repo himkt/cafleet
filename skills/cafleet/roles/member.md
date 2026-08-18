@@ -12,7 +12,7 @@ At startup — before you process your first task (the `ready` handshake in the 
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay section [`reference/coding-agent-overlays.md#<name>`](../reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay*) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{permission_flags}` emitted unresolved |
+| 1 | your overlay section [`reference/coding-agent-overlays.md#<name>`](../reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay*) | unresolved `{token}`s, guessed values, ignored backend notes |
 | 2 | [`reference/base-dir.md`](../reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root every scratch / audit / figure write or fall back to `/tmp` |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**
@@ -36,7 +36,7 @@ Use the literal body `ready` (optionally append a brief role recap after `:` —
 cafleet message poll <my-member-id>
 ```
 
-If a message is queued, ACK and process it. If the poll is empty and no assigned work is outstanding, **end your turn and go idle** — do not keep the turn alive waiting. The broker's inline preview re-opens your turn when the Director sends work, and the Director's `cafleet member ping` re-pokes you if a preview is missed. **Never set up a repeated wait-then-poll cycle to wait for work** — in any form (a `sleep`-then-`poll` sequence, chained or split across turns; a backgrounded sleep; a self-scheduled wake-up). A single `cafleet message poll` when you have a reason to check now — on wake, or while awaiting a reply you just routed to the Director — is fine.
+If a message is queued, ACK and process it. If the poll is empty and no assigned work is outstanding, **end your turn and go idle** — the broker's inline preview re-opens your turn when the Director sends work, and the Director's `cafleet member ping` re-pokes you if a preview is missed. Waiting happens by ending the turn, never by a wait-then-poll cycle of any form; a single `cafleet message poll` when you have a reason to check now — on wake, or while awaiting a reply you just routed to the Director — is fine.
 
 ## The default rule: run shell commands yourself
 
