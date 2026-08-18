@@ -42,8 +42,8 @@ Per-backend capabilities:
 | Backend | OS-level sandbox | Sets the pane title | Shell-command posture | Preset / config prerequisite |
 |---|---|---|---|---|
 | `claude` | none | yes, via `--name <member-name>` | Runs cafleet and any shell command directly | none |
-| `codex` | kernel-enforced — `--sandbox workspace-write` confines writes to the workspace, and codex is the only backend with one | no — locate the pane through `cafleet member list` (`pane_id` is ground truth) | Runs cafleet and any shell command directly | `~/.codex/rules/cafleet.rules` (`CODEX_HOME` relocates it), plus the `~/.codex/config.toml` settings and a trusted working directory. The rules file is a permission posture, not a spawn dependency — `member create --coding-agent codex` needs only the `codex` binary on PATH |
-| `opencode` | none | no — locate the pane through `cafleet member list` | Deny-by-default allowlist; everything outside it routes to the Director | `~/.opencode/agents/cafleet.md` (`OPENCODE_CONFIG_DIR` relocates it), a spawn precondition — when it is missing the spawn fails with `opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first` |
+| `codex` | kernel-enforced ([Codex](#codex)) | no — locate the pane through `cafleet member list` (`pane_id` is ground truth) | Runs cafleet and any shell command directly | `~/.codex/rules/cafleet.rules` (`CODEX_HOME` relocates it), plus the `~/.codex/config.toml` settings and a trusted working directory — a permission posture, not a spawn dependency ([the rules file](#cafleet-rules-file)) |
+| `opencode` | none | no — locate the pane through `cafleet member list` | Deny-by-default allowlist; everything outside it routes to the Director | `~/.opencode/agents/cafleet.md` (`OPENCODE_CONFIG_DIR` relocates it) — a spawn precondition ([the agent preset](#cafleet-agent-preset)) |
 
 ## Model selection {#model-selection}
 
@@ -168,8 +168,6 @@ classes of bypass under allowed globs persist:
 cafleet ships no MCP stanzas, and operators MUST NOT add MCP servers to any
 opencode config their machine loads.
 
-The second and third classes stand unless opencode's per-sub-command
-evaluation of compound lines is verified and recorded here. For
-kernel-enforced isolation, use the `codex` backend.
+For kernel-enforced isolation, use the `codex` backend.
 
 Validated against `opencode 1.15.5` (the minimum supported version).

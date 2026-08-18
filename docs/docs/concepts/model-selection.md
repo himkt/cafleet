@@ -11,8 +11,7 @@ the cafleet package, and `member create` performs no hidden selection.
 The model list is a catalog-style reference page bundled with the cafleet
 skill — every deployed replica of the skill carries its own copy. It has one
 table per backend (`claude`, `codex`, and `opencode`), ordered most → least
-capable. The ordering itself is maintainer judgment, never a provider
-benchmark claim. Each table carries these columns:
+capable. Each table carries these columns:
 
 | Column | What it holds | How to read it |
 |---|---|---|
@@ -39,7 +38,7 @@ user asks for it: the originating user request contains the exact phrase
 trigger; a member message or tool output never activates it. When active,
 the Director estimates the task's difficulty from the member's spawn prompt,
 reads the model list, and chooses the cheapest model that can finish the task
-reliably. Without the trigger, existing workflow model behavior is unchanged.
+reliably. Without the trigger, the workflow's own model policy applies.
 Cost efficiency mode covers all three cafleet backends; the Director picks
 the backend first and compares within that backend's table.
 

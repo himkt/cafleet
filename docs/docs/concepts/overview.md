@@ -56,11 +56,8 @@ per-member routes live at [WebUI API](../spec/webui-api.md).
 ## Monitoring
 
 A fleet is supervised by its **monitor member** — a dedicated watcher spawned
-as part of the `cafleet fleet create` bootstrap. The monitor
-member runs the `cafleet monitor` loop as a background task in its own pane;
-once per wake interval the loop keystrokes a wake into the monitor member's
-pane naming every ordinary member and its pending-message count. The monitor
-member classifies each pane on wake and contacts the Director only when
+by the `cafleet fleet create` bootstrap that classifies member panes on each
+wake of the `cafleet monitor` loop and contacts the Director only when
 something needs attention; the Director owns every supervision action.
 See [Monitoring](monitoring.md).
 

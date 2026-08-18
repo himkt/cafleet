@@ -27,12 +27,9 @@ backend, and confirm all three reply. Then tear the team down.
 Your agent loads the `cafleet` skill and follows its Director-only
 supervision protocol before spawning members.
 
-Supervision is supplied by the **monitor member**, spawned as part of the
-`cafleet fleet create` bootstrap — one command creates the fleet, the root
-Director, and the monitor member, before any ordinary member. The monitor
-member launches the `cafleet monitor` loop in its own pane and reports
-`monitor live` to the Director before the ordinary members spawn; it works
-the same on **any** backend (`claude`, `codex`, or `opencode`)
+Supervision is supplied by the **monitor member**, spawned by the
+`cafleet fleet create` bootstrap before any ordinary member; it works the
+same on **any** backend (`claude`, `codex`, or `opencode`)
 ([Monitoring](../concepts/monitoring.md)).
 
 ## What to expect
@@ -54,16 +51,14 @@ The commands the agent runs, with literal ids — fleet `1`, root Director
 
 :::details Expand the walkthrough
 
-Create the fleet — one command atomically creates the fleet, the root
-Director, and the monitor member. The operator declares the binary running
-in *your* pane via `--coding-agent` because cafleet cannot auto-detect it
+Create the fleet — one command creates the fleet, the root Director, and
+the monitor member ([Monitoring](../concepts/monitoring.md)). The operator
+declares the binary running in *your* pane via `--coding-agent` because
+cafleet cannot auto-detect it
 ([Coding agents](../concepts/coding-agents.md)); the monitor member inherits
-that backend, runs on the backend's monitor-default model via
-`--monitor-model`, and receives the Director-authored spawn prompt via
-`--monitor-file` ([Monitoring](../concepts/monitoring.md)). Once its pane
-boots, the monitor member launches the wake loop in its own pane and reports
-`monitor live`; an ordinary `member create` before the monitor exists fails
-with the monitor-first guard
+that backend, takes its model from `--monitor-model`, and receives its spawn
+prompt via `--monitor-file`. An ordinary `member create` before the monitor
+exists fails with the monitor-first guard
 ([CLI options](../spec/cli-options.md#member-create)):
 
 ```bash

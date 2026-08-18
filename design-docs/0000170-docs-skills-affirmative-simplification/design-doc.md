@@ -1,8 +1,8 @@
 # Affirmative & Simplification Sweep of docs/, skills/, README, SPEC, and Rules
 
 **Status**: Approved
-**Progress**: 0/28 tasks complete
-**Last Updated**: 2026-08-17
+**Progress**: 7/28 tasks complete
+**Last Updated**: 2026-08-18
 
 ## Overview
 
@@ -139,13 +139,13 @@ Per the user's answer to Q2, deletions of reactive residue that change what agen
 
 ### Step 1: docs/ tree
 
-- [ ] Apply the docs-tree ownership assignments: bootstrap story to `monitoring.md` + `cli-options.md` § fleet create; `--json` truncation to `cli-options.md` § JSON output (page-local: `message-envelope.md` § JSON output); stale-assets guard to `cli-options.md` § Stale-assets guard — non-owning mentions become link + clause <!-- completed: -->
-- [ ] Tabulate `data-model.md` § `monitor_runtime` (column / meaning / written-cleared-by), keeping coalescing/reclaim semantics as adjacent prose <!-- completed: -->
-- [ ] Remove design-doc/maintainer voice and historical residue (class R) from spec pages: `data-model.md` § fleets trade-off framing, `cli-options.md` row-count defense + "kept as defense" + "unchanged", `multiplexer-backends.md` deferred-alternative narration + meta-justification clause, `coding-agent-backends.md` § Safety-floor record-here clause <!-- completed: -->
-- [ ] `webui-api.md`: replace implementation names (`list_roster(...)`, index name) with behavioral descriptions; let the three-endpoint comparison table own shared attributes; apply flagged edit 2 <!-- completed: -->
-- [ ] Apply flagged edit 1 (`cli-options.md` § Schema-only invocation deletion) <!-- completed: -->
-- [ ] Apply the remaining docs-tree P3/P5 findings: `contributing.md` tables bullet, `overview.md` § Monitoring, `monitoring.md` intro + § Keystroke safety, `member-lifecycle.md` intro split + multiplexer-neutral terms, `model-selection.md` duplicate clause, `coding-agents.md` heading restatement, `storage.md` guard paragraph, `mixed-backend-team.md` duplicate bootstrap paragraphs, `coding-agent-backends.md` table-cell/section duplication <!-- completed: -->
-- [ ] Apply flagged edit 10 (accuracy corrections in `quickstart.md` and `fleet-isolation.md`) <!-- completed: -->
+- [x] Apply the docs-tree ownership assignments: bootstrap story to `monitoring.md` + `cli-options.md` § fleet create; `--json` truncation to `cli-options.md` § JSON output (page-local: `message-envelope.md` § JSON output); stale-assets guard to `cli-options.md` § Stale-assets guard — non-owning mentions become link + clause <!-- completed: 2026-08-18T20:50 -->
+- [x] Tabulate `data-model.md` § `monitor_runtime` (column / meaning / written-cleared-by), keeping coalescing/reclaim semantics as adjacent prose <!-- completed: 2026-08-18T20:50 -->
+- [x] Remove design-doc/maintainer voice and historical residue (class R) from spec pages: `data-model.md` § fleets trade-off framing, `cli-options.md` row-count defense + "kept as defense" + "unchanged", `multiplexer-backends.md` deferred-alternative narration + meta-justification clause, `coding-agent-backends.md` § Safety-floor record-here clause <!-- completed: 2026-08-18T20:50 -->
+- [x] `webui-api.md`: replace implementation names (`list_roster(...)`, index name) with behavioral descriptions; let the three-endpoint comparison table own shared attributes; apply flagged edit 2 <!-- completed: 2026-08-18T20:50 -->
+- [x] Apply flagged edit 1 (`cli-options.md` § Schema-only invocation deletion) <!-- completed: 2026-08-18T20:50 -->
+- [x] Apply the remaining docs-tree P3/P5 findings: `contributing.md` tables bullet, `overview.md` § Monitoring, `monitoring.md` intro + § Keystroke safety, `member-lifecycle.md` intro split + multiplexer-neutral terms, `model-selection.md` duplicate clause, `coding-agents.md` heading restatement, `storage.md` guard paragraph, `mixed-backend-team.md` duplicate bootstrap paragraphs, `coding-agent-backends.md` table-cell/section duplication <!-- completed: 2026-08-18T20:50 -->
+- [x] Apply flagged edit 10 (accuracy corrections in `quickstart.md` and `fleet-isolation.md`) <!-- completed: 2026-08-18T20:50 -->
 
 ### Step 2: skills/cafleet tree
 

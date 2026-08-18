@@ -53,7 +53,7 @@ Returns non-soft-deleted fleets (`deleted_at IS NULL`) with member counts, order
 
 ### GET /api/members — List Members
 
-Returns the selected fleet's roster via `list_roster(include_message_holders=True)`: every active registry entry plus deregistered members that still own messages (so their message history stays inspectable). Every row carries a `kind` discriminator so the frontend can locate the root Director without matching on its name.
+Returns the selected fleet's roster: every active registry entry plus deregistered members that still own messages (so their message history stays inspectable). Every row carries a `kind` discriminator so the frontend can locate the root Director without matching on its name.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -235,9 +235,9 @@ ignored.
 
 ### GET /api/members/{member_id}/inbox — Inbox Messages
 
-Returns messages received by the member (`owner_member_id = member_id`), excluding `broadcast_summary` type messages. Consumed by the member detail view's **Inbox** tab in the admin WebUI.
+Returns messages received by the member. Consumed by the member detail view's **Inbox** tab in the admin WebUI.
 
-The three message endpoints compare as follows:
+The three message endpoints compare as follows (this table owns their row-selection, exclusion, ordering, and cap attributes):
 
 | Endpoint | Rows returned | Excluded | Ordering | Row cap |
 |---|---|---|---|---|
@@ -277,7 +277,7 @@ The `body` field is the message's `text` column.
 
 ### GET /api/members/{member_id}/sent — Sent Messages
 
-Returns messages sent by the member (single SQL query against `messages` filtered by `from_member_id` and ordered by `status_timestamp DESC`, served by `idx_messages_from_member_status_ts`), excluding `broadcast_summary` type messages. Consumed by the member detail view's **Sent** tab in the admin WebUI.
+Returns messages sent by the member (see the comparison table above). Consumed by the member detail view's **Sent** tab in the admin WebUI.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -285,7 +285,7 @@ Same response format as inbox.
 
 ### GET /api/timeline — Unified Fleet Timeline
 
-Returns the selected fleet's non-`broadcast_summary` messages. Consumed by the Discord-style admin dashboard, which groups delivery rows sharing an `origin_message_id` into a single broadcast entry client-side.
+Returns the fleet's unified message timeline (see the comparison table above). Consumed by the Discord-style admin dashboard, which groups delivery rows sharing an `origin_message_id` into a single broadcast entry client-side.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -315,7 +315,7 @@ Fleet scoping is reached through the `messages.from_member_id → members.member
 
 The frontend re-orders ascending for newest-at-bottom chat rendering.
 
-**Exclusions**: Rows with `type == "broadcast_summary"` are filtered out of the response. The summary row is not needed for the UI; the grouping convention below lets the frontend reconstruct broadcasts from their delivery rows alone.
+**Exclusions**: the summary row is not needed for the UI — the grouping convention below lets the frontend reconstruct broadcasts from their delivery rows alone.
 
 **Broadcast grouping**: Every row carries an `origin_message_id` field:
 
@@ -326,7 +326,7 @@ The frontend re-orders ascending for newest-at-bottom chat rendering.
 
 The client groups rows by `origin_message_id` (non-null rows sharing a value form one broadcast entry; null rows are standalone unicast entries). Each broadcast entry's sort key is the `MIN(created_at)` of its rows — stable, so a broadcast never drifts when a lagging recipient ACKs.
 
-**ACK timestamps**: Per-recipient ACK time is read from the `status_timestamp` of a `completed` delivery row. Delivery messages make exactly one state transition over their lifetime (`input_required → completed` on ACK), so for `status == "completed"` rows `status_timestamp` IS the ACK moment. If this invariant is ever broken by a future change, the timeline will silently show wrong ACK times until a dedicated `acknowledged_at` column is added. See [Data model](data-model.md) § ACK timestamp inference.
+**ACK timestamps**: Per-recipient ACK time is read from the `status_timestamp` of a `completed` delivery row. Delivery messages make exactly one state transition over their lifetime (`input_required → completed` on ACK), so for `status == "completed"` rows `status_timestamp` IS the ACK moment. See [Data model § Broadcast Grouping](data-model.md#broadcast-grouping).
 
 ### POST /api/messages/send — Send Message
 

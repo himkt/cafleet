@@ -31,12 +31,11 @@ placement) in one all-or-nothing transaction — which is why
 invariant. The pane spawn happens **inside** the transaction, between the
 monitor registration and its placement insert, so any failure (spawn
 included) unwinds every row; a pane spawned before a placement-insert or
-commit failure is killed by the CLI error path. The flip side is the
-write-lock window: the connection holds SQLite's write lock across the
-pane-spawn subprocess call, so a concurrent cafleet writer on the shared
-database blocks for the duration of the multiplexer call, backstopped by
-the connection's `busy_timeout=5000` PRAGMA — an accepted trade-off of the
-literally-atomic bootstrap.
+commit failure is killed by the CLI error path. The connection holds
+SQLite's write lock across the pane-spawn subprocess call, so a concurrent
+cafleet writer on the shared database blocks for the duration of the
+multiplexer call, backstopped by the connection's `busy_timeout=5000`
+PRAGMA.
 
 ### `members`
 
@@ -67,25 +66,25 @@ value.
 
 ### `monitor_runtime`
 
-`monitor_runtime` is the one-row-per-fleet loop pid/heartbeat table: the
-single-instance claim (`pid`, `started_at`), the liveness heartbeat
-(`last_tick_at`, `tick_seconds`), `last_wake_at` — the nullable UTC ISO
-timestamp of the last successfully delivered wake, kept durable
-across loop restarts so an immediate restart honors the remaining wake
-cadence — and `wake_interval_seconds`, the nullable live mirror of the
-running loop's wake interval: stamped with the startup-resolved
-value at every `cafleet monitor` start (claim and reclaim), re-read by the loop on
-every tick, overwritten by `PATCH /api/monitor`, and preserved across a
-loop stop like `tick_seconds`. It is `NULL` only in rows that predate the
-column and have not been re-claimed since — a running loop's row is always
-stamped. The row also carries `wake_requested_at`, the nullable UTC ISO
-timestamp of the latest pending forced-wake request
-(`POST /api/monitor/wake`): `NULL` when no request is pending, and repeat
-requests overwrite the timestamp, coalescing into a single wake. Exactly two
-writes clear it: a delivered wake — scheduled or forced — stamps
-`last_wake_at` and clears the request in the same write, and a new loop
-instance's reclaim resets it, so a pending request never survives into a
-later loop instance. The cadence semantics are defined in
+`monitor_runtime` is the one-row-per-fleet loop pid/heartbeat table:
+
+| Column | Meaning | Written / cleared by |
+|---|---|---|
+| `pid`, `started_at` | The single-instance claim | Stamped at every `cafleet monitor` start (claim and reclaim); cleared by a clean stop |
+| `last_tick_at` | The liveness heartbeat (UTC ISO) | Rewritten by the running loop on every tick |
+| `tick_seconds` | The loop's scan-tick cadence | Stamped at every start; preserved across a loop stop |
+| `last_wake_at` | Nullable UTC ISO timestamp of the last successfully delivered wake, durable across loop restarts | Stamped by a delivered wake — scheduled or forced |
+| `wake_interval_seconds` | Nullable live mirror of the running loop's wake interval, re-read by the loop on every tick | Stamped with the startup-resolved value at every start; overwritten by `PATCH /api/monitor`; preserved across a loop stop |
+| `wake_requested_at` | Nullable UTC ISO timestamp of the latest pending forced-wake request (`POST /api/monitor/wake`); `NULL` when none is pending | Set by `POST /api/monitor/wake`; cleared by a delivered wake or a new loop instance's reclaim |
+
+Repeat forced-wake requests overwrite `wake_requested_at`, coalescing into a
+single wake. Exactly two writes clear it: a delivered wake — scheduled or
+forced — stamps `last_wake_at` and clears the request in the same write, and
+a new loop instance's reclaim resets it, so a pending request never survives
+into a later loop instance. The durable `last_wake_at` lets an immediate
+restart honor the remaining wake cadence. `wake_interval_seconds` is `NULL`
+only in rows that predate the column and have not been re-claimed since — a
+running loop's row is always stamped. The cadence semantics are defined in
 [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
 
 ### `asset_installs`

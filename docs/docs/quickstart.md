@@ -85,6 +85,7 @@ commands into a member's pane; the operator should confirm each invocation.
 
 ```toml
 [sandbox_workspace_write]
+network_access = true
 writable_roots = ["/home/<you>/.local/share/cafleet"]
 ```
 
@@ -136,9 +137,9 @@ The walkthrough pastes literal integer ids: fleet `1`, root Director `2`,
 monitor member `3`, members `4` and `5`, message `10`. Your ids will
 differ — substitute the integers your own commands print.
 
-Create a fleet. One command atomically creates the fleet, records your
-current pane as the root Director's pane, and spawns the fleet's monitor
-member. `--coding-agent` is required — pass the backend the Director is
+Create a fleet. One command creates the fleet, your pane's root Director,
+and the monitor member ([Monitoring](concepts/monitoring.md)).
+`--coding-agent` is required — pass the backend the Director is
 actually running on (here, Claude Code); the monitor member inherits it.
 `--monitor-file` is required and carries the monitor's spawn prompt (a
 one-liner is enough for this demo); `--monitor-model` optionally pins the
