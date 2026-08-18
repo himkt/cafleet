@@ -1,7 +1,7 @@
 # Affirmative & Simplification Sweep of docs/, skills/, README, SPEC, and Rules
 
 **Status**: Approved
-**Progress**: 20/28 tasks complete
+**Progress**: 24/28 tasks complete
 **Last Updated**: 2026-08-18
 
 ## Overview
@@ -168,10 +168,10 @@ Per the user's answer to Q2, deletions of reactive residue that change what agen
 
 ### Step 4: README.md, SPEC.md, .claude/rules/
 
-- [ ] `README.md`: split the pitch run-on into two–three short sentences (what it is; how it works; who it is for), thin surface preserved; `/update-readme` sync if the Step 1 docs edits moved owned facts <!-- completed: -->
-- [ ] `SPEC.md` register sweep: state each contract directly without reference-implementation attribution (§2, §5.6, §6.1, §6.8, §11) or internal source paths (schema-version guard, server launcher, §6.5); delete the doc-grouping reconciliation paragraph; single-home the reference-parity non-goal in § Non-goals; drop both "absence is a valid, well-defined state" justification clauses (§6.5, §7.1) and the §6.7 "keep each as written" sentence; rewrite the §5.4 and schema-version-guard closings as plain invariants (class R) <!-- completed: -->
-- [ ] Apply flagged edit 1 in `SPEC.md` (§6.3 deletion); per flagged edit 11, leave the §6.7 preset block untouched (the artifact defect is recorded there as a follow-up) <!-- completed: -->
-- [ ] `.claude/rules/` sweep: `commands.md` `--` separator condition becomes one plain rule ("pass test-name filters bare; insert `--` before any `--`-prefixed arg"); `bash-tool.md` per flagged edit 12, including deleting the prior-protocol comparison sentence and the § Director side restatement; `documentation-maintenance.md` first-class targets become a target/update-trigger/drift-consequence table with one owning blocker statement, § Implementation Order linking instead of restating <!-- completed: -->
+- [x] `README.md`: split the pitch run-on into two–three short sentences (what it is; how it works; who it is for), thin surface preserved; `/update-readme` sync if the Step 1 docs edits moved owned facts (not needed — no owned thin-surface fact moved) <!-- completed: 2026-08-18T21:25 -->
+- [x] `SPEC.md` register sweep: state each contract directly without reference-implementation attribution (§2, §5.6, §6.1, §6.8, §11) or internal source paths (schema-version guard, server launcher, §6.5); delete the doc-grouping reconciliation paragraph; single-home the reference-parity non-goal in § Non-goals; drop both "absence is a valid, well-defined state" justification clauses (§6.5, §7.1) and the §6.7 "keep each as written" sentence; rewrite the §5.4 and schema-version-guard closings as plain invariants (class R) <!-- completed: 2026-08-18T21:25 -->
+- [x] Apply flagged edit 1 in `SPEC.md` (§6.3 deletion); per flagged edit 11, leave the §6.7 preset block untouched (the artifact defect is recorded there as a follow-up) <!-- completed: 2026-08-18T21:25 -->
+- [x] `.claude/rules/` sweep: `commands.md` `--` separator condition becomes one plain rule ("pass test-name filters bare; insert `--` before any `--`-prefixed arg"); `bash-tool.md` per flagged edit 12, including deleting the prior-protocol comparison sentence and the § Director side restatement; `documentation-maintenance.md` first-class targets become a target/update-trigger/drift-consequence table with one owning blocker statement, § Implementation Order linking instead of restating <!-- completed: 2026-08-18T21:29 -->
 
 ### Step 5: Verification
 
