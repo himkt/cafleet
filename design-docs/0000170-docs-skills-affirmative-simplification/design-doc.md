@@ -1,7 +1,7 @@
 # Affirmative & Simplification Sweep of docs/, skills/, README, SPEC, and Rules
 
 **Status**: Approved
-**Progress**: 24/28 tasks complete
+**Progress**: 26/28 tasks complete
 **Last Updated**: 2026-08-18
 
 ## Overview
@@ -11,10 +11,10 @@ A one-time documentation sweep that simplifies the repository's Markdown documen
 ## Success Criteria
 
 - [ ] Zero prohibition-only sections (P1) and zero unpaired load-bearing prohibitions (P2) remain in touched files, Reviewer-verified.
-- [ ] Every duplication cluster in § Ownership assignments is reduced to the owning location(s) listed there; every non-owning mention is a link plus at most a one-clause summary.
+- [x] Every duplication cluster in § Ownership assignments is reduced to the owning location(s) listed there; every non-owning mention is a link plus at most a one-clause summary.
 - [ ] All contract surfaces — CLI flags and error strings, protocol verbs and pointer forms, `{placeholder}` tokens, pane-state cues, command shapes, `SPEC.md` literals — appear unchanged in the final diff, except the edits enumerated in § Flagged edits.
-- [ ] `mise //:docs-build` completes cleanly.
-- [ ] Every intra-repo Markdown link and anchor in touched files resolves to an existing file/heading.
+- [x] `mise //:docs-build` completes cleanly.
+- [x] Every intra-repo Markdown link and anchor in touched files resolves to an existing file/heading.
 - [ ] Each edit listed in § Flagged edits is applied exactly as specified (or explicitly rejected with a recorded reason).
 
 ---
@@ -96,6 +96,8 @@ The single-owner decisions for every cross-location duplication cluster the scan
 
 Per the user's answer to Q2, deletions of reactive residue that change what agents or readers are literally instructed are allowed but must be flagged individually. These are the flagged edits; everything else in the sweep is voice- and behavior-preserving rewording.
 
+Branch-level exception: commit 619e9f06 — independent, operator-requested pre-sweep work on this branch — alters the spawn-frame `start cue` rows in `create/create.md` and `execute/execute.md` to instruct the on-spawn ready signal; the contract-surface criterion and the Reviewer diff check treat it as an enumerated exception alongside the edits below.
+
 1. § Schema-only invocation, in both `cli-options.md` and `SPEC.md` §6.3 — delete the verbatim-equivalent absence-framed sections; fold any affirmative sentence not already present into each document's `setup` section.
 2. `webui-api.md` GET /api/timeline — delete the speculative future-failure warning about ACK timestamps; retarget its dead link ("Data model § ACK timestamp inference") to `data-model.md` § Broadcast Grouping.
 3. `supervision.md` § User Delegation Protocol — delete the two "What you MUST NOT do" bullets that restate step 3's positive spec; fold the two bullets with novel content (no batching of distinct questions; invoke pane primitives via your own Bash tool) into the numbered steps.
@@ -175,8 +177,8 @@ Per the user's answer to Q2, deletions of reactive residue that change what agen
 
 ### Step 5: Verification
 
-- [ ] Run `mise //:docs-build` and confirm a clean exit <!-- completed: -->
-- [ ] Verify every intra-repo link/anchor in touched files resolves; re-check `documentation-tables.md` conventions (incl. rendered HTML for piped cells) on touched docs pages <!-- completed: -->
+- [x] Run `mise //:docs-build` and confirm a clean exit <!-- completed: 2026-08-18T21:33 -->
+- [x] Verify every intra-repo link/anchor in touched files resolves; re-check `documentation-tables.md` conventions (incl. rendered HTML for piped cells) on touched docs pages <!-- completed: 2026-08-18T21:33 -->
 - [ ] Reviewer pass: zero P1/P2 residue in touched files; every § Flagged edit applied as specified or rejected with recorded reason <!-- completed: -->
 - [ ] Reviewer diff check: no contract surface altered (CLI flags, error strings, verbs, placeholder tokens, pane-state cues, `SPEC.md` literals), except the edits enumerated in § Flagged edits <!-- completed: -->
 
