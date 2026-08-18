@@ -1,6 +1,6 @@
 # Affirmative & Simplification Sweep of docs/, skills/, README, SPEC, and Rules
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 28/28 tasks complete
 **Last Updated**: 2026-08-18
 
@@ -191,3 +191,4 @@ Branch-level exception: commit 619e9f06 — independent, operator-requested pre-
 | 2026-08-17 | Initial draft |
 | 2026-08-17 | Fold in root-slice evidence (README/SPEC/.claude-rules): flagged edits 11–12, two ownership rows, evidence-based Step 4 |
 | 2026-08-17 | Review round 1: touched-files criterion, owning-location(s) wording, flagged-edits carve-out in criterion/gate/task, edit 11 respecified as recorded follow-up (artifact-internal defect, frontmatter wins), Step 2 file-to-section mapping |
+| 2026-08-18 | Executed: all 28 tasks complete, Phase D verification passed (docs-build clean, 498/498 links resolve), Reviewer approved in 2 rounds, branch-level exception 619e9f06 recorded, PR #321 opened. Status → Complete |
