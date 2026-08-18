@@ -96,7 +96,7 @@ CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFL
 
 ## Team supervision
 
-The fleet's **monitor member** is spawned by the `cafleet fleet create` bootstrap itself, before any ordinary `cafleet member create`. At startup it launches the `cafleet monitor` wake loop in its own pane and sends the gate signal `monitor live` to the Director — the message that gates the first ordinary spawn (the CLI's monitor-first guard backstops it). On each wake it classifies the fleet's panes and contacts the Director only when something actually needs attention.
+The fleet's **monitor member** is spawned by the `cafleet fleet create` bootstrap itself, before any ordinary `cafleet member create`. At startup it launches the `cafleet monitor` wake loop in its own pane, confirms the loop's `monitor loop started` line, and sends the gate signal `monitor live` to the Director — the message that gates the first ordinary spawn (the CLI's monitor-first guard backstops it). On each wake it classifies the fleet's panes and contacts the Director only when something actually needs attention. A dead monitor is re-spawned mid-run with `cafleet member create --role monitor`.
 
 For the full governance + heartbeat mechanism, Read [`reference/supervision.md`](reference/supervision.md); the monitor member's own protocol is [`roles/monitor.md`](roles/monitor.md).
 

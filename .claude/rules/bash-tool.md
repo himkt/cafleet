@@ -18,3 +18,4 @@ Any of the following signals means you are a member subject to this rule:
 
 - Member-side conduct — the run-commands-yourself default, the never-fabricate rules, denial handling, and where your ids come from: `skills/cafleet/roles/member.md`.
 - The bash-via-Director fallback — the member-side reconsider-then-route protocol and the Director-side `prompt --shell → ping → ack` dispatch, serialization, and lookup boundary: `skills/cafleet/reference/prompt-routing.md`.
+- Director keystrokes you may see land in your pane: a `cafleet member ping` (`Esc` → `cafleet message poll <your-member-id> — then resume your work if something was still running.` → `Enter`) re-poking a missed delivery, and a `cafleet member prompt --shell` staging a dispatched command's output for your next turn.
