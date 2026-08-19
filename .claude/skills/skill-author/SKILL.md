@@ -160,7 +160,11 @@ CODING AGENT: {coding_agent}
 
 <role-specific assignment text — e.g. CURRENT DATE, USER REQUEST, OUTPUT PATH, YOUR TASK ID>
 
-<role-specific instructions — every IMPORTANT: line, poll-handling line, and start cue>
+<role-specific instructions — every IMPORTANT: line and poll-handling line>
+
+On spawn, as your first Bash call, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
+
+<start cue>
 ```
 
 There is no `COMMUNICATION PROTOCOL` command-example block: the member learns the poll/send/ack command shapes from the `cafleet` skill and its role file, and takes its ids from the literal identity lines above.
@@ -223,6 +227,14 @@ audit-disabled no BASE in spawn prompt
 ```
 
 The phrasing deliberately omits parentheses so the Director reading the broker log does not misinterpret it as a malformed `<verb> (<pointer>)` hop.
+
+### 3.6 The ready-signal line
+
+The ready-signal line is part of the skeleton's **fixed frame**, not a role-specific slot: every spawn prompt carries it as written in the anatomy skeleton above (§ 3), between the role-specific instructions and the start cue. Do not vary its wording per role and do not fold it into a start cue.
+
+Its `{member_id}` / `{director_member_id}` tokens are two of the CLI's four `str.format` identity placeholders (§ 3.2), so `cafleet member create` renders the line into a copy-pastable command with literal integers at spawn — the member executes it verbatim as its first Bash call.
+
+The resulting `ready` message is the only evidence that the coding agent inside the pane actually booted (pane placement proves only that the pane exists), and the Director dispatches the member's first task on that signal. A spawn prompt missing the line is a spawn defect — fix the prompt and re-spawn.
 
 ---
 
@@ -383,6 +395,8 @@ INPUT FILE: /repo/researches/pr-1234/diff.patch
 OUTPUT FILE: /repo/researches/pr-1234/summary.md
 
 When you see cafleet message poll output with a message from the Director, capture the id: from each entry as the task id and ack it via cafleet message ack, then act on the instructions.
+
+On spawn, as your first Bash call, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
 
 Read INPUT FILE, write a 200-word summary highlighting the top 3 risk areas to OUTPUT FILE, then send complete (doc) to the Director.
 ```

@@ -1,7 +1,7 @@
 # Member Ready-Signal Enforcement via the Canonical Spawn-Prompt Skeleton
 
-**Status**: Approved
-**Progress**: 0/15 tasks complete
+**Status**: Complete
+**Progress**: 15/15 tasks complete
 **Last Updated**: 2026-08-19
 
 ## Overview
@@ -10,12 +10,12 @@ The on-spawn ready-signal directive — mandated by `skills/cafleet/reference/su
 
 ## Success Criteria
 
-- [ ] The canonical spawn-prompt skeleton in `skills/cafleet/reference/director.md` carries the fixed ready-signal line, so rendering any workflow's per-role delta yields a prompt containing it.
-- [ ] `rg "Send your on-spawn ready signal" skills/ .claude/skills/ docs/` returns zero hits — no start-cue delta row restates the directive (single owner).
-- [ ] The canonical ready-signal line appears verbatim in exactly four skeleton blocks: the `director.md` canonical skeleton, the `clean-docs` skeleton, and the `skill-author` § 3 anatomy skeleton and worked-example prompt.
-- [ ] `supervision.md` Spawn Protocol step 3 names the skeleton frame as the directive's carrier and retains the "a prompt missing it is a defect — fix and re-spawn" rule.
-- [ ] The `skill-author` guide teaches the ready-signal requirement in its spawn-prompt anatomy section.
-- [ ] Every ordinary-member spawn section in the five consuming workflow files (`create.md`, `interview.md`, `execute.md`, `report.md`, `presentation.md`) still renders the canonical skeleton by anchor link, so all of them inherit the line with no per-workflow edit.
+- [x] The canonical spawn-prompt skeleton in `skills/cafleet/reference/director.md` carries the fixed ready-signal line, so rendering any workflow's per-role delta yields a prompt containing it.
+- [x] `rg "Send your on-spawn ready signal" skills/ .claude/skills/ docs/` returns zero hits — no start-cue delta row restates the directive (single owner).
+- [x] The canonical ready-signal line appears verbatim in exactly four skeleton blocks: the `director.md` canonical skeleton, the `clean-docs` skeleton, and the `skill-author` § 3 anatomy skeleton and worked-example prompt.
+- [x] `supervision.md` Spawn Protocol step 3 names the skeleton frame as the directive's carrier and retains the "a prompt missing it is a defect — fix and re-spawn" rule.
+- [x] The `skill-author` guide teaches the ready-signal requirement in its spawn-prompt anatomy section.
+- [x] Every ordinary-member spawn section in the five consuming workflow files (`create.md`, `interview.md`, `execute.md`, `report.md`, `presentation.md`) still renders the canonical skeleton by anchor link, so all of them inherit the line with no per-workflow edit.
 
 ---
 
@@ -147,36 +147,36 @@ All changes are documentation edits to skill files; the documentation-first orde
 
 ### Step 1: Canonical skeleton (`skills/cafleet/reference/director.md`)
 
-- [ ] Insert the canonical ready-signal line (D2) into the skeleton frame between `‹IMPORTANT / ROLE-CONSTRAINT LINES›` and `‹START CUE›` (D3) <!-- completed: -->
-- [ ] Add a short prose note after the frame stating the line is fixed frame (not a delta slot), that the CLI renders its two identity placeholders at spawn, and update the `‹START CUE›` slot description with the does-not-restate clause (D3) <!-- completed: -->
+- [x] Insert the canonical ready-signal line (D2) into the skeleton frame between `‹IMPORTANT / ROLE-CONSTRAINT LINES›` and `‹START CUE›` (D3) <!-- completed: 2026-08-19T10:50 -->
+- [x] Add a short prose note after the frame stating the line is fixed frame (not a delta slot), that the CLI renders its two identity placeholders at spawn, and update the `‹START CUE›` slot description with the does-not-restate clause (D3) <!-- completed: 2026-08-19T10:50 -->
 
 ### Step 2: Spawn Protocol (`skills/cafleet/reference/supervision.md`)
 
-- [ ] Replace Spawn Protocol step 3 with the D6 wording <!-- completed: -->
+- [x] Replace Spawn Protocol step 3 with the D6 wording <!-- completed: 2026-08-19T10:52 -->
 
 ### Step 3: Remove redundant start-cue prefixes (D8)
 
-- [ ] `skills/cafleet-design-doc/create/create.md:126` — create Reviewer start cue <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/execute.md:171` — Programmer start cue <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/execute.md:190` — Tester start cue <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/execute.md:204` — Verifier start cue <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/execute.md:312` — execute Reviewer start cue <!-- completed: -->
+- [x] `skills/cafleet-design-doc/create/create.md:126` — create Reviewer start cue <!-- completed: 2026-08-19T10:53 -->
+- [x] `skills/cafleet-design-doc/execute/execute.md:171` — Programmer start cue <!-- completed: 2026-08-19T10:53 -->
+- [x] `skills/cafleet-design-doc/execute/execute.md:190` — Tester start cue <!-- completed: 2026-08-19T10:53 -->
+- [x] `skills/cafleet-design-doc/execute/execute.md:204` — Verifier start cue <!-- completed: 2026-08-19T10:53 -->
+- [x] `skills/cafleet-design-doc/execute/execute.md:312` — execute Reviewer start cue <!-- completed: 2026-08-19T10:53 -->
 
 ### Step 4: `skill-author` guide (`.claude/skills/skill-author/SKILL.md`)
 
-- [ ] Add the canonical line to the § 3 anatomy skeleton block (D7.1) <!-- completed: -->
-- [ ] Add the teaching subsection under § 3 (D7.2) <!-- completed: -->
-- [ ] Add the canonical line to the worked-example Summarizer prompt (D7.3) <!-- completed: -->
+- [x] Add the canonical line to the § 3 anatomy skeleton block (D7.1) <!-- completed: 2026-08-19T10:57 -->
+- [x] Add the teaching subsection under § 3 (D7.2) <!-- completed: 2026-08-19T10:57 -->
+- [x] Add the canonical line to the worked-example Summarizer prompt (D7.3) <!-- completed: 2026-08-19T10:57 -->
 
 ### Step 5: `clean-docs` normalization check
 
-- [ ] Verify `.claude/skills/clean-docs/SKILL.md:248` is byte-identical to the canonical line and satisfies the two contractual placement properties (after the identity block, before the start cue — neighbor order is not normalized, D3); edit only if drifted (expected: no-op, D2) <!-- completed: -->
+- [x] Verify `.claude/skills/clean-docs/SKILL.md:248` is byte-identical to the canonical line and satisfies the two contractual placement properties (after the identity block, before the start cue — neighbor order is not normalized, D3); edit only if drifted (expected: no-op, D2) <!-- completed: 2026-08-19T11:06 -->
 
 ### Step 6: Verification sweeps
 
-- [ ] `rg "Send your on-spawn ready signal" skills/ .claude/skills/ docs/` returns zero hits <!-- completed: -->
-- [ ] `rg "On spawn, as your first Bash call, send the ready signal" skills/ .claude/skills/` hits exactly the four carrier blocks: `director.md` skeleton, `clean-docs` skeleton, `skill-author` anatomy skeleton, `skill-author` worked example <!-- completed: -->
-- [ ] Confirm every ordinary-member spawn section in `create.md`, `interview.md`, `execute.md`, `report.md`, `presentation.md` still links the canonical skeleton anchor (`director.md#canonical-spawn-prompt-skeleton`), so each render inherits the line <!-- completed: -->
+- [x] `rg "Send your on-spawn ready signal" skills/ .claude/skills/ docs/` returns zero hits <!-- completed: 2026-08-19T11:07 -->
+- [x] `rg "On spawn, as your first Bash call, send the ready signal" skills/ .claude/skills/` hits exactly the four carrier blocks: `director.md` skeleton, `clean-docs` skeleton, `skill-author` anatomy skeleton, `skill-author` worked example <!-- completed: 2026-08-19T11:07 -->
+- [x] Confirm every ordinary-member spawn section in `create.md`, `interview.md`, `execute.md`, `report.md`, `presentation.md` still links the canonical skeleton anchor (`director.md#canonical-spawn-prompt-skeleton`), so each render inherits the line <!-- completed: 2026-08-19T11:07 -->
 
 ---
 
@@ -186,3 +186,4 @@ All changes are documentation edits to skill files; the documentation-first orde
 |------|---------|
 | 2026-08-19 | Initial draft |
 | 2026-08-19 | Review round 1: pinned the ready line's contractual placement (after the identity block, before the start cue; neighbor order presentational — clean-docs tolerated as-is), specified the skill-author skeleton split and worked-example insertion point, and barred the D7.2 teaching subsection from quoting the contract string |
+| 2026-08-19 | Implementation complete: all 15 tasks and 6 success criteria verified, Reviewer approved in round 1, PR #324 opened; skill-author edits applied Director-side (member harness denies writes under the project .claude/ tree) |

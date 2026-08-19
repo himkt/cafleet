@@ -168,7 +168,7 @@ Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/
 | ROLE TITLE | `the Programmer` |
 | role-file | `roles/programmer.md` |
 | IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` |
-| start cue | `Send your on-spawn ready signal, then read the design document and wait for the Director to assign your first step.` |
+| start cue | `Read the design document and wait for the Director to assign your first step.` |
 
 Spawn per the 3e spawn frame. Worked example — the one full command block of this file; the Tester, Verifier, and Step-5 Reviewer spawns reuse the frame with their own literals:
 
@@ -187,7 +187,7 @@ Spawn per the 3e spawn frame. Worked example — the one full command block of t
 | ROLE TITLE | `the Tester` |
 | role-file | `roles/tester.md` |
 | IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` / `IMPORTANT: Do NOT write implementation code — only test code.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` |
-| start cue | `Send your on-spawn ready signal, then read the design document and wait for the Director to assign your first step.` |
+| start cue | `Read the design document and wait for the Director to assign your first step.` |
 | `--name` / `--description` | `Tester` / `Writes unit tests per step` |
 
 Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/tester-<UTC-compact>.md`).
@@ -201,7 +201,7 @@ Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/tester-<UTC-compact>.
 | ROLE TITLE | `the Verifier` |
 | role-file | `roles/verifier.md` |
 | IMPORTANT (verbatim) | `IMPORTANT: Do NOT commit code or modify implementation/test files.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` |
-| start cue | `Send your on-spawn ready signal, then read the design document and discover available tools. Wait for the Director to assign your first verification task.` |
+| start cue | `Read the design document and discover available tools. Wait for the Director to assign your first verification task.` |
 | `--name` / `--description` | `Verifier` / `E2E/integration testing and evidence collection` |
 
 Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/verifier-<UTC-compact>.md`).
@@ -309,7 +309,7 @@ This is the first and only time the Reviewer exists in the fleet (never in the S
 | CONTEXT LINES | `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` / `BASE BRANCH: [INSERT default branch name from Step 2]` |
 | poll-handling line (verbatim) | `When you see cafleet message poll output with a message from the Director, act on those instructions.` |
 | IMPORTANT (verbatim) | `IMPORTANT: You are a fresh reviewer with no implementation context — judge only what you can verify from the design document, the diff, and the checks you run.` / `IMPORTANT: Do NOT write or modify implementation or test code. Your only edits are COMMENT(reviewer) markers.` / `IMPORTANT: Do NOT commit. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` |
-| start cue | `Send your on-spawn ready signal, then read the design document and the branch diff. Then act on the Director's ready (doc) assignment.` |
+| start cue | `Read the design document and the branch diff. Then act on the Director's ready (doc) assignment.` |
 | `--name` / `--description` / `--model` | `Reviewer` / `Fresh post-implementation review` / `{reviewer_model}` (your overlay's resolved value) |
 
 Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/reviewer-<UTC-compact>.md`), adding `--model {reviewer_model}`. Verify `status: active` via `cafleet member list <fleet-id>` before assigning.
