@@ -1,7 +1,7 @@
 # Member Ready-Signal Enforcement via the Canonical Spawn-Prompt Skeleton
 
 **Status**: Approved
-**Progress**: 12/15 tasks complete
+**Progress**: 15/15 tasks complete
 **Last Updated**: 2026-08-19
 
 ## Overview
@@ -10,12 +10,12 @@ The on-spawn ready-signal directive — mandated by `skills/cafleet/reference/su
 
 ## Success Criteria
 
-- [ ] The canonical spawn-prompt skeleton in `skills/cafleet/reference/director.md` carries the fixed ready-signal line, so rendering any workflow's per-role delta yields a prompt containing it.
-- [ ] `rg "Send your on-spawn ready signal" skills/ .claude/skills/ docs/` returns zero hits — no start-cue delta row restates the directive (single owner).
-- [ ] The canonical ready-signal line appears verbatim in exactly four skeleton blocks: the `director.md` canonical skeleton, the `clean-docs` skeleton, and the `skill-author` § 3 anatomy skeleton and worked-example prompt.
-- [ ] `supervision.md` Spawn Protocol step 3 names the skeleton frame as the directive's carrier and retains the "a prompt missing it is a defect — fix and re-spawn" rule.
-- [ ] The `skill-author` guide teaches the ready-signal requirement in its spawn-prompt anatomy section.
-- [ ] Every ordinary-member spawn section in the five consuming workflow files (`create.md`, `interview.md`, `execute.md`, `report.md`, `presentation.md`) still renders the canonical skeleton by anchor link, so all of them inherit the line with no per-workflow edit.
+- [x] The canonical spawn-prompt skeleton in `skills/cafleet/reference/director.md` carries the fixed ready-signal line, so rendering any workflow's per-role delta yields a prompt containing it.
+- [x] `rg "Send your on-spawn ready signal" skills/ .claude/skills/ docs/` returns zero hits — no start-cue delta row restates the directive (single owner).
+- [x] The canonical ready-signal line appears verbatim in exactly four skeleton blocks: the `director.md` canonical skeleton, the `clean-docs` skeleton, and the `skill-author` § 3 anatomy skeleton and worked-example prompt.
+- [x] `supervision.md` Spawn Protocol step 3 names the skeleton frame as the directive's carrier and retains the "a prompt missing it is a defect — fix and re-spawn" rule.
+- [x] The `skill-author` guide teaches the ready-signal requirement in its spawn-prompt anatomy section.
+- [x] Every ordinary-member spawn section in the five consuming workflow files (`create.md`, `interview.md`, `execute.md`, `report.md`, `presentation.md`) still renders the canonical skeleton by anchor link, so all of them inherit the line with no per-workflow edit.
 
 ---
 
@@ -174,9 +174,9 @@ All changes are documentation edits to skill files; the documentation-first orde
 
 ### Step 6: Verification sweeps
 
-- [ ] `rg "Send your on-spawn ready signal" skills/ .claude/skills/ docs/` returns zero hits <!-- completed: -->
-- [ ] `rg "On spawn, as your first Bash call, send the ready signal" skills/ .claude/skills/` hits exactly the four carrier blocks: `director.md` skeleton, `clean-docs` skeleton, `skill-author` anatomy skeleton, `skill-author` worked example <!-- completed: -->
-- [ ] Confirm every ordinary-member spawn section in `create.md`, `interview.md`, `execute.md`, `report.md`, `presentation.md` still links the canonical skeleton anchor (`director.md#canonical-spawn-prompt-skeleton`), so each render inherits the line <!-- completed: -->
+- [x] `rg "Send your on-spawn ready signal" skills/ .claude/skills/ docs/` returns zero hits <!-- completed: 2026-08-19T11:07 -->
+- [x] `rg "On spawn, as your first Bash call, send the ready signal" skills/ .claude/skills/` hits exactly the four carrier blocks: `director.md` skeleton, `clean-docs` skeleton, `skill-author` anatomy skeleton, `skill-author` worked example <!-- completed: 2026-08-19T11:07 -->
+- [x] Confirm every ordinary-member spawn section in `create.md`, `interview.md`, `execute.md`, `report.md`, `presentation.md` still links the canonical skeleton anchor (`director.md#canonical-spawn-prompt-skeleton`), so each render inherits the line <!-- completed: 2026-08-19T11:07 -->
 
 ---
 
