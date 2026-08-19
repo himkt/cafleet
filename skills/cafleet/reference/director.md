@@ -84,10 +84,14 @@ CODING AGENT: {coding_agent}
 
 ‹IMPORTANT / ROLE-CONSTRAINT LINES›
 
+On spawn, as your first Bash call, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
+
 ‹START CUE›
 ```
 
 Rendering is **two-stage**: the Director substitutes the values it already knows as literals before the call (`BASE`, the absolute role-file path, the cafleet-load purpose phrase), then the CLI substitutes the four identity placeholders shown in the skeleton above (`{member_id}` is the member's own newly-allocated id, which only the CLI can fill). The Director must leave **no stray single braces** other than those four. After spawn the member sees literal labeled lines — `FLEET ID: 24`, `DIRECTOR MEMBER ID: 84`, `YOUR MEMBER ID: 88`, `CODING AGENT: claude` — and uses those integers on every `cafleet` command. There is no `COMMUNICATION PROTOCOL` command-example block: the member learns poll/send/ack command shapes from the `cafleet` skill and its role file. The `CODING AGENT:` line keeps the spawned binary and the overlay selector in lockstep for every role: when `--coding-agent` is omitted at spawn, the CLI records — and `{coding_agent}` renders — the backend inherited from the Director's placement row.
+
+The ready-signal line is part of the **fixed frame**, not a per-role delta slot: every skeleton render carries it, and no consuming skill repeats or varies it. Its `{member_id}` / `{director_member_id}` placeholders are two of the CLI's four identity placeholders, rendered to literal integers at spawn — the member receives a copy-pastable command.
 
 Per-role delta slots (each consuming skill's spawn section fills these):
 
@@ -98,7 +102,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 | `‹cafleet-load purpose›` + `‹EXTRA SKILL LOADS›` | The cafleet purpose phrase (`for communication with the Director`, or `for the broker primitives and bash-via-Director routing`), plus any extra startup skills — `cafleet-design-doc` (design-doc family); `cafleet-research` (Presentation Specialist — its `reference/slidev.md` + `reference/visualization.md`). |
 | `‹CONTEXT LINES›` | Role inputs, one per line: `DESIGN DOCUMENT` / `OUTPUT PATH` / `CURRENT DATE` / `USER REQUEST` / `OUTPUT DIRECTORY` / `LANGUAGE` / `YOUR ASSIGNMENT` / `OUTPUT FILE` / `YOUR TASK ID` / `REPORT` / `SLIDE FILE` / `SERVER URL` / `ROUND`, etc. |
 | `‹IMPORTANT / ROLE-CONSTRAINT LINES›` | Every `IMPORTANT:` line and hard role constraint, verbatim (see lossless rule) — including each role's poll-handling line: either the simple `When you see cafleet message poll output with a message from the Director, act on those instructions.` (create / execute / interview) or the **ack-inline** form `…capture the id: integer id from each entry as [message-id] and ack it via cafleet message ack [message-id], then act on the instructions.` (research / presentation), plus each role's coordination constraints — each consuming skill's delta table is the authoritative inventory. |
-| `‹START CUE›` | The role's closing instruction — e.g. `Start by reading the design document. Then wait for the Director to assign your first step.`; `Read the design document, generate a numbered question list …`; `When complete, send the file path to the Director …`. |
+| `‹START CUE›` | The role's closing instruction — e.g. `Start by reading the design document. Then wait for the Director to assign your first step.`; `Read the design document, generate a numbered question list …`; `When complete, send the file path to the Director …`. The start cue follows the frame's ready-signal line and does not restate it. |
 
 **Lossless rule (non-negotiable).** When a skill collapses its inline spawn prompts to "this skeleton + a per-role delta", the per-role delta MUST reproduce **every** `IMPORTANT:` line, hard role-constraint, and start cue from the original prompt **verbatim** — none dropped or paraphrased. These lines are the behavioral contract of the spawn; the reconstruction check asserts each maps to a delta row. Lines that MUST survive every collapse include: the Programmer no-commit line; the Tester test-only line; the Verifier no-commit/no-modify line; the all-execute-roles pair (the member-Bash-protocol line and the if-blocked line); and the Drafter clarifying-questions lines (normal and resume mode). Each consuming skill's delta table (`create/create.md`, `execute/execute.md`, …) is the authoritative inventory of its IMPORTANT / coordination lines; the reconstruction check runs against that table.
 

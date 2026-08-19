@@ -1,7 +1,7 @@
 # Member Ready-Signal Enforcement via the Canonical Spawn-Prompt Skeleton
 
 **Status**: Approved
-**Progress**: 0/15 tasks complete
+**Progress**: 2/15 tasks complete
 **Last Updated**: 2026-08-19
 
 ## Overview
@@ -147,8 +147,8 @@ All changes are documentation edits to skill files; the documentation-first orde
 
 ### Step 1: Canonical skeleton (`skills/cafleet/reference/director.md`)
 
-- [ ] Insert the canonical ready-signal line (D2) into the skeleton frame between `‹IMPORTANT / ROLE-CONSTRAINT LINES›` and `‹START CUE›` (D3) <!-- completed: -->
-- [ ] Add a short prose note after the frame stating the line is fixed frame (not a delta slot), that the CLI renders its two identity placeholders at spawn, and update the `‹START CUE›` slot description with the does-not-restate clause (D3) <!-- completed: -->
+- [x] Insert the canonical ready-signal line (D2) into the skeleton frame between `‹IMPORTANT / ROLE-CONSTRAINT LINES›` and `‹START CUE›` (D3) <!-- completed: 2026-08-19T10:50 -->
+- [x] Add a short prose note after the frame stating the line is fixed frame (not a delta slot), that the CLI renders its two identity placeholders at spawn, and update the `‹START CUE›` slot description with the does-not-restate clause (D3) <!-- completed: 2026-08-19T10:50 -->
 
 ### Step 2: Spawn Protocol (`skills/cafleet/reference/supervision.md`)
 
