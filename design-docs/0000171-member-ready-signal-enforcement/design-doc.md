@@ -1,6 +1,6 @@
 # Member Ready-Signal Enforcement via the Canonical Spawn-Prompt Skeleton
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 15/15 tasks complete
 **Last Updated**: 2026-08-19
 
@@ -186,3 +186,4 @@ All changes are documentation edits to skill files; the documentation-first orde
 |------|---------|
 | 2026-08-19 | Initial draft |
 | 2026-08-19 | Review round 1: pinned the ready line's contractual placement (after the identity block, before the start cue; neighbor order presentational — clean-docs tolerated as-is), specified the skill-author skeleton split and worked-example insertion point, and barred the D7.2 teaching subsection from quoting the contract string |
+| 2026-08-19 | Implementation complete: all 15 tasks and 6 success criteria verified, Reviewer approved in round 1, PR #324 opened; skill-author edits applied Director-side (member harness denies writes under the project .claude/ tree) |
