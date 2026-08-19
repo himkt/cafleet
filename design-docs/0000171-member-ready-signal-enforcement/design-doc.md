@@ -1,7 +1,7 @@
 # Member Ready-Signal Enforcement via the Canonical Spawn-Prompt Skeleton
 
 **Status**: Approved
-**Progress**: 11/15 tasks complete
+**Progress**: 12/15 tasks complete
 **Last Updated**: 2026-08-19
 
 ## Overview
@@ -170,7 +170,7 @@ All changes are documentation edits to skill files; the documentation-first orde
 
 ### Step 5: `clean-docs` normalization check
 
-- [ ] Verify `.claude/skills/clean-docs/SKILL.md:248` is byte-identical to the canonical line and satisfies the two contractual placement properties (after the identity block, before the start cue — neighbor order is not normalized, D3); edit only if drifted (expected: no-op, D2) <!-- completed: -->
+- [x] Verify `.claude/skills/clean-docs/SKILL.md:248` is byte-identical to the canonical line and satisfies the two contractual placement properties (after the identity block, before the start cue — neighbor order is not normalized, D3); edit only if drifted (expected: no-op, D2) <!-- completed: 2026-08-19T11:06 -->
 
 ### Step 6: Verification sweeps
 
