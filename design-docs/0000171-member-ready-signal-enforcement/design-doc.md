@@ -1,7 +1,7 @@
 # Member Ready-Signal Enforcement via the Canonical Spawn-Prompt Skeleton
 
 **Status**: Approved
-**Progress**: 8/15 tasks complete
+**Progress**: 11/15 tasks complete
 **Last Updated**: 2026-08-19
 
 ## Overview
@@ -164,9 +164,9 @@ All changes are documentation edits to skill files; the documentation-first orde
 
 ### Step 4: `skill-author` guide (`.claude/skills/skill-author/SKILL.md`)
 
-- [ ] Add the canonical line to the § 3 anatomy skeleton block (D7.1) <!-- completed: -->
-- [ ] Add the teaching subsection under § 3 (D7.2) <!-- completed: -->
-- [ ] Add the canonical line to the worked-example Summarizer prompt (D7.3) <!-- completed: -->
+- [x] Add the canonical line to the § 3 anatomy skeleton block (D7.1) <!-- completed: 2026-08-19T10:57 -->
+- [x] Add the teaching subsection under § 3 (D7.2) <!-- completed: 2026-08-19T10:57 -->
+- [x] Add the canonical line to the worked-example Summarizer prompt (D7.3) <!-- completed: 2026-08-19T10:57 -->
 
 ### Step 5: `clean-docs` normalization check
 
