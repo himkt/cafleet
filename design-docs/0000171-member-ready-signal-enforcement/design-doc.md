@@ -1,7 +1,7 @@
 # Member Ready-Signal Enforcement via the Canonical Spawn-Prompt Skeleton
 
 **Status**: Approved
-**Progress**: 3/15 tasks complete
+**Progress**: 8/15 tasks complete
 **Last Updated**: 2026-08-19
 
 ## Overview
@@ -156,11 +156,11 @@ All changes are documentation edits to skill files; the documentation-first orde
 
 ### Step 3: Remove redundant start-cue prefixes (D8)
 
-- [ ] `skills/cafleet-design-doc/create/create.md:126` — create Reviewer start cue <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/execute.md:171` — Programmer start cue <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/execute.md:190` — Tester start cue <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/execute.md:204` — Verifier start cue <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/execute/execute.md:312` — execute Reviewer start cue <!-- completed: -->
+- [x] `skills/cafleet-design-doc/create/create.md:126` — create Reviewer start cue <!-- completed: 2026-08-19T10:53 -->
+- [x] `skills/cafleet-design-doc/execute/execute.md:171` — Programmer start cue <!-- completed: 2026-08-19T10:53 -->
+- [x] `skills/cafleet-design-doc/execute/execute.md:190` — Tester start cue <!-- completed: 2026-08-19T10:53 -->
+- [x] `skills/cafleet-design-doc/execute/execute.md:204` — Verifier start cue <!-- completed: 2026-08-19T10:53 -->
+- [x] `skills/cafleet-design-doc/execute/execute.md:312` — execute Reviewer start cue <!-- completed: 2026-08-19T10:53 -->
 
 ### Step 4: `skill-author` guide (`.claude/skills/skill-author/SKILL.md`)
 
