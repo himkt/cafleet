@@ -1,7 +1,7 @@
 # Member Ready-Signal Enforcement via the Canonical Spawn-Prompt Skeleton
 
 **Status**: Approved
-**Progress**: 2/15 tasks complete
+**Progress**: 3/15 tasks complete
 **Last Updated**: 2026-08-19
 
 ## Overview
@@ -152,7 +152,7 @@ All changes are documentation edits to skill files; the documentation-first orde
 
 ### Step 2: Spawn Protocol (`skills/cafleet/reference/supervision.md`)
 
-- [ ] Replace Spawn Protocol step 3 with the D6 wording <!-- completed: -->
+- [x] Replace Spawn Protocol step 3 with the D6 wording <!-- completed: 2026-08-19T10:52 -->
 
 ### Step 3: Remove redundant start-cue prefixes (D8)
 
