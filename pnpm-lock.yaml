@@ -15,8 +15,8 @@ importers:
         specifier: ^0.25.0
         version: 0.25.0
       agent-browser:
-        specifier: ^0.33.0
-        version: 0.33.2
+        specifier: ^0.34.0
+        version: 0.34.0
       vue:
         specifier: ^3.5.29
         version: 3.5.41(typescript@6.0.3)
@@ -2476,8 +2476,8 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
 
-  agent-browser@0.33.2:
-    resolution: {integrity: sha512-e+TZ0G04uw2rs+lVB8gn0IWTT7ErfiAl3jQ4zNNwyqDhgXWJKhqxYKkyibjuBGXLzx/APlzU3IWAsOVdRwh0DA==}
+  agent-browser@0.34.0:
+    resolution: {integrity: sha512-eR6Ey4I/DMs9zZ60b3ziV6pgLIgpxXWzggr3dfFbtskLmeXPJAgXCIIwVL4PihVYJqEUpvWgUKlZ2CIjY1u44g==}
     engines: {node: '>=24.0.0', pnpm: '>=11.0.0'}
     hasBin: true
 
@@ -3121,6 +3121,7 @@ packages:
   eslint@9.39.5:
     resolution: {integrity: sha512-DgZS62aPLXKlnxILS/AYCoRvHaZeXceIzlXPkkGGzJWSow1aEk0lbTlxUSlyjC8jcaKxAdOnTDz+o1JFSBsyjw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -8041,7 +8042,7 @@ snapshots:
 
   acorn@8.18.0: {}
 
-  agent-browser@0.33.2: {}
+  agent-browser@0.34.0: {}
 
   ajv@6.15.0:
     dependencies:
