@@ -1,7 +1,7 @@
 # Sunset cafleet-research
 
 **Status**: Approved
-**Progress**: 13/29 tasks complete
+**Progress**: 16/29 tasks complete
 **Last Updated**: 2026-08-21
 
 ## Overview
@@ -149,9 +149,9 @@ Documentation first, per `.claude/rules/documentation-maintenance.md`.
 
 ### Step 2: Skill tree and repo config
 
-- [ ] Delete `skills/cafleet-research/` (all 26 files) <!-- completed: -->
-- [ ] Update `.claude/settings.json` per the Specification table <!-- completed: -->
-- [ ] Update `.gitignore` per the Specification table <!-- completed: -->
+- [x] Delete `skills/cafleet-research/` (all 26 files) <!-- completed: 2026-08-21T11:22 -->
+- [x] Update `.claude/settings.json` per the Specification table <!-- completed: 2026-08-21T11:22 -->
+- [x] Update `.gitignore` per the Specification table <!-- completed: 2026-08-21T11:21 -->
 
 ### Step 3: pnpm workspace restructuring
 
