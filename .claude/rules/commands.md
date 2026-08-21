@@ -39,14 +39,3 @@ The commands above are the **only** way to run these operations. Do NOT invoke t
 | `cargo run -- ...` / `cafleet ...` for verification/smoke | delegate to a teammate that already has permission, or ask the user | see `skills/cafleet/reference/supervision.md` § *Authorization-Scope Guard* |
 
 This rule applies **even when a teammate is blocked on permissions** and you are tempted to "just run it yourself" — using `mise` keeps commands matching the project's `permissions.allow` patterns, which is the entire point of this project's fleet-id / member-id CLI design.
-
-## Skill artifact runners (project-specific glue)
-
-Skills under `skills/` are deliberately invocation-agnostic — they describe the artifact they produce (a matplotlib script, a Slidev deck) but not the host-project run command. This section is the cafleet repo's catalog of those commands, paired one-to-one with the skill artifact they run. Skills MUST NOT embed the cafleet-specific runner in their own body; they direct users to the host project's `.claude/rules/`, which in this repo is this very file.
-
-| Skill artifact | Cafleet runner |
-|---|---|
-| `cafleet-research` presentation pnpm deps install | `mise //:pnpm-install` (equivalent to `pnpm install --frozen-lockfile`). |
-| `cafleet-research` presentation Slidev dev server | `mise //:slidev <folder>/slide.md` — PTY-wrapped via `script -qfc 'pnpm exec slidev --open false <slide>' /dev/null`. Default URL `http://localhost:3030`. Run with `run_in_background: true`. |
-| Calling-pane working directory for `pnpm` / `agent-browser` / Slidev | The cafleet repo root (where `package.json` and `node_modules/` live). |
-| `agent-browser wait` | Discouraged — unreliable across renderers and slow CI environments. The repo's `.claude/settings.json` `permissions.deny` blocks the common `wait --load networkidle` forms and bare `wait` forms but does not cover every variant; treat the whole family as off-limits and use `sleep N` + `pnpm exec agent-browser ... open` retry loops instead. |

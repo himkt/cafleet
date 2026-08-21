@@ -65,8 +65,7 @@ that need one.
     "allow": [
       "Bash(cafleet *)",
       "Skill(cafleet:cafleet)",
-      "Skill(cafleet:cafleet-design-doc)",
-      "Skill(cafleet:cafleet-research)"
+      "Skill(cafleet:cafleet-design-doc)"
     ],
     "ask": [
       "Bash(cafleet * member prompt *)"

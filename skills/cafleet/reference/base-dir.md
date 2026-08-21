@@ -21,16 +21,11 @@ When the consuming skill operates on a per-task folder, it picks the task-folder
 
 **The consuming skill is responsible for passing a task-folder path that is the actual task folder**, not a child file path — this procedure does no slug-folding or filename-stripping.
 
-**Consumer contract — canonicalize ARGUMENTS to the task-folder path before resolving.** The procedure is deliberately general: it does not strip trailing filenames (e.g. `/design-doc.md`, `/report.md`) and does not strip leading bucket prefixes (e.g. `design-docs/`, `researches/`). It treats `<task-folder>/` as the task folder exactly as supplied (created lazily on the first consumer write). Each consuming skill MUST canonicalize `$ARGUMENTS` against its own convention BEFORE running Step 0:
-
-| Consumer | Canonical task-folder path form | Canonicalization steps |
-|:--|:--|:--|
-| The `cafleet-design-doc` skill (create/execute/interview workflows) | `design-docs/<slug>` | (1) strip trailing `/design-doc.md` if present; (2) strip leading `design-docs/` if present; (3) prepend `design-docs/`. |
-| The `cafleet-research` skill (report/presentation workflows) | `researches/<topic-slug>` | (1) strip trailing `/report.md` (or other known per-topic filenames) if present; (2) strip leading `researches/` if present; (3) prepend `researches/`. |
+**Consumer contract — canonicalize ARGUMENTS to the task-folder path before resolving.** The procedure is deliberately general: it does not strip trailing filenames (e.g. `/design-doc.md`) and does not strip leading bucket prefixes (e.g. `design-docs/`, `researches/`). It treats `<task-folder>/` as the task folder exactly as supplied (created lazily on the first consumer write). Each consuming skill MUST canonicalize `$ARGUMENTS` against its own convention BEFORE running Step 0. The `cafleet-design-doc` skill (create/execute/interview workflows) canonicalizes to `design-docs/<slug>`: (1) strip trailing `/design-doc.md` if present; (2) strip leading `design-docs/` if present; (3) prepend `design-docs/`.
 
 **Absolute paths**: apply ONLY step 1 (strip the trailing per-task filename); skip the bucket strip/prepend (steps 2–3) — the absolute path is used verbatim as the task folder (the trailing-filename strip stops a child file path from becoming a directory named after the file).
 
-Skipping canonicalization resolves the wrong BASE — a directory literally named `design-doc.md` (or `report.md`, etc.) instead of the intended task folder.
+Skipping canonicalization resolves the wrong BASE — a directory literally named `design-doc.md` instead of the intended task folder.
 
 ### Step 1. Shared-root resolution (no task name)
 
@@ -61,7 +56,7 @@ The chosen value is `${BASE}`. Nothing is persisted; if the procedure reloads in
 
 Every CAFleet member, every consumer skill, and every Director MUST follow this protocol for scratch / audit / figure / spawn-prompt-render writes:
 
-1. **Every write under `${BASE}` or an explicit consumer-supplied absolute target.** Scratch (pre-spawn renders of spawn prompts at `${BASE}/.prompts/<role>-<UTC-compact>.md`, working notes), audit files, figure artifacts, and any other ephemeral output MUST land under `${BASE}` or under a consumer-supplied absolute path — e.g., the design-doc directory delivered to spawned members via `[INSERT abs design-doc directory]`, or the research folder delivered via `[INSERT abs research folder]`. Never `/tmp` unless `${BASE}` itself is `/tmp/cafleet` (which is a legitimate base-dir choice).
+1. **Every write under `${BASE}` or an explicit consumer-supplied absolute target.** Scratch (pre-spawn renders of spawn prompts at `${BASE}/.prompts/<role>-<UTC-compact>.md`, working notes), audit files, figure artifacts, and any other ephemeral output MUST land under `${BASE}` or under a consumer-supplied absolute path — e.g., the design-doc directory delivered to spawned members via `[INSERT abs design-doc directory]`. Never `/tmp` unless `${BASE}` itself is `/tmp/cafleet` (which is a legitimate base-dir choice).
 
 2. **Spawn prompts are written before they are spawned (the two-step).** Render each spawn prompt and **write** it to `${BASE}/.prompts/<role>-<UTC-compact>.md`, then invoke `cafleet member create --file <abs path>` against that file — the pre-spawn file is both the CLI input and the permanent audit artifact. The `<UTC-compact>` format, the same-second collision rule, the identity-placeholders-pre-substitution note, and the inline fallback when `${BASE}` is `<unset>` are canonical in [`reference/director.md`](director.md) § *Member Create — Scratch and audit files* and § *Spawn prompt size limit*.
 
@@ -79,7 +74,7 @@ Every CAFleet member, every consumer skill, and every Director MUST follow this 
 
 ### Hidden agent-only folders vs visible deliverables
 
-Assets a coding agent creates only for its own workflow — scratch, audit trails, and intermediate build inputs — live in **dot-prefixed hidden folders** under `${BASE}` (e.g. `${BASE}/.prompts/`, `${BASE}/.figures/code`, `${BASE}/.figures/data`, `${BASE}/.screenshots/`). Assets that are **user-facing deliverables** — the artifacts the user opens, embeds, or ships — live in **visible, unprefixed folders** (e.g. `${BASE}/figures/output/` for the rendered charts embedded into slides and reports).
+Assets a coding agent creates only for its own workflow — scratch, audit trails, and intermediate build inputs — live in **dot-prefixed hidden folders** under `${BASE}` (e.g. `${BASE}/.prompts/`). Assets that are **user-facing deliverables** — the artifacts the user opens, embeds, or ships — live in **visible, unprefixed folders** (e.g. the task deliverable `design-docs/<task>/design-doc.md`).
 
 When a skill adds a new output folder under `${BASE}`, classify it first: coding-agent-only → dot-prefix it; user-facing deliverable → leave it visible/unprefixed.
 

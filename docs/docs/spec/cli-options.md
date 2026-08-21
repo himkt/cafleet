@@ -269,7 +269,7 @@ The command runs two halves, in order:
     | Version unknown to this CLI version | Refused | `DB schema is at version <M> which is unknown to this version of cafleet. Refusing to downgrade automatically.` |
 
 2. **assets half** — installs, from the data embedded in the binary at build
-   time with no network access, each selected agent's three skill directories
+   time with no network access, each selected agent's two skill directories
    plus its bundled preset where one exists (creating the agent's directories
    as needed) at the directories resolved per
    [Config-dir resolution](#config-dir-resolution), and upserts one
@@ -371,8 +371,12 @@ binary next to the skills; install targets resolve per
 
 Per target:
 
-1. The three skill directories are delete-and-reinstalled into the agent's
-   resolved skills dir; a failure aborts with `failed to install skills into
+1. The two skill directories are delete-and-reinstalled into the agent's
+   resolved skills dir; after the copy, a leftover `<skills_dir>/cafleet-research`
+   entry is removed when present, using the same existing-target check order as
+   the preset install (a symlink is unlinked; else a directory is recursively
+   deleted; else an existing entry is unlinked) and producing no extra output.
+   A failure in either half aborts with `failed to install skills into
    <skills_dir>: <error>`.
 2. For agents with a bundled preset (codex, opencode), the preset is installed
    to its resolved target, overwriting whatever exists there — a regular file,
@@ -385,7 +389,7 @@ Per target:
    appears for codex and opencode targets only):
 
 ```
-<agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>) -> <skills dir>
+<agent>: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
 <agent>: installed preset (v<version>) -> <target>
 ```
 

@@ -516,19 +516,8 @@ fn skill_files_reference_no_path_that_is_missing_from_disk() {
     );
 }
 
-/// The one role file that carries no Required-reading block: it is an agent
-/// spec pasted verbatim into a dispatched sub-agent's prompt, not an entry
-/// point for a spawned member.
-const ROLE_FILE_WITHOUT_REQUIRED_READING: &str =
-    "skills/cafleet-research/report/roles/web-researcher.md";
-
 #[test]
 fn every_role_file_gates_its_overlay_as_required_reading_row_one() {
-    assert!(
-        root().join(ROLE_FILE_WITHOUT_REQUIRED_READING).exists(),
-        "the exempt role file {ROLE_FILE_WITHOUT_REQUIRED_READING} moved — retarget the exemption"
-    );
-
     let heading = regex::Regex::new(r"(?m)^#+[ \t]+Required[ -]reading").unwrap();
     let mut offenders = Vec::new();
     for relative_path in skill_markdown_files() {
@@ -536,8 +525,7 @@ fn every_role_file_gates_its_overlay_as_required_reading_row_one() {
         // A role file must *have* the block: folding content out of one must
         // never carry the gated overlay read away with it. Other skill pages
         // are checked for content only, since not all of them gate reads.
-        let block_is_mandatory = relative_path.contains("/roles/")
-            && relative_path != ROLE_FILE_WITHOUT_REQUIRED_READING;
+        let block_is_mandatory = relative_path.contains("/roles/");
         let Some(block) = heading.find(&text) else {
             if block_is_mandatory {
                 offenders.push(format!(
@@ -565,15 +553,14 @@ fn every_role_file_gates_its_overlay_as_required_reading_row_one() {
     );
 }
 
-/// The ten placeholders every backend overlay resolves.
-const OVERLAY_PLACEHOLDERS: [&str; 10] = [
+/// The nine placeholders every backend overlay resolves.
+const OVERLAY_PLACEHOLDERS: [&str; 9] = [
     "decision_surface",
     "reviewer_model",
     "monitor_model",
     "permission_flags",
     "bg_run",
     "bg_stop",
-    "task_coord",
     "pane_title",
     "skill_loader",
     "effort_levels",
@@ -590,17 +577,13 @@ const FORMAT_PLACEHOLDERS: [&str; 4] = [
 /// Brace tokens that are deliberately not overlay placeholders. Each has a
 /// documented home outside the overlay mechanism, so a token entering the tree
 /// without one still fails this check.
-const NON_OVERLAY_TOKENS: [&str; 7] = [
+const NON_OVERLAY_TOKENS: [&str; 4] = [
     // Meta-references: prose describing the resolution rule itself.
     "token",
     "placeholder",
     // Workflow-local path variables.
     "slug",
     "dir_path",
-    // web-researcher discovery-query examples.
-    "topic",
-    "current_year",
-    "current_month",
 ];
 
 #[test]

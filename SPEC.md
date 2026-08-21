@@ -1673,11 +1673,15 @@ agents, or — on the no-flag form — all three agents, always in the fixed
 order `claude`, `codex`, `opencode`);
 **install-skills** (per target, create the target's resolved skills dir as
 needed, then
-copy each embedded skill dir — exactly the three skill dirs `cafleet`,
-`cafleet-design-doc`, `cafleet-research` — into it, removing any existing copy
-first; a filesystem error → `failed to install skills into <skills_dir>: <error>`;
+copy each embedded skill dir — exactly the two skill dirs `cafleet`,
+`cafleet-design-doc` — into it, removing any existing copy first; after the
+copy, remove `<skills_dir>/cafleet-research` when present, using the same
+existing-target check order as install-preset — a symlink → unlink; else a
+directory → recursive delete; else if it exists → unlink — with no extra
+output on success; a filesystem error in either half → `failed to install
+skills into <skills_dir>: <error>`;
 success prints
-`<agent>: installed cafleet, cafleet-design-doc, cafleet-research (v<version>)
+`<agent>: installed cafleet, cafleet-design-doc (v<version>)
 -> <skills dir>`);
 **install-preset** (per target with a preset — codex: embedded source
 `presets/codex/cafleet.rules` → `<codex home>/rules/cafleet.rules`; opencode:

@@ -4,6 +4,7 @@ monorepo_root = true
 config_roots = [
   "cafleet",
   "admin",
+  "docs",
 ]
 
 [tools]
@@ -11,10 +12,6 @@ config_roots = [
 "core:node" = "26.7.0"
 "core:rust" = { version = "1.97.1", components = ["clippy", "rustfmt"] }
 "core:zig" = "0.15.2"
-
-[tasks.pnpm-install]
-run = "pnpm install --frozen-lockfile"
-description = "Install pnpm dependencies (slidev, agent-browser, vue, admin, and the docs site) into ./node_modules"
 
 [tasks.skill-install]
 run = [
@@ -30,15 +27,3 @@ run = [
   {"task" = "//cafleet:install"},
   {"task" = "//:skill-install"},
 ]
-
-[tasks.slidev]
-usage = '''
-arg "<slide>" help="path to slide.md file"
-'''
-run = "script -qfc \"pnpm exec slidev --open false {{ arg(name='slide') }}\" /dev/null"
-description = "Start the Slidev dev server inside a PTY (script -qfc) so Slidev does not detect a non-TTY stdout and exit early. The trailing /dev/null is the script(1) typescript output file — discarding it keeps the working tree clean"
-
-[tasks."docs-build"]
-description = "Build the rspress documentation site"
-run = "pnpm --dir docs build"
-depends = ["pnpm-install"]

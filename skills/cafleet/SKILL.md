@@ -64,7 +64,6 @@ Used only when your backend's section omits a token or your backend is unknown. 
 | `{permission_flags}` | describe the mode neutrally as "workspace-scoped auto-approval" — for prose uses only; spawn-flag construction never falls here |
 | `{bg_run}` | a backgrounded `!` shell command |
 | `{bg_stop}` | killing the recorded background process |
-| `{task_coord}` | cafleet messages |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading the skill's `SKILL.md` + your overlay by absolute path |
 | `{effort_levels}` | unsupported — omit `--effort` |

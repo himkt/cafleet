@@ -14,7 +14,7 @@ use crate::config_dir::{
 use crate::embedded::{PRESETS, SKILLS, lookup};
 use crate::error::CafleetError;
 
-const SKILL_NAMES: [&str; 3] = ["cafleet", "cafleet-design-doc", "cafleet-research"];
+const SKILL_NAMES: [&str; 2] = ["cafleet", "cafleet-design-doc"];
 pub const TARGET_AGENTS: [&str; 3] = ["claude", "codex", "opencode"];
 
 /// An agent's resolved install locations plus its recorded-path identity
@@ -102,11 +102,23 @@ fn install_skills(skills_dir: &Path, agent: &str, version: &str) -> Result<(), C
             std::fs::write(&dest, bytes).map_err(fail)?;
         }
     }
+    remove_existing_target(&skills_dir.join("cafleet-research")).map_err(fail)?;
     println!(
-        "{agent}: installed cafleet, cafleet-design-doc, cafleet-research (v{version}) -> {}",
+        "{agent}: installed cafleet, cafleet-design-doc (v{version}) -> {}",
         skills_dir.display()
     );
     Ok(())
+}
+
+fn remove_existing_target(target: &Path) -> std::io::Result<()> {
+    // The symlink check comes first: a directory check follows symlinks and a
+    // recursive delete refuses them.
+    match std::fs::symlink_metadata(target) {
+        Ok(metadata) if metadata.file_type().is_symlink() => std::fs::remove_file(target),
+        Ok(metadata) if metadata.is_dir() => std::fs::remove_dir_all(target),
+        Ok(_) => std::fs::remove_file(target),
+        Err(_) => Ok(()),
+    }
 }
 
 fn install_preset(
@@ -124,20 +136,7 @@ fn install_preset(
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(fail)?;
     }
-    // The symlink check comes first: a directory check follows symlinks and a
-    // recursive delete refuses them.
-    match std::fs::symlink_metadata(target) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            std::fs::remove_file(target).map_err(fail)?;
-        }
-        Ok(metadata) if metadata.is_dir() => {
-            std::fs::remove_dir_all(target).map_err(fail)?;
-        }
-        Ok(_) => {
-            std::fs::remove_file(target).map_err(fail)?;
-        }
-        Err(_) => {}
-    }
+    remove_existing_target(target).map_err(fail)?;
     let bytes = lookup(PRESETS, source)
         .unwrap_or_else(|| panic!("the embedded presets tree carries '{source}'"));
     std::fs::write(target, bytes).map_err(fail)?;
