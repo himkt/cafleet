@@ -1,7 +1,7 @@
 # Sunset cafleet-research
 
 **Status**: Approved
-**Progress**: 22/29 tasks complete
+**Progress**: 26/29 tasks complete
 **Last Updated**: 2026-08-21
 
 ## Overview
@@ -164,10 +164,10 @@ Documentation first, per `.claude/rules/documentation-maintenance.md`.
 
 ### Step 4: Rust code and tests
 
-- [ ] Update `cafleet/src/assets.rs`: two-entry `SKILL_NAMES`, new success line, leftover-`cafleet-research` removal <!-- completed: -->
-- [ ] Update `cafleet/tests/cli_setup_doctor.rs`: two-skill expectations + stale-cleanup coverage <!-- completed: -->
-- [ ] Update `cafleet/tests/docs_sync.rs`: remove the Required-reading exemption; shrink `OVERLAY_PLACEHOLDERS` and `NON_OVERLAY_TOKENS` <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `//cafleet:lint`, `//cafleet:typecheck`, `//admin:lint` — all pass <!-- completed: -->
+- [x] Update `cafleet/src/assets.rs`: two-entry `SKILL_NAMES`, new success line, leftover-`cafleet-research` removal <!-- completed: 2026-08-21T11:30 -->
+- [x] Update `cafleet/tests/cli_setup_doctor.rs`: two-skill expectations + stale-cleanup coverage <!-- completed: 2026-08-21T11:30 -->
+- [x] Update `cafleet/tests/docs_sync.rs`: remove the Required-reading exemption; shrink `OVERLAY_PLACEHOLDERS` and `NON_OVERLAY_TOKENS` <!-- completed: 2026-08-21T11:30 -->
+- [x] Run `mise //cafleet:test`, `//cafleet:lint`, `//cafleet:typecheck`, `//admin:lint` — all pass <!-- completed: 2026-08-21T11:30 -->
 
 ### Step 5: Verification and close-out
 

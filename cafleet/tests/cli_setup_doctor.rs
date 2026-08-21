@@ -190,19 +190,16 @@ fn selector_setup_installs_only_the_named_agents() {
 #[test]
 fn setup_removes_a_leftover_cafleet_research_directory_from_each_target() {
     let cli = Cli::new();
-    let stale_dirs: Vec<std::path::PathBuf> = [
-        ".claude/skills",
-        ".codex/skills",
-        ".config/opencode/skills",
-    ]
-    .iter()
-    .map(|skills_dir| {
-        let stale = cli.home.path().join(skills_dir).join("cafleet-research");
-        std::fs::create_dir_all(&stale).unwrap();
-        std::fs::write(stale.join("SKILL.md"), "stale").unwrap();
-        stale
-    })
-    .collect();
+    let stale_dirs: Vec<std::path::PathBuf> =
+        [".claude/skills", ".codex/skills", ".config/opencode/skills"]
+            .iter()
+            .map(|skills_dir| {
+                let stale = cli.home.path().join(skills_dir).join("cafleet-research");
+                std::fs::create_dir_all(&stale).unwrap();
+                std::fs::write(stale.join("SKILL.md"), "stale").unwrap();
+                stale
+            })
+            .collect();
 
     let output = cli.run(&["setup"]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
