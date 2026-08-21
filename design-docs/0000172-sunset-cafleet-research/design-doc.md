@@ -1,7 +1,7 @@
 # Sunset cafleet-research
 
 **Status**: Approved
-**Progress**: 16/29 tasks complete
+**Progress**: 22/29 tasks complete
 **Last Updated**: 2026-08-21
 
 ## Overview
@@ -155,12 +155,12 @@ Documentation first, per `.claude/rules/documentation-maintenance.md`.
 
 ### Step 3: pnpm workspace restructuring
 
-- [ ] Delete root `package.json`, `pnpm-workspace.yaml`, and `pnpm-lock.yaml` <!-- completed: -->
-- [ ] Add the `packageManager` field to `docs/package.json` <!-- completed: -->
-- [ ] Generate `admin/pnpm-lock.yaml` and `docs/pnpm-lock.yaml` (`pnpm install` in each package) <!-- completed: -->
-- [ ] Create `docs/mise.toml` (install/build/dev); update root `mise.toml`: delete `pnpm-install`, `slidev`, `docs-build`; add `docs` to `config_roots` <!-- completed: -->
-- [ ] Update `.github/workflows/docs.yml` to `mise //docs:install` + `mise //docs:build` <!-- completed: -->
-- [ ] Verify `mise //admin:install` and `mise //admin:build` succeed against the standalone lockfile <!-- completed: -->
+- [x] Delete root `package.json`, `pnpm-workspace.yaml`, and `pnpm-lock.yaml` <!-- completed: 2026-08-21T11:25 -->
+- [x] Add the `packageManager` field to `docs/package.json` <!-- completed: 2026-08-21T11:24 -->
+- [x] Generate `admin/pnpm-lock.yaml` and `docs/pnpm-lock.yaml` (`pnpm install` in each package) <!-- completed: 2026-08-21T11:26 -->
+- [x] Create `docs/mise.toml` (install/build/dev); update root `mise.toml`: delete `pnpm-install`, `slidev`, `docs-build`; add `docs` to `config_roots` <!-- completed: 2026-08-21T11:24 -->
+- [x] Update `.github/workflows/docs.yml` to `mise //docs:install` + `mise //docs:build` <!-- completed: 2026-08-21T11:24 -->
+- [x] Verify `mise //admin:install` and `mise //admin:build` succeed against the standalone lockfile <!-- completed: 2026-08-21T11:26 -->
 
 ### Step 4: Rust code and tests
 
