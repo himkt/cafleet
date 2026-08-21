@@ -6,7 +6,7 @@ cost efficiency mode, the monitor and reviewer rules — lives in
 [`roles/director.md`](../roles/director.md) § *Model selection*, not on this
 page. The tables are maintained exclusively by the
 `cafleet-model-list-refresh` skill from the official sources linked below —
-refreshed at least every 30 days (last refreshed: 2026-07-25).
+refreshed at least every 30 days (last refreshed: 2026-08-21).
 Prices are standard provider USD rates per MTok and are planning estimates,
 not an invoice guarantee. Context windows are listed for the `claude` backend,
 whose model strings are the ones a context-window suffix can apply to. The
@@ -61,8 +61,8 @@ before spending their credits that way.
 |---|---|---|---|
 | gpt-5.6-sol | Latest frontier agentic coding tier; strongest reviewer | 5.00 | 30.00 |
 | gpt-5.5 | Frontier tier for complex coding and research work | 5.00 | 30.00 |
-| gpt-5.6-terra | Balanced agentic coding tier for everyday work | 2.50 | 15.00 |
-| gpt-5.6-luna | Fast affordable agentic coding tier | 1.00 | 6.00 |
+| gpt-5.6-terra | Balanced agentic coding tier for everyday work | 2.00 | 12.00 |
+| gpt-5.6-luna | Fast affordable agentic coding tier | 0.20 | 1.20 |
 
 ## opencode
 
@@ -77,6 +77,7 @@ time.
 |---|---|---|---|
 | opencode/glm-5.2 | Strong general coding tier | 1.40 | 4.40 |
 | opencode/kimi-k2.7-code | Strong agentic tier tuned for code | 0.95 | 4.00 |
+| opencode/muse-spark-1.2 | Mid-price general coding tier | 1.25 | 4.25 |
+| opencode/muse-spark-1.2-contributor-free | Muse Spark 1.2 free for contributors | 0.00 | 0.00 |
 | opencode/qwen3.5-plus | Efficient mid tier for routine work | 0.20 | 1.20 |
 | opencode/big-pickle | Stealth preview model; capability unverified | 0.00 | 0.00 |
-| opencode/deepseek-v4-flash-free | Fast light tier for quick bounded tasks | 0.00 | 0.00 |
