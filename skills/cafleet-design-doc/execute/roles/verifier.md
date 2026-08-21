@@ -50,7 +50,7 @@ For each verification task assigned by the Director (you receive `ready (doc)` o
 
 | Project Type | Primary Approach | Fallback |
 |:--|:--|:--|
-| Web application | Playwright MCP (browser automation) | WebFetch (public URL) or delegate to an agent-browser teammate (local dev server) — never `curl`/`wget` |
+| Web application | Playwright MCP (browser automation) | WebFetch (public URL); for a local-only dev server, delegate to a teammate with a browser-automation tool — never `curl`/`wget` |
 | CLI tool | Run the tool via Bash, verify output | -- |
 | API service | HTTP requests via an MCP HTTP tool or WebFetch (public URLs; delegate for a local-only server) | -- |
 | Library/package | Import and call from a test script | -- |

@@ -11,10 +11,10 @@ path.
 |---|---|
 | `cafleet/` | The `cafleet` Rust package (clap CLI + axum server + rusqlite persistence); builds the single `cafleet` binary. |
 | `admin/` | Admin WebUI SPA (Vite + React + TypeScript + Tailwind CSS); its build output is embedded in the binary. |
-| `skills/` | Coding-agent skill files (`cafleet`, `cafleet-design-doc`, `cafleet-research`), installed into the agent homes by `cafleet setup` / `mise //:skill-install`. |
-| `package.json` + `pnpm-lock.yaml` (repo root) | pnpm toolchain manifests for the Slidev + agent-browser tools used in the repo. Driven via `mise //:pnpm-install` / `mise //:slidev <deck>`; `node_modules/` is gitignored. |
+| `skills/` | Coding-agent skill files (`cafleet`, `cafleet-design-doc`), installed into the agent homes by `cafleet setup` / `mise //:skill-install`. |
+| `admin/package.json`, `docs/package.json` | Per-package pnpm manifests — `admin/` and `docs/` are standalone pnpm packages, each with its own committed `pnpm-lock.yaml`; `node_modules/` is gitignored. |
 | `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
-| `docs/` | The rspress documentation-site project (workspace package `cafleet-docs`): `rspress.config.ts` and the operator-facing pages in its nested `docs/` content root. |
+| `docs/` | The rspress documentation-site project (standalone pnpm package `cafleet-docs`): `rspress.config.ts` and the operator-facing pages in its nested `docs/` content root. |
 
 ## Tech stack
 
@@ -56,9 +56,9 @@ fresh clone needs no manual prerequisite:
 | `mise //admin:install` | `pnpm install --frozen-lockfile` | Reinstalling WebUI deps from the committed lockfile |
 
 To change the WebUI's dependencies, edit `admin/package.json` and run plain
-`pnpm install --no-frozen-lockfile` from the repository root to regenerate `pnpm-lock.yaml` —
-`mise //admin:install` installs with `--frozen-lockfile` and cannot update
-the lockfile.
+`pnpm install --no-frozen-lockfile` in `admin/` to regenerate
+`admin/pnpm-lock.yaml` — `mise //admin:install` installs with
+`--frozen-lockfile` and cannot update the lockfile.
 
 ### Installing the skills from your checkout
 
@@ -83,17 +83,18 @@ later `cafleet setup` to restore the working-tree skills.
 ## Building docs locally
 
 The docs site is an [rspress](https://rspress.rs/) project rooted at `docs/`,
-a package in the repo's pnpm workspace. Build the documentation site (this
-site) locally with:
+a standalone pnpm package with its own lockfile. Build the documentation site
+(this site) locally with:
 
 ```bash
-mise //:docs-build
+mise //docs:install
+mise //docs:build
 ```
 
-That task is a thin wrapper around `pnpm --dir docs build` and is the same
-command the GitHub Actions workflow runs; it installs the pnpm dependencies
-first, so a fresh clone needs no manual prerequisite. For a live-reloading
-local preview while editing pages, run `pnpm --dir docs dev`.
+These tasks are thin wrappers around `pnpm install --frozen-lockfile` and
+`pnpm build` in `docs/` (defined in `docs/mise.toml`) and are the same
+commands the GitHub Actions workflow runs. For a live-reloading local
+preview while editing pages, run `mise //docs:dev`.
 
 ## Contributing changes
 

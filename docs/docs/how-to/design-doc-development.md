@@ -1,7 +1,7 @@
 # Design-doc-driven development
 
-CAFleet ships three skills that run spec-driven development as
-CAFleet-orchestrated teams. Give your coding agent one prompt per stage, in
+CAFleet ships two skills (`cafleet`, `cafleet-design-doc`) that run
+spec-driven development as CAFleet-orchestrated teams. Give your coding agent one prompt per stage, in
 order.
 
 ## Prompts {#prompts}
