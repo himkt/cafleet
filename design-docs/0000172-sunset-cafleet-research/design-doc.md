@@ -1,7 +1,7 @@
 # Sunset cafleet-research
 
-**Status**: Approved
-**Progress**: 26/29 tasks complete
+**Status**: Complete
+**Progress**: 28/29 tasks complete
 **Last Updated**: 2026-08-21
 
 ## Overview
@@ -10,10 +10,10 @@ Remove the `cafleet-research` skill and its entire support stack from the reposi
 
 ## Success Criteria
 
-- [ ] `skills/cafleet-research/` (26 files) is deleted, and a repo-wide search for `cafleet-research` outside `design-docs/` matches only the sanctioned stale-install-cleanup surface: `cafleet/src/assets.rs`, `cafleet/tests/cli_setup_doctor.rs`, `SPEC.md` §6.3, and `docs/docs/spec/cli-options.md`.
-- [ ] `cafleet setup` installs exactly two skills (`cafleet`, `cafleet-design-doc`), prints the two-skill success line, and removes a leftover `cafleet-research` directory from each target skills dir.
-- [ ] No root `package.json`, `pnpm-workspace.yaml`, or `pnpm-lock.yaml` exists; `admin/` and `docs/` are standalone pnpm packages with their own lockfiles; `mise //admin:install`, `//admin:build`, `//docs:install`, and `//docs:build` all succeed.
-- [ ] `agent-browser`, Slidev, and the `{task_coord}` overlay token have zero mentions outside `design-docs/`.
+- [x] `skills/cafleet-research/` (26 files) is deleted, and a repo-wide search for `cafleet-research` outside `design-docs/` matches only the sanctioned stale-install-cleanup surface: `cafleet/src/assets.rs`, `cafleet/tests/cli_setup_doctor.rs`, `SPEC.md` §6.3, and `docs/docs/spec/cli-options.md`.
+- [x] `cafleet setup` installs exactly two skills (`cafleet`, `cafleet-design-doc`), prints the two-skill success line, and removes a leftover `cafleet-research` directory from each target skills dir.
+- [x] No root `package.json`, `pnpm-workspace.yaml`, or `pnpm-lock.yaml` exists; `admin/` and `docs/` are standalone pnpm packages with their own lockfiles; `mise //admin:install`, `//admin:build`, `//docs:install`, and `//docs:build` all succeed.
+- [x] `agent-browser`, Slidev, and the `{task_coord}` overlay token have zero mentions outside `design-docs/`.
 - [ ] `mise //cafleet:test`, `//cafleet:lint`, `//cafleet:typecheck`, and `//admin:lint` pass; the CI and Docs workflows are green.
 - [ ] Issue #330 is closed by the implementing PR.
 
@@ -171,9 +171,9 @@ Documentation first, per `.claude/rules/documentation-maintenance.md`.
 
 ### Step 5: Verification and close-out
 
-- [ ] Sweep: `rg cafleet-research`, `rg -i slidev`, `rg agent-browser`, `rg task_coord` outside `design-docs/` match only the sanctioned cleanup surface <!-- completed: -->
+- [x] Sweep: `rg cafleet-research`, `rg -i slidev`, `rg agent-browser`, `rg task_coord` outside `design-docs/` match only the sanctioned cleanup surface <!-- completed: 2026-08-21T11:33 -->
 - [ ] Run `mise //docs:build`; confirm the CI and Docs workflows are green on the PR <!-- completed: -->
-- [ ] Open the implementing PR with `Closes #330` <!-- completed: -->
+- [x] Open the implementing PR with `Closes #330` <!-- completed: 2026-08-21T11:39 -->
 
 ---
 
@@ -183,3 +183,4 @@ Documentation first, per `.claude/rules/documentation-maintenance.md`.
 |------|---------|
 | 2026-08-21 | Initial draft |
 | 2026-08-21 | Review round 1: fuller base-dir.md/director.md/contributing.md edit inventories, how-to page row, docs_sync.rs placeholder-constant changes |
+| 2026-08-21 | Implementation complete: Steps 1–5 executed, Reviewer approved (round 1), PR #331 opened with Closes #330. The remaining task — CI and Docs workflows green — rides the open PR; teardown on operator instruction. |
