@@ -114,13 +114,12 @@ fn selector_setup_installs_the_named_agents_at_resolved_paths_and_records_rows()
         let dir = cli.home.path().join(skills_dir);
         assert!(
             out.contains(&format!(
-                "{agent}: installed cafleet, cafleet-design-doc, cafleet-research \
-                 (v{VERSION}) -> {}",
+                "{agent}: installed cafleet, cafleet-design-doc (v{VERSION}) -> {}",
                 dir.display()
             )),
             "per-target skills echo for {agent}, got: {out}"
         );
-        for skill in ["cafleet", "cafleet-design-doc", "cafleet-research"] {
+        for skill in ["cafleet", "cafleet-design-doc"] {
             let installed = dir.join(skill).join("SKILL.md");
             assert!(installed.is_file(), "missing {}", installed.display());
         }
@@ -185,6 +184,43 @@ fn selector_setup_installs_only_the_named_agents() {
             cli.identity_path("codex"),
             VERSION.to_string()
         )]
+    );
+}
+
+#[test]
+fn setup_removes_a_leftover_cafleet_research_directory_from_each_target() {
+    let cli = Cli::new();
+    let stale_dirs: Vec<std::path::PathBuf> = [
+        ".claude/skills",
+        ".codex/skills",
+        ".config/opencode/skills",
+    ]
+    .iter()
+    .map(|skills_dir| {
+        let stale = cli.home.path().join(skills_dir).join("cafleet-research");
+        std::fs::create_dir_all(&stale).unwrap();
+        std::fs::write(stale.join("SKILL.md"), "stale").unwrap();
+        stale
+    })
+    .collect();
+
+    let output = cli.run(&["setup"]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    for stale in &stale_dirs {
+        assert!(
+            !stale.exists(),
+            "leftover {} is removed by install-skills",
+            stale.display()
+        );
+        for skill in ["cafleet", "cafleet-design-doc"] {
+            let installed = stale.parent().unwrap().join(skill).join("SKILL.md");
+            assert!(installed.is_file(), "missing {}", installed.display());
+        }
+    }
+    assert!(
+        !stdout(&output).contains("cafleet-research"),
+        "the removal produces no extra output: {}",
+        stdout(&output)
     );
 }
 
@@ -296,7 +332,7 @@ fn plain_setup_installs_at_the_resolved_path_despite_rows_recorded_elsewhere() {
     let out = stdout(&output);
     assert!(
         out.contains(&format!(
-            "codex: installed cafleet, cafleet-design-doc, cafleet-research (v{VERSION})"
+            "codex: installed cafleet, cafleet-design-doc (v{VERSION})"
         )),
         "the records-elsewhere agent installs at the resolved path anyway: {out}"
     );
