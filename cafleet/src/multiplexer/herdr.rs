@@ -146,9 +146,10 @@ impl HerdrMultiplexer {
         }
     }
 
-    fn send_esc(&self, target_pane_id: &str) -> Result<(), MultiplexerError> {
-        self.run(
+    fn send_esc(&self, target_pane_id: &str, ignore_missing: bool) -> Result<(), MultiplexerError> {
+        self.run_tolerating_missing(
             &herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "esc"]),
+            ignore_missing,
             Some(5),
         )?;
         self.runner.sleep(ESC_SETTLE_DELAY);
@@ -345,6 +346,7 @@ impl HerdrMultiplexer {
         target_pane_id: &str,
         ignore_missing: bool,
     ) -> Result<(), MultiplexerError> {
+        self.send_esc(target_pane_id, ignore_missing)?;
         self.run_tolerating_missing(
             &herdr_argv(&["herdr", "pane", "run", target_pane_id, "/exit"]),
             ignore_missing,
@@ -358,7 +360,7 @@ impl HerdrMultiplexer {
              — then resume your work if something was still running."
         );
         self.best_effort(|| {
-            self.send_esc(target_pane_id)?;
+            self.send_esc(target_pane_id, false)?;
             self.run(
                 &herdr_argv(&["herdr", "pane", "run", target_pane_id, &payload]),
                 Some(5),
@@ -378,7 +380,7 @@ impl HerdrMultiplexer {
     ) -> Result<bool, MultiplexerError> {
         let payload = build_wake_payload(fleet_id, members, director)?;
         Ok(self.best_effort(|| {
-            self.send_esc(target_pane_id)?;
+            self.send_esc(target_pane_id, false)?;
             self.run(
                 &herdr_argv(&["herdr", "pane", "run", target_pane_id, &payload]),
                 Some(5),
@@ -400,7 +402,7 @@ impl HerdrMultiplexer {
         let sanitized = text.replace("\r\n", "⏎").replace(['\n', '\r'], "⏎");
         let payload = format!("[cafleet msg {message_id} from {sender_id} {ts}]\n{sanitized}");
         self.best_effort(|| {
-            self.send_esc(target_pane_id)?;
+            self.send_esc(target_pane_id, false)?;
             self.run(
                 &herdr_argv(&["herdr", "pane", "send-text", target_pane_id, &payload]),
                 Some(5),
@@ -429,24 +431,16 @@ impl HerdrMultiplexer {
                 "send_prompt: text may not contain newlines",
             ));
         }
-        if shell {
-            self.run(
-                &herdr_argv(&[
-                    "herdr",
-                    "pane",
-                    "run",
-                    target_pane_id,
-                    &format!("! {stripped}"),
-                ]),
-                None,
-            )?;
+        let payload = if shell {
+            format!("! {stripped}")
         } else {
-            self.send_esc(target_pane_id)?;
-            self.run(
-                &herdr_argv(&["herdr", "pane", "run", target_pane_id, stripped]),
-                None,
-            )?;
-        }
+            stripped.to_string()
+        };
+        self.send_esc(target_pane_id, false)?;
+        self.run(
+            &herdr_argv(&["herdr", "pane", "run", target_pane_id, &payload]),
+            None,
+        )?;
         Ok(())
     }
 
@@ -1007,8 +1001,7 @@ mod tests {
 
     #[test]
     fn send_prompt_shell_and_plain_forms() {
-        for (text, shell, payload) in [(" ls ", true, "! ls"), ("hi there", false, "hi there")]
-        {
+        for (text, shell, payload) in [(" ls ", true, "! ls"), ("hi there", false, "hi there")] {
             let runner = FakeRunner::with_binary("herdr");
             let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
             mux.send_prompt("w1:p2", text, shell).unwrap();

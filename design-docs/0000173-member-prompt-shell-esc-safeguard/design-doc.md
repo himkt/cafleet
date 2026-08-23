@@ -1,7 +1,7 @@
 # Unconditional Esc Safeguard for `send_prompt` and `send_exit`
 
 **Status**: Approved
-**Progress**: 7/12 tasks complete
+**Progress**: 10/12 tasks complete
 **Last Updated**: 2026-08-21
 
 ## Overview
@@ -112,9 +112,9 @@ Unit tests only (no live smoke test). The keystroke-shape tests assert the recor
 
 ### Step 3: herdr backend
 
-- [ ] `send_prompt`: lead both branches with `send_esc` <!-- completed: -->
-- [ ] `send_esc`: add the `ignore_missing` parameter; `send_exit` calls it with its own `ignore_missing` before the `/exit` run <!-- completed: -->
-- [ ] Update the two herdr keystroke-shape tests per the Tests table <!-- completed: -->
+- [x] `send_prompt`: lead both branches with `send_esc` <!-- completed: 2026-08-23T18:14 -->
+- [x] `send_esc`: add the `ignore_missing` parameter; `send_exit` calls it with its own `ignore_missing` before the `/exit` run <!-- completed: 2026-08-23T18:14 -->
+- [x] Update the two herdr keystroke-shape tests per the Tests table <!-- completed: 2026-08-23T18:14 -->
 
 ### Step 4: Verification
 
