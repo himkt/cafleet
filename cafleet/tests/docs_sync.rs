@@ -145,6 +145,36 @@ fn monitoring_concept_covers_the_monitor_member_and_capture_taxonomy() {
 }
 
 #[test]
+fn monitoring_concept_explains_the_codex_managed_session_lifecycle() {
+    let path = "docs/docs/concepts/monitoring.md";
+    assert_terms(
+        path,
+        &[
+            "backend-resolved long-lived execution",
+            "monitor member",
+            "session ID",
+            "initial output",
+            "one immediate poll",
+            "failed start",
+            "monitor live",
+            "broker message",
+            "before other work",
+            "monitor restarted",
+            "Director",
+            "broker",
+        ],
+    );
+    assert_absent(
+        path,
+        &[
+            "runs as a background task",
+            "plain backgrounded command",
+            "works identically on any backend",
+        ],
+    );
+}
+
+#[test]
 fn spec_defines_the_ping_skip_and_flattened_monitor_contract() {
     assert_terms(
         "SPEC.md",
@@ -163,6 +193,50 @@ fn spec_defines_the_ping_skip_and_flattened_monitor_contract() {
     let mut absent = OLD_CLI_SURFACE.to_vec();
     absent.extend(REMOVED_VOCABULARY);
     assert_absent("SPEC.md", &absent);
+}
+
+#[test]
+fn spec_separates_blocking_runtime_from_backend_resolved_hosting() {
+    assert_terms(
+        "SPEC.md",
+        &[
+            "backend-resolved long-lived execution",
+            "monitor member",
+            "in-process (blocking)",
+            "monitor loop started",
+            "monitor live",
+            "SIGTERM",
+            "SIGINT",
+        ],
+    );
+    assert_absent("SPEC.md", &["as a background task in its own pane"]);
+}
+
+#[test]
+fn cli_and_webui_specs_keep_hosting_backend_neutral() {
+    assert_terms(
+        "docs/docs/spec/cli-options.md",
+        &[
+            "long-lived execution",
+            "monitor member",
+            "in-process",
+            "blocks",
+            "monitor loop started",
+        ],
+    );
+    assert_absent("docs/docs/spec/cli-options.md", &["background task"]);
+
+    assert_terms(
+        "docs/docs/spec/webui-api.md",
+        &[
+            "CLI-only",
+            "long-lived execution",
+            "monitor member",
+            "no `POST`/`DELETE` counterpart",
+            "deleting the monitor member",
+        ],
+    );
+    assert_absent("docs/docs/spec/webui-api.md", &["background task"]);
 }
 
 #[test]
