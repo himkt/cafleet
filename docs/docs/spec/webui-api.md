@@ -150,11 +150,10 @@ the runtime fields take these values:
 | `tick_seconds` | `null` | **preserved** — the cadence the monitor last ran at |
 | `wake_interval_seconds` | `null` | **preserved** — the wake interval the monitor last ran at; `null` when the row predates the column and was never re-stamped |
 
-Launching the loop is CLI-only (`cafleet monitor`, run by the monitor member
-as a background task in its own pane); there is no `POST`/`DELETE` counterpart
-here and no CLI stop command — deleting the monitor member kills the pane
-hosting the loop, and a still-running loop self-terminates after
-`fleet delete`.
+Launching the loop is CLI-only (`cafleet monitor`), and the monitor member owns
+it as a long-lived execution resolved by its backend. It has no `POST`/`DELETE` counterpart
+and no CLI stop command — deleting the monitor member kills the pane hosting
+the loop, and a still-running loop self-terminates after `fleet delete`.
 
 ### PATCH /api/monitor — Update the Wake Interval {#patch-api-monitor}
 

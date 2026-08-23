@@ -1479,11 +1479,11 @@ the wake while the loop keeps heartbeating every tick. The
 startup-resolved interval is stamped into the fleet's `monitor_runtime` row
 by the claim and re-read on every tick (§6.6), so a `PATCH /api/monitor`
 edit (§6.8) changes a running loop's cadence within one tick. Requires a
-live fleet, then tmux. Runs the monitor loop in-process (blocking),
-launched by the fleet's monitor member as a background task in its own pane
-immediately after its pane boots (the pane is spawned by the `cafleet fleet
-create` bootstrap, before any ordinary member; `cafleet member create
---role monitor` is the mid-run re-spawn path).
+live fleet, then tmux. Runs the monitor loop in-process (blocking). The fleet's
+monitor member hosts that command as a backend-resolved long-lived execution
+in its own pane immediately after the pane boots (the pane is spawned by the
+`cafleet fleet create` bootstrap, before any ordinary member; `cafleet member
+create --role monitor` is the mid-run re-spawn path).
 Immediately after the successful runtime claim, before the first tick, the
 loop prints the startup line the monitor member confirms before sending the
 `monitor live` gate signal to the Director — the signal that unblocks the
@@ -2363,10 +2363,10 @@ unconditional and interval-driven, on both backends.
 **Scope:** the in-process supervision scheduler. The fleet's **monitor
 member** — a dedicated watcher spawned by the `cafleet fleet create`
 bootstrap, before any ordinary `cafleet member create` (re-spawned mid-run
-via `cafleet member create --role monitor` after a monitor death) — launches
-`run_monitor_loop` as a background task in its own pane. It fires
-one unconditional, fleet-level wake into the **monitor member's own pane**
-once per
+via `cafleet member create --role monitor` after a monitor death) — hosts the
+blocking `run_monitor_loop` command as a backend-resolved long-lived execution
+in its own pane. It fires one unconditional, fleet-level wake into the
+**monitor member's own pane** once per
 wake interval, naming every ordinary member and the Director with their
 pending-delivery counts, pointing at the monitor role protocol, and resuming
 the monitor member's own work

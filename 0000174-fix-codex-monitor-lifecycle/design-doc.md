@@ -1,7 +1,7 @@
 # Keep the Codex Monitor Alive with a Managed Execution Session
 
 **Status**: Approved
-**Progress**: 6/13 tasks complete
+**Progress**: 9/13 tasks complete
 **Last Updated**: 2026-08-23
 
 ## Overview
@@ -146,9 +146,9 @@ Finish with the tracked-source audit described in Step 4.
 
 ### Step 3: Synchronize specification and public documentation
 
-- [ ] Update both monitor lifecycle descriptions in `SPEC.md` without changing the CLI or runtime contract. <!-- completed: -->
-- [ ] Update `docs/docs/concepts/monitoring.md` to explain backend-resolved hosting, monitor-member-only session ownership, the Director's broker-only reaction role, Codex later-turn polling, failure gating, and confirmed restart behavior. <!-- completed: -->
-- [ ] Update `docs/docs/spec/cli-options.md` and `docs/docs/spec/webui-api.md` to remove backend-specific launch assumptions while preserving their command/API semantics. <!-- completed: -->
+- [x] Update both monitor lifecycle descriptions in `SPEC.md` without changing the CLI or runtime contract. <!-- completed: 2026-08-23T18:10 -->
+- [x] Update `docs/docs/concepts/monitoring.md` to explain backend-resolved hosting, monitor-member-only session ownership, the Director's broker-only reaction role, Codex later-turn polling, failure gating, and confirmed restart behavior. <!-- completed: 2026-08-23T18:10 -->
+- [x] Update `docs/docs/spec/cli-options.md` and `docs/docs/spec/webui-api.md` to remove backend-specific launch assumptions while preserving their command/API semantics. <!-- completed: 2026-08-23T18:10 -->
 
 ### Step 4: Add regression checks and verify
 
