@@ -27,8 +27,8 @@ Where the two backends differ, behavior by behavior:
 | Access mechanism | Shells out to `tmux` | Uses the herdr CLI as a subprocess |
 | Pane-spawn cwd | Builtin inheritance from the splitting pane | Explicit `--cwd <dir>` on every `herdr pane split` |
 | Delete-time layout reflow | Native auto-fit after a bare `kill-pane` | No native reflow — `kill_pane` rebalances best-effort, scoped to the killed pane's tab |
-| `send_prompt` shell form | Payload `! <stripped>` + `Enter`, no leading `Esc` | `herdr pane run <pane> "! <stripped>"`, no `Esc` |
-| `send_prompt` plain form | Payload `<stripped>` + `Enter` with a leading `Esc` (`esc_first=not shell`) | `Esc` first, then `herdr pane run <pane> <stripped>` |
+| `send_prompt` shell form | `Esc` first, then payload `! <stripped>` + `Enter` | `Esc` first, then `herdr pane run <pane> "! <stripped>"` |
+| `send_prompt` plain form | `Esc` first, then payload `<stripped>` + `Enter` | `Esc` first, then `herdr pane run <pane> <stripped>` |
 | Inline-preview keystroke | `send-keys` | `pane send-text` + `pane send-keys` |
 
 `TmuxError` and `HerdrError` are both subclasses of `MultiplexerError`. Each
@@ -180,9 +180,10 @@ interface's `send_prompt(target_pane_id, text, shell = false)` operation.
 Both backends validate fail-fast: text empty after strip →
 `send_prompt: text may not be empty`; the **original** text containing `\n` or
 `\r` → `send_prompt: text may not contain newlines` (raised as the backend's
-native error type, `TmuxError` / `HerdrError`). The `shell` flag controls both
-the payload prefix and the Esc safeguard; the per-backend payloads are in the
-[backend matrix](#backend-matrix). herdr's plain form mirrors
+native error type, `TmuxError` / `HerdrError`). Both forms use the same Esc
+safeguard and failure semantics; the `shell` flag controls only whether the
+payload has the `! ` prefix. The per-backend payloads are in the
+[backend matrix](#backend-matrix). Both herdr forms mirror
 `send_poll_trigger`'s esc-then-run shape.
 
 ## Push notifications {#push-notifications}
@@ -213,16 +214,16 @@ A member's Director-bound messages ride this same ordinary path — a plain
 
 ### The `Esc` safeguard {#esc-safeguard}
 
-Where a path leads with `Esc`, the mechanism is the same: it presses `Escape`,
-lets the pane settle ~0.1 s, then types the payload and `Enter`.
+Every keystroke path presses `Escape`, lets the pane settle ~0.1 s, then types
+the payload and `Enter`.
 
-| Keystroke path | Leads with `Esc`? | Payload | Why |
-|---|---|---|---|
-| Inline preview (`message send` / `message broadcast`) | yes (`esc_first=True`) | The 2-line preview + `Enter` | A recipient parked on a pending permission-approval prompt has it dismissed before the trailing `Enter` lands |
-| `cafleet member ping` | yes (`send_poll_trigger`, `esc_first=True`) | The literal poll command with the resume clause + `Enter` | The manual re-poke for a pane that missed an inline preview |
-| `cafleet member prompt` (plain form) | yes | The text + `Enter` | The same safeguard, protecting the submitted user turn |
-| `cafleet member prompt --shell` | **no** — a deliberate omission | `! <cmd>` + `Enter` | `! <cmd>` must land in the bare composer, and an `Esc` before it would mis-fire (see [Prompt dispatch](#prompt-dispatch)) |
-| Monitor-loop wake trigger (`send_wake_trigger`) | yes | The `[cafleet] tick:` wake + `Enter` | It targets the monitor member's pane, which can be parked on a permission prompt (see [Monitoring](../concepts/monitoring.md)) |
+| Keystroke path | Payload | Why |
+|---|---|---|
+| Inline preview (`message send` / `message broadcast`) | The 2-line preview + `Enter` | A recipient parked on a pending permission-approval prompt has it dismissed before the trailing `Enter` lands |
+| `cafleet member ping` | The literal poll command with the resume clause + `Enter` | The manual re-poke for a pane that missed an inline preview |
+| `cafleet member prompt` (plain and `--shell` forms) | The text, optionally prefixed with `! `, + `Enter` | The same safeguard and failure semantics protect both forms; the flag changes only the payload prefix |
+| Member teardown (`send_exit`) | `/exit` + `Enter` | Teardown uses the same safeguard, with pane-gone tolerance covering the leading `Esc` when `ignore_missing` is enabled |
+| Monitor-loop wake trigger (`send_wake_trigger`) | The `[cafleet] tick:` wake + `Enter` | It targets the monitor member's pane, which can be parked on a permission prompt (see [Monitoring](../concepts/monitoring.md)) |
 
 ### Design principles
 

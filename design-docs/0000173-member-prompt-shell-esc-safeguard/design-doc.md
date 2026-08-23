@@ -1,7 +1,7 @@
 # Unconditional Esc Safeguard for `send_prompt` and `send_exit`
 
 **Status**: Approved
-**Progress**: 0/12 tasks complete
+**Progress**: 4/12 tasks complete
 **Last Updated**: 2026-08-21
 
 ## Overview
@@ -99,10 +99,10 @@ Unit tests only (no live smoke test). The keystroke-shape tests assert the recor
 
 ### Step 1: Documentation
 
-- [ ] Update `docs/docs/spec/multiplexer-backends.md` (backend matrix, § Prompt dispatch, § The `Esc` safeguard) per the Specification table <!-- completed: -->
-- [ ] Update `docs/docs/spec/cli-options.md` § `member prompt` (keystroke-sequence table + surrounding prose) per the Specification table <!-- completed: -->
-- [ ] Update `SPEC.md` (§ `member prompt`, tmux §6.5 entries + Esc-first matrix, herdr §6.5 entries + `_SUBMIT_DELAY` paragraph) <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/prompt-routing.md` § *The two forms* wording <!-- completed: -->
+- [x] Update `docs/docs/spec/multiplexer-backends.md` (backend matrix, § Prompt dispatch, § The `Esc` safeguard) per the Specification table <!-- completed: 2026-08-23T17:56 -->
+- [x] Update `docs/docs/spec/cli-options.md` § `member prompt` (keystroke-sequence table + surrounding prose) per the Specification table <!-- completed: 2026-08-23T17:56 -->
+- [x] Update `SPEC.md` (§ `member prompt`, tmux §6.5 entries + Esc-first matrix, herdr §6.5 entries + `_SUBMIT_DELAY` paragraph) <!-- completed: 2026-08-23T17:56 -->
+- [x] Update `skills/cafleet/reference/prompt-routing.md` § *The two forms* wording <!-- completed: 2026-08-23T17:56 -->
 
 ### Step 2: tmux backend
 

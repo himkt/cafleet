@@ -13,8 +13,8 @@ The bash-via-Director protocol is the **fallback** for a harness-denied command.
 
 `cafleet member prompt` has two forms with distinct follow-up semantics:
 
-- **`--shell`** dispatches `! <cmd>` un-escaped. The bang output only **stages** in the pane — it does not advance the member's turn, so every successful shell dispatch requires a `cafleet member ping` follow-up.
-- **Plain** (no `--shell`) dispatches `TEXT` Esc-safeguarded as a **real user turn** — the trailing `Enter` submits it, opening the member's turn directly. **No ping follows the plain form.** It exists for text that only takes effect when it arrives as a direct user turn in the member's pane — slash commands, skill invocations, and other magic commands a broker message body cannot trigger (a `message send` inline preview arrives as content, not as a typed command). Broker messaging remains the canonical coordination channel; the plain form is not a substitute for `message send` and is not a stall-recovery or urgent-redirect primitive.
+- **`--shell`** dispatches Esc-safeguarded `! <cmd>`. The bang output only **stages** in the pane — it does not advance the member's turn, so every successful shell dispatch requires a `cafleet member ping` follow-up.
+- **Plain** (no `--shell`) dispatches Esc-safeguarded `TEXT` as a **real user turn** — the trailing `Enter` submits it, opening the member's turn directly. **No ping follows the plain form.** It exists for text that only takes effect when it arrives as a direct user turn in the member's pane — slash commands, skill invocations, and other magic commands a broker message body cannot trigger (a `message send` inline preview arrives as content, not as a typed command). Broker messaging remains the canonical coordination channel; the plain form is not a substitute for `message send` and is not a stall-recovery or urgent-redirect primitive.
 
 ## Member-side: reconsider, then route
 
