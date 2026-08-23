@@ -1,7 +1,7 @@
 # Keep the Codex Monitor Alive with a Managed Execution Session
 
-**Status**: Approved
-**Progress**: 0/13 tasks complete
+**Status**: Complete
+**Progress**: 13/13 tasks complete
 **Last Updated**: 2026-08-23
 
 ## Overview
@@ -10,15 +10,15 @@ Correct the Codex coding-agent overlay so the monitor member runs `cafleet monit
 
 ## Success Criteria
 
-- [ ] The Codex overlay launches `cafleet monitor <fleet-id>` without a shell ampersand, retains the managed execution-session ID, inspects the initial output, and performs at most one immediate poll to observe `monitor loop started (...)`.
-- [ ] Codex withholds `monitor live` and reports startup failure when no managed session is returned, the session exits early, or the startup line remains absent after the bounded confirmation sequence; a still-active unconfirmed session is terminated first.
-- [ ] On every later Codex monitor-member turn reopened by a broker message, the retained session is polled once before other work; an exited loop follows the existing relaunch and `monitor restarted` flow.
-- [ ] The Codex `{bg_stop}` value describes interrupting or terminating the retained managed execution session.
-- [ ] The monitor member alone owns the Codex execution-session ID and all launch/liveness polling; the Director runs no timer, sleep loop, or session poll loop and reacts only to broker signals.
-- [ ] Claude continues to use its background-task facility and OpenCode continues to use its existing shell-backgrounding behavior; neither backend's overlay contract changes.
-- [ ] Shared skill, specification, and public-documentation prose no longer claims that every backend hosts the loop as the same kind of backgrounded shell command.
-- [ ] Section-scoped documentation tests enforce the new Codex contract and preserve the Claude/OpenCode contracts.
-- [ ] The targeted Rust documentation-contract tests and public documentation build pass without changes to Rust CLI/runtime source.
+- [x] The Codex overlay launches `cafleet monitor <fleet-id>` without a shell ampersand, retains the managed execution-session ID, inspects the initial output, and performs at most one immediate poll to observe `monitor loop started (...)`.
+- [x] Codex withholds `monitor live` and reports startup failure when no managed session is returned, the session exits early, or the startup line remains absent after the bounded confirmation sequence; a still-active unconfirmed session is terminated first.
+- [x] On every later Codex monitor-member turn reopened by a broker message, the retained session is polled once before other work; an exited loop follows the existing relaunch and `monitor restarted` flow.
+- [x] The Codex `{bg_stop}` value describes interrupting or terminating the retained managed execution session.
+- [x] The monitor member alone owns the Codex execution-session ID and all launch/liveness polling; the Director runs no timer, sleep loop, or session poll loop and reacts only to broker signals.
+- [x] Claude continues to use its background-task facility and OpenCode continues to use its existing shell-backgrounding behavior; neither backend's overlay contract changes.
+- [x] Shared skill, specification, and public-documentation prose no longer claims that every backend hosts the loop as the same kind of backgrounded shell command.
+- [x] Section-scoped documentation tests enforce the new Codex contract and preserve the Claude/OpenCode contracts.
+- [x] The targeted Rust documentation-contract tests and public documentation build pass without changes to Rust CLI/runtime source.
 
 ---
 
@@ -134,25 +134,33 @@ Finish with the tracked-source audit described in Step 4.
 
 ### Step 1: Correct the Codex overlay contract
 
-- [ ] Update Codex `{bg_run}`, `{bg_stop}`, and the attached note in `skills/cafleet/reference/coding-agent-overlays.md` to define the retained managed-session lifecycle without adding a placeholder. <!-- completed: -->
-- [ ] Rewrite only the Codex worked resolution to remove shell `&`, retain the session, apply the initial-yield-plus-one-poll startup bound, terminate an active unconfirmed session, and gate `monitor live` on the startup line. <!-- completed: -->
-- [ ] Verify the Claude and OpenCode overlay sections retain their current launch, stop, and worked-example semantics. <!-- completed: -->
+- [x] Update Codex `{bg_run}`, `{bg_stop}`, and the attached note in `skills/cafleet/reference/coding-agent-overlays.md` to define the retained managed-session lifecycle without adding a placeholder. <!-- completed: 2026-08-23T17:58 -->
+- [x] Rewrite only the Codex worked resolution to remove shell `&`, retain the session, apply the initial-yield-plus-one-poll startup bound, terminate an active unconfirmed session, and gate `monitor live` on the startup line. <!-- completed: 2026-08-23T17:58 -->
+- [x] Verify the Claude and OpenCode overlay sections retain their current launch, stop, and worked-example semantics. <!-- completed: 2026-08-23T17:58 -->
 
 ### Step 2: Align the normative skill lifecycle
 
-- [ ] Update `skills/cafleet/roles/monitor.md` startup, failure, later-turn liveness, restart, stop, and monitor-member-only ownership wording to support both managed sessions and existing backend primitives. <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/supervision.md`, `skills/cafleet/reference/cli.md`, and the recovery summary in `skills/cafleet/roles/director.md` to use backend-neutral lifecycle language and keep the Director broker-reactive rather than execution-owning. <!-- completed: -->
-- [ ] Audit other tracked skill guidance, including `.claude/skills/skill-author/SKILL.md`, and replace only lifecycle wording that incorrectly universalizes shell/background-task behavior. <!-- completed: -->
+- [x] Update `skills/cafleet/roles/monitor.md` startup, failure, later-turn liveness, restart, stop, and monitor-member-only ownership wording to support both managed sessions and existing backend primitives. <!-- completed: 2026-08-23T18:05 -->
+- [x] Update `skills/cafleet/reference/supervision.md`, `skills/cafleet/reference/cli.md`, and the recovery summary in `skills/cafleet/roles/director.md` to use backend-neutral lifecycle language and keep the Director broker-reactive rather than execution-owning. <!-- completed: 2026-08-23T18:05 -->
+- [x] Audit other tracked skill guidance, including `.claude/skills/skill-author/SKILL.md`, and replace only lifecycle wording that incorrectly universalizes shell/background-task behavior. <!-- completed: 2026-08-23T18:05 -->
 
 ### Step 3: Synchronize specification and public documentation
 
-- [ ] Update both monitor lifecycle descriptions in `SPEC.md` without changing the CLI or runtime contract. <!-- completed: -->
-- [ ] Update `docs/docs/concepts/monitoring.md` to explain backend-resolved hosting, monitor-member-only session ownership, the Director's broker-only reaction role, Codex later-turn polling, failure gating, and confirmed restart behavior. <!-- completed: -->
-- [ ] Update `docs/docs/spec/cli-options.md` and `docs/docs/spec/webui-api.md` to remove backend-specific launch assumptions while preserving their command/API semantics. <!-- completed: -->
+- [x] Update both monitor lifecycle descriptions in `SPEC.md` without changing the CLI or runtime contract. <!-- completed: 2026-08-23T18:10 -->
+- [x] Update `docs/docs/concepts/monitoring.md` to explain backend-resolved hosting, monitor-member-only session ownership, the Director's broker-only reaction role, Codex later-turn polling, failure gating, and confirmed restart behavior. <!-- completed: 2026-08-23T18:10 -->
+- [x] Update `docs/docs/spec/cli-options.md` and `docs/docs/spec/webui-api.md` to remove backend-specific launch assumptions while preserving their command/API semantics. <!-- completed: 2026-08-23T18:10 -->
 
 ### Step 4: Add regression checks and verify
 
-- [ ] Add Codex-section positive and obsolete-command-negative assertions to `cafleet/tests/docs_sync.rs`. <!-- completed: -->
-- [ ] Add Claude/OpenCode preservation assertions and shared-contract wording checks to `cafleet/tests/docs_sync.rs`. <!-- completed: -->
-- [ ] Run `cargo test --manifest-path cafleet/Cargo.toml --test docs_sync`, `mise //cafleet:test`, `mise //docs:install`, and `mise //docs:build`, in that order. <!-- completed: -->
-- [ ] Audit the final diff and tracked text hits to confirm no Rust CLI/runtime source changed, no extra generated artifact is required, and only OpenCode retains the shell-ampersand worked command. <!-- completed: -->
+- [x] Add Codex-section positive and obsolete-command-negative assertions to `cafleet/tests/docs_sync.rs`. <!-- completed: 2026-08-23T18:19 -->
+- [x] Add Claude/OpenCode preservation assertions and shared-contract wording checks to `cafleet/tests/docs_sync.rs`. <!-- completed: 2026-08-23T18:19 -->
+- [x] Run `cargo test --manifest-path cafleet/Cargo.toml --test docs_sync`, `mise //cafleet:test`, `mise //docs:install`, and `mise //docs:build`, in that order. <!-- completed: 2026-08-23T18:19 -->
+- [x] Audit the final diff and tracked text hits to confirm no Rust CLI/runtime source changed, no extra generated artifact is required, and only OpenCode retains the shell-ampersand worked command. <!-- completed: 2026-08-23T18:19 -->
+
+---
+
+## Changelog
+
+| Date | Changes |
+|------|---------|
+| 2026-08-23 | Implementation complete; all validations passed; fresh Reviewer approved in round 1; PR #341 created. |
