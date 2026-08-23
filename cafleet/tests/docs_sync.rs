@@ -275,6 +275,66 @@ fn every_backend_overlay_defines_the_capture_cues() {
 }
 
 #[test]
+fn codex_overlay_defines_the_retained_managed_session_lifecycle() {
+    let text = read(OVERLAYS_FILE);
+    assert_terms_in(
+        &format!("{OVERLAYS_FILE} § codex"),
+        overlay_section(&text, "codex"),
+        &[
+            "managed execution session",
+            "retained session ID",
+            "without shell `&`",
+            "initial output",
+            "one immediate poll",
+            "monitor loop started",
+            "active but unconfirmed",
+            "terminate",
+            "monitor live",
+            "broker message reopens",
+            "before any other work",
+            "interrupting or terminating",
+        ],
+    );
+}
+
+#[test]
+fn codex_worked_launch_does_not_use_the_obsolete_shell_ampersand() {
+    let text = read(OVERLAYS_FILE);
+    let codex = overlay_section(&text, "codex");
+    assert!(
+        codex.contains("cafleet monitor <fleet-id>"),
+        "{OVERLAYS_FILE} § codex must show the monitor launch command"
+    );
+    assert!(
+        !codex.contains("cafleet monitor <fleet-id> &"),
+        "{OVERLAYS_FILE} § codex still uses the obsolete shell-backgrounded command"
+    );
+}
+
+#[test]
+fn claude_and_opencode_overlays_preserve_their_launch_and_stop_contracts() {
+    let text = read(OVERLAYS_FILE);
+    assert_terms_in(
+        &format!("{OVERLAYS_FILE} § claude"),
+        overlay_section(&text, "claude"),
+        &[
+            "run_in_background: true",
+            "TaskStop",
+            "cafleet monitor <fleet-id>",
+        ],
+    );
+    assert_terms_in(
+        &format!("{OVERLAYS_FILE} § opencode"),
+        overlay_section(&text, "opencode"),
+        &[
+            "backgrounded `!` shell command",
+            "killing the recorded background process",
+            "cafleet monitor <fleet-id> &",
+        ],
+    );
+}
+
+#[test]
 fn the_supervision_contract_covers_the_monitor_member_and_quiet_members() {
     assert_terms(
         "skills/cafleet/reference/supervision.md",
