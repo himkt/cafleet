@@ -209,7 +209,7 @@ impl TmuxMultiplexer {
         target_pane_id: &str,
         ignore_missing: bool,
     ) -> Result<(), MultiplexerError> {
-        self.send_literal_then_enter(target_pane_id, "/exit", None, ignore_missing, false)
+        self.send_literal_then_enter(target_pane_id, "/exit", None, ignore_missing, true)
     }
 
     pub fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
@@ -264,7 +264,7 @@ impl TmuxMultiplexer {
         } else {
             stripped.to_string()
         };
-        self.send_literal_then_enter(target_pane_id, &payload, None, false, !shell)
+        self.send_literal_then_enter(target_pane_id, &payload, None, false, true)
     }
 
     /// Capture the last `lines` drawn lines of the pane buffer via the shared

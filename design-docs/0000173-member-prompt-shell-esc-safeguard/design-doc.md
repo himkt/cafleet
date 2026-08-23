@@ -1,7 +1,7 @@
 # Unconditional Esc Safeguard for `send_prompt` and `send_exit`
 
 **Status**: Approved
-**Progress**: 4/12 tasks complete
+**Progress**: 7/12 tasks complete
 **Last Updated**: 2026-08-21
 
 ## Overview
@@ -106,9 +106,9 @@ Unit tests only (no live smoke test). The keystroke-shape tests assert the recor
 
 ### Step 2: tmux backend
 
-- [ ] `send_prompt`: pass `esc_first: true` unconditionally <!-- completed: -->
-- [ ] `send_exit`: pass `esc_first: true` <!-- completed: -->
-- [ ] Update the three tmux keystroke-shape tests per the Tests table <!-- completed: -->
+- [x] `send_prompt`: pass `esc_first: true` unconditionally <!-- completed: 2026-08-23T18:05 -->
+- [x] `send_exit`: pass `esc_first: true` <!-- completed: 2026-08-23T18:05 -->
+- [x] Update the three tmux keystroke-shape tests per the Tests table <!-- completed: 2026-08-23T18:05 -->
 
 ### Step 3: herdr backend
 
