@@ -1,6 +1,6 @@
 # Keep the Codex Monitor Alive with a Managed Execution Session
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 13/13 tasks complete
 **Last Updated**: 2026-08-23
 
@@ -156,3 +156,11 @@ Finish with the tracked-source audit described in Step 4.
 - [x] Add Claude/OpenCode preservation assertions and shared-contract wording checks to `cafleet/tests/docs_sync.rs`. <!-- completed: 2026-08-23T18:19 -->
 - [x] Run `cargo test --manifest-path cafleet/Cargo.toml --test docs_sync`, `mise //cafleet:test`, `mise //docs:install`, and `mise //docs:build`, in that order. <!-- completed: 2026-08-23T18:19 -->
 - [x] Audit the final diff and tracked text hits to confirm no Rust CLI/runtime source changed, no extra generated artifact is required, and only OpenCode retains the shell-ampersand worked command. <!-- completed: 2026-08-23T18:19 -->
+
+---
+
+## Changelog
+
+| Date | Changes |
+|------|---------|
+| 2026-08-23 | Implementation complete; all validations passed; fresh Reviewer approved in round 1; PR #341 created. |
