@@ -1,8 +1,8 @@
 # Unconditional Esc Safeguard for `send_prompt` and `send_exit`
 
 **Status**: Approved
-**Progress**: 10/12 tasks complete
-**Last Updated**: 2026-08-21
+**Progress**: 12/12 tasks complete
+**Last Updated**: 2026-08-23
 
 ## Overview
 
@@ -10,11 +10,11 @@ Make the Esc + settle safeguard unconditional on both multiplexer keystroke disp
 
 ## Success Criteria
 
-- [ ] `cafleet member prompt --shell` dispatches `Esc` + 0.1 s settle before the `! <cmd>` payload on both tmux and herdr.
-- [ ] `send_exit` dispatches `Esc` + 0.1 s settle before `/exit` on both backends, and pane-gone tolerance under `ignore_missing` covers the Esc keystroke too (teardown of a dead pane never fails on the Esc).
-- [ ] The `shell` flag affects only the payload prefix; both forms share identical Esc and failure semantics.
-- [ ] `docs/docs/spec/multiplexer-backends.md`, `docs/docs/spec/cli-options.md`, and `SPEC.md` are updated before code, and the old "deliberate omission / would mis-fire" rationale is removed entirely (no historical residue).
-- [ ] Keystroke-shape unit tests in both backend files assert the new shapes; `mise //cafleet:test` and `mise //cafleet:lint` pass.
+- [x] `cafleet member prompt --shell` dispatches `Esc` + 0.1 s settle before the `! <cmd>` payload on both tmux and herdr.
+- [x] `send_exit` dispatches `Esc` + 0.1 s settle before `/exit` on both backends, and pane-gone tolerance under `ignore_missing` covers the Esc keystroke too (teardown of a dead pane never fails on the Esc).
+- [x] The `shell` flag affects only the payload prefix; both forms share identical Esc and failure semantics.
+- [x] `docs/docs/spec/multiplexer-backends.md`, `docs/docs/spec/cli-options.md`, and `SPEC.md` are updated before code, and the old "deliberate omission / would mis-fire" rationale is removed entirely (no historical residue).
+- [x] Keystroke-shape unit tests in both backend files assert the new shapes; `mise //cafleet:test` and `mise //cafleet:lint` pass.
 
 ---
 
@@ -118,8 +118,8 @@ Unit tests only (no live smoke test). The keystroke-shape tests assert the recor
 
 ### Step 4: Verification
 
-- [ ] `mise //cafleet:test` passes <!-- completed: -->
-- [ ] `mise //cafleet:lint` passes <!-- completed: -->
+- [x] `mise //cafleet:test` passes <!-- completed: 2026-08-23T18:25 -->
+- [x] `mise //cafleet:lint` passes <!-- completed: 2026-08-23T18:25 -->
 
 ---
 
