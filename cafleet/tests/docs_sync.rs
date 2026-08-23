@@ -335,6 +335,97 @@ fn claude_and_opencode_overlays_preserve_their_launch_and_stop_contracts() {
 }
 
 #[test]
+fn monitor_role_defines_the_backend_resolved_loop_lifecycle() {
+    let path = "skills/cafleet/roles/monitor.md";
+    assert_terms(
+        path,
+        &[
+            "long-lived execution",
+            "{bg_run}",
+            "{bg_stop}",
+            "initial output",
+            "one immediate poll",
+            "failed start",
+            "terminate",
+            "monitor loop started",
+            "monitor live",
+            "exit notification",
+            "broker message",
+            "before other work",
+            "monitor restarted",
+            "session ID",
+            "monitor member",
+            "Director",
+        ],
+    );
+    assert_absent(
+        path,
+        &[
+            "as a background task",
+            "loop's background task",
+            "loop task itself",
+        ],
+    );
+}
+
+#[test]
+fn shared_skill_pages_make_the_monitor_member_the_execution_owner() {
+    assert_terms(
+        "skills/cafleet/reference/supervision.md",
+        &[
+            "backend-resolved long-lived execution",
+            "monitor member",
+            "execution handle",
+            "liveness checks",
+            "Director",
+            "broker",
+        ],
+    );
+    assert_terms(
+        "skills/cafleet/reference/cli.md",
+        &["long-lived execution", "monitor member", "backend"],
+    );
+    assert_terms(
+        "skills/cafleet/roles/director.md",
+        &["monitor member", "wake source", "first"],
+    );
+    assert_absent(
+        "skills/cafleet/reference/supervision.md",
+        &["just a backgrounded command"],
+    );
+    assert_absent(
+        "skills/cafleet/reference/cli.md",
+        &["as a background task in its own pane"],
+    );
+    assert_absent(
+        "skills/cafleet/roles/director.md",
+        &["loop's background task"],
+    );
+}
+
+#[test]
+fn skill_author_guidance_keeps_the_heartbeat_backend_neutral() {
+    let path = ".claude/skills/skill-author/SKILL.md";
+    assert_terms(
+        path,
+        &[
+            "long-lived execution",
+            "monitor member",
+            "monitor live",
+            "backend",
+            "heartbeat",
+        ],
+    );
+    assert_absent(
+        path,
+        &[
+            "as a background task in its own pane",
+            "both are identical on any backend",
+        ],
+    );
+}
+
+#[test]
 fn the_supervision_contract_covers_the_monitor_member_and_quiet_members() {
     assert_terms(
         "skills/cafleet/reference/supervision.md",
