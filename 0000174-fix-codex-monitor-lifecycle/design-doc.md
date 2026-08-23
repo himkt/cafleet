@@ -1,7 +1,7 @@
 # Keep the Codex Monitor Alive with a Managed Execution Session
 
 **Status**: Approved
-**Progress**: 9/13 tasks complete
+**Progress**: 13/13 tasks complete
 **Last Updated**: 2026-08-23
 
 ## Overview
@@ -152,7 +152,7 @@ Finish with the tracked-source audit described in Step 4.
 
 ### Step 4: Add regression checks and verify
 
-- [ ] Add Codex-section positive and obsolete-command-negative assertions to `cafleet/tests/docs_sync.rs`. <!-- completed: -->
-- [ ] Add Claude/OpenCode preservation assertions and shared-contract wording checks to `cafleet/tests/docs_sync.rs`. <!-- completed: -->
-- [ ] Run `cargo test --manifest-path cafleet/Cargo.toml --test docs_sync`, `mise //cafleet:test`, `mise //docs:install`, and `mise //docs:build`, in that order. <!-- completed: -->
-- [ ] Audit the final diff and tracked text hits to confirm no Rust CLI/runtime source changed, no extra generated artifact is required, and only OpenCode retains the shell-ampersand worked command. <!-- completed: -->
+- [x] Add Codex-section positive and obsolete-command-negative assertions to `cafleet/tests/docs_sync.rs`. <!-- completed: 2026-08-23T18:19 -->
+- [x] Add Claude/OpenCode preservation assertions and shared-contract wording checks to `cafleet/tests/docs_sync.rs`. <!-- completed: 2026-08-23T18:19 -->
+- [x] Run `cargo test --manifest-path cafleet/Cargo.toml --test docs_sync`, `mise //cafleet:test`, `mise //docs:install`, and `mise //docs:build`, in that order. <!-- completed: 2026-08-23T18:19 -->
+- [x] Audit the final diff and tracked text hits to confirm no Rust CLI/runtime source changed, no extra generated artifact is required, and only OpenCode retains the shell-ampersand worked command. <!-- completed: 2026-08-23T18:19 -->
