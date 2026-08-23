@@ -1,8 +1,8 @@
 # Unconditional Esc Safeguard for `send_prompt` and `send_exit`
 
-**Status**: Approved
-**Progress**: 0/12 tasks complete
-**Last Updated**: 2026-08-21
+**Status**: Complete
+**Progress**: 12/12 tasks complete
+**Last Updated**: 2026-08-23
 
 ## Overview
 
@@ -10,11 +10,11 @@ Make the Esc + settle safeguard unconditional on both multiplexer keystroke disp
 
 ## Success Criteria
 
-- [ ] `cafleet member prompt --shell` dispatches `Esc` + 0.1 s settle before the `! <cmd>` payload on both tmux and herdr.
-- [ ] `send_exit` dispatches `Esc` + 0.1 s settle before `/exit` on both backends, and pane-gone tolerance under `ignore_missing` covers the Esc keystroke too (teardown of a dead pane never fails on the Esc).
-- [ ] The `shell` flag affects only the payload prefix; both forms share identical Esc and failure semantics.
-- [ ] `docs/docs/spec/multiplexer-backends.md`, `docs/docs/spec/cli-options.md`, and `SPEC.md` are updated before code, and the old "deliberate omission / would mis-fire" rationale is removed entirely (no historical residue).
-- [ ] Keystroke-shape unit tests in both backend files assert the new shapes; `mise //cafleet:test` and `mise //cafleet:lint` pass.
+- [x] `cafleet member prompt --shell` dispatches `Esc` + 0.1 s settle before the `! <cmd>` payload on both tmux and herdr.
+- [x] `send_exit` dispatches `Esc` + 0.1 s settle before `/exit` on both backends, and pane-gone tolerance under `ignore_missing` covers the Esc keystroke too (teardown of a dead pane never fails on the Esc).
+- [x] The `shell` flag affects only the payload prefix; both forms share identical Esc and failure semantics.
+- [x] `docs/docs/spec/multiplexer-backends.md`, `docs/docs/spec/cli-options.md`, and `SPEC.md` are updated before code, and the old "deliberate omission / would mis-fire" rationale is removed entirely (no historical residue).
+- [x] Keystroke-shape unit tests in both backend files assert the new shapes; `mise //cafleet:test` and `mise //cafleet:lint` pass.
 
 ---
 
@@ -99,27 +99,27 @@ Unit tests only (no live smoke test). The keystroke-shape tests assert the recor
 
 ### Step 1: Documentation
 
-- [ ] Update `docs/docs/spec/multiplexer-backends.md` (backend matrix, § Prompt dispatch, § The `Esc` safeguard) per the Specification table <!-- completed: -->
-- [ ] Update `docs/docs/spec/cli-options.md` § `member prompt` (keystroke-sequence table + surrounding prose) per the Specification table <!-- completed: -->
-- [ ] Update `SPEC.md` (§ `member prompt`, tmux §6.5 entries + Esc-first matrix, herdr §6.5 entries + `_SUBMIT_DELAY` paragraph) <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/prompt-routing.md` § *The two forms* wording <!-- completed: -->
+- [x] Update `docs/docs/spec/multiplexer-backends.md` (backend matrix, § Prompt dispatch, § The `Esc` safeguard) per the Specification table <!-- completed: 2026-08-23T17:56 -->
+- [x] Update `docs/docs/spec/cli-options.md` § `member prompt` (keystroke-sequence table + surrounding prose) per the Specification table <!-- completed: 2026-08-23T17:56 -->
+- [x] Update `SPEC.md` (§ `member prompt`, tmux §6.5 entries + Esc-first matrix, herdr §6.5 entries + `_SUBMIT_DELAY` paragraph) <!-- completed: 2026-08-23T17:56 -->
+- [x] Update `skills/cafleet/reference/prompt-routing.md` § *The two forms* wording <!-- completed: 2026-08-23T17:56 -->
 
 ### Step 2: tmux backend
 
-- [ ] `send_prompt`: pass `esc_first: true` unconditionally <!-- completed: -->
-- [ ] `send_exit`: pass `esc_first: true` <!-- completed: -->
-- [ ] Update the three tmux keystroke-shape tests per the Tests table <!-- completed: -->
+- [x] `send_prompt`: pass `esc_first: true` unconditionally <!-- completed: 2026-08-23T18:05 -->
+- [x] `send_exit`: pass `esc_first: true` <!-- completed: 2026-08-23T18:05 -->
+- [x] Update the three tmux keystroke-shape tests per the Tests table <!-- completed: 2026-08-23T18:05 -->
 
 ### Step 3: herdr backend
 
-- [ ] `send_prompt`: lead both branches with `send_esc` <!-- completed: -->
-- [ ] `send_esc`: add the `ignore_missing` parameter; `send_exit` calls it with its own `ignore_missing` before the `/exit` run <!-- completed: -->
-- [ ] Update the two herdr keystroke-shape tests per the Tests table <!-- completed: -->
+- [x] `send_prompt`: lead both branches with `send_esc` <!-- completed: 2026-08-23T18:14 -->
+- [x] `send_esc`: add the `ignore_missing` parameter; `send_exit` calls it with its own `ignore_missing` before the `/exit` run <!-- completed: 2026-08-23T18:14 -->
+- [x] Update the two herdr keystroke-shape tests per the Tests table <!-- completed: 2026-08-23T18:14 -->
 
 ### Step 4: Verification
 
-- [ ] `mise //cafleet:test` passes <!-- completed: -->
-- [ ] `mise //cafleet:lint` passes <!-- completed: -->
+- [x] `mise //cafleet:test` passes <!-- completed: 2026-08-23T18:25 -->
+- [x] `mise //cafleet:lint` passes <!-- completed: 2026-08-23T18:25 -->
 
 ---
 
@@ -129,3 +129,4 @@ Unit tests only (no live smoke test). The keystroke-shape tests assert the recor
 |------|---------|
 | 2026-08-21 | Initial draft |
 | 2026-08-21 | Add `docs/docs/spec/cli-options.md` § `member prompt` to the documentation surfaces (reviewer round 1) |
+| 2026-08-23 | Implementation complete; full test and lint gates pass; Reviewer approved; PR #340 opened |

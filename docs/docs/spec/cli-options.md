@@ -937,20 +937,19 @@ coordination channel; the plain form is not a substitute for `message send`.
 Shell metacharacters — pipes, `&&`, `;`, `$(...)`, and backticks — are
 forwarded opaquely. The newline check runs first, against the original text.
 
-The `--shell` flag controls both the payload prefix and the Esc safeguard:
+The `--shell` flag controls only the payload prefix; both forms use the same
+Esc safeguard and failure semantics:
 
 | Form | Keystroke sequence | Follow-up |
 |---|---|---|
 | Plain (no `--shell`) | `Esc` → settle → literal `TEXT` → `Enter` | None |
-| `--shell` | literal `! TEXT` → `Enter` | `cafleet member ping` required |
+| `--shell` | `Esc` → settle → literal `! TEXT` → `Enter` | `cafleet member ping` required |
 
-In the plain form the trailing `Enter` submits a real user turn, and the
-leading `Esc` (as in `member ping` and inline previews) keeps it from blindly
-confirming a pending permission prompt; the submitted turn opens the member's
-turn directly. The `--shell` form leads with no `Esc` because an `Esc` before
-`! <cmd>` would mis-fire (see
-[Esc safeguard](multiplexer-backends.md#esc-safeguard)), and its bang output
-only stages in the pane — the ping advances the member's turn to consume it.
+In both forms the leading `Esc` (as in `member ping` and inline previews) keeps
+the dispatch from blindly confirming a pending permission prompt. In the plain
+form the trailing `Enter` submits a real user turn and opens the member's turn
+directly. The `--shell` form's bang output only stages in the pane — the ping
+advances the member's turn to consume it.
 
 The flag performs no content inspection: plain-form `TEXT` beginning with `!`
 is delivered verbatim without the shell mechanics.

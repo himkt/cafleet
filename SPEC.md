@@ -1405,7 +1405,8 @@ body is a one-line keystroke by contract. A newline/CR → usage error
 be empty.`; then trim. Ensure tmux, load the member, require a pane (`prompt`).
 Dispatch via the multiplexer's `send_prompt` (§6.5): the plain form delivers
 the text Esc-safeguarded as a submitted user turn; the `--shell` form delivers
-`! <text>` un-escaped via the coding agent's `!` shell shortcut (a tmux error →
+`! <text>` with the same Esc safeguard via the coding agent's `!` shell shortcut
+(a tmux error →
 application error `send failed: <error>`). The flag performs no content
 inspection — plain-form text beginning with `!` is delivered verbatim. JSON:
 `{member_id, pane_id, text, shell}`; text: `Sent prompt <quoted-text> to
@@ -2060,8 +2061,9 @@ Director's `MultiplexerContext` and passes it directly.
   the pane id. `select_layout` runs `tmux select-layout -t <reference.window_id>
   <layout>` and is internal to the tmux backend (not on the interface).
 - **`send_exit(*, target_pane_id, ignore_missing=False)`** — keystrokes `/exit`
-  + Enter via the literal-then-Enter core, **no Esc-first**; tolerates a missing
-  pane when `ignore_missing`.
+  + Enter via the literal-then-Enter core, **Esc-first=YES**; tolerates a missing
+  pane when `ignore_missing`, including when the pane disappears before the
+  leading Esc.
 - **`send_poll_trigger(*, target_pane_id, member_id) -> bool`** —
   best-effort. tmux missing → `false`; payload `cafleet message poll
   <member_id> — then resume your work if something was
@@ -2124,9 +2126,9 @@ Director's `MultiplexerContext` and passes it directly.
   surrounding whitespace; empty after strip → `send_prompt: text may not
   be empty`; the **original** text with a newline or CR → `send_prompt:
   text may not contain newlines`. literal-then-Enter with `payload = "! " +
-  stripped_text` when `shell` else `stripped_text`, and `esc_first=not shell` —
-  the plain form Esc-safeguards the submitted user turn; the shell form omits
-  the Esc (honors the coding-agent `!` shortcut).
+  stripped_text` when `shell` else `stripped_text`, and `esc_first=true` — both
+  forms share the same Esc safeguard and failure semantics; `shell` changes only
+  the `! ` payload prefix.
 - **`capture_pane(*, target_pane_id, lines=20) -> str`** — fail-fast. `lines <=
   0` → `capture_pane: lines must be positive, got <lines>`. Run `tmux
   capture-pane -p -t <target_pane_id> -S -<lines + 1000>` (the fixed
@@ -2185,8 +2187,7 @@ The shared literal-then-Enter primitive (used by `send_exit`,
 An embedded `\n` in `payload` is a **soft** newline within the single keystroke
 sequence — it does NOT fragment into a second submit. Esc-first matrix:
 `send_poll_trigger` **YES**, `send_inline_preview` **YES**, `send_wake_trigger`
-**YES**, `send_exit` **NO**, `send_prompt` plain form **YES** / shell form
-**NO** (`esc_first=not shell`).
+**YES**, `send_exit` **YES**, and both `send_prompt` forms **YES**.
 
 #### Subprocess core, timeout, and pane-gone tolerance
 
@@ -2297,8 +2298,10 @@ Each method's herdr realization:
   `_read_tab_layout` / `_equalize_column` with `_equalize_tab_column`;
   tmux `kill_pane` stays a bare `kill-pane` (native auto-fit).
 - **`list_pane_ids() -> set`** — `herdr pane list` → the set of pane ids.
-- **`send_exit(*, target_pane_id, ignore_missing=False)`** — `herdr pane run
-  <id> "/exit"`.
+- **`send_exit(*, target_pane_id, ignore_missing=False)`** — `herdr pane
+  send-keys <id> esc`, then `herdr pane run <id> "/exit"`; pane-not-found on
+  either keystroke is tolerated exactly when `ignore_missing` is true, while
+  other errors propagate.
 - **`send_poll_trigger(...) -> bool`** — best-effort. `herdr pane send-keys <id>
   esc` (the Esc safeguard, with the same short settle delay), then `herdr pane
   run <id> "cafleet message poll <member_id>
@@ -2316,10 +2319,10 @@ Each method's herdr realization:
   the embedded newline is literal), then a sleep of `_SUBMIT_DELAY` (`1.0`s),
   then a single `herdr pane send-keys <id> enter`, keeping the tmux contract of
   "one submit for the whole 2-line payload".
-- **`send_prompt(*, target_pane_id, text, shell=False)`** — shell form:
-  `herdr pane run <id> "! <text>"` (no Esc); plain form: `herdr pane send-keys
-  <id> esc`, then `herdr pane run <id> "<text>"` (mirroring
-  `send_poll_trigger`'s esc-then-run shape).
+- **`send_prompt(*, target_pane_id, text, shell=False)`** — `herdr pane
+  send-keys <id> esc`, then `herdr pane run <id> "<payload>"`, where `<payload>`
+  is `! <text>` for the shell form and `<text>` for the plain form. Both forms
+  mirror `send_poll_trigger`'s esc-then-run shape and differ only in the prefix.
 - **`capture_pane(*, target_pane_id, lines=20) -> str`** — fail-fast. `lines <=
   0` → `capture_pane: lines must be positive, got <lines>`. Run `herdr pane read
   <id> --source recent-unwrapped --lines <lines + 1000>` (the same fixed
@@ -2337,10 +2340,10 @@ is the one herdr path built from a separate `pane send-text` + `pane send-keys
 enter` pair, and it sleeps `_SUBMIT_DELAY` between them: codex classifies the
 fast-injected payload as a paste and absorbs an Enter arriving within its
 post-paste suppression window, which would otherwise leave the preview stuck in
-the recipient's composer. The `esc_first` safeguard maps to a discrete `herdr
-pane send-keys <id> esc` before the payload on exactly the paths that use it
-today (`send_poll_trigger`, `send_wake_trigger`, `send_inline_preview`, and
-`send_prompt`'s plain form).
+the recipient's composer. The Esc safeguard maps to a discrete `herdr pane
+send-keys <id> esc` before the payload on every keystroke path:
+`send_poll_trigger`, `send_wake_trigger`, `send_inline_preview`, `send_exit`,
+and both `send_prompt` forms.
 
 #### `AgentStateAware` capability (herdr only)
 

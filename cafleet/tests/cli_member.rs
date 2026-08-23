@@ -515,7 +515,7 @@ fn member_prompt_dispatches_and_validates_the_text() {
 }
 
 #[test]
-fn member_prompt_shell_form_types_the_bang_line_without_the_esc_safeguard() {
+fn member_prompt_shell_form_is_esc_safeguarded_before_the_bang_line() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.with_fleet();
     let member_id = cli.create_member(fleet_id, "worker");
@@ -531,13 +531,16 @@ fn member_prompt_shell_form_types_the_bang_line_without_the_esc_safeguard() {
     assert!(out.contains("Sent shell prompt"), "got: {out}");
     assert!(out.contains("worker (%7)."), "got: {out}");
     let calls = cli.shim_calls();
-    assert!(
-        calls.iter().any(|line| line.contains("-l ! ls -la")),
-        "the shell form types the bang line literally: {calls:?}"
-    );
-    assert!(
-        !calls.iter().any(|line| line.contains("Escape")),
-        "no Esc before the shell form — it honors the ! shortcut: {calls:?}"
+    let payload_index = calls
+        .iter()
+        .rposition(|line| line == "send-keys -t %7 -l ! ls -la")
+        .expect("the shell form types the bang line literally");
+    assert_eq!(
+        calls
+            .get(payload_index.saturating_sub(1))
+            .map(String::as_str),
+        Some("send-keys -t %7 Escape"),
+        "Escape immediately precedes the literal bang payload: {calls:?}"
     );
 }
 
