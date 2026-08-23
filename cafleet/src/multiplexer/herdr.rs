@@ -856,25 +856,50 @@ mod tests {
 
     #[test]
     fn send_exit_runs_the_exit_line_and_tolerates_only_pane_not_found() {
+        for missing_keystroke in 0..2 {
+            let runner = FakeRunner::with_binary("herdr");
+            for _ in 0..missing_keystroke {
+                runner.respond(Ok(String::new()));
+            }
+            runner.respond(Err(RunError::Failed {
+                stderr: herdr_error_stderr("pane_not_found"),
+            }));
+            let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+            mux.send_exit("w1:p2", true).unwrap();
+            assert_eq!(
+                runner.events(),
+                vec![
+                    run_event(&["herdr", "pane", "send-keys", "w1:p2", "esc"], Some(5)),
+                    sleep_event(0.1),
+                    run_event(&["herdr", "pane", "run", "w1:p2", "/exit"], None),
+                ],
+                "a missing pane at keystroke {missing_keystroke} is tolerated"
+            );
+        }
+
+        for failed_keystroke in 0..2 {
+            let runner = FakeRunner::with_binary("herdr");
+            for _ in 0..failed_keystroke {
+                runner.respond(Ok(String::new()));
+            }
+            runner.respond(Err(RunError::Failed {
+                stderr: herdr_error_stderr("internal"),
+            }));
+            let mux = HerdrMultiplexer::new(runner, herdr_env());
+            assert!(
+                mux.send_exit("w1:p2", true).is_err(),
+                "a non-pane-not-found error at keystroke {failed_keystroke} propagates"
+            );
+        }
+
         let runner = FakeRunner::with_binary("herdr");
         runner.respond(Err(RunError::Failed {
             stderr: herdr_error_stderr("pane_not_found"),
         }));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        mux.send_exit("w1:p2", true).unwrap();
-        assert_eq!(
-            runner.run_argvs(),
-            vec![argv(&["herdr", "pane", "run", "w1:p2", "/exit"])]
-        );
-
-        let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Err(RunError::Failed {
-            stderr: herdr_error_stderr("internal"),
-        }));
         let mux = HerdrMultiplexer::new(runner, herdr_env());
         assert!(
-            mux.send_exit("w1:p2", true).is_err(),
-            "only the pane_not_found code is tolerated"
+            mux.send_exit("w1:p2", false).is_err(),
+            "pane_not_found propagates when ignore_missing is false"
         );
     }
 
@@ -982,24 +1007,38 @@ mod tests {
 
     #[test]
     fn send_prompt_shell_and_plain_forms() {
-        let runner = FakeRunner::with_binary("herdr");
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        mux.send_prompt("w1:p2", " ls ", true).unwrap();
-        assert_eq!(
-            runner.events(),
-            vec![run_event(&["herdr", "pane", "run", "w1:p2", "! ls"], None)]
-        );
+        for (text, shell, payload) in [(" ls ", true, "! ls"), ("hi there", false, "hi there")]
+        {
+            let runner = FakeRunner::with_binary("herdr");
+            let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+            mux.send_prompt("w1:p2", text, shell).unwrap();
+            assert_eq!(
+                runner.events(),
+                vec![
+                    run_event(&["herdr", "pane", "send-keys", "w1:p2", "esc"], Some(5)),
+                    sleep_event(0.1),
+                    run_event(&["herdr", "pane", "run", "w1:p2", payload], None),
+                ],
+                "the shell flag changes only the payload prefix"
+            );
+        }
 
         let runner = FakeRunner::with_binary("herdr");
+        runner.respond(Err(RunError::Failed {
+            stderr: herdr_error_stderr("internal"),
+        }));
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        mux.send_prompt("w1:p2", "hi there", false).unwrap();
+        assert!(
+            mux.send_prompt("w1:p2", "ls", true).is_err(),
+            "the shell form propagates an Esc failure like the plain form"
+        );
         assert_eq!(
             runner.events(),
-            vec![
-                run_event(&["herdr", "pane", "send-keys", "w1:p2", "esc"], Some(5)),
-                sleep_event(0.1),
-                run_event(&["herdr", "pane", "run", "w1:p2", "hi there"], None),
-            ]
+            vec![run_event(
+                &["herdr", "pane", "send-keys", "w1:p2", "esc"],
+                Some(5),
+            )],
+            "a failed Esc aborts before the payload"
         );
 
         let mux = HerdrMultiplexer::new(FakeRunner::with_binary("herdr"), herdr_env());
