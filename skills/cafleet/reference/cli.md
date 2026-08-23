@@ -93,7 +93,7 @@ cafleet doctor --json
 `cafleet monitor` is the supervision scheduler — a two-form command with a positional fleet id:
 
 ```bash
-cafleet monitor <fleet-id>          # the scheduler loop (launched by the monitor member as a background task in its own pane)
+cafleet monitor <fleet-id>          # the scheduler loop (a long-lived execution owned by the monitor member using its backend's launch primitive)
 cafleet monitor scan <fleet-id>     # one-shot batch capture: the Director's pane + every active member's pane, print, exit
 ```
 

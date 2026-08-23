@@ -21,7 +21,7 @@ Before spawning your first member, Read every file in the **Load-bearing** table
 | Read | Read before you… | What you lose if you skip it |
 |------|------------------|------------------------------|
 | [`reference/prompt-routing.md`](../reference/prompt-routing.md) | process a member's denial-fallback request | the `cafleet member prompt --shell` dispatch shape, the required `cafleet member ping` follow-up, and serialization (one request at a time, poll order) — the member stalls waiting on `! <command>` output |
-| [`reference/recovery.md`](../reference/recovery.md) | tear down or recover a member / fleet | the 2-stage health check, stalled-member classification, and the Shutdown Protocol order (stop the monitor loop's background task first → delete members → verify → `fleet delete`) — you orphan panes / leak the fleet |
+| [`reference/recovery.md`](../reference/recovery.md) | tear down or recover a member / fleet | the 2-stage health check, stalled-member classification, and the Shutdown Protocol order (delete the monitor member first to end its wake source → delete remaining members → verify → `fleet delete`) — you orphan panes / leak the fleet |
 | [`reference/cli.md`](../reference/cli.md) § *Broadcast* | broadcast to the fleet | the fan-out semantics, the `broadcast_summary` envelope, and `origin_message_id` threading — your broadcast misfires |
 
 **On-demand — Read only when you need that capability:**

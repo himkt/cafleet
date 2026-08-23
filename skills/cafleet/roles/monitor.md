@@ -34,19 +34,24 @@ while every other `{placeholder}` still resolves from your own section only.
 1. Send the standard ready signal:
    `cafleet message send --from-member-id <my-member-id> --to-member-id
    <director-member-id> "ready"`.
-2. Launch the heartbeat in THIS pane as a background task ({bg_run}):
-   `cafleet monitor <fleet-id>`. You launch the loop in your own pane as
-   part of this startup sequence, and you are the only party that does so —
-   the Director never runs the loop itself (it waits for
-   `monitor live`), and ordinary members never run it.
-3. Confirm the startup line in the task output:
+2. Launch the heartbeat in THIS pane as a backend-resolved long-lived
+   execution ({bg_run}): `cafleet monitor <fleet-id>`. You launch the loop,
+   retain its execution handle (including its session ID when your overlay
+   provides one), and perform its liveness checks. The monitor member is the
+   only party that does so — the Director reacts to broker signals and never
+   launches or polls the execution, and ordinary members never run it.
+3. Confirm the startup line in the initial output:
    `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)`.
-   A task that exits instead (runtime-claim conflict, dead fleet) is a failed
-   start — report it to the Director instead of proceeding.
+   Apply any bounded startup-confirmation sequence required by your overlay.
+   For Codex, a missing active session ID is a failed start. When the line is
+   absent and the session remains active, perform one immediate poll. An
+   execution that exits before the line appears is also a failed start; if it
+   remains active but unconfirmed after the poll, terminate it with {bg_stop}.
+   Report any failed start to the Director instead of proceeding.
 4. Send the gate signal (an anchorless status, deliberately parens-free):
-   `monitor live`. This message gates the Director's first ordinary
-   `cafleet member create` (belt), alongside the CLI's monitor-first guard
-   (suspenders).
+   `monitor live` only after observing the startup line. This message gates
+   the Director's first ordinary `cafleet member create` (belt), alongside the
+   CLI's monitor-first guard (suspenders).
 
 Then end your turn and go idle. The loop wakes your own pane once per wake
 interval; you never set up a sleep-then-poll cycle.
@@ -110,15 +115,19 @@ one-per-fleet guard counts only *active* members, so a deleted monitor frees
 the slot); the stale runtime row reads dead on both liveness axes and is
 reclaimed by the fresh loop.
 
-**Your standing obligation — the loop task itself.** If the loop's background
-task exits mid-run while your pane lives, the fleet loses its heartbeat
-silently. On observing your loop task exit (where {bg_run} delivers an exit
-notification), relaunch `cafleet monitor <fleet-id>` (the stale runtime row
-reads dead and is reclaimed) and report the restart to the Director as an
-anchorless status: `monitor restarted`. On a backend whose background
-primitive delivers no exit notification, run the check on your next turn
-instead: any broker message landing in your pane cues a task-liveness check
-before other work.
+**Your standing obligation — the long-lived execution.** If the execution
+exits mid-run while your pane lives, the fleet loses its heartbeat silently.
+Observe it through the backend's push-style exit notification or through any
+overlay-required liveness polling. In particular, when a broker message
+reopens a later Codex turn, poll the retained session ID once before other work.
+On observing an exit, relaunch `cafleet monitor <fleet-id>` (the stale
+runtime row reads dead and is reclaimed), retain the replacement execution
+handle, and repeat the same startup confirmation. Report the anchorless status
+`monitor restarted` only after the replacement emits `monitor loop started`;
+report a failed relaunch to the Director instead of claiming a restart. The
+monitor member alone retains any session ID and performs these checks; the
+Director receives only broker status signals and never owns or polls the
+execution. Use {bg_stop} whenever an explicit stop is required.
 
 ## Where the IDs come from
 
@@ -143,5 +152,5 @@ Director's backend (the bootstrap inherits it by construction).
 ## Shutdown
 
 At teardown the Director deletes you **first** (first-out): the pane kill
-takes the loop process down with it, ending the wake source before any other
-member disappears. Nothing is required of you.
+takes the long-lived execution down with it, ending the wake source before any
+other member disappears. Nothing is required of you.

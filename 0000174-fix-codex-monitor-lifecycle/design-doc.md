@@ -1,7 +1,7 @@
 # Keep the Codex Monitor Alive with a Managed Execution Session
 
 **Status**: Approved
-**Progress**: 3/13 tasks complete
+**Progress**: 6/13 tasks complete
 **Last Updated**: 2026-08-23
 
 ## Overview
@@ -140,9 +140,9 @@ Finish with the tracked-source audit described in Step 4.
 
 ### Step 2: Align the normative skill lifecycle
 
-- [ ] Update `skills/cafleet/roles/monitor.md` startup, failure, later-turn liveness, restart, stop, and monitor-member-only ownership wording to support both managed sessions and existing backend primitives. <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/supervision.md`, `skills/cafleet/reference/cli.md`, and the recovery summary in `skills/cafleet/roles/director.md` to use backend-neutral lifecycle language and keep the Director broker-reactive rather than execution-owning. <!-- completed: -->
-- [ ] Audit other tracked skill guidance, including `.claude/skills/skill-author/SKILL.md`, and replace only lifecycle wording that incorrectly universalizes shell/background-task behavior. <!-- completed: -->
+- [x] Update `skills/cafleet/roles/monitor.md` startup, failure, later-turn liveness, restart, stop, and monitor-member-only ownership wording to support both managed sessions and existing backend primitives. <!-- completed: 2026-08-23T18:05 -->
+- [x] Update `skills/cafleet/reference/supervision.md`, `skills/cafleet/reference/cli.md`, and the recovery summary in `skills/cafleet/roles/director.md` to use backend-neutral lifecycle language and keep the Director broker-reactive rather than execution-owning. <!-- completed: 2026-08-23T18:05 -->
+- [x] Audit other tracked skill guidance, including `.claude/skills/skill-author/SKILL.md`, and replace only lifecycle wording that incorrectly universalizes shell/background-task behavior. <!-- completed: 2026-08-23T18:05 -->
 
 ### Step 3: Synchronize specification and public documentation
 
