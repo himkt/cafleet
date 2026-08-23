@@ -1,6 +1,6 @@
 # Unconditional Esc Safeguard for `send_prompt` and `send_exit`
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 12/12 tasks complete
 **Last Updated**: 2026-08-23
 
@@ -129,3 +129,4 @@ Unit tests only (no live smoke test). The keystroke-shape tests assert the recor
 |------|---------|
 | 2026-08-21 | Initial draft |
 | 2026-08-21 | Add `docs/docs/spec/cli-options.md` § `member prompt` to the documentation surfaces (reviewer round 1) |
+| 2026-08-23 | Implementation complete; full test and lint gates pass; Reviewer approved; PR #340 opened |
