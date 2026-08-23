@@ -623,17 +623,37 @@ mod tests {
     }
 
     #[test]
-    fn send_prompt_shell_form_prefixes_bang_and_skips_the_esc() {
+    fn send_prompt_shell_form_is_esc_safeguarded_and_prefixes_bang() {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         mux.send_prompt("%5", " ls -la ", true).unwrap();
         assert_eq!(
             runner.events(),
             vec![
+                run_event(&["tmux", "send-keys", "-t", "%5", "Escape"], None),
+                sleep_event(0.1),
                 run_event(&["tmux", "send-keys", "-t", "%5", "-l", "! ls -la"], None),
                 sleep_event(1.0),
                 run_event(&["tmux", "send-keys", "-t", "%5", "Enter"], None),
             ]
+        );
+
+        let runner = FakeRunner::with_binary("tmux");
+        runner.respond(Err(RunError::Failed {
+            stderr: "boom".to_string(),
+        }));
+        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+        assert!(
+            mux.send_prompt("%5", "ls -la", true).is_err(),
+            "the shell form propagates an Esc failure like the plain form"
+        );
+        assert_eq!(
+            runner.events(),
+            vec![run_event(
+                &["tmux", "send-keys", "-t", "%5", "Escape"],
+                None,
+            )],
+            "a failed Esc aborts before the payload"
         );
     }
 
@@ -662,22 +682,29 @@ mod tests {
     }
 
     #[test]
-    fn send_exit_types_exit_without_esc_and_tolerates_a_missing_pane() {
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Err(RunError::Failed {
-            stderr: "can't find pane %5".to_string(),
-        }));
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        mux.send_exit("%5", true).unwrap();
-        assert_eq!(
-            runner.events(),
-            vec![
-                run_event(&["tmux", "send-keys", "-t", "%5", "-l", "/exit"], None),
-                sleep_event(1.0),
-                run_event(&["tmux", "send-keys", "-t", "%5", "Enter"], None),
-            ],
-            "the tolerated pane-gone failure does not abort the sequence"
-        );
+    fn send_exit_is_esc_safeguarded_and_tolerates_a_missing_pane() {
+        for missing_keystroke in 0..3 {
+            let runner = FakeRunner::with_binary("tmux");
+            for _ in 0..missing_keystroke {
+                runner.respond(Ok(String::new()));
+            }
+            runner.respond(Err(RunError::Failed {
+                stderr: "can't find pane %5".to_string(),
+            }));
+            let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+            mux.send_exit("%5", true).unwrap();
+            assert_eq!(
+                runner.events(),
+                vec![
+                    run_event(&["tmux", "send-keys", "-t", "%5", "Escape"], None),
+                    sleep_event(0.1),
+                    run_event(&["tmux", "send-keys", "-t", "%5", "-l", "/exit"], None),
+                    sleep_event(1.0),
+                    run_event(&["tmux", "send-keys", "-t", "%5", "Enter"], None),
+                ],
+                "a missing pane at keystroke {missing_keystroke} is tolerated"
+            );
+        }
     }
 
     #[test]
@@ -686,8 +713,16 @@ mod tests {
         runner.respond(Err(RunError::Failed {
             stderr: "can't find pane %5".to_string(),
         }));
-        let mux = TmuxMultiplexer::new(runner, tmux_env());
+        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         assert!(mux.send_exit("%5", false).is_err());
+        assert_eq!(
+            runner.events(),
+            vec![run_event(
+                &["tmux", "send-keys", "-t", "%5", "Escape"],
+                None,
+            )],
+            "without tolerance, an Esc failure aborts before the payload"
+        );
     }
 
     #[test]
