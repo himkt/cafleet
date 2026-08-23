@@ -10,15 +10,15 @@ Correct the Codex coding-agent overlay so the monitor member runs `cafleet monit
 
 ## Success Criteria
 
-- [ ] The Codex overlay launches `cafleet monitor <fleet-id>` without a shell ampersand, retains the managed execution-session ID, inspects the initial output, and performs at most one immediate poll to observe `monitor loop started (...)`.
-- [ ] Codex withholds `monitor live` and reports startup failure when no managed session is returned, the session exits early, or the startup line remains absent after the bounded confirmation sequence; a still-active unconfirmed session is terminated first.
-- [ ] On every later Codex monitor-member turn reopened by a broker message, the retained session is polled once before other work; an exited loop follows the existing relaunch and `monitor restarted` flow.
-- [ ] The Codex `{bg_stop}` value describes interrupting or terminating the retained managed execution session.
-- [ ] The monitor member alone owns the Codex execution-session ID and all launch/liveness polling; the Director runs no timer, sleep loop, or session poll loop and reacts only to broker signals.
-- [ ] Claude continues to use its background-task facility and OpenCode continues to use its existing shell-backgrounding behavior; neither backend's overlay contract changes.
-- [ ] Shared skill, specification, and public-documentation prose no longer claims that every backend hosts the loop as the same kind of backgrounded shell command.
-- [ ] Section-scoped documentation tests enforce the new Codex contract and preserve the Claude/OpenCode contracts.
-- [ ] The targeted Rust documentation-contract tests and public documentation build pass without changes to Rust CLI/runtime source.
+- [x] The Codex overlay launches `cafleet monitor <fleet-id>` without a shell ampersand, retains the managed execution-session ID, inspects the initial output, and performs at most one immediate poll to observe `monitor loop started (...)`.
+- [x] Codex withholds `monitor live` and reports startup failure when no managed session is returned, the session exits early, or the startup line remains absent after the bounded confirmation sequence; a still-active unconfirmed session is terminated first.
+- [x] On every later Codex monitor-member turn reopened by a broker message, the retained session is polled once before other work; an exited loop follows the existing relaunch and `monitor restarted` flow.
+- [x] The Codex `{bg_stop}` value describes interrupting or terminating the retained managed execution session.
+- [x] The monitor member alone owns the Codex execution-session ID and all launch/liveness polling; the Director runs no timer, sleep loop, or session poll loop and reacts only to broker signals.
+- [x] Claude continues to use its background-task facility and OpenCode continues to use its existing shell-backgrounding behavior; neither backend's overlay contract changes.
+- [x] Shared skill, specification, and public-documentation prose no longer claims that every backend hosts the loop as the same kind of backgrounded shell command.
+- [x] Section-scoped documentation tests enforce the new Codex contract and preserve the Claude/OpenCode contracts.
+- [x] The targeted Rust documentation-contract tests and public documentation build pass without changes to Rust CLI/runtime source.
 
 ---
 
