@@ -1,7 +1,8 @@
 # Monitoring
 
-`cafleet monitor` is a fleet-scoped foreground loop — `scan → wake → sleep` —
-that the fleet's **monitor member** runs as a background task in its own pane.
+`cafleet monitor` is a fleet-scoped foreground loop — `scan → wake → sleep`.
+The fleet's **monitor member** hosts it as a backend-resolved long-lived execution
+in its own pane.
 The monitor member is a dedicated watcher spawned before any other member
 (by the `cafleet fleet create` bootstrap) on a cheap model — its work is
 bounded classification, not generation. The loop supplies the **heartbeat**: a
@@ -9,10 +10,11 @@ plain loop, not agent reasoning, that fires one unconditional fleet-level wake
 into the monitor member's own pane once per wake interval. On each wake the
 monitor member classifies every member pane and contacts the Director only
 when something actually needs attention, so the Director is never nudged by a
-timer. While running, the loop spends no model tokens and — as a plain
-backgrounded command — works identically on any backend. One monitor loop per
-fleet; deleting the monitor member kills its pane and the loop process with
-it.
+timer. The monitor member alone owns the execution handle and liveness checks;
+the Director reacts only to broker signals and never launches or polls the
+execution. Hosting mechanics differ by backend, while the heartbeat semantics
+are identical. One monitor loop per fleet; deleting the monitor member kills
+its pane and the loop process with it.
 
 ## Heartbeat, classification, facilitation
 
@@ -183,23 +185,25 @@ Director-authored monitor prompt passed via `--monitor-file` and the
 backend's monitor-default model via `--monitor-model` (see
 [CLI options](../spec/cli-options.md#fleet-create)). Any failure rolls the
 whole bootstrap back — no fleet, no rows, no pane — so the command is
-retryable as-is. At startup the monitor member sends the
-standard `ready` signal, launches `cafleet monitor <fleet-id>` as a
-background task in its own pane, confirms the startup line the loop prints
+retryable as-is. At startup the monitor member sends the standard `ready`
+signal, launches `cafleet monitor <fleet-id>` using its backend-resolved
+long-lived-execution primitive, and confirms the startup line the loop prints
 immediately after claiming the runtime row — `monitor loop started (fleet
-<fleet_id>, tick <tick>s, pid <pid>)` — and then sends the gate signal
-`monitor live` to the Director. The monitor member is the only party that
-launches the loop: the Director never runs the loop itself — it waits for
-`monitor live` — and ordinary members never run
-it. That gate message unblocks the Director's first
-ordinary `cafleet member create`; the CLI enforces the same order (spawning
+<fleet_id>, tick <tick>s, pid <pid>)`. On Codex, it runs the command without
+shell `&`, retains the managed execution's session ID, and inspects the initial output.
+If the line is absent while the session remains active, it performs one immediate poll.
+A missing session ID or an early exit is a failed start; an
+active but unconfirmed session is terminated after that poll. Only after the
+line is observed does the monitor member send `monitor live` to the Director.
+The monitor member is the only party that owns this execution or its handle:
+the Director receives only broker status signals, ordinary members never run
+the loop, and the session ID is never shared. That gate message unblocks the
+Director's first ordinary `cafleet member create`; the CLI enforces the same order (spawning
 an ordinary member into a fleet with no active monitor member fails — see
 [CLI options](../spec/cli-options.md#member-create)), and a
 `member create --role monitor` spawn into a fleet that already has an active
-monitor member
-also fails. A loop task that exits instead of printing the startup line
-(runtime-claim conflict, dead fleet) is a failed start the monitor member
-reports to the Director instead of proceeding.
+monitor member also fails. Any failed start is reported to the Director without claiming the
+monitor is live.
 
 Once `monitor live` arrives, the Director spawns the ordinary members and
 **dispatches on ready**: when a member's ready signal arrives, the Director
@@ -220,18 +224,24 @@ confirms with `cafleet fleet list`. `fleet delete` alone also ends a
 still-running loop — its next tick sees the soft-deleted fleet and
 self-terminates.
 
-**Recovery.** If the monitor member's pane dies without a graceful stop, the
-loop process dies with the pane and a stale `monitor_runtime` row survives
+**Recovery and standing liveness.** If the monitor member's pane dies without
+a graceful stop, the loop process dies with the pane and a stale
+`monitor_runtime` row survives
 with a non-null `pid`. That row reads as dead on both liveness axes — the
 heartbeat goes stale and the process probe reports no such process — so a
 fresh `cafleet monitor` run reclaims it and succeeds. The Director re-spawns
 the dead monitor with `--role monitor` (the one-per-fleet guard counts only
 active members, so a deleted monitor frees the slot), and the fresh loop
-reclaims the stale row. If instead the loop's background task exits while the
-monitor member's pane lives, the monitor member relaunches
-`cafleet monitor <fleet-id>` itself and reports `monitor restarted` to the
-Director. `cafleet fleet delete` removes the row unconditionally. No manual
-cleanup step exists or is needed.
+reclaims the stale row. Backends with push-style exit notification surface a
+loop exit directly. When a broker message reopens a later Codex turn, the
+monitor member polls its retained session once before other work. If the
+execution exited, the monitor member relaunches `cafleet monitor <fleet-id>`
+and repeats the bounded startup confirmation; it reports `monitor restarted`
+only after the replacement prints the startup line, and reports a failed
+relaunch instead of claiming a restart. The Director remains broker-reactive
+and never owns the execution handle or runs a session-poll loop. `cafleet fleet
+delete` removes the row unconditionally. No manual cleanup step exists or is
+needed.
 
 See [Data model](../spec/data-model.md) for the backing table and
 [CLI options](../spec/cli-options.md#cafleet-monitor) for the command surface

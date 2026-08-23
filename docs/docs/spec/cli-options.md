@@ -17,7 +17,7 @@ fleet the new member joins) and the two-party pair `--from-member-id`
 | `setup` | Migrate the database schema + install the coding-agent assets (skills and presets) | — | — | [setup](#cafleet-setup) |
 | `doctor` | Print the three-section environment diagnosis (multiplexer, database, coding agents) | — | — | [doctor](#cafleet-doctor) |
 | `server` | Start the admin WebUI server | — | — | [server](#cafleet-server) |
-| `monitor` | Run the per-fleet scheduler loop in-process (launch as a background task) | `FLEET_ID` | — | [monitor](#cafleet-monitor) |
+| `monitor` | Run the per-fleet scheduler loop in-process as a long-lived execution owned by the monitor member | `FLEET_ID` | — | [monitor](#cafleet-monitor) |
 | `monitor scan` | Capture the Director's pane and every active member's pane once | `FLEET_ID` | — | [monitor scan](#cafleet-monitor-scan) |
 | `fleet create` | Create a fleet with its root Director and monitor member | — | — | [fleet create](#fleet-create) |
 | `fleet list` | List non-deleted fleets | — | — | [fleet list](#fleet-list) |
@@ -1041,8 +1041,8 @@ re-read on every tick, so a
 [`PATCH /api/monitor`](webui-api.md#patch-api-monitor)
 edit changes the running loop's cadence within one tick.
 
-Runs the loop **in-process** (the monitor member launches it as a background
-task in its own pane; the loop blocks the task and writes to its stdout — one
+Runs the loop **in-process** and blocks. The monitor member hosts it as a
+long-lived execution using its backend's launch primitive; the loop writes to its stdout — one
 `<iso-ts> tick -> wake monitor <monitor-member-id> (<N> members)` line per
 delivered wake). On startup it runs the multiplexer precondition guard,
 atomically claims the single-instance `monitor_runtime` row, installs

@@ -145,6 +145,36 @@ fn monitoring_concept_covers_the_monitor_member_and_capture_taxonomy() {
 }
 
 #[test]
+fn monitoring_concept_explains_the_codex_managed_session_lifecycle() {
+    let path = "docs/docs/concepts/monitoring.md";
+    assert_terms(
+        path,
+        &[
+            "backend-resolved long-lived execution",
+            "monitor member",
+            "session ID",
+            "initial output",
+            "one immediate poll",
+            "failed start",
+            "monitor live",
+            "broker message",
+            "before other work",
+            "monitor restarted",
+            "Director",
+            "broker",
+        ],
+    );
+    assert_absent(
+        path,
+        &[
+            "runs as a background task",
+            "plain backgrounded command",
+            "works identically on any backend",
+        ],
+    );
+}
+
+#[test]
 fn spec_defines_the_ping_skip_and_flattened_monitor_contract() {
     assert_terms(
         "SPEC.md",
@@ -163,6 +193,50 @@ fn spec_defines_the_ping_skip_and_flattened_monitor_contract() {
     let mut absent = OLD_CLI_SURFACE.to_vec();
     absent.extend(REMOVED_VOCABULARY);
     assert_absent("SPEC.md", &absent);
+}
+
+#[test]
+fn spec_separates_blocking_runtime_from_backend_resolved_hosting() {
+    assert_terms(
+        "SPEC.md",
+        &[
+            "backend-resolved long-lived execution",
+            "monitor member",
+            "in-process (blocking)",
+            "monitor loop started",
+            "monitor live",
+            "SIGTERM",
+            "SIGINT",
+        ],
+    );
+    assert_absent("SPEC.md", &["as a background task in its own pane"]);
+}
+
+#[test]
+fn cli_and_webui_specs_keep_hosting_backend_neutral() {
+    assert_terms(
+        "docs/docs/spec/cli-options.md",
+        &[
+            "long-lived execution",
+            "monitor member",
+            "in-process",
+            "blocks",
+            "monitor loop started",
+        ],
+    );
+    assert_absent("docs/docs/spec/cli-options.md", &["background task"]);
+
+    assert_terms(
+        "docs/docs/spec/webui-api.md",
+        &[
+            "CLI-only",
+            "long-lived execution",
+            "monitor member",
+            "no `POST`/`DELETE` counterpart",
+            "deleting the monitor member",
+        ],
+    );
+    assert_absent("docs/docs/spec/webui-api.md", &["background task"]);
 }
 
 #[test]
@@ -272,6 +346,172 @@ fn every_backend_overlay_defines_the_capture_cues() {
     let mut absent = vec!["pre-nudge"];
     absent.extend(REMOVED_VOCABULARY);
     assert_absent(OVERLAYS_FILE, &absent);
+}
+
+#[test]
+fn codex_overlay_defines_the_retained_managed_session_lifecycle() {
+    let text = read(OVERLAYS_FILE);
+    assert_terms_in(
+        &format!("{OVERLAYS_FILE} § codex"),
+        overlay_section(&text, "codex"),
+        &[
+            "managed execution session",
+            "retained session ID",
+            "without shell `&`",
+            "initial output",
+            "one immediate poll",
+            "monitor loop started",
+            "active but unconfirmed",
+            "terminate",
+            "monitor live",
+            "broker message reopens",
+            "before any other work",
+            "interrupting or terminating",
+        ],
+    );
+}
+
+#[test]
+fn codex_worked_launch_does_not_use_the_obsolete_shell_ampersand() {
+    let text = read(OVERLAYS_FILE);
+    let codex = overlay_section(&text, "codex");
+    assert!(
+        codex.contains("cafleet monitor <fleet-id>"),
+        "{OVERLAYS_FILE} § codex must show the monitor launch command"
+    );
+    assert!(
+        !codex.contains("cafleet monitor <fleet-id> &"),
+        "{OVERLAYS_FILE} § codex still uses the obsolete shell-backgrounded command"
+    );
+}
+
+#[test]
+fn only_opencode_retains_the_shell_ampersand_worked_command() {
+    let text = read(OVERLAYS_FILE);
+    let command = "cafleet monitor <fleet-id> &";
+    assert_eq!(
+        text.matches(command).count(),
+        1,
+        "{OVERLAYS_FILE} must contain exactly one shell-ampersand worked command"
+    );
+    assert!(
+        overlay_section(&text, "opencode").contains(command),
+        "{OVERLAYS_FILE} § opencode must own the sole shell-ampersand worked command"
+    );
+}
+
+#[test]
+fn claude_and_opencode_overlays_preserve_their_launch_and_stop_contracts() {
+    let text = read(OVERLAYS_FILE);
+    assert_terms_in(
+        &format!("{OVERLAYS_FILE} § claude"),
+        overlay_section(&text, "claude"),
+        &[
+            "run_in_background: true",
+            "TaskStop",
+            "cafleet monitor <fleet-id>",
+        ],
+    );
+    assert_terms_in(
+        &format!("{OVERLAYS_FILE} § opencode"),
+        overlay_section(&text, "opencode"),
+        &[
+            "backgrounded `!` shell command",
+            "killing the recorded background process",
+            "cafleet monitor <fleet-id> &",
+        ],
+    );
+}
+
+#[test]
+fn monitor_role_defines_the_backend_resolved_loop_lifecycle() {
+    let path = "skills/cafleet/roles/monitor.md";
+    assert_terms(
+        path,
+        &[
+            "long-lived execution",
+            "{bg_run}",
+            "{bg_stop}",
+            "initial output",
+            "one immediate poll",
+            "failed start",
+            "terminate",
+            "monitor loop started",
+            "monitor live",
+            "exit notification",
+            "broker message",
+            "before other work",
+            "monitor restarted",
+            "session ID",
+            "monitor member",
+            "Director",
+        ],
+    );
+    assert_absent(
+        path,
+        &[
+            "as a background task",
+            "loop's background task",
+            "loop task itself",
+        ],
+    );
+}
+
+#[test]
+fn shared_skill_pages_make_the_monitor_member_the_execution_owner() {
+    assert_terms(
+        "skills/cafleet/reference/supervision.md",
+        &[
+            "backend-resolved long-lived execution",
+            "monitor member",
+            "execution handle",
+            "liveness checks",
+            "Director",
+            "broker",
+        ],
+    );
+    assert_terms(
+        "skills/cafleet/reference/cli.md",
+        &["long-lived execution", "monitor member", "backend"],
+    );
+    assert_terms(
+        "skills/cafleet/roles/director.md",
+        &["monitor member", "wake source", "first"],
+    );
+    assert_absent(
+        "skills/cafleet/reference/supervision.md",
+        &["just a backgrounded command"],
+    );
+    assert_absent(
+        "skills/cafleet/reference/cli.md",
+        &["as a background task in its own pane"],
+    );
+    assert_absent(
+        "skills/cafleet/roles/director.md",
+        &["loop's background task"],
+    );
+}
+
+#[test]
+fn skill_author_guidance_keeps_the_heartbeat_backend_neutral() {
+    let path = ".claude/skills/skill-author/SKILL.md";
+    assert_terms(
+        path,
+        &[
+            "long-lived execution",
+            "monitor member",
+            "monitor live",
+            "backend",
+            "heartbeat",
+        ],
+    );
+    assert_absent(
+        path,
+        &[
+            "as a background task in its own pane",
+            "both are identical on any backend",
+        ],
+    );
 }
 
 #[test]

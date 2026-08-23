@@ -56,8 +56,8 @@ Substitute these into the base `{…}` placeholders.
 | `{reviewer_model}` | `gpt-5.6-sol` |
 | `{monitor_model}` | `gpt-5.6-luna` |
 | `{permission_flags}` | `--ask-for-approval never --sandbox workspace-write` |
-| `{bg_run}` | a backgrounded `!` shell command |
-| `{bg_stop}` | killing the recorded background process |
+| `{bg_run}` | a retained Codex-managed execution session created without shell `&` |
+| `{bg_stop}` | interrupting or terminating the retained managed execution session |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading the cafleet `SKILL.md` core + this overlay by the absolute paths the spawn prompt provides |
 | `{effort_levels}` | `minimal`, `low`, `medium`, `high`, `xhigh` (spawn flag `--effort <level>`, forwarded as `--config=model_reasoning_effort=<level>`) |
@@ -69,6 +69,7 @@ Every note names the base token/instruction it qualifies.
 | Note | Applies at |
 |------|-----------|
 | No in-pane prompt — a fleet member sends its question to the Director, which answers as a plain operator message. Ask a concrete, answerable question, not free-form prose. | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions |
+| Run the monitor command without shell `&` and retain the active managed execution session's returned session ID. Inspect the initial output for `monitor loop started`; if the line is absent and the session remains active, perform one immediate poll. A missing session ID or an early exit is a failed start; if the session is active but unconfirmed after that poll, terminate it. Withhold `monitor live` and report startup failure unless the line was observed. Whenever a broker message reopens a later monitor-member turn, poll the retained session ID once before any other work. If it exited, relaunch with the same bounded confirmation and send `monitor restarted` only after the replacement is confirmed. The monitor member alone owns the session ID and polling; it never sends the ID to the Director or creates a timer or sleep loop. | `{bg_run}` / `{bg_stop}` — `cafleet/roles/monitor.md` § On spawn / § Standing obligation; `cafleet/reference/supervision.md` § Monitor-first Bootstrap / § Idle Semantics |
 | *Pane-state capture cues* (below) — the concrete codex-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (each reader applies the cues of the **target member's** backend overlay). |
 
 ### Pane-state capture cues
@@ -88,7 +89,7 @@ Tie-breaks and the two-quiet-families rule: `supervision.md` § *The pre-ping ca
 
 The canonical monitor-member-side loop launch, fully resolved for this backend:
 
-Launch `cafleet monitor <fleet-id> &` as a backgrounded `!` shell command, confirm `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` in its output, then send `monitor live` to the Director.
+Launch `cafleet monitor <fleet-id>` without shell `&` as a Codex-managed execution and retain the returned session ID. Inspect the initial output for `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)`; when the line is absent and the session is active, perform one immediate poll of that retained session. Treat a missing session ID or early exit as startup failure. If the execution remains active but unconfirmed after the poll, terminate it. Send `monitor live` to the Director only after observing the startup line; otherwise withhold it and report the failure.
 
 ## opencode
 
