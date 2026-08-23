@@ -386,6 +386,21 @@ fn codex_worked_launch_does_not_use_the_obsolete_shell_ampersand() {
 }
 
 #[test]
+fn only_opencode_retains_the_shell_ampersand_worked_command() {
+    let text = read(OVERLAYS_FILE);
+    let command = "cafleet monitor <fleet-id> &";
+    assert_eq!(
+        text.matches(command).count(),
+        1,
+        "{OVERLAYS_FILE} must contain exactly one shell-ampersand worked command"
+    );
+    assert!(
+        overlay_section(&text, "opencode").contains(command),
+        "{OVERLAYS_FILE} § opencode must own the sole shell-ampersand worked command"
+    );
+}
+
+#[test]
 fn claude_and_opencode_overlays_preserve_their_launch_and_stop_contracts() {
     let text = read(OVERLAYS_FILE);
     assert_terms_in(
