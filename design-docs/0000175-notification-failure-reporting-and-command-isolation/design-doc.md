@@ -10,16 +10,16 @@ Make `cafleet message send` report an explicit partial failure when the broker p
 
 ## Success Criteria
 
-- [ ] An attempted unicast pane notification failure leaves exactly one message row persisted as `input_required` and makes `cafleet message send` exit 1.
-- [ ] The CLI partial-failure text contains the persisted message id, the raw tmux/herdr error detail, an explicit “do not resend” instruction, and both supported recovery paths (`cafleet member ping` and recipient-side `cafleet message poll`).
-- [ ] Notification failure triggers no automatic retry at the multiplexer, broker, CLI, or skill layer.
-- [ ] Successful notification, self-send, and a recipient with no pane retain their existing exit-0 text/JSON contracts; the latter two remain intentional notification skips.
-- [ ] `message broadcast` keeps its current `recipients`/`delivered` output and exit behavior, and `POST /api/messages/send` keeps its current HTTP response contract.
-- [ ] No database column, table, status value, or migration is added; existing databases and queued messages remain readable without conversion.
-- [ ] The core `skills/cafleet/SKILL.md` is the sole normative source for one-shot command isolation and applies identically to Claude, Codex, and OpenCode.
-- [ ] The long-lived `cafleet monitor` process remains the sole command-isolation exception and continues to use the launch mechanism already selected by its coding-agent overlay.
-- [ ] The existing Director asynchronous-wait contract unambiguously makes dispatch a turn boundary: the Director ends or yields instead of sleeping, busy-waiting, or recurring-polling until a member replies.
-- [ ] Automated tests cover raw tmux/herdr failure propagation, broker persistence, CLI output/exit behavior, unchanged non-goals, and the skill wording guard.
+- [x] An attempted unicast pane notification failure leaves exactly one message row persisted as `input_required` and makes `cafleet message send` exit 1.
+- [x] The CLI partial-failure text contains the persisted message id, the raw tmux/herdr error detail, an explicit “do not resend” instruction, and both supported recovery paths (`cafleet member ping` and recipient-side `cafleet message poll`).
+- [x] Notification failure triggers no automatic retry at the multiplexer, broker, CLI, or skill layer.
+- [x] Successful notification, self-send, and a recipient with no pane retain their existing exit-0 text/JSON contracts; the latter two remain intentional notification skips.
+- [x] `message broadcast` keeps its current `recipients`/`delivered` output and exit behavior, and `POST /api/messages/send` keeps its current HTTP response contract.
+- [x] No database column, table, status value, or migration is added; existing databases and queued messages remain readable without conversion.
+- [x] The core `skills/cafleet/SKILL.md` is the sole normative source for one-shot command isolation and applies identically to Claude, Codex, and OpenCode.
+- [x] The long-lived `cafleet monitor` process remains the sole command-isolation exception and continues to use the launch mechanism already selected by its coding-agent overlay.
+- [x] The existing Director asynchronous-wait contract unambiguously makes dispatch a turn boundary: the Director ends or yields instead of sleeping, busy-waiting, or recurring-polling until a member replies.
+- [x] Automated tests cover raw tmux/herdr failure propagation, broker persistence, CLI output/exit behavior, unchanged non-goals, and the skill wording guard.
 
 ---
 
