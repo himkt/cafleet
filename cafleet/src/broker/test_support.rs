@@ -38,9 +38,13 @@
 //! list_roster(conn: &Connection, fleet_id: i64, include_message_holders: bool)
 //!     -> Result<Vec<Value>>
 //! // messaging
+//! pub struct SendMessageOutcome {
+//!     pub(crate) payload: Value,                    // the unchanged {message, notification_sent}
+//!     pub(crate) notification_error: Option<String> // Some(raw) only for an attempted, failed preview
+//! }
 //! send_message(conn: &mut Connection, notifier: &dyn InlinePreviewSender,
 //!     max_text_len: usize, from_member_id: i64, to: &str, text: &str)
-//!     -> Result<Value>  // {message, notification_sent}
+//!     -> Result<SendMessageOutcome>  // Ok even when the attempted preview failed
 //! broadcast_message(conn: &mut Connection, notifier: &dyn InlinePreviewSender,
 //!     max_text_len: usize, from_member_id: i64, text: &str)
 //!     -> Result<Vec<Value>>  // [{message, recipients, delivered}]
@@ -222,6 +226,8 @@ impl InlinePreviewSender for FakeNotifier {
     }
 }
 
+/// Send and return the outcome's `{message, notification_sent}` payload;
+/// tests that assert `notification_error` call `broker::send_message` directly.
 pub fn send(
     conn: &mut Connection,
     notifier: &FakeNotifier,
@@ -229,5 +235,7 @@ pub fn send(
     to: i64,
     text: &str,
 ) -> Value {
-    broker::send_message(conn, notifier, MAX_TEXT_LEN, from, &to.to_string(), text).unwrap()
+    broker::send_message(conn, notifier, MAX_TEXT_LEN, from, &to.to_string(), text)
+        .unwrap()
+        .payload
 }
