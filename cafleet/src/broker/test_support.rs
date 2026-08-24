@@ -11,7 +11,8 @@
 //!     pub coding_agent: String }
 //! pub trait InlinePreviewSender {
 //!     fn send_inline_preview(&self, target_pane_id: &str, message_id: i64,
-//!         sender_id: i64, ts: &str, text: &str) -> bool;
+//!         sender_id: i64, ts: &str, text: &str) -> Result<(), String>;
+//!     // Err carries the raw multiplexer error string, preserved verbatim
 //! }
 //! // fleets
 //! create_fleet(conn: &mut Connection, name: Option<&str>, mux_session: &str,
@@ -177,22 +178,25 @@ pub struct NotifyCall {
     pub text: String,
 }
 
+/// The raw error string [`FakeNotifier::failing`] returns from every attempt.
+pub const PREVIEW_ERROR: &str = "tmux command failed: tmux send-keys -t %2 Escape\nstderr: boom";
+
 pub struct FakeNotifier {
-    pub result: bool,
+    pub result: Result<(), String>,
     pub calls: RefCell<Vec<NotifyCall>>,
 }
 
 impl FakeNotifier {
     pub fn succeeding() -> Self {
         FakeNotifier {
-            result: true,
+            result: Ok(()),
             calls: RefCell::new(Vec::new()),
         }
     }
 
     pub fn failing() -> Self {
         FakeNotifier {
-            result: false,
+            result: Err(PREVIEW_ERROR.to_string()),
             calls: RefCell::new(Vec::new()),
         }
     }
@@ -206,7 +210,7 @@ impl InlinePreviewSender for FakeNotifier {
         sender_id: i64,
         ts: &str,
         text: &str,
-    ) -> bool {
+    ) -> Result<(), String> {
         self.calls.borrow_mut().push(NotifyCall {
             target_pane_id: target_pane_id.to_string(),
             message_id,
@@ -214,7 +218,7 @@ impl InlinePreviewSender for FakeNotifier {
             ts: ts.to_string(),
             text: text.to_string(),
         });
-        self.result
+        self.result.clone()
     }
 }
 

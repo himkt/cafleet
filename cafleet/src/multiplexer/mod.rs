@@ -585,4 +585,42 @@ mod tests {
             );
         }
     }
+
+    mod any_multiplexer_inline_preview_tests {
+        use crate::multiplexer::test_support::{FakeRunner, env};
+        use crate::multiplexer::{AnyMultiplexer, HerdrMultiplexer, Multiplexer, TmuxMultiplexer};
+
+        const TS: &str = "2026-07-30T09:00:00.000000+00:00";
+
+        #[test]
+        fn dispatch_returns_each_backend_inline_preview_result() {
+            let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
+                FakeRunner::without_binaries(),
+                env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
+            ));
+            assert_eq!(
+                mux.send_inline_preview("%5", 5, 2, TS, "hi")
+                    .unwrap_err()
+                    .to_string(),
+                "tmux binary not found on PATH"
+            );
+
+            let mux = AnyMultiplexer::Herdr(HerdrMultiplexer::new(
+                FakeRunner::without_binaries(),
+                env(&[("HERDR_ENV", "1")]),
+            ));
+            assert_eq!(
+                mux.send_inline_preview("w1:p2", 5, 2, TS, "hi")
+                    .unwrap_err()
+                    .to_string(),
+                "herdr binary not found on PATH"
+            );
+
+            let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
+                FakeRunner::with_binary("tmux"),
+                env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
+            ));
+            assert!(mux.send_inline_preview("%5", 5, 2, TS, "hi").is_ok());
+        }
+    }
 }
