@@ -1,7 +1,7 @@
 # Surface Persisted-Message Notification Failures and Isolate CAFleet Commands
 
 **Status**: Approved
-**Progress**: 10/28 tasks complete
+**Progress**: 22/28 tasks complete
 **Last Updated**: 2026-08-25
 
 ## Overview
@@ -454,21 +454,21 @@ Between every asynchronous dispatch and reply above, the Director ends or yields
 
 ### Step 3: Surface the unicast CLI partial failure
 
-- [ ] Add public `SendMessageOutcome` with crate-visible payload/error fields, carrying the unchanged payload plus optional notification error for sibling CLI/WebUI consumers. <!-- completed: -->
-- [ ] Update `broker::send_message` to distinguish skip, success, and attempted failure after persistence without retry or rollback. <!-- completed: -->
-- [ ] Adapt broadcast to count `Ok(())` previews and discard individual errors without changing its result schema or exit behavior. <!-- completed: -->
-- [ ] Adapt the WebUI unicast call site to consume `outcome.payload` and preserve its current response. <!-- completed: -->
-- [ ] Make `cli/message.rs` return the exact `CafleetError::App` partial-failure message before the success emitter. <!-- completed: -->
-- [ ] Add broker and CLI regression tests for persistence, one attempt, exact error/recovery content, text and `--json` channels, successful sends, intentional skips, and resolution failure that cannot preempt insertion or fail self/no-pane skips. <!-- completed: -->
+- [x] Add public `SendMessageOutcome` with crate-visible payload/error fields, carrying the unchanged payload plus optional notification error for sibling CLI/WebUI consumers. <!-- completed: 2026-08-25T06:22 -->
+- [x] Update `broker::send_message` to distinguish skip, success, and attempted failure after persistence without retry or rollback. <!-- completed: 2026-08-25T06:22 -->
+- [x] Adapt broadcast to count `Ok(())` previews and discard individual errors without changing its result schema or exit behavior. <!-- completed: 2026-08-25T06:22 -->
+- [x] Adapt the WebUI unicast call site to consume `outcome.payload` and preserve its current response. <!-- completed: 2026-08-25T06:22 -->
+- [x] Make `cli/message.rs` return the exact `CafleetError::App` partial-failure message before the success emitter. <!-- completed: 2026-08-25T06:22 -->
+- [x] Add broker and CLI regression tests for persistence, one attempt, exact error/recovery content, text and `--json` channels, successful sends, intentional skips, and resolution failure that cannot preempt insertion or fail self/no-pane skips. <!-- completed: 2026-08-25T06:22 -->
 
 ### Step 4: Add the global skill rule
 
-- [ ] Add the sole normative one-shot command-isolation section to `skills/cafleet/SKILL.md`, including separate calls, prohibited compound forms, allowed leading environment assignments, the backend-neutral permission-error diagnostic note, and the narrow monitor exception. <!-- completed: -->
-- [ ] Add the `## Send` persisted-id/committed/no-resend paragraph with isolated ping/poll recovery and no skill-layer retry. <!-- completed: -->
-- [ ] Point the exception to the existing coding-agent overlay without duplicating monitor lifecycle mechanics or backend-specific variants. <!-- completed: -->
-- [ ] Strengthen `skills/cafleet/reference/supervision.md` § *Asynchronous Wait Rule* and add a core pointer: dispatch ends/yields the turn, notifications resume later, one-off user status checks stay bounded, and Director sleep/recurring-poll loops remain forbidden. <!-- completed: -->
-- [ ] Audit `skills/cafleet-design-doc/**`, explicitly replacing create's periodic polling, interview's poll-until/wait-again wording, and execute's post-Tester/Programmer wait-via-poll wording; split other contradictory compound one-shot examples while preserving monitor launch examples. <!-- completed: -->
-- [ ] Add/extend `cafleet/tests/docs_sync.rs` guards for isolation (including allowed assignment prefixes but no `env` helper), monitor exception, core Send recovery, and the asynchronous-wait surfaces; reject periodic/poll-until/wait-again, timer, busy-wait, and recurring-poll guidance. <!-- completed: -->
+- [x] Add the sole normative one-shot command-isolation section to `skills/cafleet/SKILL.md`, including separate calls, prohibited compound forms, allowed leading environment assignments, the backend-neutral permission-error diagnostic note, and the narrow monitor exception. <!-- completed: 2026-08-25T06:22 -->
+- [x] Add the `## Send` persisted-id/committed/no-resend paragraph with isolated ping/poll recovery and no skill-layer retry. <!-- completed: 2026-08-25T06:22 -->
+- [x] Point the exception to the existing coding-agent overlay without duplicating monitor lifecycle mechanics or backend-specific variants. <!-- completed: 2026-08-25T06:22 -->
+- [x] Strengthen `skills/cafleet/reference/supervision.md` § *Asynchronous Wait Rule* and add a core pointer: dispatch ends/yields the turn, notifications resume later, one-off user status checks stay bounded, and Director sleep/recurring-poll loops remain forbidden. <!-- completed: 2026-08-25T06:22 -->
+- [x] Audit `skills/cafleet-design-doc/**`, explicitly replacing create's periodic polling, interview's poll-until/wait-again wording, and execute's post-Tester/Programmer wait-via-poll wording; split other contradictory compound one-shot examples while preserving monitor launch examples. <!-- completed: 2026-08-25T06:22 -->
+- [x] Add/extend `cafleet/tests/docs_sync.rs` guards for isolation (including allowed assignment prefixes but no `env` helper), monitor exception, core Send recovery, and the asynchronous-wait surfaces; reject periodic/poll-until/wait-again, timer, busy-wait, and recurring-poll guidance. <!-- completed: 2026-08-25T06:22 -->
 
 ### Step 5: Verify automated and live behavior
 

@@ -57,7 +57,7 @@ Intent judgment and the Abort Flow follow the `cafleet` skill's `reference/super
 
 ## Progress Monitoring
 
-Your turns are granted by members' replies (broker inline previews) and your own periodic polling; run the 2-stage health check (poll → member capture) on each. What counts as stalled, the nudge shape, and the supervision obligations (Authorization-Scope Guard, idle semantics) are canonical in the `cafleet` skill's `reference/supervision.md` § *Stall Response* and § *Idle Semantics*.
+Every dispatch is a turn boundary: you end or yield the turn, and your turns are granted by members' replies (broker inline previews) and monitor notifications, each re-opening a later turn where you run the 2-stage health check (poll → member capture). What counts as stalled, the nudge shape, and the supervision obligations (Authorization-Scope Guard, idle semantics, the Asynchronous Wait Rule) are canonical in the `cafleet` skill's `reference/supervision.md` § *Stall Response*, § *Idle Semantics*, and § *Asynchronous Wait Rule*.
 
 ### Skill-specific milestones
 
