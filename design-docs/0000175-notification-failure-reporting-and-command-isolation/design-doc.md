@@ -1,8 +1,8 @@
 # Surface Persisted-Message Notification Failures and Isolate CAFleet Commands
 
 **Status**: Approved
-**Progress**: 0/28 tasks complete
-**Last Updated**: 2026-08-24
+**Progress**: 5/28 tasks complete
+**Last Updated**: 2026-08-25
 
 ## Overview
 
@@ -438,11 +438,11 @@ Between every asynchronous dispatch and reply above, the Director ends or yields
 
 ### Step 1: Amend contracts before code
 
-- [ ] Update `SPEC.md` for the inline-preview result, persisted partial failure, unchanged broadcast/WebUI adapters, CLI error string, and one-shot isolation rule with monitor exception. <!-- completed: -->
-- [ ] Update `docs/docs/spec/cli-options.md` with the exact text/JSON output and exit contract plus recovery guidance. <!-- completed: -->
-- [ ] Update `docs/docs/spec/multiplexer-backends.md` with raw inline-preview error propagation and the unchanged boolean contracts for poll/wake triggers. <!-- completed: -->
-- [ ] Update `docs/docs/concepts/coding-agents.md` with the backend-neutral isolated-invocation guidance and overlay-deferred monitor exception. <!-- completed: -->
-- [ ] Audit the error/reference tables and remove obsolete claims that all notification failures are silently best-effort for unicast CLI sends. <!-- completed: -->
+- [x] Update `SPEC.md` for the inline-preview result, persisted partial failure, unchanged broadcast/WebUI adapters, CLI error string, and one-shot isolation rule with monitor exception. <!-- completed: 2026-08-25T05:45 -->
+- [x] Update `docs/docs/spec/cli-options.md` with the exact text/JSON output and exit contract plus recovery guidance. <!-- completed: 2026-08-25T05:45 -->
+- [x] Update `docs/docs/spec/multiplexer-backends.md` with raw inline-preview error propagation and the unchanged boolean contracts for poll/wake triggers. <!-- completed: 2026-08-25T05:45 -->
+- [x] Update `docs/docs/concepts/coding-agents.md` with the backend-neutral isolated-invocation guidance and overlay-deferred monitor exception. <!-- completed: 2026-08-25T05:45 -->
+- [x] Audit the error/reference tables and remove obsolete claims that all notification failures are silently best-effort for unicast CLI sends. <!-- completed: 2026-08-25T05:45 -->
 
 ### Step 2: Preserve raw multiplexer failures
 

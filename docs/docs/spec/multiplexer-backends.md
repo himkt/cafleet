@@ -12,7 +12,7 @@ parses them.
 
 The pane is also cafleet's only push channel: message delivery stays pull-based
 (recipients drain the persisted queue with `cafleet message poll`), and the
-broker keystrokes a best-effort inline preview into the recipient's pane after
+broker keystrokes an inline preview into the recipient's pane after
 persisting a message — see [Push notifications](#push-notifications).
 
 ## Backend matrix {#backend-matrix}
@@ -203,6 +203,29 @@ The keystroke is dispatched through the resolved backend's
 whole 2-line payload — is identical on both, and the per-backend realization is
 in the [backend matrix](#backend-matrix).
 
+### Inline-preview error propagation {#inline-preview-errors}
+
+`send_inline_preview` is the one keystroke path that propagates its failure as
+a `Result` carrying the raw backend error instead of a best-effort boolean.
+A missing backend binary fails with exactly `tmux binary not found on PATH` or
+`herdr binary not found on PATH`; a subprocess failure after that precheck
+carries the backend's existing raw error formatting — the failed command, its
+payload argv, and a newline-delimited stderr detail — from whichever Escape,
+payload, or Enter operation failed. The string is preserved verbatim all the
+way to the caller.
+
+The other trigger keystrokes, `send_poll_trigger` and `send_wake_trigger`,
+keep their best-effort boolean contract: they never raise, and any failure
+returns `false`.
+
+Callers consume the inline-preview `Result` asymmetrically:
+
+| Caller | On an attempted inline-preview failure |
+|---|---|
+| Unicast `message send` | Surfaces the raw error as an exit-1 partial failure after persistence — see [CLI options](cli-options.md#message-send-partial-failure) |
+| `message broadcast` | Discards the individual error; only the `delivered` count reflects it, and the summary output and exit 0 are unchanged |
+| `POST /api/messages/send` | Ignores the notification outcome; the 200 `{message_id, status}` response after persistence is unchanged |
+
 The recipient pane is resolved from `member_placements` by `member_id` alone,
 so Member → Director notifications work automatically. The recipient acks via
 `cafleet message ack <message_id>` once it has consumed the message.
@@ -227,19 +250,28 @@ the payload and `Enter`.
 
 ### Design principles
 
-- **Best-effort**: the message queue remains the sole source of truth; a failed
-  push leaves the message available for normal polling.
-- **Self-send skip**: when sender == recipient, the notification is suppressed.
-- **Silent failure**: missing placements, null `mux_pane_id`, dead panes, and
-  an absent multiplexer binary all result in no notification — no exceptions
-  propagate to the caller.
+- **Queue first**: the message queue remains the sole source of truth; a failed
+  push leaves the message available for normal polling, and the persisted row
+  is never rolled back.
+- **Intentional skips stay silent**: a self-send and a recipient whose
+  placement has no pane id suppress the notification without an attempt; both
+  succeed with `notification_sent: false`.
+- **Attempted failures surface**: an attempted preview that fails — a dead
+  pane, an absent multiplexer binary, an unavailable or ambiguous multiplexer
+  environment — propagates its raw error to the caller, consumed per the
+  [caller table](#inline-preview-errors). The notification is attempted at
+  most once; no layer retries it.
 - **No multiplexer env var required**: the keystroke targets the pane by id
   (tmux `send-keys -t <pane>`, herdr `pane send-*`), which works from any
   process on the same host as long as the multiplexer's server is reachable.
 
 ### Response annotations
 
-Unicast responses include a top-level `notification_sent` boolean. Broadcast
+Unicast success responses include a top-level `notification_sent` boolean —
+`true` only when an attempted preview landed, `false` on the intentional
+skips; an attempted failure exits 1 with the partial-failure error instead of
+printing the success payload (see
+[CLI options](cli-options.md#message-send-partial-failure)). Broadcast
 responses expose `recipients` (the real recipient count) and `delivered` (how
 many recipient panes were successfully triggered) as top-level wrapper fields.
 Neither count is persisted — they live only in the broker return value.

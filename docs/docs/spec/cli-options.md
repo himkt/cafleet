@@ -99,6 +99,10 @@ machine form is [`--json`](#json-output).
 
 `setup`, `server`, and the `monitor` loop form stream progress or run a loop
 rather than emitting a one-shot payload, so they carry no output-shape row.
+The `message send` row describes its exit-0 shapes; when an attempted pane
+notification fails after persistence, the command instead exits 1 through
+stderr — see
+[Notification outcome and partial failure](#message-send-partial-failure).
 
 ## JSON output (`--json`) {#json-output}
 
@@ -750,6 +754,49 @@ PATH) [--json]`
 | positional `TEXT` | one of | Inline message body. Exactly one of `TEXT` / `--file`. |
 | `--file PATH` | one of | Path to a UTF-8 file whose contents are the body (`-` = stdin); use it for bodies that would exceed the shell's `ARG_MAX`. |
 
+#### Notification outcome and partial failure {#message-send-partial-failure}
+
+`message send` persists the message row first, then attempts one inline-preview
+pane notification — unless the send is a self-send or the recipient's placement
+has no pane id, which are intentional skips (see
+[Push notifications](multiplexer-backends.md#push-notifications)). The
+notification is attempted at most once; no layer retries it. The persisted row
+is never deleted, rolled back, or duplicated on a notification failure — it
+stays `input_required` and recoverable through the normal `poll`/`ack` path.
+
+| Mode | Exit | stdout | stderr |
+|---|---|---|---|
+| Text, attempted notification succeeds | 0 | `Message sent.` plus the compact rendered envelope | Empty |
+| `--json`, attempted notification succeeds | 0 | The untruncated `{"message": …, "notification_sent": true}` JSON | Empty |
+| Text, self-send or no-pane skip | 0 | The success output, with no warning added | Empty |
+| `--json`, self-send or no-pane skip | 0 | The success JSON with `notification_sent: false` | Empty |
+| Text, attempted notification fails | 1 | Empty | `Error: ` plus the exact partial-failure message below |
+| `--json`, attempted notification fails | 1 | Empty | The same text error as non-JSON mode |
+
+An attempted notification failure exits 1 with:
+
+```text
+Error: Message <message-id> was persisted, but pane notification failed: <raw backend error>. Do not resend this message. Recover the recipient pane, then run 'cafleet member ping <recipient-id>' or have the recipient run 'cafleet message poll <recipient-id>'.
+```
+
+`<raw backend error>` is the multiplexer's error detail inserted verbatim; it
+may contain the backend command, its payload argv, and a newline-delimited
+stderr detail (see
+[Multiplexer backends](multiplexer-backends.md#inline-preview-errors)). The
+formatter adds no separate copy of the sent message body. The `--json` failure
+behavior follows the existing global error contract: `--json` selects
+successful command output only and never produces a JSON error envelope.
+
+The recovery contract is no-resend:
+
+1. Treat `<message-id>` as authoritative proof that persistence succeeded.
+2. Repair or re-engage the recipient pane.
+3. Run `cafleet member ping <recipient-id>` as its own shell-tool invocation,
+   or have the recipient run `cafleet message poll <recipient-id>` as its own
+   shell-tool invocation.
+4. Consume and ACK the existing row normally. Do not issue a second
+   `message send` for the same content.
+
 ### `message broadcast`
 
 `cafleet message broadcast --from-member-id ID (TEXT | --file PATH) [--json]`
@@ -759,7 +806,10 @@ PATH) [--json]`
 | `--from-member-id` | yes | Broadcaster (sender). The fleet is derived from the sender row. |
 | positional `TEXT` / `--file PATH` | one of | Message body, as on `message send`. |
 
-`delivered=<k>` counts the best-effort inline previews that landed.
+`delivered=<k>` counts the inline previews that landed. A failed preview only
+lowers `delivered` — broadcast keeps its single summary envelope, its
+`recipients`/`delivered` counts, and exit 0, with no per-recipient failure
+detail.
 
 ### `message poll`
 
@@ -1181,6 +1231,7 @@ failed capture. `lines` always echoes the requested depth.
 | `message send` / `message broadcast` | The sender is unknown or inactive | `Error: Sender member not found or not active: <from-member-id>` | 1 | — |
 | `message send` | The recipient is unknown or inactive | `Error: Destination member not found: <to-member-id>` | 1 | — |
 | `message send` | Sender and recipient in different fleets | `Error: members <from-member-id> and <to-member-id> are not in the same fleet.` | 1 | — |
+| `message send` | The row was persisted but the attempted pane notification failed | `Error: Message <message-id> was persisted, but pane notification failed: <raw backend error>. Do not resend this message. Recover the recipient pane, then run 'cafleet member ping <recipient-id>' or have the recipient run 'cafleet message poll <recipient-id>'.` | 1 | The row stays `input_required`; self-send and no-pane skips stay exit 0 — see [message send](#message-send-partial-failure) |
 | `member prompt` | Missing positional `TEXT` | `Error: Missing argument 'TEXT'.` | 2 | — |
 | `member prompt` | `\n` or `\r` in the text | `Error: text may not contain newlines.` | 2 | Checked first, against the original text — a `"\n"`-only input raises this, not the empty-text error |
 | `member prompt` | Empty / whitespace-only text | `Error: text may not be empty.` | 2 | — |

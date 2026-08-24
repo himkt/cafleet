@@ -58,7 +58,8 @@ What is part of the contract (must be reproduced):
   contract, and status code of the WebUI API.
 - **Observable semantics:** the message status lifecycle, the soft-delete +
   cascade rules, the monitor claim/heartbeat/clear protocol, the message
-  routing and best-effort notification behavior, and the stdout-vs-stderr stream
+  routing and notification behavior (including the unicast partial-failure
+  surfacing, §6.3), and the stdout-vs-stderr stream
   choice for each emitted line.
 
 What is **not** required (the relaxation):
@@ -188,10 +189,13 @@ Edges (who depends on whom):
    (§6.2) looks up the recipient's `mux_pane_id`, skips self-sends and
    paneless recipients, **truncates** `text` to `settings.max_text_len` with a
    `…` suffix, then calls `send_inline_preview` (§6.5) which keystrokes the
-   2-line `[cafleet msg …]` payload Esc-first. The multiplexer call is
-   **best-effort**: it returns a boolean, never raises, and the broker never
-   rolls back the persisted message on a failed keystroke. Truncation happens
-   broker-side; the keystroke mechanics are multiplexer-side.
+   2-line `[cafleet msg …]` payload Esc-first. The multiplexer call returns a
+   result carrying the **raw backend error** on failure (§6.5); the broker
+   never rolls back the persisted message on a failed keystroke and never
+   retries it. The unicast CLI surfaces an attempted-and-failed notification
+   as an exit-1 partial failure (§6.3); broadcast discards individual preview
+   errors and only its `delivered` count reflects them (§6.2). Truncation
+   happens broker-side; the keystroke mechanics are multiplexer-side.
 2. **CLI ↔ multiplexer ↔ coding-agent member-create.** `cafleet member create`
    (§6.3) sequences: resolve backend → `validate_model` → `validate_effort` →
    resolve the prompt
@@ -469,7 +473,7 @@ module that reads/writes the operational tables (fleets, members, placements,
 messages, monitor schedule/runtime, message queries). Owns
 transaction boundaries, the member-kind predicates, soft-delete + cascade, the
 message status lifecycle, and the monitor single-instance claim/heartbeat/clear. It
-performs no OS side effects except one best-effort inline-preview keystroke
+performs no OS side effects except one attempted inline-preview keystroke
 during message delivery (§6.5) and one process-liveness probe (signal-0).
 
 #### Session semantics
@@ -631,8 +635,8 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
 
 #### Messaging
 
-- **`send_message(from_member_id, to, text)`** — one unicast message + best-
-  effort notify, one write_session. Coerce `to` to int; on failure → value error
+- **`send_message(from_member_id, to, text)`** — one unicast message + at most
+  one attempted notify, one write_session. Coerce `to` to int; on failure → value error
   `Invalid destination format: {to}`. If the sender is not an active member →
   value error `Sender member not found or not active: {from_member_id}`. The
   sender's fleet is **derived from the sender row** — no caller-supplied fleet
@@ -643,8 +647,26 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   fleet.`. Build the unicast message (`owner_member_id = to_id`,
   `from_member_id = from_member_id`, `to_member_id = to_id`, `type = "unicast"`,
   `status_state = "input_required"`, `origin_message_id = null`), insert, then
-  `notification_sent = _try_notify_recipient(...)`. The persisted row holds the
-  **full untruncated text**. Returns `{message, notification_sent}`.
+  attempt the inline-preview notification via `_try_notify_recipient`. The
+  persisted row holds the **full untruncated text**. Returns the send outcome:
+  the unchanged `{message, notification_sent}` payload plus a separate
+  `notification_error` — the retained raw multiplexer error string, present
+  only when a pane notification was attempted and failed. `notification_error`
+  is out-of-band caller metadata and is never inserted into the payload. The
+  four cases:
+
+  | Recipient/notification state | `notification_sent` | `notification_error` | Row state |
+  |---|---|---|---|
+  | Self-send | `false` | absent | `input_required` |
+  | Recipient has no pane id | `false` | absent | `input_required` |
+  | Pane notification succeeds | `true` | absent | `input_required` |
+  | Pane notification is attempted and fails | `false` | the raw error | `input_required` |
+
+  `send_message` still returns success for the attempted-failure row because
+  the durable insert — the operation the broker owns — succeeded. The unicast
+  CLI alone interprets `notification_error` as a sender-facing partial failure
+  (§6.3); broadcast discards individual preview errors (below); the WebUI send
+  handler ignores the field (§6.8).
 - **`broadcast_message(from_member_id, text)`** — fan out one unicast
   delivery per active peer plus one `broadcast_summary` owned by the
   sender. Sender not active → value error `Sender member not found or not
@@ -658,20 +680,29 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   its own `message_id` (self-referential), then insert each delivery with
   `origin_message_id = summary.message_id`. **After all deliveries are inserted (still
   inside the same write_session), call `_try_notify_recipient` once per delivery
-  and set `delivered` = the count of those calls that returned `true`** (the sum
-  of successful best-effort inline previews; a paneless or self-recipient
-  delivery contributes 0). Returns a **single-element list** `[{message: <summary>,
+  and set `delivered` = the count of those calls whose attempted preview
+  succeeded** (a paneless or self-recipient delivery contributes 0; an
+  attempted preview's individual error is discarded — only the count reflects
+  it, and broadcast keeps exit 0 with no per-recipient failure schema).
+  Returns a **single-element list** `[{message: <summary>,
   recipients: N, delivered}]` — `recipients` is the real recipient count `N` and
-  `delivered` is the best-effort-preview success count; the two diverge when any
+  `delivered` is the preview success count; the two diverge when any
   preview fails to land. The two values are kept as **separate fields** and never
   conflated; the CLI surfaces both (§6.3).
-- **`_try_notify_recipient`** — best-effort inline preview, returns whether the
-  keystroke landed. recipient == sender → `false`; paneless recipient → `false`;
-  else **truncate** the preview text to `settings.max_text_len` codepoints (+ a
-  single U+2026 `…` suffix when over the limit) and call the multiplexer's
-  inline-preview keystroke, returning its boolean. Truncation is broker-side.
-  The notification never rolls back the insert; the boolean flows only into
-  `notification_sent` (unicast) or the broadcast `delivered` count.
+- **`_try_notify_recipient`** — the single inline-preview attempt, classified
+  three ways: **skipped** (recipient == sender, or a paneless recipient — no
+  attempt is made), **delivered** (the attempted keystroke landed), or
+  **failed** (the attempted keystroke or the multiplexer resolution failed —
+  the raw error string is retained). Multiplexer resolution failure (an
+  unavailable or ambiguous environment, §6.5) is deferred: it is retained and
+  exposed only when a pane preview is actually attempted after the insert, so
+  it can never preempt the insert and never turns a self-send or no-pane skip
+  into an error. On a non-skip, **truncate** the preview text to
+  `settings.max_text_len` codepoints (+ a single U+2026 `…` suffix when over
+  the limit) and call the multiplexer's inline-preview keystroke exactly once.
+  Truncation is broker-side. The notification outcome never rolls back the
+  insert and triggers no retry; it flows only into `notification_sent` +
+  `notification_error` (unicast) or the broadcast `delivered` count.
 - **`poll_messages(member_id)`** — un-acked deliveries for an existing member.
   If the member is not an active registry row → value error
   `Member {member_id} not found`. Then: `owner_member_id = member_id` AND
@@ -1201,13 +1232,34 @@ on `send` / `broadcast`, the recipient and fleet from the message row on
   different fleets → the broker's cross-fleet error (§6.2)
   `members <from> and <to> are not in the same fleet.` (exit 1). Text:
   `Message sent.\n` + the formatted message.
+
+  **Partial failure.** Before the success emit, the handler checks the send
+  outcome's `notification_error` (§6.2). When present — the row was persisted
+  but the attempted pane notification failed — it raises an application error
+  (exit 1) with this cafleet-authored message (the top-level handler supplies
+  the `Error: ` prefix):
+
+  ```
+  Message <message-id> was persisted, but pane notification failed: <raw backend error>. Do not resend this message. Recover the recipient pane, then run 'cafleet member ping <recipient-id>' or have the recipient run 'cafleet message poll <recipient-id>'.
+  ```
+
+  `<raw backend error>` is inserted verbatim and may contain the backend
+  command, its payload argv, and a newline-delimited stderr detail (§6.5); the
+  formatter adds no separate copy of the sent message body. stdout stays
+  empty; `--json` follows the global error contract — it selects successful
+  command output only and creates no JSON error envelope, so both modes emit
+  the same stderr text. The intentional skips (self-send, no-pane recipient)
+  keep their exit-0 success output with `notification_sent: false`, and a
+  successful attempted notification keeps the byte-identical success contract
+  in both modes. No layer retries the notification.
 - **broadcast** — `--from-member-id` and the shared body input (positional
   `TEXT` or `--file PATH`; §6.3 [text-body input](#text-body-input)). The
   result is a list; text is `broadcast
   id=<message_id> recipients=<N> delivered=<k>`, where `<N>` is the result's
   `recipients` (the real recipient count, matching `Broadcast sent to {N}
-  recipients`) and `<k>` is the result's `delivered` (the count of best-effort
-  inline previews that landed). The two diverge when any preview fails to deliver;
+  recipients`) and `<k>` is the result's `delivered` (the count of attempted
+  inline previews that landed; individual preview errors are discarded, §6.2).
+  The two diverge when any preview fails to deliver;
   they are reported as **separate fields**, not conflated (the broker computes
   both, §6.2). In JSON mode the result object carries both `recipients` and
   `delivered`.
@@ -2109,9 +2161,12 @@ Director's `MultiplexerContext` and passes it directly.
   **Esc-first=YES** (a wake landing on a pending permission prompt clears it
   instead of answering it); any error returns false. It contains no backtick,
   command-substitution sequence, or pipe.
-- **`send_inline_preview(*, target_pane_id, message_id, sender_id, ts, text) ->
-  bool`** — best-effort; the broker's inline-preview path (the broker truncates
-  `text` first). tmux missing → `false`; cosmetic CR/LF strip on `text`
+- **`send_inline_preview(*, target_pane_id, message_id, sender_id, ts, text)`**
+  — result-returning; the broker's inline-preview path (the broker truncates
+  `text` first). A missing tmux binary (the existing `binary_exists` precheck —
+  not `ensure_available`, whose extra environment/session validation is not
+  part of inline delivery) fails with exactly `tmux binary not found on PATH`;
+  cosmetic CR/LF strip on `text`
   (`\r\n`/`\n`/`\r` each → `⏎` U+23CE, **no** tab/backtick/command-substitution
   sanitization here); two-line payload (single `\n` separator intentionally
   kept):
@@ -2119,7 +2174,10 @@ Director's `MultiplexerContext` and passes it directly.
   [cafleet msg <message_id> from <sender_id> <ts>]
   <sanitized_text>
   ```
-  literal-then-Enter, `timeout=5`s, **Esc-first=YES**, any error → `false`. Under
+  literal-then-Enter, `timeout=5`s, **Esc-first=YES**. A subprocess failure
+  from whichever Escape, payload, or Enter operation failed propagates as the
+  raw `MultiplexerError` with the existing subprocess-runner formatting (the
+  failed argv and trimmed stderr) — no boolean wrapper. Under
   `send-keys -l` the `\n` is a soft line break inside one keystroke; the single
   trailing Enter submits the whole 2-line payload as one recipient turn.
 - **`send_prompt(*, target_pane_id, text, shell=False)`** — fail-fast. Strip
@@ -2156,10 +2214,15 @@ Director's `MultiplexerContext` and passes it directly.
   `capture_pane`, `list_pane_ids`, `kill_pane` (modulo `ignore_missing`
   pane-gone tolerance on `kill_pane` / `send_exit`).
 - **Best-effort boolean** (NEVER raise; `false` on any failure):
-  `send_poll_trigger`, `send_wake_trigger`, `send_inline_preview`. Each guards
+  `send_poll_trigger`, `send_wake_trigger`. Each guards
   "tmux missing → `false`" then wraps the keystroke so any error → `false`. The
-  boolean is consumed as the broker's `notification_sent` (unicast) /
-  the broadcast `delivered` count and the monitor's `woke`.
+  boolean is consumed as the monitor's `woke` and the ping outcome.
+- **Result-returning** (the raw error is the contract): `send_inline_preview`.
+  It applies the exact missing-binary precheck string, then propagates any
+  Escape/payload/Enter failure as the raw `MultiplexerError` — no boolean
+  wrapper. The broker consumes the result as the unicast
+  `notification_sent` + `notification_error` pair and the broadcast
+  `delivered` count (§6.2).
 
 #### `MultiplexerContext` (frozen value type)
 
@@ -2314,11 +2377,15 @@ Each method's herdr realization:
   `<member_id> (<name>; coding_agent=<agent>; unacked=<pending_count>)`
   entry list, and its trailing `Director:` segment — is **byte-identical** to the tmux `send_wake_trigger` payload
   above, carrying no backtick, no command-substitution sequence, and no pipe.
-- **`send_inline_preview(...) -> bool`** — best-effort. `herdr pane send-keys
+- **`send_inline_preview(...)`** — result-returning. A missing herdr binary
+  (the existing `binary_exists` precheck — not `ensure_available`) fails with
+  exactly `herdr binary not found on PATH`. Then `herdr pane send-keys
   <id> esc`, then `herdr pane send-text <id> "<2-line payload>"` (raw, no Enter —
   the embedded newline is literal), then a sleep of `_SUBMIT_DELAY` (`1.0`s),
   then a single `herdr pane send-keys <id> enter`, keeping the tmux contract of
-  "one submit for the whole 2-line payload".
+  "one submit for the whole 2-line payload". A failure from whichever of those
+  operations failed propagates as the raw `HerdrError` with the existing
+  `_run()` formatting — no boolean wrapper.
 - **`send_prompt(*, target_pane_id, text, shell=False)`** — `herdr pane
   send-keys <id> esc`, then `herdr pane run <id> "<payload>"`, where `<payload>`
   is `! <text>` for the shell form and `<text>` for the plain form. Both forms
@@ -2931,6 +2998,10 @@ same `{"detail": <string>}` shape (a single human-readable string).
   `404`, detail `Member not found`; otherwise send and return `{message_id,
   status}`. Both branches:
   `{message_id: int, status: string}` (`status` = the broker message's `status_state`).
+  The unicast branch consumes only the `message` object of the broker send
+  outcome and intentionally ignores its `notification_error` (§6.2) — the
+  `200` response after persistence is unchanged whatever the notification
+  outcome.
   The SPA always submits `from_member_id = director.member_id` (the fleet's
   root Director); the endpoint itself is sender-agnostic.
 
@@ -3121,6 +3192,51 @@ for age math.
   time; `cafleet setup` installs assets offline from the embedded data (§6.3)
   with no network access.
 
+### 7.7 Agent-operation contract — one-shot command isolation
+
+How a coding agent invokes the CLI is part of the operating contract. The
+normative rule ships in the core cafleet skill and is backend-neutral —
+identical for the claude, codex, and opencode backends:
+
+- Every one-shot `cafleet` process is the only command in its shell-tool
+  invocation; a sequence of CAFleet operations runs as separate shell-tool
+  calls.
+- A one-shot CAFleet command is never placed beside another command via a
+  newline, `;`, `&&`, a pipe, shell `&`, or any other setup/follow-up command.
+  A compound invocation keeps the agent's shell tool occupied after the
+  CAFleet process exits, so the pane cannot consume an inbound inline-preview
+  keystroke (§6.5) and a notification aimed at it can fail after the message
+  was persisted.
+- Leading `NAME=value` assignments immediately preceding the CAFleet
+  executable are allowed — they set the CAFleet process environment without
+  starting another process. An `env` helper process is not a substitute.
+- Shell redirection does not authorize another process; a long body uses the
+  positional argument or `--file <path>` (§6.3), not a pipe.
+
+**Permission-error diagnostic.** A CAFleet command that fails with an
+operating-system permission error — `Operation not permitted` /
+`Permission denied`, commonly surfacing as a multiplexer socket or
+pane-command failure — signals that the invocation likely ran outside the
+coding agent's command auto-approval scope: a compound invocation does not
+match single-command allow rules, so the shell tool executes it under the
+agent's restricted sandbox or permission set. The response is to re-run the
+CAFleet command as its own isolated invocation, honoring the no-resend rule
+whenever a persisted message id was already reported; retrying the compound
+form is forbidden.
+
+The sole exception is the long-lived `cafleet monitor` process (§6.6): its
+invocation still contains only that monitor process, but it may use the
+background or managed-execution mechanism resolved by the member's
+coding-agent overlay (part of the installed skill assets). The core rule
+defers that launch syntax to the overlay and does not duplicate it.
+
+The companion recovery contract for a `message send` partial failure — the
+persisted id proves the send committed, the sender never resends the body, and
+recovery is an isolated `cafleet member ping <recipient-id>` or a
+recipient-side isolated `cafleet message poll <recipient-id>` followed by a
+normal ACK — is pinned in §6.3 and also ships in the core skill's Send
+guidance. No layer retries the notification.
+
 ---
 
 ## 8. Database schema
@@ -3255,7 +3371,9 @@ connection is closed when the command finishes (success or failure).
     codepoint truncation with `…`, compact-JSON key order).
   - *Multiplexer* — inject a **fake command runner** (no real tmux) and assert
     exact argv lists, the Esc-first/`-l`/Enter ordering, the two sleeps, the
-    sanitizer substitutions, and best-effort-vs-raising contracts.
+    sanitizer substitutions, and the per-method failure contracts (best-effort
+    boolean, the result-returning inline preview with its exact missing-binary
+    strings, and fail-fast raising).
   - *Coding-agent* — assert each `build_spawn_argv` argv, the opencode model
     validation, and each backend's `ensure_available` preconditions (PATH
     check; opencode's preset-existence check at the resolved preset path)
