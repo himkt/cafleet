@@ -49,9 +49,9 @@ fn assert_terms(relative_path: &str, terms: &[&str]) {
 
 const OVERLAYS_FILE: &str = "skills/cafleet/reference/coding-agent-overlays.md";
 
-/// Slice the merged overlay file at top-level `## ` boundaries.
+/// Slice a markdown file at top-level `## ` boundaries.
 /// Panics (test failure) when the named section is missing.
-fn overlay_section<'a>(text: &'a str, name: &str) -> &'a str {
+fn markdown_section<'a>(context: &str, text: &'a str, name: &str) -> &'a str {
     let mut start = None;
     let mut offset = 0;
     for line in text.split_inclusive('\n') {
@@ -64,8 +64,12 @@ fn overlay_section<'a>(text: &'a str, name: &str) -> &'a str {
     }
     match start {
         Some(section_start) => &text[section_start..],
-        None => panic!("{OVERLAYS_FILE} has no top-level `## {name}` section"),
+        None => panic!("{context} has no top-level `## {name}` section"),
     }
+}
+
+fn overlay_section<'a>(text: &'a str, name: &str) -> &'a str {
+    markdown_section(OVERLAYS_FILE, text, name)
 }
 
 fn assert_absent(relative_path: &str, terms: &[&str]) {
@@ -876,4 +880,142 @@ fn every_backend_overlay_defines_the_full_placeholder_vocabulary() {
             "{OVERLAYS_FILE} § {section} leaves placeholders undefined: {missing:?}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Issue #338 contracts: one-shot command isolation, the Send partial-failure
+// recovery, and the asynchronous-wait turn boundary.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_core_skill_owns_the_one_shot_isolation_rule() {
+    assert_terms(
+        "skills/cafleet/SKILL.md",
+        &[
+            "one-shot",
+            "only command in its shell-tool invocation",
+            "separate shell-tool",
+            "newline",
+            "&&",
+            "pipe",
+            "shell `&`",
+            "NAME=value",
+            "immediately precede",
+            "helper process",
+            "redirection",
+            "sole exception",
+            "cafleet monitor",
+            "overlay",
+            "Asynchronous Wait Rule",
+        ],
+    );
+}
+
+#[test]
+fn the_isolation_section_carries_the_permission_error_diagnostic() {
+    assert_terms(
+        "skills/cafleet/SKILL.md",
+        &[
+            "Operation not permitted",
+            "Permission denied",
+            "auto-approval scope",
+            "allow rules",
+            "compound invocation",
+            "re-run",
+            "isolated invocation",
+            "no-resend",
+        ],
+    );
+}
+
+#[test]
+fn the_send_section_pins_the_persisted_no_resend_recovery() {
+    let path = "skills/cafleet/SKILL.md";
+    let text = read(path);
+    assert_terms_in(
+        &format!("{path} § Send (Unicast)"),
+        markdown_section(path, &text, "Send (Unicast)"),
+        &[
+            "was persisted",
+            "committed",
+            "not resend",
+            "member ping",
+            "message poll",
+            "ack",
+            "isolated",
+            "retry",
+        ],
+    );
+}
+
+#[test]
+fn supervision_pins_the_asynchronous_turn_boundary() {
+    assert_terms(
+        "skills/cafleet/reference/supervision.md",
+        &[
+            "Asynchronous Wait Rule",
+            "asynchronous handoff is a turn boundary",
+            "end or yield",
+            "MUST NOT",
+            "busy-wait",
+            "recurring polling",
+            "resumes the workflow in a later turn",
+            "one-off status check",
+            "timer",
+        ],
+    );
+}
+
+#[test]
+fn design_doc_workflows_resume_on_notifications_not_recurring_polls() {
+    assert_terms(
+        "skills/cafleet-design-doc/create/create.md",
+        &["turn boundary"],
+    );
+    assert_terms(
+        "skills/cafleet-design-doc/create/roles/director.md",
+        &["turn boundary"],
+    );
+    assert_terms(
+        "skills/cafleet-design-doc/interview/interview.md",
+        &["turn boundary"],
+    );
+    assert_terms(
+        "skills/cafleet-design-doc/execute/execute.md",
+        &["later turn"],
+    );
+
+    // Directive phrases only: the normative prohibition text (which names
+    // sleep / periodic polling as forbidden objects) lives in the core
+    // supervision reference, which this sweep deliberately excludes.
+    let patterns = [
+        ("periodic-poll directive", r"(?i)periodic[^\n]{0,60}poll"),
+        ("poll-until directive", r"(?i)\bpoll\b[^\n]{0,80}\buntil\b"),
+        ("wait-again-with-poll directive", r"(?i)wait again with"),
+        ("wait-via-poll directive", r"(?i)via `cafleet message poll"),
+        ("director-side sleep guidance", r"(?i)\bsleep\b"),
+        ("busy-wait guidance", r"(?i)busy[- ]wait"),
+        ("scheduler guidance", r"(?i)\bscheduler\b"),
+        ("timer-loop guidance", r"(?i)\btimer\b"),
+    ];
+    let mut files = Vec::new();
+    collect_markdown(&root().join("skills/cafleet-design-doc"), &mut files);
+    files.sort();
+    let mut offenders = Vec::new();
+    for relative_path in &files {
+        let text = read(relative_path);
+        for (label, pattern) in &patterns {
+            let regex = regex::Regex::new(pattern).unwrap();
+            for (index, line) in text.lines().enumerate() {
+                if regex.is_match(line) {
+                    offenders.push(format!("{relative_path}:{} → {label}", index + 1));
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "dependent workflows must dispatch, end or yield, and resume on a \
+         notification in a later turn — not wait through recurring polls: {offenders:#?}"
+    );
 }
