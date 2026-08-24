@@ -183,7 +183,7 @@ pub trait Multiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
-    ) -> bool;
+    ) -> Result<(), MultiplexerError>;
     fn send_prompt(
         &self,
         target_pane_id: &str,
@@ -263,7 +263,7 @@ impl Multiplexer for AnyMultiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
-    ) -> bool {
+    ) -> Result<(), MultiplexerError> {
         dispatch!(self, mux => mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text))
     }
 

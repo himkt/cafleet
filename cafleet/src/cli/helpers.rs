@@ -189,16 +189,19 @@ pub fn resolve_mux(settings: &Settings) -> Result<AnyMultiplexer, MultiplexerErr
     )
 }
 
-/// The broker-side preview notifier: the resolved multiplexer when one
-/// exists, else a silent non-delivery (best-effort by contract).
+/// The broker-side preview notifier. Construction is infallible even though
+/// it runs before `broker::send_message`: a multiplexer-resolution failure is
+/// retained as its raw string and exposed only from an attempted
+/// `send_inline_preview`, so it can never preempt the insert or fail an
+/// intentional skip (SPEC §6.2).
 pub struct CliNotifier {
-    mux: Option<AnyMultiplexer>,
+    mux: Result<AnyMultiplexer, String>,
 }
 
 impl CliNotifier {
     pub fn new(settings: &Settings) -> Self {
         CliNotifier {
-            mux: resolve_mux(settings).ok(),
+            mux: resolve_mux(settings).map_err(|error| error.to_string()),
         }
     }
 }
@@ -211,10 +214,13 @@ impl InlinePreviewSender for CliNotifier {
         sender_id: i64,
         ts: &str,
         text: &str,
-    ) -> bool {
-        self.mux.as_ref().is_some_and(|mux| {
-            mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text)
-        })
+    ) -> Result<(), String> {
+        match &self.mux {
+            Ok(mux) => mux
+                .send_inline_preview(target_pane_id, message_id, sender_id, ts, text)
+                .map_err(|error| error.to_string()),
+            Err(retained) => Err(retained.clone()),
+        }
     }
 }
 
@@ -258,6 +264,9 @@ mod tests {
         let err = notifier
             .send_inline_preview("%1", 8, 2, "2026-07-30T09:00:00.000000+00:00", "again")
             .unwrap_err();
-        assert_eq!(err, expected, "the retained error survives repeated attempts");
+        assert_eq!(
+            err, expected,
+            "the retained error survives repeated attempts"
+        );
     }
 }

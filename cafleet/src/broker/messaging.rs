@@ -1,4 +1,4 @@
-//! Message send/broadcast/poll/ack with the write-then-best-effort-preview
+//! Message send/broadcast/poll/ack with the write-then-attempted-preview
 //! ordering (SPEC §6.2 *Messaging*). The colocated tests pin the contract;
 //! see [`super::test_support`] for the API.
 
@@ -12,7 +12,7 @@ use crate::time::{format_utc, now_utc};
 
 /// The broker-side half of the inline-preview overlap point (SPEC §4): the
 /// broker truncates and calls this; the keystroke mechanics live behind it.
-/// Best-effort — implementations return a boolean and never raise.
+/// `Err` carries the raw multiplexer error string, preserved verbatim.
 pub trait InlinePreviewSender {
     fn send_inline_preview(
         &self,
@@ -21,7 +21,17 @@ pub trait InlinePreviewSender {
         sender_id: i64,
         ts: &str,
         text: &str,
-    ) -> bool;
+    ) -> Result<(), String>;
+}
+
+/// The unicast send outcome (SPEC §6.2): the unchanged
+/// `{message, notification_sent}` payload plus the retained raw error of an
+/// attempted, failed pane notification. `notification_error` is caller
+/// metadata — it never enters the payload JSON.
+#[derive(Debug)]
+pub struct SendMessageOutcome {
+    pub(crate) payload: Value,
+    pub(crate) notification_error: Option<String>,
 }
 
 /// Read one full typed-column message row in the pinned key order.
@@ -88,7 +98,7 @@ pub fn send_message(
     from_member_id: i64,
     to: &str,
     text: &str,
-) -> Result<Value, CafleetError> {
+) -> Result<SendMessageOutcome, CafleetError> {
     let fleet_id = sender_fleet(conn, from_member_id)?;
     let to_id: i64 = to
         .parse()
@@ -128,19 +138,26 @@ pub fn send_message(
     let message_id = conn.last_insert_rowid();
 
     let mut notification_sent = false;
+    let mut notification_error = None;
     if to_id != from_member_id
         && let Some(pane) = pane_of(conn, to_id)?
     {
-        notification_sent = notifier.send_inline_preview(
+        match notifier.send_inline_preview(
             &pane,
             message_id,
             from_member_id,
             &now,
             &preview_text(text, max_text_len),
-        );
+        ) {
+            Ok(()) => notification_sent = true,
+            Err(raw) => notification_error = Some(raw),
+        }
     }
     let message = message_row(conn, message_id)?.expect("the just-inserted message exists");
-    Ok(json!({"message": message, "notification_sent": notification_sent}))
+    Ok(SendMessageOutcome {
+        payload: json!({"message": message, "notification_sent": notification_sent}),
+        notification_error,
+    })
 }
 
 pub fn broadcast_message(
@@ -201,7 +218,9 @@ pub fn broadcast_message(
     let mut delivered = 0i64;
     for (delivery_id, pane) in &deliveries {
         if let Some(pane) = pane
-            && notifier.send_inline_preview(pane, *delivery_id, from_member_id, &now, &preview)
+            && notifier
+                .send_inline_preview(pane, *delivery_id, from_member_id, &now, &preview)
+                .is_ok()
         {
             delivered += 1;
         }
@@ -461,7 +480,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(outcome.payload["notification_sent"], false);
-        assert_eq!(outcome.notification_error, None, "self-send attempts nothing");
+        assert_eq!(
+            outcome.notification_error, None,
+            "self-send attempts nothing"
+        );
 
         let outcome = broker::send_message(
             &mut conn,
@@ -690,7 +712,11 @@ mod tests {
             "only Ok previews count; the failed pane is discarded silently"
         );
         assert_eq!(envelope["message"]["status_state"], "completed");
-        assert_eq!(*notifier.attempts.borrow(), 3, "one attempt per pane, no retry");
+        assert_eq!(
+            *notifier.attempts.borrow(),
+            3,
+            "one attempt per pane, no retry"
+        );
 
         for recipient in [monitor_id, member_a, member_b] {
             let pending = broker::poll_messages(&conn, recipient).unwrap();

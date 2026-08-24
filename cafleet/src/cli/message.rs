@@ -106,7 +106,7 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
             let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
             let mut conn = connect(settings)?;
             let notifier = CliNotifier::new(settings);
-            let result = broker::send_message(
+            let outcome = broker::send_message(
                 &mut conn,
                 &notifier,
                 settings.max_text_len,
@@ -114,7 +114,18 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
                 &to_member_id.to_string(),
                 &text,
             )?;
-            emit_result(settings, result, json, |result| {
+            if let Some(raw) = outcome.notification_error {
+                let message_id = outcome.payload["message"]["message_id"]
+                    .as_i64()
+                    .expect("the send payload carries the message id");
+                return Err(CafleetError::App(format!(
+                    "Message {message_id} was persisted, but pane notification failed: {raw}. \
+                     Do not resend this message. Recover the recipient pane, then run \
+                     'cafleet member ping {to_member_id}' or have the recipient run \
+                     'cafleet message poll {to_member_id}'."
+                )));
+            }
+            emit_result(settings, outcome.payload, json, |result| {
                 format!("Message sent.\n{}", format_message(result))
             });
             Ok(())

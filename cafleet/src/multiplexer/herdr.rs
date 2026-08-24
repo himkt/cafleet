@@ -391,6 +391,9 @@ impl HerdrMultiplexer {
 
     /// `send-text` delivers the raw 2-line payload without submitting; the
     /// single trailing enter submits the whole payload as one recipient turn.
+    /// Result-returning (SPEC §6.5): the missing-binary precheck fails with
+    /// the exact PATH string, and any esc/send-text/enter failure propagates
+    /// as the raw error — no boolean wrapper, no retry.
     pub fn send_inline_preview(
         &self,
         target_pane_id: &str,
@@ -398,22 +401,23 @@ impl HerdrMultiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
-    ) -> bool {
+    ) -> Result<(), MultiplexerError> {
+        if !self.runner.binary_exists("herdr") {
+            return Err(MultiplexerError::new("herdr binary not found on PATH"));
+        }
         let sanitized = text.replace("\r\n", "⏎").replace(['\n', '\r'], "⏎");
         let payload = format!("[cafleet msg {message_id} from {sender_id} {ts}]\n{sanitized}");
-        self.best_effort(|| {
-            self.send_esc(target_pane_id, false)?;
-            self.run(
-                &herdr_argv(&["herdr", "pane", "send-text", target_pane_id, &payload]),
-                Some(5),
-            )?;
-            self.runner.sleep(SUBMIT_DELAY);
-            self.run(
-                &herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
-                Some(5),
-            )?;
-            Ok(())
-        })
+        self.send_esc(target_pane_id, false)?;
+        self.run(
+            &herdr_argv(&["herdr", "pane", "send-text", target_pane_id, &payload]),
+            Some(5),
+        )?;
+        self.runner.sleep(SUBMIT_DELAY);
+        self.run(
+            &herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
+            Some(5),
+        )?;
+        Ok(())
     }
 
     pub fn send_prompt(
@@ -1064,10 +1068,7 @@ mod tests {
             vec![
                 run_event(&["herdr", "pane", "send-keys", "w1:p2", "esc"], Some(5)),
                 sleep_event(0.1),
-                run_event(
-                    &["herdr", "pane", "send-text", "w1:p2", &payload],
-                    Some(5),
-                ),
+                run_event(&["herdr", "pane", "send-text", "w1:p2", &payload], Some(5),),
             ],
             "one attempt only — the send-text failure aborts before enter"
         );

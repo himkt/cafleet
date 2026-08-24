@@ -231,6 +231,9 @@ impl TmuxMultiplexer {
         Ok(self.best_effort_send(target_pane_id, &payload, true))
     }
 
+    /// Result-returning (SPEC §6.5): the missing-binary precheck fails with
+    /// the exact PATH string, and any Escape/payload/Enter failure propagates
+    /// as the raw error — no boolean wrapper, no retry.
     pub fn send_inline_preview(
         &self,
         target_pane_id: &str,
@@ -238,10 +241,13 @@ impl TmuxMultiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
-    ) -> bool {
+    ) -> Result<(), MultiplexerError> {
+        if !self.runner.binary_exists("tmux") {
+            return Err(MultiplexerError::new("tmux binary not found on PATH"));
+        }
         let sanitized = text.replace("\r\n", "⏎").replace(['\n', '\r'], "⏎");
         let payload = format!("[cafleet msg {message_id} from {sender_id} {ts}]\n{sanitized}");
-        self.best_effort_send(target_pane_id, &payload, true)
+        self.send_literal_then_enter(target_pane_id, &payload, Some(5), false, true)
     }
 
     pub fn send_prompt(
@@ -529,7 +535,10 @@ mod tests {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let ts = "2026-07-30T09:00:00.000000+00:00";
-        assert!(mux.send_inline_preview("%5", 5, 2, ts, "a\r\nb\nc\rd").is_ok());
+        assert!(
+            mux.send_inline_preview("%5", 5, 2, ts, "a\r\nb\nc\rd")
+                .is_ok()
+        );
         assert_eq!(
             runner.events(),
             vec![
@@ -604,7 +613,9 @@ mod tests {
         let payload = format!("[cafleet msg 5 from 2 {ts}]\na⏎b");
         assert_eq!(
             err.to_string(),
-            format!("tmux command failed: tmux send-keys -t %5 -l {payload}\nstderr: no such pane: %5")
+            format!(
+                "tmux command failed: tmux send-keys -t %5 -l {payload}\nstderr: no such pane: %5"
+            )
         );
         assert_eq!(
             runner.events(),

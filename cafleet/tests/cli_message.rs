@@ -192,11 +192,18 @@ fn send_with_no_resolvable_multiplexer_persists_then_fails() {
         &member_id.to_string(),
         "resolver gap",
     ]);
-    assert_eq!(code(&output), 1, "an attempted notification must fail loudly");
+    assert_eq!(
+        code(&output),
+        1,
+        "an attempted notification must fail loudly"
+    );
     assert_eq!(stdout(&output), "");
 
     let (message_id, status, text) = only_unicast_row(&cli);
-    assert_eq!(status, "input_required", "resolution failure cannot preempt the insert");
+    assert_eq!(
+        status, "input_required",
+        "resolution failure cannot preempt the insert"
+    );
     assert_eq!(text, "resolver gap");
 
     let raw = "no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; \

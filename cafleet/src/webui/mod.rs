@@ -432,7 +432,9 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
                     &to.to_string(),
                     &text,
                 ) {
-                    Ok(result) => result["message"].clone(),
+                    // Persistence alone decides the response; the outcome's
+                    // notification_error is intentionally ignored (SPEC §6.8).
+                    Ok(outcome) => outcome.payload["message"].clone(),
                     Err(error) => return broker_500(error),
                 }
             }

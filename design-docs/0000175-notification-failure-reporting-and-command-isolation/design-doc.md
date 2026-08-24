@@ -1,7 +1,7 @@
 # Surface Persisted-Message Notification Failures and Isolate CAFleet Commands
 
 **Status**: Approved
-**Progress**: 5/28 tasks complete
+**Progress**: 10/28 tasks complete
 **Last Updated**: 2026-08-25
 
 ## Overview
@@ -446,11 +446,11 @@ Between every asynchronous dispatch and reply above, the Director ends or yields
 
 ### Step 2: Preserve raw multiplexer failures
 
-- [ ] Change only `Multiplexer::send_inline_preview` and `AnyMultiplexer` dispatch to return `Result<(), MultiplexerError>`. <!-- completed: -->
-- [ ] Update tmux inline-preview delivery to return exact missing-binary text `tmux binary not found on PATH` and propagate Escape/payload/Enter failures with existing raw error formatting. <!-- completed: -->
-- [ ] Update Herdr inline-preview delivery to return exact missing-binary text `herdr binary not found on PATH` and propagate Escape/send-text/Enter failures with existing raw error formatting. <!-- completed: -->
-- [ ] Keep `CliNotifier::new` infallible; retain multiplexer resolution or delivery errors as raw strings and expose them only from an attempted `send_inline_preview`. <!-- completed: -->
-- [ ] Update focused tmux, Herdr, and notifier unit tests for exact missing-binary strings and deferred resolution failure while proving poll/wake best-effort behavior is unchanged. <!-- completed: -->
+- [x] Change only `Multiplexer::send_inline_preview` and `AnyMultiplexer` dispatch to return `Result<(), MultiplexerError>`. <!-- completed: 2026-08-25T06:09 -->
+- [x] Update tmux inline-preview delivery to return exact missing-binary text `tmux binary not found on PATH` and propagate Escape/payload/Enter failures with existing raw error formatting. <!-- completed: 2026-08-25T06:09 -->
+- [x] Update Herdr inline-preview delivery to return exact missing-binary text `herdr binary not found on PATH` and propagate Escape/send-text/Enter failures with existing raw error formatting. <!-- completed: 2026-08-25T06:09 -->
+- [x] Keep `CliNotifier::new` infallible; retain multiplexer resolution or delivery errors as raw strings and expose them only from an attempted `send_inline_preview`. <!-- completed: 2026-08-25T06:09 -->
+- [x] Update focused tmux, Herdr, and notifier unit tests for exact missing-binary strings and deferred resolution failure while proving poll/wake best-effort behavior is unchanged. <!-- completed: 2026-08-25T06:09 -->
 
 ### Step 3: Surface the unicast CLI partial failure
 
