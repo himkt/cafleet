@@ -1,6 +1,6 @@
 # Surface Persisted-Message Notification Failures and Isolate CAFleet Commands
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 26/26 tasks complete
 **Last Updated**: 2026-08-25
 
@@ -280,3 +280,4 @@ Run each verification command in its own shell-tool invocation, consistent with 
 | 2026-08-24 | Resolved second review: made the broker outcome crate-consumable, moved live binary/skills under writable workspace paths with inline environment propagation, and restored canonical one-pass spawn-placeholder substitution. |
 | 2026-08-25 | User feedback during execution: the isolation section must include a backend-neutral diagnostic note — an OS permission error from a CAFleet command signals a compound invocation that missed the agent’s command allow rules and ran sandboxed; respond by re-running the command isolated (no resend). Guarded in docs_sync. |
 | 2026-08-25 | User decision during execution: descoped the live Herdr/Codex verification gate (its Success Criterion, spec section, and two Step 5 tasks removed; partial `.live`/database/evidence artifacts deleted). The automated suites cover every shipped contract; non-goal-drift auditing is owned by the Step 5 Reviewer pass. |
+| 2026-08-25 | Execution complete: all 26 tasks and 10 Success Criteria verified, fresh-Reviewer approval after one correction round, user approval granted; branch pushed and PR #343 opened. Status set to Complete. |
