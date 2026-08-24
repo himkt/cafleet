@@ -48,7 +48,7 @@ A poll result with one unicast delivery (id `42`, from `7`, to `3`, body `"build
 [{"message_id":42,"owner_member_id":3,"from_member_id":7,"to_member_id":3,"type":"unicast","created_at":"2026-05-05T05:42:11.123456+00:00","status_state":"input_required","status_timestamp":"2026-05-05T05:42:11.123456+00:00","origin_message_id":null,"text":"build OK"}]
 ```
 
-A broadcast summary row carries `kind: "broadcast_summary"` and `origin: <id>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"`. The `message broadcast` response always contains exactly this single summary message plus the wrapper-level `recipients` (the real recipient count `N`) and `delivered` (the count of best-effort inline previews that landed) fields — there is no per-recipient envelope list (see [Output shapes](cli-options.md#output-shapes) for the cross-subcommand summary).
+A broadcast summary row carries `kind: "broadcast_summary"` and `origin: <id>` (self-referencing); the `text` body is the broker-computed summary string `"Broadcast sent to N recipients"`. The `message broadcast` response always contains exactly this single summary message plus the wrapper-level `recipients` (the real recipient count `N`) and `delivered` (the count of attempted inline previews that landed; broadcast discards individual preview errors) fields — there is no per-recipient envelope list (see [Output shapes](cli-options.md#output-shapes) for the cross-subcommand summary).
 
 ### Text mode
 
