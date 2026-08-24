@@ -11,7 +11,8 @@
 //!     pub coding_agent: String }
 //! pub trait InlinePreviewSender {
 //!     fn send_inline_preview(&self, target_pane_id: &str, message_id: i64,
-//!         sender_id: i64, ts: &str, text: &str) -> bool;
+//!         sender_id: i64, ts: &str, text: &str) -> Result<(), String>;
+//!     // Err carries the raw multiplexer error string, preserved verbatim
 //! }
 //! // fleets
 //! create_fleet(conn: &mut Connection, name: Option<&str>, mux_session: &str,
@@ -37,9 +38,13 @@
 //! list_roster(conn: &Connection, fleet_id: i64, include_message_holders: bool)
 //!     -> Result<Vec<Value>>
 //! // messaging
+//! pub struct SendMessageOutcome {
+//!     pub(crate) payload: Value,                    // the unchanged {message, notification_sent}
+//!     pub(crate) notification_error: Option<String> // Some(raw) only for an attempted, failed preview
+//! }
 //! send_message(conn: &mut Connection, notifier: &dyn InlinePreviewSender,
 //!     max_text_len: usize, from_member_id: i64, to: &str, text: &str)
-//!     -> Result<Value>  // {message, notification_sent}
+//!     -> Result<SendMessageOutcome>  // Ok even when the attempted preview failed
 //! broadcast_message(conn: &mut Connection, notifier: &dyn InlinePreviewSender,
 //!     max_text_len: usize, from_member_id: i64, text: &str)
 //!     -> Result<Vec<Value>>  // [{message, recipients, delivered}]
@@ -177,22 +182,25 @@ pub struct NotifyCall {
     pub text: String,
 }
 
+/// The raw error string [`FakeNotifier::failing`] returns from every attempt.
+pub const PREVIEW_ERROR: &str = "tmux command failed: tmux send-keys -t %2 Escape\nstderr: boom";
+
 pub struct FakeNotifier {
-    pub result: bool,
+    pub result: Result<(), String>,
     pub calls: RefCell<Vec<NotifyCall>>,
 }
 
 impl FakeNotifier {
     pub fn succeeding() -> Self {
         FakeNotifier {
-            result: true,
+            result: Ok(()),
             calls: RefCell::new(Vec::new()),
         }
     }
 
     pub fn failing() -> Self {
         FakeNotifier {
-            result: false,
+            result: Err(PREVIEW_ERROR.to_string()),
             calls: RefCell::new(Vec::new()),
         }
     }
@@ -206,7 +214,7 @@ impl InlinePreviewSender for FakeNotifier {
         sender_id: i64,
         ts: &str,
         text: &str,
-    ) -> bool {
+    ) -> Result<(), String> {
         self.calls.borrow_mut().push(NotifyCall {
             target_pane_id: target_pane_id.to_string(),
             message_id,
@@ -214,10 +222,12 @@ impl InlinePreviewSender for FakeNotifier {
             ts: ts.to_string(),
             text: text.to_string(),
         });
-        self.result
+        self.result.clone()
     }
 }
 
+/// Send and return the outcome's `{message, notification_sent}` payload;
+/// tests that assert `notification_error` call `broker::send_message` directly.
 pub fn send(
     conn: &mut Connection,
     notifier: &FakeNotifier,
@@ -225,5 +235,7 @@ pub fn send(
     to: i64,
     text: &str,
 ) -> Value {
-    broker::send_message(conn, notifier, MAX_TEXT_LEN, from, &to.to_string(), text).unwrap()
+    broker::send_message(conn, notifier, MAX_TEXT_LEN, from, &to.to_string(), text)
+        .unwrap()
+        .payload
 }

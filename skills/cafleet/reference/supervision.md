@@ -134,6 +134,10 @@ Never spawn an ordinary member before the `monitor live` gate. Keep the monitor 
 
 The active turn consumes inputs that have already arrived and dispatches what is ready — then returns control. Waiting for things that have not yet arrived is the job of the re-engagement channels (§ Communication Model → *Facilitation cue*).
 
+> **An asynchronous handoff is a turn boundary.** After a Director dispatches work to a member, the Director MUST end or yield its active turn. It MUST NOT remain active waiting for completion by running `sleep`, repeated or periodic `cafleet message poll`, a busy-wait loop, or any equivalent timer/polling loop. A CAFleet/monitor notification resumes the workflow in a later turn. A user-requested one-off status check is allowed, but MUST NOT become recurring polling.
+
+This boundary applies after spawn dispatch, ordinary assignments, review routes, and every other asynchronous member handoff. It does not prohibit the on-demand inbox poll performed when an inbound notification has already reopened a later turn, and it does not prohibit one user-requested status snapshot. After acting on already-arrived inputs and dispatching new work, the Director returns control again. One-shot command isolation ([`SKILL.md`](../SKILL.md) § *One-shot command isolation*) complements this rule; neither replaces the other.
+
 | Situation | Director action |
 |---|---|
 | Just spawned a member; ready signal not yet arrived | End the turn. Auto-fire delivers the ready signal as it lands; the monitor member is the backstop. When it lands, ACK and dispatch that member's first task in the same turn (§ Spawn Protocol → *Dispatch-on-ready*). |

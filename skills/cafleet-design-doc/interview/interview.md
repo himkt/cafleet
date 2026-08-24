@@ -113,9 +113,9 @@ Render the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` per the 2c aud
 
 #### 2e. Wait for the Analyzer's question list
 
-Poll `cafleet message poll <director-member-id> --json` until the Analyzer's reply arrives. **The `--json` flag is required**: text-mode `cafleet message poll` truncates each message body to 200 codepoints + `…`, which would silently mangle the Analyzer's numbered question list — `--json` carries the complete body. Acknowledge with `cafleet message ack <message-id>`.
+The Analyzer dispatch is a turn boundary: end or yield your turn, and the broker notification re-opens a later turn when the Analyzer's reply arrives. In that later turn run one `cafleet message poll <director-member-id> --json`. **The `--json` flag is required**: text-mode `cafleet message poll` truncates each message body to 200 codepoints + `…`, which would silently mangle the Analyzer's numbered question list — `--json` carries the complete body. Acknowledge with `cafleet message ack <message-id>`.
 
-The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and wait again with `cafleet message poll <director-member-id> --json`. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
+The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format — a fresh turn boundary; when the corrected reply re-opens a later turn, run `cafleet message poll <director-member-id> --json` again. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
 
 #### 2f. Tear down the monitor member and the Analyzer
 

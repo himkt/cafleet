@@ -20,8 +20,8 @@ use tower::ServiceExt;
 struct NullNotifier;
 
 impl InlinePreviewSender for NullNotifier {
-    fn send_inline_preview(&self, _: &str, _: i64, _: i64, _: &str, _: &str) -> bool {
-        false
+    fn send_inline_preview(&self, _: &str, _: i64, _: i64, _: &str, _: &str) -> Result<(), String> {
+        Err("pane notification suppressed in tests".to_string())
     }
 }
 
@@ -372,10 +372,20 @@ async fn post_send_handles_unicast_broadcast_and_the_error_surfaces() {
         Some(json!({"from_member_id": director_id, "to_member_id": member_id, "text": "hi"})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "persistence alone decides the response — a failed or skipped pane \
+         notification never changes it"
+    );
     let payload = parsed(&body);
     assert!(payload["message_id"].is_i64());
     assert_eq!(payload["status"], "input_required");
+    assert_eq!(
+        keys(&payload),
+        ["message_id", "status"],
+        "the unicast response gains no notification field"
+    );
 
     let (status, body) = call(
         app.clone(),

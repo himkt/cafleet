@@ -1,4 +1,4 @@
-//! Message send/broadcast/poll/ack with the write-then-best-effort-preview
+//! Message send/broadcast/poll/ack with the write-then-attempted-preview
 //! ordering (SPEC §6.2 *Messaging*). The colocated tests pin the contract;
 //! see [`super::test_support`] for the API.
 
@@ -12,7 +12,7 @@ use crate::time::{format_utc, now_utc};
 
 /// The broker-side half of the inline-preview overlap point (SPEC §4): the
 /// broker truncates and calls this; the keystroke mechanics live behind it.
-/// Best-effort — implementations return a boolean and never raise.
+/// `Err` carries the raw multiplexer error string, preserved verbatim.
 pub trait InlinePreviewSender {
     fn send_inline_preview(
         &self,
@@ -21,7 +21,17 @@ pub trait InlinePreviewSender {
         sender_id: i64,
         ts: &str,
         text: &str,
-    ) -> bool;
+    ) -> Result<(), String>;
+}
+
+/// The unicast send outcome (SPEC §6.2): the unchanged
+/// `{message, notification_sent}` payload plus the retained raw error of an
+/// attempted, failed pane notification. `notification_error` is caller
+/// metadata — it never enters the payload JSON.
+#[derive(Debug)]
+pub struct SendMessageOutcome {
+    pub(crate) payload: Value,
+    pub(crate) notification_error: Option<String>,
 }
 
 /// Read one full typed-column message row in the pinned key order.
@@ -88,7 +98,7 @@ pub fn send_message(
     from_member_id: i64,
     to: &str,
     text: &str,
-) -> Result<Value, CafleetError> {
+) -> Result<SendMessageOutcome, CafleetError> {
     let fleet_id = sender_fleet(conn, from_member_id)?;
     let to_id: i64 = to
         .parse()
@@ -128,19 +138,26 @@ pub fn send_message(
     let message_id = conn.last_insert_rowid();
 
     let mut notification_sent = false;
+    let mut notification_error = None;
     if to_id != from_member_id
         && let Some(pane) = pane_of(conn, to_id)?
     {
-        notification_sent = notifier.send_inline_preview(
+        match notifier.send_inline_preview(
             &pane,
             message_id,
             from_member_id,
             &now,
             &preview_text(text, max_text_len),
-        );
+        ) {
+            Ok(()) => notification_sent = true,
+            Err(raw) => notification_error = Some(raw),
+        }
     }
     let message = message_row(conn, message_id)?.expect("the just-inserted message exists");
-    Ok(json!({"message": message, "notification_sent": notification_sent}))
+    Ok(SendMessageOutcome {
+        payload: json!({"message": message, "notification_sent": notification_sent}),
+        notification_error,
+    })
 }
 
 pub fn broadcast_message(
@@ -201,7 +218,9 @@ pub fn broadcast_message(
     let mut delivered = 0i64;
     for (delivery_id, pane) in &deliveries {
         if let Some(pane) = pane
-            && notifier.send_inline_preview(pane, *delivery_id, from_member_id, &now, &preview)
+            && notifier
+                .send_inline_preview(pane, *delivery_id, from_member_id, &now, &preview)
+                .is_ok()
         {
             delivered += 1;
         }
@@ -272,8 +291,8 @@ mod tests {
     use crate::broker;
     use crate::broker::test_support as common;
     use crate::broker::test_support::{
-        FakeNotifier, MAX_TEXT_LEN, MONITOR_PANE, bootstrap_monitor, create_fleet, migrated_conn,
-        register,
+        FakeNotifier, MAX_TEXT_LEN, MONITOR_PANE, PREVIEW_ERROR, bootstrap_monitor, create_fleet,
+        migrated_conn, register,
     };
     use crate::error::CafleetError;
     use crate::output::format_json;
@@ -286,8 +305,21 @@ mod tests {
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let notifier = FakeNotifier::succeeding();
 
-        let result = common::send(&mut conn, &notifier, director_id, member_id, "hi");
+        let outcome = broker::send_message(
+            &mut conn,
+            &notifier,
+            MAX_TEXT_LEN,
+            director_id,
+            &member_id.to_string(),
+            "hi",
+        )
+        .unwrap();
+        let result = &outcome.payload;
         assert_eq!(result["notification_sent"], true);
+        assert_eq!(
+            outcome.notification_error, None,
+            "a delivered preview carries no error"
+        );
 
         let message = &result["message"];
         let message_id = message["message_id"].as_i64().unwrap();
@@ -323,7 +355,8 @@ mod tests {
             &member_id.to_string(),
             &text,
         )
-        .unwrap();
+        .unwrap()
+        .payload;
 
         assert_eq!(
             result["message"]["text"], text,
@@ -339,8 +372,20 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (_, director_id) = create_fleet(&mut conn, "alpha");
         let notifier = FakeNotifier::succeeding();
-        let result = common::send(&mut conn, &notifier, director_id, director_id, "note");
-        assert_eq!(result["notification_sent"], false);
+        let outcome = broker::send_message(
+            &mut conn,
+            &notifier,
+            MAX_TEXT_LEN,
+            director_id,
+            &director_id.to_string(),
+            "note",
+        )
+        .unwrap();
+        assert_eq!(outcome.payload["notification_sent"], false);
+        assert_eq!(
+            outcome.notification_error, None,
+            "an intentional skip is never a partial failure"
+        );
         assert!(notifier.calls.borrow().is_empty());
     }
 
@@ -351,28 +396,109 @@ mod tests {
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let pending_id = register(&mut conn, fleet_id, "pending", None);
         let notifier = FakeNotifier::succeeding();
-        let result = common::send(&mut conn, &notifier, director_id, pending_id, "hi");
-        assert_eq!(result["notification_sent"], false);
+        let outcome = broker::send_message(
+            &mut conn,
+            &notifier,
+            MAX_TEXT_LEN,
+            director_id,
+            &pending_id.to_string(),
+            "hi",
+        )
+        .unwrap();
+        assert_eq!(outcome.payload["notification_sent"], false);
+        assert_eq!(
+            outcome.notification_error, None,
+            "an intentional skip is never a partial failure"
+        );
         assert!(notifier.calls.borrow().is_empty());
     }
 
     #[test]
-    fn send_message_survives_a_failed_preview() {
+    fn send_message_attempted_failure_persists_and_carries_the_raw_error() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let notifier = FakeNotifier::failing();
 
-        let result = common::send(&mut conn, &notifier, director_id, member_id, "hi");
-        assert_eq!(result["notification_sent"], false);
-        assert_eq!(notifier.calls.borrow().len(), 1);
+        let outcome = broker::send_message(
+            &mut conn,
+            &notifier,
+            MAX_TEXT_LEN,
+            director_id,
+            &member_id.to_string(),
+            "hi",
+        )
+        .unwrap();
+        assert_eq!(
+            outcome.notification_error.as_deref(),
+            Some(PREVIEW_ERROR),
+            "the raw multiplexer error is preserved verbatim"
+        );
+        assert_eq!(
+            notifier.calls.borrow().len(),
+            1,
+            "exactly one notification attempt, no retry"
+        );
+
+        let message = &outcome.payload["message"];
+        let message_id = message["message_id"].as_i64().unwrap();
+        let ts = message["created_at"].as_str().unwrap().to_string();
+        let expected = format!(
+            r#"{{"message":{{"message_id":{message_id},"owner_member_id":{member_id},"from_member_id":{director_id},"to_member_id":{member_id},"type":"unicast","created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","origin_message_id":null,"text":"hi"}},"notification_sent":false}}"#
+        );
+        assert_eq!(
+            format_json(&outcome.payload),
+            expected,
+            "the payload keeps the exact envelope; notification_error never enters the JSON"
+        );
 
         let pending = broker::poll_messages(&conn, member_id).unwrap();
         assert_eq!(
             pending.len(),
             1,
             "the persisted message is never rolled back"
+        );
+        assert_eq!(pending[0]["text"], "hi", "the full body remains readable");
+    }
+
+    #[test]
+    fn a_failing_notifier_cannot_fail_self_send_or_no_pane_skips() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let pending_id = register(&mut conn, fleet_id, "pending", None);
+        let notifier = FakeNotifier::failing();
+
+        let outcome = broker::send_message(
+            &mut conn,
+            &notifier,
+            MAX_TEXT_LEN,
+            director_id,
+            &director_id.to_string(),
+            "note",
+        )
+        .unwrap();
+        assert_eq!(outcome.payload["notification_sent"], false);
+        assert_eq!(
+            outcome.notification_error, None,
+            "self-send attempts nothing"
+        );
+
+        let outcome = broker::send_message(
+            &mut conn,
+            &notifier,
+            MAX_TEXT_LEN,
+            director_id,
+            &pending_id.to_string(),
+            "hi",
+        )
+        .unwrap();
+        assert_eq!(outcome.payload["notification_sent"], false);
+        assert_eq!(outcome.notification_error, None, "no-pane attempts nothing");
+        assert!(
+            notifier.calls.borrow().is_empty(),
+            "a skip never reaches the notifier, so its error cannot surface"
         );
     }
 
@@ -524,6 +650,82 @@ mod tests {
             envelope["message"]["text"],
             "Broadcast sent to 4 recipients"
         );
+    }
+
+    #[test]
+    fn broadcast_discards_individual_preview_errors_without_schema_change() {
+        use std::cell::RefCell;
+
+        use crate::broker::InlinePreviewSender;
+
+        struct PaneSelectiveNotifier {
+            fail_pane: &'static str,
+            attempts: RefCell<usize>,
+        }
+
+        impl InlinePreviewSender for PaneSelectiveNotifier {
+            fn send_inline_preview(
+                &self,
+                target_pane_id: &str,
+                _message_id: i64,
+                _sender_id: i64,
+                _ts: &str,
+                _text: &str,
+            ) -> Result<(), String> {
+                *self.attempts.borrow_mut() += 1;
+                if target_pane_id == self.fail_pane {
+                    Err(PREVIEW_ERROR.to_string())
+                } else {
+                    Ok(())
+                }
+            }
+        }
+
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let monitor_id = bootstrap_monitor(&conn, fleet_id);
+        let member_a = register(&mut conn, fleet_id, "a", Some("%2"));
+        let member_b = register(&mut conn, fleet_id, "b", Some("%3"));
+        let notifier = PaneSelectiveNotifier {
+            fail_pane: "%2",
+            attempts: RefCell::new(0),
+        };
+
+        let result =
+            broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "all hands")
+                .unwrap();
+        assert_eq!(result.len(), 1, "still the single summary envelope");
+        let envelope = &result[0];
+        assert_eq!(
+            envelope
+                .as_object()
+                .expect("a JSON object")
+                .keys()
+                .collect::<Vec<_>>(),
+            ["message", "recipients", "delivered"],
+            "no error list or extra field joins the envelope"
+        );
+        assert_eq!(envelope["recipients"], 3, "monitor + two workers");
+        assert_eq!(
+            envelope["delivered"], 2,
+            "only Ok previews count; the failed pane is discarded silently"
+        );
+        assert_eq!(envelope["message"]["status_state"], "completed");
+        assert_eq!(
+            *notifier.attempts.borrow(),
+            3,
+            "one attempt per pane, no retry"
+        );
+
+        for recipient in [monitor_id, member_a, member_b] {
+            let pending = broker::poll_messages(&conn, recipient).unwrap();
+            assert_eq!(
+                pending.len(),
+                1,
+                "every delivery row persists regardless of its preview outcome"
+            );
+        }
     }
 
     #[test]

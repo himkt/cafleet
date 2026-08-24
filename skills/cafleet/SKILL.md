@@ -115,6 +115,18 @@ Every id input (the positional `FLEET_ID` / `MEMBER_ID` / `MESSAGE_ID` subjects,
 
 When you need a recorded user reaction — **approve**, **choose among options**, **confirm**, or **continue-or-abort** — solicit it through {decision_surface}, never in free-form prose ("let me know if this looks good", "shall I proceed?", "reply with your choice") which records no answer and routinely stalls. A fleet **member** never talks to the user: it sends its question to the Director via `cafleet message send`, and the Director relays it. See your overlay for the question shapes and any surface constraints.
 
+## One-shot command isolation
+
+Every one-shot `cafleet` process is the **only command in its shell-tool invocation**. Run a sequence of CAFleet operations as separate shell-tool calls. Do not place a one-shot CAFleet command beside another command using a newline, `;`, `&&`, a pipe, shell `&`, or any other setup/follow-up command — a compound invocation keeps your shell tool occupied after the CAFleet process exits, so your pane cannot consume an inbound inline preview while the extra command runs.
+
+Leading `NAME=value` assignments that set the environment of the CAFleet process are allowed; they do not start another process. They must immediately precede the CAFleet executable — do not substitute an `env` helper process or append another command. Shell redirection does not authorize another process either; a command that needs a long body uses the positional argument or `--file <path>`, not a pipe.
+
+**Permission-error diagnostic.** A CAFleet command that fails with an operating-system permission error — `Operation not permitted` / `Permission denied`, commonly surfacing as a multiplexer socket or pane-command failure — signals that the invocation likely ran outside your coding agent's command auto-approval scope: a compound invocation does not match single-command allow rules, so the shell tool executes it under the agent's restricted sandbox or permission set. The response is to re-run the CAFleet command as its own isolated invocation, honoring the no-resend rule (§ *Send (Unicast)*) whenever a persisted message id was already reported — never a compound retry.
+
+The sole exception is the long-lived `cafleet monitor` process. Its invocation must still contain only that monitor process, but it may use exactly the background or managed-execution mechanism resolved by your coding-agent overlay — including OpenCode's shell `&` form and tool-managed background modes. The overlay owns that launch syntax; this rule does not duplicate lifecycle mechanics.
+
+Command isolation complements, but does not replace, the Director-side dispatch boundary in [`reference/supervision.md`](reference/supervision.md) § *Asynchronous Wait Rule*: after dispatching work to a member, a Director ends or yields its turn and a notification resumes the workflow in a later turn.
+
 ## Send (Unicast)
 
 ```bash
@@ -123,6 +135,8 @@ cafleet message send --from-member-id <my-member-id> \
 ```
 
 `--to-member-id` (recipient id) is required, plus exactly one of the positional `TEXT` (inline body) or `--file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`). The delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview and text output. `--json` carries the complete untruncated body per [`reference/cli.md`](reference/cli.md) § *Output switch*. After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast`), caught on the next manual `message poll` or a Director `cafleet member ping` if missed; full mechanics in [`multiplexer-backends.md`](../../docs/docs/spec/multiplexer-backends.md#push-notifications).
+
+When `message send` exits nonzero while stating that `Message <id> was persisted`, the id proves the send committed: do **not resend** the body. Repair or re-engage the recipient pane, then run `cafleet member ping <recipient-id>` as its own isolated invocation, or have the recipient run `cafleet message poll <recipient-id>` as its own isolated invocation, and consume and ack the existing row normally. This is the only response to the partial failure — it introduces no retry of the notification.
 
 ## Poll (Check Inbox)
 

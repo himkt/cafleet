@@ -1,8 +1,8 @@
 # Surface Persisted-Message Notification Failures and Isolate CAFleet Commands
 
-**Status**: Approved
-**Progress**: 0/28 tasks complete
-**Last Updated**: 2026-08-24
+**Status**: Complete
+**Progress**: 26/26 tasks complete
+**Last Updated**: 2026-08-25
 
 ## Overview
 
@@ -10,17 +10,16 @@ Make `cafleet message send` report an explicit partial failure when the broker p
 
 ## Success Criteria
 
-- [ ] An attempted unicast pane notification failure leaves exactly one message row persisted as `input_required` and makes `cafleet message send` exit 1.
-- [ ] The CLI partial-failure text contains the persisted message id, the raw tmux/herdr error detail, an explicit “do not resend” instruction, and both supported recovery paths (`cafleet member ping` and recipient-side `cafleet message poll`).
-- [ ] Notification failure triggers no automatic retry at the multiplexer, broker, CLI, or skill layer.
-- [ ] Successful notification, self-send, and a recipient with no pane retain their existing exit-0 text/JSON contracts; the latter two remain intentional notification skips.
-- [ ] `message broadcast` keeps its current `recipients`/`delivered` output and exit behavior, and `POST /api/messages/send` keeps its current HTTP response contract.
-- [ ] No database column, table, status value, or migration is added; existing databases and queued messages remain readable without conversion.
-- [ ] The core `skills/cafleet/SKILL.md` is the sole normative source for one-shot command isolation and applies identically to Claude, Codex, and OpenCode.
-- [ ] The long-lived `cafleet monitor` process remains the sole command-isolation exception and continues to use the launch mechanism already selected by its coding-agent overlay.
-- [ ] The existing Director asynchronous-wait contract unambiguously makes dispatch a turn boundary: the Director ends or yields instead of sleeping, busy-waiting, or recurring-polling until a member replies.
-- [ ] Automated tests cover raw tmux/herdr failure propagation, broker persistence, CLI output/exit behavior, unchanged non-goals, and the skill wording guard.
-- [ ] A live Herdr/Codex run reproduces the persisted-but-not-notified case, shows the new partial error, recovers the same message without resending, and confirms isolated one-shot invocations avoid the known race.
+- [x] An attempted unicast pane notification failure leaves exactly one message row persisted as `input_required` and makes `cafleet message send` exit 1.
+- [x] The CLI partial-failure text contains the persisted message id, the raw tmux/herdr error detail, an explicit “do not resend” instruction, and both supported recovery paths (`cafleet member ping` and recipient-side `cafleet message poll`).
+- [x] Notification failure triggers no automatic retry at the multiplexer, broker, CLI, or skill layer.
+- [x] Successful notification, self-send, and a recipient with no pane retain their existing exit-0 text/JSON contracts; the latter two remain intentional notification skips.
+- [x] `message broadcast` keeps its current `recipients`/`delivered` output and exit behavior, and `POST /api/messages/send` keeps its current HTTP response contract.
+- [x] No database column, table, status value, or migration is added; existing databases and queued messages remain readable without conversion.
+- [x] The core `skills/cafleet/SKILL.md` is the sole normative source for one-shot command isolation and applies identically to Claude, Codex, and OpenCode.
+- [x] The long-lived `cafleet monitor` process remains the sole command-isolation exception and continues to use the launch mechanism already selected by its coding-agent overlay.
+- [x] The existing Director asynchronous-wait contract unambiguously makes dispatch a turn boundary: the Director ends or yields instead of sleeping, busy-waiting, or recurring-polling until a member replies.
+- [x] Automated tests cover raw tmux/herdr failure propagation, broker persistence, CLI output/exit behavior, unchanged non-goals, and the skill wording guard.
 
 ---
 
@@ -161,6 +160,8 @@ Add a clearly headed normative section to `skills/cafleet/SKILL.md`. It is the s
 - Leading `NAME=value` assignments that set the environment of the CAFleet process are allowed; they do not start another process. They must immediately precede the CAFleet executable. Do not substitute an `env` helper process or append another command.
 - Shell redirection does not authorize another process; examples that need a body should prefer the existing positional argument or `--file <path>` rather than a pipe.
 
+The same section must carry a backend-neutral diagnostic note for permission errors: a CAFleet command that fails with an operating-system permission error (“Operation not permitted” / “Permission denied”, commonly surfacing as a multiplexer socket or pane-command failure) signals that the invocation likely ran outside the coding agent’s command auto-approval scope — a compound invocation does not match single-command allow rules, so the shell tool executes it under the agent’s restricted sandbox or permission set. The documented response is to re-run the CAFleet command as its own isolated invocation, honoring the no-resend rule whenever a persisted message id was already reported; retrying the compound form is forbidden. The note names no specific backend, sandbox implementation, or allow-rule syntax.
+
 The sole exception is the long-lived `cafleet monitor` process. Its invocation must still contain only that monitor process, but it may use exactly the background or managed-execution mechanism resolved by the existing coding-agent overlay, including OpenCode's shell `&` form and tool-managed background modes. The core rule points to the overlay for launch syntax and does not duplicate lifecycle mechanics.
 
 All roles already load the same core CAFleet skill, so the rule does not need copies in Claude, Codex, or OpenCode presets. Audit role/reference examples for contradictions: compound one-shot examples must become separate invocations, while monitor examples remain unchanged and are covered by the explicit exception. Pointer text may refer readers back to the core section; it must not restate backend-specific rules.
@@ -185,7 +186,7 @@ Keep this distinct from the long-lived monitor member. The monitor remains CAFle
 | `docs/docs/spec/cli-options.md` | Pin exit 1, stdout/stderr, exact partial-error wording, `--json` failure behavior, persistence/no-resend semantics, and unchanged skip cases. |
 | `docs/docs/spec/multiplexer-backends.md` | Change only inline-preview error propagation to `Result`; retain boolean best effort for poll/wake triggers and document broadcast's compatibility adapter. |
 | `docs/docs/concepts/coding-agents.md` | Explain why one-shot CAFleet commands use isolated shell-tool invocations and defer monitor hosting syntax to the existing backend lifecycle guidance. |
-| `skills/cafleet/SKILL.md` | Add the sole normative global rule, its prohibited compound forms, allowed leading environment assignments, separate-call guidance, and the narrow monitor exception. In `## Send`, add the single persisted-id/no-resend paragraph and isolated ping/poll recovery. |
+| `skills/cafleet/SKILL.md` | Add the sole normative global rule, its prohibited compound forms, allowed leading environment assignments, separate-call guidance, the backend-neutral permission-error diagnostic note, and the narrow monitor exception. In `## Send`, add the single persisted-id/no-resend paragraph and isolated ping/poll recovery. |
 | `skills/cafleet/reference/supervision.md` | Strengthen the existing *Asynchronous Wait Rule* with the dispatch turn boundary, prohibited Director-side sleep/recurring-poll loops, notification-based resumption, and one-off status-check allowance. |
 | `skills/cafleet-design-doc/create/create.md` and `create/roles/director.md` | Replace the known “periodic `cafleet message poll`”/“own periodic polling” directions with dispatch, end/yield, notification-based resumption, and one later on-demand poll/ACK. Treat every correction round as a new asynchronous handoff and turn boundary. |
 | `skills/cafleet-design-doc/interview/interview.md` | Replace “poll ... until” and “wait again with ... poll” directions with the same turn-boundary sequence. |
@@ -215,217 +216,9 @@ Tests must pin both the new behavior and the deliberately unchanged surfaces:
 | Broadcast regression | One failed preview still returns the existing single summary envelope, recipient count, and delivered-success count without an error list or nonzero CLI exit. |
 | CLI integration | A forced tmux shim `send-keys` failure produces exit 1, empty stdout, the persisted id/raw cause/no-resend/ping/poll stderr text, and exactly one persisted row. Repeat with `--json` to pin the same existing text-error channel. Add unavailable/ambiguous `resolve_mux` cases proving attempted notification exits 1 after one insert while self-send and no-pane remain exit 0. |
 | WebUI regression | Existing route tests remain green; if adapting the typed broker result requires a focused assertion, pin the unchanged 200 `{message_id,status}` response rather than adding fields. |
-| Skill/docs contract | Extend `cafleet/tests/docs_sync.rs` to require the core one-shot isolation phrases, prohibited compound forms, allowed leading environment assignments without an `env` helper process, separate invocations, and the overlay-deferred monitor exception. Require the `## Send` persisted-id/committed/no-resend plus isolated ping/poll recovery paragraph. Add a focused asynchronous-wait guard over `skills/cafleet-design-doc/**` and the core supervision reference: require dispatch-as-turn-boundary, later-turn notification resumption, and the user-requested one-off status allowance; reject known “periodic poll,” “poll until,” “wait again with poll,” Director-side `sleep`, busy-wait, scheduler, or timer-loop guidance. |
+| Skill/docs contract | Extend `cafleet/tests/docs_sync.rs` to require the core one-shot isolation phrases, prohibited compound forms, allowed leading environment assignments without an `env` helper process, separate invocations, the backend-neutral permission-error diagnostic note (both quoted error spellings, the allow-rule mismatch cause, and the isolated re-run response), and the overlay-deferred monitor exception. Require the `## Send` persisted-id/committed/no-resend plus isolated ping/poll recovery paragraph. Add a focused asynchronous-wait guard over `skills/cafleet-design-doc/**` and the core supervision reference: require dispatch-as-turn-boundary, later-turn notification resumption, and the user-requested one-off status allowance; reject known “periodic poll,” “poll until,” “wait again with poll,” Director-side `sleep`, busy-wait, scheduler, or timer-loop guidance. |
 
 Run each verification command in its own shell-tool invocation, consistent with the new rule. The final gates are `mise //cafleet:test`, `mise //cafleet:lint`, and `mise //docs:build`, each separately.
-
-### Live Herdr/Codex verification
-
-Run one disposable Herdr fleet with two active actors: Director `<D>` in the current Herdr/Codex pane and recipient `<R>` in a spawned Codex pane. The fleet monitor is `<MON>`. Use a unique `<run-id>` in message bodies and paths, a fresh database at `/private/tmp/cafleet-issue338-live-<run-id>.db`, and the repository-visible evidence file `design-docs/0000175-notification-failure-reporting-and-command-isolation/live-verification.md`.
-
-The live gate uses only workspace-writable artifacts: the binary at `/Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet` and a Codex install root at `/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home`. Every CAFleet command below carries the same three leading assignments—`CODEX_HOME`, `CAFLEET_DATABASE_URL`, and `CAFLEET_MULTIPLEXER`—inline in that invocation. A leading assignment changes the CAFleet process environment without starting another command, so it satisfies the isolation rule and works despite non-persistent shell invocations. `fleet create`/`member create` additionally forward the database URL into spawned panes as today; the monitor and recipient prompts still use the full inline prefix for every command, so `<D>`, `<MON>`, and `<R>` address the same database, select Herdr explicitly, and resolve the same workspace-local asset identity.
-
-The live gate is the following ordered procedure. Every displayed command is a separate shell-tool invocation unless the step explicitly labels the one prohibited negative-control command.
-
-1. **Build and prove workspace-local assets.** Record `git rev-parse HEAD`, then run:
-
-   ```text
-   mise //cafleet:build
-   ```
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet setup --coding-agent codex
-   ```
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet doctor
-   ```
-
-   ```text
-   cmp skills/cafleet/SKILL.md design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home/skills/cafleet/SKILL.md
-   ```
-
-   ```text
-   shasum -a 256 skills/cafleet/SKILL.md design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home/skills/cafleet/SKILL.md
-   ```
-
-   Record the install output, doctor-selected Herdr backend, `cmp` exit 0, and equal hashes in `live-verification.md`. This proves both the executable and Codex skill came from the tested working tree rather than a stale installed copy.
-
-2. **Create the actors with canonical substitution.** Before `fleet create`, use the repository editing tool to create `.live/monitor.md`. It must retain the four canonical tokens `{fleet_id}`, `{member_id}`, `{director_member_id}`, and `{coding_agent}`, instruct the monitor to read `.live/codex-home/skills/cafleet/SKILL.md`, and show the full workspace-local binary/environment prefix for its long-lived monitor command. Any braces unrelated to the four tokens are doubled as required by the spawn-template grammar. Then run:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet fleet create --name issue338-live-<run-id> --coding-agent codex --monitor-file /Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/monitor.md --json
-   ```
-
-   Record `<F>`, `<D>`, and `<MON>` from the JSON. Now create `.live/recipient.md` with the same four canonical tokens left literally intact; do not manually render any id. The prompt must instruct the spawned member to read `.live/codex-home/skills/cafleet/SKILL.md`, use the full workspace-local binary/environment prefix for every CAFleet command, send a ready message quoting the new isolation heading and persisted-id/no-resend sentence, and wait for the negative-control assignment. `member create` allocates `<R>` and performs the single canonical substitution:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet member create --fleet-id <F> --name issue338-target --description "Issue 338 Herdr notification target" --coding-agent codex --file /Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/recipient.md --json
-   ```
-
-   Record `<R>` and its pane id. End/yield the Director turn. When the ready notification opens a later turn, run these separately and record the member's quoted rule text:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message poll <D> --json
-   ```
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message ack <initial-ready-id> --json
-   ```
-
-   No recurring status poll is permitted.
-
-3. **Dispatch the negative control.** Send `<R>` an isolated assignment telling it to execute the exact negative-control line below and, only after that shell tool returns, to send `issue338-target-idle-<run-id>` in a new isolated invocation:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message send --from-member-id <D> --to-member-id <R> "Begin issue338 negative control for <run-id>" --json
-   ```
-
-   End/yield. After the notification opens `<R>`, it runs these two commands separately:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message poll <R> --json
-   ```
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message ack <negative-assignment-id> --json
-   ```
-
-   It then deliberately executes this one prohibited compound shell-tool invocation:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message send --from-member-id <R> --to-member-id <D> "issue338-negative-ready-<run-id>" && sleep 60
-   ```
-
-   The first process persists the ready message and notifies `<D>`; the follow-up process keeps `<R>`'s Codex shell tool occupied. This line is allowed only as the negative reproduction in the disposable fleet and is never an operating example.
-
-   When that shell tool returns, `<R>` runs the promised separate command:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message send --from-member-id <R> --to-member-id <D> "issue338-target-idle-<run-id>" --json
-   ```
-
-4. **Trigger and capture the partial failure.** The ready notification opens `<D>` in a later turn. It runs these separately:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message poll <D> --json
-   ```
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message ack <negative-ready-id> --json
-   ```
-
-   It then immediately runs:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet member capture <R> --lines 80 --json
-   ```
-
-   The capture must show `<R>` still inside the shell-tool invocation with the follow-up `sleep 60` active, not idle at the Codex composer. While that state is present, run exactly:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message send --from-member-id <D> --to-member-id <R> "issue338-live-reply-<run-id>"
-   ```
-
-   Copy the shell tool's exit status, stdout, and stderr into `live-verification.md`; do not use shell redirection. Require exit 1, empty stdout, `Message <M> was persisted`, the raw failing Herdr operation/stderr, `Do not resend`, and the isolated ping/poll recovery choices. The pane remains occupied and no second send is issued.
-
-5. **Prove the committed row before recovery.** Run the following separately and record both outputs:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message show <M> --json
-   ```
-
-   ```text
-   sqlite3 /private/tmp/cafleet-issue338-live-<run-id>.db "SELECT COUNT(*), MIN(status_state), MAX(status_state), MIN(text), MAX(text) FROM messages WHERE message_id = <M>;"
-   ```
-
-   The CLI object and SQL result must prove exactly one row, `input_required` state, and the full `issue338-live-reply-<run-id>` body. Record the before-recovery pane capture and these row facts together with `<M>` and the raw Herdr failure.
-
-6. **Recover the same row without resending.** The isolated `issue338-target-idle-<run-id>` message causes a later Director turn. `<D>` runs the full-prefix `message poll <D> --json` and `message ack <idle-marker-id> --json` separately, then runs:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet member ping <R> --json
-   ```
-
-   `<R>` then performs the following separately:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message poll <R> --json
-   ```
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message ack <M> --json
-   ```
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message send --from-member-id <R> --to-member-id <D> "issue338-acked-<run-id>" --json
-   ```
-
-   The poll must contain `<M>`. After the last notification resumes `<D>`, it runs the following separately before verification:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message poll <D> --json
-   ```
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message ack <acked-marker-id> --json
-   ```
-
-   Then verify separately:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message show <M> --json
-   ```
-
-   ```text
-   sqlite3 /private/tmp/cafleet-issue338-live-<run-id>.db "SELECT COUNT(*), MIN(status_state), MAX(status_state) FROM messages WHERE from_member_id = <D> AND to_member_id = <R> AND text = 'issue338-live-reply-<run-id>';"
-   ```
-
-   Require `completed` for `<M>` and a matching-message count of exactly one. This is the no-resend proof.
-
-7. **Run the positive isolated control.** With `<R>` idle, run:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message send --from-member-id <D> --to-member-id <R> "issue338-positive-<run-id>" --json
-   ```
-
-   Require exit 0 and the unchanged success JSON with `notification_sent:true`. `<R>` receives the pane notification and runs these as three separate invocations:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message poll <R> --json
-   ```
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message ack <positive-message-id> --json
-   ```
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet message send --from-member-id <R> --to-member-id <D> "issue338-positive-acked-<run-id>" --json
-   ```
-
-   `<D>` polls and ACKs the response with the same full prefix only after its notification opens the later turn. Record both idle-pane receipt and successful sender output. The fleet-created monitor must use the existing Codex overlay launch mechanism throughout; the test does not alter or manually replace it.
-
-8. **Record cleanup evidence.** ACK any remaining live-test messages, then follow the monitor-first recovery order with separate commands:
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet member delete <MON> --json
-   ```
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet member delete <R> --json
-   ```
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet fleet delete <F> --json
-   ```
-
-   ```text
-   CODEX_HOME=/Users/himkt/work/himkt/cafleet/design-docs/0000175-notification-failure-reporting-and-command-isolation/.live/codex-home CAFLEET_DATABASE_URL=sqlite:////private/tmp/cafleet-issue338-live-<run-id>.db CAFLEET_MULTIPLEXER=herdr /Users/himkt/work/himkt/cafleet/cafleet/target/release/cafleet fleet show <F> --json
-   ```
-
-   Append the deletion outputs and final soft-deleted fleet/member state to `live-verification.md`, then remove only the explicitly named `.live/monitor.md`, `.live/recipient.md`, `.live/codex-home`, and `/private/tmp/cafleet-issue338-live-<run-id>.db` after their relevant evidence has been copied. The evidence file must finish with the commit, binary/install proof, skill hashes and member-quoted rule, actor and pane ids, pre-failure pane state, `<M>`, raw Herdr stderr, before/after DB state and count, ACK result, positive-control result, and cleanup result.
-
-Between every asynchronous dispatch and reply above, the Director ends or yields its active turn. Notification opens a later turn; the Director never uses `sleep` or recurring `message poll` to advance the procedure. The only sleep is the explicitly prohibited target-side negative control in step 3.
 
 ---
 
@@ -436,46 +229,44 @@ Between every asynchronous dispatch and reply above, the Director ends or yields
 
 ### Step 1: Amend contracts before code
 
-- [ ] Update `SPEC.md` for the inline-preview result, persisted partial failure, unchanged broadcast/WebUI adapters, CLI error string, and one-shot isolation rule with monitor exception. <!-- completed: -->
-- [ ] Update `docs/docs/spec/cli-options.md` with the exact text/JSON output and exit contract plus recovery guidance. <!-- completed: -->
-- [ ] Update `docs/docs/spec/multiplexer-backends.md` with raw inline-preview error propagation and the unchanged boolean contracts for poll/wake triggers. <!-- completed: -->
-- [ ] Update `docs/docs/concepts/coding-agents.md` with the backend-neutral isolated-invocation guidance and overlay-deferred monitor exception. <!-- completed: -->
-- [ ] Audit the error/reference tables and remove obsolete claims that all notification failures are silently best-effort for unicast CLI sends. <!-- completed: -->
+- [x] Update `SPEC.md` for the inline-preview result, persisted partial failure, unchanged broadcast/WebUI adapters, CLI error string, and one-shot isolation rule with monitor exception. <!-- completed: 2026-08-25T05:45 -->
+- [x] Update `docs/docs/spec/cli-options.md` with the exact text/JSON output and exit contract plus recovery guidance. <!-- completed: 2026-08-25T05:45 -->
+- [x] Update `docs/docs/spec/multiplexer-backends.md` with raw inline-preview error propagation and the unchanged boolean contracts for poll/wake triggers. <!-- completed: 2026-08-25T05:45 -->
+- [x] Update `docs/docs/concepts/coding-agents.md` with the backend-neutral isolated-invocation guidance and overlay-deferred monitor exception. <!-- completed: 2026-08-25T05:45 -->
+- [x] Audit the error/reference tables and remove obsolete claims that all notification failures are silently best-effort for unicast CLI sends. <!-- completed: 2026-08-25T05:45 -->
 
 ### Step 2: Preserve raw multiplexer failures
 
-- [ ] Change only `Multiplexer::send_inline_preview` and `AnyMultiplexer` dispatch to return `Result<(), MultiplexerError>`. <!-- completed: -->
-- [ ] Update tmux inline-preview delivery to return exact missing-binary text `tmux binary not found on PATH` and propagate Escape/payload/Enter failures with existing raw error formatting. <!-- completed: -->
-- [ ] Update Herdr inline-preview delivery to return exact missing-binary text `herdr binary not found on PATH` and propagate Escape/send-text/Enter failures with existing raw error formatting. <!-- completed: -->
-- [ ] Keep `CliNotifier::new` infallible; retain multiplexer resolution or delivery errors as raw strings and expose them only from an attempted `send_inline_preview`. <!-- completed: -->
-- [ ] Update focused tmux, Herdr, and notifier unit tests for exact missing-binary strings and deferred resolution failure while proving poll/wake best-effort behavior is unchanged. <!-- completed: -->
+- [x] Change only `Multiplexer::send_inline_preview` and `AnyMultiplexer` dispatch to return `Result<(), MultiplexerError>`. <!-- completed: 2026-08-25T06:09 -->
+- [x] Update tmux inline-preview delivery to return exact missing-binary text `tmux binary not found on PATH` and propagate Escape/payload/Enter failures with existing raw error formatting. <!-- completed: 2026-08-25T06:09 -->
+- [x] Update Herdr inline-preview delivery to return exact missing-binary text `herdr binary not found on PATH` and propagate Escape/send-text/Enter failures with existing raw error formatting. <!-- completed: 2026-08-25T06:09 -->
+- [x] Keep `CliNotifier::new` infallible; retain multiplexer resolution or delivery errors as raw strings and expose them only from an attempted `send_inline_preview`. <!-- completed: 2026-08-25T06:09 -->
+- [x] Update focused tmux, Herdr, and notifier unit tests for exact missing-binary strings and deferred resolution failure while proving poll/wake best-effort behavior is unchanged. <!-- completed: 2026-08-25T06:09 -->
 
 ### Step 3: Surface the unicast CLI partial failure
 
-- [ ] Add public `SendMessageOutcome` with crate-visible payload/error fields, carrying the unchanged payload plus optional notification error for sibling CLI/WebUI consumers. <!-- completed: -->
-- [ ] Update `broker::send_message` to distinguish skip, success, and attempted failure after persistence without retry or rollback. <!-- completed: -->
-- [ ] Adapt broadcast to count `Ok(())` previews and discard individual errors without changing its result schema or exit behavior. <!-- completed: -->
-- [ ] Adapt the WebUI unicast call site to consume `outcome.payload` and preserve its current response. <!-- completed: -->
-- [ ] Make `cli/message.rs` return the exact `CafleetError::App` partial-failure message before the success emitter. <!-- completed: -->
-- [ ] Add broker and CLI regression tests for persistence, one attempt, exact error/recovery content, text and `--json` channels, successful sends, intentional skips, and resolution failure that cannot preempt insertion or fail self/no-pane skips. <!-- completed: -->
+- [x] Add public `SendMessageOutcome` with crate-visible payload/error fields, carrying the unchanged payload plus optional notification error for sibling CLI/WebUI consumers. <!-- completed: 2026-08-25T06:22 -->
+- [x] Update `broker::send_message` to distinguish skip, success, and attempted failure after persistence without retry or rollback. <!-- completed: 2026-08-25T06:22 -->
+- [x] Adapt broadcast to count `Ok(())` previews and discard individual errors without changing its result schema or exit behavior. <!-- completed: 2026-08-25T06:22 -->
+- [x] Adapt the WebUI unicast call site to consume `outcome.payload` and preserve its current response. <!-- completed: 2026-08-25T06:22 -->
+- [x] Make `cli/message.rs` return the exact `CafleetError::App` partial-failure message before the success emitter. <!-- completed: 2026-08-25T06:22 -->
+- [x] Add broker and CLI regression tests for persistence, one attempt, exact error/recovery content, text and `--json` channels, successful sends, intentional skips, and resolution failure that cannot preempt insertion or fail self/no-pane skips. <!-- completed: 2026-08-25T06:22 -->
 
 ### Step 4: Add the global skill rule
 
-- [ ] Add the sole normative one-shot command-isolation section to `skills/cafleet/SKILL.md`, including separate calls, prohibited compound forms, allowed leading environment assignments, and the narrow monitor exception. <!-- completed: -->
-- [ ] Add the `## Send` persisted-id/committed/no-resend paragraph with isolated ping/poll recovery and no skill-layer retry. <!-- completed: -->
-- [ ] Point the exception to the existing coding-agent overlay without duplicating monitor lifecycle mechanics or backend-specific variants. <!-- completed: -->
-- [ ] Strengthen `skills/cafleet/reference/supervision.md` § *Asynchronous Wait Rule* and add a core pointer: dispatch ends/yields the turn, notifications resume later, one-off user status checks stay bounded, and Director sleep/recurring-poll loops remain forbidden. <!-- completed: -->
-- [ ] Audit `skills/cafleet-design-doc/**`, explicitly replacing create's periodic polling, interview's poll-until/wait-again wording, and execute's post-Tester/Programmer wait-via-poll wording; split other contradictory compound one-shot examples while preserving monitor launch examples. <!-- completed: -->
-- [ ] Add/extend `cafleet/tests/docs_sync.rs` guards for isolation (including allowed assignment prefixes but no `env` helper), monitor exception, core Send recovery, and the asynchronous-wait surfaces; reject periodic/poll-until/wait-again, timer, busy-wait, and recurring-poll guidance. <!-- completed: -->
+- [x] Add the sole normative one-shot command-isolation section to `skills/cafleet/SKILL.md`, including separate calls, prohibited compound forms, allowed leading environment assignments, the backend-neutral permission-error diagnostic note, and the narrow monitor exception. <!-- completed: 2026-08-25T06:22 -->
+- [x] Add the `## Send` persisted-id/committed/no-resend paragraph with isolated ping/poll recovery and no skill-layer retry. <!-- completed: 2026-08-25T06:22 -->
+- [x] Point the exception to the existing coding-agent overlay without duplicating monitor lifecycle mechanics or backend-specific variants. <!-- completed: 2026-08-25T06:22 -->
+- [x] Strengthen `skills/cafleet/reference/supervision.md` § *Asynchronous Wait Rule* and add a core pointer: dispatch ends/yields the turn, notifications resume later, one-off user status checks stay bounded, and Director sleep/recurring-poll loops remain forbidden. <!-- completed: 2026-08-25T06:22 -->
+- [x] Audit `skills/cafleet-design-doc/**`, explicitly replacing create's periodic polling, interview's poll-until/wait-again wording, and execute's post-Tester/Programmer wait-via-poll wording; split other contradictory compound one-shot examples while preserving monitor launch examples. <!-- completed: 2026-08-25T06:22 -->
+- [x] Add/extend `cafleet/tests/docs_sync.rs` guards for isolation (including allowed assignment prefixes but no `env` helper), monitor exception, core Send recovery, and the asynchronous-wait surfaces; reject periodic/poll-until/wait-again, timer, busy-wait, and recurring-poll guidance. <!-- completed: 2026-08-25T06:22 -->
 
-### Step 5: Verify automated and live behavior
+### Step 5: Verify automated behavior
 
-- [ ] Run the focused tmux/Herdr multiplexer, broker messaging, CLI message, WebUI compatibility, and docs-sync tests as separate invocations. <!-- completed: -->
-- [ ] Run `mise //cafleet:test` in its own shell-tool invocation. <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` in its own shell-tool invocation. <!-- completed: -->
-- [ ] Run `mise //docs:build` in its own shell-tool invocation. <!-- completed: -->
-- [ ] Perform the disposable Herdr/Codex negative reproduction, verify the partial error, and recover the original message without resending. <!-- completed: -->
-- [ ] Perform the isolated-command success exchange, audit the final diff for non-goal drift, and record the specified install, failure, row, ACK, and cleanup evidence in `live-verification.md`. <!-- completed: -->
+- [x] Run the focused tmux/Herdr multiplexer, broker messaging, CLI message, WebUI compatibility, and docs-sync tests as separate invocations. <!-- completed: 2026-08-25T06:32 -->
+- [x] Run `mise //cafleet:test` in its own shell-tool invocation. <!-- completed: 2026-08-25T06:32 -->
+- [x] Run `mise //cafleet:lint` in its own shell-tool invocation. <!-- completed: 2026-08-25T06:32 -->
+- [x] Run `mise //docs:build` in its own shell-tool invocation. <!-- completed: 2026-08-25T06:32 -->
 
 ---
 
@@ -487,3 +278,6 @@ Between every asynchronous dispatch and reply above, the Director ends or yields
 | 2026-08-24 | Clarified the existing asynchronous-handoff turn boundary and added its wording/contract guard; no scheduler or runtime scope added. |
 | 2026-08-24 | Resolved first review: deferred mux-resolution errors until an attempted post-insert notification, pinned missing-binary strings, added core no-resend guidance and dependent-workflow guards, and made Herdr/Codex live verification fully executable with retained evidence. |
 | 2026-08-24 | Resolved second review: made the broker outcome crate-consumable, moved live binary/skills under writable workspace paths with inline environment propagation, and restored canonical one-pass spawn-placeholder substitution. |
+| 2026-08-25 | User feedback during execution: the isolation section must include a backend-neutral diagnostic note — an OS permission error from a CAFleet command signals a compound invocation that missed the agent’s command allow rules and ran sandboxed; respond by re-running the command isolated (no resend). Guarded in docs_sync. |
+| 2026-08-25 | User decision during execution: descoped the live Herdr/Codex verification gate (its Success Criterion, spec section, and two Step 5 tasks removed; partial `.live`/database/evidence artifacts deleted). The automated suites cover every shipped contract; non-goal-drift auditing is owned by the Step 5 Reviewer pass. |
+| 2026-08-25 | Execution complete: all 26 tasks and 10 Success Criteria verified, fresh-Reviewer approval after one correction round, user approval granted; branch pushed and PR #343 opened. Status set to Complete. |

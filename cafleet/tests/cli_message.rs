@@ -11,6 +11,37 @@ fn fleet_with_member(cli: &Cli) -> (i64, i64, i64) {
     (fleet_id, director_id, member_id)
 }
 
+/// The pinned partial-failure stderr line: persisted id, verbatim raw cause,
+/// the no-resend instruction, and both recovery paths.
+fn partial_error(message_id: i64, recipient_id: i64, raw: &str) -> String {
+    format!(
+        "Error: Message {message_id} was persisted, but pane notification failed: {raw}. \
+         Do not resend this message. Recover the recipient pane, then run \
+         'cafleet member ping {recipient_id}' or have the recipient run \
+         'cafleet message poll {recipient_id}'."
+    )
+}
+
+/// The single persisted unicast row: `(message_id, status_state, text)`.
+fn only_unicast_row(cli: &Cli) -> (i64, String, String) {
+    let count: i64 = cli
+        .sqlite()
+        .query_row(
+            "SELECT COUNT(*) FROM messages WHERE type='unicast'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1, "exactly one persisted row — never a duplicate");
+    cli.sqlite()
+        .query_row(
+            "SELECT message_id, status_state, text FROM messages WHERE type='unicast'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap()
+}
+
 #[test]
 fn send_prints_the_header_and_the_compact_echo() {
     let cli = Cli::new();
@@ -68,6 +99,222 @@ fn send_truncates_the_echo_but_never_the_persisted_text() {
         )
         .unwrap();
     assert_eq!(stored, long_text, "persistence is never truncated");
+}
+
+#[test]
+fn send_partial_failure_reports_the_persisted_id_and_recovery() {
+    let mut cli = Cli::new();
+    let (_, director_id, member_id) = fleet_with_member(&cli);
+    cli.fail_subcommand = Some("send-keys".to_string());
+    let calls_before = cli.shim_calls().len();
+
+    let output = cli.run(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &member_id.to_string(),
+        "payload one",
+    ]);
+    assert_eq!(code(&output), 1);
+    assert_eq!(
+        stdout(&output),
+        "",
+        "the partial failure prints nothing on stdout"
+    );
+
+    let (message_id, status, text) = only_unicast_row(&cli);
+    assert_eq!(status, "input_required", "the row stays recoverable");
+    assert_eq!(text, "payload one", "the full body is persisted");
+
+    let raw = "tmux command failed: tmux send-keys -t %7 Escape\nstderr: forced failure";
+    assert!(
+        stderr(&output).contains(&partial_error(message_id, member_id, raw)),
+        "got: {}",
+        stderr(&output)
+    );
+
+    let calls = cli.shim_calls();
+    assert_eq!(
+        calls.len() - calls_before,
+        1,
+        "one notification attempt, no retry: {calls:?}"
+    );
+    assert_eq!(calls.last().unwrap(), "send-keys -t %7 Escape");
+}
+
+#[test]
+fn send_partial_failure_json_uses_the_same_text_error_channel() {
+    let mut cli = Cli::new();
+    let (_, director_id, member_id) = fleet_with_member(&cli);
+    cli.fail_subcommand = Some("send-keys".to_string());
+
+    let output = cli.run(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &member_id.to_string(),
+        "payload two",
+        "--json",
+    ]);
+    assert_eq!(code(&output), 1);
+    assert_eq!(
+        stdout(&output),
+        "",
+        "--json selects successful output only — no JSON error envelope"
+    );
+
+    let (message_id, status, _) = only_unicast_row(&cli);
+    assert_eq!(status, "input_required");
+    let raw = "tmux command failed: tmux send-keys -t %7 Escape\nstderr: forced failure";
+    assert!(
+        stderr(&output).contains(&partial_error(message_id, member_id, raw)),
+        "got: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn send_with_no_resolvable_multiplexer_persists_then_fails() {
+    let cli = Cli::new();
+    let (_, director_id, member_id) = fleet_with_member(&cli);
+    let calls_before = cli.shim_calls().len();
+
+    let output = cli.run_outside_tmux(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &member_id.to_string(),
+        "resolver gap",
+    ]);
+    assert_eq!(
+        code(&output),
+        1,
+        "an attempted notification must fail loudly"
+    );
+    assert_eq!(stdout(&output), "");
+
+    let (message_id, status, text) = only_unicast_row(&cli);
+    assert_eq!(
+        status, "input_required",
+        "resolution failure cannot preempt the insert"
+    );
+    assert_eq!(text, "resolver gap");
+
+    let raw = "no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; \
+               run cafleet inside a tmux or herdr session, or set CAFLEET_MULTIPLEXER";
+    assert!(
+        stderr(&output).contains(&partial_error(message_id, member_id, raw)),
+        "got: {}",
+        stderr(&output)
+    );
+    assert_eq!(
+        cli.shim_calls().len(),
+        calls_before,
+        "no backend invocation exists to attempt"
+    );
+}
+
+#[test]
+fn send_with_an_ambiguous_multiplexer_persists_then_fails() {
+    let mut cli = Cli::new();
+    let (_, director_id, member_id) = fleet_with_member(&cli);
+    cli.set_env("HERDR_ENV", "1");
+
+    let output = cli.run(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &member_id.to_string(),
+        "ambiguous env",
+    ]);
+    assert_eq!(code(&output), 1);
+    assert_eq!(stdout(&output), "");
+
+    let (message_id, status, _) = only_unicast_row(&cli);
+    assert_eq!(status, "input_required");
+    let raw = "ambiguous multiplexer environment: both HERDR_ENV and TMUX are set; \
+               set CAFLEET_MULTIPLEXER to 'tmux' or 'herdr' to disambiguate";
+    assert!(
+        stderr(&output).contains(&partial_error(message_id, member_id, raw)),
+        "got: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn self_send_and_no_pane_skips_stay_successful_without_a_multiplexer() {
+    let cli = Cli::new();
+    let (_, director_id, member_id) = fleet_with_member(&cli);
+
+    let output = cli.run_outside_tmux(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &director_id.to_string(),
+        "note to self",
+        "--json",
+    ]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(
+        payload["notification_sent"], false,
+        "self-send remains an intentional skip"
+    );
+
+    cli.sqlite()
+        .execute(
+            "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=?1",
+            [member_id],
+        )
+        .unwrap();
+    let output = cli.run_outside_tmux(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &member_id.to_string(),
+        "queued for pickup",
+        "--json",
+    ]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(
+        payload["notification_sent"], false,
+        "a paneless recipient remains an intentional skip"
+    );
+}
+
+#[test]
+fn broadcast_keeps_exit_zero_and_counts_when_previews_fail() {
+    let mut cli = Cli::new();
+    let (_, director_id, _member_id) = fleet_with_member(&cli);
+    cli.fail_subcommand = Some("send-keys".to_string());
+
+    let output = cli.run(&[
+        "message",
+        "broadcast",
+        "--from-member-id",
+        &director_id.to_string(),
+        "failing fanout",
+    ]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert_eq!(stderr(&output), "", "no per-recipient error list appears");
+    let out = stdout(&output);
+    assert!(
+        out.contains("recipients=2 delivered=0"),
+        "failed previews only lower the delivered count, got: {out}"
+    );
 }
 
 #[test]
@@ -400,6 +647,10 @@ fn json_is_untruncated_on_every_message_subcommand() {
     assert_eq!(
         payload["message"]["text"], long_text,
         "send --json is complete"
+    );
+    assert_eq!(
+        payload["notification_sent"], true,
+        "the delivered-preview success envelope is unchanged"
     );
     let message_id = payload["message"]["message_id"]
         .as_i64()

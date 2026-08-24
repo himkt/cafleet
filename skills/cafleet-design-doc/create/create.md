@@ -142,7 +142,7 @@ Placement-audit semantics — non-gating, retry a missing or pending row, dispat
 
 > **Clarification Exemption** ([Coordination Protocol above](#coordination-protocol)): Director-to-Drafter messages in this step ride as free-form multi-line cafleet bodies — the design doc does not yet exist. From Step 3 onward every message falls back under the schema.
 
-1. Wait for the Drafter's clarifying questions. The broker's inline-preview keystroke on the Drafter's `message send`, and your own periodic `cafleet message poll <director-member-id>`, will surface the Drafter's message once it arrives.
+1. The Drafter's clarification work is a turn boundary: end or yield your turn. The broker's inline-preview keystroke on the Drafter's `message send` re-opens a later turn once the questions arrive; retrieve the full body there with one on-demand `cafleet message poll <director-member-id>`.
 2. `cafleet message ack <message-id>` each received message after reading it.
 3. Relay the questions to the user via {decision_surface}. If {decision_surface} caps how many questions it shows at once (your overlay states the cap) and the number exceeds it, split them into multiple sequential calls to relay all questions without omission.
 4. Relay the user's answers back to the Drafter (free-form, per the Clarification Exemption above):
@@ -166,13 +166,13 @@ Enter this step after the Drafter reports `complete (doc)`, **or immediately** w
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <reviewer-member-id> "ready (doc)"
    ```
-2. **Wait** for the Reviewer's response via `cafleet message poll <director-member-id>`. Round-1 fresh review arrives as `complete (doc) — N issues`; approval arrives as `approved (doc)`. Each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design doc — the Director does NOT relay the finding text in cafleet.
+2. **End or yield the turn** — the review route is a turn boundary, and the Reviewer's notification re-opens a later turn where you poll and ACK the response. Round-1 fresh review arrives as `complete (doc) — N issues`; approval arrives as `approved (doc)`. Each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design doc — the Director does NOT relay the finding text in cafleet.
 3. **On feedback**: Route the Drafter to address the markers in-doc:
    ```bash
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <drafter-member-id> "ready (doc)"
    ```
-4. Wait for the Drafter's `addressed (doc)` reply (revisions resolve the `COMMENT(reviewer)` markers), then loop back to step 1 (re-route to Reviewer with `ready (doc)`).
+4. The correction route is again a turn boundary. When the Drafter's `addressed (doc)` reply re-opens a later turn (revisions resolve the `COMMENT(reviewer)` markers), loop back to step 1 (re-route to Reviewer with `ready (doc)`).
 5. Repeat until the Reviewer explicitly signals `approved (doc)`.
 6. **Iteration limit**: Aim for 2–3 rounds. If not converging, escalate to the user: summarize the remaining issues at a high level (read directly from the surviving `COMMENT(reviewer)` markers in the doc) and use {decision_surface} to ask whether to continue iterating or abort. Do not proceed to Step 4 until the Reviewer has approved.
 

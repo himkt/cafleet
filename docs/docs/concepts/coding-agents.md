@@ -45,6 +45,33 @@ All three honor a leading-`!` shell shortcut on the coding agent's input line,
 so `cafleet member prompt --shell` works against any pane shape. For the full
 broker CLI reference, see [CLI options](../spec/cli-options.md).
 
+## One-shot command isolation {#one-shot-command-isolation}
+
+Run every one-shot `cafleet` command as the only command of its shell-tool
+invocation, and run a sequence of CAFleet operations as separate shell-tool
+calls. This rule is backend-neutral and applies identically to `claude`,
+`codex`, and `opencode` panes.
+
+The reason is the pane push channel: a compound invocation — a one-shot
+CAFleet command placed beside another command with a newline, `;`, `&&`, a
+pipe, or shell `&` — keeps the coding agent's shell tool occupied after the
+CAFleet process exits. While the tool is occupied, the pane cannot consume an
+inbound inline-preview keystroke, and a notification aimed at that pane can
+fail even though the message itself was durably persisted. Isolated
+invocations return the pane to the composer between operations, which is what
+the push-notification channel depends on.
+
+Leading `NAME=value` environment assignments immediately preceding the
+`cafleet` executable are allowed: they set the CAFleet process's environment
+without starting another process. Shell redirection does not authorize another
+process either; a command that needs a long body should use the positional
+argument or `--file <path>` rather than a pipe.
+
+The sole exception is the long-lived `cafleet monitor` process. Its invocation
+still contains only that monitor process, but the monitor member hosts it with
+its backend-resolved long-lived-execution mechanism — see
+[Monitoring](monitoring.md) for the monitor lifecycle.
+
 ## Model selection
 
 `cafleet member create --model <string>` forwards the value to the spawned

@@ -189,16 +189,19 @@ pub fn resolve_mux(settings: &Settings) -> Result<AnyMultiplexer, MultiplexerErr
     )
 }
 
-/// The broker-side preview notifier: the resolved multiplexer when one
-/// exists, else a silent non-delivery (best-effort by contract).
+/// The broker-side preview notifier. Construction is infallible even though
+/// it runs before `broker::send_message`: a multiplexer-resolution failure is
+/// retained as its raw string and exposed only from an attempted
+/// `send_inline_preview`, so it can never preempt the insert or fail an
+/// intentional skip (SPEC §6.2).
 pub struct CliNotifier {
-    mux: Option<AnyMultiplexer>,
+    mux: Result<AnyMultiplexer, String>,
 }
 
 impl CliNotifier {
     pub fn new(settings: &Settings) -> Self {
         CliNotifier {
-            mux: resolve_mux(settings).ok(),
+            mux: resolve_mux(settings).map_err(|error| error.to_string()),
         }
     }
 }
@@ -211,10 +214,13 @@ impl InlinePreviewSender for CliNotifier {
         sender_id: i64,
         ts: &str,
         text: &str,
-    ) -> bool {
-        self.mux.as_ref().is_some_and(|mux| {
-            mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text)
-        })
+    ) -> Result<(), String> {
+        match &self.mux {
+            Ok(mux) => mux
+                .send_inline_preview(target_pane_id, message_id, sender_id, ts, text)
+                .map_err(|error| error.to_string()),
+            Err(retained) => Err(retained.clone()),
+        }
     }
 }
 
@@ -224,5 +230,43 @@ pub fn emit(json: bool, payload: &Value, text: impl FnOnce() -> String) {
         println!("{}", format_json(payload));
     } else {
         println!("{}", text());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CliNotifier;
+    use crate::broker::InlinePreviewSender;
+    use crate::config::Settings;
+
+    fn settings(multiplexer: Option<&str>) -> Settings {
+        Settings {
+            database_url: "sqlite:///unused.db".to_string(),
+            broker_host: "127.0.0.1".to_string(),
+            broker_port: 8000,
+            max_text_len: 200,
+            multiplexer: multiplexer.map(str::to_string),
+            monitor_wake_interval: 60,
+        }
+    }
+
+    #[test]
+    fn cli_notifier_construction_is_infallible_and_defers_the_resolution_error() {
+        let notifier = CliNotifier::new(&settings(Some("bogus")));
+        let expected = "CAFLEET_MULTIPLEXER='bogus' is not a supported multiplexer \
+                        (expected one of: herdr, tmux)";
+
+        let err = notifier
+            .send_inline_preview("%1", 7, 2, "2026-07-30T09:00:00.000000+00:00", "hi")
+            .unwrap_err();
+        assert_eq!(err, expected, "the retained resolve_mux error, verbatim");
+
+        let err = notifier
+            .send_inline_preview("%1", 8, 2, "2026-07-30T09:00:00.000000+00:00", "again")
+            .unwrap_err();
+        assert_eq!(
+            err, expected,
+            "the retained error survives repeated attempts"
+        );
     }
 }
