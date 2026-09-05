@@ -1,16 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchInbox, fetchSent, setFleetId } from "../src/api";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createFleetClient } from "../src/api";
 import type { TimelineResponse } from "../src/types";
 
+const client = createFleetClient(7);
 const endpoints = [
-  ["inbox", fetchInbox],
-  ["sent", fetchSent],
+  ["inbox", client.fetchInbox],
+  ["sent", client.fetchSent],
 ] as const;
 
-beforeEach(() => setFleetId(null));
 afterEach(() => {
   vi.unstubAllGlobals();
-  setFleetId(null);
 });
 
 describe("bounded member history requests", () => {
@@ -32,15 +31,14 @@ describe("bounded member history requests", () => {
     };
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(payload)));
     vi.stubGlobal("fetch", fetch);
-    setFleetId(7);
     expect(await load(42)).toEqual(payload);
     expect(fetch).toHaveBeenCalledExactlyOnceWith(
       `/api/members/42/${endpoint}?limit=201`,
-      { headers: { "X-Fleet-Id": "7" } },
+      expect.objectContaining({ headers: { "X-Fleet-Id": "7" } }),
     );
   });
 
-  it.each(endpoints)("preserves %s response errors and omits an unset fleet header", async (_endpoint, load) => {
+  it.each(endpoints)("preserves %s response errors with explicit fleet scope", async (_endpoint, load) => {
     const fetch = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ detail: "limit must be an integer between 1 and 1000" }),
       { status: 422 },
@@ -48,6 +46,6 @@ describe("bounded member history requests", () => {
     vi.stubGlobal("fetch", fetch);
     await expect(load(42)).rejects.toThrow("limit must be an integer between 1 and 1000");
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][1]).toEqual({ headers: {} });
+    expect(fetch.mock.calls[0][1]).toEqual(expect.objectContaining({ headers: { "X-Fleet-Id": "7" } }));
   });
 });
