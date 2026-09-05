@@ -61,7 +61,7 @@ fn detail(status: StatusCode, message: &str) -> Response {
 }
 
 fn broker_500(error: CafleetError) -> Response {
-    detail(StatusCode::INTERNAL_SERVER_ERROR, error.message())
+    detail(StatusCode::INTERNAL_SERVER_ERROR, &error.message())
 }
 
 /// The sync-broker bridge: every handler body runs on the blocking pool with

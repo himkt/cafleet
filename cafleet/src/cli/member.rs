@@ -341,7 +341,9 @@ fn create(
         monitor,
     )
     .map_err(|error| match error {
-        CafleetError::App(_) | CafleetError::Usage(_) => error,
+        CafleetError::App(_)
+        | CafleetError::Usage(_)
+        | CafleetError::ActiveMonitorExists { .. } => error,
         other => CafleetError::App(format!("register failed: {}", other.message())),
     })?;
     let member_id = registered["member_id"]

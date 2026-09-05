@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::{Value, json};
 
 use crate::error::CafleetError;
@@ -114,13 +114,37 @@ pub fn register_member(
 
     let now = format_utc(now_utc());
     let card = member_card(name, description, skills, monitor);
-    let tx = conn.transaction().map_err(db_err)?;
-    tx.execute(
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(db_err)?;
+    if monitor && let Some(member_id) = active_monitor_member_id(&tx, fleet_id)? {
+        return Err(CafleetError::ActiveMonitorExists {
+            fleet_id,
+            member_id,
+        });
+    }
+    let inserted = tx.execute(
         "INSERT INTO members (fleet_id, name, description, status, registered_at, member_card_json) \
          VALUES (?1, ?2, ?3, 'active', ?4, ?5)",
         params![fleet_id, name, description, now, card],
-    )
-    .map_err(db_err)?;
+    );
+    if let Err(error) = inserted {
+        // SQLite reports column names for this (non-expression) index. Match
+        // its extended code and exact column, then require a monitor conflict
+        // in this same writer transaction. Other constraints retain their cause.
+        if monitor
+            && matches!(&error, rusqlite::Error::SqliteFailure(code, Some(message))
+                if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+                    && message == "UNIQUE constraint failed: members.fleet_id")
+            && let Ok(Some(member_id)) = active_monitor_member_id(&tx, fleet_id)
+        {
+            return Err(CafleetError::ActiveMonitorExists {
+                fleet_id,
+                member_id,
+            });
+        }
+        return Err(db_err(error));
+    }
     let member_id = tx.last_insert_rowid();
     if let Some(p) = placement {
         tx.execute(

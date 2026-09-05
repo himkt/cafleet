@@ -2,7 +2,7 @@
 //! (SPEC §6.3, §8): the refinery db half, then the offline embedded assets
 //! half, failing independently.
 
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use clap::Args;
 use rusqlite::Connection;
@@ -45,6 +45,16 @@ pub fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
 /// The db-migration driver (SPEC §8): scheme validation, the two refusals,
 /// and the three head-migration messages.
 fn db_half(settings: &Settings) -> Result<(), CafleetError> {
+    db_half_with_after_diagnosis(settings, || {})
+}
+
+/// The callback runs only after a clean diagnosis for pending migrations,
+/// before opening the migration transaction. Tests can commit a competing
+/// writer on a second connection without a process-global failure switch.
+fn db_half_with_after_diagnosis(
+    settings: &Settings,
+    after_diagnosis: impl FnOnce(),
+) -> Result<(), CafleetError> {
     let path = settings
         .database_url
         .strip_prefix("sqlite:///")
@@ -89,7 +99,18 @@ fn db_half(settings: &Settings) -> Result<(), CafleetError> {
             return Ok(());
         }
     }
-    crate::db::migrate_to_head(&mut conn)?;
+    if let Some(diagnostic) = duplicate_monitor_diagnostic(&conn)? {
+        return Err(CafleetError::App(diagnostic));
+    }
+    after_diagnosis();
+    if let Err(original) = crate::db::migrate_to_head(&mut conn) {
+        // The diagnostic and migration do not hold a shared transaction. The
+        // index remains authoritative if a writer committed between them.
+        if let Ok(Some(diagnostic)) = duplicate_monitor_diagnostic(&conn) {
+            return Err(CafleetError::App(diagnostic));
+        }
+        return Err(original);
+    }
     match recorded {
         None => println!(
             "Created {} and applied migrations to head ({head}).",
@@ -98,6 +119,53 @@ fn db_half(settings: &Settings) -> Result<(), CafleetError> {
         Some(version) => println!("Upgraded from {version} to {head}."),
     }
     Ok(())
+}
+
+fn duplicate_monitor_diagnostic(conn: &Connection) -> Result<Option<String>, CafleetError> {
+    let db_error = |error| CafleetError::App(format!("database error: {error}"));
+    let members_exist: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='members')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(db_error)?;
+    if !members_exist {
+        return Ok(None);
+    }
+    let mut statement = conn
+        .prepare(
+            "SELECT fleet_id, member_id FROM members WHERE status='active' \
+             AND json_extract(member_card_json, '$.cafleet.kind')='monitor' \
+             ORDER BY fleet_id, member_id",
+        )
+        .map_err(db_error)?;
+    let rows = statement
+        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+        .map_err(db_error)?;
+    let mut fleets: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
+    for row in rows {
+        let (fleet_id, member_id) = row.map_err(db_error)?;
+        fleets.entry(fleet_id).or_default().push(member_id);
+    }
+    let conflicts: Vec<String> = fleets
+        .into_iter()
+        .filter(|(_, members)| members.len() > 1)
+        .map(|(fleet, members)| {
+            let ids = members
+                .iter()
+                .map(i64::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("fleet {fleet}: members {ids}")
+        })
+        .collect();
+    Ok((!conflicts.is_empty()).then(|| {
+        format!(
+            "active monitor duplicates prevent migration: {}",
+            conflicts.join("; ")
+        )
+    }))
 }
 
 /// The applied-migration high-water mark, `None` when the ledger is absent

@@ -41,6 +41,7 @@ pub fn connect(database_url: &str) -> Result<Connection, CafleetError> {
 /// head version.
 pub fn migrate_to_head(conn: &mut Connection) -> Result<u32, CafleetError> {
     embedded::migrations::runner()
+        .set_grouped(true)
         .run(conn)
         .map_err(|e| CafleetError::App(format!("migration failed: {e}")))?;
     Ok(head_version())
