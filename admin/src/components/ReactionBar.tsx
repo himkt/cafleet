@@ -27,11 +27,16 @@ function getCompletedRows(entry: TimelineEntry): TimelineMessage[] {
 export default function ReactionBar({ entry, members }: ReactionBarProps) {
   const completedRows = getCompletedRows(entry);
 
-  if (completedRows.length === 0) return null;
+  if (completedRows.length === 0 && entry.kind === "unicast") return null;
 
   return (
     <Tooltip.Provider delayDuration={200}>
       <div className="mt-1 flex flex-wrap gap-1">
+        {entry.kind === "broadcast" && (
+          <p className="w-full text-xs text-text-faint">
+            Recipients and ACKs shown may cover only part of this broadcast.
+          </p>
+        )}
         {completedRows.map((row) => (
           <Tooltip.Root key={row.message_id}>
             <Tooltip.Trigger className="cursor-default rounded-full bg-success-soft px-2 py-0.5 text-xs font-medium text-success focus-visible:outline-2 focus-visible:outline-accent">

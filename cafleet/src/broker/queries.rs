@@ -54,7 +54,7 @@ pub fn list_sent(conn: &Connection, member_id: i64) -> Result<Vec<Value>, Caflee
     )
 }
 
-/// The fleet's messages (scoped via the owning member's fleet), newest first,
+/// The fleet's deliveries (scoped via the owning member's fleet), newest first,
 /// hard-capped at `limit`.
 pub fn list_timeline(
     conn: &Connection,
@@ -67,7 +67,7 @@ pub fn list_timeline(
                 g.type, g.created_at, g.status_state, g.status_timestamp, \
                 g.origin_message_id, g.text \
          FROM messages g JOIN members m ON m.member_id=g.owner_member_id \
-         WHERE m.fleet_id=?1 \
+         WHERE m.fleet_id=?1 AND g.type='unicast' \
          ORDER BY g.status_timestamp DESC, g.message_id DESC LIMIT ?2",
         params![fleet_id, limit as i64],
     )

@@ -12,18 +12,28 @@ export interface Member {
   kind: "director" | "monitor" | "member";
 }
 
-export interface TimelineMessage {
+interface MessageFields {
   message_id: number;
   from_member_id: number;
   from_member_name: string;
-  to_member_id: number;
-  to_member_name: string;
   status: "input_required" | "completed";
   created_at: string;
   origin_message_id: number | null;
   status_timestamp: string;
   body: string;
 }
+
+export type TimelineMessage = MessageFields & {
+  type: "unicast";
+  to_member_id: number;
+  to_member_name: string;
+};
+
+export type FormattedMessage = TimelineMessage | (MessageFields & {
+  type: "broadcast_summary";
+  to_member_id: null;
+  to_member_name: null;
+});
 
 export type TimelineEntry =
   | { kind: "unicast"; message: TimelineMessage }
@@ -34,7 +44,7 @@ export interface MembersResponse {
 }
 
 export interface TimelineResponse {
-  messages: TimelineMessage[];
+  messages: FormattedMessage[];
 }
 
 export interface FleetListItem {

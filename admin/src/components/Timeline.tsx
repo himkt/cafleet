@@ -1,10 +1,10 @@
 import { useState, useLayoutEffect, useRef, useCallback } from "react";
 import type { ReactNode } from "react";
 import { Inbox } from "lucide-react";
-import type { TimelineMessage, TimelineEntry, Member } from "../types";
+import type { TimelineEntry, Member } from "../types";
 import { fetchTimeline } from "../api";
 import { useRefreshKeyLoad } from "../hooks/useRefreshKeyLoad";
-import { entrySortKey } from "../timeline";
+import { entrySortKey, groupMessages } from "../timeline";
 import TimelineMessageComponent from "./TimelineMessage";
 import EmptyState from "./EmptyState";
 import Skeleton from "./Skeleton";
@@ -18,39 +18,6 @@ function entryKey(entry: TimelineEntry): string {
   return entry.kind === "unicast"
     ? String(entry.message.message_id)
     : `bcast:${entry.rows[0].origin_message_id ?? entry.rows[0].message_id}`;
-}
-
-function groupMessages(msgs: TimelineMessage[]): TimelineEntry[] {
-  const groups = new Map<number, TimelineMessage[]>();
-  const singletons: TimelineEntry[] = [];
-
-  for (const m of msgs) {
-    if (!m.origin_message_id) {
-      singletons.push({ kind: "unicast", message: m });
-      continue;
-    }
-    const existing = groups.get(m.origin_message_id);
-    if (existing) {
-      existing.push(m);
-    } else {
-      groups.set(m.origin_message_id, [m]);
-    }
-  }
-
-  const broadcasts = Array.from(
-    groups.values(),
-    (rows): TimelineEntry => ({
-      kind: "broadcast",
-      rows,
-      sortKey: rows.reduce((a, b) =>
-        a.created_at < b.created_at ? a : b,
-      ).created_at,
-    }),
-  );
-
-  return [...singletons, ...broadcasts].sort((a, b) =>
-    entrySortKey(a).localeCompare(entrySortKey(b)),
-  );
 }
 
 function dayLabel(iso: string): string {

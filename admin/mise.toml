@@ -9,3 +9,6 @@ run = "pnpm install --frozen-lockfile"
 
 [tasks.build]
 run = "pnpm build"
+
+[tasks.test]
+run = "pnpm test"

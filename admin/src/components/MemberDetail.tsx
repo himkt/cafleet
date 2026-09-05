@@ -121,8 +121,12 @@ export default function MemberDetail({
       ]);
       // The endpoints are unbounded; keep ROW_CAP + 1 rows so the
       // "Showing the 200 most recent" footer still knows about the overflow.
-      setInbox(inboxData.messages.slice(0, ROW_CAP + 1));
-      setSent(sentData.messages.slice(0, ROW_CAP + 1));
+      setInbox(inboxData.messages
+        .filter((row) => row.type === "unicast")
+        .slice(0, ROW_CAP + 1));
+      setSent(sentData.messages
+        .filter((row) => row.type === "unicast")
+        .slice(0, ROW_CAP + 1));
     } catch {
       /* swallow — keep last-known lists; next bump re-attempts */
     } finally {
