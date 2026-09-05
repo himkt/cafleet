@@ -416,10 +416,8 @@ An install failure aborts the loop; rows recorded before the failure remain.
 
 ## Shared diagnosis and connection reuse {#diagnosis-reuse}
 
-The Step 6 refactoring will share typed diagnosis and an invocation's SQLite
-connection between guards and command work. This is an implementation
-contract pending implementation; the existing output and failure rules below
-remain unchanged.
+Typed diagnosis and an invocation's SQLite connection are shared between
+guards and command work. The output and failure rules below remain unchanged.
 
 | Internal schema state | Meaning |
 |---|---|
@@ -447,6 +445,12 @@ table retains the preflight error. If the first connection attempt failed,
 the assets half may try again. Targeted setup still resolves only the selected
 agents. Keep the existing refusal messages and combined half-failure result.
 HTTP connections remain scoped to individual blocking handlers.
+
+Fleet creation retains access to the connection's owner so a broker failure
+closes the actual database handle before CLI pane compensation. A failed
+explicit rollback does not prevent that close. Success keeps the same
+connection; cleanup does not reopen a closed connection just for reporting.
+See [creation failure compensation](#creation-failure-compensation).
 
 ## Schema-version guard {#schema-version-guard}
 
@@ -1089,9 +1093,8 @@ deliveries. `idle` uses the greatest non-null string among all three, parsed
 with the existing lenient reader against one `now` for the list. All null or
 an unparseable selected value yields null; no older timestamp fallback is
 used. Text remains humanized as `Ns` / `Nm` / `Nh`.
-Step 6 adds a zero clamp to the final whole-second idle result; it does not
-change stored future timestamps or parsing. That clamp is pending
-implementation. See the [activity contract](data-model.md#query-and-activity-contracts).
+A zero clamp applies to the final whole-second idle result; it does not
+change stored future timestamps or parsing. See the [activity contract](data-model.md#query-and-activity-contracts).
 Per-member detail such as `description` and `registered_at` lives on
 [`member show`](#member-show).
 

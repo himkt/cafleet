@@ -7,9 +7,12 @@ use std::{collections::BTreeMap, path::PathBuf};
 use clap::Args;
 use rusqlite::Connection;
 
+use super::{InvocationEvent, InvocationHooks, InvocationPhase, SchemaPoint, inspect_schema};
 use crate::assets::{TARGET_AGENTS, agent_paths, install_agent};
-use crate::broker::asset_installs_table_exists;
 use crate::config::Settings;
+#[cfg(test)]
+use crate::diagnosis::recorded_version;
+use crate::diagnosis::{SchemaState, asset_table_exists};
 use crate::error::CafleetError;
 
 #[derive(Args)]
@@ -19,19 +22,42 @@ pub struct SetupArgs {
     coding_agent: Vec<String>,
 }
 
-pub fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
-    let mut failed_halves: Vec<&str> = Vec::new();
-
-    if let Err(error) = db_half(settings) {
+pub fn run(
+    settings: &Settings,
+    args: SetupArgs,
+    hooks: &InvocationHooks<'_>,
+) -> Result<(), CafleetError> {
+    let mut slot = None;
+    let mut failed_halves = Vec::new();
+    let db_result = db_half_in_slot(settings, &mut slot, hooks, || {});
+    (hooks.observe)(InvocationEvent::Finished {
+        phase: InvocationPhase::SetupDatabase,
+        conn: slot.as_ref(),
+        result: &db_result,
+    });
+    if let Err(error) = db_result {
         println!("db half failed: {}", error.message());
         failed_halves.push("db");
     }
-
-    if let Err(error) = assets_half(settings, &args.coding_agent) {
+    let assets_result = (|| {
+        if slot.is_none() {
+            slot = Some((hooks.connect)(&settings.database_url)?);
+        }
+        assets_half(
+            slot.as_mut().expect("assets connection opened"),
+            &args.coding_agent,
+            hooks.asset_env,
+        )
+    })();
+    (hooks.observe)(InvocationEvent::Finished {
+        phase: InvocationPhase::SetupAssets,
+        conn: slot.as_ref(),
+        result: &assets_result,
+    });
+    if let Err(error) = assets_result {
         println!("assets half failed: {}", error.message());
         failed_halves.push("assets");
     }
-
     if failed_halves.is_empty() {
         Ok(())
     } else {
@@ -42,17 +68,29 @@ pub fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
     }
 }
 
-/// The db-migration driver (SPEC §8): scheme validation, the two refusals,
-/// and the three head-migration messages.
-fn db_half(settings: &Settings) -> Result<(), CafleetError> {
-    db_half_with_after_diagnosis(settings, || {})
-}
-
-/// The callback runs only after a clean diagnosis for pending migrations,
-/// before opening the migration transaction. Tests can commit a competing
-/// writer on a second connection without a process-global failure switch.
+// Preserve the existing per-call migration-race seam for its unit tests.
+#[cfg(test)]
 fn db_half_with_after_diagnosis(
     settings: &Settings,
+    after_diagnosis: impl FnOnce(),
+) -> Result<(), CafleetError> {
+    db_half_in_slot(
+        settings,
+        &mut None,
+        &InvocationHooks {
+            connect: &crate::db::connect,
+            observe: &|_| {},
+            asset_env: &|name| std::env::var(name).ok(),
+        },
+        after_diagnosis,
+    )
+}
+
+/// Retain ownership across the two independent setup halves.
+fn db_half_in_slot(
+    settings: &Settings,
+    slot: &mut Option<Connection>,
+    hooks: &InvocationHooks<'_>,
     after_diagnosis: impl FnOnce(),
 ) -> Result<(), CafleetError> {
     let path = settings
@@ -77,16 +115,19 @@ fn db_half_with_after_diagnosis(
             .map_err(|e| CafleetError::App(format!("cannot create {}: {e}", parent.display())))?;
     }
 
-    let mut conn = crate::db::connect(&settings.database_url)?;
+    *slot = Some((hooks.connect)(&settings.database_url)?);
+    let conn = slot.as_mut().expect("database connection opened");
     let head = crate::db::head_version();
-    let recorded = recorded_version(&conn)?;
-    if recorded.is_none() && has_foreign_tables(&conn)? {
-        return Err(CafleetError::App(
-            "DB has existing tables but no refinery_schema_history. \
-             Refusing to migrate an unversioned database."
-                .to_string(),
-        ));
-    }
+    let schema = inspect_schema(conn, SchemaPoint::SetupBefore, hooks);
+    let recorded = match schema {
+        SchemaState::Unreachable { cause } => return Err(cause),
+        SchemaState::Unversioned => return Err(CafleetError::App(
+            "DB has existing tables but no refinery_schema_history. Refusing to migrate an unversioned database.".into()
+        )),
+        SchemaState::Missing => None,
+        SchemaState::Behind { recorded, .. } | SchemaState::Ahead { recorded, .. } => Some(recorded),
+        SchemaState::Head { version } => Some(version),
+    };
     if let Some(version) = recorded {
         if version > head {
             return Err(CafleetError::App(format!(
@@ -99,18 +140,20 @@ fn db_half_with_after_diagnosis(
             return Ok(());
         }
     }
-    if let Some(diagnostic) = duplicate_monitor_diagnostic(&conn)? {
+    if let Some(diagnostic) = duplicate_monitor_diagnostic(conn)? {
         return Err(CafleetError::App(diagnostic));
     }
     after_diagnosis();
-    if let Err(original) = crate::db::migrate_to_head(&mut conn) {
+    if let Err(original) = crate::db::migrate_to_head(conn) {
         // The diagnostic and migration do not hold a shared transaction. The
         // index remains authoritative if a writer committed between them.
-        if let Ok(Some(diagnostic)) = duplicate_monitor_diagnostic(&conn) {
+        if let Ok(Some(diagnostic)) = duplicate_monitor_diagnostic(conn) {
             return Err(CafleetError::App(diagnostic));
         }
         return Err(original);
     }
+    let after = inspect_schema(conn, SchemaPoint::SetupAfter, hooks);
+    super::helpers::schema_guard(&after)?;
     match recorded {
         None => println!(
             "Created {} and applied migrations to head ({head}).",
@@ -168,46 +211,15 @@ fn duplicate_monitor_diagnostic(conn: &Connection) -> Result<Option<String>, Caf
     }))
 }
 
-/// The applied-migration high-water mark, `None` when the ledger is absent
-/// or empty.
-pub(super) fn recorded_version(conn: &Connection) -> Result<Option<u32>, CafleetError> {
-    let ledger_exists: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master \
-             WHERE type='table' AND name='refinery_schema_history')",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| CafleetError::App(format!("database error: {e}")))?;
-    if !ledger_exists {
-        return Ok(None);
-    }
-    conn.query_row(
-        "SELECT MAX(version) FROM refinery_schema_history",
-        [],
-        |row| row.get::<_, Option<u32>>(0),
-    )
-    .map_err(|e| CafleetError::App(format!("database error: {e}")))
-}
-
-/// Whether any table outside the ledger (and SQLite's own bookkeeping)
-/// exists.
-pub(super) fn has_foreign_tables(conn: &Connection) -> Result<bool, CafleetError> {
-    conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' \
-         AND name NOT LIKE 'sqlite_%' AND name != 'refinery_schema_history')",
-        [],
-        |row| row.get(0),
-    )
-    .map_err(|e| CafleetError::App(format!("database error: {e}")))
-}
-
 /// The assets half (SPEC §6.3): the explicit selector installs exactly the
 /// named agents; the no-flag form installs all three. An install failure
 /// aborts the loop; rows recorded before the failure remain.
-fn assets_half(settings: &Settings, selected: &[String]) -> Result<(), CafleetError> {
-    let mut conn = crate::db::connect(&settings.database_url)?;
-    if !asset_installs_table_exists(&conn) {
+fn assets_half(
+    conn: &mut Connection,
+    selected: &[String],
+    env: crate::config_dir::EnvLookup<'_>,
+) -> Result<(), CafleetError> {
+    if !asset_table_exists(conn)? {
         return Err(CafleetError::App(
             "the database schema is missing or outdated; run 'cafleet setup' first".to_string(),
         ));
@@ -215,14 +227,13 @@ fn assets_half(settings: &Settings, selected: &[String]) -> Result<(), CafleetEr
     let home = PathBuf::from(
         std::env::var("HOME").map_err(|_| CafleetError::App("HOME is not set".to_string()))?,
     );
-    let env = |name: &str| std::env::var(name).ok();
 
     for agent in TARGET_AGENTS {
         if !selected.is_empty() && !selected.iter().any(|s| s == agent) {
             continue;
         }
-        let paths = agent_paths(&env, &home, agent)?;
-        install_agent(&mut conn, agent, &paths, super::VERSION)?;
+        let paths = agent_paths(env, &home, agent)?;
+        install_agent(conn, agent, &paths, super::VERSION)?;
     }
     Ok(())
 }

@@ -85,7 +85,7 @@ Returns the selected fleet's roster: every active registry entry plus deregister
 
 Rows are ordered by `member_id ASC`. Holder inclusion checks
 `messages.owner_member_id = members.member_id`; a sender-only reference does
-not include a deregistered member. The planned Step 6 lean query preserves
+not include a deregistered member. The lean query preserves
 this condition and the existing response while omitting unused message
 activity aggregates. CLI member listing retains its separate activity query;
 see [query and activity contracts](data-model.md#query-and-activity-contracts).

@@ -52,9 +52,9 @@ diagnostic. A failed preview does not roll back or resend the message; keep the
 
 ## Shared diagnosis and query refactoring
 
-The following Step 6 contracts are prepared for implementation. Shared
-diagnosis, connection reuse, roster query separation, batched name lookup,
-and the final idle zero clamp are not yet implemented at this stage.
+Shared diagnosis and connection reuse preserve CLI behavior while roster
+query separation and batched name lookup avoid unused database work. Idle
+calculation clamps only its final result to zero.
 
 Keep `Diagnosis` as facts: `SchemaState` is `Missing`, `Unversioned`, `Behind`,
 `Head`, `Ahead`, or `Unreachable`; `AssetState` records each agent's resolved
@@ -71,6 +71,12 @@ DB creation/migration on the same connection. Reconnect when the first open
 failed rather than preventing recovery. HTTP retains a connection per
 blocking handler. The full guard and setup behavior is in
 [diagnosis reuse](spec/cli-options.md#diagnosis-reuse).
+
+Keep ownership available for failure cleanup: fleet creation takes the
+invocation's `Option<Connection>` slot so it can close the database before
+pane compensation on broker failure. The slot then stays empty; successful
+creation keeps the same connection. Observers report the real remaining
+connection and must not reopen it just to supply an observation.
 
 Keep `list_roster_records` free of message activity aggregates;
 `list_member_records` supplies activity for CLI member listing. Batch

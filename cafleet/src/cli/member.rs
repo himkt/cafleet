@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use super::creation::{CreationHooks, NoopCreationHooks, PaneGuard, RegistrationGuard};
-use super::helpers::{connect, emit, resolve_body, resolve_mux};
+use super::helpers::{emit, resolve_body, resolve_mux};
 use crate::broker::records::MemberRecord;
 use crate::broker::{self, NewPlacement};
 use crate::coding_agent::{SpawnProbe, coding_agent};
@@ -208,7 +208,11 @@ fn resolve_coding_agent(
     }
 }
 
-pub fn run(settings: &Settings, command: MemberCommand) -> Result<(), CafleetError> {
+pub fn run(
+    conn: &mut Connection,
+    settings: &Settings,
+    command: MemberCommand,
+) -> Result<(), CafleetError> {
     match command {
         MemberCommand::Create {
             fleet_id,
@@ -221,6 +225,7 @@ pub fn run(settings: &Settings, command: MemberCommand) -> Result<(), CafleetErr
             body,
             json,
         } => create(
+            conn,
             settings,
             fleet_id,
             &name,
@@ -232,27 +237,28 @@ pub fn run(settings: &Settings, command: MemberCommand) -> Result<(), CafleetErr
             &body,
             json,
         ),
-        MemberCommand::Delete { member_id, json } => delete(settings, member_id, json),
-        MemberCommand::Show { member_id, json } => show(settings, member_id, json),
-        MemberCommand::List { fleet_id, json } => list(settings, fleet_id, json),
+        MemberCommand::Delete { member_id, json } => delete(conn, settings, member_id, json),
+        MemberCommand::Show { member_id, json } => show(conn, member_id, json),
+        MemberCommand::List { fleet_id, json } => list(conn, fleet_id, json),
         MemberCommand::Prompt {
             member_id,
             text,
             shell,
             json,
-        } => prompt(settings, member_id, shell, &text, json),
-        MemberCommand::Ping { member_id, json } => ping(settings, member_id, json),
+        } => prompt(conn, settings, member_id, shell, &text, json),
+        MemberCommand::Ping { member_id, json } => ping(conn, settings, member_id, json),
         MemberCommand::Capture {
             member_id,
             lines,
             ansi,
             json,
-        } => capture(settings, member_id, lines, ansi, json),
+        } => capture(conn, settings, member_id, lines, ansi, json),
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 fn create(
+    conn: &mut Connection,
     settings: &Settings,
     fleet_id: i64,
     name: &str,
@@ -264,8 +270,8 @@ fn create(
     body: &PromptArgs,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let result = create_with_dependencies(
-        settings,
+    let result = create_with_connection(
+        conn,
         fleet_id,
         name,
         description,
@@ -282,6 +288,7 @@ fn create(
     Ok(())
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn create_with_dependencies<M: Multiplexer>(
     settings: &Settings,
@@ -297,10 +304,40 @@ fn create_with_dependencies<M: Multiplexer>(
     probe: &dyn SpawnProbe,
     hooks: &dyn CreationHooks,
 ) -> Result<Value, CafleetError> {
-    let mut conn = connect(settings)?;
+    let mut conn = crate::db::connect(&settings.database_url)?;
+    create_with_connection(
+        &mut conn,
+        fleet_id,
+        name,
+        description,
+        explicit_agent,
+        model,
+        effort,
+        monitor,
+        body,
+        resolve_mux,
+        probe,
+        hooks,
+    )
+}
 
+#[allow(clippy::too_many_arguments)]
+fn create_with_connection<M: Multiplexer>(
+    conn: &mut Connection,
+    fleet_id: i64,
+    name: &str,
+    description: &str,
+    explicit_agent: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
+    monitor: bool,
+    body: &PromptArgs,
+    resolve_mux: impl FnOnce() -> Result<M, MultiplexerError>,
+    probe: &dyn SpawnProbe,
+    hooks: &dyn CreationHooks,
+) -> Result<Value, CafleetError> {
     // 1. Auto-resolve the Director from the fleet row, first thing.
-    let fleet = broker::fleets::fetch_fleet(&conn, fleet_id)?
+    let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
     if fleet.deleted_at.is_some() {
         return Err(CafleetError::App(format!("fleet {fleet_id} is deleted")));
@@ -311,7 +348,7 @@ fn create_with_dependencies<M: Multiplexer>(
              with 'cafleet fleet create'."
         )));
     };
-    let agent_name = resolve_coding_agent(&conn, fleet_id, director_id, explicit_agent)?;
+    let agent_name = resolve_coding_agent(conn, fleet_id, director_id, explicit_agent)?;
     let backend = coding_agent(&agent_name)
         .unwrap_or_else(|| panic!("'{agent_name}' is a registry-validated backend"));
 
@@ -321,7 +358,7 @@ fn create_with_dependencies<M: Multiplexer>(
 
     // 3. Monitor-role guards, one-per-fleet first, before any registration
     //    or pane effect (the broker also enforces monitor uniqueness).
-    let active_monitor = broker::active_monitor_member_id(&conn, fleet_id)?;
+    let active_monitor = broker::active_monitor_member_id(conn, fleet_id)?;
     if monitor {
         if let Some(existing) = active_monitor {
             return Err(CafleetError::App(format!(
@@ -357,7 +394,7 @@ fn create_with_dependencies<M: Multiplexer>(
         coding_agent: agent_name.clone(),
     };
     let registered = broker::register_member_record(
-        &mut conn,
+        conn,
         fleet_id,
         name,
         description,
@@ -372,7 +409,7 @@ fn create_with_dependencies<M: Multiplexer>(
         other => CafleetError::App(format!("register failed: {}", other.message())),
     })?;
     let member_id = registered.member_id;
-    let mut registration = RegistrationGuard::new(&mut conn, member_id, hooks);
+    let mut registration = RegistrationGuard::new(conn, member_id, hooks);
 
     // 7. Substitute the identity placeholders; on failure deregister and
     //    re-raise the original error unwrapped.
@@ -436,13 +473,16 @@ fn create_with_dependencies<M: Multiplexer>(
     Ok(result)
 }
 
-fn delete(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetError> {
-    let mut conn = connect(settings)?;
-
+fn delete(
+    conn: &mut Connection,
+    settings: &Settings,
+    member_id: i64,
+    json: bool,
+) -> Result<(), CafleetError> {
     // Root-Director guard, before any pane mutation.
-    let fleet_id = broker::active_member_fleet(&conn, member_id)?
+    let fleet_id = broker::active_member_fleet(conn, member_id)?
         .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
-    let fleet = broker::fleets::fetch_fleet(&conn, fleet_id)?
+    let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
     if fleet.director_member_id == Some(member_id) {
         return Err(CafleetError::App(
@@ -450,7 +490,7 @@ fn delete(settings: &Settings, member_id: i64, json: bool) -> Result<(), Cafleet
         ));
     }
 
-    let member = load_member(&conn, member_id, true)?;
+    let member = load_member(conn, member_id, true)?;
     let pane = member
         .placement
         .as_ref()
@@ -472,7 +512,7 @@ fn delete(settings: &Settings, member_id: i64, json: bool) -> Result<(), Cafleet
     } else {
         "(pending — no pane)".to_string()
     };
-    broker::deregister_member(&mut conn, member_id)
+    broker::deregister_member(conn, member_id)
         .map_err(|e| CafleetError::App(format!("deregister failed: {}", e.message())))?;
 
     let result = json!({"member_id": member_id, "pane_status": pane_status});
@@ -482,17 +522,15 @@ fn delete(settings: &Settings, member_id: i64, json: bool) -> Result<(), Cafleet
     Ok(())
 }
 
-fn show(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetError> {
-    let conn = connect(settings)?;
-    let member = load_member(&conn, member_id, true)?;
+fn show(conn: &mut Connection, member_id: i64, json: bool) -> Result<(), CafleetError> {
+    let member = load_member(conn, member_id, true)?;
     let value = presentation::member(&member);
     emit(json, &value, || format_member_detail(&value));
     Ok(())
 }
 
-fn list(settings: &Settings, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
-    let conn = connect(settings)?;
-    let members: Vec<Value> = broker::list_member_records(&conn, fleet_id)?
+fn list(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
+    let members: Vec<Value> = broker::list_member_records(conn, fleet_id)?
         .iter()
         .map(presentation::member_activity)
         .collect();
@@ -503,6 +541,7 @@ fn list(settings: &Settings, fleet_id: i64, json: bool) -> Result<(), CafleetErr
 }
 
 fn prompt(
+    conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
     shell: bool,
@@ -521,8 +560,8 @@ fn prompt(
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
-    let conn = connect(settings)?;
-    let member = load_member(&conn, member_id, false)?;
+
+    let member = load_member(conn, member_id, false)?;
     let pane_id = require_pane(&member, member_id, "prompt")?;
     mux.send_prompt(&pane_id, trimmed, shell)
         .map_err(|e| CafleetError::App(format!("send failed: {e}")))?;
@@ -541,12 +580,17 @@ fn prompt(
     Ok(())
 }
 
-fn ping(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetError> {
+fn ping(
+    conn: &mut Connection,
+    settings: &Settings,
+    member_id: i64,
+    json: bool,
+) -> Result<(), CafleetError> {
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
-    let conn = connect(settings)?;
-    let member = load_member(&conn, member_id, false)?;
+
+    let member = load_member(conn, member_id, false)?;
     let name = member.name.as_str();
     let pane = member
         .placement
@@ -579,6 +623,7 @@ fn ping(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetEr
 }
 
 fn capture(
+    conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
     lines: i64,
@@ -588,8 +633,8 @@ fn capture(
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
-    let conn = connect(settings)?;
-    let member = load_member(&conn, member_id, false)?;
+
+    let member = load_member(conn, member_id, false)?;
     let pane_id = require_pane(&member, member_id, "capture")?;
     let raw = mux
         .capture_pane(&pane_id, lines)

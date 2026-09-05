@@ -1,11 +1,13 @@
 //! The `fleet` group (SPEC §6.3 *fleet group*) — the atomic fleet + Director
 //! + monitor bootstrap, list, show, and soft-delete.
 
+use rusqlite::Connection;
+
 use clap::Subcommand;
 use serde_json::Value;
 
 use super::creation::{CreationHooks, NoopCreationHooks, PaneGuard};
-use super::helpers::{connect, emit, resolve_body, resolve_mux};
+use super::helpers::{emit, resolve_body, resolve_mux};
 use crate::broker;
 use crate::coding_agent::{SpawnProbe, coding_agent};
 use crate::config::Settings;
@@ -64,7 +66,11 @@ pub enum FleetCommand {
     },
 }
 
-pub fn run(settings: &Settings, command: FleetCommand) -> Result<(), CafleetError> {
+pub fn run(
+    slot: &mut Option<Connection>,
+    settings: &Settings,
+    command: FleetCommand,
+) -> Result<(), CafleetError> {
     match command {
         FleetCommand::Create {
             name,
@@ -73,6 +79,7 @@ pub fn run(settings: &Settings, command: FleetCommand) -> Result<(), CafleetErro
             monitor_model,
             json,
         } => create(
+            slot,
             settings,
             &name,
             &coding_agent,
@@ -80,9 +87,19 @@ pub fn run(settings: &Settings, command: FleetCommand) -> Result<(), CafleetErro
             monitor_model.as_deref(),
             json,
         ),
-        FleetCommand::List { json } => list(settings, json),
-        FleetCommand::Show { fleet_id, json } => show(settings, fleet_id, json),
-        FleetCommand::Delete { fleet_id, json } => delete(settings, fleet_id, json),
+        FleetCommand::List { json } => {
+            list(slot.as_mut().expect("open invocation connection"), json)
+        }
+        FleetCommand::Show { fleet_id, json } => show(
+            slot.as_mut().expect("open invocation connection"),
+            fleet_id,
+            json,
+        ),
+        FleetCommand::Delete { fleet_id, json } => delete(
+            slot.as_mut().expect("open invocation connection"),
+            fleet_id,
+            json,
+        ),
     }
 }
 
@@ -92,6 +109,7 @@ pub fn run(settings: &Settings, command: FleetCommand) -> Result<(), CafleetErro
 /// placeholders and splits the monitor pane. A post-spawn failure kills the
 /// recorded pane after DB rollback. Cleanup failures remain in the diagnostic.
 fn create(
+    slot: &mut Option<Connection>,
     settings: &Settings,
     name: &str,
     agent_name: &str,
@@ -99,8 +117,8 @@ fn create(
     monitor_model: Option<&str>,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let fleet = create_with_dependencies(
-        settings,
+    let fleet = create_with_connection(
+        slot,
         name,
         agent_name,
         monitor_file,
@@ -113,9 +131,34 @@ fn create(
     Ok(())
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn create_with_dependencies<M: Multiplexer>(
     settings: &Settings,
+    name: &str,
+    agent_name: &str,
+    monitor_file: &str,
+    monitor_model: Option<&str>,
+    resolve_mux: impl FnOnce() -> Result<M, MultiplexerError>,
+    probe: &dyn SpawnProbe,
+    hooks: &dyn CreationHooks,
+) -> Result<Value, CafleetError> {
+    let mut slot = Some(crate::db::connect(&settings.database_url)?);
+    create_with_connection(
+        &mut slot,
+        name,
+        agent_name,
+        monitor_file,
+        monitor_model,
+        resolve_mux,
+        probe,
+        hooks,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_with_connection<M: Multiplexer>(
+    slot: &mut Option<Connection>,
     name: &str,
     agent_name: &str,
     monitor_file: &str,
@@ -140,10 +183,12 @@ fn create_with_dependencies<M: Multiplexer>(
     backend.validate_model(monitor_model)?;
     backend.ensure_available(probe)?;
 
-    let mut conn = connect(settings)?;
+    let conn = slot
+        .as_mut()
+        .ok_or_else(|| CafleetError::App("database connection is closed".into()))?;
     let mut spawned_pane: Option<PaneGuard<'_>> = None;
     let bootstrap = broker::fleets::create_fleet_with_hooks(
-        &mut conn,
+        conn,
         Some(name),
         &context.session,
         &context.window_id,
@@ -178,7 +223,7 @@ fn create_with_dependencies<M: Multiplexer>(
         Err(error) => {
             // The broker has ended its transaction scope. Close our DB handle
             // before external cleanup, including when explicit rollback failed.
-            drop(conn);
+            drop(slot.take());
             return Err(match &mut spawned_pane {
                 Some(pane) => pane.rollback(error),
                 None => error,
@@ -191,9 +236,8 @@ fn create_with_dependencies<M: Multiplexer>(
     Ok(fleet)
 }
 
-fn list(settings: &Settings, json: bool) -> Result<(), CafleetError> {
-    let conn = connect(settings)?;
-    let fleets = broker::list_fleets(&conn)?;
+fn list(conn: &mut Connection, json: bool) -> Result<(), CafleetError> {
+    let fleets = broker::list_fleets(conn)?;
     emit(json, &Value::Array(fleets.clone()), || {
         if fleets.is_empty() {
             return "No fleets found.".to_string();
@@ -222,9 +266,8 @@ fn list(settings: &Settings, json: bool) -> Result<(), CafleetError> {
     Ok(())
 }
 
-fn show(settings: &Settings, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
-    let conn = connect(settings)?;
-    let fleet = broker::get_fleet(&conn, fleet_id)?
+fn show(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
+    let fleet = broker::get_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
     emit(json, &fleet, || {
         let scalar = |value: &Value| match value {
@@ -244,9 +287,8 @@ fn show(settings: &Settings, fleet_id: i64, json: bool) -> Result<(), CafleetErr
     Ok(())
 }
 
-fn delete(settings: &Settings, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
-    let mut conn = connect(settings)?;
-    let result = broker::delete_fleet(&mut conn, fleet_id)?;
+fn delete(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
+    let result = broker::delete_fleet(conn, fleet_id)?;
     emit(json, &result, || {
         format!(
             "Deleted fleet {fleet_id}. Deregistered {} members.",

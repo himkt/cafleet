@@ -2,6 +2,81 @@
 use crate::broker::records::*;
 use serde_json::{Value, json};
 
+use crate::config_dir::DirSource;
+use crate::diagnosis::{AssetReport, AssetState, SchemaState};
+
+pub(crate) fn doctor_database_detail(schema: &SchemaState) -> String {
+    match schema {
+        SchemaState::Head { version } => format!("schema {version} (head)"),
+        SchemaState::Behind { recorded, head } => {
+            format!("schema {recorded}, head is {head} — run: cafleet setup")
+        }
+        SchemaState::Ahead { recorded, head } => {
+            format!("schema {recorded} is newer than this CLI (head {head}) — upgrade cafleet")
+        }
+        SchemaState::Unversioned => {
+            "database has tables but no schema history — not a cafleet database?".into()
+        }
+        SchemaState::Missing => "no database — run: cafleet setup".into(),
+        SchemaState::Unreachable { cause } => cause.message().into_owned(),
+    }
+}
+
+pub(crate) fn doctor_database(schema: &SchemaState, head: u32) -> Value {
+    let recorded = match schema {
+        SchemaState::Head { version } => Some(*version),
+        SchemaState::Behind { recorded, .. } | SchemaState::Ahead { recorded, .. } => {
+            Some(*recorded)
+        }
+        _ => None,
+    };
+    let ok = matches!(schema, SchemaState::Head { .. });
+    json!({"ok":ok,"schema_version":recorded,"head_version":head,
+        "error":if ok { None } else { Some(doctor_database_detail(schema)) }})
+}
+
+pub(crate) fn doctor_assets(assets: &AssetReport, cli_version: &str) -> Value {
+    let agents = assets
+        .agents
+        .iter()
+        .map(|agent| {
+            let (identity, install, state, error, source) = match &agent.state {
+                AssetState::Current { identity, install } => {
+                    (Some(identity), Some(install), "ok", None, None)
+                }
+                AssetState::Stale { identity, install } => {
+                    (Some(identity), Some(install), "stale", None, None)
+                }
+                AssetState::NotInstalled { identity } => {
+                    (Some(identity), None, "not_installed", None, None)
+                }
+                AssetState::PathError {
+                    variable, cause, ..
+                } => (None, None, "error", Some(cause.message()), Some(*variable)),
+            };
+            let source = source.unwrap_or_else(|| {
+                match &identity.expect("resolved state has identity").source {
+                    DirSource::EnvVar(name) => name,
+                    DirSource::Default => "default",
+                }
+            });
+            json!({"coding_agent":agent.coding_agent,
+            "path":identity.map(|d| d.path.display().to_string()),"source":source,
+            "recorded_version":install.map(|r| &r.cafleet_version),
+            "installed_at":install.map(|r| &r.installed_at),"state":state,"error":error})
+        })
+        .collect::<Vec<_>>();
+    let ok = assets.agents.iter().all(|a| {
+        matches!(
+            a.state,
+            AssetState::Current { .. } | AssetState::NotInstalled { .. }
+        )
+    });
+    json!({"ok":ok,"cli_version":cli_version,"agents":agents,
+        "superseded":assets.superseded.iter().map(|r| json!({"coding_agent":r.coding_agent,
+            "path":r.path,"recorded_version":r.cafleet_version,"installed_at":r.installed_at})).collect::<Vec<_>>()})
+}
+
 pub fn placement(row: &Placement) -> Value {
     json!({"backend":row.backend,"mux_session":row.mux_session,
         "mux_window_id":row.mux_window_id,"mux_pane_id":row.mux_pane_id,

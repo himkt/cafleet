@@ -681,8 +681,7 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   input executes no SQL. Deduplicate ids before querying; bind at most 500
   unique ids per `IN` query, for at most `ceil(unique_ids / 500)` queries.
   Unknown ids are absent from the map. Construct only the placeholder list
-  dynamically; all ids are bound parameters. Batching is a Step 6 requirement
-  pending implementation; these lookup results preserve existing behavior.
+  dynamically; all ids are bound parameters. Batching preserves the existing lookup results.
 
 #### Members — roster
 
@@ -702,8 +701,8 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   timestamp. Otherwise use `max(0, (now - parsed).num_seconds())`, retaining
   whole-second truncation and the existing offset/fraction parsing. Clamp
   only the final idle result; leave stored timestamps and other age outputs
-  unchanged. The final zero clamp is pending Step 6 implementation; the
-  aggregate selection and three-timestamp maximum describe current behavior.
+  unchanged. The final zero clamp leaves the aggregate selection and
+  three-timestamp maximum unchanged.
   Returns `{member_id, name,
   kind, placement, last_sent, last_recv, last_ack, idle}` per row — `kind` is
   the same three values as `get_member` (§5.4), `placement` is null for
@@ -720,7 +719,7 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   same three values as `get_member`), with
   `placement` null for placementless rows. Backs `GET /api/members`
   (`include_message_holders=True`); it is not a CLI surface. Order by
-  `member_id ASC`. Step 6 must separate this lean query from the activity
+  `member_id ASC`. This lean query is separate from the activity
   query: it performs no message activity aggregates, retaining only the
   owner-message `EXISTS` needed for holder inclusion. Keep kind precedence,
   placement null versus pending pane, and the existing wire projection.
@@ -1929,9 +1928,8 @@ An install failure aborts the loop; rows recorded before the failure remain.
 
 #### Shared diagnosis and connection reuse
 
-**Step 6 implementation contract:** the shared types and connection reuse
-below are planned; existing command text, JSON, exit codes, and validation
-order remain the compatibility baseline.
+Shared diagnosis and connection reuse preserve existing command text, JSON,
+exit codes, and validation order.
 
 `Diagnosis` holds a `SchemaState` and per-coding-agent/path `AssetState`
 facts. It carries versions, resolved paths and their sources, recorded
@@ -1963,6 +1961,13 @@ do not resolve invalid asset paths early and change which failure wins.
 `server` still has only the schema startup guard. HTTP still opens a connection
 per blocking handler; no process-global connection or diagnosis cache is
 introduced.
+
+The invocation owns an `Option<Connection>` and lends the open connection to
+command work. Fleet creation also receives its owner slot: if the broker
+fails, it closes the actual DB handle before CLI pane compensation, including
+after a failed explicit rollback. That failure leaves the slot empty; do not
+reopen merely to report it. Successful creation retains the same connection.
+This preserves the creation cleanup order specified above.
 
 Doctor keeps multiplexer → database → coding agents report order and reports
 connection/schema failures as data without suppressing the other sections.

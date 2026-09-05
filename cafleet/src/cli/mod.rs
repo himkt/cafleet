@@ -14,9 +14,60 @@ mod server;
 mod setup;
 
 use clap::{Parser, Subcommand};
+use rusqlite::Connection;
 
 use crate::config::Settings;
+use crate::diagnosis::{self, AssetMode, AssetReport, Diagnosis, SchemaState};
 use crate::error::CafleetError;
+
+pub(crate) enum SchemaPoint {
+    Guard,
+    Doctor,
+    SetupBefore,
+    SetupAfter,
+}
+pub(crate) enum InvocationPhase {
+    CommandBody,
+    SetupDatabase,
+    SetupAssets,
+}
+// Fields are consumed by per-invocation observers; the default observer is a no-op.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum InvocationEvent<'a> {
+    SchemaInspected {
+        point: SchemaPoint,
+        conn: &'a Connection,
+        state: &'a SchemaState,
+    },
+    AssetsInspected {
+        conn: Option<&'a Connection>,
+        result: &'a Result<AssetReport, CafleetError>,
+    },
+    Finished {
+        phase: InvocationPhase,
+        conn: Option<&'a Connection>,
+        result: &'a Result<(), CafleetError>,
+    },
+}
+pub(crate) struct InvocationHooks<'a> {
+    pub(crate) connect: &'a dyn Fn(&str) -> Result<Connection, CafleetError>,
+    pub(crate) observe: &'a dyn for<'event> Fn(InvocationEvent<'event>),
+    pub(crate) asset_env: crate::config_dir::EnvLookup<'a>,
+}
+
+pub(crate) fn inspect_schema(
+    conn: &Connection,
+    point: SchemaPoint,
+    hooks: &InvocationHooks<'_>,
+) -> SchemaState {
+    let state = diagnosis::classify_schema(conn, crate::db::head_version());
+    (hooks.observe)(InvocationEvent::SchemaInspected {
+        point,
+        conn,
+        state: &state,
+    });
+    state
+}
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -59,29 +110,95 @@ enum Command {
 pub fn run() -> Result<(), CafleetError> {
     let args = CliArgs::parse();
     let settings = Settings::from_env()?;
+    dispatch(
+        &settings,
+        args,
+        &InvocationHooks {
+            connect: &crate::db::connect,
+            observe: &|_| {},
+            asset_env: &|name| std::env::var(name).ok(),
+        },
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn run_with_hooks(
+    settings: &Settings,
+    argv: &[&str],
+    hooks: &InvocationHooks<'_>,
+) -> Result<(), CafleetError> {
+    let args = CliArgs::try_parse_from(argv).map_err(|e| CafleetError::Usage(e.to_string()))?;
+    dispatch(settings, args, hooks)
+}
+
+fn dispatch(
+    settings: &Settings,
+    args: CliArgs,
+    hooks: &InvocationHooks<'_>,
+) -> Result<(), CafleetError> {
     match args.command {
-        Command::Setup(cmd) => setup::run(&settings, cmd),
-        Command::Doctor(cmd) => doctor::run(&settings, cmd),
-        Command::Server(cmd) => server::run(&settings, cmd),
-        Command::Fleet(cmd) => {
-            helpers::schema_guard(&settings)?;
-            helpers::stale_assets_guard(&settings)?;
-            fleet::run(&settings, cmd)
-        }
-        Command::Member(cmd) => {
-            helpers::schema_guard(&settings)?;
-            helpers::stale_assets_guard(&settings)?;
-            member::run(&settings, cmd)
-        }
-        Command::Message(cmd) => {
-            helpers::schema_guard(&settings)?;
-            helpers::stale_assets_guard(&settings)?;
-            message::run(&settings, cmd)
-        }
-        Command::Monitor(cmd) => {
-            helpers::schema_guard(&settings)?;
-            helpers::stale_assets_guard(&settings)?;
-            monitor::run(&settings, cmd)
+        Command::Setup(cmd) => setup::run(settings, cmd, hooks),
+        Command::Doctor(cmd) => doctor::run(settings, cmd, hooks),
+        command => {
+            let conn = (hooks.connect)(&settings.database_url)?;
+            let mut facts = Diagnosis {
+                head_version: crate::db::head_version(),
+                schema: inspect_schema(&conn, SchemaPoint::Guard, hooks),
+                assets: None,
+            };
+            helpers::schema_guard(&facts.schema)?;
+            if !matches!(command, Command::Server(_)) {
+                let home = std::path::PathBuf::from(
+                    std::env::var("HOME")
+                        .map_err(|_| CafleetError::App("HOME is not set".into()))?,
+                );
+                let assets = diagnosis::diagnose_assets(
+                    Some(&conn),
+                    hooks.asset_env,
+                    &home,
+                    VERSION,
+                    AssetMode::Guard,
+                );
+                (hooks.observe)(InvocationEvent::AssetsInspected {
+                    conn: Some(&conn),
+                    result: &assets,
+                });
+                facts.assets = Some(assets);
+                let assets = facts
+                    .assets
+                    .as_ref()
+                    .expect("assets just inspected")
+                    .as_ref()
+                    .map_err(Clone::clone)?;
+                helpers::stale_assets_guard(assets, VERSION)?;
+            }
+            let mut slot = Some(conn);
+            let result = match command {
+                Command::Fleet(cmd) => fleet::run(&mut slot, settings, cmd),
+                Command::Member(cmd) => member::run(
+                    slot.as_mut().expect("open invocation connection"),
+                    settings,
+                    cmd,
+                ),
+                Command::Message(cmd) => message::run(
+                    slot.as_mut().expect("open invocation connection"),
+                    settings,
+                    cmd,
+                ),
+                Command::Monitor(cmd) => monitor::run(
+                    slot.as_mut().expect("open invocation connection"),
+                    settings,
+                    cmd,
+                ),
+                Command::Server(cmd) => server::run(settings, cmd),
+                Command::Setup(_) | Command::Doctor(_) => unreachable!("handled above"),
+            };
+            (hooks.observe)(InvocationEvent::Finished {
+                phase: InvocationPhase::CommandBody,
+                conn: slot.as_ref(),
+                result: &result,
+            });
+            result
         }
     }
 }

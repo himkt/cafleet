@@ -3,10 +3,12 @@
 //! text = truncation + compact rendering). The broker derives the fleet and
 //! recipient from the subject row.
 
+use rusqlite::Connection;
+
 use clap::{Args, Subcommand};
 use serde_json::Value;
 
-use super::helpers::{connect, resolve_body};
+use super::helpers::resolve_body;
 use crate::broker;
 use crate::broker::records::NotificationAttempt;
 use crate::config::Settings;
@@ -98,7 +100,11 @@ fn emit_result(
     }
 }
 
-pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetError> {
+pub fn run(
+    conn: &mut Connection,
+    settings: &Settings,
+    command: MessageCommand,
+) -> Result<(), CafleetError> {
     match command {
         MessageCommand::Send {
             from_member_id,
@@ -107,10 +113,10 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
             json,
         } => {
             let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
-            let mut conn = connect(settings)?;
+
             let notifier = RuntimeNotifier::new(settings);
             let outcome = broker::send_message_record(
-                &mut conn,
+                conn,
                 &notifier,
                 settings.max_text_len,
                 from_member_id,
@@ -140,10 +146,10 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
             json,
         } => {
             let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
-            let mut conn = connect(settings)?;
+
             let notifier = RuntimeNotifier::new(settings);
             let result = broker::broadcast_message_record(
-                &mut conn,
+                conn,
                 &notifier,
                 settings.max_text_len,
                 from_member_id,
@@ -163,8 +169,7 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
             Ok(())
         }
         MessageCommand::Poll { member_id, json } => {
-            let conn = connect(settings)?;
-            let result = broker::poll_message_records(&conn, member_id)?
+            let result = broker::poll_message_records(conn, member_id)?
                 .iter()
                 .map(presentation::message)
                 .collect();
@@ -175,18 +180,16 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
             Ok(())
         }
         MessageCommand::Ack { message_id, json } => {
-            let mut conn = connect(settings)?;
             let result =
-                presentation::message_envelope(&broker::ack_message_record(&mut conn, message_id)?);
+                presentation::message_envelope(&broker::ack_message_record(conn, message_id)?);
             emit_result(settings, result, json, |result| {
                 format!("Message acknowledged.\n{}", format_message(result))
             });
             Ok(())
         }
         MessageCommand::Show { message_id, json } => {
-            let conn = connect(settings)?;
             let result =
-                presentation::message_envelope(&broker::get_message_record(&conn, message_id)?);
+                presentation::message_envelope(&broker::get_message_record(conn, message_id)?);
             emit_result(settings, result, json, format_message);
             Ok(())
         }

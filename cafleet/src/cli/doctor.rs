@@ -6,17 +6,17 @@
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-use rusqlite::Connection;
 use serde_json::{Value, json};
 use unicode_width::UnicodeWidthStr;
 
 use super::helpers::{emit, resolve_mux, tilde};
-use super::setup::{has_foreign_tables, recorded_version};
-use crate::broker::{asset_installs_table_exists, list_asset_installs};
+use super::{InvocationEvent, InvocationHooks, SchemaPoint, inspect_schema};
 use crate::config::Settings;
-use crate::config_dir::{DirSource, claude_config_dir, codex_home, opencode_preset_base};
+use crate::config_dir::DirSource;
+use crate::diagnosis::{self, AssetMode, AssetReport, AssetState, Diagnosis, SchemaState};
 use crate::error::CafleetError;
 use crate::multiplexer::{Multiplexer, MultiplexerContext};
+use crate::presentation;
 
 #[derive(Args)]
 pub struct DoctorArgs {
@@ -32,78 +32,60 @@ struct MuxOk {
     presence_value: String,
 }
 
-enum DbReport {
-    Head(u32),
-    Behind(u32, u32),
-    Ahead(u32, u32),
-    Unversioned,
-    Missing,
-    Unreachable(String),
-}
-
-impl DbReport {
-    fn ok(&self) -> bool {
-        matches!(self, DbReport::Head(_))
-    }
-
-    fn detail(&self) -> String {
-        match self {
-            DbReport::Head(n) => format!("schema {n} (head)"),
-            DbReport::Behind(m, n) => format!("schema {m}, head is {n} — run: cafleet setup"),
-            DbReport::Ahead(m, n) => {
-                format!("schema {m} is newer than this CLI (head {n}) — upgrade cafleet")
-            }
-            DbReport::Unversioned => {
-                "database has tables but no schema history — not a cafleet database?".to_string()
-            }
-            DbReport::Missing => "no database — run: cafleet setup".to_string(),
-            DbReport::Unreachable(error) => error.clone(),
-        }
-    }
-
-    fn schema_version(&self) -> Value {
-        match self {
-            DbReport::Head(n) => json!(n),
-            DbReport::Behind(m, _) | DbReport::Ahead(m, _) => json!(m),
-            _ => Value::Null,
-        }
-    }
-}
-
 struct AgentRow {
     agent: &'static str,
     path_cell: String,
-    json_path: Value,
     source_cell: String,
-    json_source: String,
     setup_cell: String,
-    state: &'static str,
-    recorded_version: Value,
-    installed_at: Value,
-    error: Value,
     is_issue: bool,
 }
 
-pub fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
+pub fn run(
+    settings: &Settings,
+    args: DoctorArgs,
+    hooks: &InvocationHooks<'_>,
+) -> Result<(), CafleetError> {
     let home = PathBuf::from(
         std::env::var("HOME").map_err(|_| CafleetError::App("HOME is not set".to_string()))?,
     );
 
     let mux = multiplexer_report(settings);
-    let conn = crate::db::connect(&settings.database_url);
-    let db = match &conn {
-        Ok(conn) => database_report(conn),
-        Err(error) => DbReport::Unreachable(error.message().to_string()),
+    let conn = (hooks.connect)(&settings.database_url);
+    let mut facts = Diagnosis {
+        head_version: crate::db::head_version(),
+        schema: match &conn {
+            Ok(conn) => inspect_schema(conn, SchemaPoint::Doctor, hooks),
+            Err(cause) => SchemaState::Unreachable {
+                cause: cause.clone(),
+            },
+        },
+        assets: None,
     };
-    let rows: Vec<Value> = match &conn {
-        Ok(conn) if db.ok() && asset_installs_table_exists(conn) => list_asset_installs(conn)?,
-        _ => Vec::new(),
-    };
-    let agents = agent_rows(&home, &rows);
-    let superseded = superseded_rows(&agents, &rows);
+    let db_ok = matches!(facts.schema, SchemaState::Head { .. });
+    let asset_conn = if db_ok { conn.as_ref().ok() } else { None };
+    let assets = diagnosis::diagnose_assets(
+        asset_conn,
+        hooks.asset_env,
+        &home,
+        super::VERSION,
+        AssetMode::Report,
+    );
+    (hooks.observe)(InvocationEvent::AssetsInspected {
+        conn: asset_conn,
+        result: &assets,
+    });
+    facts.assets = Some(assets);
+    let assets = facts
+        .assets
+        .as_ref()
+        .expect("assets inspected")
+        .as_ref()
+        .map_err(Clone::clone)?;
+    let agents = agent_rows(&home, assets);
+    let superseded = &assets.superseded;
 
     let issues = usize::from(mux.is_err())
-        + usize::from(!db.ok())
+        + usize::from(!db_ok)
         + agents.iter().filter(|row| row.is_issue).count();
     let agents_ok = agents.iter().all(|row| !row.is_issue);
 
@@ -130,31 +112,8 @@ pub fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
                 "error": error,
             }),
         },
-        "database": {
-            "ok": db.ok(),
-            "schema_version": db.schema_version(),
-            "head_version": crate::db::head_version(),
-            "error": if db.ok() { Value::Null } else { json!(db.detail()) },
-        },
-        "coding_agents": {
-            "ok": agents_ok,
-            "cli_version": super::VERSION,
-            "agents": agents.iter().map(|row| json!({
-                "coding_agent": row.agent,
-                "path": row.json_path,
-                "source": row.json_source,
-                "recorded_version": row.recorded_version,
-                "installed_at": row.installed_at,
-                "state": row.state,
-                "error": row.error,
-            })).collect::<Vec<_>>(),
-            "superseded": superseded.iter().map(|row| json!({
-                "coding_agent": row["coding_agent"],
-                "path": row["path"],
-                "recorded_version": row["cafleet_version"],
-                "installed_at": row["installed_at"],
-            })).collect::<Vec<_>>(),
-        },
+        "database": presentation::doctor_database(&facts.schema, facts.head_version),
+        "coding_agents": presentation::doctor_assets(assets, super::VERSION),
         "issues": issues,
     });
 
@@ -177,8 +136,11 @@ pub fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
                 lines.push(format!("  {error}"));
             }
         }
-        lines.push(format!("{} database", if db.ok() { "✓" } else { "✗" }));
-        lines.push(format!("  {}", db.detail()));
+        lines.push(format!("{} database", if db_ok { "✓" } else { "✗" }));
+        lines.push(format!(
+            "  {}",
+            presentation::doctor_database_detail(&facts.schema)
+        ));
         lines.push(format!(
             "{} coding agents",
             if agents_ok { "✓" } else { "✗" }
@@ -186,11 +148,11 @@ pub fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
         for line in framed_table(&agents) {
             lines.push(format!("  {line}"));
         }
-        for row in &superseded {
+        for row in superseded {
             lines.push(format!(
                 "  note: {} was previously set up at {}",
-                row["coding_agent"].as_str().expect("rows carry the agent"),
-                tilde(row["path"].as_str().expect("rows carry the path"), &home)
+                row.coding_agent,
+                tilde(&row.path, &home)
             ));
         }
         lines.push(match issues {
@@ -223,114 +185,53 @@ fn multiplexer_report(settings: &Settings) -> Result<MuxOk, String> {
     })
 }
 
-fn database_report(conn: &Connection) -> DbReport {
-    let head = crate::db::head_version();
-    match recorded_version(conn) {
-        Err(error) => DbReport::Unreachable(error.message().to_string()),
-        Ok(Some(recorded)) if recorded == head => DbReport::Head(recorded),
-        Ok(Some(recorded)) if recorded < head => DbReport::Behind(recorded, head),
-        Ok(Some(recorded)) => DbReport::Ahead(recorded, head),
-        Ok(None) => match has_foreign_tables(conn) {
-            Err(error) => DbReport::Unreachable(error.message().to_string()),
-            Ok(true) => DbReport::Unversioned,
-            Ok(false) => DbReport::Missing,
-        },
-    }
-}
-
-/// One row per agent in the fixed order, resolution errors caught per agent
-/// and rendered as the `error` state instead of aborting.
-fn agent_rows(home: &Path, rows: &[Value]) -> Vec<AgentRow> {
-    let env = |name: &str| std::env::var(name).ok();
-    ["claude", "codex", "opencode"]
-        .into_iter()
+/// Render typed asset facts using the existing text-only cells.
+fn agent_rows(home: &Path, report: &AssetReport) -> Vec<AgentRow> {
+    report
+        .agents
+        .iter()
         .map(|agent| {
-            let (var, resolved) = match agent {
-                "claude" => ("CLAUDE_CONFIG_DIR", claude_config_dir(&env, home)),
-                "codex" => ("CODEX_HOME", codex_home(&env, home)),
-                _ => ("OPENCODE_CONFIG_DIR", opencode_preset_base(&env, home)),
-            };
-            match resolved {
-                Err(error) => AgentRow {
-                    agent,
-                    path_cell: env(var).expect("a resolution error implies a set variable"),
-                    json_path: Value::Null,
-                    source_cell: format!("${var}"),
-                    json_source: var.to_string(),
-                    setup_cell: format!("✗ {var} is not an absolute path"),
-                    state: "error",
-                    recorded_version: Value::Null,
-                    installed_at: Value::Null,
-                    error: json!(error.message()),
-                    is_issue: true,
-                },
-                Ok(resolved) => {
-                    let identity = resolved.path.display().to_string();
-                    let (source_cell, json_source) = match resolved.source {
-                        DirSource::EnvVar(name) => (format!("${name}"), name.to_string()),
-                        DirSource::Default => ("default".to_string(), "default".to_string()),
-                    };
-                    let current = rows.iter().find(|row| {
-                        row["coding_agent"] == agent && row["path"] == identity.as_str()
-                    });
-                    let (setup_cell, state, recorded, installed_at, is_issue) = match current {
-                        Some(row) if row["cafleet_version"] == super::VERSION => (
-                            format!("✓ {}", super::VERSION),
-                            "ok",
-                            row["cafleet_version"].clone(),
-                            row["installed_at"].clone(),
-                            false,
-                        ),
-                        Some(row) => (
-                            format!(
-                                "✗ {} → cafleet setup --coding-agent {agent}",
-                                row["cafleet_version"]
-                                    .as_str()
-                                    .expect("rows carry the version")
-                            ),
-                            "stale",
-                            row["cafleet_version"].clone(),
-                            row["installed_at"].clone(),
-                            true,
-                        ),
-                        None => (
-                            format!("– cafleet setup --coding-agent {agent}"),
-                            "not_installed",
-                            Value::Null,
-                            Value::Null,
-                            false,
-                        ),
-                    };
-                    AgentRow {
-                        agent,
-                        path_cell: tilde(&identity, home),
-                        json_path: json!(identity),
-                        source_cell,
-                        json_source,
-                        setup_cell,
-                        state,
-                        recorded_version: recorded,
-                        installed_at,
-                        error: Value::Null,
-                        is_issue,
-                    }
+            let (identity, setup_cell, is_issue) = match &agent.state {
+                AssetState::Current { identity, install } => {
+                    (identity, format!("✓ {}", install.cafleet_version), false)
                 }
+                AssetState::Stale { identity, install } => (
+                    identity,
+                    format!(
+                        "✗ {} → cafleet setup --coding-agent {}",
+                        install.cafleet_version, agent.coding_agent
+                    ),
+                    true,
+                ),
+                AssetState::NotInstalled { identity } => (
+                    identity,
+                    format!("– cafleet setup --coding-agent {}", agent.coding_agent),
+                    false,
+                ),
+                AssetState::PathError {
+                    variable,
+                    raw_value,
+                    ..
+                } => {
+                    return AgentRow {
+                        agent: agent.coding_agent,
+                        path_cell: raw_value.clone(),
+                        source_cell: format!("${variable}"),
+                        setup_cell: format!("✗ {variable} is not an absolute path"),
+                        is_issue: true,
+                    };
+                }
+            };
+            AgentRow {
+                agent: agent.coding_agent,
+                path_cell: tilde(&identity.path.display().to_string(), home),
+                source_cell: match identity.source {
+                    DirSource::EnvVar(name) => format!("${name}"),
+                    DirSource::Default => "default".into(),
+                },
+                setup_cell,
+                is_issue,
             }
-        })
-        .collect()
-}
-
-/// The recorded rows at paths other than their agent's resolved identity
-/// path, in the stored ascending `(coding_agent, path)` order. Rows of an
-/// agent in the `error` state stay unclassified and are omitted.
-fn superseded_rows<'a>(agents: &[AgentRow], rows: &'a [Value]) -> Vec<&'a Value> {
-    rows.iter()
-        .filter(|row| {
-            agents.iter().any(|agent_row| {
-                row["coding_agent"] == agent_row.agent
-                    && agent_row.json_path != Value::Null
-                    && row["path"] != agent_row.json_path
-            })
         })
         .collect()
 }

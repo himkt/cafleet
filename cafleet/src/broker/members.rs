@@ -305,19 +305,36 @@ pub fn get_member_names(
     conn: &Connection,
     member_ids: &[i64],
 ) -> Result<BTreeMap<i64, String>, CafleetError> {
+    get_member_names_observed(conn, member_ids, &|_| {})
+}
+
+pub(crate) fn get_member_names_observed(
+    conn: &Connection,
+    member_ids: &[i64],
+    observe: &dyn Fn(&rusqlite::Statement<'_>),
+) -> Result<BTreeMap<i64, String>, CafleetError> {
+    let ids = member_ids
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    let ids = ids.into_iter().collect::<Vec<_>>();
     let mut names = BTreeMap::new();
-    for &member_id in member_ids {
-        let name: Option<String> = conn
-            .query_row(
-                "SELECT name FROM members WHERE member_id=?1",
-                [member_id],
-                |row| row.get(0),
-            )
-            .optional()
+    for chunk in ids.chunks(500) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let mut statement = conn
+            .prepare(&format!(
+                "SELECT member_id, name FROM members WHERE member_id IN ({placeholders})"
+            ))
             .map_err(db_err)?;
-        if let Some(name) = name {
-            names.insert(member_id, name);
-        }
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(chunk), |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(db_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(db_err)?;
+        observe(&statement);
+        names.extend(rows);
     }
     Ok(names)
 }
@@ -326,7 +343,16 @@ fn roster_rows(
     conn: &Connection,
     fleet_id: i64,
     include_message_holders: bool,
+    activity: bool,
+    observe: &dyn Fn(&rusqlite::Statement<'_>),
 ) -> Result<Vec<MemberActivity>, CafleetError> {
+    let activity_columns = if activity {
+        ", (SELECT MAX(created_at) FROM messages WHERE from_member_id=m.member_id), \
+          (SELECT MAX(created_at) FROM messages WHERE owner_member_id=m.member_id AND type='unicast'), \
+          (SELECT MAX(status_timestamp) FROM messages WHERE owner_member_id=m.member_id AND type='unicast' AND status_state='completed')"
+    } else {
+        ""
+    };
     let mut stmt = conn
         .prepare(&format!(
             "SELECT m.member_id, m.name, m.status, \
@@ -334,13 +360,8 @@ fn roster_rows(
                            WHERE f.fleet_id=m.fleet_id AND f.director_member_id=m.member_id), \
                     p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, \
                     p.created_at, \
-                    (SELECT MAX(created_at) FROM messages WHERE from_member_id=m.member_id), \
-                    (SELECT MAX(created_at) FROM messages \
-                     WHERE owner_member_id=m.member_id AND type='unicast'), \
-                    (SELECT MAX(status_timestamp) FROM messages \
-                     WHERE owner_member_id=m.member_id AND type='unicast' \
-                       AND status_state='completed'), \
                     m.description, m.registered_at, {IS_MONITOR_COLUMN}, m.member_card_json \
+                    {activity_columns} \
              FROM members m LEFT JOIN member_placements p ON p.member_id=m.member_id \
              WHERE m.fleet_id=?1 AND (m.status='active' OR (?2 AND EXISTS( \
                    SELECT 1 FROM messages WHERE owner_member_id=m.member_id))) \
@@ -356,21 +377,22 @@ fn roster_rows(
                     fleet_id,
                     name: row.get(1)?,
                     status: row.get::<_, MemberStatus>(2)?,
-                    kind: member_kind(row.get(3)?, row.get(15)?),
+                    kind: member_kind(row.get(3)?, row.get(12)?),
                     placement: backend.map(|_| Placement::from_row(row, 4)).transpose()?,
-                    description: row.get(13)?,
-                    registered_at: row.get(14)?,
-                    skills: skills_from_card(&row.get::<_, String>(16)?),
+                    description: row.get(10)?,
+                    registered_at: row.get(11)?,
+                    skills: skills_from_card(&row.get::<_, String>(13)?),
                 },
-                last_sent: row.get(10)?,
-                last_recv: row.get(11)?,
-                last_ack: row.get(12)?,
+                last_sent: if activity { row.get(14)? } else { None },
+                last_recv: if activity { row.get(15)? } else { None },
+                last_ack: if activity { row.get(16)? } else { None },
                 idle: None,
             })
         })
         .map_err(db_err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(db_err)?;
+    observe(&stmt);
     Ok(rows)
 }
 
@@ -380,15 +402,23 @@ fn idle_seconds(row: &MemberActivity, now: chrono::DateTime<chrono::Utc>) -> Opt
         .flatten()
         .max()?;
     let parsed = parse_lenient(latest).ok()?;
-    Some((now - parsed).num_seconds())
+    Some((now - parsed).num_seconds().max(0))
 }
 
 pub fn list_member_records(
     conn: &Connection,
     fleet_id: i64,
 ) -> Result<Vec<MemberActivity>, CafleetError> {
-    let now = now_utc();
-    let mut rows = roster_rows(conn, fleet_id, false)?;
+    list_member_records_observed(conn, fleet_id, now_utc(), &|_| {})
+}
+
+pub(crate) fn list_member_records_observed(
+    conn: &Connection,
+    fleet_id: i64,
+    now: chrono::DateTime<chrono::Utc>,
+    observe: &dyn Fn(&rusqlite::Statement<'_>),
+) -> Result<Vec<MemberActivity>, CafleetError> {
+    let mut rows = roster_rows(conn, fleet_id, false, true, observe)?;
     for row in &mut rows {
         row.idle = idle_seconds(row, now);
     }
@@ -400,10 +430,21 @@ pub fn list_roster_records(
     fleet_id: i64,
     include_message_holders: bool,
 ) -> Result<Vec<MemberRecord>, CafleetError> {
-    Ok(roster_rows(conn, fleet_id, include_message_holders)?
-        .into_iter()
-        .map(|row| row.member)
-        .collect())
+    list_roster_records_observed(conn, fleet_id, include_message_holders, &|_| {})
+}
+
+pub(crate) fn list_roster_records_observed(
+    conn: &Connection,
+    fleet_id: i64,
+    include_message_holders: bool,
+    observe: &dyn Fn(&rusqlite::Statement<'_>),
+) -> Result<Vec<MemberRecord>, CafleetError> {
+    Ok(
+        roster_rows(conn, fleet_id, include_message_holders, false, observe)?
+            .into_iter()
+            .map(|row| row.member)
+            .collect(),
+    )
 }
 
 #[cfg(test)]

@@ -2,11 +2,13 @@
 //! guard, the in-process heartbeat loop, and the one-shot `scan` batch
 //! capture.
 
+use rusqlite::Connection;
+
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use super::helpers::{connect, emit, resolve_mux};
+use super::helpers::{emit, resolve_mux};
 use crate::broker;
 use crate::config::Settings;
 use crate::error::CafleetError;
@@ -64,15 +66,20 @@ fn require_live_fleet(
 
 /// Dispatch the two forms: the `scan` subcommand, else the loop (clap
 /// guarantees the loop positional whenever no subcommand is given).
-pub fn run(settings: &Settings, args: MonitorArgs) -> Result<(), CafleetError> {
+pub fn run(
+    conn: &mut Connection,
+    settings: &Settings,
+    args: MonitorArgs,
+) -> Result<(), CafleetError> {
     match args.command {
         Some(MonitorCommand::Scan {
             fleet_id,
             lines,
             ansi,
             json,
-        }) => scan(settings, fleet_id, lines, ansi, json),
+        }) => scan(conn, settings, fleet_id, lines, ansi, json),
         None => run_loop(
+            conn,
             settings,
             args.fleet_id
                 .expect("clap guarantees the loop positional when no subcommand is given"),
@@ -85,19 +92,19 @@ pub fn run(settings: &Settings, args: MonitorArgs) -> Result<(), CafleetError> {
 /// Requires a live fleet, then the multiplexer; blocks in the loop until
 /// stopped or displaced.
 fn run_loop(
+    conn: &mut Connection,
     settings: &Settings,
     fleet_id: i64,
     tick: i64,
     interval: Option<i64>,
 ) -> Result<(), CafleetError> {
-    let mut conn = connect(settings)?;
-    require_live_fleet(&conn, fleet_id)?;
+    require_live_fleet(conn, fleet_id)?;
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
     let mut out = std::io::stdout();
     crate::monitor::run_monitor_loop(
-        &mut conn,
+        conn,
         &mux,
         &mut out,
         fleet_id,
@@ -110,20 +117,20 @@ fn run_loop(
 /// first, then every other active placement-owning member ascending by
 /// member id. An annotated entry never aborts the scan; no DB writes.
 fn scan(
+    conn: &mut Connection,
     settings: &Settings,
     fleet_id: i64,
     lines: i64,
     ansi: bool,
     json_output: bool,
 ) -> Result<(), CafleetError> {
-    let conn = connect(settings)?;
-    let fleet = require_live_fleet(&conn, fleet_id)?;
+    let fleet = require_live_fleet(conn, fleet_id)?;
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
     let director_member_id = fleet.director_member_id;
-    let members = broker::list_member_records(&conn, fleet_id)?
+    let members = broker::list_member_records(conn, fleet_id)?
         .into_iter()
         .map(|row| row.member)
         .collect::<Vec<_>>();

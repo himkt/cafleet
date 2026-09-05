@@ -5,6 +5,7 @@ pub mod coding_agent;
 pub mod config;
 pub mod config_dir;
 pub mod db;
+pub(crate) mod diagnosis;
 pub mod embedded;
 pub mod error;
 pub mod monitor;
@@ -15,3 +16,6 @@ pub mod runtime;
 pub mod spawn_prompt;
 pub mod time;
 pub mod webui;
+
+#[cfg(test)]
+mod step6_contract_tests;

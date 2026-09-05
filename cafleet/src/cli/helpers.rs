@@ -2,109 +2,68 @@
 //! positional-`TEXT` / `--file` body reader, multiplexer resolution, and the
 //! JSON-vs-text emit fork.
 
-use std::path::PathBuf;
-
-use rusqlite::Connection;
 use serde_json::Value;
 
-use crate::broker::{asset_installs_table_exists, list_asset_installs};
-use crate::config::Settings;
-use crate::config_dir::{claude_config_dir, codex_home, opencode_preset_base};
 use crate::error::CafleetError;
 use crate::output::format_json;
 pub use crate::runtime::resolve_mux;
 use crate::runtime::system::read_stdin;
 
-pub fn connect(settings: &Settings) -> Result<Connection, CafleetError> {
-    crate::db::connect(&settings.database_url)
-}
-
-/// Each agent's recorded-path identity (SPEC §6.3 *Config-dir resolution*),
-/// in the fixed `claude`, `codex`, `opencode` order.
-fn identity_paths() -> Result<[(&'static str, String); 3], CafleetError> {
-    let home = PathBuf::from(
-        std::env::var("HOME").map_err(|_| CafleetError::App("HOME is not set".to_string()))?,
-    );
-    let env = |name: &str| std::env::var(name).ok();
-    Ok([
-        ("claude", claude_config_dir(&env, &home)?.path),
-        ("codex", codex_home(&env, &home)?.path),
-        ("opencode", opencode_preset_base(&env, &home)?.path),
-    ]
-    .map(|(agent, path)| (agent, path.display().to_string())))
-}
-
-/// The schema-version guard (SPEC §6.3): classifies the database against the
-/// embedded head before any non-setup command body runs — ahead of the
-/// stale-assets guard, so no missing or outdated schema state reaches
-/// `asset_installs`. Connection-level failures keep their own errors.
-pub fn schema_guard(settings: &Settings) -> Result<(), CafleetError> {
-    let conn = connect(settings)?;
-    let head = crate::db::head_version();
-    match super::setup::recorded_version(&conn)? {
-        Some(recorded) if recorded == head => Ok(()),
-        Some(recorded) if recorded < head => Err(CafleetError::App(format!(
+/// Preserve the CLI guard's wording while sharing schema classification.
+pub(crate) fn schema_guard(schema: &crate::diagnosis::SchemaState) -> Result<(), CafleetError> {
+    use crate::diagnosis::SchemaState;
+    match schema {
+        SchemaState::Head { .. } => Ok(()),
+        SchemaState::Behind { recorded, head } => Err(CafleetError::App(format!(
             "database schema is outdated (schema {recorded}, head {head}); run 'cafleet setup'"
         ))),
-        Some(recorded) => Err(CafleetError::App(format!(
+        SchemaState::Ahead { recorded, head } => Err(CafleetError::App(format!(
             "database schema {recorded} is newer than this cafleet (head {head}); upgrade cafleet"
         ))),
-        None if super::setup::has_foreign_tables(&conn)? => Err(CafleetError::App(
-            "database has tables but no schema history — not a cafleet database?".to_string(),
+        SchemaState::Unversioned => Err(CafleetError::App(
+            "database has tables but no schema history — not a cafleet database?".into(),
         )),
-        None => Err(CafleetError::App(
-            "no cafleet database; run 'cafleet setup'".to_string(),
+        SchemaState::Missing => Err(CafleetError::App(
+            "no cafleet database; run 'cafleet setup'".into(),
         )),
+        SchemaState::Unreachable { cause } => Err(cause.clone()),
     }
 }
 
-/// The stale-assets guard (SPEC §6.3): resolves each agent's identity path
-/// and validates only the recorded rows at those paths before any
-/// fleet-scoped subcommand body runs; superseded rows at other paths are
-/// ignored.
-pub fn stale_assets_guard(settings: &Settings) -> Result<(), CafleetError> {
-    let identities = identity_paths()?;
-    let recorded = match connect(settings) {
-        Ok(conn) if asset_installs_table_exists(&conn) => list_asset_installs(&conn)?,
-        _ => Vec::new(),
-    };
-    let current: Vec<(&str, &Value)> = identities
-        .iter()
-        .filter_map(|(agent, path)| {
-            recorded
-                .iter()
-                .find(|row| row["coding_agent"] == *agent && row["path"] == path.as_str())
-                .map(|row| (*agent, row))
-        })
-        .collect();
-    if current.is_empty() {
+pub(crate) fn stale_assets_guard(
+    assets: &crate::diagnosis::AssetReport,
+    cli_version: &str,
+) -> Result<(), CafleetError> {
+    use crate::diagnosis::AssetState;
+    let mut current = 0;
+    let mut stale = Vec::new();
+    for agent in &assets.agents {
+        match &agent.state {
+            AssetState::PathError { cause, .. } => return Err(cause.clone()),
+            AssetState::Current { .. } => current += 1,
+            AssetState::Stale { install, .. } => {
+                current += 1;
+                stale.push(format!(
+                    "{}={}",
+                    agent.coding_agent, install.cafleet_version
+                ));
+            }
+            AssetState::NotInstalled { .. } => {}
+        }
+    }
+    if current == 0 {
         return Err(CafleetError::App(
-            "no assets install is recorded at the resolved paths; \
-             run 'cafleet setup' to install"
-                .to_string(),
+            "no assets install is recorded at the resolved paths; run 'cafleet setup' to install"
+                .into(),
         ));
     }
-    let stale: Vec<String> = current
-        .iter()
-        .filter(|(_, row)| row["cafleet_version"] != super::VERSION)
-        .map(|(agent, row)| {
-            format!(
-                "{agent}={}",
-                row["cafleet_version"]
-                    .as_str()
-                    .expect("rows carry the version")
-            )
-        })
-        .collect();
-    if stale.is_empty() {
-        Ok(())
-    } else {
-        Err(CafleetError::App(format!(
-            "stale assets detected ({}; CLI {}); run 'cafleet setup' to reinstall",
-            stale.join(", "),
-            super::VERSION
-        )))
+    if !stale.is_empty() {
+        return Err(CafleetError::App(format!(
+            "stale assets detected ({}; CLI {cli_version}); run 'cafleet setup' to reinstall",
+            stale.join(", ")
+        )));
     }
+    Ok(())
 }
 
 /// Render `path` with a `~` abbreviation when it sits under `home`.

@@ -23,7 +23,7 @@ with `mux_pane_id: null`.
 `list_roster_records` with message holders included: active members plus
 deregistered members for whom an owned message exists
 (`messages.owner_member_id = members.member_id`). A sender-only reference
-does not include a deregistered member. The planned lean roster query keeps
+does not include a deregistered member. The lean roster query keeps
 this `EXISTS` condition but computes no send/receive/ACK aggregates.
 
 | Activity field | Selection |
@@ -42,7 +42,7 @@ stay unchanged. ACK can change `last_ack` and idle without changing the
 creation timestamps used by `last_sent` and `last_recv`.
 
 Name resolution returns `BTreeMap<i64, String>` with ascending keys. The
-planned batched lookup deduplicates ids before issuing `IN` queries with at
+batched lookup deduplicates ids before issuing `IN` queries with at
 most 500 bound ids each: empty input executes zero SQL, and other inputs
 execute at most `ceil(unique_ids / 500)` queries. Unknown ids are omitted;
 deregistered members are included. Only placeholders are assembled into SQL;
@@ -52,10 +52,6 @@ Timeline scope follows the **owning member**, through
 `messages.owner_member_id → members.member_id → members.fleet_id`, rather
 than a sender join. This preserves the delivery selection and ordering in
 the [WebUI API](webui-api.md).
-
-Query separation, batched name lookup, and the final idle zero clamp above
-are Step 6 implementation requirements; they are not yet implemented.
-The other selection and ordering rules describe the existing Rust behavior.
 
 ## Tables
 
