@@ -742,26 +742,32 @@ mod tests {
 #[cfg(test)]
 mod creation_regressions {
     use super::*;
-    use crate::cli::creation::test_support::Fixture;
+    use crate::cli::creation::test_support::{Fixture, SpawnFixture};
     use crate::coding_agent::test_support::FakeProbe;
-    use crate::multiplexer::{AnyMultiplexer, RunError};
+    use crate::multiplexer::RunError;
 
-    fn create(f: &Fixture, mux: AnyMultiplexer, prompt: &str) -> Result<Value, CafleetError> {
-        create_with_dependencies(
-            &f.settings,
-            1,
-            "worker",
-            "fixture",
-            None,
-            None,
-            None,
-            false,
-            &PromptArgs {
-                prompt: Some(prompt.into()),
+    fn create(f: &Fixture, mut spawn: SpawnFixture, prompt: &str) -> Result<Value, CafleetError> {
+        let mux = spawn.take_mux();
+        create_with_options(
+            &mut f.conn(),
+            &MemberCreateOptions {
+                fleet_id: 1,
+                name: "worker",
+                description: "fixture",
+                explicit_agent: None,
+                model: None,
+                effort: None,
+                monitor: false,
+                prompt: Some(prompt),
                 file: None,
             },
             || Ok(mux),
             &FakeProbe::with_binary("claude", f.dir.path()),
+            &SpawnPreparation {
+                cwd: &|| Ok(f.dir.path().to_path_buf()),
+                env: &|_| None,
+            },
+            &spawn.execution(),
             f,
         )
     }
@@ -770,7 +776,7 @@ mod creation_regressions {
     fn registration_failure_has_no_pane_or_registration_guard_to_compensate() {
         let f = Fixture::new(true);
         f.sql("CREATE TRIGGER fail_register BEFORE INSERT ON members BEGIN SELECT RAISE(ABORT, 'registration failed'); END;");
-        let error = create(&f, f.mux(None, false, false), "prompt").unwrap_err();
+        let error = create(&f, f.spawn(None, false, false), "prompt").unwrap_err();
         assert_eq!(error.exit_code(), 1);
         assert!(error.to_string().contains("registration failed"));
         assert_eq!(f.timeline(), ["current:ok"]);
@@ -785,7 +791,7 @@ mod creation_regressions {
             if fail_cleanup {
                 f.sql("CREATE TRIGGER fail_deregister BEFORE UPDATE OF status ON members BEGIN SELECT RAISE(ABORT, 'deregister failed'); END;");
             }
-            let error = create(&f, f.mux(None, false, false), "{unknown}").unwrap_err();
+            let error = create(&f, f.spawn(None, false, false), "{unknown}").unwrap_err();
             assert!(matches!(error, CafleetError::Usage(_)));
             assert_eq!(error.exit_code(), 2);
             assert!(
@@ -823,7 +829,7 @@ mod creation_regressions {
             let f = Fixture::new(true);
             let error = create(
                 &f,
-                f.mux(Some(("run", failure.clone())), close_fails, false),
+                f.spawn(Some(("run", failure.clone())), close_fails, false),
                 "prompt",
             )
             .unwrap_err();
@@ -836,7 +842,6 @@ mod creation_regressions {
                     "list:ok",
                     "split:ok",
                     "run:error",
-                    "get:error",
                     "write-lock:true",
                     if close_fails {
                         "close:error"
@@ -871,7 +876,7 @@ mod creation_regressions {
                 if deregister_fails {
                     f.sql("CREATE TRIGGER fail_deregister BEFORE UPDATE OF status ON members BEGIN SELECT RAISE(ABORT, 'secondary deregister failure'); END;");
                 }
-                let error = create(&f, f.mux(None, close_fails, false), "prompt").unwrap_err();
+                let error = create(&f, f.spawn(None, close_fails, false), "prompt").unwrap_err();
                 assert_eq!(error.exit_code(), 1);
                 let detail = error.to_string();
                 assert!(
@@ -889,7 +894,6 @@ mod creation_regressions {
                         "list:ok",
                         "split:ok",
                         "run:ok",
-                        "get:error",
                         "write-lock:true",
                         if close_fails {
                             "close:error"
@@ -926,7 +930,7 @@ mod creation_regressions {
     #[test]
     fn split_with_unknown_id_deregisters_without_guessed_kill() {
         let f = Fixture::new(true);
-        let error = create(&f, f.mux(None, false, true), "prompt").unwrap_err();
+        let error = create(&f, f.spawn(None, false, true), "prompt").unwrap_err();
         assert!(
             error
                 .to_string()
@@ -948,7 +952,7 @@ mod creation_regressions {
     #[test]
     fn successful_creation_disarms_both_guards_before_returning_output_value() {
         let f = Fixture::new(true);
-        let value = create(&f, f.mux(None, false, false), "prompt").unwrap();
+        let value = create(&f, f.spawn(None, false, false), "prompt").unwrap();
         assert_eq!(value["member_id"], 3);
         assert_eq!(value["placement"]["mux_pane_id"], "w1:p9");
         assert_eq!(

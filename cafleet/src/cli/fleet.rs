@@ -388,23 +388,12 @@ mod tests {
 mod creation_regressions {
     use super::*;
     use crate::broker::fleets::BootstrapEvent;
-    use crate::cli::creation::test_support::{Event, Fixture};
+    use crate::cli::creation::test_support::{Event, Fixture, SpawnFixture};
     use crate::coding_agent::test_support::FakeProbe;
-    use crate::multiplexer::{AnyMultiplexer, RunError};
+    use crate::multiplexer::RunError;
 
-    fn create(f: &Fixture, mux: AnyMultiplexer, prompt: &str) -> Result<Value, CafleetError> {
-        let path = f.dir.path().join("monitor.md");
-        std::fs::write(&path, prompt).unwrap();
-        create_with_dependencies(
-            &f.settings,
-            "fixture",
-            "claude",
-            path.to_str().unwrap(),
-            None,
-            || Ok(mux),
-            &FakeProbe::with_binary("claude", f.dir.path()),
-            f,
-        )
+    fn create(f: &Fixture, spawn: SpawnFixture, prompt: &str) -> Result<Value, CafleetError> {
+        create_in_slot(f, &mut Some(f.conn()), spawn, prompt)
     }
 
     fn invocation_slot(f: &Fixture) -> Option<Connection> {
@@ -432,19 +421,27 @@ mod creation_regressions {
     fn create_in_slot(
         f: &Fixture,
         slot: &mut Option<Connection>,
-        mux: AnyMultiplexer,
+        mut spawn: SpawnFixture,
         prompt: &str,
     ) -> Result<Value, CafleetError> {
         let path = f.dir.path().join("monitor.md");
         std::fs::write(&path, prompt).unwrap();
-        create_with_connection(
+        let mux = spawn.take_mux();
+        create_with_options(
             slot,
-            "fixture",
-            "claude",
-            path.to_str().unwrap(),
-            None,
+            &FleetCreateOptions {
+                name: "fixture",
+                agent_name: "claude",
+                monitor_file: path.to_str().unwrap(),
+                monitor_model: None,
+            },
             || Ok(mux),
             &FakeProbe::with_binary("claude", f.dir.path()),
+            &SpawnPreparation {
+                cwd: &|| Ok(f.dir.path().to_path_buf()),
+                env: &|_| None,
+            },
+            &spawn.execution(),
             f,
         )
     }
@@ -456,7 +453,7 @@ mod creation_regressions {
         let error = create_in_slot(
             &f,
             &mut slot,
-            f.mux(
+            f.spawn(
                 Some((
                     "current",
                     RunError::Failed {
@@ -483,7 +480,7 @@ mod creation_regressions {
         for diagnostic in [false, true] {
             let mut f = Fixture::new(false);
             f.diagnostic = diagnostic;
-            let error = create(&f, f.mux(None, false, false), "{unknown}").unwrap_err();
+            let error = create(&f, f.spawn(None, false, false), "{unknown}").unwrap_err();
             assert!(matches!(error, CafleetError::Usage(_)));
             assert_eq!(error.exit_code(), 2);
             assert!(
@@ -516,7 +513,7 @@ mod creation_regressions {
             let error = create_in_slot(
                 &f,
                 &mut slot,
-                f.mux(Some(("run", failure.clone())), close_fails, false),
+                f.spawn(Some(("run", failure.clone())), close_fails, false),
                 "prompt",
             )
             .unwrap_err();
@@ -534,7 +531,6 @@ mod creation_regressions {
                     "list:ok",
                     "split:ok",
                     "run:error",
-                    "get:error",
                     "write-lock:false",
                     if close_fails {
                         "close:error"
@@ -566,7 +562,7 @@ mod creation_regressions {
                     stderr: "split transport failed".into(),
                 },
             ));
-            let error = create(&f, f.mux(failure, false, true), "prompt").unwrap_err();
+            let error = create(&f, f.spawn(failure, false, true), "prompt").unwrap_err();
             assert_eq!(error.exit_code(), 1);
             assert!(
                 error
@@ -605,7 +601,7 @@ mod creation_regressions {
                 f.sql(&format!("CREATE TRIGGER fail_insert BEFORE INSERT ON member_placements WHEN NEW.member_id=2 BEGIN SELECT RAISE({action}, 'primary placement failure'); END;"));
                 let mut slot = invocation_slot(&f);
                 let error =
-                    create_in_slot(&f, &mut slot, f.mux(None, close_fails, false), "prompt")
+                    create_in_slot(&f, &mut slot, f.spawn(None, close_fails, false), "prompt")
                         .unwrap_err();
                 assert!(
                     slot.is_none(),
@@ -623,7 +619,6 @@ mod creation_regressions {
                         "run:ok",
                         "rollback:ok",
                         "after-real-rollback",
-                        "get:error",
                         "write-lock:true",
                         if close_fails {
                             "close:error"
@@ -655,7 +650,7 @@ mod creation_regressions {
                     BEGIN INSERT INTO compensation_child VALUES (999); END;");
                 let mut slot = invocation_slot(&f);
                 let error =
-                    create_in_slot(&f, &mut slot, f.mux(None, close_fails, false), "prompt")
+                    create_in_slot(&f, &mut slot, f.spawn(None, close_fails, false), "prompt")
                         .unwrap_err();
                 assert!(
                     slot.is_none(),
@@ -678,7 +673,6 @@ mod creation_regressions {
                         "commit:error",
                         "rollback:ok",
                         "after-real-rollback",
-                        "get:error",
                         "write-lock:true",
                         if close_fails {
                             "close:error"
@@ -723,7 +717,7 @@ mod creation_regressions {
         let mut f = Fixture::new(false);
         f.diagnostic = true;
         f.sql("CREATE TRIGGER fail_fleet BEFORE INSERT ON fleets BEGIN SELECT RAISE(ABORT, 'primary fleet insert failure'); END;");
-        let error = create(&f, f.mux(None, false, false), "prompt").unwrap_err();
+        let error = create(&f, f.spawn(None, false, false), "prompt").unwrap_err();
         assert_eq!(error.exit_code(), 1);
         assert_eq!(
             error.to_string(),
@@ -749,7 +743,7 @@ mod creation_regressions {
     fn commit_success_disarms_pane_before_the_caller_can_emit_output() {
         let f = Fixture::new(false);
         let mut slot = invocation_slot(&f);
-        let value = create_in_slot(&f, &mut slot, f.mux(None, false, false), "prompt").unwrap();
+        let value = create_in_slot(&f, &mut slot, f.spawn(None, false, false), "prompt").unwrap();
         assert_retained_slot(&slot);
         assert_eq!(
             slot.as_ref()

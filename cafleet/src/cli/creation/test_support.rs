@@ -1,6 +1,11 @@
 //! Test-only observations shared by the real fleet/member creation paths.
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -13,7 +18,10 @@ use crate::{
     },
     config::Settings,
     error::CafleetError,
-    multiplexer::{AnyMultiplexer, CommandRunner, HerdrMultiplexer, RunError},
+    multiplexer::{
+        AnyMultiplexer, CommandRunner, HerdrMultiplexer, RunError,
+        spawn::{MonotonicClock, SpawnExecution, TimedCommandRunner},
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,9 +108,40 @@ impl Fixture {
                 failure: failure.map(|(op, error)| (op.to_string(), error)),
                 close_fails,
                 unknown,
+                bounded_clock: None,
             }),
             HashMap::from([("HERDR_ENV".into(), "1".into())]),
         ))
+    }
+
+    /// Real Herdr backend with a per-call clock and finite subprocess seam.
+    pub fn spawn(
+        &self,
+        failure: Option<(&str, RunError)>,
+        close_fails: bool,
+        unknown: bool,
+    ) -> SpawnFixture {
+        let clock = Rc::new(FakeClock {
+            start: Instant::now(),
+            elapsed: Cell::new(Duration::ZERO),
+        });
+        let runner = Rc::new(Runner {
+            events: self.events.clone(),
+            url: self.settings.database_url.clone(),
+            failure: failure.map(|(op, error)| (op.to_string(), error)),
+            close_fails,
+            unknown,
+            bounded_clock: Some(clock.clone()),
+        });
+        let mux = AnyMultiplexer::Herdr(HerdrMultiplexer::new(
+            runner.clone(),
+            HashMap::from([("HERDR_ENV".into(), "1".into())]),
+        ));
+        SpawnFixture {
+            mux: Some(mux),
+            clock,
+            runner,
+        }
     }
 
     pub fn timeline(&self) -> Vec<String> {
@@ -197,12 +236,43 @@ impl CreationHooks for Fixture {
     }
 }
 
+pub(crate) struct SpawnFixture {
+    mux: Option<AnyMultiplexer>,
+    clock: Rc<FakeClock>,
+    runner: Rc<Runner>,
+}
+
+impl SpawnFixture {
+    pub fn take_mux(&mut self) -> AnyMultiplexer {
+        self.mux.take().expect("one creation invocation")
+    }
+
+    pub fn execution(&self) -> SpawnExecution<'_> {
+        SpawnExecution {
+            clock: self.clock.as_ref(),
+            runner: self.runner.as_ref(),
+        }
+    }
+}
+
+struct FakeClock {
+    start: Instant,
+    elapsed: Cell<Duration>,
+}
+
+impl MonotonicClock for FakeClock {
+    fn now(&self) -> Instant {
+        self.start + self.elapsed.get()
+    }
+}
+
 struct Runner {
     events: Rc<RefCell<Vec<Event>>>,
     url: String,
     failure: Option<(String, RunError)>,
     close_fails: bool,
     unknown: bool,
+    bounded_clock: Option<Rc<FakeClock>>,
 }
 
 impl CommandRunner for Runner {
@@ -213,6 +283,46 @@ impl CommandRunner for Runner {
         panic!("creation must not send exit/notification keystrokes")
     }
     fn run(&self, argv: &[String], _: Option<u64>) -> Result<String, RunError> {
+        if self.bounded_clock.is_some() {
+            assert_eq!(
+                &argv[..3],
+                &["herdr", "pane", "current"],
+                "creation escaped to the legacy runner"
+            );
+        }
+        self.respond(argv)
+    }
+}
+
+impl TimedCommandRunner for Runner {
+    fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
+        let clock = self.bounded_clock.as_ref().expect("bounded spawn fixture");
+        let expected = if argv[2] == "close" {
+            Duration::from_secs(5)
+        } else {
+            Duration::from_secs(30)
+                .checked_sub(clock.elapsed.get())
+                .expect("unexhausted spawn budget")
+        };
+        assert_eq!(timeout, expected, "remaining budget for {argv:?}");
+        let cost = Duration::from_millis(125);
+        assert!(
+            timeout > cost,
+            "these ordinary-error fixtures must have time to finish"
+        );
+        clock.elapsed.set(clock.elapsed.get() + cost);
+        let result = self.respond(argv);
+        assert_ne!(
+            result,
+            Err(RunError::Timeout),
+            "timeout contracts use the Step 8 cost-driven fixture"
+        );
+        result
+    }
+}
+
+impl Runner {
+    fn respond(&self, argv: &[String]) -> Result<String, RunError> {
         assert_eq!(&argv[..2], &["herdr", "pane"]);
         let op = argv[2].as_str();
         let result = if let Some((_, error)) =

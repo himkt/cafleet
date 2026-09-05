@@ -128,27 +128,27 @@ impl TimedCommandRunner for Script<'_> {
             .expect("unexpected extra subprocess");
         assert_eq!(operation(argv), step.op, "{argv:?}");
         self.calls.borrow_mut().push((argv.to_vec(), timeout));
-        if let Some(f) = self.fixture {
-            if step.op == "close" {
-                assert_eq!(&argv[..4], ["herdr", "pane", "close", "w1:p9"]);
-                let conn = f.conn();
-                conn.busy_timeout(Duration::ZERO).unwrap();
-                let available = match conn.execute_batch("BEGIN IMMEDIATE") {
-                    Ok(()) => {
-                        conn.execute_batch("ROLLBACK").unwrap();
-                        true
-                    }
-                    Err(rusqlite::Error::SqliteFailure(e, _))
-                        if e.code == rusqlite::ErrorCode::DatabaseBusy =>
-                    {
-                        false
-                    }
-                    other => panic!("unexpected real lock result {other:?}"),
-                };
-                f.events
-                    .borrow_mut()
-                    .push(Event::WriteLockAvailable(available));
-            }
+        if let Some(f) = self.fixture
+            && step.op == "close"
+        {
+            assert_eq!(&argv[..4], ["herdr", "pane", "close", "w1:p9"]);
+            let conn = f.conn();
+            conn.busy_timeout(Duration::ZERO).unwrap();
+            let available = match conn.execute_batch("BEGIN IMMEDIATE") {
+                Ok(()) => {
+                    conn.execute_batch("ROLLBACK").unwrap();
+                    true
+                }
+                Err(rusqlite::Error::SqliteFailure(e, _))
+                    if e.code == rusqlite::ErrorCode::DatabaseBusy =>
+                {
+                    false
+                }
+                other => panic!("unexpected real lock result {other:?}"),
+            };
+            f.events
+                .borrow_mut()
+                .push(Event::WriteLockAvailable(available));
         }
         let result = if step.cost >= timeout {
             self.clock.advance(timeout);
