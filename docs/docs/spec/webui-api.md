@@ -21,8 +21,8 @@ No server-side session cookies. The SPA stores the active fleet_id client-side v
 
 ## Fleet selection and asynchronous reads {#frontend-resource-lifecycle}
 
-The following client lifecycle is planned for the WebUI refactoring; HTTP
-endpoints and response shapes remain the contracts below.
+The WebUI uses the following client lifecycle. HTTP endpoints and response
+shapes follow the contracts below.
 
 The hash route is the sole source of the selected fleet:
 `#/fleets`, `#/fleets/<fleet-id>/members`, and
@@ -77,7 +77,10 @@ Invalid routes and fleets absent from a successful fleet-list response
 server failures keep the route and offer Retry. A scoped `404 Fleet not found`
 can invalidate the fleet; a monitor runtime `404` or a member `404` is not
 proof that the fleet is missing. Back/forward navigation and direct member
-links retain these rules. See the [user-facing recovery flow](../how-to/use-the-webui.md#loading-and-retrying).
+links retain these rules. Automatic invalid-route/member corrections and
+fleet-deletion fallbacks replace the current history entry, so Back does not
+revisit a rejected URL and trigger another fallback. Explicit fleet/member
+selection and Back/Close actions keep normal navigation history. See the [user-facing recovery flow](../how-to/use-the-webui.md#loading-and-retrying).
 
 ## Response compatibility
 

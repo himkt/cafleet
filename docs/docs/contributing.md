@@ -108,7 +108,7 @@ refresh and error behavior.
 
 ## Frontend resource tests
 
-The [planned resource lifecycle](spec/webui-api.md#frontend-resource-lifecycle)
+The [resource lifecycle](spec/webui-api.md#frontend-resource-lifecycle)
 uses the existing Vitest Node environment and `.test.ts` suites. No DOM testing
 dependencies are added. The React hook subscribes to the same production
 resource object that the Node tests exercise; do not create a test-only

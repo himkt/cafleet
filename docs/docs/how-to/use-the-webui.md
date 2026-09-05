@@ -36,7 +36,7 @@ for the selection and counting rules.
 
 ## Loading and retrying {#loading-and-retrying}
 
-The planned loading update keeps the fleet and member selection in the page
+The dashboard keeps the fleet and member selection in the page
 URL, so direct links and browser Back/Forward select the same view. Switching
 fleets clears the previous fleet's names, recipients, and message draft.
 

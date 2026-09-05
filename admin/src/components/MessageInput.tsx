@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { LoaderCircle, Send, Users } from "lucide-react";
 import type { Member } from "../types";
-import { sendMessage } from "../api";
+import { ApiError } from "../api";
+import type { FleetClient } from "../api";
 import MemberAvatar from "./MemberAvatar";
 
-interface MessageInputProps {
+export interface MessageInputProps {
+  client: FleetClient;
   senderId: number | null;
   members: Member[];
   onSent: () => void;
@@ -94,10 +96,21 @@ function detectMention(text: string, cursor: number): MentionState | null {
 }
 
 export default function MessageInput({
+  client,
   senderId,
   members,
   onSent,
 }: MessageInputProps) {
+  const [missingFleet, setMissingFleet] = useState(false);
+  useEffect(() => {
+    if (missingFleet) window.location.replace("#/fleets");
+  }, [missingFleet]);
+  const lifetime = useRef<AbortController | null>(null);
+  useLayoutEffect(() => {
+    const controller = new AbortController();
+    lifetime.current = controller;
+    return () => { controller.abort(); lifetime.current = null; };
+  }, [client]);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -226,6 +239,8 @@ export default function MessageInput({
   const closePopover = () => setMention(null);
 
   const submitForm = async () => {
+    const controller = lifetime.current;
+    if (!controller || controller.signal.aborted) return;
     if (disabled || !senderId) return;
     const parsed = parseInput(input, recipientMembers);
     if (parsed.error) {
@@ -235,14 +250,20 @@ export default function MessageInput({
     setError(null);
     setSending(true);
     try {
-      await sendMessage(senderId, parsed.to, parsed.body);
+      await client.sendMessage(senderId, parsed.to, parsed.body, { signal: controller.signal });
+      if (controller.signal.aborted) return;
       setInput("");
       setMention(null);
     } catch (err) {
+      if (controller.signal.aborted) return;
+      if (err instanceof ApiError && err.status === 404 && err.message === "Fleet not found") {
+        setMissingFleet(true);
+        return;
+      }
       setError(err instanceof Error ? err.message : "Send failed");
       return;
     } finally {
-      setSending(false);
+      if (!controller.signal.aborted) setSending(false);
     }
     onSent();
   };

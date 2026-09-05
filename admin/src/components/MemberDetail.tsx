@@ -1,15 +1,16 @@
-import { useState, useEffect, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 import { Inbox, X } from "lucide-react";
 import { Tabs } from "radix-ui";
 import type { Member, TimelineMessage } from "../types";
-import { fetchInbox, fetchSent } from "../api";
+import { ApiError } from "../api";
+import type { FleetClient } from "../api";
 import { HISTORY_ROW_CAP, selectHistory } from "../history";
 import type { HistoryWindow } from "../history";
-import { useRefreshKeyLoad } from "../hooks/useRefreshKeyLoad";
+import { useResource } from "../hooks/useResource";
+import ResourceNotice from "./ResourceNotice";
 import { formatDateTime } from "../format";
 import MemberAvatar from "./MemberAvatar";
 import EmptyState from "./EmptyState";
-import Skeleton from "./Skeleton";
 
 const STATUS_CHIPS: Record<
   TimelineMessage["status"],
@@ -33,26 +34,11 @@ function StatusChip({ status }: { status: TimelineMessage["status"] }) {
 function MessageList({
   history,
   direction,
-  loading,
 }: {
   history: HistoryWindow;
   direction: "inbox" | "sent";
-  loading: boolean;
 }) {
   const { visible, truncated } = history;
-  if (loading && visible.length === 0) {
-    return (
-      <div className="px-4 py-3">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="py-2">
-            <Skeleton className="h-3 w-32" />
-            <Skeleton className="mt-2 h-3 w-56 max-w-full" />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
   if (visible.length === 0) {
     return <EmptyState icon={Inbox} title="No messages" />;
   }
@@ -89,44 +75,31 @@ function MessageList({
 const TAB_TRIGGER_CLASS =
   "border-b-2 border-transparent px-3 py-1.5 text-sm text-text-muted hover:text-text focus-visible:outline-2 focus-visible:outline-accent data-[state=active]:border-accent data-[state=active]:font-medium data-[state=active]:text-text";
 
-interface MemberDetailProps {
+export interface MemberDetailProps {
+  client: FleetClient;
   member: Member;
   refreshKey: number;
   onClose: () => void;
 }
 
 export default function MemberDetail({
+  client,
   member,
   refreshKey,
   onClose,
 }: MemberDetailProps) {
-  const [inbox, setInbox] = useState<HistoryWindow>(() => selectHistory([]));
-  const [sent, setSent] = useState<HistoryWindow>(() => selectHistory([]));
-  const [loading, setLoading] = useState(true);
+  const id = member.member_id;
+  const loadInbox = useCallback((signal: AbortSignal) => client.fetchInbox(id, { signal }), [client, id]);
+  const loadSent = useCallback((signal: AbortSignal) => client.fetchSent(id, { signal }), [client, id]);
+  const inbox = useResource({ key: `${client.fleetId}:${id}:inbox`, load: loadInbox, refreshKey });
+  const sent = useResource({ key: `${client.fleetId}:${id}:sent`, load: loadSent, refreshKey });
 
-  // The panel is keyed by member_id at its call site, so switching members
-  // remounts it with fresh empty/loading state — no reset effect needed.
-
-  // Refetches ride Dashboard's refreshKey bumps (5 s poll / manual Refresh /
-  // post-send) via useRefreshKeyLoad instead of a second polling loop; the
-  // hook's in-flight guard absorbs bumps landing during a slow fetch, and its
-  // mount-time run fetches the freshly keyed member.
-  const load = useCallback(async () => {
-    try {
-      const [inboxData, sentData] = await Promise.all([
-        fetchInbox(member.member_id),
-        fetchSent(member.member_id),
-      ]);
-      setInbox(selectHistory(inboxData.messages));
-      setSent(selectHistory(sentData.messages));
-    } catch {
-      /* swallow — keep last-known lists; next bump re-attempts */
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if ([inbox.state.error, sent.state.error].some((error) =>
+      error instanceof ApiError && error.status === 404 && error.message === "Fleet not found")) {
+      window.location.replace("#/fleets");
     }
-  }, [member.member_id]);
-
-  useRefreshKeyLoad(load, refreshKey);
+  }, [inbox.state.error, sent.state.error]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -187,10 +160,12 @@ export default function MemberDetail({
           </Tabs.Trigger>
         </Tabs.List>
         <Tabs.Content value="inbox" className="min-h-0 flex-1 overflow-y-auto">
-          <MessageList history={inbox} direction="inbox" loading={loading} />
+          <ResourceNotice state={inbox.state} name="inbox" retry={inbox.refresh} />
+          {inbox.state.status === "success" && <MessageList history={selectHistory(inbox.state.data.messages)} direction="inbox" />}
         </Tabs.Content>
         <Tabs.Content value="sent" className="min-h-0 flex-1 overflow-y-auto">
-          <MessageList history={sent} direction="sent" loading={loading} />
+          <ResourceNotice state={sent.state} name="sent" retry={sent.refresh} />
+          {sent.state.status === "success" && <MessageList history={selectHistory(sent.state.data.messages)} direction="sent" />}
         </Tabs.Content>
       </Tabs.Root>
     </aside>

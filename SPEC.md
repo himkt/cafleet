@@ -3207,7 +3207,7 @@ take segment 0) is in the reserved set, re-raise the genuine 404; otherwise serv
 `index.html` (200); `GET /ui/...` or `/api/...` with no asset returns a genuine
 non-HTML 404.
 
-#### Frontend route and resource ownership (planned)
+#### Frontend route and resource ownership
 
 The hash route is the sole selected-fleet authority. Fleet selection only
 navigates; remove global `setFleetId` and App's `initialMembers` prefetch.
@@ -3241,6 +3241,9 @@ to the picker. Transport/parse/server errors retain the route and Retry.
 Only an actual fleet-not-found response invalidates a scoped fleet; missing
 monitor runtime/member errors do not imply missing fleet. Validate member
 membership only after successful roster loading, before history reads.
+Automatic invalid-route/member correction and fleet-deletion fallback replace
+the current history entry while retaining hashchange notification. Explicit
+fleet/member selection and Back/Close keep normal navigation history.
 Fleet switches must not mix old fleet names, recipients, sender identity or
 drafts into a new fleet's form. HTTP/CLI contracts stay unchanged, including
 the history 201-fetch/200-display limit and delivery-only timeline grouping.

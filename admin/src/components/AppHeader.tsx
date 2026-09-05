@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LoaderCircle, RefreshCw } from "lucide-react";
 import type { MonitorRuntime } from "../types";
-import { patchMonitor, postMonitorWake } from "../api";
+import { ApiError } from "../api";
+import type { FleetClient } from "../api";
 import ThemeToggle from "./ThemeToggle";
 
 function BrandMark() {
@@ -25,12 +26,24 @@ function parseInterval(draft: string): number | null {
 }
 
 function MonitorIndicator({
+  client,
   monitor,
   onSaved,
 }: {
+  client: FleetClient;
   monitor: MonitorRuntime | null;
   onSaved: () => void;
 }) {
+  const [missingFleet, setMissingFleet] = useState(false);
+  useEffect(() => {
+    if (missingFleet) window.location.replace("#/fleets");
+  }, [missingFleet]);
+  const lifetime = useRef<AbortController | null>(null);
+  useLayoutEffect(() => {
+    const controller = new AbortController();
+    lifetime.current = controller;
+    return () => { controller.abort(); lifetime.current = null; };
+  }, [client]);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -76,33 +89,49 @@ function MonitorIndicator({
   };
 
   const save = async () => {
+    const controller = lifetime.current;
+    if (!controller || controller.signal.aborted) return;
     if (!running || parsed === null) return;
     setSaving(true);
     setError(null);
     try {
-      await patchMonitor(parsed);
+      await client.patchMonitor(parsed, { signal: controller.signal });
+      if (controller.signal.aborted) return;
     } catch (err) {
+      if (controller.signal.aborted) return;
+      if (err instanceof ApiError && err.status === 404 && err.message === "Fleet not found") {
+        setMissingFleet(true);
+        return;
+      }
       setError(err instanceof Error ? err.message : "Save failed");
       return;
     } finally {
-      setSaving(false);
+      if (!controller.signal.aborted) setSaving(false);
     }
     setOpen(false);
     onSaved();
   };
 
   const wake = async () => {
+    const controller = lifetime.current;
+    if (!controller || controller.signal.aborted) return;
     if (!running || waking) return;
     setWaking(true);
     setError(null);
     setWakeRequested(false);
     try {
-      await postMonitorWake();
+      await client.postMonitorWake({ signal: controller.signal });
+      if (controller.signal.aborted) return;
     } catch (err) {
+      if (controller.signal.aborted) return;
+      if (err instanceof ApiError && err.status === 404 && err.message === "Fleet not found") {
+        setMissingFleet(true);
+        return;
+      }
       setError(err instanceof Error ? err.message : "Wake failed");
       return;
     } finally {
-      setWaking(false);
+      if (!controller.signal.aborted) setWaking(false);
     }
     setWakeRequested(true);
     onSaved();
@@ -231,7 +260,8 @@ function LiveIndicator({ isPolling }: { isPolling: boolean }) {
   );
 }
 
-interface AppHeaderProps {
+export interface AppHeaderProps {
+  client?: FleetClient;
   isPolling: boolean;
   onRefresh: () => void;
   /** Breadcrumb tail (fleet name or id). Presence switches `Fleets` into a link. */
@@ -245,6 +275,7 @@ interface AppHeaderProps {
 }
 
 export default function AppHeader({
+  client,
   isPolling,
   onRefresh,
   fleetName,
@@ -287,7 +318,7 @@ export default function AppHeader({
             Sending as <span className="font-medium text-text">Director</span>
           </span>
         )}
-        <MonitorIndicator monitor={monitor} onSaved={onMonitorSaved} />
+        {client && <MonitorIndicator key={client.fleetId} client={client} monitor={monitor} onSaved={onMonitorSaved} />}
         <LiveIndicator isPolling={isPolling} />
         <button
           type="button"
