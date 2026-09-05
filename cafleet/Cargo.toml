@@ -10,7 +10,7 @@ unsafe_code = "forbid"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
-nix = { version = "0.31", features = ["signal"] }
+nix = { version = "0.31", features = ["signal", "fs", "poll"] }
 refinery = { version = "0.9", features = ["rusqlite"] }
 regex = "1"
 rusqlite = { version = "0.39", features = ["bundled"] }

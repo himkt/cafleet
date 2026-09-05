@@ -1,9 +1,13 @@
 //! The real process-facing seams: the subprocess [`CommandRunner`] and the
 //! PATH/HOME [`SpawnProbe`].
 
-use std::io::Read;
+use std::io::{self, Read, Write};
+use std::os::fd::{AsFd, BorrowedFd};
+
+use nix::fcntl::{FcntlArg, OFlag, fcntl};
+use nix::poll::{PollFd, PollFlags, poll};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::coding_agent::SpawnProbe;
@@ -48,7 +52,7 @@ impl CommandRunner for SystemRunner {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn();
-        let mut child = match spawned {
+        let child = match spawned {
             Ok(child) => child,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Err(RunError::BinaryNotFound(e.to_string()));
@@ -60,25 +64,7 @@ impl CommandRunner for SystemRunner {
             }
         };
         if let Some(secs) = timeout_secs {
-            let deadline = Instant::now() + Duration::from_secs(secs);
-            loop {
-                match child.try_wait() {
-                    Ok(Some(_)) => break,
-                    Ok(None) => {
-                        if Instant::now() >= deadline {
-                            let _ = child.kill();
-                            let _ = child.wait();
-                            return Err(RunError::Timeout);
-                        }
-                        std::thread::sleep(Duration::from_millis(20));
-                    }
-                    Err(e) => {
-                        return Err(RunError::Failed {
-                            stderr: e.to_string(),
-                        });
-                    }
-                }
-            }
+            return run_timed(child, Duration::from_secs(secs), &mut SystemProcessHooks);
         }
         let output = child.wait_with_output().map_err(|e| RunError::Failed {
             stderr: e.to_string(),
@@ -94,6 +80,264 @@ impl CommandRunner for SystemRunner {
 
     fn sleep(&self, seconds: f64) {
         std::thread::sleep(Duration::from_secs_f64(seconds));
+    }
+}
+
+/// Per-invocation observation/failure seam. Cleanup checks run *after* the real
+/// operation, so injected kill/wait errors never prevent actual child recovery.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProcessOperation {
+    ConfigureStdout,
+    ConfigureStderr,
+    ReadStdout,
+    ReadStderr,
+    Poll,
+    TryWait,
+    Kill,
+    Wait,
+}
+
+trait ProcessHooks {
+    fn check(&mut self, _operation: ProcessOperation) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn cleanup_diagnostic(&mut self, diagnostic: &str) {
+        // Timeout has no diagnostic payload; preserve that public category and
+        // report secondary failures on stderr without panicking on a closed FD.
+        let _ = writeln!(io::stderr().lock(), "{diagnostic}");
+    }
+}
+
+struct SystemProcessHooks;
+impl ProcessHooks for SystemProcessHooks {}
+
+struct OwnedChild {
+    child: Child,
+    reaped: bool,
+}
+
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        if !self.reaped {
+            let _ = self.child.kill();
+            let _ = retry_interrupted(|| self.child.wait());
+        }
+    }
+}
+
+fn retry_interrupted<T>(mut action: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    loop {
+        match action() {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            result => return result,
+        }
+    }
+}
+
+fn run_timed(
+    child: Child,
+    timeout: Duration,
+    hooks: &mut impl ProcessHooks,
+) -> Result<String, RunError> {
+    let started = Instant::now();
+    let mut owned = OwnedChild {
+        child,
+        reaped: false,
+    };
+    let result = collect_timed(&mut owned, started, timeout, hooks);
+    match result {
+        Ok((status, stdout, stderr)) => {
+            if status.success() {
+                Ok(String::from_utf8_lossy(&stdout).into_owned())
+            } else {
+                Err(RunError::Failed {
+                    stderr: String::from_utf8_lossy(&stderr).into_owned(),
+                })
+            }
+        }
+        Err(mut primary) => {
+            // collect_timed owns the read ends, so they have already closed.
+            let mut diagnostics = Vec::new();
+            if !owned.reaped {
+                let killed = retry_interrupted(|| owned.child.kill());
+                if let Err(error) = killed.and_then(|()| hooks.check(ProcessOperation::Kill)) {
+                    diagnostics.push(format!(
+                        "cleanup failed for child {} kill: {error}",
+                        owned.child.id()
+                    ));
+                }
+            }
+            let waited = retry_interrupted(|| owned.child.wait());
+            owned.reaped = waited.is_ok();
+            if let Err(error) = waited.and_then(|_| hooks.check(ProcessOperation::Wait)) {
+                diagnostics.push(format!(
+                    "cleanup failed for child {} wait: {error}",
+                    owned.child.id()
+                ));
+            }
+            for diagnostic in diagnostics {
+                match &mut primary {
+                    RunError::Failed { stderr } => {
+                        stderr.push('\n');
+                        stderr.push_str(&diagnostic);
+                    }
+                    _ => hooks.cleanup_diagnostic(&diagnostic),
+                }
+            }
+            Err(primary)
+        }
+    }
+}
+
+fn io_failure(error: io::Error) -> RunError {
+    RunError::Failed {
+        stderr: error.to_string(),
+    }
+}
+
+fn remaining(started: Instant, timeout: Duration) -> Result<Duration, RunError> {
+    timeout
+        .checked_sub(started.elapsed())
+        .filter(|left| !left.is_zero())
+        .ok_or(RunError::Timeout)
+}
+
+fn configure_pipe(
+    fd: BorrowedFd<'_>,
+    operation: ProcessOperation,
+    started: Instant,
+    timeout: Duration,
+    hooks: &mut impl ProcessHooks,
+) -> Result<(), RunError> {
+    loop {
+        remaining(started, timeout)?;
+        let result: io::Result<()> = (|| {
+            hooks.check(operation)?;
+            let flags = OFlag::from_bits_truncate(fcntl(fd, FcntlArg::F_GETFL)?);
+            fcntl(fd, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
+            Ok(())
+        })();
+        match result {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            result => return result.map_err(io_failure),
+        }
+    }
+}
+
+/// One stream gets at most 64 KiB per iteration, including short reads. An
+/// interruption yields to the outer deadline/status check instead of spinning.
+fn drain_pipe(
+    pipe: &mut Option<impl Read>,
+    output: &mut Vec<u8>,
+    operation: ProcessOperation,
+    hooks: &mut impl ProcessHooks,
+) -> io::Result<()> {
+    let Some(reader) = pipe.as_mut() else {
+        return Ok(());
+    };
+    let mut buffer = [0; 8192];
+    let mut budget = 64 * 1024;
+    while budget > 0 {
+        let capacity = buffer.len().min(budget);
+        let result = hooks
+            .check(operation)
+            .and_then(|()| reader.read(&mut buffer[..capacity]));
+        match result {
+            Ok(0) => {
+                *pipe = None;
+                break;
+            }
+            Ok(count) => {
+                output.extend_from_slice(&buffer[..count]);
+                budget -= count;
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                ) =>
+            {
+                break;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn collect_timed(
+    owned: &mut OwnedChild,
+    started: Instant,
+    timeout: Duration,
+    hooks: &mut impl ProcessHooks,
+) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), RunError> {
+    let mut stdout = owned.child.stdout.take();
+    let mut stderr = owned.child.stderr.take();
+    for (fd, operation) in [
+        (
+            stdout.as_ref().expect("stdout is piped").as_fd(),
+            ProcessOperation::ConfigureStdout,
+        ),
+        (
+            stderr.as_ref().expect("stderr is piped").as_fd(),
+            ProcessOperation::ConfigureStderr,
+        ),
+    ] {
+        configure_pipe(fd, operation, started, timeout, hooks)?;
+    }
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let mut status = None;
+    loop {
+        remaining(started, timeout)?;
+        if status.is_none() {
+            match hooks
+                .check(ProcessOperation::TryWait)
+                .and_then(|()| owned.child.try_wait())
+            {
+                Ok(observed) => {
+                    status = observed;
+                    owned.reaped = status.is_some();
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(io_failure(error)),
+            }
+        }
+        drain_pipe(&mut stdout, &mut out, ProcessOperation::ReadStdout, hooks)
+            .map_err(io_failure)?;
+        drain_pipe(&mut stderr, &mut err, ProcessOperation::ReadStderr, hooks)
+            .map_err(io_failure)?;
+        if stdout.is_none()
+            && stderr.is_none()
+            && let Some(status) = status
+        {
+            return Ok((status, out, err));
+        }
+        let wait = remaining(started, timeout)?.min(Duration::from_millis(20));
+        let mut fds = Vec::with_capacity(2);
+        if let Some(pipe) = &stdout {
+            fds.push(PollFd::new(pipe.as_fd(), PollFlags::POLLIN));
+        }
+        if let Some(pipe) = &stderr {
+            fds.push(PollFd::new(pipe.as_fd(), PollFlags::POLLIN));
+        }
+        // Floor the sub-millisecond remainder so poll never exceeds the budget.
+        let result: io::Result<()> = hooks.check(ProcessOperation::Poll).and_then(|()| {
+            poll(&mut fds, wait.as_millis() as u16)?;
+            if fds.iter().any(|fd| {
+                fd.revents()
+                    .is_some_and(|events| events.contains(PollFlags::POLLNVAL))
+            }) {
+                return Err(io::Error::other("invalid subprocess pipe descriptor"));
+            }
+            Ok(())
+        });
+        match result {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(io_failure(error)),
+            Ok(()) => {}
+        }
     }
 }
 

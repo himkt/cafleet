@@ -1,7 +1,7 @@
 # コード・ドキュメントの簡素化と障害時の整合性改善
 
 **Status**: In Progress
-**Progress**: 0/36 tasks complete
+**Progress**: 1/36 tasks complete
 **Last Updated**: 2026-09-05
 
 ## Overview
@@ -385,11 +385,12 @@ miseの`--nocapture`例は現行toolchainでargv到達を検証して更新す�
 
 ## Implementation
 
-> 完了したtaskはチェックと同じ編集で日時を記録する: `- [x] 作業 <!-- completed: 2026-09-05T14:30 -->`。以下36 taskはすべて未実装。各Stepは文書更新・対象回帰・実装・対象検証の順で進める。
+> 完了したtaskはチェックと同じ編集で日時を記録する: `- [x] 作業 <!-- completed: 2026-09-05T14:30 -->`。以下36 taskの進捗を記録する。各Stepは文書更新・対象回帰・実装・対象検証の順で進める。
 
 ### Step 1: pipeの詰まりとtimeoutを修正する
 
-- [ ] §2に従いprocess契約文書を先に更新し、大量stdout/stderr・両stream・実timeout・非0終了の回帰fixtureを追加する。 <!-- completed: -->
+
+- [x] §2に従いprocess契約文書を先に更新し、大量stdout/stderr・両stream・実timeout・非0終了の回帰fixtureを追加する。 <!-- completed: 2026-09-05T16:31 -->
 - [ ] nonblocking drain・期限確認・直接子の回収を実装し、FD設定/IO失敗・子孫pipe保持を含めcleanupを検証する。 <!-- completed: -->
 
 ### Step 2: monitor登録のDB制約を追加する
