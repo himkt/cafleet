@@ -53,7 +53,7 @@ Substitute these into the base `{…}` placeholders.
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
-| `{reviewer_model}` | `gpt-5.6-sol` |
+| `{reviewer_model}` | `gpt-6-astra` |
 | `{monitor_model}` | `gpt-5.6-luna` |
 | `{permission_flags}` | `--ask-for-approval never --sandbox workspace-write` |
 | `{bg_run}` | a retained Codex-managed execution session created without shell `&` |

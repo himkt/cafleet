@@ -6,7 +6,7 @@ cost efficiency mode, the monitor and reviewer rules — lives in
 [`roles/director.md`](../roles/director.md) § *Model selection*, not on this
 page. The tables are maintained exclusively by the
 `cafleet-model-list-refresh` skill from the official sources linked below —
-refreshed at least every 30 days (last refreshed: 2026-08-21).
+refreshed at least every 30 days (last refreshed: 2026-09-05).
 Prices are standard provider USD rates per MTok and are planning estimates,
 not an invoice guarantee. Context windows are listed for the `claude` backend,
 whose model strings are the ones a context-window suffix can apply to. The
@@ -32,7 +32,7 @@ tables below:
 | Backend | Reviewer | Monitor |
 |---|---|---|
 | claude | fable | haiku |
-| codex | gpt-5.6-sol | gpt-5.6-luna |
+| codex | gpt-6-astra | gpt-5.6-luna |
 | opencode | opencode/glm-5.2 | opencode/big-pickle |
 
 ## claude
@@ -41,7 +41,8 @@ Either the model name or its alias is a valid `--model` token.
 
 | Model | Alias | Class | Context | Input $/MTok | Output $/MTok |
 |---|---|---|---|---|---|
-| claude-fable-5 | fable | Mythos-class frontier; highest capability on every dimension | 1M | 10.00 | 50.00 |
+| claude-fable-5-1 | fable | Mythos-class frontier; highest capability on every dimension | 1M | 10.00 | 50.00 |
+| claude-fable-5 | — | Prior Mythos-class generation at the same price tier | 1M | 10.00 | 50.00 |
 | claude-opus-5 | opus | Everyday frontier; strong coding, planning, and review | 1M | 5.00 | 25.00 |
 | claude-opus-4-8 | — | Prior frontier generation at the same price tier | 1M | 5.00 | 25.00 |
 | claude-sonnet-5 | sonnet | Efficient mid tier for routine work | 1M | 2.00 | 10.00 |
@@ -59,8 +60,8 @@ before spending their credits that way.
 
 | Model | Class | Input $/MTok | Output $/MTok |
 |---|---|---|---|
-| gpt-5.6-sol | Latest frontier agentic coding tier; strongest reviewer | 5.00 | 30.00 |
-| gpt-5.5 | Frontier tier for complex coding and research work | 5.00 | 30.00 |
+| gpt-6-astra | Latest frontier tier across code, apps, and research; strongest reviewer | 10.00 | 50.00 |
+| gpt-5.6-sol | Most capable GPT-5.6 tier for complex coding and research | 4.00 | 20.00 |
 | gpt-5.6-terra | Balanced agentic coding tier for everyday work | 2.00 | 12.00 |
 | gpt-5.6-luna | Fast affordable agentic coding tier | 0.20 | 1.20 |
 
@@ -78,6 +79,6 @@ time.
 | opencode/glm-5.2 | Strong general coding tier | 1.40 | 4.40 |
 | opencode/kimi-k2.7-code | Strong agentic tier tuned for code | 0.95 | 4.00 |
 | opencode/muse-spark-1.2 | Mid-price general coding tier | 1.25 | 4.25 |
-| opencode/muse-spark-1.2-contributor-free | Muse Spark 1.2 free for contributors | 0.00 | 0.00 |
+| opencode/muse-spark-1.3-contributor-free | Muse Spark 1.3 free for contributors | 0.00 | 0.00 |
 | opencode/qwen3.5-plus | Efficient mid tier for routine work | 0.20 | 1.20 |
 | opencode/big-pickle | Stealth preview model; capability unverified | 0.00 | 0.00 |
